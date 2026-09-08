@@ -5,48 +5,89 @@ All notable changes to uDeck are recorded here. The format follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 The **plugin contract** is versioned separately from the application, by the
-`api` field in a plugin manifest. See `docs/plugin-api.md` for what that promises.
+`api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
+for what that promises.
 
 ## [Unreleased]
 
-### Added
+The first working version: the shell, the plugin runtime, and one plugin.
+
+### The application
 
 - **The panel.** A non-activating `NSPanel` hanging below the menu bar at the
-  top centre of whichever screen the cursor is on, with four states — a pill, a
-  peek, a working panel and fullscreen — and the pointer gesture that opens it.
-  It retracts when another application is activated, and comes back as it was
-  when the interruption is over.
-- **Tabs and the 12-column grid.** Windows are dragged by their title bar and
+  top centre of whichever screen the cursor is on — on the built-in display that
+  is exactly the bottom edge of the notch, so it grows out of it. Four states: a
+  pill, a peek, a working panel and fullscreen. It retracts when another
+  application is activated, and a panel that was being worked in comes back as
+  it was.
+- **The pointer gesture.** Two ways in: keep pushing after the cursor has
+  stopped at the top edge, or rest there for a moment. Suppressed while a button
+  is down, while a system menu is open, over fullscreen applications, just after
+  a menu-bar click, and just after the panel closed.
+- **Tabs and a 12-column grid.** Windows are dragged by their title bar and
   resized from a corner, in whole cells; neighbours make room and everything
-  settles upward. The arrangement is a file, so it survives a restart.
-- **Card rendering** for all seven row types, three densities, and the glass
-  look, with staleness drawn rather than described.
-- **The empty state**, which is what an install with no plugins shows.
+  settles upward. The arrangement is a file, so it survives a restart and can be
+  copied between machines.
+- **Card rendering** for all seven row types, in three densities, in the glass
+  look — with staleness drawn rather than described.
+- **The empty state**, which is what an install with no plugins shows: a plugin
+  picker that also lists the folders that failed to load, and why.
 - **A settings window**: how the panel opens, density, and — the largest part —
   what is installed, what each plugin asked for, and the settings each plugin
   declared, rendered by the host so no plugin has to ship a settings screen.
-- **`Scripts/make-app.sh`**, which assembles `uDeck.app` from a release build
-  and signs it. Ad-hoc by default; `--sign` takes a Developer ID when there is
-  one, and the hardened runtime is on from the start so notarisation is a step
-  rather than a refactor.
-- **Logging** through the unified logging system, so the gate that stopped a
-  gesture or the reason a panel closed can be read after the fact:
-  `log stream --predicate 'subsystem == "place.unicorns.udeck"' --level debug`.
+- **A menu-bar item**, which is the only way to quit an application with no Dock
+  icon, and a second way to open the panel.
 
-- **Core model** (`UDeckCore`) — screen and panel geometry, the pointer-gesture
-  recognizer, the four panel states, the 12-column grid, the plugin manifest and
-  card formats, the permission model, and the on-disk stores. Foundation only,
-  no AppKit, so all of it is tested without a window server.
-- **Plugin runtime for `poll` producers** — discovery from `~/.udeck/plugins/`,
-  a host-enforced deadline, an output cap, and a legible failure for every way a
-  producer can fail.
-- **The bundled plugin, "Claude sessions"** — how many Claude Code sessions are
-  alive on this machine and how many are waiting for the operator, read from the
-  status lines, the lease registry and the process list, with liveness decided
-  from three sources because none of them is sufficient alone.
+### The plugin runtime
+
+- **Discovery** from `~/.udeck/plugins/`, relocatable with `UDECK_HOME`. A
+  folder that fails to load is shown with its reason rather than skipped.
+- **`poll` producers** run under a deadline the host enforces, because a stock
+  macOS has neither `timeout` nor `gtimeout` and a shell producer cannot police
+  itself. Killing one kills what it started.
+- **An output cap**, so a producer stuck in a printing loop is stopped.
+- **A legible failure for every way a producer can fail** — timed out, crashed,
+  printed nothing, printed something that is not a card, printed too much, could
+  not be started, was never permitted.
+- **Staleness**: a card past its `ttl` is dimmed and dated; past a multiple of
+  it, its values are hidden. "The source is quiet" looks like neither "fine" nor
+  "broken".
+- **Permissions** declared by the manifest, decided by the operator, and honest
+  about which of them the host can genuinely hold.
+- **`resident` plugins are described by the manifest format** and not
+  implemented, so that adding them later cannot break plugins written today.
+
+### The bundled plugin
+
+- **Claude sessions** — how many Claude Code sessions are alive on this machine
+  and how many are waiting for the operator. Liveness is decided from three
+  sources, because a title file proves nothing on its own, a lease with a frozen
+  heartbeat is a dead session, and a keeper process can outlive the tab it was
+  writing for.
+
+### Around the code
+
+- **`UDeckCore`** holds every decision that can be made without AppKit, so the
+  gesture can be tested against a fabricated event stream and the geometry
+  against real screens. 143 tests.
 - **Documentation**: the [plugin contract](docs/plugin-api.md), a README, a
-  contributing guide and a contributor licence agreement.
-- **CI** on GitHub Actions: build, the Swift tests, and the plugin's own tests.
+  contributing guide, and a contributor licence agreement.
+- **CI** on GitHub Actions: the build, the Swift tests, and the plugin's own
+  Python tests.
+- **`Scripts/make-app.sh`** assembles `uDeck.app` from a release build and signs
+  it. Ad-hoc by default; `--sign` takes a Developer ID when there is one, and the
+  hardened runtime is on from the start so notarisation is a step rather than a
+  refactor.
+- **Logging** through the unified logging system, so the gate that stopped a
+  gesture or the reason a panel closed can be read afterwards:
+  `log stream --predicate 'subsystem == "place.unicorns.udeck"' --level debug`.
 - **Example plugins** in `examples/`: `hello-card` (every row type),
   `slow-plugin` (hangs on purpose) and `broken-card` (prints something that is
   not a card). They are the test fixtures as well as the documentation.
+
+### Deliberately not here
+
+Resident plugins and the terminal they exist for; the `canvas` row a plugin
+would draw itself; a plugin registry; the global hotkey; the application
+switcher, which would need Accessibility; host-side history for sparklines; and
+notarisation.
