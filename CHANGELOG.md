@@ -30,6 +30,13 @@ The **plugin contract** is versioned separately from the application, by the
 - **Plugin runtime for `poll` producers** — discovery from `~/.udeck/plugins/`,
   a host-enforced deadline, an output cap, and a legible failure for every way a
   producer can fail.
+- **The bundled plugin, "Claude sessions"** — how many Claude Code sessions are
+  alive on this machine and how many are waiting for the operator, read from the
+  status lines, the lease registry and the process list, with liveness decided
+  from three sources because none of them is sufficient alone.
+- **Documentation**: the [plugin contract](docs/plugin-api.md), a README, a
+  contributing guide and a contributor licence agreement.
+- **CI** on GitHub Actions: build, the Swift tests, and the plugin's own tests.
 - **Example plugins** in `examples/`: `hello-card` (every row type),
   `slow-plugin` (hangs on purpose) and `broken-card` (prints something that is
   not a card). They are the test fixtures as well as the documentation.

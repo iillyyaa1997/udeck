@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          sw_vers
+
+      - name: Build
+        run: swift build --build-tests
+
+      # The plugin tests run real child processes against the fixtures in
+      # examples/, including one that hangs on purpose, so they are not fast
+      # and must not be run in parallel with each other.
+      - name: Test
+        run: swift test
+
+      - name: Check that the example plugins still produce valid cards
+        run: |
+          set -euo pipefail
+          for plugin in examples/*/; do
+            name=$(basename "$plugin")
+            test -f "$plugin/manifest.json" || { echo "$name: no manifest"; exit 1; }
+            python3 -c "import json,sys; json.load(open('$plugin/manifest.json'))"
+            echo "$name: manifest is valid JSON"
+          done
+
+      - name: Run the plugin's own tests
+        run: python3 -m unittest discover -s examples/claude-sessions -p 'test_*.py' -v
