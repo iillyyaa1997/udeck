@@ -1,0 +1,13 @@
+{
+  "id": "slow-plugin",
+  "name": "Deliberately slow plugin",
+  "version": "0.1.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "Hangs on purpose. Used to prove that the host, not the producer, owns the deadline.",
+  "author": "uDeck",
+  "run": ["./hang.sh"],
+  "interval": 5,
+  "timeout": 1,
+  "window": { "defaultWidth": 3, "defaultHeight": 2 }
+}

@@ -1,0 +1,159 @@
+import Foundation
+
+/// Why a poll is happening. Passed to the producer so it can, for instance,
+/// skip an expensive computation on an automatic refresh but do it when the
+/// operator asked.
+public enum RefreshReason: String, Sendable {
+    case launch
+    case interval
+    case manual
+}
+
+/// One attempt to get a card out of a plugin.
+public enum PollExecution: Sendable, Equatable {
+    case card(Card)
+    case failure(PluginFailure)
+}
+
+/// Runs one `poll` plugin once, and turns whatever happened into either a card
+/// or a legible failure.
+///
+/// Every path out of here produces something the operator can read. A producer
+/// that hangs, crashes, prints nothing, prints garbage or was never permitted
+/// each yields a different message — because "this card is not updating" with no
+/// reason attached is the state in which someone stops trusting the whole panel.
+public struct PollExecutor: Sendable {
+    public var runner: ProcessRunner
+
+    public init(runner: ProcessRunner = ProcessRunner()) {
+        self.runner = runner
+    }
+
+    public func poll(
+        plugin: DiscoveredPlugin,
+        grant: PluginGrant?,
+        enabled: Bool,
+        settings: PluginSettings,
+        paths: UDeckPaths,
+        searchPath: [String],
+        appearance: Appearance,
+        reason: RefreshReason,
+        now: Date = Date()
+    ) async -> PollExecution {
+        guard let manifest = plugin.manifest, let executable = plugin.executable, plugin.problems.isEmpty else {
+            return .failure(PluginFailure(reason: .notLoadable(plugin.problems), occurredAt: now))
+        }
+
+        let decision = PermissionGate.launchDecision(for: manifest, grant: grant, enabled: enabled)
+        guard decision.isAllowed else {
+            return .failure(PluginFailure(reason: .notPermitted(decision), occurredAt: now))
+        }
+
+        guard manifest.kind == .poll else {
+            return .failure(PluginFailure(reason: .notLoadable([.manifest(.residentNotSupportedYet)]),
+                                          occurredAt: now))
+        }
+
+        let cacheDirectory = paths.cache(forPlugin: manifest.id)
+        try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+
+        let result = await runner.run(
+            executable: executable,
+            arguments: Array(manifest.run.dropFirst()),
+            workingDirectory: plugin.directory,
+            environment: environment(
+                for: manifest,
+                plugin: plugin,
+                settings: settings,
+                cacheDirectory: cacheDirectory,
+                searchPath: searchPath,
+                appearance: appearance,
+                reason: reason
+            ),
+            timeout: manifest.timeout ?? 0
+        )
+
+        let diagnostics = String(decoding: result.standardError, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        switch result.termination {
+        case .timedOut(let seconds):
+            return .failure(PluginFailure(reason: .timedOut(after: seconds), diagnostics: diagnostics, occurredAt: now))
+        case .outputLimitExceeded(let bytes):
+            return .failure(PluginFailure(reason: .outputLimitExceeded(bytes: bytes), diagnostics: diagnostics, occurredAt: now))
+        case .launchFailed(let detail):
+            return .failure(PluginFailure(reason: .launchFailed(detail), diagnostics: diagnostics, occurredAt: now))
+        case .signalled(let signal):
+            return .failure(PluginFailure(reason: .signalled(signal: signal), diagnostics: diagnostics, occurredAt: now))
+        case .exited(let code) where code != 0:
+            return .failure(PluginFailure(reason: .exited(code: code), diagnostics: diagnostics, occurredAt: now))
+        case .exited:
+            break
+        }
+
+        return .init(parsing: result.standardOutput, diagnostics: diagnostics, now: now)
+    }
+
+    /// The environment a producer runs in.
+    ///
+    /// Built from scratch rather than inherited. uDeck can be launched from
+    /// Finder, from a shell or by launchd, each with a different environment,
+    /// and a plugin that works when started one way and not another is close to
+    /// impossible to debug. Building it explicitly also means a third-party
+    /// plugin never sees whatever secrets happen to be in the launching shell.
+    func environment(
+        for manifest: PluginManifest,
+        plugin: DiscoveredPlugin,
+        settings: PluginSettings,
+        cacheDirectory: URL,
+        searchPath: [String],
+        appearance: Appearance,
+        reason: RefreshReason
+    ) -> [String: String] {
+        var environment: [String: String] = [
+            "PATH": searchPath.joined(separator: ":"),
+            "HOME": NSHomeDirectory(),
+            // Producers print human text; without a UTF-8 locale a runtime can
+            // fall back to ASCII and mangle everything non-Latin.
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "UDECK_API": String(PluginAPI.current),
+            "UDECK_PLUGIN_ID": manifest.id.rawValue,
+            "UDECK_PLUGIN_DIR": plugin.directory.path,
+            "UDECK_CACHE_DIR": cacheDirectory.path,
+            "UDECK_APPEARANCE": appearance.rawValue,
+            "UDECK_REFRESH_REASON": reason.rawValue,
+        ]
+        if let tmp = ProcessInfo.processInfo.environment["TMPDIR"] { environment["TMPDIR"] = tmp }
+        environment.merge(settings.environment(for: manifest)) { _, new in new }
+        return environment
+    }
+}
+
+/// Whether the panel is currently drawn light or dark. Passed to producers so a
+/// card can pick colours that work, without each one guessing.
+public enum Appearance: String, Sendable {
+    case light
+    case dark
+}
+
+extension PollExecution {
+    init(parsing stdout: Data, diagnostics: String, now: Date) {
+        let trimmed = String(decoding: stdout, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            self = .failure(PluginFailure(reason: .emptyOutput, diagnostics: diagnostics, occurredAt: now))
+            return
+        }
+        do {
+            let card = try JSONDecoder().decode(Card.self, from: Data(trimmed.utf8))
+            self = .card(card)
+        } catch {
+            self = .failure(PluginFailure(
+                reason: .unparsableOutput(PluginDiscovery.describe(error)),
+                diagnostics: diagnostics,
+                occurredAt: now
+            ))
+        }
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "broken-card",
+  "name": "Deliberately broken plugin",
+  "version": "0.1.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "Prints something that is not a card. Used to prove a producer's mistakes are reported, not swallowed.",
+  "author": "uDeck",
+  "run": ["./broken.sh"],
+  "interval": 5,
+  "timeout": 2,
+  "window": { "defaultWidth": 3, "defaultHeight": 2 }
+}

@@ -1,0 +1,261 @@
+import CoreGraphics
+import Foundation
+import Testing
+@testable import UDeckCore
+
+/// Drives the recognizer the way the real event stream would: a sequence of
+/// moves with real deltas and real timestamps. Nothing here is faked past the
+/// event source, which is the point — the recognizer's whole job is to read a
+/// stream of moves, so it has to be tested against one.
+private struct Driver {
+    var recognizer = HoverGestureRecognizer()
+    var geometry: PanelGeometry
+    var tuning: GestureTuning
+    var environment = GestureEnvironment()
+    var clock: TimeInterval = 1_000
+    var cursor: CGPoint
+    private(set) var outcomes: [GestureOutcome] = []
+
+    init(
+        screen: ScreenSnapshot = ScreenFixtures.externalMain,
+        tuning: GestureTuning = GestureTuning(),
+        startingAt start: CGPoint? = nil
+    ) {
+        self.tuning = tuning
+        self.geometry = PanelGeometry(screen: screen, tuning: tuning, metrics: PanelMetrics())
+        self.cursor = start ?? CGPoint(x: screen.frame.midX, y: screen.frame.midY)
+    }
+
+    /// Moves the pointer, clamping the position at the top edge the way macOS
+    /// does while still reporting the full device delta.
+    @discardableResult
+    mutating func move(dx: CGFloat, dy: CGFloat, over seconds: TimeInterval = 0.008) -> GestureOutcome {
+        clock += seconds
+        cursor.x += dx
+        cursor.y = min(cursor.y + dy, geometry.screen.frame.maxY - 1)
+        cursor.x = min(max(cursor.x, geometry.screen.frame.minX), geometry.screen.frame.maxX - 1)
+        let sample = PointerSample(location: cursor, delta: CGVector(dx: dx, dy: dy), timestamp: clock)
+        let outcome = recognizer.handle(sample, geometry: geometry, environment: environment, tuning: tuning)
+        outcomes.append(outcome)
+        return outcome
+    }
+
+    /// Stays put for a while, the way a real stream still reports the odd event.
+    @discardableResult
+    mutating func rest(for seconds: TimeInterval, steps: Int = 8) -> GestureOutcome {
+        var last: GestureOutcome = .idle(reason: .outsideStrip)
+        for _ in 0 ..< steps { last = move(dx: 0, dy: 0, over: seconds / Double(steps)) }
+        return last
+    }
+
+    var fired: Bool { outcomes.contains(.fire) }
+}
+
+@Suite("Pointer gesture")
+struct GestureTests {
+    /// The gesture the operator actually makes: throw the cursor at the top of
+    /// the screen, and keep pushing after it lands.
+    @Test("pushing on after the cursor pins to the edge fires immediately")
+    func edgePushFires() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.move(dx: 0, dy: 300)   // arrives, and the cursor clamps
+        #expect(!driver.fired, "the throw itself must not count as the push")
+        driver.move(dx: 0, dy: 25)    // still pushing, against the edge
+        driver.move(dx: 0, dy: 25)
+        #expect(driver.fired)
+    }
+
+    @Test("arriving at a menu-bar target and stopping does not fire")
+    func arrivingAndStoppingDoesNotFire() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.move(dx: 0, dy: 300)
+        // The hand stops, because the target has been reached. Real streams still
+        // deliver a few zero-delta events.
+        driver.rest(for: 0.1)
+        #expect(!driver.fired)
+    }
+
+    @Test("resting in the strip fires on the dwell")
+    func dwellFires() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.3)
+        #expect(driver.fired)
+    }
+
+    /// The single most damaging false positive: travelling along the menu bar
+    /// from the app menus on the left to the status items on the right.
+    @Test("traversing the menu bar sideways never fires")
+    func menuBarTraversalDoesNotFire() {
+        var driver = Driver(startingAt: CGPoint(x: 400, y: 1439))
+        for _ in 0 ..< 200 {
+            driver.move(dx: 9, dy: 0, over: 0.008)
+        }
+        #expect(!driver.fired)
+        #expect(driver.cursor.x > 1400, "the traversal should have crossed the strip")
+    }
+
+    @Test("a slow sideways traversal outlasts the dwell and still does not fire")
+    func slowTraversalDoesNotFire() {
+        // Slow enough that a naive delay would expire mid-crossing.
+        var driver = Driver(startingAt: CGPoint(x: 1100, y: 1439))
+        for _ in 0 ..< 60 {
+            driver.move(dx: 4, dy: 0, over: 0.02)
+        }
+        #expect(!driver.fired)
+    }
+
+    @Test("crossing in from the side needs a visibly longer pause")
+    func lateralApproachNeedsLongerDwell() {
+        var driver = Driver(startingAt: CGPoint(x: 1000, y: 1439))
+        // Arrive travelling almost purely sideways, as when crossing displays,
+        // and stop just inside the strip.
+        for _ in 0 ..< 25 { driver.move(dx: 8, dy: 0, over: 0.008) }
+        #expect(driver.geometry.triggerStrip.contains(driver.cursor))
+        driver.rest(for: 0.25)
+        #expect(!driver.fired, "the normal dwell must not be enough after a lateral approach")
+        driver.rest(for: 0.25)
+        #expect(driver.fired, "a deliberate longer pause should still work")
+    }
+
+    @Test("a held mouse button suppresses the gesture entirely")
+    func buttonDownSuppresses() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.environment.buttonsDown = true
+        driver.move(dx: 0, dy: 300)
+        driver.move(dx: 0, dy: 60)
+        driver.rest(for: 0.5)
+        #expect(!driver.fired)
+        #expect(driver.outcomes.last == .idle(reason: .buttonDown))
+    }
+
+    @Test("an open system menu suppresses the gesture")
+    func menuTrackingSuppresses() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.environment.menuTrackingActive = true
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.5)
+        #expect(!driver.fired)
+    }
+
+    @Test("a fullscreen app suppresses the gesture by default, and can be allowed")
+    func fullscreenSuppresses() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.environment.frontmostIsFullscreen = true
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.5)
+        #expect(!driver.fired)
+
+        var allowed = Driver(tuning: {
+            var t = GestureTuning(); t.enabledInFullscreen = true; return t
+        }(), startingAt: CGPoint(x: 1280, y: 1200))
+        allowed.environment.frontmostIsFullscreen = true
+        allowed.move(dx: 0, dy: 300)
+        allowed.rest(for: 0.5)
+        #expect(allowed.fired)
+    }
+
+    @Test("a click in the menu bar keeps the gesture quiet for a moment afterwards")
+    func menuBarClickGrace() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.environment.lastMenuBarButtonUp = driver.clock + 0.3
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.2)
+        #expect(!driver.fired)
+    }
+
+    /// The oscillation failure: the panel closes, the cursor has not moved, and
+    /// the trigger fires again immediately.
+    @Test("a dismissal silences the trigger for the cooldown")
+    func cooldownAfterDismissal() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.move(dx: 0, dy: 300)
+        driver.environment.lastDismissal = driver.clock
+        driver.rest(for: 0.4)
+        #expect(!driver.fired)
+        driver.rest(for: 0.5)
+        #expect(driver.fired, "once the cooldown passes the gesture works again")
+    }
+
+    @Test("a visible panel is not re-triggered")
+    func visiblePanelNotRetriggered() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.environment.panelVisible = true
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.5)
+        #expect(!driver.fired)
+    }
+
+    @Test("a disabled gesture never fires")
+    func disabledNeverFires() {
+        var tuning = GestureTuning()
+        tuning.enabled = false
+        var driver = Driver(tuning: tuning, startingAt: CGPoint(x: 1280, y: 1200))
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 1)
+        #expect(!driver.fired)
+    }
+
+    @Test("it fires once per visit, not on every event afterwards")
+    func firesOncePerVisit() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.6)
+        #expect(driver.outcomes.filter { $0 == .fire }.count == 1)
+    }
+
+    @Test("leaving and coming back arms the gesture again")
+    func leavingRearms() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.3)
+        #expect(driver.fired)
+
+        driver.move(dx: 0, dy: -400)          // away from the edge
+        driver.recognizer.reset()             // as the host does when the panel opens
+        driver.environment.panelVisible = false
+        let before = driver.outcomes.filter { $0 == .fire }.count
+        driver.move(dx: 0, dy: 400)
+        driver.rest(for: 0.3)
+        #expect(driver.outcomes.filter { $0 == .fire }.count == before + 1)
+    }
+
+    @Test("the notched screen behaves the same as the notchless one")
+    func worksOnTheNotchedScreen() {
+        var driver = Driver(
+            screen: ScreenFixtures.builtInNotched,
+            startingAt: CGPoint(x: -864, y: 700)
+        )
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.3)
+        #expect(driver.fired)
+    }
+
+    @Test("the strip is where the notch is, not where the screen centre is")
+    func stripFollowsTheNotch() {
+        // The built-in's notch is centred at x = -864.5, and its frame midX is
+        // -864 — close, so pick a point that is inside the frame but far from
+        // the notch to prove the strip is not simply the screen centre.
+        var driver = Driver(
+            screen: ScreenFixtures.builtInNotched,
+            startingAt: CGPoint(x: -1400, y: 700)
+        )
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.5)
+        #expect(!driver.fired)
+    }
+
+    @Test("progress is reported while arming, so a calibration screen can show it")
+    func progressIsReported() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.15, steps: 6)
+        let arming = driver.outcomes.compactMap { outcome -> Double? in
+            if case .arming(let progress) = outcome { return progress }
+            return nil
+        }
+        #expect(!arming.isEmpty)
+        #expect(arming.allSatisfy { $0 >= 0 && $0 <= 1 })
+        #expect(arming.last! > arming.first!)
+    }
+}
