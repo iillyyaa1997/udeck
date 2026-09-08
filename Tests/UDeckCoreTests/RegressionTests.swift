@@ -313,4 +313,36 @@ struct RegressionTests {
         guard let dictionary = object as? [String: Any] else { return [] }
         return Set(dictionary.keys)
     }
+
+    // MARK: - A setting the operator could not reach
+
+    /// The fault: the glass tint was clamped to 0.9 by the validator and offered
+    /// to 0.6 by the slider, so a third of the range the code accepted could not
+    /// be asked for from the only place the operator sets it. He found the
+    /// ceiling by needing what was past it.
+    ///
+    /// The invariant: what the pane offers and what the code keeps are one
+    /// range, named once. This test guards the naming; the pane now builds its
+    /// slider from the same constant, so the two cannot drift apart again.
+    @Test("what the glass validator keeps is exactly what the settings pane can offer")
+    func theTintRangeIsStatedOnce() {
+        for value in [GlassAppearance.tintStrengthRange.lowerBound,
+                      GlassAppearance.tintStrengthRange.upperBound] {
+            var glass = GlassAppearance()
+            glass.tintStrength = value
+            #expect(glass.validated().tintStrength == value,
+                    "the pane can ask for \(value) and the validator throws it away")
+        }
+        for value in [GlassAppearance.opacityRange.lowerBound,
+                      GlassAppearance.opacityRange.upperBound] {
+            var glass = GlassAppearance()
+            glass.opacity = value
+            #expect(glass.validated().opacity == value)
+        }
+        // And past the ends it still clamps rather than obeying a hand-written
+        // file to the letter.
+        var beyond = GlassAppearance()
+        beyond.tintStrength = GlassAppearance.tintStrengthRange.upperBound + 1
+        #expect(beyond.validated().tintStrength == GlassAppearance.tintStrengthRange.upperBound)
+    }
 }

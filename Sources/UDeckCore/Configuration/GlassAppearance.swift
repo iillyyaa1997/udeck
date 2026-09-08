@@ -84,6 +84,19 @@ public struct GlassAppearance: Codable, Equatable, Sendable {
         return (tintIsLight ? 1 : 0, tintStrength)
     }
 
+    /// How far the tint is allowed to go.
+    ///
+    /// One range, named once, because it was two: the settings pane offered a
+    /// slider that stopped at 0.6 while the validator accepted 0.9, so a third
+    /// of what the code allowed was unreachable from the only place the
+    /// operator sets it — and he found the ceiling by needing what was past it.
+    /// A limit stated twice is a limit that will disagree with itself.
+    public static let tintStrengthRange: ClosedRange<Double> = 0 ... 0.9
+
+    /// How much of the material there can be. Zero is meaningful: no glass at
+    /// all, with the content floating over whatever is behind it.
+    public static let opacityRange: ClosedRange<Double> = 0 ... 1
+
     /// Ranges that keep both knobs meaning what they say.
     public func validated() -> GlassAppearance {
         var result = self
@@ -91,8 +104,8 @@ public struct GlassAppearance: Codable, Equatable, Sendable {
             guard value.isFinite else { return fallback }
             return min(max(value, range.lowerBound), range.upperBound)
         }
-        result.opacity = clamp(result.opacity, 0 ... 1, 1)
-        result.tintStrength = clamp(result.tintStrength, 0 ... 0.9, 0.16)
+        result.opacity = clamp(result.opacity, Self.opacityRange, 1)
+        result.tintStrength = clamp(result.tintStrength, Self.tintStrengthRange, 0.16)
         return result
     }
 }

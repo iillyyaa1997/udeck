@@ -215,7 +215,7 @@ private struct LookSettings: View {
                 .font(.caption).foregroundStyle(.secondary)
 
             LabeledContent("How much glass") {
-                Slider(value: binding(\.glass.opacity), in: 0 ... 1, step: 0.05) {
+                Slider(value: binding(\.glass.opacity), in: GlassAppearance.opacityRange, step: 0.05) {
                     Text("\(Int(model.settings.glass.opacity * 100)) %")
                 }
                 .frame(width: 260)
@@ -244,7 +244,7 @@ private struct LookSettings: View {
                 .font(.caption).foregroundStyle(.secondary)
 
             LabeledContent("Tint strength") {
-                Slider(value: binding(\.glass.tintStrength), in: 0 ... 0.6, step: 0.02) {
+                Slider(value: binding(\.glass.tintStrength), in: GlassAppearance.tintStrengthRange, step: 0.02) {
                     Text("\(Int(model.settings.glass.tintStrength * 100)) %")
                 }
                 .frame(width: 260)
