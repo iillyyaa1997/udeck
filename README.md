@@ -41,8 +41,14 @@ See the [changelog](CHANGELOG.md) for what exists.
 
 ## Requirements
 
-macOS 14 or later, Apple Silicon or Intel. No Xcode needed to run it; a Swift
-toolchain is needed to build it.
+**To run it:** macOS 14 or later, Apple Silicon or Intel. No Xcode needed.
+
+**To build it:** the macOS 26 SDK, which means Xcode 26 or its command-line
+tools. The panel's surface is `NSGlassEffectView`, the system's own glass, and
+a type the SDK has never heard of cannot be compiled against however carefully
+its use is guarded — `@available` decides what runs, not what exists. On
+macOS 14 and 15 the same build falls back to a blur at runtime; it is only the
+compiler that needs the newer SDK.
 
 ## Building and running
 

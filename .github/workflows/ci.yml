@@ -12,7 +12,11 @@ concurrency:
 jobs:
   build-and-test:
     name: Build and test
-    runs-on: macos-15
+    # macOS 26, because the panel uses NSGlassEffectView. `@available` is a
+    # runtime check and does not help when the SDK has never heard of the type:
+    # on macos-15 the build fails outright with "cannot find type
+    # 'NSGlassEffectView' in scope".
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 

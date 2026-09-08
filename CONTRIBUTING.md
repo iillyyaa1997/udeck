@@ -31,8 +31,10 @@ swift test           # runs the tests
 .build/debug/uDeck   # runs it; the binary is already a menu-bar app
 ```
 
-macOS 14 or later. Xcode is not required to build, but the Swift toolchain that
-ships with it is the one this is developed against.
+macOS 14 or later to run. To **build**, the macOS 26 SDK — Xcode 26 or its
+command-line tools — because the panel's surface is `NSGlassEffectView` and a
+type the SDK does not declare cannot be compiled against, guarded or not. What
+you build still runs on macOS 14, where it falls back to a blur.
 
 ## What a good change looks like
 
