@@ -210,38 +210,31 @@ struct PanelGeometryTests {
         }
     }
 
-    /// A game is the one time the screen is being watched rather than worked
-    /// on, and something hanging the full depth of a menu bar into it is an
-    /// interruption.
-    @Test("the island hangs half as far over a fullscreen application")
-    func islandShortensOverFullscreen() {
+    /// The island is a mark, not a slab: it hangs half the depth of what is
+    /// reserved at the top of the screen. It began as a special case for
+    /// fullscreen applications and became the rule everywhere, which also
+    /// retired the machinery that watched every screen for a fullscreen window.
+    @Test("the island hangs half the depth of the top inset, and nothing else moves")
+    func islandIsShort() {
         let screen = ScreenFixtures.externalMain
-        let normal = geometry(screen)
-        let overGame = PanelGeometry(screen: screen, tuning: tuning, metrics: metrics,
-                                     isOverFullscreenApp: true)
+        let g = geometry(screen)
+        let visible = min(g.collapsedFrame.maxY, screen.frame.maxY) - g.collapsedFrame.minY
+        #expect(visible == screen.topInset * metrics.islandHeightFactor)
 
-        let visible = { (g: PanelGeometry) in min(g.collapsedFrame.maxY, screen.frame.maxY) - g.collapsedFrame.minY }
-        #expect(visible(overGame) == visible(normal) * metrics.islandFullscreenHeightFactor)
-        // Same width, same top edge, same bleed past it.
-        #expect(overGame.collapsedFrame.width == normal.collapsedFrame.width)
-        #expect(overGame.collapsedFrame.minX == normal.collapsedFrame.minX)
-        #expect(overGame.collapsedFrame.maxY == normal.collapsedFrame.maxY)
+        // Same width as the anchor, same top edge, same bleed past it.
+        #expect(g.collapsedFrame.width == g.anchor.width)
+        #expect(g.collapsedFrame.minX == g.anchor.minX)
+        #expect(g.collapsedFrame.maxY == screen.frame.maxY + metrics.topEdgeBleed)
 
-        // The gesture must not get harder to make precisely when the panel has
-        // just become reachable.
-        #expect(overGame.triggerStrip == normal.triggerStrip)
-        // And nothing else moves.
-        #expect(overGame.peekFrame == normal.peekFrame)
-        #expect(overGame.openFrame == normal.openFrame)
-        #expect(overGame.windowFrame(for: .collapsed) == normal.windowFrame(for: .collapsed))
+        // The gesture is exactly as easy to make as it was.
+        #expect(g.triggerStrip.height == tuning.stripHeight)
+        #expect(g.triggerStrip.maxY == screen.frame.maxY)
     }
 
-    @Test("a real notch is not narrowed, because nothing is drawn there anyway")
-    func notchIsUnaffectedByFullscreen() {
-        let screen = ScreenFixtures.builtInNotched
-        let overGame = PanelGeometry(screen: screen, tuning: tuning, metrics: metrics,
-                                     isOverFullscreenApp: true)
-        #expect(overGame.collapsedFrame == overGame.anchor)
+    @Test("a real notch is left alone: nothing is drawn there to shorten")
+    func notchIsNotShortened() {
+        let g = geometry(ScreenFixtures.builtInNotched)
+        #expect(g.collapsedFrame == g.anchor)
     }
 
     @Test("fullscreen never takes the menu bar, on any screen")
@@ -271,11 +264,12 @@ struct PanelGeometryTests {
     @Test("the collapsed state is the island where there is no notch, and nothing where there is")
     func collapsedShapeFollowsTheHardware() {
         let dell = geometry(ScreenFixtures.externalMain)
-        #expect(dell.collapsedFrame.minY == dell.anchor.minY)
         #expect(dell.collapsedFrame.width == dell.anchor.width)
-        // The visible island is the anchor; the extra height is off the display.
-        #expect(dell.collapsedFrame.height == ScreenFixtures.externalMain.topInset + metrics.topEdgeBleed)
         #expect(dell.collapsedFrame.width == tuning.virtualAnchorWidth)
+        // It hangs from the same edge, half the depth, and bleeds past the top.
+        #expect(dell.collapsedFrame.maxY == dell.anchor.maxY + metrics.topEdgeBleed)
+        #expect(dell.collapsedFrame.height
+            == ScreenFixtures.externalMain.topInset * metrics.islandHeightFactor + metrics.topEdgeBleed)
 
         // Nothing hangs under a real notch. The frame is the notch itself, so
         // the window sits behind the camera housing rather than below it, and

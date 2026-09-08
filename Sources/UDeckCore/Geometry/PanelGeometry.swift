@@ -12,24 +12,11 @@ public struct PanelGeometry: Equatable, Sendable {
     public let tuning: GestureTuning
     public let metrics: PanelMetrics
 
-    /// Whether the application filling this screen is doing so fullscreen.
-    ///
-    /// The only thing it changes is how far the island hangs into the screen
-    /// while the panel is away. It is not a property of the screen, which is why it is passed in
-    /// rather than derived — the answer comes from the window server and
-    /// changes without the display arrangement changing at all.
-    public let isOverFullscreenApp: Bool
 
-    public init(
-        screen: ScreenSnapshot,
-        tuning: GestureTuning,
-        metrics: PanelMetrics,
-        isOverFullscreenApp: Bool = false
-    ) {
+    public init(screen: ScreenSnapshot, tuning: GestureTuning, metrics: PanelMetrics) {
         self.screen = screen
         self.tuning = tuning
         self.metrics = metrics
-        self.isOverFullscreenApp = isOverFullscreenApp
     }
 
     /// The anchor the panel grows out of: the real notch when the screen has
@@ -152,15 +139,11 @@ public struct PanelGeometry: Equatable, Sendable {
     /// those points are behind the camera housing.
     public var collapsedFrame: CGRect {
         guard !screen.hasNotch else { return anchor }
-        // Shallower over a fullscreen application: that is the one time the
-        // screen is being watched rather than worked on, and the island should
-        // hang less far into it. The width is left alone — it is the shape the
-        // panel grows out of — and so is the strip the gesture listens on, or
-        // the panel would become harder to open precisely when it has just
-        // become reachable.
-        let visible = isOverFullscreenApp
-            ? anchor.height * metrics.islandFullscreenHeightFactor
-            : anchor.height
+        // The island hangs half the depth of what is reserved at the top of
+        // the screen. The width is left alone — it is the shape the panel grows
+        // out of — and so is the strip the gesture listens on, which keeps the
+        // gesture exactly as easy to make as before.
+        let visible = anchor.height * metrics.islandHeightFactor
         return CGRect(
             x: anchor.minX,
             y: anchor.maxY - visible,
@@ -200,7 +183,32 @@ public struct PanelGeometry: Equatable, Sendable {
     /// cursor brushes the top of the screen, so one window resize there is a
     /// price worth paying over keeping a full-screen window permanently alive.
     public func windowFrame(for phase: PanelPhase) -> CGRect {
-        phase == .fullscreen ? fullscreenFrame : openFrame
+        wholePoints(phase == .fullscreen ? fullscreenFrame : openFrame)
+    }
+
+    /// The window once a transition has finished: exactly the panel.
+    ///
+    /// Between transitions the window is the panel and nothing more, so every
+    /// point inside it is a point the panel draws on and everything outside is
+    /// somebody else's. During a transition it is the stage, because the panel
+    /// grows inside it.
+    public func settledWindowFrame(for phase: PanelPhase) -> CGRect {
+        wholePoints(frame(for: phase))
+    }
+
+    /// Window frames are whole points; the panel's own frames are not.
+    ///
+    /// An anchor 185 points wide centred on a screen lands on a half point, and
+    /// a window placed on a half point is never equal to the frame that was
+    /// asked for — so "is it already there?" was false every time and the
+    /// window was resized on every pass, glass edge and all.
+    private func wholePoints(_ rect: CGRect) -> CGRect {
+        CGRect(
+            x: rect.minX.rounded(),
+            y: rect.minY.rounded(),
+            width: rect.width.rounded(),
+            height: rect.height.rounded()
+        )
     }
 
     /// Where the panel sits inside its window, in the window's own coordinates

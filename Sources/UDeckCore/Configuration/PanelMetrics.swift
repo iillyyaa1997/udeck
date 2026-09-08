@@ -36,18 +36,20 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
     /// draws for itself.
     public var topEdgeBleed: CGFloat
 
-    /// How much of its height the island keeps while the frontmost application
-    /// is filling the screen.
+    /// How far the island hangs into the screen, as a fraction of the space
+    /// reserved at the top of it.
     ///
-    /// A game or a film is the one time the operator is looking at the screen
-    /// rather than working on it, and something hanging the full depth of a
-    /// menu bar into it is an interruption. Half still reads as the island and
-    /// still carries a colour, while protruding half as far.
+    /// Half. It started as a special case for fullscreen applications — a
+    /// full-depth slab across the top of a game is an interruption — and the
+    /// operator asked for it everywhere, which is the better answer: the island
+    /// is a mark, and a mark does not need the whole menu bar's depth to be
+    /// read. It also retired the machinery that watched every screen for a
+    /// fullscreen window.
     ///
     /// The width is deliberately left alone: the island is the shape the panel
     /// grows out of, and one that changed width as well would have to grow back
     /// out again from somewhere else.
-    public var islandFullscreenHeightFactor: CGFloat
+    public var islandHeightFactor: CGFloat
 
     /// Corner radius of the collapsed island's bottom corners.
     ///
@@ -88,7 +90,7 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
         openMaxHeight: CGFloat = 760,
         cornerRadius: CGFloat = 18,
         topEdgeBleed: CGFloat = 2,
-        islandFullscreenHeightFactor: CGFloat = 0.5,
+        islandHeightFactor: CGFloat = 0.5,
         islandCornerRadius: CGFloat = 12,
         revealSpringResponse: TimeInterval = 0.42,
         revealSpringDamping: Double = 0.8,
@@ -106,7 +108,7 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
         self.openMaxHeight = openMaxHeight
         self.cornerRadius = cornerRadius
         self.topEdgeBleed = topEdgeBleed
-        self.islandFullscreenHeightFactor = islandFullscreenHeightFactor
+        self.islandHeightFactor = islandHeightFactor
         self.islandCornerRadius = islandCornerRadius
         self.revealSpringResponse = revealSpringResponse
         self.revealSpringDamping = revealSpringDamping
@@ -132,7 +134,7 @@ extension PanelMetrics {
             openMaxHeight: try c.decodeIfPresent(CGFloat.self, forKey: .openMaxHeight) ?? d.openMaxHeight,
             cornerRadius: try c.decodeIfPresent(CGFloat.self, forKey: .cornerRadius) ?? d.cornerRadius,
             topEdgeBleed: try c.decodeIfPresent(CGFloat.self, forKey: .topEdgeBleed) ?? d.topEdgeBleed,
-            islandFullscreenHeightFactor: try c.decodeIfPresent(CGFloat.self, forKey: .islandFullscreenHeightFactor) ?? d.islandFullscreenHeightFactor,
+            islandHeightFactor: try c.decodeIfPresent(CGFloat.self, forKey: .islandHeightFactor) ?? d.islandHeightFactor,
             islandCornerRadius: try c.decodeIfPresent(CGFloat.self, forKey: .islandCornerRadius) ?? d.islandCornerRadius,
             revealSpringResponse: try c.decodeIfPresent(TimeInterval.self, forKey: .revealSpringResponse) ?? d.revealSpringResponse,
             revealSpringDamping: try c.decodeIfPresent(Double.self, forKey: .revealSpringDamping) ?? d.revealSpringDamping,

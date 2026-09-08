@@ -85,20 +85,6 @@ public struct GestureTuning: Codable, Equatable, Sendable {
     /// Whether the pointer gesture is enabled at all.
     public var enabled: Bool
 
-    /// How often the island asks whether the screen it is on is filled by a
-    /// fullscreen application, in seconds.
-    ///
-    /// A separate question from `fullscreenCheckInterval`, and it has to be:
-    /// that one is answered only while the cursor is at the top of the screen,
-    /// because that is the only time the *gesture* cares. How far the island
-    /// hangs into the screen matters the whole time, and reusing the gesture's
-    /// answer meant it was permanently "no" for anyone whose cursor was in the
-    /// middle of their game.
-    ///
-    /// Slow on purpose: asking means enumerating every window on screen, about
-    /// 1.5 ms, and an island that takes a second to notice a game has started
-    /// is not a problem anyone has.
-    public var islandFullscreenCheckInterval: TimeInterval
 
     /// How long an answer to "is the frontmost application fullscreen?" is
     /// reused before asking again, in seconds.
@@ -140,7 +126,6 @@ public struct GestureTuning: Codable, Equatable, Sendable {
         enabledInFullscreen: Bool = true,
         enabled: Bool = true,
         fullscreenCheckInterval: TimeInterval = 0.25,
-        islandFullscreenCheckInterval: TimeInterval = 2,
         pointerPollInterval: TimeInterval = 0.1
     ) {
         self.stripHeight = stripHeight
@@ -162,7 +147,6 @@ public struct GestureTuning: Codable, Equatable, Sendable {
         self.enabledInFullscreen = enabledInFullscreen
         self.enabled = enabled
         self.fullscreenCheckInterval = fullscreenCheckInterval
-        self.islandFullscreenCheckInterval = islandFullscreenCheckInterval
         self.pointerPollInterval = pointerPollInterval
     }
 }
@@ -195,7 +179,6 @@ extension GestureTuning {
             enabledInFullscreen: try c.decodeIfPresent(Bool.self, forKey: .enabledInFullscreen) ?? d.enabledInFullscreen,
             enabled: try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled,
             fullscreenCheckInterval: try c.decodeIfPresent(TimeInterval.self, forKey: .fullscreenCheckInterval) ?? d.fullscreenCheckInterval,
-            islandFullscreenCheckInterval: try c.decodeIfPresent(TimeInterval.self, forKey: .islandFullscreenCheckInterval) ?? d.islandFullscreenCheckInterval,
             pointerPollInterval: try c.decodeIfPresent(TimeInterval.self, forKey: .pointerPollInterval) ?? d.pointerPollInterval
         )
     }

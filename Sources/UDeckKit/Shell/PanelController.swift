@@ -34,8 +34,6 @@ public final class PanelController {
     /// other display — which is the one place it was actually wanted.
     private var islands: [String: IslandWindow] = [:]
 
-    /// Which screens are currently filled by somebody's fullscreen window.
-    private var filledScreens: Set<String> = []
 
     /// The keyboard way in. Owned here rather than by the app delegate so that
     /// it is re-registered by the same `settingsChanged()` that everything else
@@ -64,8 +62,6 @@ public final class PanelController {
     /// can be told apart from changing state on the one it is already on.
     private var placedScreenID: String?
 
-    /// When that was last asked, so it is not asked on every tick.
-    private var lastIslandFullscreenCheck: TimeInterval = -.infinity
 
     /// Identifies the most recent transition, so a settle scheduled for one is
     /// dropped when another starts before it fires.
@@ -222,7 +218,6 @@ public final class PanelController {
                 // arrives somewhere: another application can warp it, and then
                 // the first thing to happen at the new position would be a
                 // click against a stale answer.
-                self.refreshIslandForFullscreen()
 
                 // The gesture itself is only worth evaluating while there is
                 // something for it to do. A peek is watched because the cursor
@@ -317,12 +312,7 @@ public final class PanelController {
     }
 
     private func geometry(for screen: ScreenSnapshot) -> PanelGeometry {
-        PanelGeometry(
-            screen: screen,
-            tuning: settings.gesture,
-            metrics: settings.panel,
-            isOverFullscreenApp: filledScreens.contains(screen.id)
-        )
+        PanelGeometry(screen: screen, tuning: settings.gesture, metrics: settings.panel)
     }
 
     // MARK: - Pointer
@@ -379,10 +369,15 @@ public final class PanelController {
     /// without uDeck having to decide anything.
     private func settleWindow() {
         guard let geometry else { return }
-        let frame = geometry.frame(for: state.phase)
+        let frame = geometry.settledWindowFrame(for: state.phase)
         guard panel.frame != frame else { return }
-        panel.setFrame(frame, display: true)
+        // The content is told where it will be *before* the window moves, so
+        // that the first layout after the resize is already the right one. The
+        // other order leaves one frame drawn with the panel in its old place
+        // inside the new window, which is a visible jolt at the end of every
+        // reveal.
         shell.panelRect = CGRect(origin: .zero, size: frame.size)
+        panel.setFrame(frame, display: true)
     }
 
     /// Gives every screen but the active one an island of its own, and takes
@@ -405,32 +400,6 @@ public final class PanelController {
         }
     }
 
-    /// Keeps the island's depth in step with whether a fullscreen application
-    /// is on its screen.
-    ///
-    /// This deliberately does not reuse the gesture's answer, twice over.
-    ///
-    /// That answer is only computed while the cursor is at the top of the
-    /// screen — the only time the gesture cares — so borrowing it made the
-    /// island permanently full depth for anyone whose cursor was in the middle
-    /// of the game it was supposed to be staying out of.
-    ///
-    /// And it is a different question. The gesture asks whether the *frontmost
-    /// application* is fullscreen; the island has to ask whether the *screen it
-    /// is on* is filled. Those part company the moment the operator switches to
-    /// another display: the game is no longer frontmost, but it is still there,
-    /// still filling that screen, and the island is still hanging into it.
-    private func refreshIslandForFullscreen() {
-        let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastIslandFullscreenCheck >= settings.gesture.islandFullscreenCheckInterval else { return }
-        lastIslandFullscreenCheck = now
-
-        let filled = FullscreenDetector.screensFilledByFullscreenWindow(screens.screens)
-        guard filled != filledScreens else { return }
-        filledScreens = filled
-        DeckLog.panel.debug("screens filled by a fullscreen window: \(filled.sorted().joined(separator: ", "), privacy: .public)")
-        applyPhase(animated: false)
-    }
 
     /// A peek closes when the cursor has been away from the panel for a grace
     /// period — long enough that flicking past a corner does not count.
@@ -577,9 +546,6 @@ public final class PanelController {
     }
 
     private func handleApplicationActivated(pid: pid_t?) {
-        // A different application in front is the most likely moment for the
-        // answer to have changed, so do not make the island wait out the timer.
-        lastIslandFullscreenCheck = -.infinity
         guard let pid else { return }
 
         // uDeck activating itself must not collapse uDeck. Without this the
@@ -719,6 +685,12 @@ public final class PanelController {
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.state.phase == phase else { return }
                 withAnimation(reveal) { self.shell.panelRect = panelRect }
+                // This path used to return without one, so a panel revealed on
+                // a display it was not already on kept the whole stage for a
+                // window — which is why it behaved differently there.
+                self.scheduleWindowSettle(after: arriving
+                    ? metrics.revealSpringResponse * 1.6
+                    : metrics.collapseDuration)
             }
             return
         }

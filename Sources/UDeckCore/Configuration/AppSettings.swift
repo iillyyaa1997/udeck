@@ -121,7 +121,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         result.gesture.peekExitGrace = clamp(result.gesture.peekExitGrace, 0.02 ... 30)
         result.gesture.peekKeepAliveInset = clamp(result.gesture.peekKeepAliveInset, 0 ... 500)
         result.gesture.fullscreenCheckInterval = clamp(result.gesture.fullscreenCheckInterval, 0.05 ... 60)
-        result.gesture.islandFullscreenCheckInterval = clamp(result.gesture.islandFullscreenCheckInterval, 0.2 ... 60)
         // Zero is meaningful here — it turns the safety poll off — so it is the
         // only value below the floor that survives.
         if result.gesture.pointerPollInterval != 0 {
@@ -137,7 +136,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         result.panel.openMaxHeight = clamp(result.panel.openMaxHeight, 60 ... 10_000)
         result.panel.cornerRadius = clamp(result.panel.cornerRadius, 0 ... 100)
         result.panel.islandCornerRadius = clamp(result.panel.islandCornerRadius, 0 ... 100)
-        result.panel.islandFullscreenHeightFactor = clamp(result.panel.islandFullscreenHeightFactor, 0.05 ... 1)
+        result.panel.islandHeightFactor = clamp(result.panel.islandHeightFactor, 0.05 ... 1)
         result.panel.topEdgeBleed = clamp(result.panel.topEdgeBleed, 0 ... 50)
         result.panel.revealSpringResponse = clamp(result.panel.revealSpringResponse, 0.05 ... 3)
         result.panel.collapseDuration = clamp(result.panel.collapseDuration, 0 ... 3)
