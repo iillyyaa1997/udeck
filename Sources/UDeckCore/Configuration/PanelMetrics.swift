@@ -31,6 +31,13 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
     /// because the panel is attached to the edge it hangs from.
     public var cornerRadius: CGFloat
 
+    /// Corner radius of the collapsed island's bottom corners.
+    ///
+    /// Smaller than the panel's, because the island is smaller: one radius for
+    /// both would either look blunt at 185 points wide or swallow the whole lip
+    /// under a notch.
+    public var islandCornerRadius: CGFloat
+
     /// Duration of the drop-down and retract animation.
     public var revealDuration: TimeInterval
 
@@ -45,7 +52,8 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
         openHeightFraction: CGFloat = 0.62,
         openMaxHeight: CGFloat = 760,
         cornerRadius: CGFloat = 18,
-        revealDuration: TimeInterval = 0.18
+        islandCornerRadius: CGFloat = 12,
+        revealDuration: TimeInterval = 0.4
     ) {
         self.pillHeight = pillHeight
         self.pillWidthFactor = pillWidthFactor
@@ -57,6 +65,7 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
         self.openHeightFraction = openHeightFraction
         self.openMaxHeight = openMaxHeight
         self.cornerRadius = cornerRadius
+        self.islandCornerRadius = islandCornerRadius
         self.revealDuration = revealDuration
     }
 }
@@ -77,6 +86,7 @@ extension PanelMetrics {
             openHeightFraction: try c.decodeIfPresent(CGFloat.self, forKey: .openHeightFraction) ?? d.openHeightFraction,
             openMaxHeight: try c.decodeIfPresent(CGFloat.self, forKey: .openMaxHeight) ?? d.openMaxHeight,
             cornerRadius: try c.decodeIfPresent(CGFloat.self, forKey: .cornerRadius) ?? d.cornerRadius,
+            islandCornerRadius: try c.decodeIfPresent(CGFloat.self, forKey: .islandCornerRadius) ?? d.islandCornerRadius,
             revealDuration: try c.decodeIfPresent(TimeInterval.self, forKey: .revealDuration) ?? d.revealDuration
         )
     }

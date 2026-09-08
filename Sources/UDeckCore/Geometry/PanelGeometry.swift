@@ -95,9 +95,40 @@ public struct PanelGeometry: Equatable, Sendable {
         }
     }
 
-    /// A thin pill hanging under the anchor. It is what the operator sees while
-    /// the panel is away, and the surface the reveal animation grows from.
+    /// The y coordinate the panel's top edge sits on.
+    ///
+    /// On a notched screen that is `panelTopY`, below the notch: the notch is
+    /// opaque hardware sitting in the middle of exactly where the panel would
+    /// be, so a panel drawn through it would have a hole punched in its top.
+    /// The notch is the island there, and the panel hangs off it.
+    ///
+    /// On a notchless screen nothing is in the way, and the panel reaches the
+    /// very top edge. That is what makes the island read as part of the machine
+    /// instead of as a window that stops one menu bar short of the corner —
+    /// which is what it looked like, and what the operator objected to.
+    public var panelHangY: CGFloat {
+        screen.hasNotch ? screen.panelTopY : screen.frame.maxY
+    }
+
+    /// How far the panel reaches above the menu bar's lower edge: the whole
+    /// menu bar on a notchless screen, nothing on a notched one. Panel content
+    /// is inset by this much so that the numbers in `PanelMetrics` keep meaning
+    /// the height of the *content*, not of the window around it.
+    public var topOverhang: CGFloat { panelHangY - screen.panelTopY }
+
+    /// What the operator sees while the panel is away.
+    ///
+    /// Where there is no notch, this is the anchor itself: a drawn island
+    /// filling the menu bar's height at the top centre, the same size as the
+    /// real notch on the built-in display, and the shape the panel grows out
+    /// of.
+    ///
+    /// Where there *is* a notch, the island already exists in hardware and
+    /// costs nothing to keep. Drawing over it would put pixels behind the
+    /// camera housing, so what hangs under it is a thin lip instead — enough to
+    /// carry a colour, not enough to pretend to be a second notch.
     public var collapsedFrame: CGRect {
+        guard screen.hasNotch else { return anchor }
         let width = anchor.width * metrics.pillWidthFactor
         return CGRect(
             x: anchor.midX - width / 2,
@@ -125,6 +156,12 @@ public struct PanelGeometry: Equatable, Sendable {
     /// Fullscreen means "the whole working area", not "the whole display": it
     /// stops below the menu bar and above the Dock. Covering either would make
     /// the panel impossible to escape from without a keyboard.
+    ///
+    /// This is the one state that does not take the overhang. The hover states
+    /// are a strip in the middle of the menu bar with the app menus and the
+    /// status items still reachable either side of them; fullscreen is the
+    /// whole width, and hiding the entire menu bar behind an application that
+    /// covers the screen is how a utility becomes a trap.
     public var fullscreenFrame: CGRect {
         CGRect(
             x: screen.visibleFrame.minX,
@@ -160,13 +197,22 @@ public struct PanelGeometry: Equatable, Sendable {
         )
     }
 
-    /// A panel of the given size, hanging from the anchor, clamped so it never
-    /// runs off the side of the screen.
+    /// A panel of the given *content* size, hanging from the anchor, clamped so
+    /// it never runs off the side of the screen.
+    ///
+    /// The window grows upward by the overhang rather than downward, so the
+    /// panel stays attached to the island while every height in `PanelMetrics`
+    /// keeps describing the room the content actually gets.
     private func hangingFrame(width: CGFloat, height: CGFloat) -> CGRect {
         let clampedWidth = min(width, screen.frame.width)
         var x = anchor.midX - clampedWidth / 2
         x = max(x, screen.frame.minX)
         x = min(x, screen.frame.maxX - clampedWidth)
-        return CGRect(x: x, y: screen.panelTopY - height, width: clampedWidth, height: height)
+        return CGRect(
+            x: x,
+            y: screen.panelTopY - height,
+            width: clampedWidth,
+            height: height + topOverhang
+        )
     }
 }

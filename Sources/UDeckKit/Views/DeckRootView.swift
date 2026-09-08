@@ -17,17 +17,34 @@ public struct DeckRootView: View {
         Group {
             switch shell.phase {
             case .collapsed:
-                CollapsedPillView(theme: theme, summary: summary)
+                CollapsedIslandView(theme: theme, summary: summary, isLipUnderNotch: shell.screenHasNotch)
             case .peek:
                 PeekView(theme: theme, summary: summary, model: model)
             case .open, .fullscreen:
                 WorkspaceView(shell: shell, model: model, theme: theme)
             }
         }
+        // The window reaches above the menu bar so that the panel stays welded
+        // to its island. The content must not: the first line of a card in the
+        // menu-bar row would be unreadable against the wallpaper behind it.
+        .padding(.top, shell.phase == .collapsed ? 0 : shell.topOverhang)
         .environment(\.deckTheme, theme)
         .background {
+            // The collapsed island is made of the same glass as the panel — it
+            // is the panel, at its smallest — except under a real notch, where
+            // there is only a few points of lip and glass would read as grime.
             if shell.phase != .collapsed {
-                GlassBackground(cornerRadius: model.settings.panel.cornerRadius, theme: theme)
+                GlassBackground(
+                    cornerRadius: model.settings.panel.cornerRadius,
+                    theme: theme,
+                    weldedToTopEdge: shell.weldedToTopEdge
+                )
+            } else if !shell.screenHasNotch {
+                GlassBackground(
+                    cornerRadius: model.settings.panel.islandCornerRadius,
+                    theme: theme,
+                    weldedToTopEdge: shell.weldedToTopEdge
+                )
             }
         }
         // Any click anywhere in the panel promotes a peek into a held panel.
@@ -81,22 +98,41 @@ struct DeckSummary {
     }
 }
 
-/// The pill hanging under the notch while the panel is away.
+/// What is on screen while the panel is away.
 ///
-/// One colour and nothing else. With dozens of things being watched, anything
-/// that moves up here becomes wallpaper within a day, and a pill that animates
-/// while idle costs battery for the privilege of being ignored.
-struct CollapsedPillView: View {
+/// Two shapes, because the two screens are not the same object. On a display
+/// with no notch this is the island itself — glass, the size of a real notch,
+/// welded to the top edge — and the state is a short bar inside it. Under a
+/// real notch there is nothing to build: the island is hardware, and all that
+/// is left to draw is a lip carrying the same colour.
+///
+/// Either way it says one thing and does not move. With dozens of sources being
+/// watched, anything that animates up here is wallpaper by the end of the day,
+/// and it costs battery for the privilege of being ignored.
+struct CollapsedIslandView: View {
     var theme: DeckTheme
     var summary: DeckSummary
+    var isLipUnderNotch: Bool
+
+    private var stateColor: Color {
+        theme.color(for: summary.worst).opacity(summary.placedPlugins == 0 ? 0.25 : 0.85)
+    }
 
     var body: some View {
-        BottomRoundedRectangle(radius: 3)
-            .fill(theme.color(for: summary.worst).opacity(summary.placedPlugins == 0 ? 0.25 : 0.85))
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .accessibilityLabel(summary.placedPlugins == 0
-                ? "uDeck, nothing placed yet"
-                : "uDeck, worst state \(summary.worst.rawValue)")
+        Group {
+            if isLipUnderNotch {
+                BottomRoundedRectangle(radius: 3).fill(stateColor)
+            } else {
+                Capsule()
+                    .fill(stateColor)
+                    .frame(width: 44, height: 3)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityLabel(summary.placedPlugins == 0
+            ? "uDeck, nothing placed yet"
+            : "uDeck, worst state \(summary.worst.rawValue)")
     }
 }
 

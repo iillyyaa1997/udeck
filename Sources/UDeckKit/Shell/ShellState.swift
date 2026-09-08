@@ -13,6 +13,29 @@ import UDeckCore
 public final class ShellState {
     public internal(set) var phase: PanelPhase = .collapsed
 
+    /// How far the panel window reaches above the menu bar's lower edge on the
+    /// screen it is currently on.
+    ///
+    /// The window is taller than its content by this much, so the content has
+    /// to be inset by it or the first line of the panel lands in the menu bar.
+    /// It is a property of the screen, not of the view, which is why the
+    /// controller hands it over rather than the view working it out.
+    public internal(set) var topOverhang: CGFloat = 0
+
+    /// Whether the panel's top edge is currently the screen's top edge.
+    ///
+    /// True for the hover states on a notchless screen, false under a real
+    /// notch and false in fullscreen, which stays below the menu bar so the
+    /// menu bar cannot become unreachable.
+    public internal(set) var weldedToTopEdge = false
+
+    /// Whether the screen the panel is on has a notch of its own.
+    ///
+    /// The collapsed state is a drawn island where it does not, and a thin lip
+    /// under real hardware where it does — the same state, two different things
+    /// to draw.
+    public internal(set) var screenHasNotch = false
+
     /// A tab rename in progress: which tab, and what has been typed so far.
     ///
     /// This lives here, outside the view, for one reason: SwiftUI destroys a

@@ -497,6 +497,14 @@ public final class PanelController {
         guard let geometry else { return }
         let frame = geometry.frame(for: state.phase)
 
+        // The window is taller than its content by the overhang, and what the
+        // collapsed state draws depends on whether the screen brought its own
+        // notch. Both are facts about the screen, so they are pushed to the
+        // views from here rather than guessed at inside them.
+        shell.topOverhang = geometry.topOverhang
+        shell.screenHasNotch = geometry.screen.hasNotch
+        shell.weldedToTopEdge = frame.maxY >= geometry.screen.frame.maxY
+
         // While away, the pill is a hint rather than a target: it must not
         // swallow clicks meant for whatever is underneath it.
         panel.ignoresMouseEvents = state.phase == .collapsed

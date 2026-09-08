@@ -116,15 +116,82 @@ struct PanelGeometryTests {
         #expect(strip.maxX <= ScreenFixtures.builtInNotched.frame.maxX)
     }
 
-    @Test("every visible state hangs from below the menu bar, never over it")
-    func panelClearsTheMenuBar() {
+    /// The rule the panel used to follow was "never reach into the menu bar at
+    /// all". It was narrowed on purpose: the island is the shape the panel
+    /// grows out of, and an island that stops one menu bar short of the top
+    /// edge is a window near the corner, not part of the machine. What survives
+    /// is the part that mattered — nothing *readable* is put where the menu bar
+    /// is, and the menu bar never becomes unreachable.
+    /// `.collapsed` is deliberately absent: the island is *supposed* to occupy
+    /// the menu-bar row, that is the whole point of it, and it carries a three
+    /// point bar rather than anything anyone has to read. Its shape is pinned
+    /// by `collapsedShapeFollowsTheHardware` instead.
+    @Test("panel content always clears the menu bar, whatever the window does")
+    func contentClearsTheMenuBar() {
         for screen in ScreenFixtures.both {
             let g = geometry(screen)
-            for phase in PanelPhase.allCases {
-                #expect(g.frame(for: phase).maxY <= screen.panelTopY,
-                        "\(phase) on \(screen.name) reaches into the menu bar")
+            for phase in [PanelPhase.peek, .open, .fullscreen] {
+                let contentTop = g.frame(for: phase).maxY - g.topOverhang
+                #expect(contentTop <= screen.panelTopY,
+                        "\(phase) on \(screen.name) puts content in the menu bar")
             }
         }
+    }
+
+    @Test("only a notchless screen lets the panel reach the top edge")
+    func overhangIsForNotchlessScreensOnly() {
+        let dell = geometry(ScreenFixtures.externalMain)
+        #expect(dell.topOverhang == 30)
+        for phase in [PanelPhase.collapsed, .peek, .open] {
+            #expect(dell.frame(for: phase).maxY == ScreenFixtures.externalMain.frame.maxY,
+                    "\(phase) should be welded to the top edge of a notchless screen")
+        }
+
+        // Under a real notch there is nothing to weld to: those points are
+        // hardware, and a panel drawn through them would have a hole in it.
+        let builtIn = geometry(ScreenFixtures.builtInNotched)
+        #expect(builtIn.topOverhang == 0)
+        for phase in PanelPhase.allCases {
+            #expect(builtIn.frame(for: phase).maxY <= ScreenFixtures.builtInNotched.panelTopY,
+                    "\(phase) on a notched screen must stay below the notch")
+        }
+    }
+
+    @Test("fullscreen never takes the menu bar, on any screen")
+    func fullscreenLeavesTheMenuBarAlone() {
+        // The hover states are a strip in the middle, with the app menus and the
+        // status items reachable either side. Fullscreen is the whole width, so
+        // covering the menu bar there would leave no way back out of it.
+        for screen in ScreenFixtures.both {
+            let g = geometry(screen)
+            #expect(g.fullscreenFrame.maxY <= screen.panelTopY)
+        }
+    }
+
+    @Test("the hover states leave both ends of the menu bar reachable")
+    func hoverStatesDoNotSpanTheMenuBar() {
+        let screen = ScreenFixtures.externalMain
+        let g = geometry(screen)
+        for phase in [PanelPhase.collapsed, .peek, .open] {
+            let frame = g.frame(for: phase)
+            #expect(frame.minX > screen.frame.minX + 200,
+                    "\(phase) reaches the app menus on the left")
+            #expect(frame.maxX < screen.frame.maxX - 200,
+                    "\(phase) reaches the status items on the right")
+        }
+    }
+
+    @Test("the collapsed state is the island where there is no notch, a lip where there is")
+    func collapsedShapeFollowsTheHardware() {
+        let dell = geometry(ScreenFixtures.externalMain)
+        #expect(dell.collapsedFrame == dell.anchor)
+        #expect(dell.collapsedFrame.height == ScreenFixtures.externalMain.topInset)
+        #expect(dell.collapsedFrame.width == tuning.virtualAnchorWidth)
+
+        let builtIn = geometry(ScreenFixtures.builtInNotched)
+        #expect(builtIn.collapsedFrame.height == metrics.pillHeight)
+        #expect(builtIn.collapsedFrame.maxY == ScreenFixtures.builtInNotched.panelTopY)
+        #expect(builtIn.collapsedFrame.width < builtIn.anchor.width)
     }
 
     @Test("the panel is centred on the anchor and stays inside the screen")
@@ -291,9 +358,9 @@ struct PanelGeometryTests {
     @Test("a region that does not reach the top of the screen keeps the ordinary rule")
     func regionsAwayFromTheEdgeAreUnchanged() {
         let g = geometry(ScreenFixtures.externalMain)
-        // The open panel's own frame stops below the menu bar, so nothing about
-        // it touches the screen edge and its top must stay exclusive.
-        let panel = g.openFrame
+        // Fullscreen is the one state that still stops below the menu bar, so
+        // nothing about it touches the screen edge and its top stays exclusive.
+        let panel = g.fullscreenFrame
         #expect(panel.maxY < ScreenFixtures.externalMain.frame.maxY)
         #expect(!g.containsPointer(CGPoint(x: panel.midX, y: panel.maxY), in: panel))
         #expect(g.containsPointer(CGPoint(x: panel.midX, y: panel.maxY - 0.5), in: panel))

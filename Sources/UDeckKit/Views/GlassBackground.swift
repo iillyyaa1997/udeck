@@ -10,18 +10,35 @@ struct GlassBackground: View {
     var cornerRadius: CGFloat
     var theme: DeckTheme
 
+    /// Whether the panel's top edge is the screen's top edge.
+    ///
+    /// When it is, the two lines that normally define that edge have to go. A
+    /// border and a highlight along the very top row make the panel read as a
+    /// window that happens to be near the corner — which is exactly the thing
+    /// the island exists to stop looking like. When the panel hangs below a
+    /// notch or a menu bar instead, its top edge is a real edge in the middle
+    /// of the screen and needs drawing.
+    var weldedToTopEdge: Bool
+
     var body: some View {
         let shape = BottomRoundedRectangle(radius: cornerRadius)
         VisualEffectBackground()
             .overlay(theme.panelTint)
             .clipShape(shape)
-            .overlay(shape.strokeBorder(theme.panelBorder, lineWidth: 1))
+            .overlay(
+                shape
+                    .strokeBorder(theme.panelBorder, lineWidth: 1)
+                    // Pull the stroke up out of frame so the sides and the
+                    // rounded bottom keep their edge and the top loses its.
+                    .padding(.top, weldedToTopEdge ? -2 : 0)
+                    .clipShape(shape)
+            )
             .overlay(alignment: .top) {
-                // The hairline that makes the top edge read as an edge rather
-                // than as a crop.
-                Rectangle()
-                    .fill(theme.innerHighlight)
-                    .frame(height: 1)
+                if !weldedToTopEdge {
+                    Rectangle()
+                        .fill(theme.innerHighlight)
+                        .frame(height: 1)
+                }
             }
     }
 }
