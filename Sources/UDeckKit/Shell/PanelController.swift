@@ -96,9 +96,9 @@ public final class PanelController {
 
         // Escape and ⌘W reach the panel only while it holds the keyboard, which
         // is exactly when they should mean "close this".
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let carried = MainThreadKeyEvent(event)
-            let handled = MainActor.assumeIsolated { self.handleKeyDown(carried.event) }
+            let handled = MainActor.assumeIsolated { self?.handleKeyDown(carried.event) ?? false }
             return handled ? nil : event
         }
 
@@ -107,8 +107,8 @@ public final class PanelController {
         // here — a click inside uDeck must never count as a click outside.
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { _ in
-            MainActor.assumeIsolated { self.handleClickOutside() }
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleClickOutside() }
         }
 
         attachedScreenID = screens.screenUnderCursor?.id ?? screens.screens.first?.id
@@ -289,9 +289,10 @@ public final class PanelController {
         exitTimer?.invalidate()
         exitTimer = Timer.scheduledTimer(
             withTimeInterval: settings.gesture.peekExitGrace, repeats: false
-        ) { _ in
+        ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard self.state.phase == .peek, self.pointerLeftAt != nil, let geometry = self.geometry
+                guard let self, self.state.phase == .peek, self.pointerLeftAt != nil,
+                      let geometry = self.geometry
                 else { return }
                 if !geometry.keepAliveRegion(for: .peek).contains(NSEvent.mouseLocation) {
                     self.apply(.pointerLeft)
