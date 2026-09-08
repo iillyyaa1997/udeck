@@ -206,6 +206,14 @@ private struct LookSettings: View {
         }
 
         SettingsGroup("The glass") {
+            Picker("Character", selection: binding(\.glass.style)) {
+                Text("Regular — what is behind stays legible").tag(GlassStyle.regular)
+                Text("Clear — what is behind is diffused").tag(GlassStyle.clear)
+            }
+            .pickerStyle(.radioGroup)
+            Text("macOS offers exactly these two and nothing in between. Both bend what is behind them towards the edges of the panel; regular keeps it recognisable, clear turns it to milk. There is no control over how much they bend — that is baked into each.")
+                .font(.caption).foregroundStyle(.secondary)
+
             LabeledContent("How much glass") {
                 Slider(value: binding(\.glass.opacity), in: 0 ... 1, step: 0.05) {
                     Text("\(Int(model.settings.glass.opacity * 100)) %")
@@ -236,7 +244,7 @@ private struct LookSettings: View {
             .disabled(!model.settings.glass.tinted)
 
             GlassPreview(glass: model.settings.glass, theme: DeckTheme(density: model.settings.density))
-            Text("The sample sits over a dark half and a light one, because those are the two cases that pull in opposite directions: a light tint stands out over a game and washes out over a document, and a dark one does the reverse.")
+            Text("The sample sits over a dark half and a light one, because those are the two cases that pull in opposite directions: a light tint stands out over a game and washes out over a document, and a dark one does the reverse. The ruling is there so the refraction is visible at all — the material bends what is behind it, and a flat colour or a field of grass gives it nothing to bend.")
                 .font(.caption).foregroundStyle(.secondary)
         }
 
@@ -539,6 +547,23 @@ private struct GlassPreview: View {
             HStack(spacing: 0) {
                 Color(red: 0.09, green: 0.13, blue: 0.08)
                 Color(red: 0.90, green: 0.89, blue: 0.86)
+            }
+            // Ruled, because a flat background cannot show refraction: the
+            // material bends what is behind it, and there is nothing to bend in
+            // a plain colour. On a wallpaper gradient or a field of grass the
+            // effect is equally invisible, which is why it looked as though the
+            // glass did not refract at all. Straight lines make it obvious —
+            // they compress towards the edges of the slab.
+            Canvas { context, size in
+                var path = Path()
+                let step: CGFloat = 13
+                var x = -size.height
+                while x < size.width {
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x + size.height, y: size.height))
+                    x += step
+                }
+                context.stroke(path, with: .color(.gray.opacity(0.75)), lineWidth: 1.5)
             }
             GlassSurface(
                 shape: RoundedRectangle(cornerRadius: 12),

@@ -155,7 +155,6 @@ struct LiquidGlassBackground: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSGlassEffectView {
         let view = NSGlassEffectView()
-        view.style = .regular
         apply(glass, to: view)
         view.cornerRadius = 0
         // One deliberate deviation from "the system's glass as it comes": the
@@ -178,6 +177,7 @@ struct LiquidGlassBackground: NSViewRepresentable {
     /// transparent" has to mean when the thing being made transparent is a
     /// material rather than a fill.
     private func apply(_ glass: GlassAppearance, to view: NSGlassEffectView) {
+        view.style = glass.style == .clear ? .clear : .regular
         view.tintColor = glass.tintComponents.map { NSColor(white: $0.white, alpha: $0.alpha) }
         view.alphaValue = glass.opacity
     }

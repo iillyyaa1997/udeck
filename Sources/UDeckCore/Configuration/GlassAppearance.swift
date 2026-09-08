@@ -13,7 +13,19 @@ import Foundation
 /// much glass there is; the tint decides what colour the glass leans towards.
 /// Both are settings because both are matters of taste and of what the operator
 /// has behind their panel all day.
+/// The two characters the system material comes in.
+///
+/// Not a slider: macOS offers exactly these, and the difference is optical
+/// rather than a matter of degree. `regular` keeps what is behind it legible
+/// and bends it towards the edges; `clear` diffuses it almost completely.
+public enum GlassStyle: String, Codable, Sendable, CaseIterable {
+    case regular
+    case clear
+}
+
 public struct GlassAppearance: Codable, Equatable, Sendable {
+    public var style: GlassStyle
+
     /// How much of the material there is, from 0 (nothing at all — the panel's
     /// content floats over whatever is behind it) to 1 (the material as the
     /// system renders it).
@@ -32,11 +44,13 @@ public struct GlassAppearance: Codable, Equatable, Sendable {
     public var tintStrength: Double
 
     public init(
+        style: GlassStyle = .regular,
         opacity: Double = 1,
         tinted: Bool = true,
         tintIsLight: Bool = true,
         tintStrength: Double = 0.16
     ) {
+        self.style = style
         self.opacity = opacity
         self.tinted = tinted
         self.tintIsLight = tintIsLight
@@ -48,6 +62,11 @@ public struct GlassAppearance: Codable, Equatable, Sendable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = GlassAppearance()
         self.init(
+            // Read as a string and mapped, rather than decoded as the enum
+            // directly: an unknown name would throw, and throwing here fails
+            // the *whole* settings file. One misspelt style should not cost the
+            // operator every other setting they have.
+            style: (try c.decodeIfPresent(String.self, forKey: .style)).flatMap(GlassStyle.init(rawValue:)) ?? d.style,
             opacity: try c.decodeIfPresent(Double.self, forKey: .opacity) ?? d.opacity,
             tinted: try c.decodeIfPresent(Bool.self, forKey: .tinted) ?? d.tinted,
             tintIsLight: try c.decodeIfPresent(Bool.self, forKey: .tintIsLight) ?? d.tintIsLight,

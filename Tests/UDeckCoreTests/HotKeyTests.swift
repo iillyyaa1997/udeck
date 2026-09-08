@@ -157,6 +157,20 @@ struct GlassAppearanceTests {
         #expect(try! JSONDecoder().decode(AppSettings.self, from: json).glass == GlassAppearance())
     }
 
+    /// The style is the one thing macOS offers only as a choice of two, with
+    /// nothing in between and no control over how far either bends what is
+    /// behind it. A settings file that names a third is a settings file that
+    /// gets the default rather than a crash.
+    @Test("the style is one of two, and nonsense falls back rather than throwing")
+    func styleDecoding() throws {
+        #expect(GlassAppearance().style == .regular)
+        let clear = try JSONDecoder().decode(GlassAppearance.self, from: Data(#"{ "style": "clear" }"#.utf8))
+        #expect(clear.style == .clear)
+        let nonsense = try JSONDecoder().decode(GlassAppearance.self, from: Data(#"{ "style": "frosted" }"#.utf8))
+        #expect(nonsense.style == .regular)
+        #expect(GlassStyle.allCases.count == 2)
+    }
+
     @Test("a half-written glass block keeps the defaults for the rest")
     func partialDecode() throws {
         let glass = try JSONDecoder().decode(GlassAppearance.self, from: Data(#"{ "opacity": 0 }"#.utf8))
