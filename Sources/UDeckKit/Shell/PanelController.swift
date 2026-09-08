@@ -429,7 +429,7 @@ public final class PanelController {
             recognizer.suppressUntilPointerLeaves()
             pointerLeftAt = nil
             exitTimer?.invalidate()
-            releaseKeyboard()
+            releaseKeyboard(restoringPreviousApplication: state.collapseReason == .dismissed)
         }
 
         pointer.panelVisible = state.phase.isVisible
@@ -485,13 +485,22 @@ public final class PanelController {
         )
     }
 
-    /// Puts the previous application back, but only if uDeck took it away.
-    private func releaseKeyboard() {
+    /// Gives the keyboard back, and the previous application with it — but
+    /// only when uDeck took either away, and only when the operator did not
+    /// just choose somewhere else to be.
+    ///
+    /// The second condition matters. Collapsing because another application was
+    /// activated means the operator picked that application; pulling the one
+    /// that was in front *before* uDeck back over it would be uDeck answering a
+    /// choice it was not asked about.
+    private func releaseKeyboard(restoringPreviousApplication shouldRestore: Bool) {
         panel.resignKey()
         guard didActivateForKeyboard else { return }
         didActivateForKeyboard = false
-        applicationToRestore?.activate()
+        let previous = applicationToRestore
         applicationToRestore = nil
+        guard shouldRestore else { return }
+        previous?.activate()
     }
 
     // MARK: - Introspection, for the smoke test and the settings screen

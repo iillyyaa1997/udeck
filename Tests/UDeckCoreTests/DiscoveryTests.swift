@@ -177,11 +177,30 @@ struct PermissionTests {
         #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["kubectl"]), grant: nil))
     }
 
-    @Test("a full path cannot be used to smuggle a different command past a grant")
-    func fullPathIsMatchedByItsName() {
+    /// A grant for `ps` is read by the operator as "may run the `ps` on this
+    /// machine". Matching only the last path component made it mean "may run
+    /// anything called `ps`, from anywhere" — including a file the plugin
+    /// shipped itself. No privilege was gained by that, since the plugin's own
+    /// process can run whatever it likes; what was wrong is that the consent
+    /// sheet said something untrue.
+    @Test("a grant for a command name does not permit a different file with that name")
+    func aNameIsNotAPath() {
         let grant = PluginGrant(granted: [.exec("ps")], decidedForVersion: "1.0.0")
-        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["/bin/ps"]), grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["/bin/sh"]), grant: grant))
+        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["ps"]), grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["/bin/ps"]), grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["/tmp/evil/ps"]), grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["../../tmp/evil/ps"]), grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["./ps"]), grant: grant))
+    }
+
+    @Test("a plugin that wants to run its own tool has to name the path, and the operator sees it")
+    func aPathIsMatchedLiterally() {
+        let grant = PluginGrant(granted: [.exec("./tools/refresh")], decidedForVersion: "1.0.0")
+        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["./tools/refresh"]), grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["refresh"]), grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["./tools/other"]), grant: grant))
+        // And the operator reads the path they are agreeing to.
+        #expect(Capability.exec("./tools/refresh").summary == "run ./tools/refresh")
     }
 
     @Test("an action with no command never runs")
@@ -244,5 +263,55 @@ struct DiscoveryMessageTests {
             == "python3 was not found on /usr/bin:/bin")
         #expect(DiscoveryProblem.executableOutsidePluginFolder(command: "../../ssh").description
             == "../../ssh resolves outside the plugin folder, which a plugin is not allowed to do")
+    }
+}
+
+@Suite("Plugin folder containment")
+struct ContainmentTests {
+    /// `standardizedFileURL` collapses `..` lexically and stops there, so a
+    /// plugin shipping `bin -> /bin` and running `./bin/sh` passed a check that
+    /// was at that point decoration.
+    @Test("a symlink cannot be used to leave the plugin folder")
+    func symlinkCannotEscape() throws {
+        let temp = TemporaryDirectory()
+        let directory = temp.url.appendingPathComponent("plugins/sneaky", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("""
+        { "id": "sneaky", "name": "Sneaky", "version": "1.0.0", "api": 1, "kind": "poll",
+          "run": ["./bin/sh"], "interval": 5, "timeout": 2 }
+        """.utf8).write(to: directory.appendingPathComponent("manifest.json"))
+        try FileManager.default.createSymbolicLink(
+            at: directory.appendingPathComponent("bin"),
+            withDestinationURL: URL(fileURLWithPath: "/bin")
+        )
+
+        let plugin = PluginDiscovery(searchPath: ["/usr/bin", "/bin"]).load(directory)
+        #expect(plugin.executable == nil)
+        #expect(plugin.problems.contains(.executableOutsidePluginFolder(command: "./bin/sh")))
+        #expect(!plugin.isUsable)
+    }
+
+    @Test("a symlink that stays inside the folder still works")
+    func symlinkInsideIsFine() throws {
+        let temp = TemporaryDirectory()
+        let directory = temp.url.appendingPathComponent("plugins/tidy", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("tools"), withIntermediateDirectories: true
+        )
+        try Data("""
+        { "id": "tidy", "name": "Tidy", "version": "1.0.0", "api": 1, "kind": "poll",
+          "run": ["./run.sh"], "interval": 5, "timeout": 2 }
+        """.utf8).write(to: directory.appendingPathComponent("manifest.json"))
+
+        let real = directory.appendingPathComponent("tools/real.sh")
+        try Data("#!/bin/sh\necho '{}'\n".utf8).write(to: real)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: real.path)
+        try FileManager.default.createSymbolicLink(
+            at: directory.appendingPathComponent("run.sh"), withDestinationURL: real
+        )
+
+        let plugin = PluginDiscovery(searchPath: ["/usr/bin", "/bin"]).load(directory)
+        #expect(plugin.problems.isEmpty, "\(plugin.problems.map(\.description))")
+        #expect(plugin.isUsable)
     }
 }

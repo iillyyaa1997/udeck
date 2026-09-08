@@ -253,8 +253,17 @@ waiting to happen.
 **uDeck runs the command, not your plugin.** That is what makes the `exec`
 permission mean something: if the operator did not grant `exec` for that
 command, the button does nothing and says why — in code your plugin does not
-control. The command is matched by its last path component, so `/bin/ps` and
-`ps` are the same grant and neither smuggles anything else past it.
+control.
+
+Matching is literal. A grant for `ps` permits the action `["ps"]`, which uDeck
+resolves on its own search path — and nothing else: not `/bin/ps`, not
+`/tmp/mine/ps`, not `./ps`. If your action runs a tool you shipped, declare the
+path you will use (`"exec": ["./tools/refresh"]`) and run exactly that. The
+operator then reads the path they are agreeing to rather than a name that could
+mean any file on the machine.
+
+The action's environment is built the same way a producer's is — a known search
+path, a UTF-8 locale, and nothing carried over from however uDeck was started.
 
 `confirm`, when present, asks the operator before running. Use it for anything
 that changes something.

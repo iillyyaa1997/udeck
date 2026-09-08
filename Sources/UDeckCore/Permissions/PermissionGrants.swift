@@ -101,13 +101,26 @@ public enum PermissionGate {
     ///
     /// Genuinely enforced: the host owns the process, so a plugin that was never
     /// granted `exec` for this command gets nothing, whatever its card says.
-    /// The command is matched by its last path component, so a plugin cannot
-    /// smuggle `/usr/bin/ps` past a grant for `kubectl`.
+    ///
+    /// The matching is deliberately strict, and it used to be too loose. It
+    /// compared only the last path component, so a grant for `ps` — which the
+    /// operator read as "may run the `ps` on this machine" — also permitted
+    /// `/tmp/anything/ps`. No privilege was gained by that, since the plugin's
+    /// own process can run whatever it likes; what was wrong is that the
+    /// consent sheet said something untrue, and a permission screen that
+    /// overstates itself is worse than none.
+    ///
+    /// So: a bare name matches a grant for that name, and a path matches only a
+    /// grant for exactly that path. A plugin that wants to run its own bundled
+    /// tool has to say so, and the operator gets to see the path they are
+    /// agreeing to.
     public static func mayRun(_ action: CardAction, grant: PluginGrant?) -> Bool {
         guard let executable = action.run.first, !executable.isEmpty else { return false }
         guard let grant else { return false }
-        let name = (executable as NSString).lastPathComponent
-        return grant.granted.contains(.exec(name)) || grant.granted.contains(.exec(executable))
+        if grant.granted.contains(.exec(executable)) { return true }
+        // A path is only ever matched literally.
+        guard !executable.contains("/") else { return false }
+        return grant.granted.contains(.exec(executable))
     }
 
     /// May the host hand this plugin the named secret?

@@ -172,14 +172,21 @@ public struct PluginDiscovery: Sendable {
         }
 
         if command.contains("/") {
-            let url = directory.appendingPathComponent(command).standardizedFileURL
             // A relative path must stay inside the plugin's folder: `../../ssh`
             // would let a manifest reach anywhere on disk while still looking
             // like a self-contained plugin.
-            guard url.path.hasPrefix(directory.standardizedFileURL.path + "/") else {
+            //
+            // Symlinks have to be resolved for that check to mean anything.
+            // `standardizedFileURL` only collapses `..` lexically, so a plugin
+            // shipping `bin -> /bin` and running `./bin/sh` passed a check that
+            // was, at that point, decoration.
+            let resolved = directory.appendingPathComponent(command)
+                .standardizedFileURL.resolvingSymlinksInPath()
+            let root = directory.standardizedFileURL.resolvingSymlinksInPath()
+            guard resolved.path.hasPrefix(root.path + "/") else {
                 return .failure(.executableOutsidePluginFolder(command: command))
             }
-            return check(url) ?? .failure(.executableMissing(path: url.path))
+            return check(resolved) ?? .failure(.executableMissing(path: resolved.path))
         }
 
         for entry in searchPath {

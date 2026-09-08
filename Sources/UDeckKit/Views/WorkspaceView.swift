@@ -7,8 +7,6 @@ struct WorkspaceView: View {
     var model: DeckModel
     var theme: DeckTheme
 
-    @State private var renamingTab: UUID?
-    @State private var draftName = ""
 
     /// A field that appears without focus is a field the operator has to click
     /// a second time, and the second click is easy to mistake for the first not
@@ -35,8 +33,7 @@ struct WorkspaceView: View {
             Button {
                 shell.onInteract()
                 let id = model.addTab(named: "New tab")
-                renamingTab = id
-                draftName = "New tab"
+                shell.tabRename = ShellState.TabRename(tabID: id, text: "New tab")
             } label: {
                 Text("+").font(theme.monoFont).foregroundStyle(theme.dim)
                     .padding(.horizontal, 9).padding(.vertical, 4)
@@ -53,8 +50,11 @@ struct WorkspaceView: View {
     private func tabButton(_ tab: DeckTab) -> some View {
         let isSelected = tab.id == model.layout.selectedTabID
 
-        if renamingTab == tab.id {
-            TextField("Tab name", text: $draftName)
+        if shell.tabRename?.tabID == tab.id {
+            TextField("Tab name", text: Binding(
+                get: { shell.tabRename?.text ?? tab.name },
+                set: { shell.tabRename = ShellState.TabRename(tabID: tab.id, text: $0) }
+            ))
                 .textFieldStyle(.plain)
                 .font(theme.bodyFont)
                 .foregroundStyle(theme.text)
@@ -65,13 +65,12 @@ struct WorkspaceView: View {
                 .focused($renameFieldFocused)
                 .onAppear { renameFieldFocused = true }
                 .onSubmit { commitRename(tab.id) }
-                .onExitCommand { renamingTab = nil }
+                .onExitCommand { shell.tabRename = nil }
         } else {
             Button {
                 shell.onInteract()
                 if isSelected {
-                    renamingTab = tab.id
-                    draftName = tab.name
+                    shell.tabRename = ShellState.TabRename(tabID: tab.id, text: tab.name)
                 } else {
                     model.selectTab(tab.id)
                 }
@@ -90,7 +89,9 @@ struct WorkspaceView: View {
             .buttonStyle(.plain)
             .help(isSelected ? "Click again to rename" : "Show this tab")
             .contextMenu {
-                Button("Rename") { renamingTab = tab.id; draftName = tab.name }
+                Button("Rename") {
+                    shell.tabRename = ShellState.TabRename(tabID: tab.id, text: tab.name)
+                }
                 Button("Close tab", role: .destructive) { model.removeTab(tab.id) }
                     .disabled(model.layout.tabs.count <= 1)
             }
@@ -98,9 +99,9 @@ struct WorkspaceView: View {
     }
 
     private func commitRename(_ id: UUID) {
-        let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = (shell.tabRename?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { model.renameTab(id, to: trimmed) }
-        renamingTab = nil
+        shell.tabRename = nil
     }
 
     // MARK: - Controls

@@ -13,7 +13,20 @@ public final class PointerMonitor {
     public var onMove: ((PointerSample, GestureEnvironment) -> Void)?
 
     public private(set) var calibration = PointerDeltaCalibration()
-    public private(set) var buttonsDown = false
+
+    /// Whether any mouse button is down, asked rather than remembered.
+    ///
+    /// This used to be tracked by watching for the release, and the release is
+    /// not reliably observable: AppKit does not deliver events to a monitor
+    /// when they are consumed by a nested tracking loop, which is exactly what
+    /// a click on a SwiftUI control inside the panel goes through. So the down
+    /// was seen, the up never arrived, and the flag stayed true — permanently
+    /// disabling the pointer gesture after the first click on a button in the
+    /// panel, with nothing on screen to say why.
+    ///
+    /// `pressedMouseButtons` is the current state of the hardware. There is
+    /// nothing to miss.
+    public var buttonsDown: Bool { NSEvent.pressedMouseButtons != 0 }
     public private(set) var menuTrackingActive = false
     public private(set) var lastMenuBarButtonUp: TimeInterval?
 
@@ -115,10 +128,10 @@ public final class PointerMonitor {
 
     private func handleButton(_ event: NSEvent) {
         switch event.type {
-        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
-            buttonsDown = true
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
-            buttonsDown = false
+            // Only the menu-bar grace is tracked from events, and missing one
+            // costs nothing: the gesture simply does not get its extra moment
+            // of quiet after a click it never saw.
             let location = NSEvent.mouseLocation
             if let screen = screens.screens.screen(containing: location),
                location.y >= screen.visibleFrame.maxY {

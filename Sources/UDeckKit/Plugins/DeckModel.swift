@@ -304,6 +304,11 @@ public final class DeckModel {
         process.executableURL = executable
         process.arguments = Array(action.run.dropFirst())
         process.currentDirectoryURL = plugin(withID: id)?.directory
+        // Built, not inherited — the same rule as a producer's environment, and
+        // for the same reason. This is the one path the documentation calls
+        // host-mediated, so it is the last place that should quietly hand a
+        // plugin whatever was in the shell that started uDeck.
+        process.environment = actionEnvironment(for: id)
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         do {
@@ -312,6 +317,27 @@ public final class DeckModel {
             return "\(action.run[0]) could not be started: \(error.localizedDescription)"
         }
         return nil
+    }
+
+    /// The environment a card's action runs in.
+    ///
+    /// Deliberately the same shape as a producer's: a known search path, a
+    /// UTF-8 locale, and nothing else carried over from however uDeck happened
+    /// to be started.
+    private func actionEnvironment(for id: PluginIdentifier) -> [String: String] {
+        var environment: [String: String] = [
+            "PATH": settings.pluginExecutableSearchPath.joined(separator: ":"),
+            "HOME": NSHomeDirectory(),
+            "LANG": "en_US.UTF-8",
+            "LC_ALL": "en_US.UTF-8",
+            "UDECK_API": String(PluginAPI.current),
+            "UDECK_PLUGIN_ID": id.rawValue,
+        ]
+        if let directory = plugin(withID: id)?.directory {
+            environment["UDECK_PLUGIN_DIR"] = directory.path
+        }
+        if let tmp = ProcessInfo.processInfo.environment["TMPDIR"] { environment["TMPDIR"] = tmp }
+        return environment
     }
 
     /// Resolves an action's command the same way a manifest's `run` is
