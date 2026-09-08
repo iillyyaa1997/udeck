@@ -98,7 +98,9 @@ public final class DeckModel {
             }
         }
 
-        settings = load(JSONFileStore<AppSettings>(url: paths.settingsFile), default: AppSettings()).validated()
+        settings = load(JSONFileStore<AppSettings>(url: paths.settingsFile), default: AppSettings())
+            .validated()
+            .resolved(systemIsDark: DeckModel.systemIsDark(), hour: DeckModel.currentHour())
         layout = load(JSONFileStore<DeckLayout>(url: paths.layoutFile), default: DeckLayout.firstRun()).normalized()
         grants = load(JSONFileStore<PermissionGrants>(url: paths.grantsFile), default: PermissionGrants())
         pluginSettings = load(JSONFileStore<PluginSettings>(url: paths.pluginSettingsFile), default: PluginSettings())
@@ -294,10 +296,40 @@ public final class DeckModel {
 
     public func update(settings newValue: AppSettings) {
         let settings = newValue.validated()
+            .resolved(systemIsDark: DeckModel.systemIsDark(), hour: DeckModel.currentHour())
         self.settings = settings
         save(settingsStore, settings, named: "settings")
         restartPolling()
         onSettingsChanged?(settings)
+    }
+
+    /// Re-reads the world and puts the panel in whichever look it now calls for.
+    ///
+    /// Called when macOS changes appearance and once a minute for the clock. It
+    /// does nothing at all when the answer has not moved, which is almost every
+    /// time — a look that is rebuilt every minute is a panel that flickers for
+    /// no reason, and a settings file that is rewritten every minute is a disk
+    /// that never sleeps.
+    public func refreshTheme() {
+        let resolved = settings.resolved(
+            systemIsDark: DeckModel.systemIsDark(), hour: DeckModel.currentHour()
+        )
+        guard resolved.glass != settings.glass || resolved.ink != settings.ink else { return }
+        settings = resolved
+        onSettingsChanged?(resolved)
+    }
+
+    /// What macOS is set to.
+    ///
+    /// Asked of the effective appearance rather than the `AppleInterfaceStyle`
+    /// default, which is absent in light mode and therefore indistinguishable
+    /// from a system that has never been asked.
+    public static func systemIsDark() -> Bool {
+        NSApp?.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+    }
+
+    public static func currentHour() -> Int {
+        Calendar.current.component(.hour, from: Date())
     }
 
     public func setEnabled(_ enabled: Bool, for id: PluginIdentifier) {

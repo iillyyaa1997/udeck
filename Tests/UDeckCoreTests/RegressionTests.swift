@@ -215,7 +215,7 @@ struct RegressionTests {
         // The readable parts survived.
         #expect(settings.density == .cozy)
         // The unreadable ones fell back rather than throwing.
-        #expect(settings.ink == .light)
+        #expect(settings.ink == AppSettings().ink)
         #expect(settings.glass.style == .regular)
         // And every number is back in a range that means something.
         #expect(settings.glass.opacity == 1)
@@ -427,5 +427,99 @@ struct RegressionTests {
         #expect(!PanelChrome.drawsIslandMark(phase: .collapsed, screenHasNotch: true, isSettled: true))
         // Arrived on a drawn island, the mark is what the island says.
         #expect(PanelChrome.drawsIslandMark(phase: .collapsed, screenHasNotch: false, isSettled: true))
+    }
+
+    // MARK: - Two looks and something that decides between them
+
+    /// The operator's own framing, and it is the right one: the panel has a
+    /// light look and a dark look, and a separate question of which is in force.
+    /// Everything that draws reads the resolved pair, so this is the whole of
+    /// "which look is showing".
+    @Test("the source decides which look is in force, and nothing else does")
+    func theSourceDecides() {
+        var theme = ThemeSettings()
+
+        theme.source = .system
+        #expect(theme.isDark(systemIsDark: true, hour: 3) == true)
+        #expect(theme.isDark(systemIsDark: false, hour: 3) == false)
+
+        theme.source = .manual
+        theme.manualIsDark = true
+        #expect(theme.isDark(systemIsDark: false, hour: 12) == true,
+                "manual must ignore a light system")
+        theme.manualIsDark = false
+        #expect(theme.isDark(systemIsDark: true, hour: 2) == false,
+                "manual must ignore a dark system")
+
+        theme.source = .schedule
+        #expect(theme.isDark(systemIsDark: false, hour: 12) == false)
+        #expect(theme.isDark(systemIsDark: true, hour: 23) == true,
+                "the clock must ignore the system too")
+    }
+
+    /// The dark half of a day wraps past midnight, which is why this is not a
+    /// comparison between two numbers.
+    @Test("a schedule that crosses midnight is still a schedule")
+    func scheduleWrapsPastMidnight() {
+        let schedule = ThemeSchedule(lightFromHour: 7, darkFromHour: 19)
+        for hour in 7 ..< 19 {
+            #expect(!schedule.isDark(atHour: hour), "\(hour):00 should be light")
+        }
+        for hour in [19, 22, 23, 0, 3, 6] {
+            #expect(schedule.isDark(atHour: hour), "\(hour):00 should be dark")
+        }
+        // And an hour outside the day still lands somewhere sensible rather
+        // than throwing or reading off the end.
+        #expect(schedule.isDark(atHour: 24) == schedule.isDark(atHour: 0))
+        #expect(schedule.isDark(atHour: -1) == schedule.isDark(atHour: 23))
+    }
+
+    /// Resolving is the only thing that writes the pair everything draws from,
+    /// so it has to produce exactly the look the source names.
+    @Test("resolving puts the named look where the drawing code reads it")
+    func resolvingWritesTheLookThatDraws() {
+        var settings = AppSettings()
+        settings.theme.source = .manual
+        settings.theme.manualIsDark = true
+        let dark = settings.resolved(systemIsDark: false, hour: 12)
+        #expect(dark.glass == settings.theme.dark.glass)
+        #expect(dark.ink == settings.theme.dark.ink)
+
+        settings.theme.manualIsDark = false
+        let light = settings.resolved(systemIsDark: true, hour: 2)
+        #expect(light.glass == settings.theme.light.glass)
+        #expect(light.ink == settings.theme.light.ink)
+    }
+
+    /// A look chosen before there were two of them is a real choice and has to
+    /// survive: it becomes the pole its ink belongs to, pinned, so nothing
+    /// changes under the operator until he asks it to.
+    @Test("a settings file older than the two looks keeps the look it had")
+    func anOlderFileKeepsItsLook() throws {
+        let json = Data("""
+        {"glass": {"tintStrength": 0.72, "tintIsLight": true}, "ink": "dark"}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: json).validated()
+        #expect(decoded.theme.source == .manual)
+        #expect(decoded.theme.manualIsDark == false, "dark ink means the light look")
+        #expect(decoded.theme.light.glass.tintStrength == 0.72)
+        #expect(decoded.theme.light.ink == .dark)
+        // And it is what resolves, whatever the system says.
+        let resolved = decoded.resolved(systemIsDark: true, hour: 3)
+        #expect(resolved.glass.tintStrength == 0.72)
+        #expect(resolved.ink == .dark)
+    }
+
+    /// The other half of the same rule: a file whose panel was dark keeps that
+    /// as the dark look and gets the shipped light one for free.
+    @Test("an older dark file becomes the dark look, pinned")
+    func anOlderDarkFileBecomesTheDarkLook() throws {
+        let json = Data("""
+        {"glass": {"tintStrength": 0.4, "tintIsLight": false}, "ink": "light"}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: json).validated()
+        #expect(decoded.theme.manualIsDark == true)
+        #expect(decoded.theme.dark.glass.tintStrength == 0.4)
+        #expect(decoded.theme.light == PanelLook.light, "the pole he never set ships as it ships")
     }
 }

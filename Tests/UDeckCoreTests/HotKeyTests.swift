@@ -152,9 +152,11 @@ struct GlassAppearanceTests {
         #expect(GlassAppearance(opacity: .nan).validated().opacity == 1)
         #expect(GlassAppearance(tintStrength: 3).validated().tintStrength == 0.9)
         #expect(GlassAppearance(tintStrength: .infinity).validated().tintStrength == 0.16)
-        // A settings file that says nothing about the glass gets the default.
+        // A settings file that says nothing about the glass gets the default —
+        // stated as "the default" rather than as a literal, because what uDeck
+        // ships with is now the light look and is a thing that can change.
         let json = Data(#"{ "version": 1 }"#.utf8)
-        #expect(try! JSONDecoder().decode(AppSettings.self, from: json).glass == GlassAppearance())
+        #expect(try! JSONDecoder().decode(AppSettings.self, from: json).glass == AppSettings().glass)
     }
 
     /// The style is the one thing macOS offers only as a choice of two, with
@@ -184,9 +186,18 @@ struct GlassAppearanceTests {
 struct PanelInkTests {
     /// White on white is what produced this setting: the panel used to be dark
     /// by construction, so light text was not a choice.
-    @Test("the default is what the panel used to assume, and both directions exist")
+    ///
+    /// The default is no longer light. uDeck ships wearing the light *look*,
+    /// which is a bright panel and therefore needs dark text — and the pairing
+    /// is the point: ink is not free to disagree with the glass it is written
+    /// on, which is what makes it part of a look rather than a setting of its
+    /// own.
+    @Test("the shipped ink is the one its own glass calls for, and both directions exist")
     func defaults() {
-        #expect(AppSettings().ink == .light)
+        #expect(AppSettings().ink == PanelLook.light.ink)
+        #expect(AppSettings().glass == PanelLook.light.glass)
+        #expect(PanelLook.light.ink == .dark, "a panel tinted 72% white cannot carry white text")
+        #expect(PanelLook.dark.ink == .light)
         #expect(PanelInk.allCases.count == 2)
     }
 
@@ -196,7 +207,7 @@ struct PanelInkTests {
     func tolerantDecoding() throws {
         let json = Data(#"{ "version": 1, "ink": "chartreuse", "density": "cozy" }"#.utf8)
         let settings = try JSONDecoder().decode(AppSettings.self, from: json)
-        #expect(settings.ink == .light)
+        #expect(settings.ink == AppSettings().ink)
         #expect(settings.density == .cozy, "the rest of the file must survive")
 
         let dark = try JSONDecoder().decode(AppSettings.self, from: Data(#"{ "ink": "dark" }"#.utf8))

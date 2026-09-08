@@ -18,12 +18,24 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// the cursor is nowhere near the top of the screen.
     public var hotkey: HotKeyBinding
 
-    /// How the panel's glass is made: how much of it there is, and what it
-    /// leans towards.
+    /// The two looks and what decides between them.
+    ///
+    /// This is the truth about how the panel is dressed. `glass` and `ink`
+    /// below are what that truth resolves to right now — see `resolved`.
+    public var theme: ThemeSettings
+
+    /// How the panel's glass is made, in the look currently in force.
+    ///
+    /// **Derived.** Written by `resolved(systemIsDark:hour:)` from `theme`, and
+    /// read by everything that draws. It stays a stored property because every
+    /// view in the app reads it, and because a settings file that names the
+    /// resolved values is one a person can still read — but editing it directly
+    /// is editing a cache: the next resolve overwrites it. The settings screen
+    /// edits `theme.light` and `theme.dark`.
     public var glass: GlassAppearance
 
-    /// Which way the panel's text is written. Follows from the glass, but not
-    /// derivably — see `PanelInk`.
+    /// Which way the panel's text is written, in the look currently in force.
+    /// Derived, like `glass`.
     public var ink: PanelInk
 
     /// Retract the panel when the operator activates another application.
@@ -62,8 +74,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         gesture: GestureTuning = GestureTuning(),
         panel: PanelMetrics = PanelMetrics(),
         hotkey: HotKeyBinding = HotKeyBinding(),
-        glass: GlassAppearance = GlassAppearance(),
-        ink: PanelInk = .light,
+        theme: ThemeSettings = ThemeSettings(),
+        glass: GlassAppearance = PanelLook.light.glass,
+        ink: PanelInk = PanelLook.light.ink,
         collapseOnAppSwitch: Bool = true,
         defaultCardTTL: TimeInterval = 60,
         silentTTLMultiplier: Double = 3,
@@ -77,6 +90,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.gesture = gesture
         self.panel = panel
         self.hotkey = hotkey
+        self.theme = theme
         self.glass = glass
         self.ink = ink
         self.collapseOnAppSwitch = collapseOnAppSwitch
@@ -104,6 +118,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
             return min(max(value, range.lowerBound), range.upperBound)
         }
 
+        result.theme = result.theme.validated()
         result.gesture.stripHeight = clamp(result.gesture.stripHeight, 1 ... 200)
         result.gesture.stripSideMargin = clamp(result.gesture.stripSideMargin, 0 ... 2000)
         result.gesture.virtualAnchorWidth = clamp(result.gesture.virtualAnchorWidth, 20 ... 2000)
@@ -182,6 +197,23 @@ public struct AppSettings: Codable, Equatable, Sendable {
         // Read as a string and mapped: an unknown name would throw, and
         // throwing here fails the whole settings file.
         ink = (try c.decodeIfPresent(String.self, forKey: .ink)).flatMap(PanelInk.init(rawValue:)) ?? defaults.ink
+        // A file written before there were two looks says only what the panel
+        // looked like at the time. That is a real choice and it is kept: it
+        // becomes whichever pole its ink belongs to, and the other pole starts
+        // from the shipped default. Pinned to that pole, so nothing changes
+        // under the operator until he asks it to.
+        if let stored = try c.decodeIfPresent(ThemeSettings.self, forKey: .theme) {
+            theme = stored
+        } else {
+            let carried = PanelLook(glass: glass, ink: ink)
+            let isDark = ink == .light
+            theme = ThemeSettings(
+                source: .manual,
+                manualIsDark: isDark,
+                light: isDark ? .light : carried,
+                dark: isDark ? carried : .dark
+            )
+        }
         collapseOnAppSwitch = try c.decodeIfPresent(Bool.self, forKey: .collapseOnAppSwitch)
             ?? defaults.collapseOnAppSwitch
         defaultCardTTL = try c.decodeIfPresent(TimeInterval.self, forKey: .defaultCardTTL)
@@ -192,5 +224,25 @@ public struct AppSettings: Codable, Equatable, Sendable {
             ?? defaults.pluginExecutableSearchPath
         pollWhileCollapsed = try c.decodeIfPresent(Bool.self, forKey: .pollWhileCollapsed)
             ?? defaults.pollWhileCollapsed
+    }
+
+    /// These settings with `glass` and `ink` brought into line with the look
+    /// that is actually in force.
+    ///
+    /// Everything that draws reads the resolved pair, so the whole of "which
+    /// look is showing" is this one function and the two facts it is handed.
+    /// Neither fact belongs in a settings file — what macOS is set to and what
+    /// time it is are the world's business, not the operator's.
+    public func resolved(systemIsDark: Bool, hour: Int) -> AppSettings {
+        var result = self
+        let look = theme.look(systemIsDark: systemIsDark, hour: hour)
+        result.glass = look.glass
+        result.ink = look.ink
+        return result
+    }
+
+    /// Whether the dark look is the one in force.
+    public func isDark(systemIsDark: Bool, hour: Int) -> Bool {
+        theme.isDark(systemIsDark: systemIsDark, hour: hour)
     }
 }

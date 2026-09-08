@@ -173,6 +173,50 @@ private struct OpeningSettings: View {
 private struct LookSettings: View {
     @Bindable var model: DeckModel
 
+    /// Which of the two looks the knobs below are editing.
+    ///
+    /// Not the one that is showing. The dark look has to be set up in daylight,
+    /// and a settings screen that only lets you edit what you can currently see
+    /// is one you have to wait until evening to finish.
+    @State private var editingDark: Bool?
+
+    /// Whichever look the knobs are pointed at: the one being edited if the
+    /// operator has picked one, otherwise the one on screen.
+    private var edited: Bool {
+        editingDark ?? model.settings.isDark(
+            systemIsDark: DeckModel.systemIsDark(), hour: DeckModel.currentHour()
+        )
+    }
+
+    private var editedLook: PanelLook { model.settings.theme.look(forDark: edited) }
+
+    /// A binding into the look being edited, rather than into the resolved copy
+    /// everything draws from — writing to that would be writing to a cache the
+    /// next resolve throws away.
+    private func look<Value>(_ keyPath: WritableKeyPath<PanelLook, Value>) -> Binding<Value> {
+        Binding(
+            get: { model.settings.theme.look(forDark: edited)[keyPath: keyPath] },
+            set: { newValue in
+                var settings = model.settings
+                var look = settings.theme.look(forDark: edited)
+                look[keyPath: keyPath] = newValue
+                settings.theme.setLook(look, forDark: edited)
+                model.update(settings: settings)
+            }
+        )
+    }
+
+    private func theme<Value>(_ keyPath: WritableKeyPath<ThemeSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { model.settings.theme[keyPath: keyPath] },
+            set: { newValue in
+                var settings = model.settings
+                settings.theme[keyPath: keyPath] = newValue
+                model.update(settings: settings)
+            }
+        )
+    }
+
     private func binding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
         Binding(
             get: { model.settings[keyPath: keyPath] },
@@ -186,35 +230,76 @@ private struct LookSettings: View {
 
     var body: some View {
         SettingsGroup("The look") {
-            Picker("Mode", selection: Binding(
-                get: { model.settings.mode },
-                set: { newValue in
-                    guard let newValue else { return }
-                    model.update(settings: model.settings.applying(newValue))
-                }
-            )) {
-                ForEach(PanelMode.allCases) { mode in
-                    Text(mode.name).tag(Optional(mode))
-                }
-                // Present only while the settings are nobody's preset, so that
-                // "Custom" is something the operator arrives at rather than
-                // something he can choose and get nothing from.
-                if model.settings.mode == nil {
-                    Text("Custom").tag(Optional<PanelMode>.none)
+            Picker("Which look", selection: theme(\.source)) {
+                ForEach(ThemeSource.allCases) { source in
+                    Text(source.name).tag(source)
                 }
             }
             .pickerStyle(.segmented)
-            .frame(width: 380)
-
-            Text(model.settings.mode?.summary
-                ?? "Your own mixture of the settings below. Pick a mode above to go back to one of the three.")
+            .frame(width: 360)
+            Text(model.settings.theme.source.summary)
                 .font(.caption).foregroundStyle(.secondary)
 
-            Text("A mode sets the four things below together — how much material there is, which way it leans, how far, and which way the text is written. They are separate settings because no one set of them is right over both a white document and a dark game; they are grouped because set independently they make combinations nobody wants, like white text on a panel tinted white. This window follows the mode too.")
+            if model.settings.theme.source == .manual {
+                Picker("Showing", selection: theme(\.manualIsDark)) {
+                    Text("Light").tag(false)
+                    Text("Dark").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 220)
+            }
+
+            if model.settings.theme.source == .schedule {
+                HStack(spacing: 18) {
+                    Stepper(value: theme(\.schedule.lightFromHour), in: 0 ... 23) {
+                        Text("Light from \(model.settings.theme.schedule.lightFromHour):00")
+                    }
+                    Stepper(value: theme(\.schedule.darkFromHour), in: 0 ... 23) {
+                        Text("Dark from \(model.settings.theme.schedule.darkFromHour):00")
+                    }
+                }
+                .frame(width: 400)
+                Text("By the clock rather than by sunset: sunset needs your location, and uDeck asks macOS for no permissions at all.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Text("Two looks, and something that decides between them. Everything below belongs to one of the two.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        SettingsGroup("Which one you are editing") {
+            Picker("Editing", selection: Binding(
+                get: { edited },
+                set: { editingDark = $0 }
+            )) {
+                Text("The light look").tag(false)
+                Text("The dark look").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 320)
+
+            Text(edited
+                ? "What shows at night, on a dark system, or when you pin it. You can set it up in daylight."
+                : "What shows in the day, on a light system, or when you pin it.")
                 .font(.caption).foregroundStyle(.secondary)
 
-            GlassPreview(glass: model.settings.glass,
-                         theme: DeckTheme(density: model.settings.density, ink: model.settings.ink))
+            GlassPreview(glass: editedLook.glass,
+                         theme: DeckTheme(density: model.settings.density, ink: editedLook.ink))
+
+            LabeledContent("Start from") {
+                HStack(spacing: 8) {
+                    ForEach(PanelMode.allCases) { preset in
+                        Button(preset.name) {
+                            var settings = model.settings
+                            settings.theme.apply(preset, forDark: edited)
+                            model.update(settings: settings)
+                        }
+                    }
+                }
+            }
+            Text(model.settings.theme.preset(forDark: edited).map(\.summary)
+                ?? "Your own mixture. Pouring a preset in above replaces it.")
+                .font(.caption).foregroundStyle(.secondary)
         }
 
         SettingsGroup("Density") {
@@ -238,7 +323,7 @@ private struct LookSettings: View {
         }
 
         SettingsGroup("The glass") {
-            Picker("Character", selection: binding(\.glass.style)) {
+            Picker("Character", selection: look(\.glass.style)) {
                 Text("Regular — what is behind stays legible").tag(GlassStyle.regular)
                 Text("Clear — what is behind is diffused").tag(GlassStyle.clear)
             }
@@ -247,19 +332,19 @@ private struct LookSettings: View {
                 .font(.caption).foregroundStyle(.secondary)
 
             LabeledContent("How much glass") {
-                Slider(value: binding(\.glass.opacity), in: GlassAppearance.opacityRange, step: 0.05) {
-                    Text("\(Int(model.settings.glass.opacity * 100)) %")
+                Slider(value: look(\.glass.opacity), in: GlassAppearance.opacityRange, step: 0.05) {
+                    Text("\(Int(editedLook.glass.opacity * 100)) %")
                 }
                 .frame(width: 260)
             }
             Text("At nothing the material is gone entirely and the panel's content floats over whatever is behind it. The system's glass has no opacity of its own — style, tint and corner radius are the whole of it — so this is the view's own alpha, which is the only thing that reaches fully transparent.")
                 .font(.caption).foregroundStyle(.secondary)
 
-            Toggle("Tint the glass", isOn: binding(\.glass.tinted))
+            Toggle("Tint the glass", isOn: look(\.glass.tinted))
             Text("Untinted, the system material takes the colour of whatever is behind it — which is what makes it glass, and also what makes it vanish over a dark game and wash out over a bright document. A tint does not close the glass; it gives it something to be measured from.")
                 .font(.caption).foregroundStyle(.secondary)
 
-            Picker("Lean", selection: binding(\.glass.tintIsLight)) {
+            Picker("Lean", selection: look(\.glass.tintIsLight)) {
                 Text("Lighter than the background").tag(true)
                 Text("Darker than the background").tag(false)
             }
@@ -267,7 +352,7 @@ private struct LookSettings: View {
             .frame(width: 380)
             .disabled(!model.settings.glass.tinted)
 
-            Picker("Text", selection: binding(\.ink)) {
+            Picker("Text", selection: look(\.ink)) {
                 Text("Light — for a panel darker than what is behind it").tag(PanelInk.light)
                 Text("Dark — for a panel brighter than what is behind it").tag(PanelInk.dark)
             }
@@ -276,8 +361,8 @@ private struct LookSettings: View {
                 .font(.caption).foregroundStyle(.secondary)
 
             LabeledContent("Tint strength") {
-                Slider(value: binding(\.glass.tintStrength), in: GlassAppearance.tintStrengthRange, step: 0.02) {
-                    Text("\(Int(model.settings.glass.tintStrength * 100)) %")
+                Slider(value: look(\.glass.tintStrength), in: GlassAppearance.tintStrengthRange, step: 0.02) {
+                    Text("\(Int(editedLook.glass.tintStrength * 100)) %")
                 }
                 .frame(width: 260)
             }

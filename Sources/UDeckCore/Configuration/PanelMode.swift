@@ -1,20 +1,16 @@
 import Foundation
 
-/// A whole look, in one choice.
+/// A starting point for a look.
 ///
-/// The pieces a look is made of — how much material there is, which way it
-/// leans, how far, and which way the text is written — are all settings of
-/// their own, and they have to be: the panel hangs over whatever the operator
-/// happens to have on screen, and no single set of numbers is right over a
-/// white document and a dark game both.
+/// This began as a third thing beside Light and Dark, and the operator's next
+/// question retired it: he asked for the two to be configurable with something
+/// deciding between them, and once there are two poles a third peer has nowhere
+/// to stand — a source that answers "light or dark?" cannot answer "or the
+/// other one".
 ///
-/// But four knobs is not a look. Set independently they produce combinations
-/// nobody wants — white text on a panel tinted 72% white, which is what the
-/// operator was handed the first time the tint went up — and the question he
-/// actually asked was "why is this not one setting". This is that setting. The
-/// knobs stay underneath it for the cases a preset does not cover, and a
-/// preset is recognised by its values rather than stored, so changing one knob
-/// leaves the look Custom without anything having to remember it.
+/// So it is a preset rather than a mode. Any of these can be poured into either
+/// look, and `Contrast` survives as the answer to "make this one readable over
+/// anything" rather than as a state the panel can be in.
 public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
     /// A bright frosted panel with near-black text. Reads as part of the
     /// machine over a document or a bright desktop.
@@ -24,7 +20,7 @@ public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
     /// setting, and still the right answer over a dark game.
     case dark
 
-    /// Neither: as close to opaque as the material goes, diffusing rather than
+    /// As close to opaque as the material goes, diffusing rather than
     /// refracting what is behind it.
     ///
     /// The one mode that does not care what it is over. Glass is a wager that
@@ -80,17 +76,21 @@ public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
     }
 }
 
-extension AppSettings {
-    /// The mode these settings are, or `nil` for a look that is nobody's preset.
-    public var mode: PanelMode? {
-        PanelMode.allCases.first { $0.glass == glass && $0.ink == ink }
+extension PanelMode {
+    /// This preset as a whole look.
+    public var look: PanelLook { PanelLook(glass: glass, ink: ink) }
+}
+
+extension ThemeSettings {
+    /// The preset one of the looks currently matches, or `nil` if it is the
+    /// operator's own mixture.
+    public func preset(forDark isDark: Bool) -> PanelMode? {
+        let current = look(forDark: isDark)
+        return PanelMode.allCases.first { $0.look == current }
     }
 
-    /// These settings, wearing that mode.
-    public func applying(_ mode: PanelMode) -> AppSettings {
-        var result = self
-        result.glass = mode.glass
-        result.ink = mode.ink
-        return result
+    /// Pours a preset into one of the looks.
+    public mutating func apply(_ mode: PanelMode, forDark isDark: Bool) {
+        setLook(mode.look, forDark: isDark)
     }
 }

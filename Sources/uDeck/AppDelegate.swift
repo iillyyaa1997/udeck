@@ -18,6 +18,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var settings: SettingsWindowController!
 
+    /// Watches macOS's own appearance, so the `system` theme source means what
+    /// it says rather than "whatever macOS was set to when uDeck started".
+    private var appearanceObserver: NSKeyValueObservation?
+
+    /// The clock, for the scheduled source. Once a minute is far finer than an
+    /// hourly turnover needs and still costs nothing measurable; the model does
+    /// nothing at all when the answer has not moved.
+    private var themeTimer: Timer?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let model = DeckModel()
         let screens = ScreenObserver()
@@ -49,6 +58,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         model.discoverPlugins()
         controller.start()
+
+        appearanceObserver = NSApp.observe(\.effectiveAppearance) { [weak model] _, _ in
+            MainActor.assumeIsolated { model?.refreshTheme() }
+        }
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak model] _ in
+            MainActor.assumeIsolated { model?.refreshTheme() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        themeTimer = timer
         installStatusItem()
     }
 
