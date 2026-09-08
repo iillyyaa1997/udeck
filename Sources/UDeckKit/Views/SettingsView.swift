@@ -235,6 +235,14 @@ private struct LookSettings: View {
             .frame(width: 380)
             .disabled(!model.settings.glass.tinted)
 
+            Picker("Text", selection: binding(\.ink)) {
+                Text("Light — for a panel darker than what is behind it").tag(PanelInk.light)
+                Text("Dark — for a panel brighter than what is behind it").tag(PanelInk.dark)
+            }
+            .pickerStyle(.radioGroup)
+            Text("Not automatic on purpose. Choosing correctly means knowing how bright what is behind the panel is, and uDeck never measures that — the glass samples it, but nothing reports it back. An automatic setting would guess, and it would guess wrong exactly where it matters.")
+                .font(.caption).foregroundStyle(.secondary)
+
             LabeledContent("Tint strength") {
                 Slider(value: binding(\.glass.tintStrength), in: 0 ... 0.6, step: 0.02) {
                     Text("\(Int(model.settings.glass.tintStrength * 100)) %")
@@ -243,7 +251,7 @@ private struct LookSettings: View {
             }
             .disabled(!model.settings.glass.tinted)
 
-            GlassPreview(glass: model.settings.glass, theme: DeckTheme(density: model.settings.density))
+            GlassPreview(glass: model.settings.glass, theme: DeckTheme(density: model.settings.density, ink: model.settings.ink))
             Text("The sample sits over a dark half and a light one, because those are the two cases that pull in opposite directions: a light tint stands out over a game and washes out over a document, and a dark one does the reverse. The ruling is there so the refraction is visible at all — the material bends what is behind it, and a flat colour or a field of grass gives it nothing to bend.")
                 .font(.caption).foregroundStyle(.secondary)
         }

@@ -179,3 +179,27 @@ struct GlassAppearanceTests {
         #expect(glass.tintStrength == GlassAppearance().tintStrength)
     }
 }
+
+@Suite("Panel ink")
+struct PanelInkTests {
+    /// White on white is what produced this setting: the panel used to be dark
+    /// by construction, so light text was not a choice.
+    @Test("the default is what the panel used to assume, and both directions exist")
+    func defaults() {
+        #expect(AppSettings().ink == .light)
+        #expect(PanelInk.allCases.count == 2)
+    }
+
+    /// Same rule as the glass style: an unknown name must not take the rest of
+    /// the settings file down with it.
+    @Test("an unreadable ink falls back rather than failing the whole file")
+    func tolerantDecoding() throws {
+        let json = Data(#"{ "version": 1, "ink": "chartreuse", "density": "cozy" }"#.utf8)
+        let settings = try JSONDecoder().decode(AppSettings.self, from: json)
+        #expect(settings.ink == .light)
+        #expect(settings.density == .cozy, "the rest of the file must survive")
+
+        let dark = try JSONDecoder().decode(AppSettings.self, from: Data(#"{ "ink": "dark" }"#.utf8))
+        #expect(dark.ink == .dark)
+    }
+}

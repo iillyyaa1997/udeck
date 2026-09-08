@@ -22,6 +22,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// leans towards.
     public var glass: GlassAppearance
 
+    /// Which way the panel's text is written. Follows from the glass, but not
+    /// derivably — see `PanelInk`.
+    public var ink: PanelInk
+
     /// Retract the panel when the operator activates another application.
     public var collapseOnAppSwitch: Bool
 
@@ -59,6 +63,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         panel: PanelMetrics = PanelMetrics(),
         hotkey: HotKeyBinding = HotKeyBinding(),
         glass: GlassAppearance = GlassAppearance(),
+        ink: PanelInk = .light,
         collapseOnAppSwitch: Bool = true,
         defaultCardTTL: TimeInterval = 60,
         silentTTLMultiplier: Double = 3,
@@ -73,6 +78,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.panel = panel
         self.hotkey = hotkey
         self.glass = glass
+        self.ink = ink
         self.collapseOnAppSwitch = collapseOnAppSwitch
         self.defaultCardTTL = defaultCardTTL
         self.silentTTLMultiplier = silentTTLMultiplier
@@ -174,6 +180,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         panel = try c.decodeIfPresent(PanelMetrics.self, forKey: .panel) ?? defaults.panel
         hotkey = try c.decodeIfPresent(HotKeyBinding.self, forKey: .hotkey) ?? defaults.hotkey
         glass = try c.decodeIfPresent(GlassAppearance.self, forKey: .glass) ?? defaults.glass
+        // Read as a string and mapped: an unknown name would throw, and
+        // throwing here fails the whole settings file.
+        ink = (try c.decodeIfPresent(String.self, forKey: .ink)).flatMap(PanelInk.init(rawValue:)) ?? defaults.ink
         collapseOnAppSwitch = try c.decodeIfPresent(Bool.self, forKey: .collapseOnAppSwitch)
             ?? defaults.collapseOnAppSwitch
         defaultCardTTL = try c.decodeIfPresent(TimeInterval.self, forKey: .defaultCardTTL)

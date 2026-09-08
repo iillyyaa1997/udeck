@@ -13,29 +13,44 @@ import UDeckCore
 public struct DeckTheme: Sendable {
     public var density: Density
 
-    public init(density: Density) {
+    /// Which way the text is written. Everything drawn *on* the panel takes its
+    /// colour from this, so that one setting flips all of it together rather
+    /// than leaving half the panel unreadable.
+    public var ink: PanelInk
+
+    public init(density: Density, ink: PanelInk = .light) {
         self.density = density
+        self.ink = ink
     }
+
+    private var isLightInk: Bool { ink == .light }
+
+    /// The colour text is written in, and the colour the panel's own lines are
+    /// drawn in — they have to move together, or a light panel keeps hairlines
+    /// meant for a dark one.
+    private var foreground: Color { isLightInk ? .white : Color(white: 0.06) }
 
     // Surfaces
     public let panelTint = Color(red: 0.078, green: 0.102, blue: 0.149).opacity(0.62)
-    public let windowFill = Color.white.opacity(0.07)
+    public var windowFill: Color { foreground.opacity(0.07) }
     public let recess = Color.black.opacity(0.28)
-    public let line = Color.white.opacity(0.11)
-    public let panelBorder = Color.white.opacity(0.14)
+    public var line: Color { foreground.opacity(isLightInk ? 0.11 : 0.16) }
+    public var panelBorder: Color { foreground.opacity(isLightInk ? 0.14 : 0.20) }
 
     public let innerHighlight = Color.white.opacity(0.16)
 
     // Text
-    public let text = Color.white
-    public let muted = Color.white.opacity(0.58)
-    public let dim = Color.white.opacity(0.40)
+    public var text: Color { foreground }
+    public var muted: Color { foreground.opacity(isLightInk ? 0.58 : 0.66) }
+    public var dim: Color { foreground.opacity(isLightInk ? 0.40 : 0.50) }
 
     // State
-    public let accent = Color(red: 0.561, green: 0.780, blue: 1.0)
-    public let ok = Color(red: 0.435, green: 0.827, blue: 0.639)
-    public let warn = Color(red: 0.949, green: 0.776, blue: 0.541)
-    public let crit = Color(red: 1.0, green: 0.604, blue: 0.604)
+    /// State colours are picked twice: the pale versions read on a dark panel
+    /// and vanish on a light one, so the dark-ink set is deeper.
+    public var accent: Color { isLightInk ? Color(red: 0.561, green: 0.780, blue: 1.0) : Color(red: 0.10, green: 0.36, blue: 0.62) }
+    public var ok: Color { isLightInk ? Color(red: 0.435, green: 0.827, blue: 0.639) : Color(red: 0.09, green: 0.45, blue: 0.28) }
+    public var warn: Color { isLightInk ? Color(red: 0.949, green: 0.776, blue: 0.541) : Color(red: 0.55, green: 0.36, blue: 0.05) }
+    public var crit: Color { isLightInk ? Color(red: 1.0, green: 0.604, blue: 0.604) : Color(red: 0.63, green: 0.13, blue: 0.13) }
 
     public func color(for state: CardState) -> Color {
         switch state {
