@@ -185,6 +185,38 @@ private struct LookSettings: View {
     }
 
     var body: some View {
+        SettingsGroup("The look") {
+            Picker("Mode", selection: Binding(
+                get: { model.settings.mode },
+                set: { newValue in
+                    guard let newValue else { return }
+                    model.update(settings: model.settings.applying(newValue))
+                }
+            )) {
+                ForEach(PanelMode.allCases) { mode in
+                    Text(mode.name).tag(Optional(mode))
+                }
+                // Present only while the settings are nobody's preset, so that
+                // "Custom" is something the operator arrives at rather than
+                // something he can choose and get nothing from.
+                if model.settings.mode == nil {
+                    Text("Custom").tag(Optional<PanelMode>.none)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 380)
+
+            Text(model.settings.mode?.summary
+                ?? "Your own mixture of the settings below. Pick a mode above to go back to one of the three.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            Text("A mode sets the four things below together — how much material there is, which way it leans, how far, and which way the text is written. They are separate settings because no one set of them is right over both a white document and a dark game; they are grouped because set independently they make combinations nobody wants, like white text on a panel tinted white. This window follows the mode too.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            GlassPreview(glass: model.settings.glass,
+                         theme: DeckTheme(density: model.settings.density, ink: model.settings.ink))
+        }
+
         SettingsGroup("Density") {
             Picker("Density", selection: Binding(
                 get: { model.settings.density },

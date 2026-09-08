@@ -32,7 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onPhaseChange = { [weak model] phase in
             model?.panelIsVisible = phase.isVisible
         }
-        model.onSettingsChanged = { [weak controller] _ in controller?.settingsChanged() }
+        model.onSettingsChanged = { [weak self, weak controller] _ in
+            controller?.settingsChanged()
+            self?.settings.applyAppearance()
+        }
         self.model = model
         self.screens = screens
         self.controller = controller

@@ -33,9 +33,24 @@ public final class SettingsWindowController {
             self.window = window
         }
 
+        applyAppearance()
+
         // Settings are the one part of uDeck the operator works in with the
         // keyboard, so this is the one place activation is unambiguously right.
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Dresses the settings window the way the panel is dressed.
+    ///
+    /// It is an ordinary application window and was therefore following macOS,
+    /// which is the one thing it should not do: the operator sets a look for
+    /// uDeck, and the window he sets it in was the only part of uDeck that
+    /// ignored him. A panel written in dark ink is a bright panel, so the
+    /// window that configures it is bright too.
+    public func applyAppearance() {
+        window?.appearance = NSAppearance(
+            named: model.settings.ink == .dark ? .aqua : .darkAqua
+        )
     }
 }
