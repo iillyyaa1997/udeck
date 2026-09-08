@@ -345,4 +345,36 @@ struct RegressionTests {
         beyond.tintStrength = GlassAppearance.tintStrengthRange.upperBound + 1
         #expect(beyond.validated().tintStrength == GlassAppearance.tintStrengthRange.upperBound)
     }
+
+    // MARK: - One colour on hover, another on click
+
+    /// The fault: the panel was a different colour depending on which state it
+    /// was in, and neither of the first two explanations survived a
+    /// measurement. What separates them is the panel's height — below about
+    /// 170 points the system's glass stops taking its tint and renders dark,
+    /// and the peek was 130. See `PanelMetrics.glassTintFloor` for the numbers.
+    ///
+    /// The invariant: the shipped peek is tall enough for the material to
+    /// behave, on every screen — the overhang the panel takes into the menu-bar
+    /// row differs from one display to another, so the height that matters is
+    /// the one the geometry works out and not the setting on its own.
+    @Test("the peek is tall enough for the glass to take its tint")
+    func peekClearsTheGlassFloor() {
+        for screen in ScreenFixtures.both + [ScreenFixtures.offCentreNotch] {
+            let g = PanelGeometry(screen: screen, tuning: tuning, metrics: metrics)
+            let height = g.frame(for: .peek).height
+            #expect(height >= PanelMetrics.glassTintFloor,
+                    "the peek is \(height)pt on \(screen.name), and the glass goes dark below \(PanelMetrics.glassTintFloor)")
+        }
+    }
+
+    /// And the panel it grows into is above the floor by a wide margin, so the
+    /// two are made of the same thing however the operator sizes them.
+    @Test("the open panel is above the floor on every screen")
+    func openPanelClearsTheGlassFloor() {
+        for screen in ScreenFixtures.both {
+            let g = PanelGeometry(screen: screen, tuning: tuning, metrics: metrics)
+            #expect(g.frame(for: .open).height >= PanelMetrics.glassTintFloor)
+        }
+    }
 }
