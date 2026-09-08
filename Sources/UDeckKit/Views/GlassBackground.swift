@@ -1,11 +1,18 @@
 import AppKit
 import SwiftUI
 
-/// The panel's own surface: a real system blur, tinted, with a defined edge.
+/// The panel's own surface.
 ///
-/// macOS 26 made the menu bar translucent, so a panel can no longer borrow a
-/// dark bar to sit against — whatever is behind it is the wallpaper. It has to
-/// bring its own ground, which is what the tint over the blur is for.
+/// On macOS 26 this is the system's own glass — `NSGlassEffectView`, the same
+/// material the system uses for its own panels, which brings its own
+/// refraction, its own edge and its own response to whatever is behind it.
+/// Nothing here tints it: a material that adjusts itself to the wallpaper stops
+/// doing that the moment something is painted over it.
+///
+/// Before macOS 26 there is no such material, and the panel falls back to a
+/// blur with a tint of its own. That fallback needs an edge drawn for it,
+/// because a blur has none — which is the whole difference between the two
+/// branches below.
 struct GlassBackground: View {
     var cornerRadius: CGFloat
     var theme: DeckTheme
@@ -22,25 +29,31 @@ struct GlassBackground: View {
 
     var body: some View {
         let shape = BottomRoundedRectangle(radius: cornerRadius)
-        VisualEffectBackground()
-            .overlay(theme.panelTint)
-            .clipShape(shape)
-            .overlay(
-                // An open path rather than a stroked shape with the top pushed
-                // out of frame. That trick did not work: `clipShape` applied
-                // after `padding` clips to the padded bounds, so the top edge
-                // was never removed and the island kept a hairline across its
-                // top for as long as the code claimed otherwise.
-                PanelBorder(radius: cornerRadius, includeTopEdge: !weldedToTopEdge)
-                    .stroke(theme.panelBorder, lineWidth: 1)
-            )
-            .overlay(alignment: .top) {
-                if !weldedToTopEdge {
-                    Rectangle()
-                        .fill(theme.innerHighlight)
-                        .frame(height: 1)
+        if #available(macOS 26, *) {
+            LiquidGlassBackground()
+                .clipShape(shape)
+        } else {
+            VisualEffectBackground()
+                .overlay(theme.panelTint)
+                .clipShape(shape)
+                .overlay(
+                    // An open path rather than a stroked shape with the top
+                    // pushed out of frame by negative padding. That trick did
+                    // not work: `clipShape` applied after `padding` clips to
+                    // the padded bounds, so the top edge was never removed and
+                    // the island kept a hairline across it for as long as the
+                    // code claimed otherwise.
+                    PanelBorder(radius: cornerRadius, includeTopEdge: !weldedToTopEdge)
+                        .stroke(theme.panelBorder, lineWidth: 1)
+                )
+                .overlay(alignment: .top) {
+                    if !weldedToTopEdge {
+                        Rectangle()
+                            .fill(theme.innerHighlight)
+                            .frame(height: 1)
+                    }
                 }
-            }
+        }
     }
 }
 
@@ -76,7 +89,8 @@ struct BottomRoundedRectangle: InsettableShape {
     }
 }
 
-/// The panel's outline, with the top edge optional.
+/// The panel's outline, with the top edge optional. Used only by the
+/// pre-macOS 26 fallback; the system glass draws its own.
 ///
 /// Half a point in from every edge, because a one-point stroke centred on the
 /// boundary puts half of itself outside the shape, where it is clipped away —
@@ -107,6 +121,25 @@ struct PanelBorder: Shape {
         }
         return path
     }
+}
+
+/// The system's glass, unmodified.
+///
+/// `cornerRadius` is left at zero and the shape comes from the caller's clip
+/// instead: the property rounds all four corners, and the panel's top two are
+/// square because it is attached to the edge it hangs from.
+@available(macOS 26, *)
+private struct LiquidGlassBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSGlassEffectView {
+        let view = NSGlassEffectView()
+        view.style = .regular
+        view.cornerRadius = 0
+        // The panel is drawn dark whatever the system is set to; see DeckTheme.
+        view.appearance = NSAppearance(named: .vibrantDark)
+        return view
+    }
+
+    func updateNSView(_ view: NSGlassEffectView, context: Context) {}
 }
 
 private struct VisualEffectBackground: NSViewRepresentable {

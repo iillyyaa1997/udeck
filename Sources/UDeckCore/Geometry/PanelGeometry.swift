@@ -106,8 +106,14 @@ public struct PanelGeometry: Equatable, Sendable {
     /// very top edge. That is what makes the island read as part of the machine
     /// instead of as a window that stops one menu bar short of the corner —
     /// which is what it looked like, and what the operator objected to.
+    ///
+    /// It reaches `topEdgeBleed` points *past* that edge, because the material
+    /// draws an edge along the top of its own view and there is no way to ask
+    /// it not to. Pushing the window's top row off the display is what removes
+    /// it — the panel has no top edge on screen because it has no top edge on
+    /// screen, rather than because something painted over one.
     public var panelHangY: CGFloat {
-        screen.hasNotch ? screen.panelTopY : screen.frame.maxY
+        screen.hasNotch ? screen.panelTopY : screen.frame.maxY + metrics.topEdgeBleed
     }
 
     /// How far the panel reaches above the menu bar's lower edge: the whole
@@ -128,7 +134,16 @@ public struct PanelGeometry: Equatable, Sendable {
     /// camera housing, so what hangs under it is a thin lip instead — enough to
     /// carry a colour, not enough to pretend to be a second notch.
     public var collapsedFrame: CGRect {
-        guard screen.hasNotch else { return anchor }
+        guard screen.hasNotch else {
+            // Bled past the top edge for the same reason the panel is; see
+            // `panelHangY`. The visible part is still exactly the anchor.
+            return CGRect(
+                x: anchor.minX,
+                y: anchor.minY,
+                width: anchor.width,
+                height: anchor.height + metrics.topEdgeBleed
+            )
+        }
         let width = anchor.width * metrics.pillWidthFactor
         return CGRect(
             x: anchor.midX - width / 2,

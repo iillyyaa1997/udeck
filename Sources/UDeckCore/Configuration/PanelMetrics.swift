@@ -31,6 +31,17 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
     /// because the panel is attached to the edge it hangs from.
     public var cornerRadius: CGFloat
 
+    /// How far the panel's window reaches *above* the top of the screen, on a
+    /// screen it is welded to.
+    ///
+    /// The material draws its own edge along the top of its view, and on a
+    /// panel attached to the top of the display that edge is a bright line
+    /// across the top row — the thing that makes it read as a window near the
+    /// corner rather than as part of the machine. Pushing the window's own top
+    /// edge off the display is the only way to remove an edge the material
+    /// draws for itself.
+    public var topEdgeBleed: CGFloat
+
     /// Corner radius of the collapsed island's bottom corners.
     ///
     /// Smaller than the panel's, because the island is smaller: one radius for
@@ -52,6 +63,7 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
         openHeightFraction: CGFloat = 0.62,
         openMaxHeight: CGFloat = 760,
         cornerRadius: CGFloat = 18,
+        topEdgeBleed: CGFloat = 2,
         islandCornerRadius: CGFloat = 12,
         revealDuration: TimeInterval = 0.4
     ) {
@@ -65,6 +77,7 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
         self.openHeightFraction = openHeightFraction
         self.openMaxHeight = openMaxHeight
         self.cornerRadius = cornerRadius
+        self.topEdgeBleed = topEdgeBleed
         self.islandCornerRadius = islandCornerRadius
         self.revealDuration = revealDuration
     }
@@ -86,6 +99,7 @@ extension PanelMetrics {
             openHeightFraction: try c.decodeIfPresent(CGFloat.self, forKey: .openHeightFraction) ?? d.openHeightFraction,
             openMaxHeight: try c.decodeIfPresent(CGFloat.self, forKey: .openMaxHeight) ?? d.openMaxHeight,
             cornerRadius: try c.decodeIfPresent(CGFloat.self, forKey: .cornerRadius) ?? d.cornerRadius,
+            topEdgeBleed: try c.decodeIfPresent(CGFloat.self, forKey: .topEdgeBleed) ?? d.topEdgeBleed,
             islandCornerRadius: try c.decodeIfPresent(CGFloat.self, forKey: .islandCornerRadius) ?? d.islandCornerRadius,
             revealDuration: try c.decodeIfPresent(TimeInterval.self, forKey: .revealDuration) ?? d.revealDuration
         )

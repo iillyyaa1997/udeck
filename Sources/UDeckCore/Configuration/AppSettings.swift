@@ -126,6 +126,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         result.panel.openMaxHeight = clamp(result.panel.openMaxHeight, 60 ... 10_000)
         result.panel.cornerRadius = clamp(result.panel.cornerRadius, 0 ... 100)
         result.panel.islandCornerRadius = clamp(result.panel.islandCornerRadius, 0 ... 100)
+        result.panel.topEdgeBleed = clamp(result.panel.topEdgeBleed, 0 ... 50)
         result.panel.revealDuration = clamp(result.panel.revealDuration, 0 ... 3)
 
         // A shortcut that cannot be registered is turned off rather than left

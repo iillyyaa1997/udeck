@@ -141,10 +141,18 @@ struct PanelGeometryTests {
     @Test("only a notchless screen lets the panel reach the top edge")
     func overhangIsForNotchlessScreensOnly() {
         let dell = geometry(ScreenFixtures.externalMain)
-        #expect(dell.topOverhang == 30)
+        let screen = ScreenFixtures.externalMain
+        // The menu bar, plus the couple of points the window is pushed past the
+        // top of the display so that the material's own top edge falls outside
+        // it.
+        #expect(dell.topOverhang == 30 + metrics.topEdgeBleed)
         for phase in [PanelPhase.collapsed, .peek, .open] {
-            #expect(dell.frame(for: phase).maxY == ScreenFixtures.externalMain.frame.maxY,
-                    "\(phase) should be welded to the top edge of a notchless screen")
+            let frame = dell.frame(for: phase)
+            #expect(frame.maxY == screen.frame.maxY + metrics.topEdgeBleed,
+                    "\(phase) should reach past the top edge of a notchless screen")
+            // What is actually on screen is still exactly the top edge: the
+            // bleed is off the display, not a gap above the panel.
+            #expect(min(frame.maxY, screen.frame.maxY) == screen.frame.maxY)
         }
 
         // Under a real notch there is nothing to weld to: those points are
@@ -184,8 +192,10 @@ struct PanelGeometryTests {
     @Test("the collapsed state is the island where there is no notch, a lip where there is")
     func collapsedShapeFollowsTheHardware() {
         let dell = geometry(ScreenFixtures.externalMain)
-        #expect(dell.collapsedFrame == dell.anchor)
-        #expect(dell.collapsedFrame.height == ScreenFixtures.externalMain.topInset)
+        #expect(dell.collapsedFrame.minY == dell.anchor.minY)
+        #expect(dell.collapsedFrame.width == dell.anchor.width)
+        // The visible island is the anchor; the extra height is off the display.
+        #expect(dell.collapsedFrame.height == ScreenFixtures.externalMain.topInset + metrics.topEdgeBleed)
         #expect(dell.collapsedFrame.width == tuning.virtualAnchorWidth)
 
         let builtIn = geometry(ScreenFixtures.builtInNotched)

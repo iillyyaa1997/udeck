@@ -57,6 +57,17 @@ public final class DeckPanel: NSPanel {
     /// never hold a text field.
     public override var canBecomeKey: Bool { true }
 
+    /// Take the frame as given.
+    ///
+    /// AppKit's default keeps a window on screen, which is right for a document
+    /// window and wrong for this one: the panel is deliberately a couple of
+    /// points taller than the display so that the edge its material draws along
+    /// its own top lands outside the visible area. Constrained back, that edge
+    /// reappears as a bright line across the island's top row.
+    public override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        frameRect
+    }
+
     /// The panel is not the application's main window, and claiming otherwise
     /// would make menu commands behave as if uDeck were a document app.
     public override var canBecomeMain: Bool { false }
