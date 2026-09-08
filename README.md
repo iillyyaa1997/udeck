@@ -100,6 +100,19 @@ for plugin trust is spelled out honestly in
 [the permissions section of the plugin API](docs/plugin-api.md#permissions) —
 please read it before installing a plugin somebody else wrote.
 
+## What it costs to leave running
+
+Measured on an M5 Pro, release build, with two plugins installed:
+
+| | CPU | Memory |
+|---|---|---|
+| Panel away, cursor anywhere | 0.1 % of one core | ~55 MB |
+| Panel away, cursor parked in the menu bar | 0.3 % of one core | ~55 MB |
+
+Plugins do not run while the panel is away — opening it refreshes everything —
+so an idle uDeck is a pointer check ten times a second and nothing else. That
+is a setting if you want it the other way.
+
 ## Permissions
 
 uDeck asks macOS for **nothing**. No Accessibility, no Screen Recording, no

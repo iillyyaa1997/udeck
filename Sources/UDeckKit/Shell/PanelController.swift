@@ -74,6 +74,7 @@ public final class PanelController {
     }
 
     public func start() {
+        pointer.fullscreenCheckInterval = settings.gesture.fullscreenCheckInterval
         pointer.onMove = { [weak self] sample, environment in
             self?.handlePointer(sample, environment: environment)
         }
@@ -159,6 +160,7 @@ public final class PanelController {
 
     public func update(settings: AppSettings) {
         self.settings = settings
+        pointer.fullscreenCheckInterval = settings.gesture.fullscreenCheckInterval
         startPointerPoll()
         applyPhase(animated: false)
     }

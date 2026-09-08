@@ -78,6 +78,15 @@ public struct GestureTuning: Codable, Equatable, Sendable {
     /// Whether the pointer gesture is enabled at all.
     public var enabled: Bool
 
+    /// How long an answer to "is the frontmost application fullscreen?" is
+    /// reused before asking again, in seconds.
+    ///
+    /// Asking costs about 1.5 ms, because it means enumerating every on-screen
+    /// window. Asking on every pointer event — a hundred a second while the
+    /// mouse is moving — would spend a seventh of a core on it, which is a
+    /// ridiculous price for a gate that only matters at the top of the screen.
+    public var fullscreenCheckInterval: TimeInterval
+
     /// How often to look at where the cursor is, in seconds, independently of
     /// any event. Zero turns it off.
     ///
@@ -108,6 +117,7 @@ public struct GestureTuning: Codable, Equatable, Sendable {
         peekKeepAliveInset: CGFloat = 24,
         enabledInFullscreen: Bool = false,
         enabled: Bool = true,
+        fullscreenCheckInterval: TimeInterval = 0.25,
         pointerPollInterval: TimeInterval = 0.1
     ) {
         self.stripHeight = stripHeight
@@ -128,6 +138,7 @@ public struct GestureTuning: Codable, Equatable, Sendable {
         self.peekKeepAliveInset = peekKeepAliveInset
         self.enabledInFullscreen = enabledInFullscreen
         self.enabled = enabled
+        self.fullscreenCheckInterval = fullscreenCheckInterval
         self.pointerPollInterval = pointerPollInterval
     }
 }
@@ -159,6 +170,7 @@ extension GestureTuning {
             peekKeepAliveInset: try c.decodeIfPresent(CGFloat.self, forKey: .peekKeepAliveInset) ?? d.peekKeepAliveInset,
             enabledInFullscreen: try c.decodeIfPresent(Bool.self, forKey: .enabledInFullscreen) ?? d.enabledInFullscreen,
             enabled: try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled,
+            fullscreenCheckInterval: try c.decodeIfPresent(TimeInterval.self, forKey: .fullscreenCheckInterval) ?? d.fullscreenCheckInterval,
             pointerPollInterval: try c.decodeIfPresent(TimeInterval.self, forKey: .pointerPollInterval) ?? d.pointerPollInterval
         )
     }

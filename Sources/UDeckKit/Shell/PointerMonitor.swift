@@ -25,7 +25,12 @@ public final class PointerMonitor {
     /// revealed.
     public var panelVisible = false
 
+    /// How long a fullscreen answer is reused. Set by the panel from the
+    /// operator's tuning.
+    public var fullscreenCheckInterval: TimeInterval = GestureTuning().fullscreenCheckInterval
+
     private var monitors: [Any] = []
+    private var fullscreenCache: [String: (value: Bool, checkedAt: TimeInterval)] = [:]
     private var menuTokens: [NotificationToken] = []
     private var previousLocation: CGPoint?
     private let screens: ScreenObserver
@@ -135,11 +140,34 @@ public final class PointerMonitor {
         return GestureEnvironment(
             buttonsDown: buttonsDown,
             menuTrackingActive: menuTrackingActive,
-            frontmostIsFullscreen: screen.map(FullscreenDetector.isFrontmostApplicationFullscreen) ?? false,
+            frontmostIsFullscreen: screen.map { isFullscreen(on: $0, at: location, now: now) } ?? false,
             panelVisible: panelVisible,
             lastMenuBarButtonUp: lastMenuBarButtonUp,
             lastDismissal: lastDismissal
         )
+    }
+
+    /// Is the frontmost application filling this screen?
+    ///
+    /// Two economies, because the honest answer costs about 1.5 ms — it means
+    /// enumerating every window on screen — and this is asked on every pointer
+    /// event:
+    ///
+    /// * it is only asked while the cursor is up in the menu-bar band, which is
+    ///   the only place the gate can matter;
+    /// * and the answer is reused for a fraction of a second.
+    ///
+    /// Below the band the answer is `false`, which is safe: the gesture cannot
+    /// arm down there anyway, so a `false` that is never acted on costs nothing.
+    private func isFullscreen(on screen: ScreenSnapshot, at location: CGPoint, now: TimeInterval) -> Bool {
+        guard location.y >= screen.visibleFrame.maxY else { return false }
+
+        if let cached = fullscreenCache[screen.id], now - cached.checkedAt < fullscreenCheckInterval {
+            return cached.value
+        }
+        let value = FullscreenDetector.isFrontmostApplicationFullscreen(on: screen)
+        fullscreenCache[screen.id] = (value, now)
+        return value
     }
 
     private func add(global mask: NSEvent.EventTypeMask, handler: @escaping @MainActor (NSEvent) -> Void) {
