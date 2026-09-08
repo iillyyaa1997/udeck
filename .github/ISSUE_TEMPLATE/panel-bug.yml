@@ -1,0 +1,39 @@
+name: The panel misbehaves
+description: The panel opens when it should not, does not open when it should, or sits in the wrong place.
+labels: [panel]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Almost everything that decides how the panel behaves is invisible in a
+        screenshot: which screen the cursor was on, how your pointer reports
+        movement, whether the frontmost window was fullscreen, and which gate
+        stopped the gesture. The two fields below carry all of it.
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: uDeck's menu-bar item → **Copy diagnostics**, then paste here.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: The log around the moment it went wrong
+      description: |
+        Run this, reproduce the problem, then paste the last few lines:
+
+        ```
+        log stream --predicate 'subsystem == "place.unicorns.udeck"' --level debug
+        ```
+      render: text
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you did, what happened, and what you expected instead
+    validations:
+      required: true

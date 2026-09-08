@@ -1,0 +1,32 @@
+name: The plugin contract
+description: Something in the plugin API is unclear, wrong, or missing.
+labels: [plugin-api]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Which `api` your manifest declares
+      placeholder: "1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: manifest
+    attributes:
+      label: The manifest
+      render: json
+
+  - type: textarea
+    id: card
+    attributes:
+      label: What your producer prints
+      description: The exact output, as uDeck would read it.
+      render: json
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What uDeck did with it, and what you expected
+      description: If uDeck showed an error on the card, paste it exactly — the wording names the field.
+    validations:
+      required: true
