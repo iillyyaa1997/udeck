@@ -55,9 +55,34 @@ public struct PanelGeometry: Equatable, Sendable {
     }
 
     /// True when the cursor is close enough to the top edge to count as pinned
-    /// against it. macOS clamps the cursor at `maxY - 1`.
+    /// against it. The cursor can reach `frame.maxY` exactly, so this has to be
+    /// a range rather than an equality.
     public func isPinnedToTopEdge(_ point: CGPoint) -> Bool {
         point.y >= screen.frame.maxY - 1 - tuning.pinnedEpsilon
+    }
+
+    /// Whether the cursor is inside a region of this screen.
+    ///
+    /// Not `CGRect.contains`, which is half-open at the top: a point whose `y`
+    /// is exactly `maxY` is outside. That is the right rule for tiling
+    /// rectangles and the wrong one for the cursor, because the cursor really
+    /// does reach the top row of the screen — driving it there with
+    /// `CGWarpMouseCursorPosition` lands it on `frame.maxY` exactly, not on
+    /// `maxY - 1` as the code used to assume in three places.
+    ///
+    /// The consequence of the assumption was that the gesture died precisely
+    /// where every gesture that matters ends: the trigger strip is flush with
+    /// the top of the screen, so a cursor pushed all the way up fell outside it
+    /// and the panel refused to open. The keep-alive region has its top pinned
+    /// to the same edge, so the same cursor also read as having left the panel.
+    ///
+    /// Only the top edge is closed, and only when the region reaches the top of
+    /// the screen. The sides stay half-open: horizontally adjacent screens share
+    /// an edge, and both claiming a point there is a worse bug than neither.
+    public func containsPointer(_ point: CGPoint, in rect: CGRect) -> Bool {
+        guard point.x >= rect.minX, point.x < rect.maxX, point.y >= rect.minY else { return false }
+        if rect.maxY >= screen.frame.maxY { return point.y <= rect.maxY }
+        return point.y < rect.maxY
     }
 
     /// The panel's frame in a given state.

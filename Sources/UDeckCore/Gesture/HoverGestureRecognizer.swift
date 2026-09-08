@@ -69,7 +69,7 @@ public struct HoverGestureRecognizer: Sendable {
     ) -> GestureOutcome {
         recordHistory(sample)
 
-        guard let geometry, geometry.triggerStrip.contains(sample.location) else {
+        guard let geometry, geometry.containsPointer(sample.location, in: geometry.triggerStrip) else {
             // Leaving the strip ends the visit, whatever else is going on. This
             // is the only place the gesture re-arms.
             reset()

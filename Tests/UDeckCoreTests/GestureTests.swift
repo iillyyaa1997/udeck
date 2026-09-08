@@ -28,11 +28,16 @@ private struct Driver {
 
     /// Moves the pointer, clamping the position at the top edge the way macOS
     /// does while still reporting the full device delta.
+    ///
+    /// The clamp is `frame.maxY`, not `maxY - 1`. This driver used to stop one
+    /// point short, which meant no test it could write was able to reach the
+    /// row the cursor actually lands on — and the gesture was dead on that row
+    /// for as long as the suite was green.
     @discardableResult
     mutating func move(dx: CGFloat, dy: CGFloat, over seconds: TimeInterval = 0.008) -> GestureOutcome {
         clock += seconds
         cursor.x += dx
-        cursor.y = min(cursor.y + dy, geometry.screen.frame.maxY - 1)
+        cursor.y = min(cursor.y + dy, geometry.screen.frame.maxY)
         cursor.x = min(max(cursor.x, geometry.screen.frame.minX), geometry.screen.frame.maxX - 1)
         let sample = PointerSample(location: cursor, delta: CGVector(dx: dx, dy: dy), timestamp: clock)
         let outcome = recognizer.handle(sample, geometry: geometry, environment: environment, tuning: tuning)
@@ -83,6 +88,20 @@ struct GestureTests {
         #expect(driver.fired)
     }
 
+    /// The row the gesture actually ends on. Shoving the cursor at the top of
+    /// the screen leaves it at `frame.maxY` exactly — verified against the
+    /// running app, where the panel opened at 1439 and did nothing at 1440.
+    @Test("the gesture works on the top row of the screen, not only one below it")
+    func firesOnTheVeryTopRow() {
+        for start in [CGFloat(1439), 1440] {
+            var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+            driver.move(dx: 0, dy: 1440 - 1200)
+            driver.cursor.y = start
+            driver.rest(for: 0.3)
+            #expect(driver.fired, "a cursor resting at y = \(start) must open the panel")
+        }
+    }
+
     /// The single most damaging false positive: travelling along the menu bar
     /// from the app menus on the left to the status items on the right.
     @Test("traversing the menu bar sideways never fires")
@@ -111,7 +130,7 @@ struct GestureTests {
         // Arrive travelling almost purely sideways, as when crossing displays,
         // and stop just inside the strip.
         for _ in 0 ..< 25 { driver.move(dx: 8, dy: 0, over: 0.008) }
-        #expect(driver.geometry.triggerStrip.contains(driver.cursor))
+        #expect(driver.geometry.containsPointer(driver.cursor, in: driver.geometry.triggerStrip))
         driver.rest(for: 0.25)
         #expect(!driver.fired, "the normal dwell must not be enough after a lateral approach")
         driver.rest(for: 0.25)

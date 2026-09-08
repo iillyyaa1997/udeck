@@ -244,4 +244,58 @@ struct PanelGeometryTests {
         // cursor inside the open panel is outside the strip almost everywhere.
         #expect(!g.triggerStrip.contains(CGPoint(x: g.openFrame.midX, y: g.openFrame.midY)))
     }
+
+    /// Every test below pins the same rule from a different side: a cursor
+    /// sitting on the screen's own top edge is *on* the screen. Measured, not
+    /// assumed — `CGWarpMouseCursorPosition` to the top of the display leaves
+    /// `NSEvent.mouseLocation` reporting `frame.maxY` exactly, and with the old
+    /// `CGRect.contains` the panel would not open there at all.
+    @Test("the very top row of the screen is inside the trigger strip")
+    func topRowIsInsideTheStrip() {
+        for screen in [ScreenFixtures.externalMain, ScreenFixtures.builtInNotched, ScreenFixtures.offCentreNotch] {
+            let g = geometry(screen)
+            let onTheEdge = CGPoint(x: g.triggerStrip.midX, y: screen.frame.maxY)
+            #expect(g.containsPointer(onTheEdge, in: g.triggerStrip),
+                    "a cursor on the top edge of \(screen.name) must arm the gesture")
+            // The whole point of the helper: the stdlib rule says otherwise.
+            #expect(!g.triggerStrip.contains(onTheEdge))
+        }
+    }
+
+    @Test("the very top row of the screen keeps an open panel alive")
+    func topRowKeepsThePanelAlive() {
+        for screen in ScreenFixtures.both {
+            let g = geometry(screen)
+            for phase in [PanelPhase.peek, .open] {
+                let region = g.keepAliveRegion(for: phase)
+                let onTheEdge = CGPoint(x: region.midX, y: screen.frame.maxY)
+                #expect(g.containsPointer(onTheEdge, in: region),
+                        "\(phase) on \(screen.name) closes under a cursor that never left")
+            }
+        }
+    }
+
+    @Test("closing the top edge does not open any of the other three")
+    func onlyTheTopEdgeIsClosed() {
+        let screen = ScreenFixtures.externalMain
+        let g = geometry(screen)
+        let strip = g.triggerStrip
+        // Below the strip: still outside, or the strip would be taller than it says.
+        #expect(!g.containsPointer(CGPoint(x: strip.midX, y: strip.minY - 0.5), in: strip))
+        // Right edge stays half-open, so two side-by-side screens cannot both
+        // claim a point on the seam between them.
+        #expect(!g.containsPointer(CGPoint(x: strip.maxX, y: strip.midY), in: strip))
+        #expect(g.containsPointer(CGPoint(x: strip.minX, y: strip.midY), in: strip))
+    }
+
+    @Test("a region that does not reach the top of the screen keeps the ordinary rule")
+    func regionsAwayFromTheEdgeAreUnchanged() {
+        let g = geometry(ScreenFixtures.externalMain)
+        // The open panel's own frame stops below the menu bar, so nothing about
+        // it touches the screen edge and its top must stay exclusive.
+        let panel = g.openFrame
+        #expect(panel.maxY < ScreenFixtures.externalMain.frame.maxY)
+        #expect(!g.containsPointer(CGPoint(x: panel.midX, y: panel.maxY), in: panel))
+        #expect(g.containsPointer(CGPoint(x: panel.midX, y: panel.maxY - 0.5), in: panel))
+    }
 }

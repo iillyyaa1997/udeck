@@ -89,10 +89,12 @@ public struct ScreenSnapshot: Equatable, Sendable, Identifiable {
 extension Array where Element == ScreenSnapshot {
     /// The screen the cursor is on.
     ///
-    /// A cursor pinned against the top edge sits at `maxY - 1`, so it is still
-    /// inside the frame — but display arrangements can leave gaps, and a point
-    /// in a gap belongs to nobody. Falling back to the nearest screen keeps the
-    /// gesture responsive instead of silently doing nothing.
+    /// A cursor pinned against the top edge sits at `frame.maxY` exactly, which
+    /// the half-open rule above puts *outside* every screen — and display
+    /// arrangements can leave gaps as well, where a point belongs to nobody
+    /// either way. Falling back to the nearest screen covers both: the distance
+    /// from a point on the top edge to the screen under it is zero, so it
+    /// resolves to that screen rather than to nothing.
     public func screen(containing point: CGPoint) -> ScreenSnapshot? {
         if let hit = first(where: { $0.contains(point) }) { return hit }
         return self.min(by: { $0.frame.squaredDistance(to: point) < $1.frame.squaredDistance(to: point) })

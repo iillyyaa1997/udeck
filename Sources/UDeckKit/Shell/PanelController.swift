@@ -293,7 +293,7 @@ public final class PanelController {
         }
 
         let region = geometry.keepAliveRegion(for: state.phase)
-        if region.contains(sample.location) {
+        if geometry.containsPointer(sample.location, in: region) {
             pointerLeftAt = nil
             return
         }
@@ -343,7 +343,7 @@ public final class PanelController {
                 guard let self, self.state.phase == .peek, self.pointerLeftAt != nil,
                       let geometry = self.geometry
                 else { return }
-                if !geometry.keepAliveRegion(for: .peek).contains(NSEvent.mouseLocation) {
+                if !geometry.containsPointer(NSEvent.mouseLocation, in: geometry.keepAliveRegion(for: .peek)) {
                     self.apply(.pointerLeft)
                 }
             }
@@ -423,7 +423,7 @@ public final class PanelController {
         // operator reaches to open the panel, dismissed it instead. The comment
         // here claimed otherwise for several commits.
         let location = NSEvent.mouseLocation
-        guard !geometry.keepAliveRegion(for: state.phase).contains(location) else { return }
+        guard !geometry.containsPointer(location, in: geometry.keepAliveRegion(for: state.phase)) else { return }
         apply(.closeRequested)
     }
 
