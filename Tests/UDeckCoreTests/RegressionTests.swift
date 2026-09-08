@@ -345,4 +345,36 @@ struct RegressionTests {
         beyond.tintStrength = GlassAppearance.tintStrengthRange.upperBound + 1
         #expect(beyond.validated().tintStrength == GlassAppearance.tintStrengthRange.upperBound)
     }
+    // MARK: - A dash that appeared mid-screen and rode up
+
+    /// The fault: the island's mark is centred in whatever rectangle the panel
+    /// currently occupies, and the collapsed state's content was swapped in the
+    /// instant the collapse was decided. With the panel still at full size the
+    /// bar appeared in the middle of the screen and travelled up to the top as
+    /// the shape shrank under it — "эта тире появляется по центру и уезжает
+    /// вверх".
+    ///
+    /// A mark means "the panel is away". During a collapse it is not away yet.
+    @Test("the island's mark waits for the panel to arrive")
+    func islandMarkWaitsForTheCollapseToFinish() {
+        #expect(!PanelChrome.drawsIslandMark(phase: .collapsed, screenHasNotch: false, isSettled: false))
+        #expect(PanelChrome.drawsIslandMark(phase: .collapsed, screenHasNotch: false, isSettled: true))
+    }
+
+    /// Under a real notch there is no drawn island, so there is nothing to put a
+    /// mark on — settled or not.
+    @Test("a real notch carries no mark of ours")
+    func noMarkUnderARealNotch() {
+        for settled in [true, false] {
+            #expect(!PanelChrome.drawsIslandMark(phase: .collapsed, screenHasNotch: true, isSettled: settled))
+        }
+    }
+
+    /// And no other state has one: the mark belongs to the panel being away.
+    @Test("only the collapsed state carries the mark")
+    func onlyTheIslandCarriesTheMark() {
+        for phase in PanelPhase.allCases where phase != .collapsed {
+            #expect(!PanelChrome.drawsIslandMark(phase: phase, screenHasNotch: false, isSettled: true))
+        }
+    }
 }

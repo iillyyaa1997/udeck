@@ -373,11 +373,19 @@ public final class PanelController {
     /// without uDeck having to decide anything.
     private func settleWindow() {
         guard let geometry else { return }
-        // Arriving is what the views are waiting to be told: one of their rules
-        // — nothing is drawn under a real notch — holds at rest and not on the
+        // Arriving is what the views are waiting to be told: two of their rules
+        // — nothing is drawn under a real notch, and the island's mark is not
+        // shown until the panel is actually away — hold at rest and not on the
         // way there. Set before the frame check, because a transition that ends
         // where the window already is has still ended.
-        shell.isSettled = true
+        //
+        // Faded rather than switched, because what it reveals is the island's
+        // mark: appearing is the last thing the operator sees of a collapse, and
+        // a mark that pops into existence reads as a second event after the one
+        // he asked for.
+        withAnimation(.easeOut(duration: settings.panel.contentRevealDuration)) {
+            shell.isSettled = true
+        }
         let frame = geometry.settledWindowFrame(for: state.phase)
         guard panel.frame != frame else { return }
         // The content is told where it will be *before* the window moves, so

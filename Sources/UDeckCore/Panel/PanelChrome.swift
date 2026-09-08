@@ -42,6 +42,27 @@ public enum PanelChrome {
         return !isSettled
     }
 
+    /// Whether the island's own mark — the small bar that says how things are
+    /// while the panel is away — is drawn.
+    ///
+    /// Only once the panel has arrived. The mark is centred in whatever
+    /// rectangle the panel currently occupies, and the collapsed state's content
+    /// used to be swapped in the instant the collapse was decided: with the
+    /// panel still at its full size, the bar appeared in the middle of the
+    /// screen and rode up to the top as the shape shrank under it. The operator
+    /// described it exactly — "эта тире появляется по центру и уезжает вверх".
+    ///
+    /// A mark means "the panel is away and this is how things are". During the
+    /// collapse the panel is not away yet; it is leaving.
+    public static func drawsIslandMark(
+        phase: PanelPhase,
+        screenHasNotch: Bool,
+        isSettled: Bool
+    ) -> Bool {
+        // Under a real notch there is no drawn island to put a mark on.
+        phase == .collapsed && !screenHasNotch && isSettled
+    }
+
     /// The corner radius the material is drawn with in a given phase.
     ///
     /// The island is smaller than the panel and takes a smaller radius; one

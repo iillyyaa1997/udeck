@@ -36,7 +36,15 @@ public struct DeckRootView: View {
         Group {
             switch shell.phase {
             case .collapsed:
-                CollapsedIslandView(theme: theme, summary: summary, drawsNothing: shell.screenHasNotch)
+                CollapsedIslandView(
+                    theme: theme,
+                    summary: summary,
+                    drawsNothing: !PanelChrome.drawsIslandMark(
+                        phase: shell.phase,
+                        screenHasNotch: shell.screenHasNotch,
+                        isSettled: shell.isSettled
+                    )
+                )
             case .peek:
                 PeekView(theme: theme, summary: summary, model: model)
             case .open, .fullscreen:
