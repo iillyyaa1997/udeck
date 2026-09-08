@@ -16,7 +16,13 @@ import UDeckCore
 /// The test is deliberately strict — an exact match against the screen's full
 /// frame, from the frontmost application. A merely maximised window stops below
 /// the menu bar and so does not match, which is the right answer: the panel is
-/// welcome over a maximised window.
+/// welcome over a maximised window. Measured on the machine this was built for,
+/// a maximised Warp is `2316x1410` from the top of a `2560x1440` screen, so the
+/// distinction is not a fine one.
+///
+/// What is left here is the part that has to ask AppKit questions. The
+/// coordinate arithmetic moved to `QuartzCoordinates` in `UDeckCore`, where it
+/// can be tested.
 public enum FullscreenDetector {
     public static func isFrontmostApplicationFullscreen(on screen: ScreenSnapshot) -> Bool {
         guard let frontmost = NSWorkspace.shared.frontmostApplication else { return false }
@@ -28,6 +34,7 @@ public enum FullscreenDetector {
         ) as? [[String: Any]] else { return false }
 
         let target = screen.frame
+        let top = mainScreenTop()
 
         for window in windows {
             guard let pid = window[kCGWindowOwnerPID as String] as? pid_t, pid == frontmostPID,
@@ -36,27 +43,21 @@ public enum FullscreenDetector {
                   let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary)
             else { continue }
 
-            if approximatelyEqual(appKitRect(fromQuartz: bounds), target) { return true }
+            let inAppKit = QuartzCoordinates.appKitRect(fromQuartz: bounds, mainScreenTop: top)
+            if inAppKit.isApproximately(target, within: 1) { return true }
         }
         return false
     }
 
-    /// Quartz measures from the top-left of the display that owns the menu bar,
-    /// with `y` growing downward; AppKit measures from that display's
-    /// bottom-left with `y` growing upward.
-    static func appKitRect(fromQuartz rect: CGRect, mainScreenTop: CGFloat? = nil) -> CGRect {
-        let top = mainScreenTop ?? NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.maxY
+    /// `maxY` of the display both coordinate systems are measured from: the one
+    /// whose origin is `(0, 0)`, which is the one with the menu bar.
+    ///
+    /// `NSScreen.main` is the screen with the *keyboard focus*, which is a
+    /// different question and is only the same screen some of the time — it is
+    /// the fallback rather than the answer.
+    static func mainScreenTop() -> CGFloat {
+        NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.maxY
             ?? NSScreen.main?.frame.maxY
             ?? 0
-        return CGRect(x: rect.minX, y: top - rect.maxY, width: rect.width, height: rect.height)
-    }
-
-    /// Window bounds arrive as integers while screen frames can carry a
-    /// fraction, so an exact comparison would miss by half a point.
-    static func approximatelyEqual(_ lhs: CGRect, _ rhs: CGRect, tolerance: CGFloat = 1) -> Bool {
-        abs(lhs.minX - rhs.minX) <= tolerance
-            && abs(lhs.minY - rhs.minY) <= tolerance
-            && abs(lhs.width - rhs.width) <= tolerance
-            && abs(lhs.height - rhs.height) <= tolerance
     }
 }

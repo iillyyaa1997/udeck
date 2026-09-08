@@ -12,6 +12,17 @@ indistinguishable from a bug that has not happened yet.
 
 ## Settled
 
+**Where does the cursor sit when it is pushed against the top of the screen?**
+On `frame.maxY` exactly — not on `maxY - 1`, which three places in the code
+assumed. Measured: `CGWarpMouseCursorPosition` to the top of the display leaves
+`NSEvent.mouseLocation` reporting `1440.0` on a 1440-point-tall screen, and the
+running app logged `idle: outsideStrip` there while opening normally one point
+below. The trigger strip and the keep-alive region are flush with that edge, so
+both now use `PanelGeometry.containsPointer`, which includes the top row.
+Whether a *physical* mouse can also reach that row was never established — two
+45-second recordings caught no sample near the top — but it no longer has a
+consequence, because both rows now behave the same.
+
 **Does a focused SwiftUI text field still reach the panel as `NSText`?**
 Yes, on macOS 26.6. The rule that Escape must give up a field before it gives up
 the panel is implemented through `panel.firstResponder as? NSText`, and SwiftUI
@@ -61,6 +72,15 @@ menu-tracking observers assume delivery on the main queue, and
 `MainActor.assumeIsolated` traps if that is wrong. It would fire only when a
 system menu opens.
 *To settle:* assert `Thread.isMainThread` in that observer and open a menu.
+
+**Is the fullscreen gate ever reached on this machine?** Not so far. It was
+assumed to be why the gesture stopped responding at one point, and that was
+wrong: measured while Warp was frontmost, its window is
+`(244, 0, 2316x1410)` against a screen frame of `(0, 0, 2560x1440)`. That is a
+maximised window, and `FullscreenDetector` correctly declines to call it
+fullscreen — the test is an exact match against the whole screen frame. The gate
+is real and still worth having, but nothing here has exercised it.
+*To settle:* put an application into true fullscreen and read the log.
 
 **Has any of the geometry run against real hardware in anger?** The screen
 geometry is tested against fabricated snapshots of two real displays, and the
