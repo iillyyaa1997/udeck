@@ -91,6 +91,17 @@ would misreport the machine.
 
 ## States
 
+### What counts as "needs you"
+
+Only two things: the `✋` icon, and the `!` badge — the status engine's "Claude
+raised a notification", which outranks whatever icon the session is showing.
+
+Nothing else. `✅` done-idle in particular is *not* waiting for you: on a machine
+with dozens of tabs it is both common and permanent, and folding it in would put
+a number on the card that never went down and therefore never meant anything.
+`⏸` (paused on usage limits) and `⏳` (waiting on something external) are the
+session waiting on something that is not you, and get their own counts.
+
 | Card | Meaning |
 |---|---|
 | `ok`, chip `all quiet` | sessions are running, none needs you |
