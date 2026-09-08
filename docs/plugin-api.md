@@ -184,6 +184,11 @@ only overnight. A panel that cried wolf every night would be ignored within a
 week, and an ignored panel is a dead one. Equally, a stale number shown as if it
 were current is how a real outage hides inside a green signal.
 
+| Past `ttl` | Past three times `ttl` |
+|---|---|
+| ![A card past its ttl, dimmed and dated](card-stale.png) | ![A card long past its ttl, values hidden](card-silent.png) |
+| The values are still there, dimmed, with the time they were produced. | The values are gone. Only when they last existed is shown. |
+
 So: set `ttl` to roughly how long your data stays true, not to your `interval`.
 
 And the corollary for your own producer: **idle is not broken.** If there is
