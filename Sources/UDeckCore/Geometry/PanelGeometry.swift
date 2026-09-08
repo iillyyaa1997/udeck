@@ -215,7 +215,20 @@ public struct PanelGeometry: Equatable, Sendable {
     /// with the origin at its top-left corner and `y` growing downward — which
     /// is what a view hierarchy uses, and the opposite of everything else here.
     public func panelRectInWindow(for phase: PanelPhase) -> CGRect {
-        let window = windowFrame(for: phase)
+        panelRect(for: phase, inWindow: windowFrame(for: phase))
+    }
+
+    /// The same, against a window named explicitly rather than the one that
+    /// phase would have chosen for itself.
+    ///
+    /// The distinction is the whole of one class of fault. A transition states
+    /// the *outgoing* panel's rectangle inside the *incoming* window, and those
+    /// two are the same window for every hover state — `windowFrame(for:)` is
+    /// the open frame for all of them — but not for fullscreen, which is larger
+    /// than the stage and sits somewhere else. Asking the outgoing phase which
+    /// window it belongs in gives an answer about a window that is no longer
+    /// there.
+    public func panelRect(for phase: PanelPhase, inWindow window: CGRect) -> CGRect {
         let panel = frame(for: phase)
         return CGRect(
             x: panel.minX - window.minX,

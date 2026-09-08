@@ -90,3 +90,17 @@ public final class ShellState {
 
     public init() {}
 }
+
+extension PanelMotion {
+    /// The SwiftUI curve this motion means.
+    ///
+    /// The shape of a transition is decided in Core, where it can be tested;
+    /// this is the one line that turns it into something a view can be handed.
+    var swiftUI: Animation {
+        switch self {
+        case .immediate: .linear(duration: 0)
+        case .spring(let response, let damping): .spring(response: response, dampingFraction: damping)
+        case .ease(let duration): .easeOut(duration: duration)
+        }
+    }
+}

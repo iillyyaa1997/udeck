@@ -626,104 +626,74 @@ public final class PanelController {
         // Every other screen keeps its own island, so that opening the panel
         // here does not take the mark off the display it was wanted on.
         syncIslands(activeScreenID: geometry.screen.id)
-
         placedScreenID = geometry.screen.id
-        let phase = state.phase
-        let windowFrame = geometry.windowFrame(for: phase)
-        let panelFrame = geometry.frame(for: phase)
-        let panelRect = geometry.panelRectInWindow(for: phase)
 
-        // Whether the window itself is about to move or resize. Everything the
-        // panel's own rectangle means is relative to it, so when it changes the
-        // rectangle has to be restated before anything is animated.
-        let windowChanged = panel.frame != windowFrame
+        // Everything this transition decides, worked out before anything moves
+        // and away from AppKit, because deciding it in here is what put four
+        // faults in front of the operator. See `PanelTransition`.
+        let phase = state.phase
+        let plan = PanelTransition.plan(
+            from: lastAppliedPhase,
+            to: phase,
+            currentWindowFrame: panel.frame,
+            geometry: geometry,
+            metrics: settings.panel,
+            animated: animated
+        )
 
         // Facts about the screen, pushed to the views rather than guessed at
         // inside them.
         shell.topOverhang = geometry.topOverhang
         shell.screenHasNotch = geometry.screen.hasNotch
-        shell.weldedToTopEdge = panelFrame.maxY >= geometry.screen.frame.maxY
+        shell.weldedToTopEdge = plan.weldedToTopEdge
 
         // While away the island is a hint, not a target: it must not swallow
         // clicks meant for whatever is underneath it.
-        panel.ignoresMouseEvents = phase == .collapsed
+        panel.ignoresMouseEvents = plan.ignoresMouseEvents
+        shell.contentAnimation = plan.contentMotion.swiftUI.delay(plan.contentDelay)
 
         // The window is a stage only while something is moving. Oversized, it
         // covers screen it does not draw on — and a window above every ordinary
         // one that covers screen it does not draw on is a window that eats
-        // clicks meant for what is underneath.
-        //
-        // That used to be handled by flipping `ignoresMouseEvents` from the
-        // pointer stream, and it lost a race it could not win: arriving on the
-        // panel and clicking in one motion beat the flag, so the first click
-        // went to the application below and the operator had to click twice.
-        // Nothing polled is correct at the instant of a click.
-        //
-        // So the window is the stage while a transition is in flight and
-        // exactly the panel once it settles. Never animated either way — it is
+        // clicks meant for what is underneath. It is never animated: it is
         // invisible, and animating it is what made the panel fly between
         // displays.
-        if panel.frame != windowFrame {
-            panel.setFrame(windowFrame, display: true)
+        if panel.frame != plan.stageFrame {
+            panel.setFrame(plan.stageFrame, display: true)
         }
-
-        let metrics = settings.panel
-        // Only a collapse is a departure. Everything else — a peek becoming a
-        // panel, a panel becoming fullscreen — is still an arrival, and arrives
-        // on the spring.
-        let arriving = state.phase != .collapsed
-        shell.contentAnimation = arriving
-            ? .easeOut(duration: metrics.contentRevealDuration).delay(metrics.contentRevealDelay)
-            : .easeOut(duration: metrics.contentHideDuration)
-
-        let reveal: Animation = arriving
-            ? .spring(response: metrics.revealSpringResponse,
-                      dampingFraction: metrics.revealSpringDamping)
-            : .easeOut(duration: metrics.collapseDuration)
 
         // Something is about to move. Until it stops, the panel is drawn even in
         // the states that draw nothing when they are standing still.
         if animated { shell.isSettled = false }
 
-        if windowChanged, animated {
+        lastAppliedPhase = phase
+        panel.orderFrontRegardless()
+
+        guard animated else {
+            shell.panelRect = plan.panelRect
+            settleWindow()
+            return
+        }
+
+        let motion = plan.motion.swiftUI
+        if let restated = plan.restatedPanelRect {
             // The window has moved or changed size, so the panel's rectangle —
-            // which is expressed inside it — now means somewhere else. Between
-            // transitions the window is exactly the panel, which puts that
-            // rectangle at the window's own origin; read against the stage that
-            // replaces it, the same numbers are the top *left corner*, and the
-            // panel slid in from the side instead of growing out of its island.
-            // First time out of a fresh launch it looked right and every time
-            // after it did not, which is exactly what the operator described.
-            //
-            // So the outgoing state is restated in the new window's coordinates
-            // first, and the animation starts from there on the next turn of the
-            // run loop. One frame later is invisible; sliding in from the corner
-            // was not.
-            shell.panelRect = geometry.panelRectInWindow(for: lastAppliedPhase)
-            panel.orderFrontRegardless()
-            lastAppliedPhase = phase
+            // which is expressed inside it — now means somewhere else. The
+            // outgoing state is restated in the new window's coordinates first,
+            // and the animation starts from there on the next turn of the run
+            // loop. One frame later is invisible; sliding in from the corner,
+            // which is what the other order does, was not.
+            shell.panelRect = restated
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.state.phase == phase else { return }
-                withAnimation(reveal) { self.shell.panelRect = panelRect }
-                self.scheduleWindowSettle(after: arriving
-                    ? metrics.revealSpringResponse * 1.6
-                    : metrics.collapseDuration)
+                withAnimation(motion) { self.shell.panelRect = plan.panelRect }
+                self.scheduleWindowSettle(after: plan.settleAfter)
             }
             return
         }
 
-        if animated {
-            withAnimation(reveal) { shell.panelRect = panelRect }
-            scheduleWindowSettle(after: arriving
-                ? metrics.revealSpringResponse * 1.6
-                : metrics.collapseDuration)
-        } else {
-            shell.panelRect = panelRect
-            settleWindow()
-        }
-
-        lastAppliedPhase = phase
-        panel.orderFrontRegardless()
+        withAnimation(motion) { shell.panelRect = plan.panelRect }
+        scheduleWindowSettle(after: plan.settleAfter)
     }
 
     /// Gives the panel the keyboard, activating uDeck only if that turns out to
