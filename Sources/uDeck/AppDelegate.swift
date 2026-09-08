@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var screens: ScreenObserver!
     private var controller: PanelController!
     private var statusItem: NSStatusItem!
+    private var settings: SettingsWindowController!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let model = DeckModel()
@@ -31,10 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onPhaseChange = { [weak model] phase in
             model?.panelIsVisible = phase.isVisible
         }
-
         self.model = model
         self.screens = screens
         self.controller = controller
+        self.settings = SettingsWindowController(model: model)
+        controller.shell.onOpenSettings = { [weak self] in self?.settings.show() }
 
         model.discoverPlugins()
         controller.start()
@@ -57,6 +59,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .target = self
         menu.addItem(withTitle: "Refresh all plugins", action: #selector(refreshAll), keyEquivalent: "")
             .target = self
+        menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+            .target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Open the plugins folder", action: #selector(openPlugins), keyEquivalent: "")
             .target = self
@@ -70,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showPanel() { controller.reveal() }
     @objc private func refreshAll() { model.refreshAll(reason: .manual) }
     @objc private func openPlugins() { model.revealPluginsDirectory() }
+    @objc private func openSettings() { settings.show() }
 
     /// The state of the window machinery, in one paste-able block.
     ///

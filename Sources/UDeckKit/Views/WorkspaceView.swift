@@ -10,6 +10,11 @@ struct WorkspaceView: View {
     @State private var renamingTab: UUID?
     @State private var draftName = ""
 
+    /// A field that appears without focus is a field the operator has to click
+    /// a second time, and the second click is easy to mistake for the first not
+    /// having worked.
+    @FocusState private var renameFieldFocused: Bool
+
     var body: some View {
         VStack(spacing: theme.rowSpacing) {
             tabBar
@@ -57,6 +62,8 @@ struct WorkspaceView: View {
                 .padding(.horizontal, 9)
                 .padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 9).fill(theme.recess))
+                .focused($renameFieldFocused)
+                .onAppear { renameFieldFocused = true }
                 .onSubmit { commitRename(tab.id) }
                 .onExitCommand { renamingTab = nil }
         } else {
@@ -107,6 +114,9 @@ struct WorkspaceView: View {
             }
             iconButton("arrow.clockwise", help: "Refresh everything now") {
                 model.refreshAll(reason: .manual)
+            }
+            iconButton("gearshape", help: "Settings") {
+                shell.onOpenSettings()
             }
             iconButton("chevron.up", help: "Send the panel away") {
                 shell.onCollapse()

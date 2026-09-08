@@ -1,0 +1,417 @@
+import SwiftUI
+import UDeckCore
+
+/// uDeck's own settings.
+///
+/// Four groups, in the order they matter: how the panel opens, how it looks,
+/// what is installed, and what this build is. The plugin section is the largest
+/// on purpose — in an application whose every feature is a plugin, "what is
+/// installed and what is it allowed to do" *is* the settings screen.
+public struct SettingsView: View {
+    @Bindable var model: DeckModel
+    @State private var section: Section = .opening
+    @State private var selectedPlugin: String?
+
+    enum Section: String, CaseIterable, Identifiable {
+        case opening = "Opening"
+        case look = "Look"
+        case plugins = "Plugins"
+        case about = "About"
+
+        var id: String { rawValue }
+
+        var symbol: String {
+            switch self {
+            case .opening: "cursorarrow.rays"
+            case .look: "paintbrush"
+            case .plugins: "square.grid.2x2"
+            case .about: "info.circle"
+            }
+        }
+    }
+
+    public init(model: DeckModel) {
+        self.model = model
+    }
+
+    public var body: some View {
+        NavigationSplitView {
+            List(Section.allCases, selection: $section) { item in
+                Label(item.rawValue, systemImage: item.symbol).tag(item)
+            }
+            .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
+        } detail: {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    switch section {
+                    case .opening: OpeningSettings(model: model)
+                    case .look: LookSettings(model: model)
+                    case .plugins: PluginSettingsSection(model: model, selected: $selectedPlugin)
+                    case .about: AboutSection(model: model)
+                    }
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(minWidth: 720, minHeight: 480)
+    }
+}
+
+// MARK: - Opening
+
+private struct OpeningSettings: View {
+    @Bindable var model: DeckModel
+
+    var body: some View {
+        SettingsGroup("The gesture") {
+            Toggle("Open by moving the cursor to the top of the screen", isOn: binding(\.gesture.enabled))
+            Text("uDeck watches the pointer, which needs no permission from macOS. Only keyboard monitoring would, and uDeck does not do it.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            LabeledContent("Pause before opening") {
+                Slider(value: binding(\.gesture.dwellDuration), in: 0.08 ... 0.8, step: 0.02) {
+                    Text(String(format: "%.0f ms", model.settings.gesture.dwellDuration * 1000))
+                }
+                .frame(width: 260)
+            }
+            Text("How long the cursor has to rest at the top edge. Sliding sideways restarts it, which is what keeps travelling along the menu bar from opening the panel.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            LabeledContent("Or push past the edge by") {
+                Slider(value: binding(\.gesture.edgePushDistance), in: 10 ... 120, step: 5) {
+                    Text("\(Int(model.settings.gesture.edgePushDistance)) pt")
+                }
+                .frame(width: 260)
+            }
+            Text("Once the cursor has stopped at the top edge, moving the mouse further opens the panel straight away. Reaching a menu-bar target stops the moment it lands, so continued pressure is a signal nothing else produces.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            LabeledContent("Stay quiet after closing for") {
+                Slider(value: binding(\.gesture.reopenCooldown), in: 0 ... 2, step: 0.1) {
+                    Text(String(format: "%.1f s", model.settings.gesture.reopenCooldown))
+                }
+                .frame(width: 260)
+            }
+        }
+
+        SettingsGroup("When to stay out of the way") {
+            Toggle("Retract when you switch to another application", isOn: binding(\.collapseOnAppSwitch))
+            Toggle("Open over fullscreen applications", isOn: binding(\.gesture.enabledInFullscreen))
+            Text("Off by default. Panels of this kind have been observed to leave macOS's own menu-bar reveal stuck when they fight it in a fullscreen app, and corrupting the system's state is worse than not opening.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        SettingsGroup("Plugins") {
+            Toggle("Keep running plugins while the panel is away", isOn: binding(\.pollWhileCollapsed))
+            Text("Off by default: a panel nobody is looking at that still runs a dozen scripts every few seconds is a laptop running out of battery for nothing. Opening the panel refreshes everything, and anything not yet refreshed is drawn as visibly old rather than as current.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func binding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { model.settings[keyPath: keyPath] },
+            set: { newValue in
+                var settings = model.settings
+                settings[keyPath: keyPath] = newValue
+                model.update(settings: settings)
+            }
+        )
+    }
+}
+
+// MARK: - Look
+
+private struct LookSettings: View {
+    @Bindable var model: DeckModel
+
+    var body: some View {
+        SettingsGroup("Density") {
+            Picker("Density", selection: Binding(
+                get: { model.settings.density },
+                set: { newValue in
+                    var settings = model.settings
+                    settings.density = newValue
+                    model.update(settings: settings)
+                }
+            )) {
+                Text("Compact").tag(Density.compact)
+                Text("Normal").tag(Density.normal)
+                Text("Cozy").tag(Density.cozy)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 320)
+
+            Text("Every plugin has to look right in all three, which is why this is one setting rather than something each plugin decides.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        SettingsGroup("Staleness") {
+            LabeledContent("Assume a card is current for") {
+                Text("\(Int(model.settings.defaultCardTTL)) s")
+                    .foregroundStyle(.secondary)
+            }
+            Text("Used only for plugins that do not declare a lifetime of their own. Past it a card is dimmed and dated; past \(Int(model.settings.silentTTLMultiplier)) times it, its values are hidden entirely — a number nobody can vouch for should not be on screen.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - Plugins
+
+private struct PluginSettingsSection: View {
+    @Bindable var model: DeckModel
+    @Binding var selected: String?
+
+    var body: some View {
+        SettingsGroup("Installed") {
+            HStack {
+                Text(model.pluginsDirectoryDisplayPath)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Open the folder") { model.revealPluginsDirectory() }
+                Button("Look again") { model.discoverPlugins() }
+            }
+
+            if model.plugins.isEmpty {
+                Text("Nothing installed yet. uDeck shows nothing of its own — everything in the panel comes from a plugin.")
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(model.plugins, id: \.id) { plugin in
+                PluginRow(model: model, plugin: plugin)
+                Divider()
+            }
+        }
+    }
+}
+
+private struct PluginRow: View {
+    @Bindable var model: DeckModel
+    var plugin: DiscoveredPlugin
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(plugin.manifest?.name ?? plugin.folderName).font(.headline)
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let manifest = plugin.manifest {
+                    Toggle("Enabled", isOn: Binding(
+                        get: { model.pluginSettings.isEnabled(manifest.id) },
+                        set: { model.setEnabled($0, for: manifest.id) }
+                    ))
+                    .labelsHidden()
+                }
+                Button(expanded ? "Less" : "More") { expanded.toggle() }
+            }
+
+            if !plugin.problems.isEmpty {
+                ForEach(Array(plugin.problems.enumerated()), id: \.offset) { _, problem in
+                    Label(problem.description, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            if expanded, let manifest = plugin.manifest {
+                details(manifest)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var subtitle: String {
+        guard let manifest = plugin.manifest else { return plugin.folderName }
+        var parts = ["\(manifest.kind.rawValue) · v\(manifest.version)"]
+        if let interval = manifest.interval { parts.append("every \(Int(interval))s") }
+        if let author = manifest.author { parts.append(author) }
+        return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private func details(_ manifest: PluginManifest) -> some View {
+        if let description = manifest.description {
+            Text(description).font(.callout)
+        }
+
+        Text(plugin.directory.path)
+            .font(.system(.caption2, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .textSelection(.enabled)
+
+        permissions(manifest)
+
+        if !manifest.settings.isEmpty {
+            Text("Settings").font(.subheadline).padding(.top, 4)
+            ForEach(manifest.settings, id: \.key) { declaration in
+                settingControl(declaration, for: manifest.id)
+            }
+        }
+
+        let snapshot = model.snapshot(for: manifest.id)
+        if let failure = snapshot.failure {
+            Text("Last failure: \(failure.reason.description)")
+                .font(.caption).foregroundStyle(.orange)
+            if !failure.diagnostics.isEmpty {
+                Text(failure.diagnostics)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(8)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func permissions(_ manifest: PluginManifest) -> some View {
+        let requested = manifest.permissions.capabilities
+        if requested.isEmpty {
+            Label("Asks for nothing", systemImage: "checkmark.seal")
+                .font(.caption).foregroundStyle(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("This plugin asks to:").font(.subheadline)
+                ForEach(Array(requested.enumerated()), id: \.offset) { _, capability in
+                    HStack(spacing: 6) {
+                        Image(systemName: granted(capability, manifest) ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(granted(capability, manifest) ? .green : .secondary)
+                        Text(capability.summary).font(.caption)
+                        if capability.processEnforcement == .declaredOnly {
+                            Text("declared")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .help("uDeck shows you this and will not start the plugin without your agreement, but it cannot hold it against a running program — see the plugin documentation.")
+                        }
+                    }
+                }
+                HStack {
+                    Button("Allow") { model.decidePermissions(for: manifest.id, allow: true) }
+                    Button("Decline") { model.decidePermissions(for: manifest.id, allow: false) }
+                }
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    private func granted(_ capability: Capability, _ manifest: PluginManifest) -> Bool {
+        model.grants[manifest.id]?.granted.contains(capability) ?? false
+    }
+
+    @ViewBuilder
+    private func settingControl(_ declaration: SettingDeclaration, for id: PluginIdentifier) -> some View {
+        let value = model.pluginSettings.value(of: declaration, for: id)
+
+        switch declaration.type {
+        case .bool:
+            Toggle(declaration.label, isOn: Binding(
+                get: { if case .bool(let flag) = value { flag } else { false } },
+                set: { model.setSetting(.bool($0), key: declaration.key, for: id) }
+            ))
+            .help(declaration.help ?? "")
+
+        case .int:
+            LabeledContent(declaration.label) {
+                Stepper(
+                    value: Binding(
+                        get: { if case .int(let number) = value { number } else { 0 } },
+                        set: { model.setSetting(.int($0), key: declaration.key, for: id) }
+                    ),
+                    in: (declaration.minimum ?? 0) ... (declaration.maximum ?? 1000)
+                ) {
+                    Text(String(describing: value.jsonLiteral))
+                }
+            }
+            .help(declaration.help ?? "")
+
+        case .string:
+            LabeledContent(declaration.label) {
+                TextField("", text: Binding(
+                    get: { if case .string(let text) = value { text } else { "" } },
+                    set: { model.setSetting(.string($0), key: declaration.key, for: id) }
+                ))
+                .frame(width: 240)
+            }
+            .help(declaration.help ?? "")
+
+        case .enumeration:
+            LabeledContent(declaration.label) {
+                Picker("", selection: Binding(
+                    get: { if case .string(let text) = value { text } else { "" } },
+                    set: { model.setSetting(.string($0), key: declaration.key, for: id) }
+                )) {
+                    ForEach(declaration.options ?? [], id: \.value) { option in
+                        Text(option.label).tag(option.value)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 240)
+            }
+            .help(declaration.help ?? "")
+        }
+
+        if let help = declaration.help {
+            Text(help).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - About
+
+private struct AboutSection: View {
+    @Bindable var model: DeckModel
+
+    var body: some View {
+        SettingsGroup("uDeck") {
+            Text("A panel at the top edge of the screen. Everything in it is a plugin.")
+            Text("Apache-2.0 · Copyright 2026 Ilya Volkov")
+                .font(.caption).foregroundStyle(.secondary)
+            Link("github.com/iillyyaa1997/udeck", destination: URL(string: "https://github.com/iillyyaa1997/udeck")!)
+        }
+
+        SettingsGroup("This build") {
+            Label("Not signed with a Developer ID and not notarised.", systemImage: "exclamationmark.shield")
+            Text("Builds are ad-hoc signed, so macOS will refuse a downloaded copy on first launch — right-click and choose Open. A binary you built yourself is unaffected.")
+                .font(.caption).foregroundStyle(.secondary)
+            Label("Not sandboxed, and cannot be: plugins run commands.", systemImage: "shield.slash")
+            Text("Read the permissions section of the plugin documentation before installing a plugin somebody else wrote.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        if !model.startupProblems.isEmpty {
+            SettingsGroup("Problems at startup") {
+                ForEach(Array(model.startupProblems.enumerated()), id: \.offset) { _, problem in
+                    Text(problem)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Layout helper
+
+private struct SettingsGroup<Content: View>: View {
+    var title: String
+    @ViewBuilder var content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.title3).bold()
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 6)
+    }
+}

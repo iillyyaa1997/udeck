@@ -17,6 +17,7 @@ public final class ShellState {
     public var onInteract: () -> Void = {}
     public var onToggleFullscreen: () -> Void = {}
     public var onCollapse: () -> Void = {}
+    public var onOpenSettings: () -> Void = {}
 
     public init() {}
 }

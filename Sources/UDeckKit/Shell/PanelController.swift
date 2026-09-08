@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import OSLog
 import UDeckCore
 
 /// Owns the window, and everything about when it is and is not on screen.
@@ -39,6 +40,10 @@ public final class PanelController {
     /// The slow look at where the cursor actually is; see
     /// `GestureTuning.pointerPollInterval`.
     private var pointerPollTimer: Timer?
+
+    /// The last idle reason logged, so a gate that blocks thousands of samples
+    /// is recorded once rather than thousands of times.
+    private var lastIdleReason: GestureOutcome.IdleReason?
 
     /// The application that was in front when uDeck took focus, so it can be
     /// put back afterwards.
@@ -202,8 +207,14 @@ public final class PanelController {
             PanelGeometry(screen: $0, tuning: settings.gesture, metrics: settings.panel)
         }
 
-        switch recognizer.handle(sample, geometry: gestureGeometry, environment: environment, tuning: settings.gesture) {
+        let outcome = recognizer.handle(sample, geometry: gestureGeometry, environment: environment, tuning: settings.gesture)
+        if case .idle(let reason) = outcome, reason != lastIdleReason {
+            lastIdleReason = reason
+            DeckLog.gesture.debug("idle: \(reason.rawValue, privacy: .public)")
+        }
+        switch outcome {
         case .fire:
+            DeckLog.gesture.debug("fired on \(screenUnderCursor?.name ?? "no screen", privacy: .public)")
             armingTimer?.invalidate()
             if let screenUnderCursor { attachedScreenID = screenUnderCursor.id }
             apply(.revealRequested)
@@ -358,7 +369,11 @@ public final class PanelController {
     private func apply(_ event: PanelEvent) {
         let before = state.phase
         let changed = state.apply(event, collapseOnAppSwitch: settings.collapseOnAppSwitch)
-        guard changed else { return }
+        guard changed else {
+            DeckLog.panel.debug("\(String(describing: event), privacy: .public) ignored in \(before.rawValue, privacy: .public)")
+            return
+        }
+        DeckLog.panel.debug("\(before.rawValue, privacy: .public) -> \(self.state.phase.rawValue, privacy: .public) on \(String(describing: event), privacy: .public)")
 
         if before == .collapsed, state.phase != .collapsed {
             // Reveal: hand the gesture a clean slate so a half-armed dwell from
@@ -423,6 +438,9 @@ public final class PanelController {
             panel.makeKeyAndOrderFront(nil)
             didActivateForKeyboard = true
         }
+        DeckLog.panel.debug(
+            "took the keyboard: key=\(self.panel.isKeyWindow, privacy: .public) active=\(NSApp.isActive, privacy: .public) activated=\(self.didActivateForKeyboard, privacy: .public)"
+        )
     }
 
     /// Puts the previous application back, but only if uDeck took it away.

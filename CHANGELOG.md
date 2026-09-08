@@ -22,6 +22,12 @@ The **plugin contract** is versioned separately from the application, by the
 - **Card rendering** for all seven row types, three densities, and the glass
   look, with staleness drawn rather than described.
 - **The empty state**, which is what an install with no plugins shows.
+- **A settings window**: how the panel opens, density, and — the largest part —
+  what is installed, what each plugin asked for, and the settings each plugin
+  declared, rendered by the host so no plugin has to ship a settings screen.
+- **Logging** through the unified logging system, so the gate that stopped a
+  gesture or the reason a panel closed can be read after the fact:
+  `log stream --predicate 'subsystem == "place.unicorns.udeck"' --level debug`.
 
 - **Core model** (`UDeckCore`) — screen and panel geometry, the pointer-gesture
   recognizer, the four panel states, the 12-column grid, the plugin manifest and
