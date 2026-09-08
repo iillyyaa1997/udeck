@@ -95,6 +95,53 @@ private struct OpeningSettings: View {
             }
         }
 
+        SettingsGroup("The keyboard shortcut") {
+            Toggle("Open with a keyboard shortcut", isOn: binding(\.hotkey.enabled))
+            Text("The other way in, for when the cursor is nowhere near the top of the screen. It opens the panel ready to type in, rather than as a glance. This needs no permission either: macOS hands one registered combination straight to uDeck, which is not the same as watching the keyboard.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            LabeledContent("Shortcut") {
+                HStack(spacing: 10) {
+                    ForEach(HotKeyModifier.allCases.sorted(), id: \.self) { modifier in
+                        Toggle(modifier.symbol, isOn: Binding(
+                            get: { model.settings.hotkey.modifiers.contains(modifier) },
+                            set: { isOn in
+                                var updated = model.settings
+                                if isOn {
+                                    updated.hotkey.modifiers.insert(modifier)
+                                } else {
+                                    updated.hotkey.modifiers.remove(modifier)
+                                }
+                                model.update(settings: updated)
+                            }
+                        ))
+                        .toggleStyle(.button)
+                    }
+                    Picker("", selection: Binding(
+                        get: { model.settings.hotkey.key.uppercased() },
+                        set: { key in
+                            var updated = model.settings
+                            updated.hotkey.key = key
+                            model.update(settings: updated)
+                        }
+                    )) {
+                        ForEach(HotKeyBinding.orderedKeyNames, id: \.self) { name in
+                            Text(name).tag(name)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 120)
+                }
+            }
+            if model.settings.hotkey.modifiers.isEmpty {
+                Text("Pick at least one modifier. A shortcut without one would take that key away from every application on this Mac.")
+                    .font(.caption).foregroundStyle(.orange)
+            } else if model.settings.hotkey.enabled {
+                Text("\(model.settings.hotkey.displayName) — if another application already holds it, macOS gives it to whoever asked first and uDeck will say so in its log rather than pretending.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+
         SettingsGroup("When to stay out of the way") {
             Toggle("Retract when you switch to another application", isOn: binding(\.collapseOnAppSwitch))
             Toggle("Open over fullscreen applications", isOn: binding(\.gesture.enabledInFullscreen))

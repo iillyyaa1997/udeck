@@ -22,6 +22,12 @@ public final class PanelController {
     private let pointer: PointerMonitor
     private var recognizer = HoverGestureRecognizer()
 
+    /// The keyboard way in. Owned here rather than by the app delegate so that
+    /// it is re-registered by the same `settingsChanged()` that everything else
+    /// goes through — a shortcut you have to remember to re-apply is a shortcut
+    /// that stops matching the settings screen.
+    private let hotKeys = HotKeyMonitor()
+
     /// The operator's settings, read live rather than copied.
     ///
     /// This used to be a copy taken at initialisation, refreshed by an
@@ -121,6 +127,9 @@ public final class PanelController {
     }
 
     public func start() {
+        hotKeys.onFire = { [weak self] in self?.toggleFromKeyboard() }
+        hotKeys.apply(settings.hotkey)
+
         pointer.fullscreenCheckInterval = settings.gesture.fullscreenCheckInterval
         pointer.onMove = { [weak self] sample, environment in
             self?.handlePointer(sample, environment: environment)
@@ -193,6 +202,7 @@ public final class PanelController {
     }
 
     public func stop() {
+        hotKeys.stop()
         pointer.stop()
         tokens.removeAll()
         exitTimer?.invalidate()
@@ -209,14 +219,33 @@ public final class PanelController {
     /// created with an interval can be recreated with the new one. Everything
     /// else is already read live.
     public func settingsChanged() {
+        hotKeys.apply(settings.hotkey)
         pointer.fullscreenCheckInterval = settings.gesture.fullscreenCheckInterval
         startPointerPoll()
         applyPhase(animated: false)
     }
 
-    /// Reveals the panel from anywhere — the menu-bar item, or a future hotkey.
+    /// Reveals the panel from anywhere — the menu-bar item, for instance.
     public func reveal() {
         apply(.revealRequested)
+    }
+
+    /// What the keyboard shortcut does: opens the panel ready to work in, and
+    /// closes it again if it is already showing.
+    ///
+    /// Not the same as `reveal()`, which gives a peek — the glance the pointer
+    /// gesture earns by the cursor being right there. Someone who reached for a
+    /// shortcut has their hands on the keys and is not going to move the mouse
+    /// over to promote a peek into a panel, so the reveal is promoted for them.
+    /// The panel takes the keyboard as part of becoming held, so it is ready to
+    /// be typed into.
+    public func toggleFromKeyboard() {
+        guard state.phase == .collapsed else {
+            apply(.closeRequested)
+            return
+        }
+        apply(.revealRequested)
+        apply(.interacted)
     }
 
     public func toggleFullscreen() {

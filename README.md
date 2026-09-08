@@ -126,6 +126,7 @@ What it actually uses, and why none of it prompts:
 | `NSScreen.safeAreaInsets` and `auxiliaryTop*Area` for the notch | public API since macOS 12 |
 | `NSWorkspace` activation notifications | public, no permission |
 | `CGWindowListCopyWindowInfo` bounds, to tell whether the frontmost app is fullscreen | window *titles* need Screen Recording; bounds and owners do not, and uDeck never reads a title |
+| Carbon's `RegisterEventHotKey` for the keyboard shortcut | it asks the window server to deliver *one* combination to this process — unlike `NSEvent.addGlobalMonitorForEvents(matching: .keyDown)`, which sees every keystroke on the machine and needs Accessibility |
 
 If that last one ever did become restricted, the effect would be that the
 fullscreen check stops working — not a permission prompt. The panel would then

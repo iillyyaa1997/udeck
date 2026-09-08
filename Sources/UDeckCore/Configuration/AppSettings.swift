@@ -14,6 +14,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var gesture: GestureTuning
     public var panel: PanelMetrics
 
+    /// The keyboard way in. The pointer is the primary one; this is for when
+    /// the cursor is nowhere near the top of the screen.
+    public var hotkey: HotKeyBinding
+
     /// Retract the panel when the operator activates another application.
     public var collapseOnAppSwitch: Bool
 
@@ -49,6 +53,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         density: Density = .normal,
         gesture: GestureTuning = GestureTuning(),
         panel: PanelMetrics = PanelMetrics(),
+        hotkey: HotKeyBinding = HotKeyBinding(),
         collapseOnAppSwitch: Bool = true,
         defaultCardTTL: TimeInterval = 60,
         silentTTLMultiplier: Double = 3,
@@ -61,6 +66,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.density = density
         self.gesture = gesture
         self.panel = panel
+        self.hotkey = hotkey
         self.collapseOnAppSwitch = collapseOnAppSwitch
         self.defaultCardTTL = defaultCardTTL
         self.silentTTLMultiplier = silentTTLMultiplier
@@ -122,6 +128,14 @@ public struct AppSettings: Codable, Equatable, Sendable {
         result.panel.islandCornerRadius = clamp(result.panel.islandCornerRadius, 0 ... 100)
         result.panel.revealDuration = clamp(result.panel.revealDuration, 0 ... 3)
 
+        // A shortcut that cannot be registered is turned off rather than left
+        // enabled-and-broken: "on, and nothing happens when you press it" is
+        // the state that costs an evening to diagnose. What made it invalid is
+        // kept as written so the settings screen can show what was meant.
+        if result.hotkey.enabled, !result.hotkey.isValid {
+            result.hotkey.enabled = false
+        }
+
         result.defaultCardTTL = clamp(result.defaultCardTTL, 1 ... Seconds.ceiling)
         result.silentTTLMultiplier = min(max(result.silentTTLMultiplier.isFinite ? result.silentTTLMultiplier : 3, 1), 100)
         if result.pluginExecutableSearchPath.isEmpty {
@@ -141,6 +155,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         density = try c.decodeIfPresent(Density.self, forKey: .density) ?? defaults.density
         gesture = try c.decodeIfPresent(GestureTuning.self, forKey: .gesture) ?? defaults.gesture
         panel = try c.decodeIfPresent(PanelMetrics.self, forKey: .panel) ?? defaults.panel
+        hotkey = try c.decodeIfPresent(HotKeyBinding.self, forKey: .hotkey) ?? defaults.hotkey
         collapseOnAppSwitch = try c.decodeIfPresent(Bool.self, forKey: .collapseOnAppSwitch)
             ?? defaults.collapseOnAppSwitch
         defaultCardTTL = try c.decodeIfPresent(TimeInterval.self, forKey: .defaultCardTTL)

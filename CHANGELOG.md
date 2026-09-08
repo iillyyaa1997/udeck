@@ -14,16 +14,23 @@ The first working version: the shell, the plugin runtime, and one plugin.
 
 ### The application
 
-- **The panel.** A non-activating `NSPanel` hanging below the menu bar at the
-  top centre of whichever screen the cursor is on — on the built-in display that
-  is exactly the bottom edge of the notch, so it grows out of it. Four states: a
-  pill, a peek, a working panel and fullscreen. It retracts when another
-  application is activated, and a panel that was being worked in comes back as
-  it was.
+- **The panel.** A non-activating `NSPanel` at the top centre of whichever
+  screen the cursor is on, growing out of an island. On the built-in display
+  that island is the notch itself and the panel hangs below it; on a screen with
+  no notch uDeck draws its own — the same size as a real one, welded to the top
+  edge — because an island that stops one menu bar short of the corner reads as
+  a window near the corner. Four states: the island, a peek, a working panel and
+  fullscreen. It retracts when another application is activated, and a panel
+  that was being worked in comes back as it was.
 - **The pointer gesture.** Two ways in: keep pushing after the cursor has
   stopped at the top edge, or rest there for a moment. Suppressed while a button
   is down, while a system menu is open, over fullscreen applications, just after
   a menu-bar click, and just after the panel closed.
+- **A keyboard shortcut**, `⌃⌥U` by default and configurable. It opens the
+  panel ready to type in rather than as a glance, and closes it again. Carbon's
+  `RegisterEventHotKey` rather than a global event monitor, so uDeck still asks
+  macOS for no permissions: one registered combination is handed to the
+  application, which is not the same thing as watching the keyboard.
 - **Tabs and a 12-column grid.** Windows are dragged by their title bar and
   resized from a corner, in whole cells; neighbours make room and everything
   settles upward. The arrangement is a file, so it survives a restart and can be
@@ -88,6 +95,6 @@ The first working version: the shell, the plugin runtime, and one plugin.
 ### Deliberately not here
 
 Resident plugins and the terminal they exist for; the `canvas` row a plugin
-would draw itself; a plugin registry; the global hotkey; the application
+would draw itself; a plugin registry; the application
 switcher, which would need Accessibility; host-side history for sparklines; and
 notarisation.
