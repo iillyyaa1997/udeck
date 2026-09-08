@@ -21,6 +21,14 @@ public struct DeckTab: Identifiable, Codable, Equatable, Sendable {
 public struct DeckLayout: Codable, Equatable, Sendable {
     public static let defaultColumns = 12
 
+    /// The tallest a single window may be, in row units.
+    ///
+    /// Not a taste judgement — a bound. A resize drag turns pointer movement
+    /// into cells, and without a ceiling a single flick downwards could ask for
+    /// a window thousands of rows tall, which the grid would dutifully lay out.
+    /// Twenty-four rows is well past the height of any panel on any screen.
+    public static let maximumWindowHeight = 24
+
     public var version: Int
     public var columns: Int
     public var tabs: [DeckTab]

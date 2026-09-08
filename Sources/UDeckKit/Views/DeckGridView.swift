@@ -108,7 +108,7 @@ struct DeckGridView: View {
             )
             let height = clamp(
                 window.height + metrics.rows(forHeight: translation.height),
-                min: max(1, hints.minimumHeight), max: 24
+                min: max(1, hints.minimumHeight), max: DeckLayout.maximumWindowHeight
             )
             draft = Draft(id: window.id, column: window.column, row: window.row,
                           width: width, height: height, isResizing: true)

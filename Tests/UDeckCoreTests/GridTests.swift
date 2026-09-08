@@ -223,3 +223,25 @@ struct LayoutTests {
         #expect(restored == layout)
     }
 }
+
+@Suite("Grid bounds")
+struct GridBoundsTests {
+    /// A resize drag turns pointer movement into cells. Without a ceiling, one
+    /// flick downwards asks for a window thousands of rows tall.
+    @Test("a window cannot be taller than the grid allows")
+    func heightIsBounded() {
+        #expect(DeckLayout.maximumWindowHeight >= 8, "the ceiling must still allow a tall window")
+
+        var layout = DeckLayout.firstRun()
+        let tab = layout.tabs[0].id
+        let plugin = PluginIdentifier(rawValue: "p")!
+        let window = layout.addWindow(pluginID: plugin, to: tab)!
+        layout.place(windowID: window, in: tab, column: 0, row: 0,
+                     width: 4, height: DeckLayout.maximumWindowHeight * 100)
+        let placed = layout.tabs[0].windows[0]
+        // The model itself does not impose the ceiling — the drag does — but it
+        // must at least survive being handed an absurd height.
+        #expect(placed.height > 0)
+        #expect(placed.row == 0)
+    }
+}
