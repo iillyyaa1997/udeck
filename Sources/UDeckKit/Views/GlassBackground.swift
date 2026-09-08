@@ -123,13 +123,31 @@ struct PanelBorder: Shape {
     }
 }
 
+/// Any surface made of the same glass as the panel, in a given shape.
+///
+/// The panel, and everything the operator puts inside it, is one material —
+/// there is no second look for the things in the grid. Before macOS 26 there is
+/// no such material at all, and the caller's fill stands in for it.
+struct GlassSurface<S: Shape>: View {
+    var shape: S
+    var fallbackFill: Color
+
+    var body: some View {
+        if #available(macOS 26, *) {
+            LiquidGlassBackground().clipShape(shape)
+        } else {
+            shape.fill(fallbackFill)
+        }
+    }
+}
+
 /// The system's glass, unmodified.
 ///
 /// `cornerRadius` is left at zero and the shape comes from the caller's clip
 /// instead: the property rounds all four corners, and the panel's top two are
 /// square because it is attached to the edge it hangs from.
 @available(macOS 26, *)
-private struct LiquidGlassBackground: NSViewRepresentable {
+struct LiquidGlassBackground: NSViewRepresentable {
     func makeNSView(context: Context) -> NSGlassEffectView {
         let view = NSGlassEffectView()
         view.style = .regular

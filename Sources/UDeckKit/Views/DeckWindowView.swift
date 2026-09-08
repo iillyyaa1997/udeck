@@ -40,7 +40,12 @@ struct DeckWindowView: View {
         }
         .padding(theme.windowPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: theme.windowCornerRadius).fill(theme.windowFill))
+        // The same glass as the panel it sits in, rather than a flat fill on
+        // top of it: one material, everywhere.
+        .background(GlassSurface(
+            shape: RoundedRectangle(cornerRadius: theme.windowCornerRadius),
+            fallbackFill: theme.windowFill
+        ))
         .overlay(RoundedRectangle(cornerRadius: theme.windowCornerRadius).strokeBorder(theme.line))
         .clipShape(RoundedRectangle(cornerRadius: theme.windowCornerRadius))
         .overlay(alignment: .bottomTrailing) { resizeGrip }
