@@ -58,9 +58,13 @@ public final class PanelController {
     /// The screen the panel is currently attached to.
     private var attachedScreenID: String?
 
-    /// The screen the window was last placed on, so that arriving at a new one
-    /// can be told apart from changing state on the one it is already on.
+    /// The screen the window was last placed on.
     private var placedScreenID: String?
+
+    /// The phase the panel's rectangle currently describes, so that a window
+    /// change can restate it in the new window's coordinates before anything
+    /// animates.
+    private var lastAppliedPhase: PanelPhase = .collapsed
 
 
     /// Identifies the most recent transition, so a settle scheduled for one is
@@ -618,13 +622,16 @@ public final class PanelController {
         // here does not take the mark off the display it was wanted on.
         syncIslands(activeScreenID: geometry.screen.id)
 
-        // Arriving on another screen is a move, not a transition.
-        let arrivedOnANewScreen = placedScreenID != geometry.screen.id
         placedScreenID = geometry.screen.id
         let phase = state.phase
         let windowFrame = geometry.windowFrame(for: phase)
         let panelFrame = geometry.frame(for: phase)
         let panelRect = geometry.panelRectInWindow(for: phase)
+
+        // Whether the window itself is about to move or resize. Everything the
+        // panel's own rectangle means is relative to it, so when it changes the
+        // rectangle has to be restated before anything is animated.
+        let windowChanged = panel.frame != windowFrame
 
         // Facts about the screen, pushed to the views rather than guessed at
         // inside them.
@@ -669,25 +676,26 @@ public final class PanelController {
                       dampingFraction: metrics.revealSpringDamping)
             : .easeOut(duration: metrics.collapseDuration)
 
-        if arrivedOnANewScreen, animated {
-            // The panel usually opens on the screen it is already on, and the
-            // window never moves. The first reveal on a *different* display is
-            // the exception: the window has to move there, and animating from
-            // where the panel was is what made it appear to fly across the desk
-            // — which is the opposite of a panel that belongs to the screen the
-            // cursor is on.
+        if windowChanged, animated {
+            // The window has moved or changed size, so the panel's rectangle —
+            // which is expressed inside it — now means somewhere else. Between
+            // transitions the window is exactly the panel, which puts that
+            // rectangle at the window's own origin; read against the stage that
+            // replaces it, the same numbers are the top *left corner*, and the
+            // panel slid in from the side instead of growing out of its island.
+            // First time out of a fresh launch it looked right and every time
+            // after it did not, which is exactly what the operator described.
             //
-            // So it arrives collapsed, instantly, and grows from there on the
-            // next turn of the run loop. One frame later is invisible; the flight
+            // So the outgoing state is restated in the new window's coordinates
+            // first, and the animation starts from there on the next turn of the
+            // run loop. One frame later is invisible; sliding in from the corner
             // was not.
-            shell.panelRect = geometry.panelRectInWindow(for: .collapsed)
+            shell.panelRect = geometry.panelRectInWindow(for: lastAppliedPhase)
             panel.orderFrontRegardless()
+            lastAppliedPhase = phase
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.state.phase == phase else { return }
                 withAnimation(reveal) { self.shell.panelRect = panelRect }
-                // This path used to return without one, so a panel revealed on
-                // a display it was not already on kept the whole stage for a
-                // window — which is why it behaved differently there.
                 self.scheduleWindowSettle(after: arriving
                     ? metrics.revealSpringResponse * 1.6
                     : metrics.collapseDuration)
@@ -705,6 +713,7 @@ public final class PanelController {
             settleWindow()
         }
 
+        lastAppliedPhase = phase
         panel.orderFrontRegardless()
     }
 
