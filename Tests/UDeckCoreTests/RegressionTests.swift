@@ -701,4 +701,37 @@ struct RegressionTests {
         #expect(back.theme.dark.inkBrightness == 0.42)
         #expect(back.theme.dark.inkColor == InkColor(red: 0.2, green: 0.8, blue: 0.3))
     }
+
+    // MARK: - The colours came apart again
+
+    /// The fault, twice: the peek was one colour and the open panel another.
+    ///
+    /// The first time it was blamed on the tint, and painting the tint ourselves
+    /// did hide it — in proportion to the tint's own strength, which is why it
+    /// came back the moment the operator turned the tint down. The cause was
+    /// never the tint. `NSGlassEffectView` renders differently depending on how
+    /// big it is: measured on the running panel at one tint, a 96-point peek
+    /// came out at 66/255 and a 300-point one at 56, with nothing else changed.
+    ///
+    /// The fix is that the material is drawn at the size of the stage and cut
+    /// to the shape of the panel, so its bounds never change and it cannot
+    /// render two ways. What this test can hold is the half of that which lives
+    /// in Core: the stage really is one size for every state the panel is drawn
+    /// in. (Re-measured after the change: 55.9 at peek heights of 96, 300 and
+    /// 600 — the same number three times.)
+    @Test("the stage is one size, so anything drawn at stage size is too")
+    func theStageDoesNotChangeWithThePhase() {
+        for screen in ScreenFixtures.both + [ScreenFixtures.offCentreNotch] {
+            let g = PanelGeometry(screen: screen, tuning: tuning, metrics: metrics)
+            let stage = g.windowFrame(for: .collapsed)
+            for phase in [PanelPhase.peek, .open] {
+                #expect(g.windowFrame(for: phase) == stage,
+                        "\(phase) on \(screen.name) is staged at a different size from collapsed")
+            }
+            // Fullscreen is the one that is larger than the stage, and the one
+            // state that is a deliberate click rather than a brush of the
+            // cursor — so its material is allowed to be its own.
+            #expect(g.windowFrame(for: .fullscreen) != stage)
+        }
+    }
 }

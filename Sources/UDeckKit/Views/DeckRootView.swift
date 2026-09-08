@@ -19,6 +19,28 @@ public struct DeckRootView: View {
         // panel is empty and lets clicks through — see `PanelHostingView`.
         ZStack(alignment: .topLeading) {
             Color.clear
+
+            // The material is drawn at the size of the stage and cut to the
+            // shape of the panel, rather than drawn at the size of the panel.
+            //
+            // `NSGlassEffectView` renders differently depending on how big it
+            // is — measured on the running panel at one tint, a 96-point peek
+            // came out at 66/255 and a 300-point one at 56, with nothing else
+            // changed. Painting the tint ourselves hid that in proportion to
+            // the tint's own strength, which is why it came back the moment the
+            // operator turned the tint down: "у чёлки одна, а если нажать то
+            // другая".
+            //
+            // A material whose bounds never change cannot render two ways. The
+            // panel's state moves the cut, not the thing being cut.
+            if PanelChrome.drawsMaterial(
+                phase: shell.phase,
+                screenHasNotch: shell.screenHasNotch,
+                isSettled: shell.isSettled
+            ) {
+                material(theme: theme)
+            }
+
             panel(theme: theme)
                 .frame(
                     width: shell.panelRect.width,
@@ -103,29 +125,40 @@ public struct DeckRootView: View {
         // added later that forgets to.
         .contentShape(Rectangle())
         .onTapGesture { shell.onInteract() }
-        .background {
-            // The collapsed island is made of the same glass as the panel — it
-            // is the panel, at its smallest — except on a screen with a real
-            // notch, where the collapsed state at rest draws nothing at all.
-            //
-            // "At rest" is the whole of the rule: see `PanelChrome`. Read off
-            // the phase alone, this deleted the glass on the first frame of
-            // every collapse on the built-in display, and the operator saw the
-            // panel disappear instead of close.
-            if PanelChrome.drawsMaterial(
-                phase: shell.phase,
-                screenHasNotch: shell.screenHasNotch,
-                isSettled: shell.isSettled
-            ) {
-                GlassBackground(
-                    cornerRadius: PanelChrome.cornerRadius(
-                        phase: shell.phase, metrics: model.settings.panel
-                    ),
-                    theme: theme,
-                    glass: model.settings.glass,
-                    weldedToTopEdge: shell.weldedToTopEdge
-                )
+    }
+
+    /// The panel's surface, at a size that never changes.
+    ///
+    /// Whether it is drawn at all is `PanelChrome`'s rule — the collapsed state
+    /// under a real notch draws nothing once it has arrived, and during the
+    /// collapse it still does, which is what makes closing visible there.
+    @ViewBuilder
+    private func material(theme: DeckTheme) -> some View {
+        let radius = PanelChrome.cornerRadius(phase: shell.phase, metrics: model.settings.panel)
+        if #available(macOS 26, *) {
+            GlassBackground(
+                cornerRadius: 0,
+                theme: theme,
+                glass: model.settings.glass,
+                weldedToTopEdge: shell.weldedToTopEdge
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .mask(alignment: .topLeading) {
+                BottomRoundedRectangle(radius: radius)
+                    .frame(width: shell.panelRect.width, height: shell.panelRect.height)
+                    .offset(x: shell.panelRect.minX, y: shell.panelRect.minY)
             }
+        } else {
+            // The fallback is a blur with a border drawn for it, and a border
+            // belongs on the panel's own edges rather than on the stage's.
+            GlassBackground(
+                cornerRadius: radius,
+                theme: theme,
+                glass: model.settings.glass,
+                weldedToTopEdge: shell.weldedToTopEdge
+            )
+            .frame(width: shell.panelRect.width, height: shell.panelRect.height)
+            .offset(x: shell.panelRect.minX, y: shell.panelRect.minY)
         }
     }
 
