@@ -14,9 +14,11 @@ struct EmptyDeckView: View {
     var tabID: UUID?
     @Bindable var shell: ShellState
 
-    private var installed: [DiscoveredPlugin] {
-        model.plugins.filter { $0.manifest != nil }
-    }
+    /// Every folder found, including the ones that failed to load.
+    ///
+    /// A plugin that simply does not appear is a support question; one that
+    /// appears saying "run.sh is not executable" is a five-second fix.
+    private var installed: [DiscoveredPlugin] { model.plugins }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -68,39 +70,46 @@ struct EmptyDeckView: View {
     private func pluginPicker(tabID: UUID) -> some View {
         VStack(spacing: 6) {
             ForEach(installed, id: \.id) { plugin in
-                if let manifest = plugin.manifest {
-                    Button {
-                        shell.onInteract()
-                        model.addWindow(pluginID: manifest.id, to: tabID)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: plugin.isUsable ? "square.dashed.inset.filled" : "exclamationmark.triangle")
-                                .foregroundStyle(plugin.isUsable ? theme.accent : theme.warn)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(manifest.name)
-                                    .font(theme.bodyFont)
-                                    .foregroundStyle(theme.text)
-                                Text(plugin.isUsable
-                                     ? (manifest.description ?? "\(manifest.kind.rawValue) · every \(Int(manifest.interval ?? 0))s")
-                                     : plugin.problems.first?.description ?? "not usable")
-                                    .font(theme.chipFont)
-                                    .foregroundStyle(plugin.isUsable ? theme.dim : theme.warn)
-                                    .lineLimit(1)
-                            }
-                            Spacer(minLength: 0)
+                Button {
+                    shell.onInteract()
+                    if let id = plugin.manifest?.id { model.addWindow(pluginID: id, to: tabID) }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: plugin.isUsable ? "square.dashed.inset.filled" : "exclamationmark.triangle")
+                            .foregroundStyle(plugin.isUsable ? theme.accent : theme.warn)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(plugin.manifest?.name ?? plugin.folderName)
+                                .font(theme.bodyFont)
+                                .foregroundStyle(theme.text)
+                            Text(subtitle(for: plugin))
+                                .font(theme.chipFont)
+                                .foregroundStyle(plugin.isUsable ? theme.dim : theme.warn)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer(minLength: 0)
+                        if plugin.isUsable {
                             Text("Add").font(theme.chipFont).foregroundStyle(theme.accent)
                         }
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: 420)
-                        .background(RoundedRectangle(cornerRadius: 11).fill(theme.windowFill))
-                        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(theme.line))
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!plugin.isUsable)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: 420)
+                    .background(RoundedRectangle(cornerRadius: 11).fill(theme.windowFill))
+                    .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(theme.line))
                 }
+                .buttonStyle(.plain)
+                .disabled(!plugin.isUsable)
+                .help(plugin.isUsable ? "Add to this tab" : plugin.problems.first?.description ?? "")
             }
         }
+    }
+
+    private func subtitle(for plugin: DiscoveredPlugin) -> String {
+        if let problem = plugin.problems.first { return problem.description }
+        guard let manifest = plugin.manifest else { return plugin.folderName }
+        if let description = manifest.description { return description }
+        return "\(manifest.kind.rawValue) · every \(Int(manifest.interval ?? 0))s"
     }
 
     private var problems: some View {

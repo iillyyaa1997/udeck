@@ -212,3 +212,37 @@ struct PermissionTests {
         #expect(restored == grants)
     }
 }
+
+@Suite("Discovery messages")
+struct DiscoveryMessageTests {
+    /// Every one of these ends up in front of a plugin author who is trying to
+    /// work out why their plugin did not load, so each has to read as one
+    /// complete sentence rather than as two templates stapled together.
+    @Test("each failure reads as a sentence")
+    func messagesAreSentences() {
+        let problems: [DiscoveryProblem] = [
+            .missingManifest,
+            .unreadableManifest("permission denied"),
+            .malformedManifest("missing required field \"run\""),
+            .identifierMismatch(declared: "a", folder: "b"),
+            .executableMissing(path: "/x/run.sh"),
+            .executableNotOnSearchPath(command: "python3", searchPath: ["/usr/bin", "/bin"]),
+            .executableOutsidePluginFolder(command: "../../ssh"),
+            .executableNotExecutable("/x/run.sh"),
+            .manifest(.missingInterval),
+        ]
+        for problem in problems {
+            let text = problem.description
+            #expect(!text.isEmpty)
+            #expect(!text.contains("  "), "\(text) has doubled spacing")
+            #expect(text.first?.isUppercase != true, "\(text) should read as a clause, not a title")
+        }
+
+        #expect(DiscoveryProblem.executableMissing(path: "/x/run.sh").description
+            == "/x/run.sh does not exist")
+        #expect(DiscoveryProblem.executableNotOnSearchPath(command: "python3", searchPath: ["/usr/bin", "/bin"]).description
+            == "python3 was not found on /usr/bin:/bin")
+        #expect(DiscoveryProblem.executableOutsidePluginFolder(command: "../../ssh").description
+            == "../../ssh resolves outside the plugin folder, which a plugin is not allowed to do")
+    }
+}

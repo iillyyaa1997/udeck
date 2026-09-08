@@ -7,7 +7,9 @@ public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertibl
     case malformedManifest(String)
     case identifierMismatch(declared: String, folder: String)
     case manifest(ManifestProblem)
-    case executableNotFound(String)
+    case executableMissing(path: String)
+    case executableNotOnSearchPath(command: String, searchPath: [String])
+    case executableOutsidePluginFolder(command: String)
     case executableNotExecutable(String)
 
     public var description: String {
@@ -22,8 +24,12 @@ public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertibl
             "manifest declares id \"\(declared)\" but sits in a folder named \"\(folder)\" — they must match, because the folder name is what the operator sees and what settings are keyed by"
         case .manifest(let problem):
             problem.description
-        case .executableNotFound(let path):
+        case .executableMissing(let path):
             "\(path) does not exist"
+        case .executableNotOnSearchPath(let command, let searchPath):
+            "\(command) was not found on \(searchPath.joined(separator: ":"))"
+        case .executableOutsidePluginFolder(let command):
+            "\(command) resolves outside the plugin folder, which a plugin is not allowed to do"
         case .executableNotExecutable(let path):
             "\(path) is not executable — try chmod +x"
         }
@@ -151,7 +157,7 @@ public struct PluginDiscovery: Sendable {
     /// from a shell or by launchd, and inheriting whichever `PATH` happened to
     /// be around makes a plugin work in one and fail in another.
     private func resolveExecutable(_ command: String, in directory: URL) -> Result<URL, DiscoveryProblem> {
-        guard !command.isEmpty else { return .failure(.executableNotFound("(empty)")) }
+        guard !command.isEmpty else { return .failure(.executableMissing(path: "(empty)")) }
 
         func check(_ url: URL) -> Result<URL, DiscoveryProblem>? {
             guard fileManager.fileExists(atPath: url.path) else { return nil }
@@ -162,7 +168,7 @@ public struct PluginDiscovery: Sendable {
         }
 
         if command.hasPrefix("/") {
-            return check(URL(fileURLWithPath: command)) ?? .failure(.executableNotFound(command))
+            return check(URL(fileURLWithPath: command)) ?? .failure(.executableMissing(path: command))
         }
 
         if command.contains("/") {
@@ -171,16 +177,16 @@ public struct PluginDiscovery: Sendable {
             // would let a manifest reach anywhere on disk while still looking
             // like a self-contained plugin.
             guard url.path.hasPrefix(directory.standardizedFileURL.path + "/") else {
-                return .failure(.executableNotFound("\(command) resolves outside the plugin folder"))
+                return .failure(.executableOutsidePluginFolder(command: command))
             }
-            return check(url) ?? .failure(.executableNotFound(url.path))
+            return check(url) ?? .failure(.executableMissing(path: url.path))
         }
 
         for entry in searchPath {
             let url = URL(fileURLWithPath: entry).appendingPathComponent(command)
             if let result = check(url) { return result }
         }
-        return .failure(.executableNotFound("\(command) was not found on \(searchPath.joined(separator: ":"))"))
+        return .failure(.executableNotOnSearchPath(command: command, searchPath: searchPath))
     }
 
     /// A decoding error in terms a plugin author can act on: which field, and
