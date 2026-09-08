@@ -95,31 +95,31 @@ public struct PanelGeometry: Equatable, Sendable {
         }
     }
 
-    /// The y coordinate the panel's top edge sits on.
+    /// The y coordinate the panel's top edge sits on: the top of the screen,
+    /// plus `topEdgeBleed`.
     ///
-    /// On a notched screen that is `panelTopY`, below the notch: the notch is
-    /// opaque hardware sitting in the middle of exactly where the panel would
-    /// be, so a panel drawn through it would have a hole punched in its top.
-    /// The notch is the island there, and the panel hangs off it.
+    /// The bleed is there because the material draws an edge along the top of
+    /// its own view and offers no way to decline. On a panel attached to the
+    /// top of the display that edge is a bright rim across the top row.
+    /// Pushing the window's top row off the display removes it at the source.
     ///
-    /// On a notchless screen nothing is in the way, and the panel reaches the
-    /// very top edge. That is what makes the island read as part of the machine
-    /// instead of as a window that stops one menu bar short of the corner —
-    /// which is what it looked like, and what the operator objected to.
-    ///
-    /// It reaches `topEdgeBleed` points *past* that edge, because the material
-    /// draws an edge along the top of its own view and there is no way to ask
-    /// it not to. Pushing the window's top row off the display is what removes
-    /// it — the panel has no top edge on screen because it has no top edge on
-    /// screen, rather than because something painted over one.
+    /// This used to stop below the notch on a notched screen, on the reasoning
+    /// that a panel drawn through opaque hardware would have a hole punched in
+    /// its top. It does — the notch is that hole — but what it left behind was
+    /// a band of menu bar above the panel, which the operator saw and called
+    /// ugly, and he is right: the panel looked detached from the very thing it
+    /// is supposed to grow out of. The hole is the notch, and the notch is the
+    /// island; a bite taken out of the top edge by the machine itself reads as
+    /// the panel belonging to the machine.
     public var panelHangY: CGFloat {
-        screen.hasNotch ? screen.panelTopY : screen.frame.maxY + metrics.topEdgeBleed
+        screen.frame.maxY + metrics.topEdgeBleed
     }
 
-    /// How far the panel reaches above the menu bar's lower edge: the whole
-    /// menu bar on a notchless screen, nothing on a notched one. Panel content
-    /// is inset by this much so that the numbers in `PanelMetrics` keep meaning
-    /// the height of the *content*, not of the window around it.
+    /// How far the panel reaches above the menu bar's lower edge: the whole of
+    /// whatever is reserved at the top of that screen — a menu bar, a notch, or
+    /// both — plus the bleed. Panel content is inset by this much so that the
+    /// numbers in `PanelMetrics` keep meaning the height of the *content*, not
+    /// of the window around it.
     public var topOverhang: CGFloat { panelHangY - screen.panelTopY }
 
     /// What the operator sees while the panel is away.

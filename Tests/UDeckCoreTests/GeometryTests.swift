@@ -138,33 +138,23 @@ struct PanelGeometryTests {
         }
     }
 
-    @Test("only a notchless screen lets the panel reach the top edge")
-    func overhangIsForNotchlessScreensOnly() {
-        let dell = geometry(ScreenFixtures.externalMain)
-        let screen = ScreenFixtures.externalMain
-        // The menu bar, plus the couple of points the window is pushed past the
-        // top of the display so that the material's own top edge falls outside
-        // it.
-        #expect(dell.topOverhang == 30 + metrics.topEdgeBleed)
-        for phase in [PanelPhase.collapsed, .peek, .open] {
-            let frame = dell.frame(for: phase)
-            #expect(frame.maxY == screen.frame.maxY + metrics.topEdgeBleed,
-                    "\(phase) should reach past the top edge of a notchless screen")
-            // What is actually on screen is still exactly the top edge: the
-            // bleed is off the display, not a gap above the panel.
-            #expect(min(frame.maxY, screen.frame.maxY) == screen.frame.maxY)
-        }
-
-        // Under a real notch there is nothing to weld to: those points are
-        // hardware, and a panel drawn through them would have a hole in it. The
-        // collapsed state is the exception, and only because it draws nothing —
-        // its frame is the notch, which is where a window is invisible rather
-        // than where it would be mangled.
-        let builtIn = geometry(ScreenFixtures.builtInNotched)
-        #expect(builtIn.topOverhang == 0)
-        for phase in [PanelPhase.peek, .open, .fullscreen] {
-            #expect(builtIn.frame(for: phase).maxY <= ScreenFixtures.builtInNotched.panelTopY,
-                    "\(phase) on a notched screen must stay below the notch")
+    /// Both screens now weld. The panel used to stop below the notch on the
+    /// built-in display, which left a band of menu bar above it — the operator
+    /// looked at that and called it ugly, and it is: a panel that is supposed
+    /// to grow out of the notch was visibly detached from it. The notch takes a
+    /// bite out of the panel's top edge instead, which is the machine doing it.
+    @Test("every screen welds the panel to its top edge")
+    func everyScreenWelds() {
+        for screen in ScreenFixtures.both {
+            let g = geometry(screen)
+            #expect(g.topOverhang == screen.topInset + metrics.topEdgeBleed)
+            for phase in [PanelPhase.peek, .open] {
+                let frame = g.frame(for: phase)
+                #expect(frame.maxY == screen.frame.maxY + metrics.topEdgeBleed,
+                        "\(phase) on \(screen.name) should reach past the top edge")
+                // The bleed is off the display, not a gap above the panel.
+                #expect(min(frame.maxY, screen.frame.maxY) == screen.frame.maxY)
+            }
         }
     }
 

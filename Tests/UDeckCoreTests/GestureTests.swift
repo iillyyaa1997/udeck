@@ -157,21 +157,27 @@ struct GestureTests {
         #expect(!driver.fired)
     }
 
-    @Test("a fullscreen app suppresses the gesture by default, and can be allowed")
-    func fullscreenSuppresses() {
+    /// A fullscreen game is exactly when the panel is wanted and exactly when
+    /// it used to refuse, which is how a panel stops being reached for at all.
+    /// The gate is still there, because hover panels of this kind have been
+    /// seen to leave macOS's own menu-bar reveal stuck inside a fullscreen app
+    /// — it is just no longer the default.
+    @Test("a fullscreen app does not suppress the gesture, but the gate still works")
+    func fullscreenIsAllowedByDefault() {
         var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
         driver.environment.frontmostIsFullscreen = true
         driver.move(dx: 0, dy: 300)
         driver.rest(for: 0.5)
-        #expect(!driver.fired)
+        #expect(driver.fired)
 
-        var allowed = Driver(tuning: {
-            var t = GestureTuning(); t.enabledInFullscreen = true; return t
+        var suppressed = Driver(tuning: {
+            var t = GestureTuning(); t.enabledInFullscreen = false; return t
         }(), startingAt: CGPoint(x: 1280, y: 1200))
-        allowed.environment.frontmostIsFullscreen = true
-        allowed.move(dx: 0, dy: 300)
-        allowed.rest(for: 0.5)
-        #expect(allowed.fired)
+        suppressed.environment.frontmostIsFullscreen = true
+        suppressed.move(dx: 0, dy: 300)
+        suppressed.rest(for: 0.5)
+        #expect(!suppressed.fired)
+        #expect(suppressed.outcomes.last == .idle(reason: .fullscreen))
     }
 
     @Test("a click in the menu bar keeps the gesture quiet for a moment afterwards")

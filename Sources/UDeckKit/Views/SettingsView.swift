@@ -145,7 +145,7 @@ private struct OpeningSettings: View {
         SettingsGroup("When to stay out of the way") {
             Toggle("Retract when you switch to another application", isOn: binding(\.collapseOnAppSwitch))
             Toggle("Open over fullscreen applications", isOn: binding(\.gesture.enabledInFullscreen))
-            Text("Off by default. Panels of this kind have been observed to leave macOS's own menu-bar reveal stuck when they fight it in a fullscreen app, and corrupting the system's state is worse than not opening.")
+            Text("On by default: a fullscreen game or video is exactly when a panel you cannot reach stops being reached for. Turn it off if you ever see macOS's own menu-bar reveal get stuck in a fullscreen app — panels of this kind have been observed to do that, and corrupting the system's state is a worse problem than an unwanted panel.")
                 .font(.caption).foregroundStyle(.secondary)
         }
 

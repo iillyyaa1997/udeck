@@ -135,9 +135,9 @@ What it actually uses, and why none of it prompts:
 | Carbon's `RegisterEventHotKey` for the keyboard shortcut | it asks the window server to deliver *one* combination to this process — unlike `NSEvent.addGlobalMonitorForEvents(matching: .keyDown)`, which sees every keystroke on the machine and needs Accessibility |
 
 If that last one ever did become restricted, the effect would be that the
-fullscreen check stops working — not a permission prompt. The panel would then
-open over fullscreen applications when it should have kept quiet, which is a
-setting you can turn off.
+fullscreen check stops working — not a permission prompt. The panel opens over
+fullscreen applications anyway by default, so the visible difference would be
+none; the check exists so that the behaviour can be turned off.
 
 The one feature that would need Accessibility — listing and switching between
 running applications — is described in the plugin contract and deliberately not

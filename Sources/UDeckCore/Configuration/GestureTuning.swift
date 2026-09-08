@@ -71,8 +71,15 @@ public struct GestureTuning: Codable, Equatable, Sendable {
     public var peekKeepAliveInset: CGFloat
 
     /// Whether the gesture is allowed while the frontmost window on that screen
-    /// is fullscreen. Off by default: this is where hover panels have been
-    /// observed to corrupt the system's own menu-bar reveal.
+    /// is fullscreen.
+    ///
+    /// On, because a panel you cannot reach from the application you are
+    /// actually looking at is a panel you stop reaching for. It was off to
+    /// begin with for a real reason — hover panels of this kind have been seen
+    /// to leave macOS's own menu-bar reveal stuck when they fight it inside a
+    /// fullscreen app, and corrupting the *system's* state is a worse class of
+    /// problem than an unwanted panel. The setting stays, so that if that ever
+    /// shows up it can be turned off without a new build.
     public var enabledInFullscreen: Bool
 
     /// Whether the pointer gesture is enabled at all.
@@ -115,7 +122,7 @@ public struct GestureTuning: Codable, Equatable, Sendable {
         buttonReleaseGrace: TimeInterval = 0.3,
         peekExitGrace: TimeInterval = 0.25,
         peekKeepAliveInset: CGFloat = 24,
-        enabledInFullscreen: Bool = false,
+        enabledInFullscreen: Bool = true,
         enabled: Bool = true,
         fullscreenCheckInterval: TimeInterval = 0.25,
         pointerPollInterval: TimeInterval = 0.1
