@@ -152,7 +152,11 @@ struct LiquidGlassBackground: NSViewRepresentable {
         let view = NSGlassEffectView()
         view.style = .regular
         view.cornerRadius = 0
-        // The panel is drawn dark whatever the system is set to; see DeckTheme.
+        // One deliberate deviation from "the system's glass as it comes": the
+        // panel is drawn dark whatever the system is set to, because the theme
+        // above it picks text and card colours for a dark ground. Measured on a
+        // dark system it changes the result by one step out of 255 — it earns
+        // its place in light mode, not here.
         view.appearance = NSAppearance(named: .vibrantDark)
         return view
     }
