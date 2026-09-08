@@ -327,7 +327,7 @@ private struct LookSettings: View {
                 .font(.caption).foregroundStyle(.secondary)
 
             GlassPreview(glass: editedLook.glass,
-                         theme: DeckTheme(density: model.settings.density, ink: editedLook.ink))
+                         theme: DeckTheme(density: model.settings.density, look: editedLook))
 
             LabeledContent("Start from") {
                 Menu(startingPointName) {
@@ -437,6 +437,44 @@ private struct LookSettings: View {
                 Text("Light — for a panel darker than what is behind it").tag(PanelInk.light)
                 Text("Dark — for a panel brighter than what is behind it").tag(PanelInk.dark)
             }
+            LabeledContent("Text brightness") {
+                Slider(value: look(\.inkBrightness), in: 0 ... 1, step: 0.02) {
+                    Text("\(Int(editedLook.inkBrightness * 100)) %")
+                }
+                .frame(width: 260)
+            }
+            Text("Full is what the panel had before this was a setting — white, or the near-black light text is the opposite of. Turning it down walks the text back towards the panel it is written on, which is what quieter text means on a surface that is already a wash of one colour.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            Toggle("Colour the text", isOn: Binding(
+                get: { editedLook.inkColor != nil },
+                set: { wantsColour in
+                    var settings = model.settings
+                    var look = settings.theme.look(forDark: edited)
+                    look.inkColor = wantsColour
+                        ? (look.ink == .light ? .white : .black)
+                        : nil
+                    settings.theme.setLook(look, forDark: edited)
+                    model.update(settings: settings)
+                }
+            ))
+            if let colour = editedLook.inkColor {
+                ColorPicker("Text colour", selection: Binding(
+                    get: { Color(red: colour.red, green: colour.green, blue: colour.blue) },
+                    set: { newValue in
+                        guard let rgb = InkColor(newValue) else { return }
+                        var settings = model.settings
+                        var look = settings.theme.look(forDark: edited)
+                        look.inkColor = rgb
+                        settings.theme.setLook(look, forDark: edited)
+                        model.update(settings: settings)
+                    }
+                ), supportsOpacity: false)
+                .frame(width: 260, alignment: .leading)
+            }
+            Text("Grey is the default and stays it: the panel is a wash of one tint, and coloured text on a coloured ground is where legibility goes. Brightness applies to a colour the same way it applies to grey — it decides how far the text travels from the panel towards its own end.")
+                .font(.caption).foregroundStyle(.secondary)
+
             .pickerStyle(.radioGroup)
             Text("Not automatic on purpose. Choosing correctly means knowing how bright what is behind the panel is, and uDeck never measures that — the glass samples it, but nothing reports it back. An automatic setting would guess, and it would guess wrong exactly where it matters.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -449,7 +487,7 @@ private struct LookSettings: View {
             }
             .disabled(!editedLook.glass.tinted)
 
-            GlassPreview(glass: editedLook.glass, theme: DeckTheme(density: model.settings.density, ink: editedLook.ink))
+            GlassPreview(glass: editedLook.glass, theme: DeckTheme(density: model.settings.density, look: editedLook))
             Text("The sample sits over a dark half and a light one, because those are the two cases that pull in opposite directions: a light tint stands out over a game and washes out over a document, and a dark one does the reverse. The ruling is there so the refraction is visible at all — the material bends what is behind it, and a flat colour or a field of grass gives it nothing to bend.")
                 .font(.caption).foregroundStyle(.secondary)
         }

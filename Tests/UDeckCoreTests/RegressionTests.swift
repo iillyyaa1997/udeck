@@ -616,4 +616,89 @@ struct RegressionTests {
                     "\(mode.name) writes in the wrong ink for its own glass")
         }
     }
+
+    // MARK: - How bright the text is, and what colour
+
+    /// Full brightness has to land exactly on what the panel had before any of
+    /// this was a setting, or every look anyone already saved changes under him.
+    @Test("full brightness is the ink the panel always had")
+    func fullBrightnessIsUnchanged() {
+        var light = PanelLook(glass: GlassAppearance(), ink: .light)
+        #expect(light.foreground == InkColor.white)
+        light.inkBrightness = 1
+        #expect(light.foreground == InkColor.white)
+
+        let dark = PanelLook(glass: GlassAppearance(), ink: .dark)
+        #expect(dark.foreground == InkColor.black)
+    }
+
+    /// Turning it down walks the text towards the panel it is written on, from
+    /// whichever end it started at.
+    @Test("dimming walks the text towards the panel, from either end")
+    func dimmingWalksTowardsThePanel() {
+        var light = PanelLook(glass: GlassAppearance(), ink: .light)
+        light.inkBrightness = 0
+        #expect(light.foreground.luminance < InkColor.white.luminance,
+                "light text dims by getting darker")
+        #expect(light.foreground.luminance > 0.2, "and not by disappearing")
+
+        var dark = PanelLook(glass: GlassAppearance(), ink: .dark)
+        dark.inkBrightness = 0
+        #expect(dark.foreground.luminance > InkColor.black.luminance,
+                "dark text dims by getting lighter")
+        #expect(dark.foreground.luminance < 0.8, "and not by disappearing")
+
+        // Monotonic in between, or the slider does not mean what it looks like.
+        var previous = -1.0
+        for step in stride(from: 0.0, through: 1.0, by: 0.1) {
+            var look = PanelLook(glass: GlassAppearance(), ink: .light)
+            look.inkBrightness = step
+            #expect(look.foreground.luminance > previous, "brightness \(step) is not brighter than the step before")
+            previous = look.foreground.luminance
+        }
+    }
+
+    /// A colour is the ink, and brightness works on it the same way it works on
+    /// grey — one number does both, which is what makes the two controls one
+    /// idea rather than two that interfere.
+    @Test("a coloured ink dims the same way a grey one does")
+    func colouredInkDimsLikeGrey() {
+        var look = PanelLook(glass: GlassAppearance(), ink: .light)
+        look.inkColor = InkColor(red: 0.4, green: 0.9, blue: 0.5)
+        #expect(look.foreground == InkColor(red: 0.4, green: 0.9, blue: 0.5),
+                "at full brightness the colour is the colour")
+
+        look.inkBrightness = 0.5
+        let dimmed = look.foreground
+        #expect(dimmed.luminance < 0.9 * 0.7)
+        // The hue survives dimming: the ratios between the channels hold.
+        #expect(abs(dimmed.green / dimmed.red - 0.9 / 0.4) < 0.001)
+    }
+
+    /// Nonsense from a hand-written file is brought back into range rather than
+    /// producing text nobody can see.
+    @Test("an impossible brightness or colour is clamped, not obeyed")
+    func inkIsValidated() throws {
+        let json = Data("""
+        {"theme": {"light": {"inkBrightness": 4, "inkColor": {"red": -1, "green": 2, "blue": 0.5}}}}
+        """.utf8)
+        let settings = try JSONDecoder().decode(AppSettings.self, from: json).validated()
+        #expect(settings.theme.light.inkBrightness == 1)
+        #expect(settings.theme.light.inkColor == InkColor(red: 0, green: 1, blue: 0.5))
+
+        var look = PanelLook()
+        look.inkBrightness = .nan
+        #expect(look.validated().inkBrightness == 1)
+    }
+
+    /// And it survives the settings file, which is the only reason it is data.
+    @Test("brightness and colour survive a round trip")
+    func inkRoundTrips() throws {
+        var settings = AppSettings()
+        settings.theme.dark.inkBrightness = 0.42
+        settings.theme.dark.inkColor = InkColor(red: 0.2, green: 0.8, blue: 0.3)
+        let back = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
+        #expect(back.theme.dark.inkBrightness == 0.42)
+        #expect(back.theme.dark.inkColor == InkColor(red: 0.2, green: 0.8, blue: 0.3))
+    }
 }

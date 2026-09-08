@@ -24,19 +24,20 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// below are what that truth resolves to right now — see `resolved`.
     public var theme: ThemeSettings
 
-    /// How the panel's glass is made, in the look currently in force.
+    /// The look currently in force, whole.
     ///
     /// **Derived.** Written by `resolved(systemIsDark:hour:)` from `theme`, and
-    /// read by everything that draws. It stays a stored property because every
-    /// view in the app reads it, and because a settings file that names the
-    /// resolved values is one a person can still read — but editing it directly
-    /// is editing a cache: the next resolve overwrites it. The settings screen
-    /// edits `theme.light` and `theme.dark`.
-    public var glass: GlassAppearance
+    /// read by everything that draws. It is stored rather than computed because
+    /// a settings file that names the resolved look is one a person can still
+    /// read — but editing it directly is editing a cache: the next resolve
+    /// overwrites it. The settings screen edits `theme.light` and `theme.dark`.
+    public var look: PanelLook
+
+    /// How the panel's glass is made, in the look currently in force.
+    public var glass: GlassAppearance { look.glass }
 
     /// Which way the panel's text is written, in the look currently in force.
-    /// Derived, like `glass`.
-    public var ink: PanelInk
+    public var ink: PanelInk { look.ink }
 
     /// Retract the panel when the operator activates another application.
     public var collapseOnAppSwitch: Bool
@@ -75,8 +76,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         panel: PanelMetrics = PanelMetrics(),
         hotkey: HotKeyBinding = HotKeyBinding(),
         theme: ThemeSettings = ThemeSettings(),
-        glass: GlassAppearance = PanelLook.light.glass,
-        ink: PanelInk = PanelLook.light.ink,
+        look: PanelLook = .light,
         collapseOnAppSwitch: Bool = true,
         defaultCardTTL: TimeInterval = 60,
         silentTTLMultiplier: Double = 3,
@@ -91,8 +91,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.panel = panel
         self.hotkey = hotkey
         self.theme = theme
-        self.glass = glass
-        self.ink = ink
+        self.look = look
         self.collapseOnAppSwitch = collapseOnAppSwitch
         self.defaultCardTTL = defaultCardTTL
         self.silentTTLMultiplier = silentTTLMultiplier
@@ -163,7 +162,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         result.panel.revealSpringDamping = min(max(
             result.panel.revealSpringDamping.isFinite ? result.panel.revealSpringDamping : 0.8, 0.1), 1)
 
-        result.glass = result.glass.validated()
+        result.look = result.look.validated()
 
         // A shortcut that cannot be registered is turned off rather than left
         // enabled-and-broken: "on, and nothing happens when you press it" is
@@ -181,6 +180,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         return result
     }
 
+
     /// Decoding is tolerant of missing keys so that a settings file written by
     /// an older build still loads, and of unknown keys so that downgrading does
     /// not destroy them — but it is NOT tolerant of a wrong type, which is a
@@ -188,15 +188,31 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = AppSettings()
+
+        /// What a settings file written before there was a `look` says instead.
+        /// Read through a container of its own so that the keys the encoder
+        /// uses stay exactly the properties there are — an extra case in the
+        /// real `CodingKeys` is a case the synthesised encoder cannot fill.
+        enum LegacyKeys: String, CodingKey {
+            case glass
+            case ink
+        }
+        let legacy = try decoder.container(keyedBy: LegacyKeys.self)
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? defaults.version
         density = try c.decodeIfPresent(Density.self, forKey: .density) ?? defaults.density
         gesture = try c.decodeIfPresent(GestureTuning.self, forKey: .gesture) ?? defaults.gesture
         panel = try c.decodeIfPresent(PanelMetrics.self, forKey: .panel) ?? defaults.panel
         hotkey = try c.decodeIfPresent(HotKeyBinding.self, forKey: .hotkey) ?? defaults.hotkey
-        glass = try c.decodeIfPresent(GlassAppearance.self, forKey: .glass) ?? defaults.glass
+        // `look` names the resolved look; `glass` and `ink` beside it are what a
+        // file written before there was a look says instead, and are read here
+        // only so that such a file still carries its own appearance in.
+        let carriedGlass = try legacy.decodeIfPresent(GlassAppearance.self, forKey: .glass) ?? defaults.glass
         // Read as a string and mapped: an unknown name would throw, and
         // throwing here fails the whole settings file.
-        ink = (try c.decodeIfPresent(String.self, forKey: .ink)).flatMap(PanelInk.init(rawValue:)) ?? defaults.ink
+        let carriedInk = (try legacy.decodeIfPresent(String.self, forKey: .ink)).flatMap(PanelInk.init(rawValue:))
+            ?? defaults.ink
+        look = try c.decodeIfPresent(PanelLook.self, forKey: .look)
+            ?? PanelLook(glass: carriedGlass, ink: carriedInk)
         // A file written before there were two looks says only what the panel
         // looked like at the time. That is a real choice and it is kept: it
         // becomes whichever pole its ink belongs to, and the other pole starts
@@ -205,8 +221,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         if let stored = try c.decodeIfPresent(ThemeSettings.self, forKey: .theme) {
             theme = stored
         } else {
-            let carried = PanelLook(glass: glass, ink: ink)
-            let isDark = ink == .light
+            let carried = look
+            let isDark = look.ink == .light
             theme = ThemeSettings(
                 source: .manual,
                 manualIsDark: isDark,
@@ -235,9 +251,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// time it is are the world's business, not the operator's.
     public func resolved(systemIsDark: Bool, hour: Int) -> AppSettings {
         var result = self
-        let look = theme.look(systemIsDark: systemIsDark, hour: hour)
-        result.glass = look.glass
-        result.ink = look.ink
+        result.look = theme.look(systemIsDark: systemIsDark, hour: hour)
         return result
     }
 

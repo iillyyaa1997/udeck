@@ -1,5 +1,57 @@
 import Foundation
 
+
+/// A colour for the panel's text, when grey is not what is wanted.
+///
+/// Stored as three numbers rather than as a platform colour because this
+/// target has no AppKit and no SwiftUI — the view that needs a `Color` is the
+/// one that can make one, and a settings file full of sRGB components is a
+/// settings file a person can still read and edit.
+public struct InkColor: Codable, Equatable, Sendable {
+    public var red: Double
+    public var green: Double
+    public var blue: Double
+
+    public init(red: Double, green: Double, blue: Double) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+    }
+
+    public static let white = InkColor(red: 1, green: 1, blue: 1)
+    public static let black = InkColor(red: 0.06, green: 0.06, blue: 0.06)
+
+    /// Perceived brightness, for deciding whether a colour belongs on a dark
+    /// panel or a light one.
+    public var luminance: Double {
+        0.2126 * red + 0.7152 * green + 0.0722 * blue
+    }
+
+    public func validated() -> InkColor {
+        func clamp(_ value: Double) -> Double {
+            guard value.isFinite else { return 0 }
+            return min(max(value, 0), 1)
+        }
+        return InkColor(red: clamp(red), green: clamp(green), blue: clamp(blue))
+    }
+
+    /// See `GlassAppearance.init(from:)` — a half-written colour keeps the rest.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            red: try c.decodeIfPresent(Double.self, forKey: .red) ?? 1,
+            green: try c.decodeIfPresent(Double.self, forKey: .green) ?? 1,
+            blue: try c.decodeIfPresent(Double.self, forKey: .blue) ?? 1
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case red
+        case green
+        case blue
+    }
+}
+
 /// One complete look: what the panel is made of, and how it is written on.
 ///
 /// The two travel together because they cannot be chosen apart. Ink is only
@@ -8,11 +60,77 @@ import Foundation
 /// independently the operator was handed white text on a white panel.
 public struct PanelLook: Codable, Equatable, Sendable {
     public var glass: GlassAppearance
+
+    /// Which way the text is written: light on a dark panel, or dark on a
+    /// bright one. The direction, not the shade.
     public var ink: PanelInk
 
-    public init(glass: GlassAppearance = GlassAppearance(), ink: PanelInk = .light) {
+    /// How far the text goes towards its own end of the scale, 0 to 1.
+    ///
+    /// One means what the panel had before this was a setting — white, or the
+    /// near-black that light ink is the opposite of. Turning it down walks the
+    /// text back towards the middle, which is what "quieter text" means when
+    /// the thing it is written on is already a wash of one colour.
+    public var inkBrightness: Double
+
+    /// A colour instead of grey, or `nil` for grey.
+    ///
+    /// Grey is the right default and stays it: the panel is a wash of one tint
+    /// and coloured text on a coloured ground is where legibility goes. But the
+    /// panel is the operator's, it sits over his work all day, and there is no
+    /// argument from legibility that survives him wanting it green.
+    public var inkColor: InkColor?
+
+    public init(
+        glass: GlassAppearance = GlassAppearance(),
+        ink: PanelInk = .light,
+        inkBrightness: Double = 1,
+        inkColor: InkColor? = nil
+    ) {
         self.glass = glass
         self.ink = ink
+        self.inkBrightness = inkBrightness
+        self.inkColor = inkColor
+    }
+
+    /// The colour the text is actually written in.
+    ///
+    /// Kept here rather than in the theme so it can be checked without a view.
+    /// Brightness is how far the ink travels from the panel's own value towards
+    /// its end of the scale, which is the same thing whether the ink is grey or
+    /// coloured — so one number does both, and at 1 it lands exactly on what
+    /// the panel had before any of this was a setting.
+    public var foreground: InkColor {
+        let b = min(max(inkBrightness.isFinite ? inkBrightness : 1, 0), 1)
+        let base = inkColor ?? (ink == .light ? .white : .black)
+        switch ink {
+        case .light:
+            // Dimming light text walks it down towards the panel it sits on.
+            let k = 0.35 + 0.65 * b
+            return InkColor(red: base.red * k, green: base.green * k, blue: base.blue * k)
+        case .dark:
+            // Dimming dark text walks it up towards the panel it sits on.
+            let k = 0.35 + 0.65 * b
+            // Written as "the colour, plus what is left of the way to white"
+            // rather than as "white, minus", so that full brightness lands on
+            // the colour itself and not a rounding error away from it.
+            let rest = 1 - k
+            return InkColor(
+                red: base.red + (1 - base.red) * rest,
+                green: base.green + (1 - base.green) * rest,
+                blue: base.blue + (1 - base.blue) * rest
+            )
+        }
+    }
+
+    public func validated() -> PanelLook {
+        var result = self
+        result.glass = result.glass.validated()
+        result.inkBrightness = result.inkBrightness.isFinite
+            ? min(max(result.inkBrightness, 0), 1)
+            : 1
+        result.inkColor = result.inkColor?.validated()
+        return result
     }
 
     /// The bright pole: a frosted panel with near-black text.
@@ -37,13 +155,17 @@ public struct PanelLook: Codable, Equatable, Sendable {
         let d = PanelLook()
         self.init(
             glass: try c.decodeIfPresent(GlassAppearance.self, forKey: .glass) ?? d.glass,
-            ink: (try c.decodeIfPresent(String.self, forKey: .ink)).flatMap(PanelInk.init(rawValue:)) ?? d.ink
+            ink: (try c.decodeIfPresent(String.self, forKey: .ink)).flatMap(PanelInk.init(rawValue:)) ?? d.ink,
+            inkBrightness: try c.decodeIfPresent(Double.self, forKey: .inkBrightness) ?? d.inkBrightness,
+            inkColor: try c.decodeIfPresent(InkColor.self, forKey: .inkColor) ?? d.inkColor
         )
     }
 
     enum CodingKeys: String, CodingKey {
         case glass
         case ink
+        case inkBrightness
+        case inkColor
     }
 }
 
@@ -267,13 +389,13 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
     public func validated() -> ThemeSettings {
         var result = self
         result.schedule = result.schedule.validated()
-        result.light.glass = result.light.glass.validated()
-        result.dark.glass = result.dark.glass.validated()
+        result.light = result.light.validated()
+        result.dark = result.dark.validated()
         result.saved = result.saved.compactMap { preset in
             var preset = preset
             preset.name = PanelPreset.cleaned(name: preset.name)
             guard !preset.name.isEmpty else { return nil }
-            preset.look.glass = preset.look.glass.validated()
+            preset.look = preset.look.validated()
             return preset
         }
         return result

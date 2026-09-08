@@ -18,9 +18,21 @@ public struct DeckTheme: Sendable {
     /// than leaving half the panel unreadable.
     public var ink: PanelInk
 
+    /// The whole of the ink: direction, how far it goes, and whether it is grey.
+    ///
+    /// The direction still decides everything derived — hairlines, recesses,
+    /// which set of state colours reads — because those follow from whether the
+    /// panel is dark or bright, not from the shade the text happens to be.
+    private let inkColour: InkColor
+
     public init(density: Density, ink: PanelInk = .light) {
+        self.init(density: density, look: PanelLook(glass: GlassAppearance(), ink: ink))
+    }
+
+    public init(density: Density, look: PanelLook) {
         self.density = density
-        self.ink = ink
+        self.ink = look.ink
+        self.inkColour = look.foreground
     }
 
     private var isLightInk: Bool { ink == .light }
@@ -28,7 +40,13 @@ public struct DeckTheme: Sendable {
     /// The colour text is written in, and the colour the panel's own lines are
     /// drawn in — they have to move together, or a light panel keeps hairlines
     /// meant for a dark one.
-    private var foreground: Color { isLightInk ? .white : Color(white: 0.06) }
+    ///
+    /// Worked out in `PanelLook.foreground`, where it can be checked without a
+    /// view. At full brightness and no colour it is exactly what it always was:
+    /// white, or the near-black light ink is the opposite of.
+    private var foreground: Color {
+        Color(red: inkColour.red, green: inkColour.green, blue: inkColour.blue)
+    }
 
     // Surfaces
     public let panelTint = Color(red: 0.078, green: 0.102, blue: 0.149).opacity(0.62)
@@ -138,5 +156,18 @@ public extension EnvironmentValues {
     var deckTheme: DeckTheme {
         get { self[DeckThemeKey.self] }
         set { self[DeckThemeKey.self] = newValue }
+    }
+}
+
+extension InkColor {
+    /// A SwiftUI colour as three sRGB numbers, or `nil` when it has no such
+    /// form — a named system colour that changes with the appearance is not a
+    /// thing a settings file can hold, and guessing at one would store a value
+    /// that means something different tomorrow.
+    init?(_ color: Color) {
+        guard let srgb = NSColor(color).usingColorSpace(.sRGB) else { return nil }
+        self.init(red: Double(srgb.redComponent),
+                  green: Double(srgb.greenComponent),
+                  blue: Double(srgb.blueComponent))
     }
 }
