@@ -257,11 +257,16 @@ struct PollExecutionTests {
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
             searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval
         )
+        // The claim under test is that large output is delivered rather than
+        // deadlocking on a full pipe buffer. What arrives is then cut down to
+        // what uDeck will draw, which is a separate rule with its own tests.
         guard case .card(let card) = outcome else {
             Issue.record("expected a card, got \(outcome)"); return
         }
         guard case .log(let lines) = card.rows.first else { Issue.record("expected a log row"); return }
-        #expect(lines.count == 2000)
+        #expect(lines.count == CardLimits.standard.logLines)
+        guard case .text(let notice) = card.rows.last else { Issue.record("expected a notice"); return }
+        #expect(notice.contains("cut short"))
     }
 
     @Test("a producer that never stops printing is stopped at the output limit")

@@ -147,7 +147,9 @@ extension PollExecution {
         }
         do {
             let card = try JSONDecoder().decode(Card.self, from: Data(trimmed.utf8))
-            self = .card(card)
+            // Bounded before anything tries to draw it: the byte cap on a
+            // producer's output is the wrong unit for what actually hurts.
+            self = .card(card.withinDrawingLimits())
         } catch {
             self = .failure(PluginFailure(
                 reason: .unparsableOutput(PluginDiscovery.describe(error)),

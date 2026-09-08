@@ -418,6 +418,31 @@ Each of these produces a different, readable message on the card:
 
 ---
 
+### How much a card may contain
+
+The output limit is in bytes, and bytes are the wrong unit for what makes a
+panel slow. A megabyte of `{"text":"x"}` is about eighty thousand rows — well
+inside the byte limit, and enough to stop the panel responding while it lays
+them out. So a card is also bounded by what it asks uDeck to draw:
+
+| | Limit |
+|---|---|
+| Rows in a card | 200 |
+| Items in a `list` | 200 |
+| Rows in a `table` | 200 |
+| Columns in a `table` | 12 |
+| Lines in a `log` | 200 |
+| Values in a `spark` | 512 |
+| Characters in any single piece of text | 1000 |
+
+Going over is not an error — the card is drawn up to the limit and gains a row
+saying it was cut short, so a card that is mostly useful and slightly too long
+still shows the useful part. But the notice is there for you: if you see it, the
+card is telling you to send less.
+
+If you have more to say than this, a card is the wrong shape for it. Summarise,
+and put the detail behind an action.
+
 ### One thing uDeck cannot clean up
 
 If uDeck itself is killed — force-quit, or crashed — while one of your runs is

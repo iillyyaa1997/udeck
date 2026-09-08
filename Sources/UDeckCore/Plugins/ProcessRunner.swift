@@ -97,6 +97,14 @@ public struct ProcessRunner: Sendable {
         let collector = OutputCollector(limit: maximumOutputBytes)
         collector.attach(stdout: outPipe.fileHandleForReading, stderr: errPipe.fileHandleForReading)
 
+        // Armed *before* the process starts. Assigning `terminationHandler`
+        // afterwards is a race that a fast producer wins: `echo '{}'` exits in
+        // milliseconds, and if it exits before the property is set, the handler
+        // is never called and the wait below never returns — that plugin stops
+        // updating for the rest of the session with no error anywhere.
+        let ended = TerminationSignal()
+        process.terminationHandler = { _ in ended.signal() }
+
         do {
             try process.run()
         } catch {
@@ -135,9 +143,7 @@ public struct ProcessRunner: Sendable {
             }
         }
 
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            process.terminationHandler = { _ in continuation.resume() }
-        }
+        await ended.wait()
 
         watchdog.cancel()
         limitWatcher.cancel()
@@ -280,6 +286,40 @@ enum ProcessTree {
         let data = (try? pipe.fileHandleForReading.readToEnd()) ?? nil
         process.waitUntilExit()
         return data.map { String(decoding: $0, as: UTF8.self) }
+    }
+}
+
+/// A one-shot signal that is safe to arm before the thing it waits for.
+///
+/// The waiter may arrive after the signal has already fired, and must not
+/// block for something that has already happened; the signal may arrive with no
+/// waiter yet, and must be remembered. Both directions are what makes it usable
+/// before `Process.run()`.
+private final class TerminationSignal: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hasFired = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func signal() {
+        lock.lock()
+        let continuation = waiter
+        waiter = nil
+        hasFired = true
+        lock.unlock()
+        continuation?.resume()
+    }
+
+    func wait() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if hasFired {
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+            waiter = continuation
+            lock.unlock()
+        }
     }
 }
 

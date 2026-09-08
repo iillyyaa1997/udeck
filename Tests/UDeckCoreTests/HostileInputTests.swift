@@ -264,3 +264,73 @@ struct DuplicateIdentifierTests {
         #expect(result.count == 3)
     }
 }
+
+/// The byte cap on a producer's output is the wrong unit for what actually
+/// hurts: a megabyte of tiny rows is well inside it and enough to stop the
+/// panel responding while it lays them out.
+@Suite("Card size")
+struct CardSizeTests {
+    @Test("a card with tens of thousands of rows is cut down, and says so")
+    func manyRowsAreCut() {
+        let card = Card(rows: (0 ..< 80_000).map { .text("row \($0)") })
+        let drawn = card.withinDrawingLimits()
+
+        #expect(drawn.rows.count == CardLimits.standard.rows + 1, "the extra row is the notice")
+        guard case .text(let notice) = drawn.rows.last else { Issue.record("expected a notice"); return }
+        #expect(notice.contains("cut short"))
+        // The rows that survive are the first ones, in order.
+        guard case .text(let first) = drawn.rows.first else { Issue.record("expected a text row"); return }
+        #expect(first == "row 0")
+    }
+
+    @Test("a single enormous string is trimmed rather than laid out")
+    func longStringsAreTrimmed() {
+        let huge = String(repeating: "x", count: 500_000)
+        let drawn = Card(chip: huge, rows: [.text(huge), .keyValue(KeyValueRow(label: huge, value: huge))])
+            .withinDrawingLimits()
+
+        #expect((drawn.chip?.count ?? 0) <= CardLimits.standard.textLength + 1)
+        guard case .text(let text) = drawn.rows[0] else { Issue.record("expected a text row"); return }
+        #expect(text.count <= CardLimits.standard.textLength + 1)
+        guard case .keyValue(let kv) = drawn.rows[1] else { Issue.record("expected a kv row"); return }
+        #expect(kv.label.count <= CardLimits.standard.textLength + 1)
+        #expect(kv.value.count <= CardLimits.standard.textLength + 1)
+    }
+
+    @Test("every collection inside a row is bounded too")
+    func nestedCollectionsAreCut() {
+        let card = Card(rows: [
+            .list((0 ..< 10_000).map { ListItem(text: "item \($0)") }),
+            .spark(SparkRow(values: Array(repeating: 1, count: 10_000))),
+            .log((0 ..< 10_000).map { "line \($0)" }),
+            .table(CardTable(
+                columns: (0 ..< 200).map { CardTableColumn(title: "c\($0)") },
+                rows: (0 ..< 10_000).map { _ in (0 ..< 200).map(String.init) }
+            )),
+        ])
+        let drawn = card.withinDrawingLimits()
+        let limits = CardLimits.standard
+
+        guard case .list(let items) = drawn.rows[0] else { Issue.record("expected a list"); return }
+        #expect(items.count == limits.listItems)
+        guard case .spark(let spark) = drawn.rows[1] else { Issue.record("expected a spark"); return }
+        #expect(spark.values.count == limits.sparkValues)
+        guard case .log(let lines) = drawn.rows[2] else { Issue.record("expected a log"); return }
+        #expect(lines.count == limits.logLines)
+        guard case .table(let table) = drawn.rows[3] else { Issue.record("expected a table"); return }
+        #expect(table.columns.count == limits.tableColumns)
+        #expect(table.rows.count == limits.tableRows)
+        #expect(table.rows.allSatisfy { $0.count == limits.tableColumns },
+                "cells beyond the surviving columns would have nowhere to go")
+    }
+
+    @Test("a card that already fits is returned unchanged, with no notice added")
+    func smallCardsAreUntouched() {
+        let card = Card(
+            state: .warn, chip: "16 waiting",
+            rows: [.text("hello"), .list([ListItem(text: "x", note: "y", icon: .wait)])],
+            ttl: 20
+        )
+        #expect(card.withinDrawingLimits() == card)
+    }
+}
