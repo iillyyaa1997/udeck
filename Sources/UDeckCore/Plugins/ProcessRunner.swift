@@ -100,7 +100,7 @@ public struct ProcessRunner: Sendable {
         do {
             try process.run()
         } catch {
-            collector.finish(after: 0, pollEvery: Self.drainPollInterval)
+            await collector.finish(after: 0, pollEvery: Self.drainPollInterval)
             return ProcessRunResult(
                 standardOutput: Data(),
                 standardError: Data("\(error)".utf8),
@@ -141,7 +141,7 @@ public struct ProcessRunner: Sendable {
 
         watchdog.cancel()
         limitWatcher.cancel()
-        collector.finish(after: drainGrace, pollEvery: Self.drainPollInterval)
+        await collector.finish(after: drainGrace, pollEvery: Self.drainPollInterval)
 
         return ProcessRunResult(
             standardOutput: collector.standardOutput,
@@ -299,13 +299,20 @@ private final class OutputCollector: @unchecked Sendable {
 
     /// Stops reading, giving the pipes a bounded moment to reach end-of-file
     /// first so that the tail of a normal producer's output is not lost.
-    func finish(after grace: TimeInterval, pollEvery interval: TimeInterval) {
+    /// Waits — without blocking a thread — for the pipes to reach end-of-file,
+    /// then stops reading.
+    ///
+    /// `Task.sleep` rather than `Thread.sleep`: this runs on the cooperative
+    /// pool, and several plugins finishing at once would otherwise each hold a
+    /// pool thread doing nothing for up to the grace period, starving whatever
+    /// else was queued.
+    func finish(after grace: TimeInterval, pollEvery interval: TimeInterval) async {
         let deadline = Date().addingTimeInterval(grace)
         while !reachedEndOfFile && Date() < deadline {
             // The readability handlers run on their own queue; this only has to
-            // yield long enough for them to observe the last bytes and the
+            // wait long enough for them to observe the last bytes and the
             // end-of-file that follows.
-            Thread.sleep(forTimeInterval: interval)
+            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
         }
         stdoutHandle?.readabilityHandler = nil
         stderrHandle?.readabilityHandler = nil
