@@ -383,13 +383,14 @@ private struct AboutSection: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
 
-        if !model.startupProblems.isEmpty {
-            SettingsGroup("Problems at startup") {
-                ForEach(Array(model.startupProblems.enumerated()), id: \.offset) { _, problem in
+        if !model.problems.isEmpty {
+            SettingsGroup("Problems") {
+                ForEach(Array(model.problems.enumerated()), id: \.offset) { _, problem in
                     Text(problem)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                 }
+                Button("Clear") { model.clearProblems() }
             }
         }
     }

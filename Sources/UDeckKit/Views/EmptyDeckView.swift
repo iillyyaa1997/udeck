@@ -56,7 +56,7 @@ struct EmptyDeckView: View {
                 .buttonStyle(GhostButtonStyle(theme: theme))
             }
 
-            if !model.startupProblems.isEmpty {
+            if !model.problems.isEmpty {
                 problems
             }
 
@@ -105,7 +105,7 @@ struct EmptyDeckView: View {
 
     private var problems: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(model.startupProblems.enumerated()), id: \.offset) { _, problem in
+            ForEach(Array(model.problems.enumerated()), id: \.offset) { _, problem in
                 Text(problem)
                     .font(theme.chipFont)
                     .foregroundStyle(theme.warn)

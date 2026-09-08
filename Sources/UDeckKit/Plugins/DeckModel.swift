@@ -20,9 +20,23 @@ public final class DeckModel {
     public private(set) var pluginSettings: PluginSettings
 
     /// Problems worth showing the operator: a settings file that would not
-    /// parse, a layout that had to be repaired. Collected rather than logged,
-    /// because a message in a log nobody reads is the same as no message.
-    public private(set) var startupProblems: [String] = []
+    /// parse, a layout that could not be written, a plugin whose windows had to
+    /// be removed. Collected and shown rather than only logged, because a
+    /// message in a log nobody reads is the same as no message — and a layout
+    /// that quietly fails to save is the operator's arrangement disappearing
+    /// with no explanation the next time they launch.
+    public private(set) var problems: [String] = []
+
+    public func clearProblems() { problems.removeAll() }
+
+    /// Records a failure the operator needs to know about, keeping the most
+    /// recent few rather than growing without bound.
+    private func record(_ description: String) {
+        DeckLog.plugins.error("\(description, privacy: .public)")
+        guard !problems.contains(description) else { return }
+        problems.append(description)
+        if problems.count > 10 { problems.removeFirst(problems.count - 10) }
+    }
 
     /// Set by the shell so the model knows whether anybody is looking.
     public var panelIsVisible = false {
@@ -61,7 +75,7 @@ public final class DeckModel {
         layout = load(JSONFileStore<DeckLayout>(url: paths.layoutFile), default: DeckLayout.firstRun()).normalized()
         grants = load(JSONFileStore<PermissionGrants>(url: paths.grantsFile), default: PermissionGrants())
         pluginSettings = load(JSONFileStore<PluginSettings>(url: paths.pluginSettingsFile), default: PluginSettings())
-        startupProblems = problems
+        self.problems = problems
 
         for directory in paths.directoriesToCreate {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -77,7 +91,7 @@ public final class DeckModel {
         let installed = Set(plugins.compactMap { $0.manifest?.id })
         let orphaned = layout.pruneWindows(keepingPlugins: installed)
         if !orphaned.isEmpty {
-            startupProblems.append(
+            record(
                 "removed windows for plugins that are no longer installed: "
                 + orphaned.map(\.rawValue).joined(separator: ", ")
             )
@@ -235,7 +249,7 @@ public final class DeckModel {
 
     public func update(settings newValue: AppSettings) {
         settings = newValue
-        try? settingsStore.save(newValue)
+        save(settingsStore, newValue, named: "settings")
         restartPolling()
     }
 
@@ -264,7 +278,7 @@ public final class DeckModel {
             denied: allow ? [] : requested,
             decidedForVersion: manifest.version
         )
-        try? grantsStore.save(grants)
+        save(grantsStore, grants, named: "permission decisions")
         restartPolling()
         if allow { refresh(id) }
     }
@@ -336,10 +350,18 @@ public final class DeckModel {
     // MARK: - Persistence
 
     private func saveLayout() {
-        try? layoutStore.save(layout)
+        save(layoutStore, layout, named: "layout")
     }
 
     private func savePluginSettings() {
-        try? pluginSettingsStore.save(pluginSettings)
+        save(pluginSettingsStore, pluginSettings, named: "plugin settings")
+    }
+
+    private func save<T: Codable & Sendable>(_ store: JSONFileStore<T>, _ value: T, named name: String) {
+        do {
+            try store.save(value)
+        } catch {
+            record("could not save the \(name): \(error)")
+        }
     }
 }
