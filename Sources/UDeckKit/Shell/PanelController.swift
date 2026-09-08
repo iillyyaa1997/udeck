@@ -45,6 +45,14 @@ public final class PanelController {
     /// is recorded once rather than thousands of times.
     private var lastIdleReason: GestureOutcome.IdleReason?
 
+    /// How finely the dwell is measured while the pointer is not moving.
+    ///
+    /// Not a setting: it is the resolution of a measurement, not a preference.
+    /// It only has to be small enough that the granularity is invisible against
+    /// the shortest dwell anyone would configure — 30 ms against a dwell of
+    /// 80 ms and up is under half a frame.
+    private static let armingTickInterval: TimeInterval = 0.03
+
     /// The application that was in front when uDeck took focus, so it can be
     /// put back afterwards.
     private var applicationToRestore: NSRunningApplication?
@@ -263,7 +271,7 @@ public final class PanelController {
     /// pointer moving.
     private func scheduleArmingTick() {
         guard armingTimer == nil else { return }
-        armingTimer = Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { [weak self] _ in
+        armingTimer = Timer.scheduledTimer(withTimeInterval: Self.armingTickInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 guard self.state.phase == .collapsed else {

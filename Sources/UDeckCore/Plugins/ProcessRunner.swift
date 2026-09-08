@@ -58,6 +58,12 @@ public struct ProcessRunner: Sendable {
     /// Most a single run may print before the host stops it.
     public var maximumOutputBytes: Int
 
+    /// How often the output cap is checked, and how finely the drain waits for
+    /// end-of-file. Both are measurement resolutions rather than preferences:
+    /// small enough not to matter, large enough not to spin.
+    private static let limitCheckInterval: TimeInterval = 0.025
+    private static let drainPollInterval: TimeInterval = 0.005
+
     public init(
         terminationGrace: TimeInterval = 0.5,
         drainGrace: TimeInterval = 0.5,
@@ -94,7 +100,7 @@ public struct ProcessRunner: Sendable {
         do {
             try process.run()
         } catch {
-            collector.finish(after: 0)
+            collector.finish(after: 0, pollEvery: Self.drainPollInterval)
             return ProcessRunResult(
                 standardOutput: Data(),
                 standardError: Data("\(error)".utf8),
@@ -125,7 +131,7 @@ public struct ProcessRunner: Sendable {
                     await stop.terminate()
                     return
                 }
-                try? await Task.sleep(nanoseconds: 25_000_000)
+                try? await Task.sleep(nanoseconds: UInt64(Self.limitCheckInterval * 1_000_000_000))
             }
         }
 
@@ -135,7 +141,7 @@ public struct ProcessRunner: Sendable {
 
         watchdog.cancel()
         limitWatcher.cancel()
-        collector.finish(after: drainGrace)
+        collector.finish(after: drainGrace, pollEvery: Self.drainPollInterval)
 
         return ProcessRunResult(
             standardOutput: collector.standardOutput,
@@ -293,13 +299,13 @@ private final class OutputCollector: @unchecked Sendable {
 
     /// Stops reading, giving the pipes a bounded moment to reach end-of-file
     /// first so that the tail of a normal producer's output is not lost.
-    func finish(after grace: TimeInterval) {
+    func finish(after grace: TimeInterval, pollEvery interval: TimeInterval) {
         let deadline = Date().addingTimeInterval(grace)
         while !reachedEndOfFile && Date() < deadline {
             // The readability handlers run on their own queue; this only has to
             // yield long enough for them to observe the last bytes and the
             // end-of-file that follows.
-            Thread.sleep(forTimeInterval: 0.005)
+            Thread.sleep(forTimeInterval: interval)
         }
         stdoutHandle?.readabilityHandler = nil
         stderrHandle?.readabilityHandler = nil
