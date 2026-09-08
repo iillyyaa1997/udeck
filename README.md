@@ -116,8 +116,21 @@ is a setting if you want it the other way.
 ## Permissions
 
 uDeck asks macOS for **nothing**. No Accessibility, no Screen Recording, no
-Automation. Watching the pointer needs no permission (only *keyboard* monitoring
-does), and the notch geometry is public API. Install it and it works.
+Automation. Install it and it works.
+
+What it actually uses, and why none of it prompts:
+
+| What | Why it is free |
+|---|---|
+| A global monitor for pointer movement and clicks | AppKit gates *keyboard* monitoring behind Accessibility, not mouse events |
+| `NSScreen.safeAreaInsets` and `auxiliaryTop*Area` for the notch | public API since macOS 12 |
+| `NSWorkspace` activation notifications | public, no permission |
+| `CGWindowListCopyWindowInfo` bounds, to tell whether the frontmost app is fullscreen | window *titles* need Screen Recording; bounds and owners do not, and uDeck never reads a title |
+
+If that last one ever did become restricted, the effect would be that the
+fullscreen check stops working — not a permission prompt. The panel would then
+open over fullscreen applications when it should have kept quiet, which is a
+setting you can turn off.
 
 The one feature that would need Accessibility — listing and switching between
 running applications — is described in the plugin contract and deliberately not
