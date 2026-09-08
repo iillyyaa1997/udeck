@@ -212,4 +212,105 @@ struct RegressionTests {
         #expect(a.collapsedFrame.height < b.collapsedFrame.height)
         #expect(a.collapsedFrame.width == b.collapsedFrame.width)
     }
+
+    // MARK: - The panel vanished instead of closing
+
+    /// The fault: "nothing is drawn under a real notch" was read off the phase,
+    /// and the phase changes before a single frame of the collapse has run. On
+    /// the built-in display the glass was deleted at frame zero and the panel's
+    /// rectangle then animated an empty region down into the notch — the
+    /// operator saw the panel disappear rather than close, and only on the
+    /// laptop, because a notchless screen takes the other branch and keeps
+    /// drawing its island all the way down.
+    ///
+    /// The rule is about the collapsed state *at rest*, so the answer needs the
+    /// one fact the phase cannot carry: whether the panel has arrived.
+    @Test("the panel is still drawn while it is closing into a real notch")
+    func collapseIntoANotchIsVisible() {
+        #expect(PanelChrome.drawsMaterial(phase: .collapsed, screenHasNotch: true, isSettled: false))
+        // And it goes away once it is home, which is the rule that was right.
+        #expect(!PanelChrome.drawsMaterial(phase: .collapsed, screenHasNotch: true, isSettled: true))
+    }
+
+    /// A drawn island is the panel at its smallest and never stops being drawn,
+    /// settled or not — this is the branch that kept working and hid the bug.
+    @Test("a drawn island is there in every state of a notchless screen")
+    func drawnIslandIsAlwaysDrawn() {
+        for settled in [true, false] {
+            #expect(PanelChrome.drawsMaterial(phase: .collapsed, screenHasNotch: false, isSettled: settled))
+        }
+    }
+
+    /// Nothing about being mid-transition may take the material off a panel
+    /// that is open: the notch rule is the only reason to stop drawing.
+    @Test("every visible phase draws its material on every screen")
+    func visiblePhasesAlwaysDraw() {
+        for phase in PanelPhase.allCases where phase != .collapsed {
+            for notch in [true, false] {
+                for settled in [true, false] {
+                    #expect(PanelChrome.drawsMaterial(
+                        phase: phase, screenHasNotch: notch, isSettled: settled
+                    ), "\(phase) notch=\(notch) settled=\(settled)")
+                }
+            }
+        }
+    }
+
+    // MARK: - A default that could never reach the operator again
+
+    /// The fault the operator felt as *nothing happening*. The reveal was
+    /// retuned, shipped and confirmed green, and he saw no change at all —
+    /// because `AppSettings` wrote every field on save, so the first time
+    /// anything was saved the whole default set was frozen into his file and no
+    /// default the code ever changed could reach that install again. His file
+    /// still held `contentRevealDelay 0.08` from before the fix.
+    ///
+    /// The invariant: a value nobody chose is not written down.
+    @Test("an untouched setting is left out of the file, so a new default can still reach it")
+    func untouchedSettingsAreNotFrozenIntoTheFile() throws {
+        let encoder = JSONEncoder()
+        let gestureKeys = try keys(of: encoder.encode(GestureTuning()))
+        #expect(gestureKeys.isEmpty, "defaults were written down: \(gestureKeys.sorted())")
+        let panelKeys = try keys(of: encoder.encode(PanelMetrics()))
+        #expect(panelKeys.isEmpty, "defaults were written down: \(panelKeys.sorted())")
+    }
+
+    /// The other half of the same rule: what the operator *did* choose has to
+    /// survive, including a choice that happens to be slower than the default.
+    @Test("a chosen setting is written down, and only that one")
+    func chosenSettingsAreWritten() throws {
+        var tuning = GestureTuning()
+        tuning.dwellDuration = 0.5
+        #expect(try keys(of: JSONEncoder().encode(tuning)) == ["dwellDuration"])
+
+        var metrics = PanelMetrics()
+        metrics.contentRevealDelay = 0.4
+        #expect(try keys(of: JSONEncoder().encode(metrics)) == ["contentRevealDelay"])
+
+        // And it comes back out as what was chosen, not as the default.
+        let decoded = try JSONDecoder().decode(GestureTuning.self, from: JSONEncoder().encode(tuning))
+        #expect(decoded.dwellDuration == 0.5)
+        #expect(decoded == tuning)
+    }
+
+    /// A file written by an older build states every value explicitly. Those are
+    /// indistinguishable from choices and must be obeyed — sparse writing fixes
+    /// what happens next, it does not rewrite what is already on disk.
+    @Test("a fully written older file is still obeyed to the letter")
+    func anOlderFullyWrittenFileIsObeyed() throws {
+        let json = Data("""
+        {"dwellDuration": 0.22, "peekExitGrace": 0.25}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(GestureTuning.self, from: json)
+        #expect(decoded.dwellDuration == 0.22)
+        #expect(decoded.peekExitGrace == 0.25)
+        // Everything it did not mention follows the code.
+        #expect(decoded.stripHeight == GestureTuning().stripHeight)
+    }
+
+    private func keys(of data: Data) throws -> Set<String> {
+        let object = try JSONSerialization.jsonObject(with: data)
+        guard let dictionary = object as? [String: Any] else { return [] }
+        return Set(dictionary.keys)
+    }
 }

@@ -373,6 +373,11 @@ public final class PanelController {
     /// without uDeck having to decide anything.
     private func settleWindow() {
         guard let geometry else { return }
+        // Arriving is what the views are waiting to be told: one of their rules
+        // — nothing is drawn under a real notch — holds at rest and not on the
+        // way there. Set before the frame check, because a transition that ends
+        // where the window already is has still ended.
+        shell.isSettled = true
         let frame = geometry.settledWindowFrame(for: state.phase)
         guard panel.frame != frame else { return }
         // The content is told where it will be *before* the window moves, so
@@ -675,6 +680,10 @@ public final class PanelController {
             ? .spring(response: metrics.revealSpringResponse,
                       dampingFraction: metrics.revealSpringDamping)
             : .easeOut(duration: metrics.collapseDuration)
+
+        // Something is about to move. Until it stops, the panel is drawn even in
+        // the states that draw nothing when they are standing still.
+        if animated { shell.isSettled = false }
 
         if windowChanged, animated {
             // The window has moved or changed size, so the panel's rectangle —

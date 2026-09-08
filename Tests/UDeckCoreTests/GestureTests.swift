@@ -70,13 +70,21 @@ struct GestureTests {
         #expect(driver.fired)
     }
 
-    @Test("arriving at a menu-bar target and stopping does not fire")
+    /// Stated against the tuning rather than against a number.
+    ///
+    /// It used to rest for a flat 0.1s, which passed only while the dwell was
+    /// 0.22 and failed the moment the dwell was shortened — reading as a broken
+    /// gesture when what had actually changed was a setting. How long the pause
+    /// has to be is a tuning decision, argued out in `GestureTuning.dwellDuration`;
+    /// what is *not* a tuning decision, and is what this guards, is that a stop
+    /// shorter than the pause never opens anything.
+    @Test("arriving at a menu-bar target and stopping does not fire before the dwell")
     func arrivingAndStoppingDoesNotFire() {
         var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
         driver.move(dx: 0, dy: 300)
         // The hand stops, because the target has been reached. Real streams still
         // deliver a few zero-delta events.
-        driver.rest(for: 0.1)
+        driver.rest(for: driver.tuning.dwellDuration * 0.5)
         #expect(!driver.fired)
     }
 
@@ -131,9 +139,14 @@ struct GestureTests {
         // and stop just inside the strip.
         for _ in 0 ..< 25 { driver.move(dx: 8, dy: 0, over: 0.008) }
         #expect(driver.geometry.containsPointer(driver.cursor, in: driver.geometry.triggerStrip))
-        driver.rest(for: 0.25)
+        // Long enough to have fired on the ordinary dwell, short of the lateral
+        // one — the gap between the two is the whole point, so the test is
+        // written from the gap and not from the numbers that happen to fill it.
+        #expect(driver.tuning.lateralApproachDwellDuration > driver.tuning.dwellDuration * 2,
+                "a lateral approach has to cost visibly more than an ordinary one")
+        driver.rest(for: driver.tuning.lateralApproachDwellDuration * 0.75)
         #expect(!driver.fired, "the normal dwell must not be enough after a lateral approach")
-        driver.rest(for: 0.25)
+        driver.rest(for: driver.tuning.lateralApproachDwellDuration * 0.5)
         #expect(driver.fired, "a deliberate longer pause should still work")
     }
 

@@ -52,6 +52,15 @@ public final class ShellState {
     /// to draw.
     public internal(set) var screenHasNotch = false
 
+    /// Whether the panel has finished moving.
+    ///
+    /// False for the whole of a transition in either direction, true at rest.
+    /// The views need it because one of their rules — nothing is drawn under a
+    /// real notch — is about the collapsed state *at rest*, and reading it off
+    /// the phase deleted the panel's glass at the first frame of every collapse
+    /// on the built-in display. See `PanelChrome.drawsMaterial`.
+    public internal(set) var isSettled = true
+
     /// A tab rename in progress: which tab, and what has been typed so far.
     ///
     /// This lives here, outside the view, for one reason: SwiftUI destroys a

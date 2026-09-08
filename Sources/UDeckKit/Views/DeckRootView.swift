@@ -63,17 +63,21 @@ public struct DeckRootView: View {
         .background {
             // The collapsed island is made of the same glass as the panel — it
             // is the panel, at its smallest — except on a screen with a real
-            // notch, where the collapsed state draws nothing at all.
-            if shell.phase != .collapsed {
+            // notch, where the collapsed state at rest draws nothing at all.
+            //
+            // "At rest" is the whole of the rule: see `PanelChrome`. Read off
+            // the phase alone, this deleted the glass on the first frame of
+            // every collapse on the built-in display, and the operator saw the
+            // panel disappear instead of close.
+            if PanelChrome.drawsMaterial(
+                phase: shell.phase,
+                screenHasNotch: shell.screenHasNotch,
+                isSettled: shell.isSettled
+            ) {
                 GlassBackground(
-                    cornerRadius: model.settings.panel.cornerRadius,
-                    theme: theme,
-                    glass: model.settings.glass,
-                    weldedToTopEdge: shell.weldedToTopEdge
-                )
-            } else if !shell.screenHasNotch {
-                GlassBackground(
-                    cornerRadius: model.settings.panel.islandCornerRadius,
+                    cornerRadius: PanelChrome.cornerRadius(
+                        phase: shell.phase, metrics: model.settings.panel
+                    ),
                     theme: theme,
                     glass: model.settings.glass,
                     weldedToTopEdge: shell.weldedToTopEdge

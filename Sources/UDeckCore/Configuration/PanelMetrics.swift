@@ -162,6 +162,30 @@ extension PanelMetrics {
         contentRevealDelay + contentRevealDuration
     }
 
+    /// Spelled out rather than synthesised: with both `init(from:)` and
+    /// `encode(to:)` written by hand there is nothing left for the compiler to
+    /// infer them from. The names are the settings file's keys, so a rename here
+    /// is a rename of the operator's file.
+    enum CodingKeys: String, CodingKey {
+        case peekWidthFraction
+        case peekMaxWidth
+        case peekHeight
+        case openWidthFraction
+        case openMaxWidth
+        case openHeightFraction
+        case openMaxHeight
+        case cornerRadius
+        case topEdgeBleed
+        case islandHeightFactor
+        case islandCornerRadius
+        case revealSpringResponse
+        case revealSpringDamping
+        case collapseDuration
+        case contentRevealDelay
+        case contentRevealDuration
+        case contentHideDuration
+    }
+
     /// See `GestureTuning.init(from:)` — same tolerance, same reasoning.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -185,5 +209,34 @@ extension PanelMetrics {
             contentRevealDuration: try c.decodeIfPresent(TimeInterval.self, forKey: .contentRevealDuration) ?? d.contentRevealDuration,
             contentHideDuration: try c.decodeIfPresent(TimeInterval.self, forKey: .contentHideDuration) ?? d.contentHideDuration
         )
+    }
+
+    /// Sparse encoding: a value equal to the default is **not** written.
+    /// See `GestureTuning.encode(to:)` — same rule, same reason, and this is the
+    /// struct the reason was found in.
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        let d = PanelMetrics()
+        func put<T: Equatable & Encodable>(_ value: T, _ fallback: T, _ key: CodingKeys) throws {
+            guard value != fallback else { return }
+            try c.encode(value, forKey: key)
+        }
+        try put(peekWidthFraction, d.peekWidthFraction, .peekWidthFraction)
+        try put(peekMaxWidth, d.peekMaxWidth, .peekMaxWidth)
+        try put(peekHeight, d.peekHeight, .peekHeight)
+        try put(openWidthFraction, d.openWidthFraction, .openWidthFraction)
+        try put(openMaxWidth, d.openMaxWidth, .openMaxWidth)
+        try put(openHeightFraction, d.openHeightFraction, .openHeightFraction)
+        try put(openMaxHeight, d.openMaxHeight, .openMaxHeight)
+        try put(cornerRadius, d.cornerRadius, .cornerRadius)
+        try put(topEdgeBleed, d.topEdgeBleed, .topEdgeBleed)
+        try put(islandHeightFactor, d.islandHeightFactor, .islandHeightFactor)
+        try put(islandCornerRadius, d.islandCornerRadius, .islandCornerRadius)
+        try put(revealSpringResponse, d.revealSpringResponse, .revealSpringResponse)
+        try put(revealSpringDamping, d.revealSpringDamping, .revealSpringDamping)
+        try put(collapseDuration, d.collapseDuration, .collapseDuration)
+        try put(contentRevealDelay, d.contentRevealDelay, .contentRevealDelay)
+        try put(contentRevealDuration, d.contentRevealDuration, .contentRevealDuration)
+        try put(contentHideDuration, d.contentHideDuration, .contentHideDuration)
     }
 }
