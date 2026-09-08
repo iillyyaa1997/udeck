@@ -144,9 +144,18 @@ struct PanelSurface<S: Shape>: View {
 
     var body: some View {
         if #available(macOS 26, *) {
+            // Each layer is clipped on its own, and the tint is a filled path
+            // rather than a rectangle behind a mask.
+            //
+            // Overlaying the tint and then clipping the pair is the shorter way
+            // to write it, and it asks the compositor to gather both layers
+            // into an offscreen buffer and mask the result on every frame of
+            // every reveal — work that does not show up in this process's CPU
+            // time at all, which is exactly what makes it worth avoiding by
+            // construction rather than by measurement.
             LiquidGlassBackground(glass: glass)
-                .overlay { GlassTint(glass: glass) }
                 .clipShape(shape)
+                .overlay { GlassTint(glass: glass, shape: shape) }
         } else {
             shape.fill(fallbackFill).opacity(glass.opacity)
         }
@@ -169,13 +178,13 @@ struct PanelSurface<S: Shape>: View {
 /// panel, and a layer painted on top does not. That adjustment is what the
 /// operator was being offered instead of the colour he set, so it is not a
 /// trade — it is the same thing, done where it can be relied on.
-struct GlassTint: View {
+struct GlassTint<S: Shape>: View {
     var glass: GlassAppearance
+    var shape: S
 
     var body: some View {
         if let tint = glass.tintComponents {
-            Color(white: tint.white)
-                .opacity(tint.alpha * glass.opacity)
+            shape.fill(Color(white: tint.white).opacity(tint.alpha * glass.opacity))
         }
     }
 }
