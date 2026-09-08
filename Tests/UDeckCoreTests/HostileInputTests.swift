@@ -190,3 +190,77 @@ struct GridLoadTests {
         #expect(Set(result.map(\.row)).count == 120, "each should have landed on its own row")
     }
 }
+
+/// Identifiers arrive from a file the operator can edit, and the README invites
+/// them to move that file between machines. The obvious way to clone a tab by
+/// hand is to copy its JSON block — which duplicates every identifier in it.
+@Suite("Duplicate identifiers")
+struct DuplicateIdentifierTests {
+    let plugin = PluginIdentifier(rawValue: "p")!
+
+    /// This used to abort inside `Dictionary(uniqueKeysWithValues:)` — at
+    /// launch, on the main actor, before any window or menu-bar item existed.
+    /// A crash loop with Force Quit as the only exit and no way to reach the
+    /// settings that would have fixed it.
+    @Test("two windows sharing an id do not take the application down")
+    func duplicateWindowIdSurvives() {
+        let shared = UUID()
+        let windows = [
+            GridWindow(id: shared, pluginID: plugin, column: 0, row: 0, width: 6, height: 2),
+            GridWindow(id: shared, pluginID: plugin, column: 6, row: 0, width: 6, height: 2),
+        ]
+        let tab = DeckTab(id: UUID(), name: "Now", windows: windows)
+        let layout = DeckLayout(tabs: [tab]).normalized()
+
+        let placed = layout.tabs[0].windows
+        #expect(placed.count == 2, "the operator meant two windows; they should get two windows")
+        #expect(Set(placed.map(\.id)).count == 2, "and the duplicate must be renumbered, not kept")
+        #expect(!placed[0].overlaps(placed[1]))
+    }
+
+    @Test("two tabs sharing an id are renumbered, and the selection follows")
+    func duplicateTabIdSurvives() {
+        let shared = UUID()
+        let layout = DeckLayout(
+            tabs: [DeckTab(id: shared, name: "Now"), DeckTab(id: shared, name: "Home")],
+            selectedTabID: shared
+        ).normalized()
+
+        #expect(layout.tabs.count == 2)
+        #expect(Set(layout.tabs.map(\.id)).count == 2)
+        #expect(layout.selectedTabID != nil)
+        #expect(layout.tabs.contains { $0.id == layout.selectedTabID })
+    }
+
+    @Test("a hand-cloned tab in a layout file loads with both copies intact")
+    func clonedTabBlockLoads() throws {
+        let tab = UUID().uuidString
+        let window = UUID().uuidString
+        // Exactly what copying a tab's JSON block by hand produces.
+        let block = """
+        { "id": "\(tab)", "name": "Now", "windows": [
+            { "id": "\(window)", "pluginID": "p", "column": 0, "row": 0, "width": 6, "height": 2 } ] }
+        """
+        let json = """
+        { "version": 1, "columns": 12, "selectedTabID": "\(tab)", "tabs": [\(block), \(block)] }
+        """
+
+        let layout = try JSONDecoder().decode(DeckLayout.self, from: Data(json.utf8)).normalized()
+        #expect(layout.tabs.count == 2)
+        #expect(Set(layout.tabs.map(\.id)).count == 2)
+        #expect(layout.tabs.allSatisfy { $0.windows.count == 1 })
+        #expect(Set(layout.tabs.flatMap { $0.windows.map(\.id) }).count == 2)
+    }
+
+    @Test("the grid does not trap when handed a duplicate directly")
+    func gridToleratesDuplicates() {
+        let shared = UUID()
+        let windows = (0 ..< 3).map { index in
+            GridWindow(id: shared, pluginID: plugin, column: 0, row: index, width: 4, height: 1)
+        }
+        // The grid cannot invent identities — that belongs to the layout — but
+        // it must not abort.
+        let result = GridEngine.normalized(windows, columns: 12)
+        #expect(result.count == 3)
+    }
+}

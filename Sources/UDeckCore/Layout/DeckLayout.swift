@@ -184,6 +184,7 @@ public struct DeckLayout: Codable, Equatable, Sendable {
         var result = self
         result.columns = max(1, columns)
         if result.tabs.isEmpty { result.tabs = [DeckTab(name: "Now")] }
+        result.giveEveryoneTheirOwnIdentity()
         for index in result.tabs.indices {
             result.tabs[index].windows = GridEngine.normalized(
                 result.tabs[index].windows, columns: result.columns
@@ -193,5 +194,38 @@ public struct DeckLayout: Codable, Equatable, Sendable {
             result.selectedTabID = result.tabs.first?.id
         }
         return result
+    }
+
+    /// Gives a fresh identifier to any tab or window that shares one with
+    /// another.
+    ///
+    /// Identifiers come from a file the operator can edit, and the README
+    /// invites them to move that file between machines — where the obvious way
+    /// to clone a tab by hand is to copy its JSON block, which duplicates every
+    /// identifier inside it. Everything downstream assumes identifiers are
+    /// unique: a duplicate silently loses a window when the grid maps them back
+    /// by id, and used to abort the application outright.
+    ///
+    /// The repair is to renumber rather than to drop. The operator meant to
+    /// have two windows; they should get two windows.
+    private mutating func giveEveryoneTheirOwnIdentity() {
+        var seenTabs = Set<UUID>()
+        var seenWindows = Set<UUID>()
+
+        for tabIndex in tabs.indices {
+            if !seenTabs.insert(tabs[tabIndex].id).inserted {
+                let replacement = UUID()
+                if selectedTabID == tabs[tabIndex].id { selectedTabID = replacement }
+                tabs[tabIndex].id = replacement
+                seenTabs.insert(replacement)
+            }
+            for windowIndex in tabs[tabIndex].windows.indices {
+                if !seenWindows.insert(tabs[tabIndex].windows[windowIndex].id).inserted {
+                    let replacement = UUID()
+                    tabs[tabIndex].windows[windowIndex].id = replacement
+                    seenWindows.insert(replacement)
+                }
+            }
+        }
     }
 }
