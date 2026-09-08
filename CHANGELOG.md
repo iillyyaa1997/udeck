@@ -25,6 +25,10 @@ The **plugin contract** is versioned separately from the application, by the
 - **A settings window**: how the panel opens, density, and — the largest part —
   what is installed, what each plugin asked for, and the settings each plugin
   declared, rendered by the host so no plugin has to ship a settings screen.
+- **`Scripts/make-app.sh`**, which assembles `uDeck.app` from a release build
+  and signs it. Ad-hoc by default; `--sign` takes a Developer ID when there is
+  one, and the hardened runtime is on from the start so notarisation is a step
+  rather than a refactor.
 - **Logging** through the unified logging system, so the gate that stopped a
   gesture or the reason a panel closed can be read after the fact:
   `log stream --predicate 'subsystem == "place.unicorns.udeck"' --level debug`.

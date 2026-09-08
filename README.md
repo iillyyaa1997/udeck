@@ -65,6 +65,13 @@ To run the tests:
 swift test
 ```
 
+To build a real application bundle:
+
+```sh
+Scripts/make-app.sh          # dist/uDeck.app, ad-hoc signed
+Scripts/make-app.sh --dmg    # …and a disk image next to it
+```
+
 ## Installing plugins
 
 Put a plugin folder in `~/.udeck/plugins/`, then open the panel and add it to a

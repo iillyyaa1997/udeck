@@ -48,7 +48,7 @@ public final class DeckModel {
         // broken file is reported and the defaults are used *without* the broken
         // file being overwritten, so the operator still has it to look at.
         var problems: [String] = []
-        func load<T: Codable & Sendable>(_ store: JSONFileStore<T>, default fallback: @autoclosure () -> T) -> T {
+        func load<T: Codable & Sendable>(_ store: JSONFileStore<T>, default fallback: @autoclosure @Sendable () -> T) -> T {
             do {
                 return try store.load() ?? fallback()
             } catch {
