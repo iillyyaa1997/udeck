@@ -12,9 +12,13 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
     public var peekMaxWidth: CGFloat
 
     /// The peek shows a summary line and an invitation, and nothing else, so it
-    /// would be sized for exactly that — a peek with a lot of empty space in it
-    /// reads as something that failed to load. It is taller than that, and the
-    /// reason is the material rather than the layout: see `glassTintFloor`.
+    /// is sized for exactly that. A peek with a lot of empty space in it reads
+    /// as something that failed to load.
+    ///
+    /// It was briefly raised to 150 to work around a material that would not
+    /// take its tint below about 170 points. That was the wrong lever — the
+    /// panel's size is a matter of what it has to say — and `GlassTint` fixed
+    /// the colour where it broke instead.
     public var peekHeight: CGFloat
 
     public var openWidthFraction: CGFloat
@@ -94,7 +98,7 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
     public init(
         peekWidthFraction: CGFloat = 0.42,
         peekMaxWidth: CGFloat = 820,
-        peekHeight: CGFloat = 150,
+        peekHeight: CGFloat = 96,
         openWidthFraction: CGFloat = 0.46,
         openMaxWidth: CGFloat = 1100,
         openHeightFraction: CGFloat = 0.62,
@@ -131,35 +135,6 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
 }
 
 extension PanelMetrics {
-    /// The height below which the system's glass stops taking its tint.
-    ///
-    /// Measured, not looked up. The operator said the panel was one colour on
-    /// hover and another on click, and both earlier explanations — the menu
-    /// bar's backdrop showing through the top strip, and the wallpaper being
-    /// brighter under the taller panel — were wrong: a screenshot of the real
-    /// panel put the desktop behind the open panel at 27/255 and the open panel
-    /// itself at 184, while the peek sat at 58 over a desktop of 64. The tint
-    /// was reaching one and not the other.
-    ///
-    /// What separates them is height alone. The same peek, in the same state
-    /// with the same settings, was measured at every height in between:
-    ///
-    ///     panel height   glass
-    ///     130 pt          58
-    ///     164 pt          32
-    ///     174 pt         184
-    ///     194 pt         184
-    ///     707 pt (open)  183
-    ///
-    /// So there is a cliff between 164 and 174 points, and everything above it
-    /// renders identically. The rule belongs to `NSGlassEffectView` and is not
-    /// documented; what is ours is the consequence — a peek shorter than this
-    /// is a different colour from the panel it grows into.
-    ///
-    /// This is the panel's whole height, the overhang into the menu-bar row
-    /// included, because that is what the glass view is given.
-    public static let glassTintFloor: CGFloat = 174
-
     /// When the reveal spring has visibly arrived, in seconds.
     ///
     /// A spring has no duration — it has a tail that runs on long after the eye

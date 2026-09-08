@@ -33,6 +33,9 @@ struct GlassBackground: View {
         let shape = BottomRoundedRectangle(radius: cornerRadius)
         if #available(macOS 26, *) {
             LiquidGlassBackground(glass: glass)
+                // The tint is painted here rather than handed to the material.
+                // See `LiquidGlassBackground` for what handing it over cost.
+                .overlay { GlassTint(glass: glass) }
                 .clipShape(shape)
         } else {
             VisualEffectBackground()
@@ -137,9 +140,40 @@ struct GlassSurface<S: Shape>: View {
 
     var body: some View {
         if #available(macOS 26, *) {
+            // Deliberately untinted. The tint belongs to the panel and is
+            // painted once, at its full extent; painting it again here put a
+            // second coat on every card and made the things inside the panel a
+            // visibly different colour from the panel itself.
             LiquidGlassBackground(glass: glass).clipShape(shape)
         } else {
             shape.fill(fallbackFill).opacity(glass.opacity)
+        }
+    }
+}
+
+/// The tint, as a layer uDeck draws itself.
+///
+/// It used to be handed to `NSGlassEffectView.tintColor`, which is the obvious
+/// way to do it and the reason the panel had two colours. The system applies a
+/// tint in proportion to something it does not document and, below a panel
+/// height of about 170 points, very nearly not at all: measured over the
+/// running panel, the open panel took the tint fully (184/255 over a desktop of
+/// 27) while the peek did not (58 over a desktop of 64). One setting, two
+/// results, and no way to ask for the one the operator chose.
+///
+/// Painted here it is exactly the colour and strength that was asked for, at
+/// every size, in every state, over every surface. The cost is real and worth
+/// stating: a tint of the material's own adjusts itself to what is behind the
+/// panel, and a layer painted on top does not. That adjustment is what the
+/// operator was being offered instead of the colour he set, so it is not a
+/// trade — it is the same thing, done where it can be relied on.
+struct GlassTint: View {
+    var glass: GlassAppearance
+
+    var body: some View {
+        if let tint = glass.tintComponents {
+            Color(white: tint.white)
+                .opacity(tint.alpha * glass.opacity)
         }
     }
 }
@@ -178,7 +212,12 @@ struct LiquidGlassBackground: NSViewRepresentable {
     /// material rather than a fill.
     private func apply(_ glass: GlassAppearance, to view: NSGlassEffectView) {
         view.style = glass.style == .clear ? .clear : .regular
-        view.tintColor = glass.tintComponents.map { NSColor(white: $0.white, alpha: $0.alpha) }
+        // No tint. The system applies one in proportion to something it does
+        // not document — below a panel height of about 170 points it applies
+        // almost none of it — so the same setting came out as two different
+        // colours depending on which state the panel was in. `GlassTint` paints
+        // it instead, where it means the same thing at every size.
+        view.tintColor = nil
         view.alphaValue = glass.opacity
     }
 }
