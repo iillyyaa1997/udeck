@@ -26,12 +26,13 @@ struct GlassBackground: View {
             .overlay(theme.panelTint)
             .clipShape(shape)
             .overlay(
-                shape
-                    .strokeBorder(theme.panelBorder, lineWidth: 1)
-                    // Pull the stroke up out of frame so the sides and the
-                    // rounded bottom keep their edge and the top loses its.
-                    .padding(.top, weldedToTopEdge ? -2 : 0)
-                    .clipShape(shape)
+                // An open path rather than a stroked shape with the top pushed
+                // out of frame. That trick did not work: `clipShape` applied
+                // after `padding` clips to the padded bounds, so the top edge
+                // was never removed and the island kept a hairline across its
+                // top for as long as the code claimed otherwise.
+                PanelBorder(radius: cornerRadius, includeTopEdge: !weldedToTopEdge)
+                    .stroke(theme.panelBorder, lineWidth: 1)
             )
             .overlay(alignment: .top) {
                 if !weldedToTopEdge {
@@ -72,6 +73,39 @@ struct BottomRoundedRectangle: InsettableShape {
 
     func inset(by amount: CGFloat) -> BottomRoundedRectangle {
         BottomRoundedRectangle(radius: radius, inset: inset + amount)
+    }
+}
+
+/// The panel's outline, with the top edge optional.
+///
+/// Half a point in from every edge, because a one-point stroke centred on the
+/// boundary puts half of itself outside the shape, where it is clipped away —
+/// leaving a half-strength line on three sides and a full-strength one wherever
+/// the clip does not reach.
+struct PanelBorder: Shape {
+    var radius: CGFloat
+    var includeTopEdge: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let box = rect.insetBy(dx: 0.5, dy: 0.5)
+        let r = min(radius, min(box.width, box.height) / 2)
+        var path = Path()
+        path.move(to: CGPoint(x: box.minX, y: box.minY))
+        path.addLine(to: CGPoint(x: box.minX, y: box.maxY - r))
+        path.addQuadCurve(
+            to: CGPoint(x: box.minX + r, y: box.maxY),
+            control: CGPoint(x: box.minX, y: box.maxY)
+        )
+        path.addLine(to: CGPoint(x: box.maxX - r, y: box.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: box.maxX, y: box.maxY - r),
+            control: CGPoint(x: box.maxX, y: box.maxY)
+        )
+        path.addLine(to: CGPoint(x: box.maxX, y: box.minY))
+        if includeTopEdge {
+            path.addLine(to: CGPoint(x: box.minX, y: box.minY))
+        }
+        return path
     }
 }
 

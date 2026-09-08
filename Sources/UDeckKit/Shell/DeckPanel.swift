@@ -38,10 +38,19 @@ public final class DeckPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
 
         // The glass look is drawn by the content view; the window itself
-        // contributes nothing but its shadow.
+        // contributes nothing.
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+
+        // No window shadow. On macOS 26 a borderless translucent window's
+        // shadow does not render as a shadow at all — it renders as a bright
+        // one-point rim along every edge, including the one lying on the top of
+        // the screen. That rim is what made the island read as a floating
+        // window with a frame around it rather than as part of the machine.
+        // Measured rather than guessed: with a flat magenta fill and no borders
+        // of our own, the top two rows still came back lighter than the body,
+        // and turning this off made all three rows identical.
+        hasShadow = false
     }
 
     /// Borderless windows return `false` by default. Without this the panel can
