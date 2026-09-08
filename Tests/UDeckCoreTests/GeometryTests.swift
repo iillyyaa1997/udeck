@@ -169,6 +169,41 @@ struct PanelGeometryTests {
         #expect(!g.isPinnedToTopEdge(CGPoint(x: 1280, y: 1430)))
     }
 
+    /// Both real screens put the notch within half a point of their centre, so
+    /// every other test here would pass just as happily against a panel centred
+    /// on the screen rather than on the notch — and "the notch is the anchor"
+    /// is the decision the whole design rests on. This fixture is the only one
+    /// where the two rules disagree.
+    @Test("the panel follows the notch, not the middle of the screen")
+    func panelFollowsTheNotchNotTheCentre() {
+        let screen = ScreenFixtures.offCentreNotch
+        let g = PanelGeometry(screen: screen, tuning: tuning, metrics: metrics)
+
+        let notchCentre = screen.notchRect!.midX
+        #expect(abs(notchCentre - screen.frame.midX) > 100, "the fixture must actually be lopsided")
+
+        #expect(abs(g.anchor.midX - notchCentre) < 0.001)
+        #expect(abs(g.collapsedFrame.midX - notchCentre) < 0.001)
+        #expect(abs(g.peekFrame.midX - notchCentre) < 0.001)
+        #expect(abs(g.triggerStrip.midX - notchCentre) < 0.001)
+
+        // …and none of them are at the screen's centre, which is the rule that
+        // would otherwise pass every test in this file.
+        #expect(abs(g.collapsedFrame.midX - screen.frame.midX) > 100)
+        #expect(abs(g.triggerStrip.midX - screen.frame.midX) > 100)
+    }
+
+    @Test("a panel too wide to centre on an off-centre notch is clamped, not overhung")
+    func offCentreClampingStillWorks() {
+        var wide = metrics
+        wide.openWidthFraction = 0.95
+        wide.openMaxWidth = 5000
+        let screen = ScreenFixtures.offCentreNotch
+        let frame = PanelGeometry(screen: screen, tuning: tuning, metrics: wide).openFrame
+        #expect(frame.minX >= screen.frame.minX)
+        #expect(frame.maxX <= screen.frame.maxX)
+    }
+
     @Test("the keep-alive region is the panel, inflated — not the trigger strip")
     func keepAliveIsThePanel() {
         let g = geometry(ScreenFixtures.externalMain)

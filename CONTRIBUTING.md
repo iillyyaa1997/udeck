@@ -44,6 +44,15 @@ ships with it is the one this is developed against.
   wrong until you know what broke without them — the keep-alive region reaching
   into the menu bar, the runtime calibration of mouse deltas, the process-tree
   kill. Each of those carries the reason next to it. Please keep that up.
+* **Do not fix an input at the one value where two rules agree.** A grid test
+  that always drops a window onto row 0 cannot tell "the topmost free row" from
+  "the cell it was dropped on", because there they are the same answer — and a
+  regression that swapped those two sat under 153 green tests for exactly that
+  reason. The same shape was in the geometry suite: both real screens put the
+  notch within half a point of their centre, so nothing could tell "centred on
+  the notch" from "centred on the screen", which is the decision the whole
+  design rests on. When two rules could explain the behaviour, pick an input
+  where they disagree, even if you have to invent a machine that does not exist.
 * **A comment that asserts an invariant becomes a test, or becomes weaker
   prose.** This one is written from experience: an outside review found that the
   three most confident sentences in this codebase — "neither smuggles anything

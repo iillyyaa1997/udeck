@@ -33,5 +33,26 @@ enum ScreenFixtures {
         auxiliaryTopRight: CGRect(x: -772, y: 938, width: 772, height: 32)
     )
 
+    /// A notched screen whose notch is **not** in the middle.
+    ///
+    /// No shipping Mac looks like this. It exists because both real fixtures
+    /// put the notch within half a point of the screen's centre, which means no
+    /// test written against them can tell "centred on the anchor" from "centred
+    /// on the screen" — and the whole design rests on the first. A fixture
+    /// where the two rules disagree is the only thing that can pin it.
+    ///
+    /// The wings are deliberately lopsided: 400 points on the left, 1143 on the
+    /// right, so the notch sits well left of centre.
+    static let offCentreNotch = ScreenSnapshot(
+        id: "lopsided",
+        name: "Lopsided Display",
+        frame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1728, height: 1085),
+        backingScale: 2,
+        safeAreaTop: 32,
+        auxiliaryTopLeft: CGRect(x: 0, y: 1085, width: 400, height: 32),
+        auxiliaryTopRight: CGRect(x: 585, y: 1085, width: 1143, height: 32)
+    )
+
     static let both = [externalMain, builtInNotched]
 }
