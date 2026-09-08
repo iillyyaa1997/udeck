@@ -358,13 +358,25 @@ public final class PanelController {
         apply(.otherAppActivated)
     }
 
+    /// The screen arrangement changed: a display was plugged in or unplugged,
+    /// the resolution changed, the Dock moved, the machine woke up.
+    ///
+    /// If the panel's screen is still there, only the geometry needs redoing.
+    /// If it is gone, the panel has nowhere to be, so it retracts — and because
+    /// that is an interruption rather than a dismissal, a panel that was being
+    /// worked in comes back as it was on whichever screen is left.
     private func handleScreenChange() {
-        guard let attachedScreenID, screens.screen(withID: attachedScreenID) == nil else {
+        let stillThere = attachedScreenID.flatMap { screens.screen(withID: $0) } != nil
+        if stillThere {
             applyPhase(animated: false)
             return
         }
-        self.attachedScreenID = screens.screenUnderCursor?.id ?? screens.screens.first?.id
-        apply(.screenLost)
+        attachedScreenID = screens.screenUnderCursor?.id ?? screens.screens.first?.id
+        if state.phase.isVisible {
+            apply(.screenLost)
+        } else {
+            applyPhase(animated: false)
+        }
     }
 
     // MARK: - Applying state
