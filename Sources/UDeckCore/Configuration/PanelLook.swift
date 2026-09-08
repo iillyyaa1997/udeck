@@ -47,6 +47,50 @@ public struct PanelLook: Codable, Equatable, Sendable {
     }
 }
 
+
+/// A look the operator saved and named.
+///
+/// The six that ship are an enum, because they are part of the program and
+/// change when it does. These are data: they are made at runtime, they outlive
+/// the build, and there can be any number of them — which is the whole
+/// difference and the reason they are not the same type.
+public struct PanelPreset: Codable, Equatable, Sendable, Identifiable {
+    public var id: UUID
+    public var name: String
+    public var look: PanelLook
+
+    public init(id: UUID = UUID(), name: String, look: PanelLook) {
+        self.id = id
+        self.name = name
+        self.look = look
+    }
+
+    /// A name that will still be one after a person has finished typing.
+    ///
+    /// Trimmed, and capped well above anything anybody means to type — a preset
+    /// list is read at a glance, and one entry three lines tall is a list that
+    /// no longer works as one.
+    public static func cleaned(name: String) -> String {
+        String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
+    }
+
+    /// See `GlassAppearance.init(from:)`.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID(),
+            name: try c.decodeIfPresent(String.self, forKey: .name) ?? "Saved look",
+            look: try c.decodeIfPresent(PanelLook.self, forKey: .look) ?? PanelLook()
+        )
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case look
+    }
+}
+
 /// What decides which of the two looks the panel is wearing.
 public enum ThemeSource: String, Codable, CaseIterable, Sendable, Identifiable {
     /// Whatever macOS is set to. Changes when the system changes, including
@@ -145,18 +189,51 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
     public var light: PanelLook
     public var dark: PanelLook
 
+    /// The operator's own presets, in the order he made them.
+    public var saved: [PanelPreset]
+
     public init(
         source: ThemeSource = .manual,
         manualIsDark: Bool = false,
         schedule: ThemeSchedule = ThemeSchedule(),
         light: PanelLook = .light,
-        dark: PanelLook = .dark
+        dark: PanelLook = .dark,
+        saved: [PanelPreset] = []
     ) {
         self.source = source
         self.manualIsDark = manualIsDark
         self.schedule = schedule
         self.light = light
         self.dark = dark
+        self.saved = saved
+    }
+
+    /// Saves the look currently in one of the poles under a name.
+    ///
+    /// A name already in use replaces what was under it rather than making a
+    /// second entry with the same label — two identical names in a list you
+    /// pick from is a list you cannot pick from. Names are matched without
+    /// regard to case or surrounding space, because that is how a person
+    /// re-types a name they mean to overwrite.
+    @discardableResult
+    public mutating func save(forDark isDark: Bool, as name: String) -> PanelPreset? {
+        let cleaned = PanelPreset.cleaned(name: name)
+        guard !cleaned.isEmpty else { return nil }
+        let preset = PanelPreset(name: cleaned, look: look(forDark: isDark))
+        if let index = saved.firstIndex(where: { $0.name.lowercased() == cleaned.lowercased() }) {
+            saved[index].look = preset.look
+            return saved[index]
+        }
+        saved.append(preset)
+        return preset
+    }
+
+    public mutating func remove(_ id: PanelPreset.ID) {
+        saved.removeAll { $0.id == id }
+    }
+
+    public mutating func apply(_ preset: PanelPreset, forDark isDark: Bool) {
+        setLook(preset.look, forDark: isDark)
     }
 
     /// Whether the dark look is in force.
@@ -192,6 +269,13 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
         result.schedule = result.schedule.validated()
         result.light.glass = result.light.glass.validated()
         result.dark.glass = result.dark.glass.validated()
+        result.saved = result.saved.compactMap { preset in
+            var preset = preset
+            preset.name = PanelPreset.cleaned(name: preset.name)
+            guard !preset.name.isEmpty else { return nil }
+            preset.look.glass = preset.look.glass.validated()
+            return preset
+        }
         return result
     }
 
@@ -204,7 +288,8 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
             manualIsDark: try c.decodeIfPresent(Bool.self, forKey: .manualIsDark) ?? d.manualIsDark,
             schedule: try c.decodeIfPresent(ThemeSchedule.self, forKey: .schedule) ?? d.schedule,
             light: try c.decodeIfPresent(PanelLook.self, forKey: .light) ?? d.light,
-            dark: try c.decodeIfPresent(PanelLook.self, forKey: .dark) ?? d.dark
+            dark: try c.decodeIfPresent(PanelLook.self, forKey: .dark) ?? d.dark,
+            saved: try c.decodeIfPresent([PanelPreset].self, forKey: .saved) ?? d.saved
         )
     }
 
@@ -214,5 +299,6 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
         case schedule
         case light
         case dark
+        case saved
     }
 }

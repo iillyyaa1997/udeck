@@ -180,6 +180,10 @@ private struct LookSettings: View {
     /// is one you have to wait until evening to finish.
     @State private var editingDark: Bool?
 
+    /// What the operator is typing into the name field. Held here rather than
+    /// in the settings, because a half-typed name is not a setting.
+    @State private var newPresetName = ""
+
     /// Whichever look the knobs are pointed at: the one being edited if the
     /// operator has picked one, otherwise the one on screen.
     private var edited: Bool {
@@ -204,6 +208,27 @@ private struct LookSettings: View {
                 model.update(settings: settings)
             }
         )
+    }
+
+    /// What the "start from" menu calls itself: the preset this look currently
+    /// matches, or the honest answer that it matches none of them.
+    private var startingPointName: String {
+        if let built = model.settings.theme.preset(forDark: edited) { return built.name }
+        if let mine = model.settings.theme.saved.first(where: { $0.look == editedLook }) { return mine.name }
+        return "Custom"
+    }
+
+    private func pour(_ look: PanelLook) {
+        var settings = model.settings
+        settings.theme.setLook(look, forDark: edited)
+        model.update(settings: settings)
+    }
+
+    private func saveCurrent() {
+        var settings = model.settings
+        guard settings.theme.save(forDark: edited, as: newPresetName) != nil else { return }
+        model.update(settings: settings)
+        newPresetName = ""
     }
 
     private func theme<Value>(_ keyPath: WritableKeyPath<ThemeSettings, Value>) -> Binding<Value> {
@@ -287,19 +312,54 @@ private struct LookSettings: View {
                          theme: DeckTheme(density: model.settings.density, ink: editedLook.ink))
 
             LabeledContent("Start from") {
+                Menu(startingPointName) {
+                    Section("Built in") {
+                        ForEach(PanelMode.allCases) { preset in
+                            Button(preset.name) { pour(preset.look) }
+                        }
+                    }
+                    if !model.settings.theme.saved.isEmpty {
+                        Section("Saved") {
+                            ForEach(model.settings.theme.saved) { preset in
+                                Button(preset.name) { pour(preset.look) }
+                            }
+                        }
+                    }
+                }
+                .frame(width: 200)
+            }
+            Text(model.settings.theme.preset(forDark: edited).map(\.summary)
+                ?? "Your own mixture. Pouring one in above replaces it.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            LabeledContent("Save as") {
                 HStack(spacing: 8) {
-                    ForEach(PanelMode.allCases) { preset in
-                        Button(preset.name) {
-                            var settings = model.settings
-                            settings.theme.apply(preset, forDark: edited)
-                            model.update(settings: settings)
+                    TextField("Name", text: $newPresetName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 160)
+                        .onSubmit(saveCurrent)
+                    Button("Save", action: saveCurrent)
+                        .disabled(PanelPreset.cleaned(name: newPresetName).isEmpty)
+                }
+            }
+            Text("Saves the look you are editing, exactly as it stands. A name you have used before is overwritten rather than added twice.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            if !model.settings.theme.saved.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(model.settings.theme.saved) { preset in
+                        HStack(spacing: 10) {
+                            Text(preset.name).frame(width: 160, alignment: .leading)
+                            Button("Use") { pour(preset.look) }
+                            Button("Delete", role: .destructive) {
+                                var settings = model.settings
+                                settings.theme.remove(preset.id)
+                                model.update(settings: settings)
+                            }
                         }
                     }
                 }
             }
-            Text(model.settings.theme.preset(forDark: edited).map(\.summary)
-                ?? "Your own mixture. Pouring a preset in above replaces it.")
-                .font(.caption).foregroundStyle(.secondary)
         }
 
         SettingsGroup("Density") {

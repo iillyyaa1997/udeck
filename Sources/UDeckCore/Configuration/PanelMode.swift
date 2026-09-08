@@ -23,11 +23,25 @@ public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
     /// As close to opaque as the material goes, diffusing rather than
     /// refracting what is behind it.
     ///
-    /// The one mode that does not care what it is over. Glass is a wager that
+    /// The one preset that does not care what it is over. Glass is a wager that
     /// the background is calm, and over a game, a video or a photograph it
     /// loses — the panel becomes something you have to look *through* to read.
     /// This gives that up on purpose.
     case contrast
+
+    /// Barely a panel: a quarter of the material at a third of its strength,
+    /// so the content hangs over whatever is behind it.
+    ///
+    /// The other end of the same argument as `contrast`. Over a game there are
+    /// two honest answers — cover it properly, or get out of the way — and this
+    /// is the second.
+    case ghost
+
+    /// A dense light surface, for reading rather than glancing.
+    case paper
+
+    /// Between `dark` and `contrast`: diffused, but still visibly a material.
+    case smoke
 
     public var id: String { rawValue }
 
@@ -37,6 +51,9 @@ public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
         case .light: "Light"
         case .dark: "Dark"
         case .contrast: "Contrast"
+        case .ghost: "Ghost"
+        case .paper: "Paper"
+        case .smoke: "Smoke"
         }
     }
 
@@ -46,6 +63,9 @@ public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
         case .light: "A bright panel with dark text, for work over documents."
         case .dark: "A dark panel with light text, for work over dark screens."
         case .contrast: "Nearly opaque, for a panel that has to be readable over anything."
+        case .ghost: "Barely there — the content hangs over whatever is behind it."
+        case .paper: "A dense light surface, for reading rather than glancing."
+        case .smoke: "Diffused, but still visibly a material."
         }
     }
 
@@ -58,6 +78,12 @@ public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
             GlassAppearance(style: .regular, opacity: 1, tinted: true, tintIsLight: false, tintStrength: 0.55)
         case .contrast:
             GlassAppearance(style: .clear, opacity: 1, tinted: true, tintIsLight: false, tintStrength: 0.9)
+        case .ghost:
+            GlassAppearance(style: .regular, opacity: 0.35, tinted: true, tintIsLight: false, tintStrength: 0.25)
+        case .paper:
+            GlassAppearance(style: .regular, opacity: 1, tinted: true, tintIsLight: true, tintStrength: 0.9)
+        case .smoke:
+            GlassAppearance(style: .clear, opacity: 1, tinted: true, tintIsLight: false, tintStrength: 0.55)
         }
     }
 
@@ -70,8 +96,8 @@ public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
     /// the look Custom.
     public var ink: PanelInk {
         switch self {
-        case .light: .dark
-        case .dark, .contrast: .light
+        case .light, .paper: .dark
+        case .dark, .contrast, .ghost, .smoke: .light
         }
     }
 }

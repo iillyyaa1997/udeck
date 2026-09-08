@@ -522,4 +522,98 @@ struct RegressionTests {
         #expect(decoded.theme.dark.glass.tintStrength == 0.4)
         #expect(decoded.theme.light == PanelLook.light, "the pole he never set ships as it ships")
     }
+
+    // MARK: - Presets the operator makes himself
+
+    /// Saving captures the look being edited exactly, and a name already in use
+    /// replaces what was under it — two identical names in a list you pick from
+    /// is a list you cannot pick from.
+    @Test("saving a look keeps it, and the same name overwrites rather than doubles")
+    func savingAPreset() {
+        var theme = ThemeSettings()
+        theme.dark.glass.tintStrength = 0.42
+        theme.save(forDark: true, as: "  Night  ")
+
+        #expect(theme.saved.count == 1)
+        #expect(theme.saved[0].name == "Night", "the name is what is left after a person stops typing")
+        #expect(theme.saved[0].look.glass.tintStrength == 0.42)
+
+        theme.dark.glass.tintStrength = 0.7
+        theme.save(forDark: true, as: "night")
+        #expect(theme.saved.count == 1, "the same name, however typed, is the same preset")
+        #expect(theme.saved[0].look.glass.tintStrength == 0.7)
+
+        theme.save(forDark: true, as: "Another")
+        #expect(theme.saved.count == 2)
+    }
+
+    /// A name that is only whitespace is not a name, and saving under it must
+    /// not leave an unpickable row in the list.
+    @Test("a preset with no name is not saved")
+    func anEmptyNameSavesNothing() {
+        var theme = ThemeSettings()
+        #expect(theme.save(forDark: false, as: "   ") == nil)
+        #expect(theme.saved.isEmpty)
+    }
+
+    /// Using one pours it into whichever pole is being edited, and only that one.
+    @Test("using a preset changes the look it was poured into, and no other")
+    func applyingAPreset() {
+        var theme = ThemeSettings()
+        let light = theme.light
+        theme.dark.glass.tintStrength = 0.42
+        guard let preset = theme.save(forDark: true, as: "Night") else {
+            Issue.record("nothing saved"); return
+        }
+        theme.dark = .dark
+        theme.apply(preset, forDark: true)
+        #expect(theme.dark.glass.tintStrength == 0.42)
+        #expect(theme.light == light, "the other pole is not touched")
+    }
+
+    /// The whole point of these being data rather than code: they outlive the
+    /// build, which means the settings file.
+    @Test("saved presets survive a round trip through the settings file")
+    func presetsRoundTrip() throws {
+        var settings = AppSettings()
+        settings.theme.dark.glass.tintStrength = 0.31
+        settings.theme.save(forDark: true, as: "Night")
+
+        let data = try JSONEncoder().encode(settings)
+        let back = try JSONDecoder().decode(AppSettings.self, from: data).validated()
+        #expect(back.theme.saved.count == 1)
+        #expect(back.theme.saved[0].name == "Night")
+        #expect(back.theme.saved[0].look.glass.tintStrength == 0.31)
+        #expect(back.theme.saved[0].id == settings.theme.saved[0].id, "the same preset, not a copy")
+    }
+
+    /// Validation is where a hand-edited file gets brought back into line, and
+    /// a nameless preset is exactly what a hand-edited file produces.
+    @Test("a hand-written preset with no name is dropped rather than shown blank")
+    func namelessPresetsAreDropped() throws {
+        let json = Data("""
+        {"theme": {"saved": [{"name": "  ", "look": {}}, {"name": "Real", "look": {}}]}}
+        """.utf8)
+        let settings = try JSONDecoder().decode(AppSettings.self, from: json).validated()
+        #expect(settings.theme.saved.map(\.name) == ["Real"])
+    }
+
+    /// The six that ship are still six, and each is a look of its own — a
+    /// preset list with two identical entries in it is a list with a mistake.
+    @Test("the built-in presets are all different from one another")
+    func builtInPresetsAreDistinct() {
+        let looks = PanelMode.allCases.map(\.look)
+        #expect(Set(PanelMode.allCases.map(\.name)).count == PanelMode.allCases.count)
+        for (i, a) in looks.enumerated() {
+            for b in looks[(i + 1)...] {
+                #expect(a != b, "two presets ship as the same look")
+            }
+        }
+        // And every one of them writes its text the way its own glass demands.
+        for mode in PanelMode.allCases {
+            let wantsDarkInk = mode.glass.tintIsLight && mode.glass.tintStrength > 0.5
+            #expect((mode.ink == .dark) == wantsDarkInk,
+                    "\(mode.name) writes in the wrong ink for its own glass")
+        }
+    }
 }
