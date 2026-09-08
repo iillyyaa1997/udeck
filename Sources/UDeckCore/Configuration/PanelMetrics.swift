@@ -74,8 +74,18 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
     /// it, which reads as the interface arguing with them.
     public var collapseDuration: TimeInterval
 
-    /// The content is sequenced behind the frame: it starts after the panel has
-    /// visibly begun to move, and it leaves faster than it arrives.
+    /// The content is sequenced behind the frame: it starts once the panel is
+    /// most of the way to its final size, and it leaves faster than it arrives.
+    ///
+    /// It used to start at 80 ms, which is about when the spring is halfway,
+    /// and finish at 300 ms — while the shape was still moving. The operator
+    /// saw it as the text arriving before the panel did, and he is right: text
+    /// at full strength inside a box that is still growing reads as text
+    /// overflowing a small panel rather than as a panel filling up.
+    ///
+    /// The spring passes 95% of its travel at about 228 ms with the default
+    /// response, so the content now starts at 160 and lands at 340 — just after
+    /// the shape does.
     public var contentRevealDelay: TimeInterval
     public var contentRevealDuration: TimeInterval
     public var contentHideDuration: TimeInterval
@@ -95,8 +105,8 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
         revealSpringResponse: TimeInterval = 0.42,
         revealSpringDamping: Double = 0.8,
         collapseDuration: TimeInterval = 0.3,
-        contentRevealDelay: TimeInterval = 0.08,
-        contentRevealDuration: TimeInterval = 0.22,
+        contentRevealDelay: TimeInterval = 0.16,
+        contentRevealDuration: TimeInterval = 0.18,
         contentHideDuration: TimeInterval = 0.12
     ) {
         self.peekWidthFraction = peekWidthFraction
