@@ -70,8 +70,22 @@ public struct GestureTuning: Codable, Equatable, Sendable {
     /// travel by this factor.
     public var lateralApproachRatio: CGFloat
 
-    /// Silence after any dismissal, so the panel cannot re-open under a cursor
-    /// that simply has not moved away yet.
+    /// Silence after any dismissal.
+    ///
+    /// Short, and it has to be: this is a window during which the top of the
+    /// screen does nothing at all, and the operator has no way to tell it from
+    /// the panel being broken. It was 0.6 seconds, which nobody noticed while
+    /// the panel was reluctant to close — a dismissal was deliberate and rare.
+    /// Dropping the exit grace from 0.25 to 0.06 at his request made closing
+    /// easy and frequent, and every close then armed six hundred milliseconds
+    /// of a dead top edge: "иногда тормозит и не сразу начинает открываться".
+    ///
+    /// What it was written to prevent — the panel re-opening under a cursor
+    /// that has not moved away — is already prevented outright by
+    /// `HoverGestureRecognizer.suppressUntilPointerLeaves`, which refuses to
+    /// fire again until the cursor has left the strip and come back. That is a
+    /// guarantee rather than a delay, and it leaves this covering only the
+    /// jitter around the instant of the dismissal itself.
     public var reopenCooldown: TimeInterval
 
     /// Silence after a mouse button is released inside the menu-bar row.
@@ -141,7 +155,7 @@ public struct GestureTuning: Codable, Equatable, Sendable {
         dwellHorizontalSpeedLimit: CGFloat = 250,
         approachSampleDistance: CGFloat = 120,
         lateralApproachRatio: CGFloat = 2,
-        reopenCooldown: TimeInterval = 0.6,
+        reopenCooldown: TimeInterval = 0.15,
         buttonReleaseGrace: TimeInterval = 0.3,
         peekExitGrace: TimeInterval = 0.06,
         peekKeepAliveInset: CGFloat = 24,

@@ -150,6 +150,48 @@ struct GestureTests {
         #expect(driver.fired, "a deliberate longer pause should still work")
     }
 
+    /// The lock-out after a dismissal has to be short enough that going back up
+    /// on purpose does not read as the panel being broken.
+    ///
+    /// It was 0.6 seconds, and for a long time nobody met it: the panel was
+    /// reluctant to close, so a dismissal was something the operator did on
+    /// purpose and rarely. Then the exit grace went from 0.25 to 0.06 at his
+    /// request, closing became easy and frequent — and every close now armed
+    /// six hundred milliseconds during which the top of the screen did nothing
+    /// at all. "Иногда тормозит и не сразу начинает открываться."
+    ///
+    /// The re-opening it guards against is already prevented by
+    /// `suppressUntilPointerLeaves`, which refuses to fire again until the
+    /// cursor has left the strip and come back. What is left for this to cover
+    /// is event jitter around the instant of the dismissal, which is a fifth of
+    /// a second at the very most.
+    @Test("going back to the top after a dismissal is not locked out")
+    func returningAfterDismissalIsNotLockedOut() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.environment.lastDismissal = driver.clock
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.2)
+        #expect(driver.fired,
+                "a deliberate return cost more than 200 ms of lock-out (cooldown \(driver.tuning.reopenCooldown)s)")
+    }
+
+    /// And the case it does have to cover: a cursor that never left. Closing the
+    /// panel while the cursor sits in the strip must not re-open it, or the
+    /// panel follows the operator around instead of getting out of the way.
+    @Test("a cursor that never left does not re-open what it just closed")
+    func aCursorThatStayedDoesNotReopen() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
+        driver.move(dx: 0, dy: 300)
+        driver.rest(for: 0.3)
+        #expect(driver.fired)
+        // The panel opened and was then dismissed with the cursor still there.
+        driver.recognizer.suppressUntilPointerLeaves()
+        driver.environment.lastDismissal = driver.clock
+        driver.rest(for: 2)
+        #expect(driver.outcomes.suffix(8).allSatisfy { $0 != .fire },
+                "the panel re-opened under a cursor that never moved away")
+    }
+
     @Test("a held mouse button suppresses the gesture entirely")
     func buttonDownSuppresses() {
         var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
@@ -204,14 +246,20 @@ struct GestureTests {
 
     /// The oscillation failure: the panel closes, the cursor has not moved, and
     /// the trigger fires again immediately.
-    @Test("a dismissal silences the trigger for the cooldown")
+    ///
+    /// Stated against the tuning. It rested for a flat 0.4s and passed only
+    /// while the cooldown was 0.6 — so shortening the cooldown, which is a
+    /// tuning decision argued out in `GestureTuning.reopenCooldown`, read as a
+    /// broken guard. What is not a tuning decision, and is what this holds, is
+    /// that the silence lasts as long as it says it does and then ends.
+    @Test("a dismissal silences the trigger for as long as the cooldown says")
     func cooldownAfterDismissal() {
         var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
         driver.move(dx: 0, dy: 300)
         driver.environment.lastDismissal = driver.clock
-        driver.rest(for: 0.4)
+        driver.rest(for: driver.tuning.reopenCooldown * 0.6)
         #expect(!driver.fired)
-        driver.rest(for: 0.5)
+        driver.rest(for: driver.tuning.reopenCooldown + driver.tuning.dwellDuration * 3)
         #expect(driver.fired, "once the cooldown passes the gesture works again")
     }
 
