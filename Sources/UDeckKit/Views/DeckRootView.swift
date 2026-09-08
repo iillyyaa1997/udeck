@@ -28,6 +28,15 @@ public struct DeckRootView: View {
         // to its island. The content must not: the first line of a card in the
         // menu-bar row would be unreadable against the wallpaper behind it.
         .padding(.top, shell.phase == .collapsed ? 0 : shell.topOverhang)
+        // The window's own frame is animated by the controller. Without this
+        // the content simply appears at its final size inside a window that is
+        // still growing, so the first two thirds of every reveal show squeezed,
+        // clipped text. Faster than the reveal on purpose: the shape is what
+        // the eye follows, and content that lags it looks broken rather than
+        // deliberate.
+        .id(contentKind)
+        .transition(.opacity)
+        .animation(.easeOut(duration: model.settings.panel.revealDuration * 0.55), value: contentKind)
         .environment(\.deckTheme, theme)
         .background {
             // The collapsed island is made of the same glass as the panel — it
@@ -52,6 +61,22 @@ public struct DeckRootView: View {
         // added later that forgets to.
         .contentShape(Rectangle())
         .onTapGesture { shell.onInteract() }
+    }
+
+    /// Which of the three layouts is showing.
+    ///
+    /// Deliberately not the phase. The content is keyed on this so that one
+    /// layout crossfades into another instead of appearing at full size inside
+    /// a window that is still growing — but `.open` and `.fullscreen` share a
+    /// layout, and keying on the phase would rebuild the whole workspace every
+    /// time the fullscreen button is pressed, throwing away scroll positions
+    /// and anything else the views hold.
+    private var contentKind: Int {
+        switch shell.phase {
+        case .collapsed: 0
+        case .peek: 1
+        case .open, .fullscreen: 2
+        }
     }
 
     /// The one line the panel can say about itself while it is small.
