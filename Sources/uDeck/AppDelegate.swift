@@ -37,7 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.screens = screens
         self.controller = controller
         self.settings = SettingsWindowController(model: model)
-        controller.shell.onOpenSettings = { [weak self] in self?.settings.show() }
+        // The panel sits above ordinary windows, so leaving it open would put
+        // it on top of the settings it was asked to show.
+        controller.shell.onOpenSettings = { [weak self] in
+            self?.controller.close()
+            self?.settings.show()
+        }
 
         model.discoverPlugins()
         controller.start()

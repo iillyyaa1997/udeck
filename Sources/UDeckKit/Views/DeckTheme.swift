@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UDeckCore
 
@@ -22,6 +23,7 @@ public struct DeckTheme: Sendable {
     public let recess = Color.black.opacity(0.28)
     public let line = Color.white.opacity(0.11)
     public let panelBorder = Color.white.opacity(0.14)
+
     public let innerHighlight = Color.white.opacity(0.16)
 
     // Text

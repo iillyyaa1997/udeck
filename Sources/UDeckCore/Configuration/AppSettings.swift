@@ -18,6 +18,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// the cursor is nowhere near the top of the screen.
     public var hotkey: HotKeyBinding
 
+    /// What the panel's glass is tinted towards, if anything.
+    public var glassTint: GlassTint
+
     /// Retract the panel when the operator activates another application.
     public var collapseOnAppSwitch: Bool
 
@@ -54,6 +57,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         gesture: GestureTuning = GestureTuning(),
         panel: PanelMetrics = PanelMetrics(),
         hotkey: HotKeyBinding = HotKeyBinding(),
+        glassTint: GlassTint = GlassTint(),
         collapseOnAppSwitch: Bool = true,
         defaultCardTTL: TimeInterval = 60,
         silentTTLMultiplier: Double = 3,
@@ -67,6 +71,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.gesture = gesture
         self.panel = panel
         self.hotkey = hotkey
+        self.glassTint = glassTint
         self.collapseOnAppSwitch = collapseOnAppSwitch
         self.defaultCardTTL = defaultCardTTL
         self.silentTTLMultiplier = silentTTLMultiplier
@@ -137,6 +142,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         result.panel.revealSpringDamping = min(max(
             result.panel.revealSpringDamping.isFinite ? result.panel.revealSpringDamping : 0.8, 0.1), 1)
 
+        result.glassTint.strength = min(max(
+            result.glassTint.strength.isFinite ? result.glassTint.strength : 0.16, 0), 0.9)
+
         // A shortcut that cannot be registered is turned off rather than left
         // enabled-and-broken: "on, and nothing happens when you press it" is
         // the state that costs an evening to diagnose. What made it invalid is
@@ -165,6 +173,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         gesture = try c.decodeIfPresent(GestureTuning.self, forKey: .gesture) ?? defaults.gesture
         panel = try c.decodeIfPresent(PanelMetrics.self, forKey: .panel) ?? defaults.panel
         hotkey = try c.decodeIfPresent(HotKeyBinding.self, forKey: .hotkey) ?? defaults.hotkey
+        glassTint = try c.decodeIfPresent(GlassTint.self, forKey: .glassTint) ?? defaults.glassTint
         collapseOnAppSwitch = try c.decodeIfPresent(Bool.self, forKey: .collapseOnAppSwitch)
             ?? defaults.collapseOnAppSwitch
         defaultCardTTL = try c.decodeIfPresent(TimeInterval.self, forKey: .defaultCardTTL)

@@ -173,6 +173,17 @@ private struct OpeningSettings: View {
 private struct LookSettings: View {
     @Bindable var model: DeckModel
 
+    private func binding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { model.settings[keyPath: keyPath] },
+            set: { newValue in
+                var settings = model.settings
+                settings[keyPath: keyPath] = newValue
+                model.update(settings: settings)
+            }
+        )
+    }
+
     var body: some View {
         SettingsGroup("Density") {
             Picker("Density", selection: Binding(
@@ -191,6 +202,32 @@ private struct LookSettings: View {
             .frame(width: 320)
 
             Text("Every plugin has to look right in all three, which is why this is one setting rather than something each plugin decides.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+
+        SettingsGroup("The glass") {
+            Toggle("Tint the glass", isOn: binding(\.glassTint.enabled))
+            Text("Untinted, the system material takes the colour of whatever is behind it — which is what makes it glass, and also what makes it vanish over a dark game and wash out over a bright document. A tint does not close the glass; it gives it something to be measured from.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            Picker("Lean", selection: binding(\.glassTint.isLight)) {
+                Text("Lighter than the background").tag(true)
+                Text("Darker than the background").tag(false)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 380)
+            .disabled(!model.settings.glassTint.enabled)
+
+            LabeledContent("Strength") {
+                Slider(value: binding(\.glassTint.strength), in: 0 ... 0.6, step: 0.02) {
+                    Text("\(Int(model.settings.glassTint.strength * 100)) %")
+                }
+                .frame(width: 260)
+            }
+            .disabled(!model.settings.glassTint.enabled)
+
+            GlassPreview(tint: model.settings.glassTint, theme: DeckTheme(density: model.settings.density))
+            Text("The sample sits over a dark half and a light one, because those are the two cases that pull in opposite directions: a light tint stands out over a game and washes out over a document, and a dark one does the reverse.")
                 .font(.caption).foregroundStyle(.secondary)
         }
 
@@ -473,5 +510,48 @@ private struct SettingsGroup<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 6)
+    }
+}
+
+
+/// The glass, over the two backgrounds that disagree about it.
+///
+/// A settings screen that describes a material in prose asks the operator to
+/// imagine it. This shows it — and shows it over a dark half and a light half
+/// at once, because that is the whole of the trade-off: a tint that rescues the
+/// panel from a dark game is the same tint that washes it out over a white
+/// document.
+private struct GlassPreview: View {
+    var tint: GlassTint
+    var theme: DeckTheme
+
+    var body: some View {
+        ZStack {
+            HStack(spacing: 0) {
+                Color(red: 0.09, green: 0.13, blue: 0.08)
+                Color(red: 0.90, green: 0.89, blue: 0.86)
+            }
+            GlassSurface(
+                shape: RoundedRectangle(cornerRadius: 12),
+                fallbackFill: theme.windowFill,
+                tint: tint
+            )
+            .frame(width: 300, height: 74)
+            .overlay {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Claude sessions")
+                        .font(theme.chipFont)
+                        .foregroundStyle(theme.muted)
+                    Text("Click or press a key to work in here")
+                        .font(theme.bodyFont)
+                        .foregroundStyle(theme.dim)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+            }
+        }
+        .frame(width: 380, height: 120)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
     }
 }

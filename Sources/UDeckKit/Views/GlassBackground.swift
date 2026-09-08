@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UDeckCore
 
 /// The panel's own surface.
 ///
@@ -16,6 +17,7 @@ import SwiftUI
 struct GlassBackground: View {
     var cornerRadius: CGFloat
     var theme: DeckTheme
+    var tint: GlassTint
 
     /// Whether the panel's top edge is the screen's top edge.
     ///
@@ -30,7 +32,7 @@ struct GlassBackground: View {
     var body: some View {
         let shape = BottomRoundedRectangle(radius: cornerRadius)
         if #available(macOS 26, *) {
-            LiquidGlassBackground()
+            LiquidGlassBackground(tint: tint.nsColor)
                 .clipShape(shape)
         } else {
             VisualEffectBackground()
@@ -131,10 +133,11 @@ struct PanelBorder: Shape {
 struct GlassSurface<S: Shape>: View {
     var shape: S
     var fallbackFill: Color
+    var tint: GlassTint
 
     var body: some View {
         if #available(macOS 26, *) {
-            LiquidGlassBackground().clipShape(shape)
+            LiquidGlassBackground(tint: tint.nsColor).clipShape(shape)
         } else {
             shape.fill(fallbackFill)
         }
@@ -148,9 +151,12 @@ struct GlassSurface<S: Shape>: View {
 /// square because it is attached to the edge it hangs from.
 @available(macOS 26, *)
 struct LiquidGlassBackground: NSViewRepresentable {
+    var tint: NSColor?
+
     func makeNSView(context: Context) -> NSGlassEffectView {
         let view = NSGlassEffectView()
         view.style = .regular
+        view.tintColor = tint
         view.cornerRadius = 0
         // One deliberate deviation from "the system's glass as it comes": the
         // panel is drawn dark whatever the system is set to, because the theme
@@ -161,7 +167,9 @@ struct LiquidGlassBackground: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: NSGlassEffectView, context: Context) {}
+    func updateNSView(_ view: NSGlassEffectView, context: Context) {
+        view.tintColor = tint
+    }
 }
 
 private struct VisualEffectBackground: NSViewRepresentable {
@@ -176,4 +184,13 @@ private struct VisualEffectBackground: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
+}
+
+
+extension GlassTint {
+    /// The colour to hand the material, or `nil` for glass exactly as the
+    /// system renders it.
+    var nsColor: NSColor? {
+        components.map { NSColor(white: $0.white, alpha: $0.alpha) }
+    }
 }
