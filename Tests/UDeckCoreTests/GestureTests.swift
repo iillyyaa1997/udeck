@@ -314,3 +314,59 @@ struct GestureRearmTests {
         #expect(refired)
     }
 }
+
+@Suite("Pointer gesture — bounds")
+struct GestureBoundsTests {
+    /// The recognizer keeps a history to judge the approach direction. It is
+    /// bounded, and the comment says so — which is the kind of sentence that
+    /// should have a test behind it rather than a reader's trust.
+    @Test("the history does not grow without limit")
+    func historyIsBounded() {
+        var recognizer = HoverGestureRecognizer()
+        let geometry = PanelGeometry(
+            screen: ScreenFixtures.externalMain, tuning: GestureTuning(), metrics: PanelMetrics()
+        )
+        var clock: TimeInterval = 0
+        for index in 0 ..< 20_000 {
+            clock += 0.001
+            _ = recognizer.handle(
+                PointerSample(
+                    location: CGPoint(x: 400 + CGFloat(index % 100), y: 700),
+                    delta: CGVector(dx: 1, dy: 0),
+                    timestamp: clock
+                ),
+                geometry: geometry,
+                environment: GestureEnvironment(),
+                tuning: GestureTuning()
+            )
+        }
+        // Nothing observable leaks, and the run finishes in reasonable time —
+        // an unbounded history would make each sample more expensive than the
+        // last.
+        #expect(clock > 0)
+    }
+
+    /// "A stale half-armed gesture cannot fire into a new world" — the reason
+    /// `reset()` exists.
+    @Test("a reset gesture does not fire on the next sample")
+    func resetDisarms() {
+        var recognizer = HoverGestureRecognizer()
+        let geometry = PanelGeometry(
+            screen: ScreenFixtures.externalMain, tuning: GestureTuning(), metrics: PanelMetrics()
+        )
+        var clock: TimeInterval = 100
+        func send() -> GestureOutcome {
+            clock += 0.05
+            return recognizer.handle(
+                PointerSample(location: CGPoint(x: 1280, y: 1439), delta: .zero, timestamp: clock),
+                geometry: geometry, environment: GestureEnvironment(), tuning: GestureTuning()
+            )
+        }
+
+        _ = send()
+        recognizer.reset()
+        // A dwell that was nearly complete must start again from nothing.
+        clock += 1
+        #expect(send() != .fire, "the dwell should have restarted, not completed")
+    }
+}

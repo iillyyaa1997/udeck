@@ -121,10 +121,14 @@ public struct CardTable: Codable, Equatable, Sendable {
 
 /// The escape hatch: a card drawing itself.
 ///
-/// Described by the format from the start so that adding it cannot break
-/// existing plugins, and deliberately not rendered in this version. When it does
-/// arrive it will be drawn inside a frame the host owns, so that a card drawing
-/// itself can never be mistaken for one the host drew.
+/// Described by the format from the start, so that adding it later does not
+/// have to change a format other people's plugins already depend on, and
+/// deliberately not rendered in this version.
+///
+/// The intention when it arrives is that it is drawn inside a frame uDeck owns,
+/// so that it reads as the plugin's own drawing rather than as part of the
+/// panel. That is a design decision, not a property of any code that exists —
+/// there is nothing here to enforce it yet.
 public struct CanvasRow: Codable, Equatable, Sendable {
     public var kind: String
     public var payload: String?

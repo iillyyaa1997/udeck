@@ -111,9 +111,13 @@ public struct PanelState: Equatable, Sendable {
         switch event {
         case .revealRequested:
             guard phase == .collapsed else { break }
-            // An interrupted panel comes back exactly as it was left, content
-            // and all. A dismissed one starts over from a peek, because the
-            // operator said they were done with it.
+            // An interrupted panel comes back in the phase it was interrupted
+            // in. Not "exactly as it was left, content and all", which is what
+            // this comment used to claim and was not true: the panel's content
+            // is a view, and a collapse takes the view down with it. Anything
+            // that has to survive lives outside the view, in `ShellState` — a
+            // half-typed tab name, for instance. A dismissed panel starts over
+            // from a peek, because the operator said they were done with it.
             phase = collapseReason == .interrupted ? restorePhase : .peek
 
         case .pointerLeft:

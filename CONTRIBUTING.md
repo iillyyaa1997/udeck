@@ -44,6 +44,14 @@ ships with it is the one this is developed against.
   wrong until you know what broke without them — the keep-alive region reaching
   into the menu bar, the runtime calibration of mouse deltas, the process-tree
   kill. Each of those carries the reason next to it. Please keep that up.
+* **A comment that asserts an invariant becomes a test, or becomes weaker
+  prose.** This one is written from experience: an outside review found that the
+  three most confident sentences in this codebase — "neither smuggles anything
+  else past it", "comes back exactly as it was left, content and all",
+  "termination is guaranteed by the number of windows" — were all false. A
+  confident comment is read as a guarantee, so if nothing checks it, it is
+  worse than no comment at all. Either write the test, or say what is actually
+  true.
 * **No new configuration constants in the middle of code.** Numbers that a
   person might reasonably want to change live in `Configuration/` with a
   documented default.
