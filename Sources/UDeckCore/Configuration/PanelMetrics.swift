@@ -8,12 +8,6 @@ import Foundation
 /// a 1728pt laptop screen and a 2560pt external one; the cap stops it from
 /// growing so wide that it no longer reads as attached to the top edge.
 public struct PanelMetrics: Codable, Equatable, Sendable {
-    /// Height of the collapsed pill hanging under the anchor.
-    public var pillHeight: CGFloat
-
-    /// Width of the collapsed pill, as a fraction of the anchor width.
-    public var pillWidthFactor: CGFloat
-
     public var peekWidthFraction: CGFloat
     public var peekMaxWidth: CGFloat
 
@@ -53,8 +47,6 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
     public var revealDuration: TimeInterval
 
     public init(
-        pillHeight: CGFloat = 6,
-        pillWidthFactor: CGFloat = 0.62,
         peekWidthFraction: CGFloat = 0.42,
         peekMaxWidth: CGFloat = 820,
         peekHeight: CGFloat = 96,
@@ -67,8 +59,6 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
         islandCornerRadius: CGFloat = 12,
         revealDuration: TimeInterval = 0.4
     ) {
-        self.pillHeight = pillHeight
-        self.pillWidthFactor = pillWidthFactor
         self.peekWidthFraction = peekWidthFraction
         self.peekMaxWidth = peekMaxWidth
         self.peekHeight = peekHeight
@@ -89,8 +79,6 @@ extension PanelMetrics {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = PanelMetrics()
         self.init(
-            pillHeight: try c.decodeIfPresent(CGFloat.self, forKey: .pillHeight) ?? d.pillHeight,
-            pillWidthFactor: try c.decodeIfPresent(CGFloat.self, forKey: .pillWidthFactor) ?? d.pillWidthFactor,
             peekWidthFraction: try c.decodeIfPresent(CGFloat.self, forKey: .peekWidthFraction) ?? d.peekWidthFraction,
             peekMaxWidth: try c.decodeIfPresent(CGFloat.self, forKey: .peekMaxWidth) ?? d.peekMaxWidth,
             peekHeight: try c.decodeIfPresent(CGFloat.self, forKey: .peekHeight) ?? d.peekHeight,

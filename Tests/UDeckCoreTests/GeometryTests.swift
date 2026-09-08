@@ -156,10 +156,13 @@ struct PanelGeometryTests {
         }
 
         // Under a real notch there is nothing to weld to: those points are
-        // hardware, and a panel drawn through them would have a hole in it.
+        // hardware, and a panel drawn through them would have a hole in it. The
+        // collapsed state is the exception, and only because it draws nothing —
+        // its frame is the notch, which is where a window is invisible rather
+        // than where it would be mangled.
         let builtIn = geometry(ScreenFixtures.builtInNotched)
         #expect(builtIn.topOverhang == 0)
-        for phase in PanelPhase.allCases {
+        for phase in [PanelPhase.peek, .open, .fullscreen] {
             #expect(builtIn.frame(for: phase).maxY <= ScreenFixtures.builtInNotched.panelTopY,
                     "\(phase) on a notched screen must stay below the notch")
         }
@@ -189,7 +192,7 @@ struct PanelGeometryTests {
         }
     }
 
-    @Test("the collapsed state is the island where there is no notch, a lip where there is")
+    @Test("the collapsed state is the island where there is no notch, and nothing where there is")
     func collapsedShapeFollowsTheHardware() {
         let dell = geometry(ScreenFixtures.externalMain)
         #expect(dell.collapsedFrame.minY == dell.anchor.minY)
@@ -198,10 +201,14 @@ struct PanelGeometryTests {
         #expect(dell.collapsedFrame.height == ScreenFixtures.externalMain.topInset + metrics.topEdgeBleed)
         #expect(dell.collapsedFrame.width == tuning.virtualAnchorWidth)
 
+        // Nothing hangs under a real notch. The frame is the notch itself, so
+        // the window sits behind the camera housing rather than below it, and
+        // nothing protrudes into the screen.
         let builtIn = geometry(ScreenFixtures.builtInNotched)
-        #expect(builtIn.collapsedFrame.height == metrics.pillHeight)
-        #expect(builtIn.collapsedFrame.maxY == ScreenFixtures.builtInNotched.panelTopY)
-        #expect(builtIn.collapsedFrame.width < builtIn.anchor.width)
+        #expect(builtIn.collapsedFrame == builtIn.anchor)
+        #expect(builtIn.collapsedFrame == ScreenFixtures.builtInNotched.notchRect)
+        #expect(builtIn.collapsedFrame.minY >= ScreenFixtures.builtInNotched.panelTopY,
+                "nothing may hang below the notch")
     }
 
     @Test("the panel is centred on the anchor and stays inside the screen")

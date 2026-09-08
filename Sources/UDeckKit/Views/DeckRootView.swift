@@ -17,7 +17,7 @@ public struct DeckRootView: View {
         Group {
             switch shell.phase {
             case .collapsed:
-                CollapsedIslandView(theme: theme, summary: summary, isLipUnderNotch: shell.screenHasNotch)
+                CollapsedIslandView(theme: theme, summary: summary, drawsNothing: shell.screenHasNotch)
             case .peek:
                 PeekView(theme: theme, summary: summary, model: model)
             case .open, .fullscreen:
@@ -40,8 +40,8 @@ public struct DeckRootView: View {
         .environment(\.deckTheme, theme)
         .background {
             // The collapsed island is made of the same glass as the panel — it
-            // is the panel, at its smallest — except under a real notch, where
-            // there is only a few points of lip and glass would read as grime.
+            // is the panel, at its smallest — except on a screen with a real
+            // notch, where the collapsed state draws nothing at all.
             if shell.phase != .collapsed {
                 GlassBackground(
                     cornerRadius: model.settings.panel.cornerRadius,
@@ -125,36 +125,38 @@ struct DeckSummary {
 
 /// What is on screen while the panel is away.
 ///
-/// Two shapes, because the two screens are not the same object. On a display
-/// with no notch this is the island itself — glass, the size of a real notch,
-/// welded to the top edge — and the state is a short bar inside it. Under a
-/// real notch there is nothing to build: the island is hardware, and all that
-/// is left to draw is a lip carrying the same colour.
+/// On a display with no notch this is the island itself — glass, the size of a
+/// real notch, welded to the top edge — and the state is a short bar inside it.
 ///
-/// Either way it says one thing and does not move. With dozens of sources being
-/// watched, anything that animates up here is wallpaper by the end of the day,
-/// and it costs battery for the privilege of being ignored.
+/// On a display that has a notch, nothing. The island is already there in
+/// hardware; a strip hung under it is a second protrusion doing a job the
+/// screen cutout was already doing, which is what the operator objected to. The
+/// window still exists at the notch's own coordinates, where the camera housing
+/// covers it, so there is nothing to see either way — but drawing nothing is
+/// the statement, and not relying on hardware to hide it is the reason this is
+/// a branch rather than an accident.
+///
+/// It says one thing and does not move. With dozens of sources being watched,
+/// anything that animates up here is wallpaper by the end of the day, and it
+/// costs battery for the privilege of being ignored.
 struct CollapsedIslandView: View {
     var theme: DeckTheme
     var summary: DeckSummary
-    var isLipUnderNotch: Bool
-
-    private var stateColor: Color {
-        theme.color(for: summary.worst).opacity(summary.placedPlugins == 0 ? 0.25 : 0.85)
-    }
+    var drawsNothing: Bool
 
     var body: some View {
         Group {
-            if isLipUnderNotch {
-                BottomRoundedRectangle(radius: 3).fill(stateColor)
+            if drawsNothing {
+                Color.clear
             } else {
                 Capsule()
-                    .fill(stateColor)
+                    .fill(theme.color(for: summary.worst)
+                        .opacity(summary.placedPlugins == 0 ? 0.25 : 0.85))
                     .frame(width: 44, height: 3)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityHidden(drawsNothing)
         .accessibilityLabel(summary.placedPlugins == 0
             ? "uDeck, nothing placed yet"
             : "uDeck, worst state \(summary.worst.rawValue)")

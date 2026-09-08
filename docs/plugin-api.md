@@ -162,7 +162,7 @@ A `poll` plugin prints exactly one JSON object to standard output and exits.
 
 | Field | Default | Meaning |
 |---|---|---|
-| `state` | `"ok"` | `ok`, `warn`, `crit` or `unknown`. Colours the card and the collapsed pill. |
+| `state` | `"ok"` | `ok`, `warn`, `crit` or `unknown`. Colours the card, and the island while the panel is away. |
 | `title` | the manifest's `name` | Overrides the window title. |
 | `chip` | none | A short badge next to the title. Keep it to a couple of words. |
 | `rows` | `[]` | The body. See [Row types](#row-types). |

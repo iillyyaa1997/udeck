@@ -124,32 +124,25 @@ public struct PanelGeometry: Equatable, Sendable {
 
     /// What the operator sees while the panel is away.
     ///
-    /// Where there is no notch, this is the anchor itself: a drawn island
-    /// filling the menu bar's height at the top centre, the same size as the
-    /// real notch on the built-in display, and the shape the panel grows out
-    /// of.
+    /// Where there is no notch, this is the anchor: a drawn island filling the
+    /// menu bar's height at the top centre, the same size as the real notch on
+    /// the built-in display, and the shape the panel grows out of. It is bled
+    /// past the top edge for the same reason the panel is; the visible part is
+    /// still exactly the anchor.
     ///
-    /// Where there *is* a notch, the island already exists in hardware and
-    /// costs nothing to keep. Drawing over it would put pixels behind the
-    /// camera housing, so what hangs under it is a thin lip instead — enough to
-    /// carry a colour, not enough to pretend to be a second notch.
+    /// Where there *is* a notch, nothing is drawn at all. The island already
+    /// exists in hardware and costs nothing to keep, and anything hung under it
+    /// is a second protrusion below a screen cutout that was already doing the
+    /// job — the operator's word for it was "доп выступ". The frame stays the
+    /// notch itself, so the window has somewhere to be and nowhere to be seen:
+    /// those points are behind the camera housing.
     public var collapsedFrame: CGRect {
-        guard screen.hasNotch else {
-            // Bled past the top edge for the same reason the panel is; see
-            // `panelHangY`. The visible part is still exactly the anchor.
-            return CGRect(
-                x: anchor.minX,
-                y: anchor.minY,
-                width: anchor.width,
-                height: anchor.height + metrics.topEdgeBleed
-            )
-        }
-        let width = anchor.width * metrics.pillWidthFactor
+        guard !screen.hasNotch else { return anchor }
         return CGRect(
-            x: anchor.midX - width / 2,
-            y: screen.panelTopY - metrics.pillHeight,
-            width: width,
-            height: metrics.pillHeight
+            x: anchor.minX,
+            y: anchor.minY,
+            width: anchor.width,
+            height: anchor.height + metrics.topEdgeBleed
         )
     }
 

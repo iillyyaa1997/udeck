@@ -115,8 +115,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
             result.gesture.pointerPollInterval = clamp(result.gesture.pointerPollInterval, 0.02 ... 5)
         }
 
-        result.panel.pillHeight = clamp(result.panel.pillHeight, 1 ... 200)
-        result.panel.pillWidthFactor = clamp(result.panel.pillWidthFactor, 0.05 ... 1)
         result.panel.peekWidthFraction = clamp(result.panel.peekWidthFraction, 0.05 ... 1)
         result.panel.peekMaxWidth = clamp(result.panel.peekMaxWidth, 100 ... 10_000)
         result.panel.peekHeight = clamp(result.panel.peekHeight, 20 ... 5000)
