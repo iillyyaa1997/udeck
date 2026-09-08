@@ -15,19 +15,32 @@ permissions:
 jobs:
   cla:
     runs-on: ubuntu-latest
+    env:
+      # A secret cannot be read in a job-level `if`, so its presence is turned
+      # into a plain value here. Until the repository has a
+      # PERSONAL_ACCESS_TOKEN, this job does nothing rather than failing every
+      # pull request with an error about a missing token — a red check that
+      # nobody can act on is worse than no check.
+      HAS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN != '' }}
     steps:
+      - name: Explain that the check is not configured yet
+        if: env.HAS_TOKEN != 'true'
+        run: |
+          echo "The CLA check is not configured: no PERSONAL_ACCESS_TOKEN secret."
+          echo "Add one with 'repo' scope to enable it. Until then, contributors"
+          echo "are asked to agree to docs/cla.md in the pull request itself."
+
       # Asks a first-time contributor to agree to docs/cla.md by commenting on
       # their pull request, and records the agreement in a file in this repo.
-      #
-      # This needs a repository secret named PERSONAL_ACCESS_TOKEN holding a
-      # token with `repo` scope, so the action can write the signatures file.
-      # Until that secret exists the job is skipped rather than failing every
-      # pull request.
       - name: Check the contributor licence agreement
         if: >
-          (github.event.issue.pull_request
-            && contains(github.event.comment.body, 'I have read the CLA Document and I hereby sign the CLA'))
-          || github.event_name == 'pull_request_target'
+          env.HAS_TOKEN == 'true'
+          && ((github.event.issue.pull_request
+                && contains(github.event.comment.body, 'I have read the CLA Document and I hereby sign the CLA'))
+              || github.event_name == 'pull_request_target')
+        # Pinned to a released tag. Running a third-party action on
+        # pull_request_target gives it write access to this repository, so this
+        # is worth pinning to a commit sha once the workflow is switched on.
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
