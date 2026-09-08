@@ -418,6 +418,23 @@ Each of these produces a different, readable message on the card:
 
 ---
 
+### One thing uDeck cannot clean up
+
+If uDeck itself is killed — force-quit, or crashed — while one of your runs is
+in flight, that run is orphaned. It keeps going until it finishes on its own,
+and a producer that never finishes keeps going until the machine restarts.
+
+macOS offers no way to say "die when my parent dies", so this is a real hole
+rather than an oversight. It is bounded — at most one stray process per plugin,
+and only when the host died at exactly the wrong moment — but it is a reason to
+write producers that terminate on their own even when nobody is waiting for
+them, and a reason not to have one start something long-lived in the background.
+
+Measured, so the size of the hole is known: with a plugin that hangs on purpose
+and ignores `SIGTERM`, polled every five seconds for a minute, a **running**
+uDeck left nothing behind at all. Every stray process observed came from the
+host being killed mid-poll.
+
 ## Testing your plugin
 
 Run it the way uDeck will, and check that what comes out is a card:
