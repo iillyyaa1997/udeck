@@ -186,14 +186,29 @@ public struct PanelGeometry: Equatable, Sendable {
         wholePoints(phase == .fullscreen ? fullscreenFrame : openFrame)
     }
 
-    /// The window once a transition has finished: exactly the panel.
+    /// The window once a transition has finished: exactly the panel, unless the
+    /// panel is away.
     ///
-    /// Between transitions the window is the panel and nothing more, so every
-    /// point inside it is a point the panel draws on and everything outside is
-    /// somebody else's. During a transition it is the stage, because the panel
-    /// grows inside it.
+    /// Between transitions a *visible* panel's window is the panel and nothing
+    /// more, so every point inside it is a point the panel draws on and
+    /// everything outside is somebody else's. During a transition it is the
+    /// stage, because the panel grows inside it.
+    ///
+    /// The collapsed state is the exception, and the reason is that it buys
+    /// nothing and costs a frame. A window whose panel is away is click-through
+    /// in its entirety — that is what makes the island a hint rather than a
+    /// target — so bringing it down to the size of the island protects nothing.
+    /// What it does do is guarantee that the next reveal has to resize the
+    /// window from the island to the stage, a jump of two orders of magnitude in
+    /// area, at the exact moment a time-based spring starts running. The
+    /// compositor rebuilds the glass for the new size, the first frames go
+    /// missing, and the spring is already part-way through when the panel next
+    /// appears: "резко появляется, как будто анимация начинается с середины".
+    ///
+    /// Left at the stage, a reveal moves a rectangle inside a window that is
+    /// already the right size and does not touch the window at all.
     public func settledWindowFrame(for phase: PanelPhase) -> CGRect {
-        wholePoints(frame(for: phase))
+        phase == .collapsed ? windowFrame(for: phase) : wholePoints(frame(for: phase))
     }
 
     /// Window frames are whole points; the panel's own frames are not.

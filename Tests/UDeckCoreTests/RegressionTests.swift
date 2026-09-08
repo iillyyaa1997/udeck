@@ -58,15 +58,46 @@ struct RegressionTests {
     /// The same rule for the window the panel settles into, which is a
     /// different frame from the one it animates in — and the difference between
     /// them is exactly what went wrong.
-    @Test("the settled window is the panel, so the panel sits at its origin")
+    ///
+    /// It holds for a *visible* panel. The collapsed state settles onto the
+    /// stage instead: its window is click-through in its entirety, so shrinking
+    /// it to the island protects nothing, and leaving it means the next reveal
+    /// does not have to resize a window at the instant a spring starts running.
+    @Test("a visible panel's settled window is the panel, so it sits at its origin")
     func settledWindowIsThePanel() {
         for screen in ScreenFixtures.both {
             let g = geometry(screen)
-            for phase in PanelPhase.allCases {
+            for phase in PanelPhase.allCases where phase != .collapsed {
                 let settled = g.settledWindowFrame(for: phase)
                 #expect(settled.isApproximately(g.frame(for: phase), within: 1),
                         "\(phase) on \(screen.name) settles to something other than the panel")
             }
+        }
+    }
+
+    /// The fault: the panel appeared already part-way open. The window was
+    /// brought down to the island whenever the panel went away, so every reveal
+    /// began by resizing it from the island to the stage — two orders of
+    /// magnitude of area — at the exact moment a time-based spring started. The
+    /// compositor rebuilt the glass for the new size, the first frames went
+    /// missing, and the spring was already part-way through when the panel next
+    /// appeared: "резко появляется, как будто анимация начинается с середины".
+    ///
+    /// The invariant: going away and coming back must not move the window.
+    @Test("a reveal does not have to resize the window before it can animate")
+    func revealNeedsNoWindowResize() {
+        for screen in ScreenFixtures.both {
+            let g = geometry(screen)
+            let away = g.settledWindowFrame(for: .collapsed)
+            for phase in [PanelPhase.peek, .open] {
+                #expect(away == g.windowFrame(for: phase),
+                        "\(screen.name): revealing \(phase) has to resize the window from \(away)")
+            }
+            // And the panel's own rectangle inside that window is still the
+            // island's place on screen, not the whole window.
+            let mark = g.panelRect(for: .collapsed, inWindow: away)
+            #expect(mark.width < away.width, "the island filled its whole window")
+            #expect(mark.size.width == g.frame(for: .collapsed).width)
         }
     }
 

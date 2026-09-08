@@ -393,7 +393,12 @@ public final class PanelController {
         // other order leaves one frame drawn with the panel in its old place
         // inside the new window, which is a visible jolt at the end of every
         // reveal.
-        shell.panelRect = CGRect(origin: .zero, size: frame.size)
+        // Stated against the frame the window is about to have, not against the
+        // one the phase would pick for itself. For a visible panel the two are
+        // the same and this is the window's own origin; for the collapsed state,
+        // whose window stays the size of the stage, it is the island's place
+        // inside it.
+        shell.panelRect = geometry.panelRect(for: state.phase, inWindow: frame)
         panel.setFrame(frame, display: true)
     }
 
