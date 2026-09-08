@@ -12,6 +12,16 @@ public enum RefreshReason: String, Sendable {
 /// One attempt to get a card out of a plugin.
 public enum PollExecution: Sendable, Equatable {
     case card(Card)
+
+    /// The producer printed a complete card and then overran its deadline.
+    ///
+    /// Both halves matter. Throwing the card away because the run was killed
+    /// wastes data the operator can use — and a producer that prints its card
+    /// and *then* does something slow is a common shape, so this was measured
+    /// happening in most runs at the deadline. Hiding the overrun would be the
+    /// opposite mistake: a producer that is always killed would look healthy.
+    case lateCard(Card, PluginFailure)
+
     case failure(PluginFailure)
 }
 
@@ -78,7 +88,12 @@ public struct PollExecutor: Sendable {
 
         switch result.termination {
         case .timedOut(let seconds):
-            return .failure(PluginFailure(reason: .timedOut(after: seconds), diagnostics: diagnostics, occurredAt: now))
+            let failure = PluginFailure(reason: .timedOut(after: seconds), diagnostics: diagnostics, occurredAt: now)
+            // It may have finished saying what it had to say before it hung.
+            if case .card(let card) = PollExecution(parsing: result.standardOutput, diagnostics: diagnostics, now: now) {
+                return .lateCard(card, failure)
+            }
+            return .failure(failure)
         case .outputLimitExceeded(let bytes):
             return .failure(PluginFailure(reason: .outputLimitExceeded(bytes: bytes), diagnostics: diagnostics, occurredAt: now))
         case .launchFailed(let detail):

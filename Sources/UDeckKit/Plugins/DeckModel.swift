@@ -35,15 +35,31 @@ public final class DeckModel {
         DeckLog.plugins.error("\(description, privacy: .public)")
         guard !problems.contains(description) else { return }
         problems.append(description)
-        if problems.count > 10 { problems.removeFirst(problems.count - 10) }
+        // Drop the newest rather than the oldest when full. The same failure
+        // with a different byte count reads as a new entry, so a repeating
+        // problem would otherwise push out the earlier ones the operator has
+        // not read — and the first thing that went wrong is usually the one
+        // worth reading.
+        if problems.count > Self.maximumProblems {
+            problems.removeLast(problems.count - Self.maximumProblems)
+        }
     }
+
+    private static let maximumProblems = 10
 
     /// Set by the shell so the model knows whether anybody is looking.
     public var panelIsVisible = false {
         didSet { if panelIsVisible != oldValue { visibilityChanged() } }
     }
 
-    public var appearance: Appearance = .dark
+    /// What uDeck tells a producer about how its card will be drawn.
+    ///
+    /// Always dark, because the panel is: it hangs over whatever the operator
+    /// has on screen, so its legibility cannot follow the system. Constant
+    /// rather than a variable nothing writes, which is what it was — and the
+    /// plugin contract now says the same thing instead of listing two values as
+    /// if they varied.
+    public let appearance: Appearance = .dark
 
     /// Told after the operator changes a setting, so the shell can rebuild
     /// anything that was created with one.
@@ -52,6 +68,13 @@ public final class DeckModel {
     private let paths: UDeckPaths
     private let executor: PollExecutor
     private var pollTasks: [String: Task<Void, Never>] = [:]
+
+    /// The refresh started by the most recent reveal.
+    ///
+    /// One task, not one per plugin, and the previous one is cancelled. Opening
+    /// and closing the panel repeatedly used to stack an unbounded number of
+    /// waves, each launching a process per placed plugin.
+    private var refreshTask: Task<Void, Never>?
 
     private var settingsStore: JSONFileStore<AppSettings> { .init(url: paths.settingsFile) }
     private var layoutStore: JSONFileStore<DeckLayout> { .init(url: paths.layoutFile) }
@@ -75,7 +98,7 @@ public final class DeckModel {
             }
         }
 
-        settings = load(JSONFileStore<AppSettings>(url: paths.settingsFile), default: AppSettings())
+        settings = load(JSONFileStore<AppSettings>(url: paths.settingsFile), default: AppSettings()).validated()
         layout = load(JSONFileStore<DeckLayout>(url: paths.layoutFile), default: DeckLayout.firstRun()).normalized()
         grants = load(JSONFileStore<PermissionGrants>(url: paths.grantsFile), default: PermissionGrants())
         pluginSettings = load(JSONFileStore<PluginSettings>(url: paths.pluginSettingsFile), default: PluginSettings())
@@ -146,6 +169,7 @@ public final class DeckModel {
     public func restartPolling() {
         for (_, task) in pollTasks { task.cancel() }
         pollTasks.removeAll()
+        if !panelIsVisible && !settings.pollWhileCollapsed { refreshTask?.cancel() }
 
         guard panelIsVisible || settings.pollWhileCollapsed else { return }
 
@@ -166,11 +190,18 @@ public final class DeckModel {
         }
     }
 
-    /// Runs everything once, now.
+    /// Runs everything once, now, replacing any refresh still in flight.
     public func refreshAll(reason: RefreshReason) {
-        for plugin in plugins where plugin.manifest?.kind == .poll {
-            guard let id = plugin.manifest?.id, placedPluginIDs.contains(id) else { continue }
-            Task { await poll(plugin, reason: reason) }
+        refreshTask?.cancel()
+        let due = plugins.filter { plugin in
+            guard plugin.manifest?.kind == .poll, let id = plugin.manifest?.id else { return false }
+            return placedPluginIDs.contains(id)
+        }
+        refreshTask = Task { [weak self] in
+            for plugin in due {
+                guard !Task.isCancelled else { return }
+                await self?.poll(plugin, reason: reason)
+            }
         }
     }
 
@@ -192,10 +223,20 @@ public final class DeckModel {
             reason: reason
         )
 
+        // Re-read rather than reuse the value from before the await: another
+        // poll of the same plugin can have finished in between — a manual
+        // refresh on reveal races the interval task — and writing back a
+        // snapshot captured earlier would drop its card and undercount its
+        // failures.
         var snapshot = snapshots[id.rawValue] ?? PluginSnapshot(pluginID: id)
         switch outcome {
-        case .card(let card): snapshot.record(card: card, at: Date())
-        case .failure(let failure): snapshot.record(failure: failure)
+        case .card(let card):
+            snapshot.record(card: card, at: Date())
+        case .lateCard(let card, let failure):
+            snapshot.record(card: card, at: Date())
+            snapshot.record(failure: failure)
+        case .failure(let failure):
+            snapshot.record(failure: failure)
         }
         snapshots[id.rawValue] = snapshot
     }
@@ -252,10 +293,11 @@ public final class DeckModel {
     // MARK: - Settings and permissions
 
     public func update(settings newValue: AppSettings) {
-        settings = newValue
-        save(settingsStore, newValue, named: "settings")
+        let settings = newValue.validated()
+        self.settings = settings
+        save(settingsStore, settings, named: "settings")
         restartPolling()
-        onSettingsChanged?(newValue)
+        onSettingsChanged?(settings)
     }
 
     public func setEnabled(_ enabled: Bool, for id: PluginIdentifier) {

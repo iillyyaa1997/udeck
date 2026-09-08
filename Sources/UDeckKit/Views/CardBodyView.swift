@@ -182,7 +182,10 @@ struct CardBodyView: View {
 
     private var actions: some View {
         HStack(spacing: 7) {
-            ForEach(card.actions) { action in
+            // Keyed by position, not by content: a card may legitimately carry
+            // two buttons with the same label and command, and identity by
+            // content makes them collide.
+            ForEach(Array(card.actions.enumerated()), id: \.offset) { _, action in
                 Button(action.label) {
                     shell.onInteract()
                     run(action)
@@ -207,6 +210,9 @@ struct CardBodyView: View {
             alert.alertStyle = .warning
             alert.addButton(withTitle: "Run")
             alert.addButton(withTitle: "Cancel")
+            // The panel sits at the status-bar level, so an ordinary alert
+            // would open behind the thing that asked the question.
+            alert.window.level = .popUpMenu
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         actionProblem = model.run(action, from: pluginID)

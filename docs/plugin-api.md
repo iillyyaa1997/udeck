@@ -314,7 +314,7 @@ variable should fall back to your declared default rather than crash.
 | `UDECK_PLUGIN_ID` | Your plugin's id. |
 | `UDECK_PLUGIN_DIR` | Your plugin's folder. Also the working directory. |
 | `UDECK_CACHE_DIR` | A directory that is yours to write in. Created before each run. |
-| `UDECK_APPEARANCE` | `light` or `dark`. |
+| `UDECK_APPEARANCE` | `dark`. The panel hangs over whatever is on screen, so it does not follow the system appearance; the variable exists so that it can start to without breaking you. |
 | `UDECK_REFRESH_REASON` | `launch`, `interval` or `manual`. |
 | `PATH` | uDeck's configured search path, not the one it inherited. |
 | `HOME`, `LANG`, `LC_ALL`, `TMPDIR` | `LANG` and `LC_ALL` are set to `en_US.UTF-8` so a producer can print UTF-8 without configuring a locale. |

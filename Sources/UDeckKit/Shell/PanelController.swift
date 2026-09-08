@@ -66,6 +66,23 @@ public final class PanelController {
     /// 80 ms and up is under half a frame.
     private static let armingTickInterval: TimeInterval = 0.03
 
+    /// A timer that keeps running while a modal loop is up.
+    ///
+    /// `Timer.scheduledTimer` schedules in the default run-loop mode only, so
+    /// every timer here stopped the moment a confirmation alert appeared — the
+    /// pointer poll, the dwell tick and the peek-exit grace all froze until the
+    /// operator answered it, and the panel simply stopped responding to the
+    /// cursor.
+    private static func commonModeTimer(
+        every interval: TimeInterval,
+        repeats: Bool,
+        _ block: @escaping @Sendable (Timer) -> Void
+    ) -> Timer {
+        let timer = Timer(timeInterval: interval, repeats: repeats, block: block)
+        RunLoop.main.add(timer, forMode: .common)
+        return timer
+    }
+
     /// The application that was in front when uDeck took focus, so it can be
     /// put back afterwards.
     private var applicationToRestore: NSRunningApplication?
@@ -152,7 +169,7 @@ public final class PanelController {
         pointerPollTimer = nil
         let interval = settings.gesture.pointerPollInterval
         guard interval > 0 else { return }
-        pointerPollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        pointerPollTimer = Self.commonModeTimer(every: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 // A peek is watched too: the cursor can be moved away without
                 // producing any event this process sees, and a peek that only
@@ -290,7 +307,7 @@ public final class PanelController {
     /// pointer moving.
     private func scheduleArmingTick() {
         guard armingTimer == nil else { return }
-        armingTimer = Timer.scheduledTimer(withTimeInterval: Self.armingTickInterval, repeats: true) { [weak self] _ in
+        armingTimer = Self.commonModeTimer(every: Self.armingTickInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 guard self.state.phase == .collapsed else {
@@ -314,8 +331,8 @@ public final class PanelController {
     /// closed on the next movement would sit there indefinitely.
     private func scheduleExitCheck() {
         exitTimer?.invalidate()
-        exitTimer = Timer.scheduledTimer(
-            withTimeInterval: settings.gesture.peekExitGrace, repeats: false
+        exitTimer = Self.commonModeTimer(
+            every: settings.gesture.peekExitGrace, repeats: false
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.state.phase == .peek, self.pointerLeftAt != nil,
@@ -338,6 +355,15 @@ public final class PanelController {
             && event.charactersIgnoringModifiers?.lowercased() == "w"
 
         if Int(event.keyCode) == escape {
+            // A rename in progress is what Escape means first, whether or not
+            // anything has been typed into it yet. An empty field used to fall
+            // through and collapse the whole panel — and the content's own
+            // Escape handling can never run, because this monitor sees the key
+            // before the window does.
+            if shell.tabRename != nil {
+                shell.tabRename = nil
+                return true
+            }
             // Whether a field is holding text is the content's business; the
             // state machine only needs to be told, and it protects the text.
             apply(.escape(isEditingText: isEditingText()))
@@ -367,10 +393,13 @@ public final class PanelController {
     private func handleClickOutside() {
         guard state.phase.isVisible else { return }
         guard let geometry else { return }
-        // A click in the trigger strip is the operator reaching for the panel,
-        // not dismissing it.
+        // Tested against the keep-alive region, not the panel's own frame. The
+        // panel hangs below the top inset and so never contains the trigger
+        // strip — which meant a click in the menu bar, the very place the
+        // operator reaches to open the panel, dismissed it instead. The comment
+        // here claimed otherwise for several commits.
         let location = NSEvent.mouseLocation
-        guard !geometry.frame(for: state.phase).contains(location) else { return }
+        guard !geometry.keepAliveRegion(for: state.phase).contains(location) else { return }
         apply(.closeRequested)
     }
 
@@ -494,7 +523,9 @@ public final class PanelController {
     /// that was in front *before* uDeck back over it would be uDeck answering a
     /// choice it was not asked about.
     private func releaseKeyboard(restoringPreviousApplication shouldRestore: Bool) {
-        panel.resignKey()
+        // No `resignKey()` here: `NSWindow` documents it as something the
+        // system calls, never the application. Ordering the panel out is what
+        // actually gives up key status.
         guard didActivateForKeyboard else { return }
         didActivateForKeyboard = false
         let previous = applicationToRestore
@@ -512,7 +543,7 @@ public final class PanelController {
         screen=\(screen?.name ?? "none") notch=\(screen?.hasNotch == true)
         frame=\(panel.frame)
         key=\(panel.isKeyWindow) appActive=\(NSApp.isActive) activatedForKeyboard=\(didActivateForKeyboard)
-        calibration polarity=\(pointer.calibration.polarity) scale=\(String(format: "%.2f", pointer.calibration.scale)) observations=\(pointer.calibration.observations)
+        calibration polarity=\(pointer.calibration.polarity) scale=\(String(format: "%.2f", pointer.calibration.scale)) agreement=\(pointer.calibration.agreementRun)
         """
     }
 }

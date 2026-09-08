@@ -249,7 +249,10 @@ private struct PluginRow: View {
 
         if !manifest.settings.isEmpty {
             Text("Settings").font(.subheadline).padding(.top, 4)
-            ForEach(manifest.settings, id: \.key) { declaration in
+            // By position: a manifest with two settings sharing a key is
+            // reported as a problem, and must still render rather than
+            // collapsing two rows into one.
+            ForEach(Array(manifest.settings.enumerated()), id: \.offset) { _, declaration in
                 settingControl(declaration, for: manifest.id)
             }
         }

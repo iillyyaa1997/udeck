@@ -67,7 +67,7 @@ public struct HoverGestureRecognizer: Sendable {
         environment: GestureEnvironment,
         tuning: GestureTuning
     ) -> GestureOutcome {
-        recordHistory(sample, tuning: tuning)
+        recordHistory(sample)
 
         guard let geometry, geometry.triggerStrip.contains(sample.location) else {
             // Leaving the strip ends the visit, whatever else is going on. This
@@ -97,6 +97,11 @@ public struct HoverGestureRecognizer: Sendable {
                 dwellHorizontalTravel = 0
                 pushWindow.removeAll(keepingCapacity: true)
             }
+            // Whether the cursor is pinned is a fact about the world, not about
+            // the gate, and it has to stay current through one — otherwise the
+            // first sample after the gate lifts is compared against a stale
+            // answer and discarded.
+            wasPinned = geometry.isPinnedToTopEdge(sample.location)
             return .idle(reason: blocked)
         }
 
@@ -281,7 +286,7 @@ public struct HoverGestureRecognizer: Sendable {
 
     // MARK: - History
 
-    private mutating func recordHistory(_ sample: PointerSample, tuning: GestureTuning) {
+    private mutating func recordHistory(_ sample: PointerSample) {
         history.append(HistoryEntry(location: sample.location,
                                     delta: sample.delta,
                                     timestamp: sample.timestamp))

@@ -103,14 +103,17 @@ public final class PointerMonitor {
     private func handleMovement(_ event: NSEvent) {
         let location = NSEvent.mouseLocation
 
-        // Calibration only learns from movements where the cursor was free: at
-        // the screen edge the position stops changing while the delta does not,
-        // and folding that in would teach it nonsense.
-        if let previous = previousLocation, let screen = screens.screens.screen(containing: location) {
-            let atEdge = location.y >= screen.frame.maxY - 1
-            if !atEdge {
-                calibration.observe(positionChange: location.y - previous.y, reportedDelta: event.deltaY)
-            }
+        // Calibration only learns from movements where the cursor was free.
+        // Against *any* screen edge the position stops changing while the delta
+        // does not, and folding that in teaches it nonsense — it was only the
+        // top edge that was excluded, but the cursor clamps at the bottom and
+        // both sides too, and a diagonal along the bottom edge is clamped in
+        // one axis while still moving in the other.
+        if let previous = previousLocation,
+           let screen = screens.screens.screen(containing: location),
+           !Self.isAgainstAnyEdge(location, of: screen),
+           !Self.isAgainstAnyEdge(previous, of: screen) {
+            calibration.observe(positionChange: location.y - previous.y, reportedDelta: event.deltaY)
         }
         previousLocation = location
 
@@ -140,6 +143,13 @@ public final class PointerMonitor {
         default:
             break
         }
+    }
+
+    /// Within a point of any edge of the screen, where the cursor stops
+    /// following the device.
+    private static func isAgainstAnyEdge(_ point: CGPoint, of screen: ScreenSnapshot) -> Bool {
+        point.y >= screen.frame.maxY - 1 || point.y <= screen.frame.minY + 1
+            || point.x >= screen.frame.maxX - 1 || point.x <= screen.frame.minX + 1
     }
 
     /// The world as it is right now, for a re-evaluation that no event

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Everything the operator can configure about the shell itself.
@@ -65,6 +66,67 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.silentTTLMultiplier = silentTTLMultiplier
         self.pluginExecutableSearchPath = pluginExecutableSearchPath
         self.pollWhileCollapsed = pollWhileCollapsed
+    }
+
+    /// Brings decoded settings into ranges that make sense.
+    ///
+    /// A plugin's manifest is validated carefully and the operator's own
+    /// settings file was not, which is the wrong way round: the manifest comes
+    /// from someone who reads the documentation, and this file is edited by
+    /// hand at two in the morning. A poll interval of `0.0001` or a negative
+    /// grace period should not be obeyed literally.
+    public func validated() -> AppSettings {
+        var result = self
+        func clamp(_ value: TimeInterval, _ range: ClosedRange<TimeInterval>) -> TimeInterval {
+            guard value.isFinite else { return range.lowerBound }
+            return min(max(value, range.lowerBound), range.upperBound)
+        }
+        func clamp(_ value: CGFloat, _ range: ClosedRange<CGFloat>) -> CGFloat {
+            guard value.isFinite else { return range.lowerBound }
+            return min(max(value, range.lowerBound), range.upperBound)
+        }
+
+        result.gesture.stripHeight = clamp(result.gesture.stripHeight, 1 ... 200)
+        result.gesture.stripSideMargin = clamp(result.gesture.stripSideMargin, 0 ... 2000)
+        result.gesture.virtualAnchorWidth = clamp(result.gesture.virtualAnchorWidth, 20 ... 2000)
+        result.gesture.pinnedEpsilon = clamp(result.gesture.pinnedEpsilon, 0 ... 50)
+        result.gesture.edgePushDistance = clamp(result.gesture.edgePushDistance, 1 ... 2000)
+        result.gesture.edgePushWindow = clamp(result.gesture.edgePushWindow, 0.02 ... 5)
+        result.gesture.dwellDuration = clamp(result.gesture.dwellDuration, 0.02 ... 5)
+        result.gesture.lateralApproachDwellDuration = clamp(result.gesture.lateralApproachDwellDuration, 0.02 ... 10)
+        result.gesture.dwellHorizontalTolerance = clamp(result.gesture.dwellHorizontalTolerance, 1 ... 500)
+        result.gesture.dwellHorizontalSpeedLimit = clamp(result.gesture.dwellHorizontalSpeedLimit, 10 ... 10_000)
+        result.gesture.approachSampleDistance = clamp(result.gesture.approachSampleDistance, 10 ... 5000)
+        result.gesture.lateralApproachRatio = clamp(result.gesture.lateralApproachRatio, 0.1 ... 50)
+        result.gesture.reopenCooldown = clamp(result.gesture.reopenCooldown, 0 ... 30)
+        result.gesture.buttonReleaseGrace = clamp(result.gesture.buttonReleaseGrace, 0 ... 30)
+        result.gesture.peekExitGrace = clamp(result.gesture.peekExitGrace, 0.02 ... 30)
+        result.gesture.peekKeepAliveInset = clamp(result.gesture.peekKeepAliveInset, 0 ... 500)
+        result.gesture.fullscreenCheckInterval = clamp(result.gesture.fullscreenCheckInterval, 0.05 ... 60)
+        // Zero is meaningful here — it turns the safety poll off — so it is the
+        // only value below the floor that survives.
+        if result.gesture.pointerPollInterval != 0 {
+            result.gesture.pointerPollInterval = clamp(result.gesture.pointerPollInterval, 0.02 ... 5)
+        }
+
+        result.panel.pillHeight = clamp(result.panel.pillHeight, 1 ... 200)
+        result.panel.pillWidthFactor = clamp(result.panel.pillWidthFactor, 0.05 ... 1)
+        result.panel.peekWidthFraction = clamp(result.panel.peekWidthFraction, 0.05 ... 1)
+        result.panel.peekMaxWidth = clamp(result.panel.peekMaxWidth, 100 ... 10_000)
+        result.panel.peekHeight = clamp(result.panel.peekHeight, 20 ... 5000)
+        result.panel.openWidthFraction = clamp(result.panel.openWidthFraction, 0.05 ... 1)
+        result.panel.openMaxWidth = clamp(result.panel.openMaxWidth, 100 ... 10_000)
+        result.panel.openHeightFraction = clamp(result.panel.openHeightFraction, 0.05 ... 1)
+        result.panel.openMaxHeight = clamp(result.panel.openMaxHeight, 60 ... 10_000)
+        result.panel.cornerRadius = clamp(result.panel.cornerRadius, 0 ... 100)
+        result.panel.revealDuration = clamp(result.panel.revealDuration, 0 ... 3)
+
+        result.defaultCardTTL = clamp(result.defaultCardTTL, 1 ... Seconds.ceiling)
+        result.silentTTLMultiplier = min(max(result.silentTTLMultiplier.isFinite ? result.silentTTLMultiplier : 3, 1), 100)
+        if result.pluginExecutableSearchPath.isEmpty {
+            result.pluginExecutableSearchPath = AppSettings().pluginExecutableSearchPath
+        }
+        return result
     }
 
     /// Decoding is tolerant of missing keys so that a settings file written by

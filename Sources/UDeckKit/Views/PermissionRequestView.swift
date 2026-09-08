@@ -41,7 +41,7 @@ struct PermissionRequestView: View {
             }
 
             Text("uDeck runs this plugin as you, without a sandbox. Allowing it means agreeing to run this program; declining means uDeck never starts it.")
-                .font(.system(size: theme.chipFont == theme.chipFont ? 9.5 : 9.5))
+                .font(.system(size: 9.5))
                 .foregroundStyle(theme.dim)
                 .fixedSize(horizontal: false, vertical: true)
 

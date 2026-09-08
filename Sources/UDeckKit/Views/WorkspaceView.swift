@@ -64,6 +64,12 @@ struct WorkspaceView: View {
                 .background(RoundedRectangle(cornerRadius: 9).fill(theme.recess))
                 .focused($renameFieldFocused)
                 .onAppear { renameFieldFocused = true }
+                // Losing focus commits rather than discards. Clicking away from
+                // a half-typed name used to throw it away silently — the only
+                // way to keep it was to notice that Return was required.
+                .onChange(of: renameFieldFocused) { _, focused in
+                    if !focused, shell.tabRename?.tabID == tab.id { commitRename(tab.id) }
+                }
                 .onSubmit { commitRename(tab.id) }
                 .onExitCommand { shell.tabRename = nil }
         } else {
