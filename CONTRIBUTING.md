@@ -85,6 +85,20 @@ you build still runs on macOS 14, where it falls back to a blur.
 * One logical change per commit, with a message that explains the reasoning
   rather than restating the diff.
 * Run `swift test` before pushing.
+
+* **A new test has to fail on the bug it guards.** Write it, break the code
+  it protects, watch it go red, put the code back. A test that cannot fail is
+  worse than no test, because it is counted as coverage. Every test in
+  `RegressionTests.swift` was checked this way.
+
+* **Say what frame of reference a value is in.** Every fault that reached the
+  operator on 8 September was one of these, and none was a wrong calculation:
+  a rectangle read against the wrong window, a duration measured against the
+  wrong clock, an answer computed for one question and reused for another.
+  Coordinates, durations and states borrowed from elsewhere are where this
+  code goes wrong; name the frame in the type, the parameter or the comment,
+  and prefer a round-trip test — convert it and convert it back — over an
+  expected value copied out of a debugger.
 * Describe what you verified by hand — especially for anything touching the
   window, since much of that cannot be unit-tested.
 

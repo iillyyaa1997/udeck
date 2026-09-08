@@ -130,6 +130,38 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
 }
 
 extension PanelMetrics {
+    /// When the reveal spring has visibly arrived, in seconds.
+    ///
+    /// A spring has no duration — it has a tail that runs on long after the eye
+    /// has stopped following it — so "how long does the panel take to open" is
+    /// the time it crosses most of its travel, not the time it stops moving.
+    /// The content is sequenced against this number, and getting the two out of
+    /// step is what made the text arrive before the panel it was written on.
+    public var revealPerceivedDuration: TimeInterval {
+        let omega = 2 * Double.pi / max(revealSpringResponse, 0.001)
+        let zeta = min(max(revealSpringDamping, 0.001), 1)
+        let step = 0.002
+        var t = 0.0
+        while t < 5 {
+            let value: Double
+            if zeta < 1 {
+                let damped = omega * (1 - zeta * zeta).squareRoot()
+                value = 1 - exp(-zeta * omega * t)
+                    * (cos(damped * t) + (zeta * omega / damped) * sin(damped * t))
+            } else {
+                value = 1 - exp(-omega * t) * (1 + omega * t)
+            }
+            if value >= 0.95 { return t }
+            t += step
+        }
+        return t
+    }
+
+    /// When the content has finished arriving, in seconds.
+    public var contentArrivalDuration: TimeInterval {
+        contentRevealDelay + contentRevealDuration
+    }
+
     /// See `GestureTuning.init(from:)` — same tolerance, same reasoning.
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
