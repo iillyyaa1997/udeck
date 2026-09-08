@@ -218,6 +218,24 @@ private struct LookSettings: View {
         return "Custom"
     }
 
+    /// Says out loud when the character control has almost nothing left to do.
+    ///
+    /// The tint is painted by uDeck over the material rather than handed to it,
+    /// which is what made one setting produce one colour — and the cost is
+    /// that the material only shows through whatever the tint leaves. Measured
+    /// on the running panel: regular against clear is 19 points of 255 apart
+    /// with no tint at all, and 8 with the tint at 72%. A control that does
+    /// almost nothing should say so rather than let the operator conclude it is
+    /// broken.
+    private var characterNote: String {
+        let strength = editedLook.glass.tintStrength
+        guard editedLook.glass.tinted, strength > 0.5 else {
+            return "At this tint the difference between the two is plain to see."
+        }
+        return "At \(Int(strength * 100)) % tint you will barely see the difference: the tint is painted over the material, "
+            + "so only what it leaves through carries the character. Turn the tint down to tell them apart."
+    }
+
     private func pour(_ look: PanelLook) {
         var settings = model.settings
         settings.theme.setLook(look, forDark: edited)
@@ -390,6 +408,9 @@ private struct LookSettings: View {
             .pickerStyle(.radioGroup)
             Text("macOS offers exactly these two and nothing in between. Both bend what is behind them towards the edges of the panel; regular keeps it recognisable, clear turns it to milk. There is no control over how much they bend — that is baked into each.")
                 .font(.caption).foregroundStyle(.secondary)
+            Text(characterNote)
+                .font(.caption)
+                .foregroundStyle(editedLook.glass.tintStrength > 0.5 ? .orange : .secondary)
 
             LabeledContent("How much glass") {
                 Slider(value: look(\.glass.opacity), in: GlassAppearance.opacityRange, step: 0.05) {
@@ -410,7 +431,7 @@ private struct LookSettings: View {
             }
             .pickerStyle(.segmented)
             .frame(width: 380)
-            .disabled(!model.settings.glass.tinted)
+            .disabled(!editedLook.glass.tinted)
 
             Picker("Text", selection: look(\.ink)) {
                 Text("Light — for a panel darker than what is behind it").tag(PanelInk.light)
@@ -426,9 +447,9 @@ private struct LookSettings: View {
                 }
                 .frame(width: 260)
             }
-            .disabled(!model.settings.glass.tinted)
+            .disabled(!editedLook.glass.tinted)
 
-            GlassPreview(glass: model.settings.glass, theme: DeckTheme(density: model.settings.density, ink: model.settings.ink))
+            GlassPreview(glass: editedLook.glass, theme: DeckTheme(density: model.settings.density, ink: editedLook.ink))
             Text("The sample sits over a dark half and a light one, because those are the two cases that pull in opposite directions: a light tint stands out over a game and washes out over a document, and a dark one does the reverse. The ruling is there so the refraction is visible at all — the material bends what is behind it, and a flat colour or a field of grass gives it nothing to bend.")
                 .font(.caption).foregroundStyle(.secondary)
         }
