@@ -141,6 +141,23 @@ public struct SettingDeclaration: Codable, Equatable, Sendable {
         return nil
     }
 
+    /// How wide an `int` setting's range is allowed to be when the manifest
+    /// gives only one end of it.
+    public static let defaultIntegerSpan = 1000
+
+    /// A range that is always legal, whatever the manifest declared.
+    ///
+    /// The bounds are a plugin author's, so they cannot be assumed to be
+    /// ordered or even both present. A `min` with no `max` used to produce a
+    /// reversed range, and a reversed range is a fatal error in SwiftUI's
+    /// `Stepper` rather than an empty one — a valid manifest could crash the
+    /// settings screen.
+    public var editingRange: ClosedRange<Int> {
+        let lower = minimum ?? 0
+        let upper = maximum ?? (lower + Self.defaultIntegerSpan)
+        return lower ... max(lower, upper)
+    }
+
     /// Brings a stored value back into the declared range, or falls back to the
     /// default when it cannot. Used when loading a settings file that a previous
     /// version of the plugin wrote against different bounds.

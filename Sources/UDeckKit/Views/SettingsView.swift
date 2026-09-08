@@ -316,13 +316,22 @@ private struct PluginRow: View {
             .help(declaration.help ?? "")
 
         case .int:
+            // The bounds come from a plugin's manifest, so they cannot be
+            // trusted to be a valid range: a declaration with `min` and no
+            // `max` produced `2000...1000`, which is a fatal error rather than
+            // an empty range. The range is built to be legal whatever arrives,
+            // and the value is brought inside it before it is shown.
+            let range = declaration.editingRange
             LabeledContent(declaration.label) {
                 Stepper(
                     value: Binding(
-                        get: { if case .int(let number) = value { number } else { 0 } },
+                        get: {
+                            guard case .int(let number) = value else { return range.lowerBound }
+                            return min(max(number, range.lowerBound), range.upperBound)
+                        },
                         set: { model.setSetting(.int($0), key: declaration.key, for: id) }
                     ),
-                    in: (declaration.minimum ?? 0) ... (declaration.maximum ?? 1000)
+                    in: range
                 ) {
                     Text(String(describing: value.jsonLiteral))
                 }

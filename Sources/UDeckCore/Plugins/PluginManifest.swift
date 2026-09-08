@@ -187,6 +187,7 @@ public enum ManifestProblem: Equatable, Sendable, CustomStringConvertible {
     case nonPositiveInterval(TimeInterval)
     case missingTimeout
     case nonPositiveTimeout(TimeInterval)
+    case durationOutOfRange(field: String, value: TimeInterval, maximum: TimeInterval)
     case timeoutNotShorterThanInterval(timeout: TimeInterval, interval: TimeInterval)
     case residentNotSupportedYet
     case blankName
@@ -208,6 +209,8 @@ public enum ManifestProblem: Equatable, Sendable, CustomStringConvertible {
             "a poll plugin must declare \"timeout\" in seconds"
         case .nonPositiveTimeout(let value):
             "\"timeout\" must be greater than zero, got \(value)"
+        case .durationOutOfRange(let field, let value, let maximum):
+            "\"\(field)\" is \(value) seconds, past the \(Int(maximum))-second limit — a plausible typo, and a number that large has no sensible meaning here"
         case .timeoutNotShorterThanInterval(let timeout, let interval):
             "\"timeout\" (\(timeout)s) must be shorter than \"interval\" (\(interval)s), otherwise a slow run always overlaps the next one"
         case .residentNotSupportedYet:
@@ -247,12 +250,23 @@ extension PluginManifest {
         case .poll:
             switch interval {
             case .none: found.append(.missingInterval)
-            case .some(let value) where value <= 0: found.append(.nonPositiveInterval(value))
+            case .some(let value) where value <= 0 || !value.isFinite:
+                found.append(.nonPositiveInterval(value))
+            case .some(let value) where value > Seconds.ceiling:
+                // Unbounded durations are not a taste question: they are turned
+                // into nanoseconds, and past about 585 years that conversion
+                // traps and takes the process with it. The conversion saturates
+                // now, but a manifest that means something impossible should be
+                // told so rather than quietly given a different number.
+                found.append(.durationOutOfRange(field: "interval", value: value, maximum: Seconds.ceiling))
             default: break
             }
             switch timeout {
             case .none: found.append(.missingTimeout)
-            case .some(let value) where value <= 0: found.append(.nonPositiveTimeout(value))
+            case .some(let value) where value <= 0 || !value.isFinite:
+                found.append(.nonPositiveTimeout(value))
+            case .some(let value) where value > Seconds.ceiling:
+                found.append(.durationOutOfRange(field: "timeout", value: value, maximum: Seconds.ceiling))
             default: break
             }
             if let interval, let timeout, interval > 0, timeout > 0, timeout >= interval {

@@ -29,6 +29,14 @@ public struct DeckLayout: Codable, Equatable, Sendable {
     /// Twenty-four rows is well past the height of any panel on any screen.
     public static let maximumWindowHeight = 24
 
+    /// The lowest row a window may occupy.
+    ///
+    /// A bound, not a taste judgement, and for the same reason as the height
+    /// ceiling — except that this one arrives from the layout file as well as
+    /// from a drag. Far more rows than any panel can show, and small enough
+    /// that no arithmetic over it can run away.
+    public static let maximumWindowRow = 4096
+
     public var version: Int
     public var columns: Int
     public var tabs: [DeckTab]

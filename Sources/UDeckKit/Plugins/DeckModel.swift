@@ -154,7 +154,7 @@ public final class DeckModel {
 
             pollTasks[manifest.id.rawValue] = Task { [weak self] in
                 while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                    try? await Task.sleep(nanoseconds: Seconds.nanoseconds(interval))
                     guard !Task.isCancelled else { return }
                     await self?.poll(plugin, reason: .interval)
                 }

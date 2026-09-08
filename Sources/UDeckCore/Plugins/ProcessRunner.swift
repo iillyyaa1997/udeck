@@ -115,7 +115,7 @@ public struct ProcessRunner: Sendable {
         let outcome = Outcome()
 
         let watchdog = Task {
-            try? await Task.sleep(nanoseconds: UInt64(max(0, timeout) * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: Seconds.nanoseconds(timeout))
             guard !Task.isCancelled else { return }
             outcome.recordTimeout(after: timeout)
             await stop.terminate()
@@ -131,7 +131,7 @@ public struct ProcessRunner: Sendable {
                     await stop.terminate()
                     return
                 }
-                try? await Task.sleep(nanoseconds: UInt64(Self.limitCheckInterval * 1_000_000_000))
+                try? await Task.sleep(nanoseconds: Seconds.nanoseconds(Self.limitCheckInterval))
             }
         }
 
@@ -174,7 +174,7 @@ private struct Stopper: Sendable {
     func terminate() async {
         let descendants = ProcessTree.descendants(of: pid)
         signal(SIGTERM, to: [pid] + descendants)
-        try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000))
+        try? await Task.sleep(nanoseconds: Seconds.nanoseconds(grace))
         let survivors = Set([pid] + descendants + ProcessTree.descendants(of: pid))
         signal(SIGKILL, to: Array(survivors))
     }
@@ -312,7 +312,7 @@ private final class OutputCollector: @unchecked Sendable {
             // The readability handlers run on their own queue; this only has to
             // wait long enough for them to observe the last bytes and the
             // end-of-file that follows.
-            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: Seconds.nanoseconds(interval))
         }
         stdoutHandle?.readabilityHandler = nil
         stderrHandle?.readabilityHandler = nil

@@ -239,9 +239,9 @@ struct GridBoundsTests {
         layout.place(windowID: window, in: tab, column: 0, row: 0,
                      width: 4, height: DeckLayout.maximumWindowHeight * 100)
         let placed = layout.tabs[0].windows[0]
-        // The model itself does not impose the ceiling — the drag does — but it
-        // must at least survive being handed an absurd height.
-        #expect(placed.height > 0)
+        // The ceiling is imposed by the model, not only by the drag: a height
+        // this large can also arrive from a hand-edited layout file.
+        #expect(placed.height == DeckLayout.maximumWindowHeight)
         #expect(placed.row == 0)
     }
 }
