@@ -245,3 +245,63 @@ struct GridBoundsTests {
         #expect(placed.row == 0)
     }
 }
+
+@Suite("Grid — dragging downward")
+struct GridDownwardDragTests {
+    let columns = 12
+    let plugin = PluginIdentifier(rawValue: "p")!
+
+    func window(_ id: String, column: Int, row: Int, width: Int, height: Int) -> GridWindow {
+        GridWindow(
+            id: UUID(uuidString: "00000000-0000-0000-0000-0000000000\(id)")!,
+            pluginID: plugin, column: column, row: row, width: width, height: height
+        )
+    }
+
+    /// The window being placed settles first so that it keeps the cell it was
+    /// dropped on. But "first" must not mean "above everything" — a window
+    /// dragged *below* another has to land below it, or dragging downward does
+    /// the opposite of what was asked.
+    @Test("a window dragged below another lands below it")
+    func draggingDownwardKeepsTheOrder() {
+        let top = window("01", column: 0, row: 0, width: 12, height: 2)
+        let bottom = window("02", column: 0, row: 2, width: 12, height: 2)
+
+        // Drag the top one down past the other.
+        var dragged = top
+        dragged.row = 3
+        let result = GridEngine.normalized([dragged, bottom], columns: columns, pinned: dragged.id)
+
+        let placedDragged = result.first { $0.id == top.id }!
+        let placedOther = result.first { $0.id == bottom.id }!
+        #expect(placedOther.row < placedDragged.row,
+                "the dragged window went to row \(placedDragged.row), the other to \(placedOther.row)")
+        #expect(!placedDragged.overlaps(placedOther))
+    }
+
+    @Test("a window dropped onto an occupied cell still keeps the cell")
+    func droppingOnACellStillWins() {
+        let occupant = window("01", column: 0, row: 0, width: 12, height: 2)
+        var dropped = window("02", column: 0, row: 4, width: 12, height: 2)
+        dropped.row = 0
+
+        let result = GridEngine.normalized([occupant, dropped], columns: columns, pinned: dropped.id)
+        #expect(result.first { $0.id == dropped.id }!.row == 0)
+        #expect(result.first { $0.id == occupant.id }!.row == 2)
+    }
+
+    @Test("dragging within a column of three keeps the requested order")
+    func reorderingWithinAStack() {
+        let a = window("01", column: 0, row: 0, width: 12, height: 1)
+        let b = window("02", column: 0, row: 1, width: 12, height: 1)
+        let c = window("03", column: 0, row: 2, width: 12, height: 1)
+
+        // Drag the first one to the bottom.
+        var dragged = a
+        dragged.row = 3
+        let result = GridEngine.normalized([dragged, b, c], columns: columns, pinned: dragged.id)
+        let rows = Dictionary(uniqueKeysWithValues: result.map { ($0.id, $0.row) })
+        #expect(rows[b.id]! < rows[a.id]!, "b should be above the dragged window")
+        #expect(rows[c.id]! < rows[a.id]!, "c should be above the dragged window")
+    }
+}

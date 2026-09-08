@@ -65,16 +65,23 @@ public enum GridEngine {
 
     /// Who settles before whom.
     ///
-    /// The window being placed goes first so that it keeps the cell it was
-    /// dropped on. Everything else settles in reading order, and ties fall back
-    /// to the caller's ordering so the result never depends on how the windows
-    /// happened to be stored.
+    /// Reading order — row, then column — with the caller's ordering breaking
+    /// remaining ties so the result never depends on how the windows happened
+    /// to be stored.
+    ///
+    /// The window being placed wins **only a tie**, and that limit is the whole
+    /// subtlety. Letting it settle before everything regardless of its row
+    /// meant a window dragged *below* another still landed above it, because it
+    /// took the top row before the other had a chance at it — dragging
+    /// downwards did the opposite of what was asked. Winning ties is enough for
+    /// the case that matters: a window dropped *onto* an occupied cell shares
+    /// that cell's row, so it goes first and the occupant is pushed below.
     private static func settleOrder(_ items: [GridWindow], pinned: UUID?) -> [GridWindow] {
         items.enumerated().sorted { lhs, rhs in
+            if lhs.element.row != rhs.element.row { return lhs.element.row < rhs.element.row }
             if (lhs.element.id == pinned) != (rhs.element.id == pinned) {
                 return lhs.element.id == pinned
             }
-            if lhs.element.row != rhs.element.row { return lhs.element.row < rhs.element.row }
             if lhs.element.column != rhs.element.column { return lhs.element.column < rhs.element.column }
             return lhs.offset < rhs.offset
         }.map(\.element)
