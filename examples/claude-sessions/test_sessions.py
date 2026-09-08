@@ -32,6 +32,9 @@ MANIFEST = os.path.join(HERE, "manifest.json")
 # os.kill raises ProcessLookupError deterministically.
 DEAD_PID = 2 ** 30
 
+# A pid that is certainly alive: this test process.
+SHIM_PID = os.getpid()
+
 
 def read_manifest():
     with open(MANIFEST) as handle:
@@ -224,13 +227,28 @@ class FailingPs(object):
         raise self.error
 
 
-def keeper_line(sid, tty="ttys001"):
+def keeper_command(sid, tty="ttys001"):
     return ('bash -c F=/tmp/claude-tab-title-%s.txt; '
             'printf "x" > /dev/%s; sleep 5' % (sid, tty))
 
 
-def claude_line(sid=None, tty="ttys001"):
-    return "%s   claude%s" % (tty, (" --resume " + sid) if sid else "")
+def claude_command(sid=None):
+    return "claude" + ((" --resume " + sid) if sid else "")
+
+
+def commands_text(*entries):
+    """Render `ps -axo pid=,ppid=,command=` from (pid, ppid, command) triples."""
+    return "\n".join("%6d %6d %s" % entry for entry in entries)
+
+
+def tty_text(*entries):
+    """Render `ps -axo tty=,command=` from (tty, command) pairs."""
+    return "\n".join("%s  %s" % entry for entry in entries)
+
+
+def one_claude(sid=None, pid=4100, ppid=1):
+    """The common case: a single claude process, nothing else running."""
+    return commands_text((pid, ppid, claude_command(sid)))
 
 
 class FakeMachine(object):
@@ -568,25 +586,28 @@ class LivenessTests(MachineTestCase):
     def test_a_resume_process_makes_a_leaseless_session_live(self):
         self.machine.title(SID_A, "✋ 50% · restored tab")
         self.machine.meta(SID_A, icon="✋", icon_since=self.now - 60)
-        card = self.card(ps=FakePs(commands=claude_line(SID_A, "ttys004")))
+        card = self.card(ps=FakePs(commands=one_claude(SID_A)))
         self.assertEqual("1 waiting", card["chip"])
 
     def test_a_keeper_on_a_live_tty_counts(self):
         self.machine.title(SID_A, "▶ 50% · fresh session")
         ps = FakePs(
-            commands="\n".join([keeper_line(SID_A, "ttys007"), "claude"]),
-            tty="\n".join(["ttys007  claude", keeper_line(SID_A, "ttys007")]),
+            commands=commands_text((4200, 1, keeper_command(SID_A, "ttys007")),
+                                   (4201, 1, claude_command())),
+            tty=tty_text(("ttys007", claude_command()),
+                         ("ttys007", keeper_command(SID_A, "ttys007"))),
         )
         card = self.card(ps=ps)
         self.assertEqual(["live", "1"], self.rows_of(card, "kv")[1])
         # The keeper was the only evidence, so the tty listing had to be read.
-        self.assertEqual(["command=", "tty=,command="], ps.calls)
+        self.assertEqual(["pid=,ppid=,command=", "tty=,command="], ps.calls)
 
     def test_a_keeper_that_outlived_its_tty_does_not_count(self):
         self.machine.title(SID_A, "▶ 50% · killed tab")
         ps = FakePs(
-            commands=keeper_line(SID_A, "ttys007"),
-            tty="ttys009  claude\n" + keeper_line(SID_A, "ttys007"),
+            commands=commands_text((4200, 1, keeper_command(SID_A, "ttys007"))),
+            tty=tty_text(("ttys009", claude_command()),
+                         ("ttys007", keeper_command(SID_A, "ttys007"))),
         )
         self.assertEqual("idle", self.card(ps=ps)["chip"])
 
@@ -595,8 +616,8 @@ class LivenessTests(MachineTestCase):
         # back as "a claude process lives on ttys007".
         self.machine.title(SID_A, "▶ 50% · killed tab")
         ps = FakePs(
-            commands=keeper_line(SID_A, "ttys007"),
-            tty="ttys007  " + keeper_line(SID_A, "ttys007"),
+            commands=commands_text((4200, 1, keeper_command(SID_A, "ttys007"))),
+            tty=tty_text(("ttys007", keeper_command(SID_A, "ttys007"))),
         )
         self.assertEqual("idle", self.card(ps=ps)["chip"])
 
@@ -605,9 +626,10 @@ class LivenessTests(MachineTestCase):
         # worth paying when a keeper is the sole evidence for a session.
         self.machine.title(SID_A, "▶ 50% · leased")
         self.machine.lease(SID_A, heartbeat_age=1, now=self.now)
-        ps = FakePs(commands=keeper_line(SID_A, "ttys007"))
+        ps = FakePs(commands=commands_text(
+            (4200, 1, keeper_command(SID_A, "ttys007"))))
         self.card(ps=ps)
-        self.assertEqual(["command="], ps.calls)
+        self.assertEqual(["pid=,ppid=,command="], ps.calls)
 
     def test_ps_failure_leaves_the_lease_counts_intact(self):
         self.machine.title(SID_A, "✋ 20% · leased")
@@ -616,6 +638,87 @@ class LivenessTests(MachineTestCase):
             card = self.card(ps=FailingPs(OSError("ps: no such file")))
         self.assertEqual("1 waiting", card["chip"])
         self.assertIn("ps unavailable", self.text_of(card))
+
+    # The lease pid must be genuinely alive or filter_live_leases drops the
+    # lease before the ancestry walk ever runs, so these fixtures use this
+    # process's own pid as the shim and fabricate the ancestry around it.
+
+    def test_a_forked_resume_id_is_not_counted_twice(self):
+        # Observed live: session 1d89ed71 holds the lease and the status line,
+        # but runs inside a process whose command line still says
+        # "claude --resume 01181340".  One tab, one session — not two.
+        self.machine.title(SID_B, "▶ 30% · AP-11112 прогон развести")
+        self.machine.meta(SID_B, icon="▶", icon_since=self.now - 60)
+        self.machine.lease(SID_B, pid=SHIM_PID, heartbeat_age=1, now=self.now)
+        ps = FakePs(commands=commands_text(
+            (5000, 1, claude_command(SID_A)),        # launched as --resume SID_A
+            (5001, 5000, "node hook-runner"),        # an intermediate hop
+            (SHIM_PID, 5001, "python session-shim.py"),
+        ))
+        card = self.card(ps=ps)
+        self.assertEqual(["live", "1"], self.rows_of(card, "kv")[1])
+        # ...and the survivor is the leased id, not the launched one.
+        self.assertEqual(["AP-11112 прогон развести"],
+                         [item["text"] for item in self.rows_of(card, "list")[0]])
+
+    def test_an_unrelated_resume_id_on_another_process_still_counts(self):
+        # Only the id launched by *this* lease's own process tree is superseded.
+        self.machine.title(SID_B, "▶ 30% · leased")
+        self.machine.meta(SID_B, icon="▶", icon_since=self.now - 60)
+        self.machine.lease(SID_B, pid=SHIM_PID, heartbeat_age=1, now=self.now)
+        ps = FakePs(commands=commands_text(
+            (5000, 1, claude_command(SID_A)),
+            (SHIM_PID, 5000, "python session-shim.py"),
+            (6000, 1, claude_command(SID_C)),        # a different tab entirely
+        ))
+        self.assertEqual(["live", "2"], self.rows_of(self.card(ps=ps), "kv")[1])
+
+    def test_a_resume_id_matching_its_own_lease_is_not_dropped(self):
+        self.machine.title(SID_A, "▶ 30% · leased")
+        self.machine.meta(SID_A, icon="▶", icon_since=self.now - 60)
+        self.machine.lease(SID_A, pid=SHIM_PID, heartbeat_age=1, now=self.now)
+        ps = FakePs(commands=commands_text(
+            (5000, 1, claude_command(SID_A)),
+            (SHIM_PID, 5000, "python session-shim.py"),
+        ))
+        self.assertEqual(["live", "1"], self.rows_of(self.card(ps=ps), "kv")[1])
+
+    def test_a_fresh_session_supersedes_nothing(self):
+        self.machine.title(SID_B, "▶ 30% · fresh")
+        self.machine.meta(SID_B, icon="▶", icon_since=self.now - 60)
+        self.machine.lease(SID_B, pid=SHIM_PID, heartbeat_age=1, now=self.now)
+        ps = FakePs(commands=commands_text(
+            (5000, 1, "/Users/x/.local/bin/claude"),   # no --resume at all
+            (SHIM_PID, 5000, "python session-shim.py"),
+            (6000, 1, claude_command(SID_C)),
+        ))
+        self.assertEqual(["live", "2"], self.rows_of(self.card(ps=ps), "kv")[1])
+
+    def test_the_ancestry_walk_survives_a_missing_shim(self):
+        # The shim is not in the listing (it raced ps): count both rather than
+        # drop a session that may well be real.
+        self.machine.lease(SID_B, pid=SHIM_PID, heartbeat_age=1, now=self.now)
+        ps = FakePs(commands=commands_text((5000, 1, claude_command(SID_A))))
+        self.assertEqual(["live", "2"], self.rows_of(self.card(ps=ps), "kv")[1])
+
+    def test_the_ancestry_walk_survives_a_parent_cycle(self):
+        self.machine.lease(SID_B, pid=SHIM_PID, heartbeat_age=1, now=self.now)
+        ps = FakePs(commands=commands_text(
+            (5001, SHIM_PID, "python a.py"),
+            (SHIM_PID, 5001, "python b.py"),         # mutual parents
+            (6000, 1, claude_command(SID_C)),
+        ))
+        self.assertEqual(["live", "2"], self.rows_of(self.card(ps=ps), "kv")[1])
+
+    def test_the_walk_passes_through_a_keeper_to_reach_the_real_cli(self):
+        # "claude-tab-title-..." must not be mistaken for the claude CLI.
+        self.machine.lease(SID_B, pid=SHIM_PID, heartbeat_age=1, now=self.now)
+        ps = FakePs(commands=commands_text(
+            (5000, 1, claude_command(SID_A)),
+            (4999, 5000, keeper_command(SID_C, "ttys007")),
+            (SHIM_PID, 4999, "python session-shim.py"),
+        ))
+        self.assertEqual(["live", "1"], self.rows_of(self.card(ps=ps), "kv")[1])
 
     def test_a_lease_with_no_heartbeat_falls_back_to_the_pid(self):
         self.machine.raw_lease(SID_A, json.dumps(
@@ -632,24 +735,32 @@ class LivenessTests(MachineTestCase):
 class PsScanTests(unittest.TestCase):
 
     def test_resume_uuids_are_found(self):
-        text = "\n".join([
-            "claude --resume %s" % SID_A,
-            "/Users/x/.local/bin/claude --resume %s" % SID_B,
-            "grep --resume not-a-uuid",
-        ])
-        resume, keepers = sessions.scan_commands(text)
+        text = commands_text(
+            (10, 1, "claude --resume %s" % SID_A),
+            (11, 1, "/Users/x/.local/bin/claude --resume %s" % SID_B),
+            (12, 1, "grep --resume not-a-uuid"),
+        )
+        processes, resume, keepers = sessions.scan_processes(text)
         self.assertEqual({SID_A, SID_B}, resume)
         self.assertEqual({}, keepers)
+        self.assertEqual((1, "claude --resume %s" % SID_A), processes[10])
 
     def test_keeper_lines_are_not_mistaken_for_resume_lines(self):
-        resume, keepers = sessions.scan_commands(keeper_line(SID_A, "ttys003"))
+        text = commands_text((13, 1, keeper_command(SID_A, "ttys003")))
+        _, resume, keepers = sessions.scan_processes(text)
         self.assertEqual(set(), resume)
         self.assertEqual({SID_A: "ttys003"}, keepers)
+
+    def test_malformed_ps_lines_are_skipped(self):
+        _, resume, keepers = sessions.scan_processes(
+            "garbage\nnot a pid 1 claude --resume %s\n\n" % SID_A)
+        self.assertEqual(set(), resume)
+        self.assertEqual({}, keepers)
 
     def test_claude_ttys_exclude_keepers(self):
         text = "\n".join([
             "ttys001  claude --resume %s" % SID_A,
-            "ttys002  " + keeper_line(SID_B, "ttys002"),
+            "ttys002  " + keeper_command(SID_B, "ttys002"),
             "ttys003  -zsh",
             "??       some-daemon claude-ish",
         ])
@@ -787,12 +898,12 @@ class CardTests(MachineTestCase):
         self.machine.title(SID_A, "✋ 50% · Личное · цвета табов Warp")
         self.machine.meta(SID_A, icon="✋", icon_since=self.now - 120)
         items = self.rows_of(
-            self.card(ps=FakePs(commands=claude_line(SID_A, "ttys004"))), "list")[0]
+            self.card(ps=FakePs(commands=one_claude(SID_A))), "list")[0]
         self.assertEqual("Личное · цвета табов Warp", items[0]["text"])
         self.assertEqual("2m", items[0]["note"])  # no lease, so no project
 
     def test_a_statusless_session_still_counts(self):
-        ps = FakePs(commands=claude_line(SID_A, "ttys004"))
+        ps = FakePs(commands=one_claude(SID_A))
         card = self.card(ps=ps)
         self.assertEqual(["live", "1"], self.rows_of(card, "kv")[1])
         self.assertIn("1 no status", self.text_of(card))
@@ -802,13 +913,13 @@ class CardTests(MachineTestCase):
         self.machine.title(SID_B, "▶ 30% · working")
         self.machine.meta(SID_B, icon="▶", icon_since=self.now - 30)
         self.machine.lease(SID_B, heartbeat_age=1, now=self.now)
-        ps = FakePs(commands=claude_line(SID_A, "ttys004"))
+        ps = FakePs(commands=one_claude(SID_A))
         card = self.card(ps=ps, include_unknown=False)
         self.assertEqual(["live", "1"], self.rows_of(card, "kv")[1])
         self.assertNotIn("no status", self.text_of(card))
 
     def test_excluding_every_session_does_not_claim_the_machine_is_idle(self):
-        ps = FakePs(commands=claude_line(SID_A, "ttys004"))
+        ps = FakePs(commands=one_claude(SID_A))
         card = self.card(ps=ps, include_unknown=False)
         self.assertEqual("ok", card["state"])
         self.assertEqual("no status", card["chip"])
@@ -829,7 +940,7 @@ class CardTests(MachineTestCase):
 
     def test_the_account_breakdown_puts_the_nameless_ones_last(self):
         self.populate()
-        ps = FakePs(commands=claude_line(SID_A.replace("a", "e"), "ttys004"))
+        ps = FakePs(commands=one_claude(SID_A.replace("a", "e")))
         line = [text for text in self.rows_of(self.card(ps=ps, show_accounts=True),
                                               "text") if " 1" in text or " 2" in text]
         self.assertEqual("pers 2 · work 1 · work2 1 · ? 1", line[-1])
@@ -931,7 +1042,7 @@ class SourceFailureTests(MachineTestCase):
         settings = self.machine.settings(
             leases_dir=os.path.join(self.machine.root, "gone"))
         card = sessions.gather(settings, self.now,
-                               ps_reader=FakePs(commands=claude_line(SID_A, "ttys004")))
+                               ps_reader=FakePs(commands=one_claude(SID_A)))
         self.assertEqual([], validate_card(card))
         self.assertEqual("warn", card["state"])
         self.assertEqual("1 waiting", card["chip"])

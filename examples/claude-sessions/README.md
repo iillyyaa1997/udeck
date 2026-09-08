@@ -8,15 +8,15 @@ and backs it with a live count and a short list of the most interesting sessions
 ┌──────────────────────────────┐
 │ Claude sessions   ⟨15 waiting⟩│
 │ needs you                  15 │
-│ live                       41 │
+│ live                       40 │
 │ 1 on external · 2 running ·   │
-│ 23 no status                  │
+│ 22 no status                  │
 │ ⚠ Задачи · тех-стори          │
 │    proctor-cyber-work… · 1d17h│
 │ ⚠ Личное · цвета табов Warp   │
 │    1d17h                      │
 │ ⚠ data docker  u-pilot · 1d14h│
-│ +35 more                      │
+│ +34 more                      │
 └──────────────────────────────┘
 ```
 
@@ -30,7 +30,7 @@ its own, and the plugin is mostly about combining them honestly.
 | `<title_dir>/claude-tab-title-<SID>.txt` | the tab status line: state icon, context %, step progress, the `!` attention badge, and the session name |
 | `<title_dir>/claude-tab-title-<SID>.meta` | the authoritative state icon plus `icon_since`, i.e. how long the session has been in that state |
 | `<leases_dir>/<SID>.json` | the claude-monitor lease: account label, working directory, pid, heartbeat |
-| `ps -axo command=` | which sessions actually have a process |
+| `ps -axo pid=,ppid=,command=` | which sessions actually have a process, and which process owns which |
 
 The status line and its sidecar are written by the `terminal-status` skill; the
 lease registry is written by the `claude-monitor` skill. Neither is required — the plugin degrades to
@@ -74,6 +74,15 @@ and there are usually several stale ones. A session counts as live when:
 * its **tab-title keeper** is running *and* the tty that keeper writes to still
   hosts a claude process. A keeper survives a tab that was killed rather than
   closed, so the tty cross-check is what stops it from inflating the count.
+
+One subtraction matters as much as the additions. **Resuming a conversation can
+mint a new session id.** The lease and the status line carry the new id; the
+process command line keeps the id it was launched with, for as long as the tab
+lives. Counting both would report one tab as two sessions — on this machine the
+live session `1d89ed71` runs inside a process still reading
+`claude --resume 01181340`. So the plugin walks up from each lease's shim to the
+claude process that owns it, and discards the launched id when it differs from
+the lease's own.
 
 Sessions that are live but have no status line land in a **`no status`** bucket
 rather than being dropped or guessed at. On a machine that has just restored a
@@ -144,13 +153,16 @@ session that is not on the default account.
 ## Cost
 
 One `ps` and two small directory listings per poll. Measured on the author's
-machine (41 live sessions, 24 title files, 17 leases): **60–90 ms** wall clock
-per run, of which ~32 ms is `ps` and ~17 ms is interpreter start-up.
+machine (40 live sessions, 24 title files, 17 leases, ~900 processes):
+**60–70 ms** wall clock per run, of which ~33 ms is `ps` and ~17 ms is
+interpreter start-up.
 
-`ps -axo tty=` costs another ~77 ms because ps resolves a device name for every
-process, so that second listing is only requested when a keeper is the *sole*
-evidence for some session — when every keeper belongs to a session already
-proven live, the answer cannot change and the call is skipped.
+The `ppid` column is free — ps already holds it — which is what makes the
+superseded-id check above cost nothing. The `tty` column is not: it costs
+another ~76 ms because ps resolves a device name for every process. That second
+listing is therefore only requested when a keeper is the *sole* evidence for
+some session; when every keeper belongs to a session already proven live, the
+answer cannot change and the call is skipped.
 
 ## Output contract
 
@@ -165,7 +177,7 @@ failure still prints a valid `unknown` card carrying the exception, and exits 0.
 python3 -m unittest discover -s examples/claude-sessions -p 'test_*.py'
 ```
 
-96 tests, no network, no dependencies, and nothing that reads the real machine's
+105 tests, no network, no dependencies, and nothing that reads the real machine's
 title or lease directories — every case runs against a fabricated filesystem
 root and a canned `ps` listing, so the suite behaves the same on a busy machine
 and an empty one. The suite includes an independent validator for the card

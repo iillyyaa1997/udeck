@@ -33,7 +33,9 @@ None of the three proves liveness by itself, so liveness is decided as:
   *and* its pid still exists — the shim rewrites the heartbeat every 60 s, so
   a frozen heartbeat is a dead session;
 * a session also counts when ``ps`` shows a ``claude --resume <SID>`` process,
-  which is how a restored tab looks before its SessionStart hook has run;
+  which is how a restored tab looks before its SessionStart hook has run —
+  unless that id has been superseded, because resuming a conversation can mint
+  a new session id while the command line keeps the old one forever;
 * a session also counts when its tab-title keeper is running *and* the tty that
   keeper writes to still hosts a claude process — a keeper can outlive the
   session whose tab was killed rather than closed;
@@ -72,6 +74,7 @@ MAX_NAME_CHARS = 120           # clamp, not a display choice: the host truncates
 # plugin must stop looking like a healthy one within about a minute.
 CARD_TTL_SECS = 20
 PS_TIMEOUT_SECS = 2.0          # bounds one external call; see note in read_ps()
+MAX_ANCESTRY_DEPTH = 25        # shim -> ... -> claude is 1-3 hops in practice
 
 TITLE_PREFIX = "claude-tab-title-"
 TITLE_SUFFIX = ".txt"
@@ -150,6 +153,9 @@ RE_WATCHERS = re.compile(r"^m\d+$")
 RE_RESUME = re.compile(r"--resume\s+([0-9a-f-]{36})")
 RE_KEEPER = re.compile(r"claude-tab-title-([0-9a-f-]{36})")
 RE_KEEPER_TTY = re.compile(r"/dev/(ttys\d+)")
+# The claude CLI itself: bare "claude", or any path ending in "/claude".  It must
+# not match "claude-tab-title-..." (a keeper) or a "/.claude/..." path segment.
+RE_CLAUDE_CLI = re.compile(r"(?:^|[/\s])claude(?:\s|$)")
 RE_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -513,24 +519,82 @@ def read_ps(fields="command=", timeout=PS_TIMEOUT_SECS):
     ).stdout
 
 
-def scan_commands(ps_text):
-    """Parse ``ps -axo command=`` into ``(resume_sids, {keeper_sid: tty})``.
+def scan_processes(ps_text):
+    """Parse ``ps -axo pid=,ppid=,command=``.
 
-    Two independent signals: ``claude --resume <SID>`` names its session
-    outright, while a session started fresh shows up only through its tab-title
-    keeper, whose command line names both the session and the tty it writes to.
+    Returns ``(processes, resume_sids, {keeper_sid: tty})`` where ``processes``
+    maps pid to ``(ppid, command)``.  Two independent session signals live in
+    here: ``claude --resume <SID>`` names its session outright, while a session
+    started fresh shows up only through its tab-title keeper, whose command line
+    names both the session and the tty it writes to.
+
+    The ppid column is carried because it is what makes `superseded_sids` work,
+    and unlike the tty column it is free — ps already holds it, whereas a tty
+    means a device lookup per process (~32 ms versus ~109 ms for the listing).
     """
+    processes = {}
     resume_sids = set()
     keepers = {}
     for line in ps_text.splitlines():
-        keeper = RE_KEEPER.search(line)
+        parts = line.split(None, 2)
+        if len(parts) != 3:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+        except ValueError:
+            continue
+        command = parts[2]
+        processes[pid] = (ppid, command)
+
+        keeper = RE_KEEPER.search(command)
         if keeper:
-            tty_match = RE_KEEPER_TTY.search(line)
+            tty_match = RE_KEEPER_TTY.search(command)
             keepers[keeper.group(1)] = tty_match.group(1) if tty_match else None
             continue
-        for match in RE_RESUME.finditer(line):
+        for match in RE_RESUME.finditer(command):
             resume_sids.add(match.group(1))
-    return resume_sids, keepers
+    return processes, resume_sids, keepers
+
+
+def superseded_sids(processes, live_leases):
+    """Session ids that ``--resume`` still names but that have been replaced.
+
+    Resuming a conversation can give it a **new** session id.  The lease and the
+    status line carry the new id; the process command line keeps the id it was
+    launched with, for as long as the tab lives.  Counting both would report one
+    tab as two sessions — verified on this machine, where the live session
+    ``1d89ed71`` runs inside a process whose command line still reads
+    ``claude --resume 01181340``.
+
+    Walking up from each lease's shim to the claude process that owns it reveals
+    the launched id; when that differs from the lease's own id, the launched one
+    is stale and must not count as a session of its own.  A shim that is not in
+    the listing, or an ancestry that runs out, simply yields nothing — the count
+    then errs towards the old, generous behaviour rather than dropping a session
+    that might be real.
+    """
+    stale = set()
+    for sid, lease in live_leases.items():
+        if lease.pid is None:
+            continue
+        pid = lease.pid
+        seen = set()
+        for _ in range(MAX_ANCESTRY_DEPTH):
+            entry = processes.get(pid)
+            if entry is None or pid in seen:
+                break
+            seen.add(pid)
+            ppid, command = entry
+            if RE_CLAUDE_CLI.search(command) and TITLE_PREFIX not in command:
+                match = RE_RESUME.search(command)
+                if match and match.group(1) != sid:
+                    stale.add(match.group(1))
+                break
+            if ppid <= 0:
+                break
+            pid = ppid
+    return stale
 
 
 def scan_claude_ttys(ps_text):
@@ -550,21 +614,22 @@ def scan_claude_ttys(ps_text):
     return ttys
 
 
-def ps_evidence(already_live, ps_reader=read_ps):
-    """Session ids vouched for by a live process.
+def ps_evidence(live_leases, ps_reader=read_ps):
+    """Session ids vouched for by a live process, minus the superseded ones.
 
     A keeper can outlive its session — the tab was killed, not closed — so a
     keeper only counts while the tty it writes to still hosts a claude process.
-    Proving that needs ``ps -axo tty=``, which costs ~77 ms more than the plain
-    command listing because ps resolves a device name per process.  That second
-    call is therefore made only when a keeper is the *sole* evidence for some
-    session; when every keeper belongs to a session already proven live by its
-    lease or by ``--resume``, the answer cannot change and the call is skipped.
+    Proving that needs ``ps -axo tty=``, which costs ~77 ms more than the pid /
+    ppid / command listing because ps resolves a device name per process.  That
+    second call is therefore made only when a keeper is the *sole* evidence for
+    some session; when every keeper belongs to a session already proven live by
+    its lease or by ``--resume``, the answer cannot change and the call is
+    skipped.
     """
-    resume_sids, keepers = scan_commands(ps_reader("command="))
-    sids = set(resume_sids)
+    processes, resume_sids, keepers = scan_processes(ps_reader("pid=,ppid=,command="))
+    sids = resume_sids - superseded_sids(processes, live_leases)
 
-    unproven = [sid for sid in keepers if sid not in already_live and sid not in sids]
+    unproven = [sid for sid in keepers if sid not in live_leases and sid not in sids]
     if not unproven:
         return sids
 
@@ -826,7 +891,7 @@ def gather(settings, now, ps_reader=read_ps):
 
     ps_sids = set()
     try:
-        ps_sids = ps_evidence(set(live), ps_reader)
+        ps_sids = ps_evidence(live, ps_reader)
     except (OSError, subprocess.SubprocessError) as exc:
         # Losing ps costs us the sessions that have no lease yet; the leases
         # themselves are unaffected, so the counts stay usable.
