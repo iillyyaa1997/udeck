@@ -193,3 +193,30 @@ title or lease directories — every case runs against a fabricated filesystem
 root and a canned `ps` listing, so the suite behaves the same on a busy machine
 and an empty one. The suite includes an independent validator for the card
 schema, which every card the tests build is checked against.
+
+## Known limits
+
+Things this plugin does not do, or does approximately, that a future reader
+should know before trusting a number on the card.
+
+- **Keeper detection has never been exercised end to end.** A session whose only
+  evidence is a running tab-title keeper is covered by unit tests and by nothing
+  else, because on the machine this was written against every live keeper also
+  had a lease. The code path is therefore correct as designed and unproven in
+  the field.
+- **"How long in this state" falls back to file modification time** when a meta
+  sidecar has no `icon_since`. That tracks the last write to the file rather
+  than the last change of state, so it can read younger than the truth.
+- **A superseded session id with no lease of its own is undetectable.** If a
+  resumed conversation minted a new id and no lease was ever written for it,
+  the plugin cannot tell which id is current. The *count* stays right — the
+  session is counted exactly once either way — but the identity shown is the
+  old one. Such a session has no status line either, so it renders as an
+  unnamed `no status` row regardless.
+- **No transcript parsing.** Session transcripts hold richer state — the real
+  context percentage, the last message — and are multi-megabyte files, of which
+  there are hundreds. Nothing that runs every five seconds should open them.
+- **No per-tab focus.** The action brings the terminal application forward.
+  Focusing the *specific* tab would need AppleScript and tab ids from the
+  launch configuration; a button that looks like it does that and does not
+  would be worse than no button.
