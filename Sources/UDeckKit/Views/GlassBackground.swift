@@ -32,11 +32,9 @@ struct GlassBackground: View {
     var body: some View {
         let shape = BottomRoundedRectangle(radius: cornerRadius)
         if #available(macOS 26, *) {
-            LiquidGlassBackground(glass: glass)
-                // The tint is painted here rather than handed to the material.
-                // See `LiquidGlassBackground` for what handing it over cost.
-                .overlay { GlassTint(glass: glass) }
-                .clipShape(shape)
+            // The same surface the settings screen previews, built in one
+            // place so the two cannot drift apart.
+            PanelSurface(shape: shape, fallbackFill: theme.panelTint, glass: glass)
         } else {
             VisualEffectBackground()
                 .overlay(theme.panelTint)
@@ -133,18 +131,22 @@ struct PanelBorder: Shape {
 /// The panel, and everything the operator puts inside it, is one material —
 /// there is no second look for the things in the grid. Before macOS 26 there is
 /// no such material at all, and the caller's fill stands in for it.
-struct GlassSurface<S: Shape>: View {
+/// The panel's surface, whole: the system material with uDeck's own tint on it.
+///
+/// Used by the panel and by the settings screen's preview, which has to show
+/// what the panel will actually look like — it was showing the bare material,
+/// so the preview stopped matching the panel the moment the tint moved out of
+/// the material and into a layer of our own.
+struct PanelSurface<S: Shape>: View {
     var shape: S
     var fallbackFill: Color
     var glass: GlassAppearance
 
     var body: some View {
         if #available(macOS 26, *) {
-            // Deliberately untinted. The tint belongs to the panel and is
-            // painted once, at its full extent; painting it again here put a
-            // second coat on every card and made the things inside the panel a
-            // visibly different colour from the panel itself.
-            LiquidGlassBackground(glass: glass).clipShape(shape)
+            LiquidGlassBackground(glass: glass)
+                .overlay { GlassTint(glass: glass) }
+                .clipShape(shape)
         } else {
             shape.fill(fallbackFill).opacity(glass.opacity)
         }

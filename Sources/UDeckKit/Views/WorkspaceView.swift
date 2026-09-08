@@ -88,7 +88,7 @@ struct WorkspaceView: View {
                     .padding(.vertical, 4)
                     .background {
                         if isSelected {
-                            RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(0.14))
+                            RoundedRectangle(cornerRadius: 9).fill(theme.selection)
                         }
                     }
             }
@@ -148,7 +148,7 @@ struct WorkspaceView: View {
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(theme.muted)
                 .frame(width: 26, height: 22)
-                .background(RoundedRectangle(cornerRadius: 7).fill(Color.white.opacity(0.06)))
+                .background(RoundedRectangle(cornerRadius: 7).fill(theme.subtleFill))
                 .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(theme.line))
         }
         .buttonStyle(.plain)

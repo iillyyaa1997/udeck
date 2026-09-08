@@ -573,7 +573,7 @@ private struct GlassPreview: View {
                 }
                 context.stroke(path, with: .color(.gray.opacity(0.75)), lineWidth: 1.5)
             }
-            GlassSurface(
+            PanelSurface(
                 shape: RoundedRectangle(cornerRadius: 12),
                 fallbackFill: theme.windowFill,
                 glass: glass

@@ -40,13 +40,14 @@ struct DeckWindowView: View {
         }
         .padding(theme.windowPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        // The same glass as the panel it sits in, rather than a flat fill on
-        // top of it: one material, everywhere.
-        .background(GlassSurface(
-            shape: RoundedRectangle(cornerRadius: theme.windowCornerRadius),
-            fallbackFill: theme.windowFill,
-            glass: model.settings.glass
-        ))
+        // A region of the panel's surface, not a second slab of material on top
+        // of it. Each card used to make its own glass, which meant each one
+        // asked the system for its own coat of tint — so the things inside the
+        // panel came out a different colour from the panel, whichever way the
+        // tint was set. One material, once, and a card is drawn on it.
+        .background(
+            RoundedRectangle(cornerRadius: theme.windowCornerRadius).fill(theme.windowFill)
+        )
         .overlay(RoundedRectangle(cornerRadius: theme.windowCornerRadius).strokeBorder(theme.line))
         .clipShape(RoundedRectangle(cornerRadius: theme.windowCornerRadius))
         .overlay(alignment: .bottomTrailing) { resizeGrip }

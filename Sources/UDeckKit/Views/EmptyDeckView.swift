@@ -136,7 +136,7 @@ struct GhostButtonStyle: ButtonStyle {
             .foregroundStyle(theme.muted)
             .padding(.horizontal, 11)
             .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(configuration.isPressed ? 0.12 : 0.05)))
+            .background(RoundedRectangle(cornerRadius: 8).fill(theme.hoverFill(pressed: configuration.isPressed)))
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(theme.line))
     }
 }

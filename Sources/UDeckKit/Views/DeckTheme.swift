@@ -33,7 +33,23 @@ public struct DeckTheme: Sendable {
     // Surfaces
     public let panelTint = Color(red: 0.078, green: 0.102, blue: 0.149).opacity(0.62)
     public var windowFill: Color { foreground.opacity(0.07) }
-    public let recess = Color.black.opacity(0.28)
+
+    /// A sunken area — a text field, a slot waiting to be filled.
+    ///
+    /// Follows the ink like everything else here. It was flat black at 28%,
+    /// which is a recess on a dark panel and a hole punched in a light one.
+    public var recess: Color { foreground.opacity(isLightInk ? 0.28 : 0.10) }
+
+    /// The tab that is showing, and anything else marked as chosen.
+    public var selection: Color { foreground.opacity(isLightInk ? 0.14 : 0.10) }
+
+    /// The faintest surface that is still a surface.
+    public var subtleFill: Color { foreground.opacity(isLightInk ? 0.06 : 0.05) }
+
+    /// A control under the pointer, and the same control being pressed.
+    public func hoverFill(pressed: Bool) -> Color {
+        foreground.opacity(pressed ? (isLightInk ? 0.12 : 0.14) : (isLightInk ? 0.05 : 0.06))
+    }
     public var line: Color { foreground.opacity(isLightInk ? 0.11 : 0.16) }
     public var panelBorder: Color { foreground.opacity(isLightInk ? 0.14 : 0.20) }
 
