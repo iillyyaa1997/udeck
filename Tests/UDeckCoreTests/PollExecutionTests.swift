@@ -123,6 +123,42 @@ struct PollExecutionTests {
             .compactMap { pid_t($0.trimmingCharacters(in: .whitespaces).split(separator: " ").first ?? "") }
     }
 
+    /// The polite signal is supposed to be followed by a wait, and the wait is
+    /// supposed to end early when the producer takes the hint. Cancelling the
+    /// run used to make that wait throw and fall straight through to `SIGKILL`
+    /// — so the grace period was zero exactly when it mattered, and the second
+    /// signal went to a pid the system had already reaped and was free to reuse.
+    @Test("a producer that takes the hint is not waited on, and not killed twice")
+    func politeProducerEndsPromptly() async {
+        let temp = TemporaryDirectory()
+        temp.writePlugin(folder: "polite", manifest: """
+        { "id": "polite", "name": "Polite", "version": "1.0.0", "api": 1, "kind": "poll",
+          "run": ["./run.sh"], "interval": 30, "timeout": 1 }
+        """, script: (name: "run.sh", body: """
+        #!/bin/sh
+        # Answers SIGTERM by leaving, the way a well-behaved producer should.
+        trap 'exit 0' TERM
+        while true; do sleep 0.05; done
+        """, executable: true))
+
+        // A grace long enough that waiting it out would be unmistakable.
+        var runner = ProcessRunner()
+        runner.terminationGrace = 3
+        let executor = PollExecutor(runner: runner)
+
+        let started = Date()
+        let outcome = await executor.poll(
+            plugin: discovery.load(temp.url.appendingPathComponent("plugins/polite")),
+            grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval
+        )
+        let elapsed = Date().timeIntervalSince(started)
+
+        guard case .failure(let failure) = outcome else { Issue.record("expected a failure"); return }
+        #expect(failure.reason == .timedOut(after: 1))
+        #expect(elapsed < 2.5, "the run should end when the producer does, not after the full grace (took \(elapsed)s)")
+    }
+
     @Test("a producer printing something that is not a card is named as the culprit")
     func garbageIsReported() async {
         let temp = TemporaryDirectory()

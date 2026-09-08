@@ -162,47 +162,73 @@ public struct ProcessRunner: Sendable {
 /// attributes, and `setpgid` called from the parent afterwards always loses:
 /// `posix_spawn` has already exec'd the child by the time `run()` returns, and
 /// `setpgid` on a process that has exec'd fails with `EACCES`. So the tree is
-/// enumerated instead.
+/// enumerated instead, before the first signal — once the direct child dies its
+/// children are re-parented to `launchd`, and a later enumeration would no
+/// longer connect them to anything.
 ///
-/// The list is taken *before* the first signal and reused for the second: once
-/// the direct child dies, its children are re-parented to `launchd`, and a
-/// second enumeration would no longer connect them to anything.
+/// Two things here are less obvious than they look.
+///
+/// **The grace period has to survive cancellation, or it is not a grace
+/// period.** When the producer dies on the polite signal — the common case —
+/// the run finishes and cancels this task, which makes the sleep below throw at
+/// once. Swallowing that would fall straight through to the second signal with
+/// no wait at all: pointless, because the process is already gone, and unsafe,
+/// because of the next paragraph.
+///
+/// **A pid is not an identity.** Between enumerating a process and signalling
+/// it, that process can exit and the system can hand its number to something
+/// else. Signalling on the strength of a remembered number is how a tool ends
+/// up killing a stranger's process. Each target therefore carries the moment it
+/// started, and is signalled only while that still matches.
 private struct Stopper: Sendable {
     let pid: pid_t
     let grace: TimeInterval
 
     func terminate() async {
-        let descendants = ProcessTree.descendants(of: pid)
-        signal(SIGTERM, to: [pid] + descendants)
-        try? await Task.sleep(nanoseconds: Seconds.nanoseconds(grace))
-        let survivors = Set([pid] + descendants + ProcessTree.descendants(of: pid))
-        signal(SIGKILL, to: Array(survivors))
+        let targets = ProcessTree.identities(for: [pid] + ProcessTree.descendants(of: pid))
+        signal(SIGTERM, to: targets)
+
+        do {
+            try await Task.sleep(nanoseconds: Seconds.nanoseconds(grace))
+        } catch {
+            // Cancelled: the producer ended while we waited, which is what the
+            // polite signal was for. Nothing left to kill.
+            return
+        }
+
+        signal(SIGKILL, to: targets)
     }
 
-    private func signal(_ number: Int32, to processes: [pid_t]) {
-        for target in processes where target > 1 {
-            kill(target, number)
+    private func signal(_ number: Int32, to targets: [ProcessTree.Identity]) {
+        guard !targets.isEmpty else { return }
+        let stillThere = Set(ProcessTree.identities(for: targets.map(\.pid)))
+        for target in targets where target.pid > 1 {
+            guard stillThere.contains(target) else { continue }
+            kill(target.pid, number)
         }
     }
 }
 
-/// Finds the descendants of a process by asking `ps` who the parents are.
+/// Finds processes, and tells them apart, by asking `ps`.
 enum ProcessTree {
+    /// A process, identified by more than its number.
+    ///
+    /// The start time is what makes this an identity rather than a handle: a
+    /// pid is reused as soon as the system feels like it.
+    struct Identity: Hashable, Sendable {
+        let pid: pid_t
+        let startedAt: String
+    }
+
     /// Every process descended from `pid`, excluding `pid` itself.
     ///
     /// Returns nothing if `ps` cannot be run — the caller still signals the
     /// direct child, so a failure here degrades to the old behaviour rather
     /// than to no behaviour.
     static func descendants(of pid: pid_t) -> [pid_t] {
-        guard let listing = run(["/bin/ps", "-axo", "pid=,ppid="]) else { return [] }
-
         var childrenByParent: [pid_t: [pid_t]] = [:]
-        for line in listing.split(separator: "\n") {
-            let fields = line.split(separator: " ", omittingEmptySubsequences: true)
-            guard fields.count >= 2,
-                  let child = pid_t(fields[0]), let parent = pid_t(fields[1])
-            else { continue }
-            childrenByParent[parent, default: []].append(child)
+        for row in listing() {
+            childrenByParent[row.ppid, default: []].append(row.identity.pid)
         }
 
         var found: [pid_t] = []
@@ -215,6 +241,28 @@ enum ProcessTree {
             }
         }
         return found
+    }
+
+    /// The current identities of the given processes. Anything that has since
+    /// exited is simply absent.
+    static func identities(for pids: [pid_t]) -> [Identity] {
+        let wanted = Set(pids)
+        return listing().filter { wanted.contains($0.identity.pid) }.map(\.identity)
+    }
+
+    private static func listing() -> [(identity: Identity, ppid: pid_t)] {
+        guard let text = run(["/bin/ps", "-axo", "pid=,ppid=,lstart="]) else { return [] }
+        return text.split(separator: "\n").compactMap { line in
+            // `lstart` is a date containing spaces, so it is whatever remains
+            // after the two numeric columns rather than a field of its own.
+            let fields = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+            guard fields.count == 3,
+                  let pid = pid_t(fields[0]), let ppid = pid_t(fields[1])
+            else { return nil }
+            let started = fields[2].trimmingCharacters(in: .whitespaces)
+            guard !started.isEmpty else { return nil }
+            return (Identity(pid: pid, startedAt: started), ppid)
+        }
     }
 
     private static func run(_ argv: [String]) -> String? {
