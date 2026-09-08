@@ -21,7 +21,7 @@ final class IslandWindow {
 
     init(content: (ShellState) -> AnyView) {
         panel = DeckPanel(contentRect: NSRect(x: 0, y: 0, width: 185, height: 32))
-        let hosting = NSHostingView(rootView: content(shell))
+        let hosting = PanelHostingView(rootView: content(shell))
         hosting.autoresizingMask = [.width, .height]
         panel.contentView = hosting
 

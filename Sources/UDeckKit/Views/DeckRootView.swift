@@ -55,6 +55,11 @@ public struct DeckRootView: View {
         .transition(.opacity)
         .animation(shell.contentAnimation, value: contentKind)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Any click anywhere in the panel promotes a peek into a held panel.
+        // Registering it here rather than on each control means nothing can be
+        // added later that forgets to.
+        .contentShape(Rectangle())
+        .onTapGesture { shell.onInteract() }
         .background {
             // The collapsed island is made of the same glass as the panel — it
             // is the panel, at its smallest — except on a screen with a real
@@ -75,11 +80,6 @@ public struct DeckRootView: View {
                 )
             }
         }
-        // Any click anywhere in the panel promotes a peek into a held panel.
-        // Registering it here rather than on each control means nothing can be
-        // added later that forgets to.
-        .contentShape(Rectangle())
-        .onTapGesture { shell.onInteract() }
     }
 
     /// Which of the three layouts is showing.

@@ -67,6 +67,10 @@ public final class PanelController {
     /// When that was last asked, so it is not asked on every tick.
     private var lastIslandFullscreenCheck: TimeInterval = -.infinity
 
+    /// Identifies the most recent transition, so a settle scheduled for one is
+    /// dropped when another starts before it fires.
+    private var settleToken = 0
+
     /// Whether the cursor has left the peek, and for how long. The rule itself
     /// lives in `UDeckCore`; what is left here is the timer that asks it again
     /// when the cursor has stopped moving and no further sample will arrive.
@@ -142,7 +146,7 @@ public final class PanelController {
         self.makeContent = content
 
         panel = DeckPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200))
-        let hosting = NSHostingView(rootView: content(shell))
+        let hosting = PanelHostingView(rootView: content(shell))
         hosting.autoresizingMask = [.width, .height]
         panel.contentView = hosting
 
@@ -218,7 +222,6 @@ public final class PanelController {
                 // arrives somewhere: another application can warp it, and then
                 // the first thing to happen at the new position would be a
                 // click against a stale answer.
-                self.updateMousePassthrough(cursor: NSEvent.mouseLocation)
                 self.refreshIslandForFullscreen()
 
                 // The gesture itself is only worth evaluating while there is
@@ -357,28 +360,31 @@ public final class PanelController {
             armingTimer = nil
         }
 
-        updateMousePassthrough(cursor: sample.location)
         trackPeekExit(sample)
     }
 
-    /// Decides, for the cursor's current position, whether the window should be
-    /// taking mouse events at all.
-    ///
-    /// The window is much larger than the panel — it is sized to the largest
-    /// state so that opening never reshapes it — so most of it is empty space
-    /// that happens to belong to uDeck, at a level above every ordinary window.
-    /// A click there belongs to whatever is behind it.
-    ///
-    /// This has to be the window's own `ignoresMouseEvents` rather than hit
-    /// testing inside the content view, and that distinction cost a rewrite:
-    /// a view returning `nil` from `hitTest` means *no view* handles the click,
-    /// so the event is dropped. It does not fall through to the window
-    /// underneath. Only the window-level flag makes the click land where the
-    /// operator was aiming.
-    ///
-    /// Driven from the pointer stream, which is event-driven while the mouse is
-    /// moving and polled while it is not — so the flag is already correct by
-    /// the time a click arrives, because reaching a target means moving there.
+    /// Brings the window down to the panel once nothing is moving. Until then
+    /// it is the stage, which is bigger than what is drawn on it.
+    private func scheduleWindowSettle(after delay: TimeInterval) {
+        settleToken += 1
+        let token = settleToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.settleToken == token else { return }
+            self.settleWindow()
+        }
+    }
+
+    /// Makes the window exactly the panel, so every point in it is a point the
+    /// panel draws on and everything outside belongs to whatever is behind it
+    /// without uDeck having to decide anything.
+    private func settleWindow() {
+        guard let geometry else { return }
+        let frame = geometry.frame(for: state.phase)
+        guard panel.frame != frame else { return }
+        panel.setFrame(frame, display: true)
+        shell.panelRect = CGRect(origin: .zero, size: frame.size)
+    }
+
     /// Gives every screen but the active one an island of its own, and takes
     /// away the ones for screens that are gone or have become active.
     private func syncIslands(activeScreenID: String) {
@@ -424,15 +430,6 @@ public final class PanelController {
         filledScreens = filled
         DeckLog.panel.debug("screens filled by a fullscreen window: \(filled.sorted().joined(separator: ", "), privacy: .public)")
         applyPhase(animated: false)
-    }
-
-    private func updateMousePassthrough(cursor: CGPoint) {
-        guard state.phase != .collapsed, let geometry else {
-            panel.ignoresMouseEvents = true
-            return
-        }
-        let inside = geometry.containsPointer(cursor, in: geometry.frame(for: state.phase))
-        panel.ignoresMouseEvents = !inside
     }
 
     /// A peek closes when the cursor has been away from the panel for a grace
@@ -669,13 +666,25 @@ public final class PanelController {
         shell.screenHasNotch = geometry.screen.hasNotch
         shell.weldedToTopEdge = panelFrame.maxY >= geometry.screen.frame.maxY
 
-        updateMousePassthrough(cursor: NSEvent.mouseLocation)
+        // While away the island is a hint, not a target: it must not swallow
+        // clicks meant for whatever is underneath it.
+        panel.ignoresMouseEvents = phase == .collapsed
 
-        // Never animated. The window is invisible — it is a stage, not the
-        // panel — so animating its frame shows nothing and costs everything:
-        // it is what made the panel appear to fly between displays, and what
-        // made the compositor rebuild the glass on every frame. What the
-        // operator actually watches is `shell.panelRect`, below.
+        // The window is a stage only while something is moving. Oversized, it
+        // covers screen it does not draw on — and a window above every ordinary
+        // one that covers screen it does not draw on is a window that eats
+        // clicks meant for what is underneath.
+        //
+        // That used to be handled by flipping `ignoresMouseEvents` from the
+        // pointer stream, and it lost a race it could not win: arriving on the
+        // panel and clicking in one motion beat the flag, so the first click
+        // went to the application below and the operator had to click twice.
+        // Nothing polled is correct at the instant of a click.
+        //
+        // So the window is the stage while a transition is in flight and
+        // exactly the panel once it settles. Never animated either way — it is
+        // invisible, and animating it is what made the panel fly between
+        // displays.
         if panel.frame != windowFrame {
             panel.setFrame(windowFrame, display: true)
         }
@@ -716,8 +725,12 @@ public final class PanelController {
 
         if animated {
             withAnimation(reveal) { shell.panelRect = panelRect }
+            scheduleWindowSettle(after: arriving
+                ? metrics.revealSpringResponse * 1.6
+                : metrics.collapseDuration)
         } else {
             shell.panelRect = panelRect
+            settleWindow()
         }
 
         panel.orderFrontRegardless()
