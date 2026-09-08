@@ -42,25 +42,27 @@ public enum PanelChrome {
         return !isSettled
     }
 
-    /// Whether the island's own mark — the small bar that says how things are
-    /// while the panel is away — is drawn.
+    /// Whether the island's mark — the small bar that says how things are — is
+    /// drawn.
     ///
-    /// Only once the panel has arrived. The mark is centred in whatever
-    /// rectangle the panel currently occupies, and the collapsed state's content
-    /// used to be swapped in the instant the collapse was decided: with the
-    /// panel still at its full size, the bar appeared in the middle of the
-    /// screen and rode up to the top as the shape shrank under it. The operator
-    /// described it exactly — "эта тире появляется по центру и уезжает вверх".
+    /// The mark is not a thing the collapsed state owns. It sits on the panel's
+    /// bottom edge in every state and rides the shape down into the island, so
+    /// that what the operator watches shrink is the same object he was just
+    /// looking at rather than one thing vanishing and another appearing.
     ///
-    /// A mark means "the panel is away and this is how things are". During the
-    /// collapse the panel is not away yet; it is leaving.
+    /// It was the collapsed state's content, swapped in the instant a collapse
+    /// was decided — and because it is centred in whatever rectangle the panel
+    /// occupies, it appeared in the middle of a full-size panel and rode the
+    /// shrink up to the top edge. Waiting for the panel to arrive fixed the
+    /// appearing; carrying it on the panel is what the operator actually
+    /// wanted, and it removes the question of when to show it, because the
+    /// answer is the same as for the surface it is drawn on.
     public static func drawsIslandMark(
         phase: PanelPhase,
         screenHasNotch: Bool,
         isSettled: Bool
     ) -> Bool {
-        // Under a real notch there is no drawn island to put a mark on.
-        phase == .collapsed && !screenHasNotch && isSettled
+        drawsMaterial(phase: phase, screenHasNotch: screenHasNotch, isSettled: isSettled)
     }
 
     /// The corner radius the material is drawn with in a given phase.

@@ -36,15 +36,10 @@ public struct DeckRootView: View {
         Group {
             switch shell.phase {
             case .collapsed:
-                CollapsedIslandView(
-                    theme: theme,
-                    summary: summary,
-                    drawsNothing: !PanelChrome.drawsIslandMark(
-                        phase: shell.phase,
-                        screenHasNotch: shell.screenHasNotch,
-                        isSettled: shell.isSettled
-                    )
-                )
+                // Nothing of its own: what the operator sees while the panel
+                // is away is the island's mark, and that is carried by the
+                // panel rather than by this state — see `IslandMark`.
+                Color.clear
             case .peek:
                 PeekView(theme: theme, summary: summary, model: model)
             case .open, .fullscreen:
@@ -63,6 +58,19 @@ public struct DeckRootView: View {
         .transition(.opacity)
         .animation(shell.contentAnimation, value: contentKind)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // Outside the crossfade above, deliberately. The mark is one object
+        // that rides the panel's bottom edge from the open panel down into the
+        // island; keyed on the content it would be a thing that disappears and
+        // another that appears, which is what it used to be and looked it.
+        .overlay(alignment: .bottom) {
+            if PanelChrome.drawsIslandMark(
+                phase: shell.phase,
+                screenHasNotch: shell.screenHasNotch,
+                isSettled: shell.isSettled
+            ) {
+                IslandMark(theme: theme, summary: summary)
+            }
+        }
         // Any click anywhere in the panel promotes a peek into a held panel.
         // Registering it here rather than on each control means nothing can be
         // added later that forgets to.
@@ -154,48 +162,40 @@ struct DeckSummary {
     }
 }
 
-/// What is on screen while the panel is away.
+/// The one thing the panel says about itself without being opened.
 ///
-/// On a display with no notch this is the island itself — glass, the size of a
-/// real notch, welded to the top edge — and the state is a short bar inside it.
+/// A short bar on the panel's bottom edge, in the colour of the worst thing
+/// being watched. It is drawn in every state and it is always on that edge, so
+/// a collapse carries it from the bottom of the open panel down into the island
+/// — the operator asked for exactly that, and it is also the only version of
+/// this that does not need a rule about when to appear.
 ///
-/// On a display that has a notch, nothing. The island is already there in
-/// hardware; a strip hung under it is a second protrusion doing a job the
-/// screen cutout was already doing, which is what the operator objected to. The
-/// window still exists at the notch's own coordinates, where the camera housing
-/// covers it, so there is nothing to see either way — but drawing nothing is
-/// the statement, and not relying on hardware to hide it is the reason this is
-/// a branch rather than an accident.
+/// On a screen with a real notch the collapsed panel draws nothing at all, and
+/// the mark goes with it: the island is hardware there, and hanging a bar under
+/// a screen cutout that was already doing the job is what he objected to in the
+/// first place.
 ///
-/// It says one thing and does not move. With dozens of sources being watched,
-/// anything that animates up here is wallpaper by the end of the day, and it
-/// costs battery for the privilege of being ignored.
-struct CollapsedIslandView: View {
+/// It says one thing and does not move on its own. With dozens of sources being
+/// watched, anything that animates up here is wallpaper by the end of the day,
+/// and it costs battery for the privilege of being ignored.
+struct IslandMark: View {
     var theme: DeckTheme
     var summary: DeckSummary
-    var drawsNothing: Bool
 
     var body: some View {
-        Group {
-            if drawsNothing {
-                Color.clear
-            } else {
-                Capsule()
-                    .fill(theme.color(for: summary.worst)
-                        .opacity(summary.placedPlugins == 0 ? 0.35 : 1))
-                    .frame(width: theme.islandIndicatorSize.width,
-                           height: theme.islandIndicatorSize.height)
-                    // A dark halo, so the bar reads against a bright document
-                    // as well as against a dark game. Without it the indicator
-                    // only works on half the things the panel sits over.
-                    .shadow(color: .black.opacity(0.55), radius: 2)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityHidden(drawsNothing)
-        .accessibilityLabel(summary.placedPlugins == 0
-            ? "uDeck, nothing placed yet"
-            : "uDeck, worst state \(summary.worst.rawValue)")
+        Capsule()
+            .fill(theme.color(for: summary.worst)
+                .opacity(summary.placedPlugins == 0 ? 0.35 : 1))
+            .frame(width: theme.islandIndicatorSize.width,
+                   height: theme.islandIndicatorSize.height)
+            // A dark halo, so the bar reads against a bright document as well
+            // as against a dark game. Without it the indicator only works on
+            // half the things the panel sits over.
+            .shadow(color: .black.opacity(0.55), radius: 2)
+            .padding(.bottom, theme.islandIndicatorSize.height)
+            .accessibilityLabel(summary.placedPlugins == 0
+                ? "uDeck, nothing placed yet"
+                : "uDeck, worst state \(summary.worst.rawValue)")
     }
 }
 

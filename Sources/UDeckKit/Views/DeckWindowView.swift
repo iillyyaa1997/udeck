@@ -88,7 +88,11 @@ struct DeckWindowView: View {
         // card's own scrolling and selection.
         .contentShape(Rectangle())
         .gesture(
-            DragGesture(minimumDistance: 3)
+            // Measured in the grid's space, not the window's own — the window
+            // moves while it is being dragged, and a drag measured against
+            // something the drag is moving reports a translation that shrinks
+            // by exactly what it just achieved. See `DeckGridView.dragSpace`.
+            DragGesture(minimumDistance: 3, coordinateSpace: .named(DeckGridView.dragSpace))
                 .onChanged { onDragChanged($0.translation) }
                 .onEnded { _ in onGestureEnded() }
         )
@@ -152,7 +156,10 @@ struct DeckWindowView: View {
             .frame(width: 16, height: 16)
             .contentShape(Rectangle())
             .gesture(
-                DragGesture(minimumDistance: 2)
+                // Same reasoning as the header's drag: the grip is in the
+                // corner of the thing it is resizing, so it moves with every
+                // cell the resize gains.
+                DragGesture(minimumDistance: 2, coordinateSpace: .named(DeckGridView.dragSpace))
                     .onChanged { onResizeChanged($0.translation) }
                     .onEnded { _ in onGestureEnded() }
             )

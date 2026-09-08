@@ -347,34 +347,54 @@ struct RegressionTests {
     }
     // MARK: - A dash that appeared mid-screen and rode up
 
-    /// The fault: the island's mark is centred in whatever rectangle the panel
-    /// currently occupies, and the collapsed state's content was swapped in the
-    /// instant the collapse was decided. With the panel still at full size the
-    /// bar appeared in the middle of the screen and travelled up to the top as
-    /// the shape shrank under it — "эта тире появляется по центру и уезжает
-    /// вверх".
+    /// The fault: the mark was the collapsed state's content, swapped in the
+    /// instant a collapse was decided. It is centred in whatever rectangle the
+    /// panel occupies, so with the panel still at full size it appeared in the
+    /// middle of the screen and travelled up as the shape shrank under it —
+    /// "эта тире появляется по центру и уезжает вверх".
     ///
-    /// A mark means "the panel is away". During a collapse it is not away yet.
-    @Test("the island's mark waits for the panel to arrive")
-    func islandMarkWaitsForTheCollapseToFinish() {
-        #expect(!PanelChrome.drawsIslandMark(phase: .collapsed, screenHasNotch: false, isSettled: false))
-        #expect(PanelChrome.drawsIslandMark(phase: .collapsed, screenHasNotch: false, isSettled: true))
-    }
-
-    /// Under a real notch there is no drawn island, so there is nothing to put a
-    /// mark on — settled or not.
-    @Test("a real notch carries no mark of ours")
-    func noMarkUnderARealNotch() {
-        for settled in [true, false] {
-            #expect(!PanelChrome.drawsIslandMark(phase: .collapsed, screenHasNotch: true, isSettled: settled))
+    /// The operator's answer was better than waiting for the arrival: carry the
+    /// mark on the panel's bottom edge in every state, so a collapse takes it
+    /// down into the island rather than replacing one thing with another. That
+    /// leaves no question of when to show it — it is shown wherever the surface
+    /// it is drawn on is shown.
+    @Test("the mark is drawn exactly where the panel's material is")
+    func theMarkFollowsTheMaterial() {
+        for phase in PanelPhase.allCases {
+            for notch in [true, false] {
+                for settled in [true, false] {
+                    #expect(
+                        PanelChrome.drawsIslandMark(phase: phase, screenHasNotch: notch, isSettled: settled)
+                            == PanelChrome.drawsMaterial(phase: phase, screenHasNotch: notch, isSettled: settled),
+                        "\(phase) notch=\(notch) settled=\(settled): the mark and its surface disagree"
+                    )
+                }
+            }
         }
     }
 
-    /// And no other state has one: the mark belongs to the panel being away.
-    @Test("only the collapsed state carries the mark")
-    func onlyTheIslandCarriesTheMark() {
+    /// The whole point of the change: the mark exists while the panel is open,
+    /// so that what shrinks into the island is the thing the operator was
+    /// already looking at.
+    @Test("the mark is there in the states the panel is open in")
+    func theMarkIsCarriedByTheOpenPanel() {
         for phase in PanelPhase.allCases where phase != .collapsed {
-            #expect(!PanelChrome.drawsIslandMark(phase: phase, screenHasNotch: false, isSettled: true))
+            for notch in [true, false] {
+                #expect(PanelChrome.drawsIslandMark(phase: phase, screenHasNotch: notch, isSettled: true))
+            }
         }
+    }
+
+    /// And it rides the collapse the whole way, on either kind of screen —
+    /// including the notched one, where what it is riding into is hardware.
+    @Test("the mark is still there while the panel is closing")
+    func theMarkRidesTheCollapse() {
+        for notch in [true, false] {
+            #expect(PanelChrome.drawsIslandMark(phase: .collapsed, screenHasNotch: notch, isSettled: false))
+        }
+        // Arrived under a real notch, there is nothing drawn to carry it.
+        #expect(!PanelChrome.drawsIslandMark(phase: .collapsed, screenHasNotch: true, isSettled: true))
+        // Arrived on a drawn island, the mark is what the island says.
+        #expect(PanelChrome.drawsIslandMark(phase: .collapsed, screenHasNotch: false, isSettled: true))
     }
 }

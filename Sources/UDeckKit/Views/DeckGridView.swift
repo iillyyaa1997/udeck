@@ -8,6 +8,10 @@ import UDeckCore
 /// points would be wrong the moment the operator undocks. The conversion to
 /// points happens here and nowhere else.
 struct DeckGridView: View {
+    /// The name of the space every drag in the grid is measured in. Shared with
+    /// `DeckWindowView`, which is where the gestures actually live.
+    static let dragSpace = "deck.grid"
+
     var model: DeckModel
     var theme: DeckTheme
     var tab: DeckTab
@@ -71,6 +75,17 @@ struct DeckGridView: View {
                     minHeight: metrics.height(cells: max(1, totalRows)),
                     alignment: .topLeading
                 )
+                // The space a drag is measured in, and the reason it is named.
+                //
+                // A `DragGesture` with no coordinate space reports translation
+                // in the space of the view it is attached to — and the view a
+                // window's drag is attached to is the window, which moves as the
+                // drag snaps it from cell to cell. Every snap therefore changed
+                // the number the snap was computed from, by exactly the distance
+                // it had just moved, and the window shook between two cells for
+                // as long as it was held. Measured against the grid, which does
+                // not move, the translation means what it says.
+                .coordinateSpace(name: DeckGridView.dragSpace)
                 .animation(.easeOut(duration: 0.12), value: draft)
             }
             .scrollIndicators(.never)
