@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let screens = ScreenObserver()
 
         let controller = PanelController(
-            settings: model.settings,
+            settings: { model.settings },
             screens: screens
         ) { shell in
             DeckRootView(shell: shell, model: model)
@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onPhaseChange = { [weak model] phase in
             model?.panelIsVisible = phase.isVisible
         }
+        model.onSettingsChanged = { [weak controller] _ in controller?.settingsChanged() }
         self.model = model
         self.screens = screens
         self.controller = controller

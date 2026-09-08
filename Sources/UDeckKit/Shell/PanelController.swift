@@ -21,7 +21,20 @@ public final class PanelController {
     private let screens: ScreenObserver
     private let pointer: PointerMonitor
     private var recognizer = HoverGestureRecognizer()
-    private var settings: AppSettings
+
+    /// The operator's settings, read live rather than copied.
+    ///
+    /// This used to be a copy taken at initialisation, refreshed by an
+    /// `update(settings:)` method that nothing ever called — so the whole
+    /// "Opening" pane was written to disk, shown as changed, and had no effect
+    /// until the next launch, while two controls in the same window did work.
+    /// A wiring that is easy to forget is a wiring that will be forgotten;
+    /// reading through a closure removes the thing to forget. Only the poll
+    /// timer's own interval still needs to be told, and forgetting *that*
+    /// degrades to one stale timer rather than to half a settings screen.
+    private let readSettings: () -> AppSettings
+
+    private var settings: AppSettings { readSettings() }
 
     /// The screen the panel is currently attached to.
     private var attachedScreenID: String?
@@ -66,8 +79,12 @@ public final class PanelController {
     /// looking, and refreshes everything when somebody is.
     public var onPhaseChange: ((PanelPhase) -> Void)?
 
-    public init(settings: AppSettings, screens: ScreenObserver, content: (ShellState) -> some View) {
-        self.settings = settings
+    public init(
+        settings: @escaping () -> AppSettings,
+        screens: ScreenObserver,
+        content: (ShellState) -> some View
+    ) {
+        self.readSettings = settings
         self.screens = screens
         self.pointer = PointerMonitor(screens: screens)
 
@@ -166,8 +183,10 @@ public final class PanelController {
         panel.orderOut(nil)
     }
 
-    public func update(settings: AppSettings) {
-        self.settings = settings
+    /// Told when the operator changes something, so the timers that were
+    /// created with an interval can be recreated with the new one. Everything
+    /// else is already read live.
+    public func settingsChanged() {
         pointer.fullscreenCheckInterval = settings.gesture.fullscreenCheckInterval
         startPointerPoll()
         applyPhase(animated: false)

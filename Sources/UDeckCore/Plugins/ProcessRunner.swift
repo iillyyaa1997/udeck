@@ -191,8 +191,12 @@ private struct Stopper: Sendable {
     let grace: TimeInterval
 
     func terminate() async {
-        let targets = ProcessTree.identities(for: [pid] + ProcessTree.descendants(of: pid))
-        signal(SIGTERM, to: targets)
+        // One listing serves both finding the tree and checking the identities
+        // in it. Enumerating every process on the system is not free, and it
+        // was being done four times per termination.
+        let before = ProcessTree.snapshot()
+        let targets = before.identities(for: [pid] + before.descendants(of: pid))
+        signal(SIGTERM, to: targets, confirmedBy: before)
 
         do {
             try await Task.sleep(nanoseconds: Seconds.nanoseconds(grace))
@@ -202,12 +206,18 @@ private struct Stopper: Sendable {
             return
         }
 
-        signal(SIGKILL, to: targets)
+        // A fresh listing, because time has passed and that is the whole point
+        // of checking identities before the unconditional signal.
+        signal(SIGKILL, to: targets, confirmedBy: ProcessTree.snapshot())
     }
 
-    private func signal(_ number: Int32, to targets: [ProcessTree.Identity]) {
+    private func signal(
+        _ number: Int32,
+        to targets: [ProcessTree.Identity],
+        confirmedBy snapshot: ProcessTree.Snapshot
+    ) {
         guard !targets.isEmpty else { return }
-        let stillThere = Set(ProcessTree.identities(for: targets.map(\.pid)))
+        let stillThere = Set(snapshot.identities(for: targets.map(\.pid)))
         for target in targets where target.pid > 1 {
             guard stillThere.contains(target) else { continue }
             kill(target.pid, number)
@@ -226,35 +236,42 @@ enum ProcessTree {
         let startedAt: String
     }
 
-    /// Every process descended from `pid`, excluding `pid` itself.
-    ///
-    /// Returns nothing if `ps` cannot be run — the caller still signals the
-    /// direct child, so a failure here degrades to the old behaviour rather
-    /// than to no behaviour.
-    static func descendants(of pid: pid_t) -> [pid_t] {
-        var childrenByParent: [pid_t: [pid_t]] = [:]
-        for row in listing() {
-            childrenByParent[row.ppid, default: []].append(row.identity.pid)
-        }
+    /// One reading of the process table, so that finding a tree and checking
+    /// the identities in it do not each pay for their own.
+    struct Snapshot: Sendable {
+        let rows: [(identity: Identity, ppid: pid_t)]
 
-        var found: [pid_t] = []
-        var frontier = [pid]
-        var seen: Set<pid_t> = [pid]
-        while let current = frontier.popLast() {
-            for child in childrenByParent[current] ?? [] where seen.insert(child).inserted {
-                found.append(child)
-                frontier.append(child)
+        /// Every process descended from `pid`, excluding `pid` itself.
+        func descendants(of pid: pid_t) -> [pid_t] {
+            var childrenByParent: [pid_t: [pid_t]] = [:]
+            for row in rows {
+                childrenByParent[row.ppid, default: []].append(row.identity.pid)
             }
+
+            var found: [pid_t] = []
+            var frontier = [pid]
+            var seen: Set<pid_t> = [pid]
+            while let current = frontier.popLast() {
+                for child in childrenByParent[current] ?? [] where seen.insert(child).inserted {
+                    found.append(child)
+                    frontier.append(child)
+                }
+            }
+            return found
         }
-        return found
+
+        /// The identities of the given processes, as of this reading. Anything
+        /// that had already exited is simply absent.
+        func identities(for pids: [pid_t]) -> [Identity] {
+            let wanted = Set(pids)
+            return rows.filter { wanted.contains($0.identity.pid) }.map(\.identity)
+        }
     }
 
-    /// The current identities of the given processes. Anything that has since
-    /// exited is simply absent.
-    static func identities(for pids: [pid_t]) -> [Identity] {
-        let wanted = Set(pids)
-        return listing().filter { wanted.contains($0.identity.pid) }.map(\.identity)
-    }
+    /// Reads the process table. An empty snapshot means `ps` could not be run —
+    /// the caller still signals the direct child, so a failure here degrades to
+    /// the old behaviour rather than to no behaviour.
+    static func snapshot() -> Snapshot { Snapshot(rows: listing()) }
 
     private static func listing() -> [(identity: Identity, ppid: pid_t)] {
         guard let text = run(["/bin/ps", "-axo", "pid=,ppid=,lstart="]) else { return [] }
@@ -356,7 +373,8 @@ private final class OutputCollector: @unchecked Sendable {
     private var out = Data()
     private var err = Data()
     private var overflow: Int?
-    private var openHandles = 0
+    private var stdoutAtEndOfFile = false
+    private var stderrAtEndOfFile = false
     private let limit: Int
     private var stdoutHandle: FileHandle?
     private var stderrHandle: FileHandle?
@@ -369,19 +387,18 @@ private final class OutputCollector: @unchecked Sendable {
 
     private var reachedEndOfFile: Bool {
         lock.lock(); defer { lock.unlock() }
-        return openHandles == 0
+        return stdoutAtEndOfFile && stderrAtEndOfFile
     }
 
     func attach(stdout: FileHandle, stderr: FileHandle) {
         stdoutHandle = stdout
         stderrHandle = stderr
-        lock.lock(); openHandles = 2; lock.unlock()
 
         stdout.readabilityHandler = { [weak self] handle in
-            self?.receive(handle.availableData, isStandardOutput: true)
+            self?.receive(handle.availableData, from: handle, isStandardOutput: true)
         }
         stderr.readabilityHandler = { [weak self] handle in
-            self?.receive(handle.availableData, isStandardOutput: false)
+            self?.receive(handle.availableData, from: handle, isStandardOutput: false)
         }
     }
 
@@ -408,14 +425,30 @@ private final class OutputCollector: @unchecked Sendable {
         stderrHandle = nil
     }
 
-    private func receive(_ data: Data, isStandardOutput: Bool) {
-        lock.lock(); defer { lock.unlock() }
+    private func receive(_ data: Data, from handle: FileHandle, isStandardOutput: Bool) {
         guard !data.isEmpty else {
-            // An empty read is end-of-file: the write end has been closed by
-            // everyone holding it.
-            openHandles = max(0, openHandles - 1)
+            // End of file: everyone holding the write end has closed it.
+            //
+            // The handler must come off *here*, not later. A dispatch read
+            // source stays permanently readable once the writer is gone, so
+            // leaving it installed re-invokes this as fast as the queue can
+            // dispatch — measured at one and a half million empty callbacks in
+            // a second and a half, a full core for the rest of the producer's
+            // life. And it is an ordinary shell idiom that gets you there:
+            // print the card, redirect stdout away, then do the slow part.
+            handle.readabilityHandler = nil
+
+            lock.lock()
+            // Recorded per handle rather than counted down. Counting made every
+            // spurious empty read look like another pipe closing, so one pipe
+            // spinning could drive the count to zero on its own and the drain
+            // below would stop waiting while the other was still open.
+            if isStandardOutput { stdoutAtEndOfFile = true } else { stderrAtEndOfFile = true }
+            lock.unlock()
             return
         }
+
+        lock.lock(); defer { lock.unlock() }
         if isStandardOutput { out.append(data) } else { err.append(data) }
         let total = out.count + err.count
         if total > limit && overflow == nil { overflow = total }

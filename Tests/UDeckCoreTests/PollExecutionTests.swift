@@ -214,6 +214,48 @@ struct PollExecutionTests {
         #expect(failure.diagnostics == "could not reach the thing")
     }
 
+    /// A dispatch read source stays permanently readable once the writer is
+    /// gone. Leaving the handler installed re-invoked it as fast as the queue
+    /// could dispatch — a full core for the rest of the producer's life, from an
+    /// ordinary shell idiom: print the card, redirect stdout away, do the slow
+    /// part.
+    @Test("a producer that closes its output does not cost the host a core")
+    func closingOutputDoesNotSpin() async {
+        let temp = TemporaryDirectory()
+        temp.writePlugin(folder: "quiet", manifest: """
+        { "id": "quiet", "name": "Quiet", "version": "1.0.0", "api": 1, "kind": "poll",
+          "run": ["./run.sh"], "interval": 30, "timeout": 10 }
+        """, script: (name: "run.sh", body: """
+        #!/bin/sh
+        printf '{"rows":[{"text":"done"}],"ttl":30}\n'
+        exec 1>&-
+        sleep 1
+        """, executable: true))
+
+        let before = Self.hostCPUSeconds()
+        let outcome = await executor.poll(
+            plugin: discovery.load(temp.url.appendingPathComponent("plugins/quiet")),
+            grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval
+        )
+        let spent = Self.hostCPUSeconds() - before
+
+        guard case .card = outcome else { Issue.record("expected a card, got \(outcome)"); return }
+        // Measured before the fix: about a second of host CPU for a one-second
+        // producer. After: a few milliseconds.
+        #expect(spent < 0.25, "the host burned \(spent)s of CPU waiting for a one-second producer")
+    }
+
+    /// This process's own CPU time, user plus system.
+    static func hostCPUSeconds() -> Double {
+        var usage = rusage()
+        guard getrusage(RUSAGE_SELF, &usage) == 0 else { return 0 }
+        func seconds(_ value: timeval) -> Double {
+            Double(value.tv_sec) + Double(value.tv_usec) / 1_000_000
+        }
+        return seconds(usage.ru_utime) + seconds(usage.ru_stime)
+    }
+
     @Test("a producer that prints nothing is reported as such, not as a blank card")
     func emptyOutputIsReported() async {
         let temp = TemporaryDirectory()

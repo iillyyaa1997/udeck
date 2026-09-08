@@ -45,6 +45,10 @@ public final class DeckModel {
 
     public var appearance: Appearance = .dark
 
+    /// Told after the operator changes a setting, so the shell can rebuild
+    /// anything that was created with one.
+    public var onSettingsChanged: ((AppSettings) -> Void)?
+
     private let paths: UDeckPaths
     private let executor: PollExecutor
     private var pollTasks: [String: Task<Void, Never>] = [:]
@@ -251,6 +255,7 @@ public final class DeckModel {
         settings = newValue
         save(settingsStore, newValue, named: "settings")
         restartPolling()
+        onSettingsChanged?(newValue)
     }
 
     public func setEnabled(_ enabled: Bool, for id: PluginIdentifier) {
