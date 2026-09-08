@@ -16,6 +16,10 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
 
     public var peekWidthFraction: CGFloat
     public var peekMaxWidth: CGFloat
+
+    /// The peek shows a summary line and an invitation, and nothing else, so it
+    /// is sized for exactly that. A peek with a lot of empty space in it reads
+    /// as something that failed to load.
     public var peekHeight: CGFloat
 
     public var openWidthFraction: CGFloat
@@ -35,7 +39,7 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
         pillWidthFactor: CGFloat = 0.62,
         peekWidthFraction: CGFloat = 0.42,
         peekMaxWidth: CGFloat = 820,
-        peekHeight: CGFloat = 132,
+        peekHeight: CGFloat = 96,
         openWidthFraction: CGFloat = 0.46,
         openMaxWidth: CGFloat = 1100,
         openHeightFraction: CGFloat = 0.62,
