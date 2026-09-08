@@ -43,8 +43,31 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
     /// under a notch.
     public var islandCornerRadius: CGFloat
 
-    /// Duration of the drop-down and retract animation.
+    /// The window resize that only fullscreen needs. Every other change of
+    /// state leaves the window alone and moves the panel inside it.
     public var revealDuration: TimeInterval
+
+    /// The spring the panel opens with: `response` is roughly how long it takes
+    /// to arrive, `damping` how much it overshoots on the way.
+    ///
+    /// Arriving is allowed to overshoot a little — that is what reads as mass.
+    /// Below about 0.7 the ringing becomes visible, which is fine on a glyph
+    /// and costly under text, because the words move while they are being read.
+    public var revealSpringResponse: TimeInterval
+    public var revealSpringDamping: Double
+
+    /// Closing does **not** use the spring.
+    ///
+    /// Opening and closing must not share a curve. A spring on the way out
+    /// means the panel bounces back towards someone who has already dismissed
+    /// it, which reads as the interface arguing with them.
+    public var collapseDuration: TimeInterval
+
+    /// The content is sequenced behind the frame: it starts after the panel has
+    /// visibly begun to move, and it leaves faster than it arrives.
+    public var contentRevealDelay: TimeInterval
+    public var contentRevealDuration: TimeInterval
+    public var contentHideDuration: TimeInterval
 
     public init(
         peekWidthFraction: CGFloat = 0.42,
@@ -57,7 +80,13 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
         cornerRadius: CGFloat = 18,
         topEdgeBleed: CGFloat = 2,
         islandCornerRadius: CGFloat = 12,
-        revealDuration: TimeInterval = 0.4
+        revealDuration: TimeInterval = 0.3,
+        revealSpringResponse: TimeInterval = 0.42,
+        revealSpringDamping: Double = 0.8,
+        collapseDuration: TimeInterval = 0.3,
+        contentRevealDelay: TimeInterval = 0.08,
+        contentRevealDuration: TimeInterval = 0.22,
+        contentHideDuration: TimeInterval = 0.12
     ) {
         self.peekWidthFraction = peekWidthFraction
         self.peekMaxWidth = peekMaxWidth
@@ -70,6 +99,12 @@ public struct PanelMetrics: Codable, Equatable, Sendable {
         self.topEdgeBleed = topEdgeBleed
         self.islandCornerRadius = islandCornerRadius
         self.revealDuration = revealDuration
+        self.revealSpringResponse = revealSpringResponse
+        self.revealSpringDamping = revealSpringDamping
+        self.collapseDuration = collapseDuration
+        self.contentRevealDelay = contentRevealDelay
+        self.contentRevealDuration = contentRevealDuration
+        self.contentHideDuration = contentHideDuration
     }
 }
 
@@ -89,7 +124,13 @@ extension PanelMetrics {
             cornerRadius: try c.decodeIfPresent(CGFloat.self, forKey: .cornerRadius) ?? d.cornerRadius,
             topEdgeBleed: try c.decodeIfPresent(CGFloat.self, forKey: .topEdgeBleed) ?? d.topEdgeBleed,
             islandCornerRadius: try c.decodeIfPresent(CGFloat.self, forKey: .islandCornerRadius) ?? d.islandCornerRadius,
-            revealDuration: try c.decodeIfPresent(TimeInterval.self, forKey: .revealDuration) ?? d.revealDuration
+            revealDuration: try c.decodeIfPresent(TimeInterval.self, forKey: .revealDuration) ?? d.revealDuration,
+            revealSpringResponse: try c.decodeIfPresent(TimeInterval.self, forKey: .revealSpringResponse) ?? d.revealSpringResponse,
+            revealSpringDamping: try c.decodeIfPresent(Double.self, forKey: .revealSpringDamping) ?? d.revealSpringDamping,
+            collapseDuration: try c.decodeIfPresent(TimeInterval.self, forKey: .collapseDuration) ?? d.collapseDuration,
+            contentRevealDelay: try c.decodeIfPresent(TimeInterval.self, forKey: .contentRevealDelay) ?? d.contentRevealDelay,
+            contentRevealDuration: try c.decodeIfPresent(TimeInterval.self, forKey: .contentRevealDuration) ?? d.contentRevealDuration,
+            contentHideDuration: try c.decodeIfPresent(TimeInterval.self, forKey: .contentHideDuration) ?? d.contentHideDuration
         )
     }
 }

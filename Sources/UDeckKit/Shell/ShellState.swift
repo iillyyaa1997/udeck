@@ -1,5 +1,7 @@
+import CoreGraphics
 import Foundation
 import Observation
+import SwiftUI
 import UDeckCore
 
 /// The bridge between the window controller and the SwiftUI content.
@@ -12,6 +14,20 @@ import UDeckCore
 @Observable
 public final class ShellState {
     public internal(set) var phase: PanelPhase = .collapsed
+
+    /// Where the panel sits inside its window, in view coordinates.
+    ///
+    /// The window no longer changes shape when the panel does — it is sized
+    /// once per screen and the panel moves inside it, so this is the thing that
+    /// animates. A layer moving inside a still window is GPU work; a window
+    /// changing shape makes the compositor rebuild the glass every frame.
+    public internal(set) var panelRect: CGRect = .zero
+
+    /// The curve the content fades on, which is not the curve the panel moves
+    /// on: it starts after the panel has visibly begun to move, and it leaves
+    /// faster than it arrives. Set by the controller, which is the only place
+    /// that knows which direction this transition is going.
+    public internal(set) var contentAnimation: Animation = .default
 
     /// How far the panel window reaches above the menu bar's lower edge on the
     /// screen it is currently on.

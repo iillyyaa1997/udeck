@@ -158,6 +158,58 @@ struct PanelGeometryTests {
         }
     }
 
+    /// The reveal is a layer moving inside a still window, not a window
+    /// changing shape — the compositor rebuilds the glass on every frame of a
+    /// resize, and that is what the stutter was. The property that makes it
+    /// true is this one: the hover states all share a window.
+    @Test("the window does not change between the states the cursor can reach")
+    func hoverStatesShareOneWindow() {
+        for screen in ScreenFixtures.both {
+            let g = geometry(screen)
+            let window = g.windowFrame(for: .collapsed)
+            for phase in [PanelPhase.peek, .open] {
+                #expect(g.windowFrame(for: phase) == window,
+                        "\(phase) on \(screen.name) would resize the window")
+            }
+            // Fullscreen is larger than the stage and is a deliberate click
+            // rather than something a passing cursor causes, so it is allowed
+            // to move the window.
+            #expect(g.windowFrame(for: .fullscreen) == g.fullscreenFrame)
+        }
+    }
+
+    @Test("every state fits inside the window it is drawn in")
+    func panelFitsItsWindow() {
+        for screen in ScreenFixtures.both {
+            let g = geometry(screen)
+            for phase in PanelPhase.allCases {
+                let window = g.windowFrame(for: phase)
+                let rect = g.panelRectInWindow(for: phase)
+                #expect(rect.minX >= -0.001, "\(phase) on \(screen.name) starts left of its window")
+                #expect(rect.minY >= -0.001, "\(phase) on \(screen.name) starts above its window")
+                #expect(rect.maxX <= window.width + 0.001, "\(phase) on \(screen.name) runs past its window")
+                #expect(rect.maxY <= window.height + 0.001, "\(phase) on \(screen.name) runs below its window")
+            }
+        }
+    }
+
+    /// The window's coordinates grow downward and the screen's grow upward, and
+    /// the panel is placed by one and measured by the other.
+    @Test("the panel rect in window coordinates is the screen rect, flipped")
+    func panelRectIsTheScreenRectFlipped() {
+        let g = geometry(ScreenFixtures.externalMain)
+        for phase in [PanelPhase.collapsed, .peek, .open] {
+            let window = g.windowFrame(for: phase)
+            let screenRect = g.frame(for: phase)
+            let rect = g.panelRectInWindow(for: phase)
+            #expect(rect.size == screenRect.size)
+            #expect(rect.minX == screenRect.minX - window.minX)
+            // The top of the panel is the top of the window for every hover
+            // state, because both hang from the same edge.
+            #expect(rect.minY == 0)
+        }
+    }
+
     @Test("fullscreen never takes the menu bar, on any screen")
     func fullscreenLeavesTheMenuBarAlone() {
         // The hover states are a strip in the middle, with the app menus and the

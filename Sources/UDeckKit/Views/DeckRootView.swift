@@ -14,6 +14,25 @@ public struct DeckRootView: View {
     public var body: some View {
         let theme = DeckTheme(density: model.settings.density)
 
+        // The window is the stage, sized once per screen; the panel is a
+        // rectangle inside it that moves and resizes. Everything around the
+        // panel is empty and lets clicks through — see `PanelHostingView`.
+        ZStack(alignment: .topLeading) {
+            Color.clear
+            panel(theme: theme)
+                .frame(
+                    width: shell.panelRect.width,
+                    height: shell.panelRect.height,
+                    alignment: .top
+                )
+                .offset(x: shell.panelRect.minX, y: shell.panelRect.minY)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .environment(\.deckTheme, theme)
+    }
+
+    @ViewBuilder
+    private func panel(theme: DeckTheme) -> some View {
         Group {
             switch shell.phase {
             case .collapsed:
@@ -24,20 +43,18 @@ public struct DeckRootView: View {
                 WorkspaceView(shell: shell, model: model, theme: theme)
             }
         }
-        // The window reaches above the menu bar so that the panel stays welded
-        // to its island. The content must not: the first line of a card in the
+        // The panel reaches above the menu bar so that it stays welded to its
+        // island. The content must not: the first line of a card in the
         // menu-bar row would be unreadable against the wallpaper behind it.
         .padding(.top, shell.phase == .collapsed ? 0 : shell.topOverhang)
-        // The window's own frame is animated by the controller. Without this
-        // the content simply appears at its final size inside a window that is
-        // still growing, so the first two thirds of every reveal show squeezed,
-        // clipped text. Faster than the reveal on purpose: the shape is what
-        // the eye follows, and content that lags it looks broken rather than
-        // deliberate.
+        // Sequenced behind the frame rather than tied to it: the content starts
+        // once the panel has visibly begun to move, and leaves faster than it
+        // arrives. Which of the two it is, the controller decides — it is the
+        // only place that knows the direction.
         .id(contentKind)
         .transition(.opacity)
-        .animation(.easeOut(duration: model.settings.panel.revealDuration * 0.55), value: contentKind)
-        .environment(\.deckTheme, theme)
+        .animation(shell.contentAnimation, value: contentKind)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             // The collapsed island is made of the same glass as the panel — it
             // is the panel, at its smallest — except on a screen with a real

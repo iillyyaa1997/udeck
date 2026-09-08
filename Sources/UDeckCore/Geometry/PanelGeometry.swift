@@ -161,6 +161,39 @@ public struct PanelGeometry: Equatable, Sendable {
         )
     }
 
+    /// The window the panel lives in, which is **not** the panel.
+    ///
+    /// It is sized once per screen, to the largest of the hover states, and the
+    /// panel is drawn inside it at whatever size the current state calls for.
+    /// The window then never resizes while the operator is using the panel, and
+    /// the reveal becomes a layer moving inside a still window rather than a
+    /// window changing shape — the compositor rebuilds the glass on every frame
+    /// of a resize, and that is where the stutter came from. Measured: 4 ms of
+    /// uDeck's own CPU per animation and nothing at idle, so the cost was never
+    /// in this process to begin with.
+    ///
+    /// Fullscreen is the exception, because it is larger than the stage. It is
+    /// also a deliberate click rather than something that happens whenever the
+    /// cursor brushes the top of the screen, so one window resize there is a
+    /// price worth paying over keeping a full-screen window permanently alive.
+    public func windowFrame(for phase: PanelPhase) -> CGRect {
+        phase == .fullscreen ? fullscreenFrame : openFrame
+    }
+
+    /// Where the panel sits inside its window, in the window's own coordinates
+    /// with the origin at its top-left corner and `y` growing downward — which
+    /// is what a view hierarchy uses, and the opposite of everything else here.
+    public func panelRectInWindow(for phase: PanelPhase) -> CGRect {
+        let window = windowFrame(for: phase)
+        let panel = frame(for: phase)
+        return CGRect(
+            x: panel.minX - window.minX,
+            y: window.maxY - panel.maxY,
+            width: panel.width,
+            height: panel.height
+        )
+    }
+
     /// Fullscreen means "the whole working area", not "the whole display": it
     /// stops below the menu bar and above the Dock. Covering either would make
     /// the panel impossible to escape from without a keyboard.

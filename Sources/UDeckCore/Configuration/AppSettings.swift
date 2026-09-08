@@ -126,6 +126,15 @@ public struct AppSettings: Codable, Equatable, Sendable {
         result.panel.islandCornerRadius = clamp(result.panel.islandCornerRadius, 0 ... 100)
         result.panel.topEdgeBleed = clamp(result.panel.topEdgeBleed, 0 ... 50)
         result.panel.revealDuration = clamp(result.panel.revealDuration, 0 ... 3)
+        result.panel.revealSpringResponse = clamp(result.panel.revealSpringResponse, 0.05 ... 3)
+        result.panel.collapseDuration = clamp(result.panel.collapseDuration, 0 ... 3)
+        result.panel.contentRevealDelay = clamp(result.panel.contentRevealDelay, 0 ... 3)
+        result.panel.contentRevealDuration = clamp(result.panel.contentRevealDuration, 0.02 ... 3)
+        result.panel.contentHideDuration = clamp(result.panel.contentHideDuration, 0.02 ... 3)
+        // A damping fraction outside (0, 1] is not a slower spring, it is a
+        // different equation; clamping keeps it a spring.
+        result.panel.revealSpringDamping = min(max(
+            result.panel.revealSpringDamping.isFinite ? result.panel.revealSpringDamping : 0.8, 0.1), 1)
 
         // A shortcut that cannot be registered is turned off rather than left
         // enabled-and-broken: "on, and nothing happens when you press it" is

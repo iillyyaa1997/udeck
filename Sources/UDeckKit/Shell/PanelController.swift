@@ -187,10 +187,22 @@ public final class PanelController {
         guard interval > 0 else { return }
         pointerPollTimer = Self.commonModeTimer(every: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                // A peek is watched too: the cursor can be moved away without
-                // producing any event this process sees, and a peek that only
-                // noticed on the next movement would sit there indefinitely.
-                guard let self, self.state.phase == .collapsed || self.state.phase == .peek else { return }
+                guard let self else { return }
+
+                // Whether the window should be taking clicks is asked on every
+                // tick, whatever state the panel is in. Movement events answer
+                // it too, and faster — but they are not the only way a cursor
+                // arrives somewhere: another application can warp it, and then
+                // the first thing to happen at the new position would be a
+                // click against a stale answer.
+                self.updateMousePassthrough(cursor: NSEvent.mouseLocation)
+
+                // The gesture itself is only worth evaluating while there is
+                // something for it to do. A peek is watched because the cursor
+                // can be moved away without producing any event this process
+                // sees, and a peek that only noticed on the next movement would
+                // sit there indefinitely.
+                guard self.state.phase == .collapsed || self.state.phase == .peek else { return }
                 self.handlePointer(
                     PointerSample(
                         location: NSEvent.mouseLocation,
@@ -312,7 +324,35 @@ public final class PanelController {
             armingTimer = nil
         }
 
+        updateMousePassthrough(cursor: sample.location)
         trackPeekExit(sample)
+    }
+
+    /// Decides, for the cursor's current position, whether the window should be
+    /// taking mouse events at all.
+    ///
+    /// The window is much larger than the panel — it is sized to the largest
+    /// state so that opening never reshapes it — so most of it is empty space
+    /// that happens to belong to uDeck, at a level above every ordinary window.
+    /// A click there belongs to whatever is behind it.
+    ///
+    /// This has to be the window's own `ignoresMouseEvents` rather than hit
+    /// testing inside the content view, and that distinction cost a rewrite:
+    /// a view returning `nil` from `hitTest` means *no view* handles the click,
+    /// so the event is dropped. It does not fall through to the window
+    /// underneath. Only the window-level flag makes the click land where the
+    /// operator was aiming.
+    ///
+    /// Driven from the pointer stream, which is event-driven while the mouse is
+    /// moving and polled while it is not — so the flag is already correct by
+    /// the time a click arrives, because reaching a target means moving there.
+    private func updateMousePassthrough(cursor: CGPoint) {
+        guard state.phase != .collapsed, let geometry else {
+            panel.ignoresMouseEvents = true
+            return
+        }
+        let inside = geometry.containsPointer(cursor, in: geometry.frame(for: state.phase))
+        panel.ignoresMouseEvents = !inside
     }
 
     /// A peek closes when the cursor has been away from the panel for a grace
@@ -527,28 +567,50 @@ public final class PanelController {
 
     private func applyPhase(animated: Bool) {
         guard let geometry else { return }
-        let frame = geometry.frame(for: state.phase)
+        let windowFrame = geometry.windowFrame(for: state.phase)
+        let panelFrame = geometry.frame(for: state.phase)
+        let panelRect = geometry.panelRectInWindow(for: state.phase)
 
-        // The window is taller than its content by the overhang, and what the
-        // collapsed state draws depends on whether the screen brought its own
-        // notch. Both are facts about the screen, so they are pushed to the
-        // views from here rather than guessed at inside them.
+        // Facts about the screen, pushed to the views rather than guessed at
+        // inside them.
         shell.topOverhang = geometry.topOverhang
         shell.screenHasNotch = geometry.screen.hasNotch
-        shell.weldedToTopEdge = frame.maxY >= geometry.screen.frame.maxY
+        shell.weldedToTopEdge = panelFrame.maxY >= geometry.screen.frame.maxY
 
-        // While away, the pill is a hint rather than a target: it must not
-        // swallow clicks meant for whatever is underneath it.
-        panel.ignoresMouseEvents = state.phase == .collapsed
+        updateMousePassthrough(cursor: NSEvent.mouseLocation)
+
+        // Only fullscreen is bigger than the stage, so only fullscreen moves
+        // the window at all.
+        if panel.frame != windowFrame {
+            if animated {
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = settings.panel.revealDuration
+                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    panel.animator().setFrame(windowFrame, display: true)
+                }
+            } else {
+                panel.setFrame(windowFrame, display: true)
+            }
+        }
+
+        let metrics = settings.panel
+        // Only a collapse is a departure. Everything else — a peek becoming a
+        // panel, a panel becoming fullscreen — is still an arrival, and arrives
+        // on the spring.
+        let arriving = state.phase != .collapsed
+        shell.contentAnimation = arriving
+            ? .easeOut(duration: metrics.contentRevealDuration).delay(metrics.contentRevealDelay)
+            : .easeOut(duration: metrics.contentHideDuration)
 
         if animated {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = settings.panel.revealDuration
-                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().setFrame(frame, display: true)
+            withAnimation(arriving
+                ? .spring(response: metrics.revealSpringResponse,
+                          dampingFraction: metrics.revealSpringDamping)
+                : .easeOut(duration: metrics.collapseDuration)) {
+                shell.panelRect = panelRect
             }
         } else {
-            panel.setFrame(frame, display: true)
+            shell.panelRect = panelRect
         }
 
         panel.orderFrontRegardless()
