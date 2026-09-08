@@ -11,6 +11,18 @@ The **plugin contract** is versioned separately from the application, by the
 
 ### Added
 
+- **The panel.** A non-activating `NSPanel` hanging below the menu bar at the
+  top centre of whichever screen the cursor is on, with four states — a pill, a
+  peek, a working panel and fullscreen — and the pointer gesture that opens it.
+  It retracts when another application is activated, and comes back as it was
+  when the interruption is over.
+- **Tabs and the 12-column grid.** Windows are dragged by their title bar and
+  resized from a corner, in whole cells; neighbours make room and everything
+  settles upward. The arrangement is a file, so it survives a restart.
+- **Card rendering** for all seven row types, three densities, and the glass
+  look, with staleness drawn rather than described.
+- **The empty state**, which is what an install with no plugins shows.
+
 - **Core model** (`UDeckCore`) — screen and panel geometry, the pointer-gesture
   recognizer, the four panel states, the 12-column grid, the plugin manifest and
   card formats, the permission model, and the on-disk stores. Foundation only,

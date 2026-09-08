@@ -154,8 +154,16 @@ public struct PanelState: Equatable, Sendable {
     }
 
     private mutating func collapse(reason: CollapseReason) {
-        if phase.isHeld { restorePhase = phase }
-        collapseReason = reason
+        // Only a panel that was being worked in is worth restoring. A peek
+        // interrupted by an application switch has nothing in it yet, and
+        // bringing it back as a full working panel would be a much bigger
+        // gesture than the one the operator made.
+        if phase.isHeld {
+            restorePhase = phase
+            collapseReason = reason
+        } else {
+            collapseReason = .dismissed
+        }
         phase = .collapsed
     }
 }

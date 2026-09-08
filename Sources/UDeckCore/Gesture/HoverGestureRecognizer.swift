@@ -69,18 +69,35 @@ public struct HoverGestureRecognizer: Sendable {
     ) -> GestureOutcome {
         recordHistory(sample, tuning: tuning)
 
-        if let blocked = blockingReason(environment: environment, tuning: tuning, now: sample.timestamp) {
-            reset()
-            return .idle(reason: blocked)
-        }
-
         guard let geometry, geometry.triggerStrip.contains(sample.location) else {
+            // Leaving the strip ends the visit, whatever else is going on. This
+            // is the only place the gesture re-arms.
             reset()
-            return .idle(reason: .outsideStrip)
+            return .idle(reason: blockingReason(environment: environment, tuning: tuning, now: sample.timestamp)
+                ?? .outsideStrip)
         }
 
         if !insideStrip {
             beginStripVisit(sample, tuning: tuning)
+        }
+
+        if let blocked = blockingReason(environment: environment, tuning: tuning, now: sample.timestamp) {
+            if blocked == .alreadyVisible {
+                // The panel is already showing, and the cursor is sitting in the
+                // strip that opened it. That visit is spent: when the panel does
+                // close — because the operator switched applications, say — it
+                // must not immediately spring back under a cursor that never
+                // moved. The gesture re-arms when the cursor leaves.
+                firedThisVisit = true
+            } else {
+                // Every other gate is momentary. Restart the dwell so that the
+                // pause has to be made again once the gate lifts, but keep the
+                // visit alive.
+                dwellStart = sample.timestamp
+                dwellHorizontalTravel = 0
+                pushWindow.removeAll(keepingCapacity: true)
+            }
+            return .idle(reason: blocked)
         }
 
         if firedThisVisit {
@@ -102,6 +119,21 @@ public struct HoverGestureRecognizer: Sendable {
         }
 
         return .arming(progress: progress(tuning: tuning, now: sample.timestamp))
+    }
+
+    /// Stops the gesture from firing again until the cursor has left the strip
+    /// and come back.
+    ///
+    /// Used when the panel closes. Without it, a cursor parked in the strip
+    /// while the operator switches to another application would immediately
+    /// re-open the panel they just left — the panel would follow them around
+    /// instead of getting out of the way.
+    public mutating func suppressUntilPointerLeaves() {
+        dwellStart = nil
+        dwellHorizontalTravel = 0
+        wasPinned = false
+        pushWindow.removeAll(keepingCapacity: true)
+        firedThisVisit = true
     }
 
     /// Forgets everything. Call when the panel opens or the screen arrangement

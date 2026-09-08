@@ -259,3 +259,58 @@ struct GestureTests {
         #expect(arming.last! > arming.first!)
     }
 }
+
+@Suite("Pointer gesture — re-arming")
+struct GestureRearmTests {
+    /// The panel closes because the operator switched to another application,
+    /// while their cursor happens to be parked in the strip. It must not follow
+    /// them back.
+    @Test("a spent visit does not fire again until the cursor leaves the strip")
+    func spentVisitDoesNotRefire() {
+        var recognizer = HoverGestureRecognizer()
+        let geometry = PanelGeometry(
+            screen: ScreenFixtures.externalMain, tuning: GestureTuning(), metrics: PanelMetrics()
+        )
+        let tuning = GestureTuning()
+        var clock: TimeInterval = 100
+
+        func send(_ point: CGPoint, visible: Bool, dismissedAt: TimeInterval? = nil) -> GestureOutcome {
+            clock += 0.05
+            return recognizer.handle(
+                PointerSample(location: point, delta: .zero, timestamp: clock),
+                geometry: geometry,
+                environment: GestureEnvironment(panelVisible: visible, lastDismissal: dismissedAt),
+                tuning: tuning
+            )
+        }
+
+        let inStrip = CGPoint(x: 1280, y: 1439)
+        let away = CGPoint(x: 400, y: 700)
+
+        // Arm and fire.
+        _ = send(inStrip, visible: false)
+        var fired = false
+        for _ in 0 ..< 10 where !fired {
+            if send(inStrip, visible: false) == .fire { fired = true }
+        }
+        #expect(fired)
+
+        // The panel is up; the cursor stays where it is.
+        for _ in 0 ..< 5 { _ = send(inStrip, visible: true) }
+
+        // The panel closes on its own — an application switch — and the cursor
+        // has still not moved. Long enough after that the cooldown has expired.
+        clock += 5
+        for _ in 0 ..< 20 {
+            #expect(send(inStrip, visible: false, dismissedAt: clock - 5) != .fire)
+        }
+
+        // Leaving and coming back is what re-arms it.
+        _ = send(away, visible: false, dismissedAt: clock - 5)
+        var refired = false
+        for _ in 0 ..< 15 where !refired {
+            if send(inStrip, visible: false, dismissedAt: clock - 5) == .fire { refired = true }
+        }
+        #expect(refired)
+    }
+}

@@ -33,6 +33,16 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// very hard to see.
     public var pluginExecutableSearchPath: [String]
 
+    /// Keep polling producers while the panel is out of sight.
+    ///
+    /// Off by default. A panel nobody is looking at that still runs a dozen
+    /// scripts every few seconds is a laptop that runs out of battery for no
+    /// reason. Revealing the panel refreshes everything immediately, and the
+    /// staleness rules make the gap between "last known" and "current" visible
+    /// while that happens — so the cost of being off is a moment of honestly
+    /// labelled old data rather than a wrong answer.
+    public var pollWhileCollapsed: Bool
+
     public init(
         version: Int = 1,
         density: Density = .normal,
@@ -43,7 +53,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         silentTTLMultiplier: Double = 3,
         pluginExecutableSearchPath: [String] = [
             "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
-        ]
+        ],
+        pollWhileCollapsed: Bool = false
     ) {
         self.version = version
         self.density = density
@@ -53,6 +64,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.defaultCardTTL = defaultCardTTL
         self.silentTTLMultiplier = silentTTLMultiplier
         self.pluginExecutableSearchPath = pluginExecutableSearchPath
+        self.pollWhileCollapsed = pollWhileCollapsed
     }
 
     /// Decoding is tolerant of missing keys so that a settings file written by
@@ -74,5 +86,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
             ?? defaults.silentTTLMultiplier
         pluginExecutableSearchPath = try c.decodeIfPresent([String].self, forKey: .pluginExecutableSearchPath)
             ?? defaults.pluginExecutableSearchPath
+        pollWhileCollapsed = try c.decodeIfPresent(Bool.self, forKey: .pollWhileCollapsed)
+            ?? defaults.pollWhileCollapsed
     }
 }

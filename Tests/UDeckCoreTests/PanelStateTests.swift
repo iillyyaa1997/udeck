@@ -163,3 +163,36 @@ struct PanelStateTests {
         }
     }
 }
+
+@Suite("Panel states — coming back")
+struct PanelRestoreTests {
+    /// A peek has nothing in it yet, so it is not worth restoring: bringing a
+    /// full working panel back from a glance the operator abandoned would be a
+    /// much bigger gesture than the one they made.
+    @Test("a peek interrupted by an app switch does not come back as a working panel")
+    func interruptedPeekDoesNotBecomeOpen() {
+        var state = PanelState()
+        state.apply(.revealRequested)
+        #expect(state.phase == .peek)
+        state.apply(.otherAppActivated)
+        #expect(state.phase == .collapsed)
+        #expect(state.collapseReason == .dismissed)
+        state.apply(.revealRequested)
+        #expect(state.phase == .peek)
+    }
+
+    @Test("a working panel interrupted by an app switch comes back as it was")
+    func interruptedWorkComesBack() {
+        for phase in [PanelPhase.open, .fullscreen] {
+            var state = PanelState()
+            state.apply(.revealRequested)
+            state.apply(.interacted)
+            if phase == .fullscreen { state.apply(.toggleFullscreen) }
+            #expect(state.phase == phase)
+            state.apply(.otherAppActivated)
+            #expect(state.collapseReason == .interrupted)
+            state.apply(.revealRequested)
+            #expect(state.phase == phase)
+        }
+    }
+}

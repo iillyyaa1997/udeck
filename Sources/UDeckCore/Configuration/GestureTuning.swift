@@ -78,6 +78,17 @@ public struct GestureTuning: Codable, Equatable, Sendable {
     /// Whether the pointer gesture is enabled at all.
     public var enabled: Bool
 
+    /// How often to look at where the cursor is, in seconds, independently of
+    /// any event. Zero turns it off.
+    ///
+    /// Events are the primary source and the only one that carries device
+    /// deltas, but they are not the only way a cursor moves: another
+    /// application can warp it, and a hand resting on a trackpad produces no
+    /// events at all while time keeps passing. A slow look at the actual
+    /// position covers both, and costs a point-in-rectangle test ten times a
+    /// second while the panel is away.
+    public var pointerPollInterval: TimeInterval
+
     public init(
         stripHeight: CGFloat = 6,
         stripSideMargin: CGFloat = 24,
@@ -96,7 +107,8 @@ public struct GestureTuning: Codable, Equatable, Sendable {
         peekExitGrace: TimeInterval = 0.25,
         peekKeepAliveInset: CGFloat = 24,
         enabledInFullscreen: Bool = false,
-        enabled: Bool = true
+        enabled: Bool = true,
+        pointerPollInterval: TimeInterval = 0.1
     ) {
         self.stripHeight = stripHeight
         self.stripSideMargin = stripSideMargin
@@ -116,6 +128,7 @@ public struct GestureTuning: Codable, Equatable, Sendable {
         self.peekKeepAliveInset = peekKeepAliveInset
         self.enabledInFullscreen = enabledInFullscreen
         self.enabled = enabled
+        self.pointerPollInterval = pointerPollInterval
     }
 }
 
@@ -145,7 +158,8 @@ extension GestureTuning {
             peekExitGrace: try c.decodeIfPresent(TimeInterval.self, forKey: .peekExitGrace) ?? d.peekExitGrace,
             peekKeepAliveInset: try c.decodeIfPresent(CGFloat.self, forKey: .peekKeepAliveInset) ?? d.peekKeepAliveInset,
             enabledInFullscreen: try c.decodeIfPresent(Bool.self, forKey: .enabledInFullscreen) ?? d.enabledInFullscreen,
-            enabled: try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled
+            enabled: try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled,
+            pointerPollInterval: try c.decodeIfPresent(TimeInterval.self, forKey: .pointerPollInterval) ?? d.pointerPollInterval
         )
     }
 }

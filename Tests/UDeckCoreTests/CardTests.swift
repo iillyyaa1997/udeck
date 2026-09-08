@@ -110,7 +110,7 @@ struct CardTests {
                 .meter(MeterRow(value: 0.5, label: "l")),
                 .list([ListItem(text: "x", note: "n", icon: .wait)]),
                 .spark(SparkRow(values: [1, 2, 3])),
-                .table(TableRow(columns: [TableColumn(title: "c")], rows: [["v"]])),
+                .table(CardTable(columns: [CardTableColumn(title: "c")], rows: [["v"]])),
                 .log(["one"]),
             ],
             actions: [CardAction(label: "Go", run: ["true"])],

@@ -109,14 +109,30 @@ public struct PanelGeometry: Equatable, Sendable {
         )
     }
 
-    /// The region that keeps a peek alive: the panel's own frame, inflated.
+    /// The region that keeps a peek alive.
     ///
-    /// Deliberately the panel frame rather than the trigger strip. Using the
-    /// strip is what makes hover panels oscillate — the panel opens, the cursor
-    /// is now inside the panel but outside the strip, it closes, the cursor is
-    /// back in the strip, it opens again.
+    /// Two things are deliberate here, and both were bugs first.
+    ///
+    /// It is built from the panel's frame rather than from the trigger strip.
+    /// Using the strip is what makes hover panels oscillate: the panel opens,
+    /// the cursor is now inside the panel but outside the strip, so it closes,
+    /// which puts the cursor back in the strip, so it opens again.
+    ///
+    /// And it reaches all the way up to the top of the screen. The panel hangs
+    /// *below* the menu bar, but the gesture that opened it left the cursor
+    /// *in* the menu bar — so a region that stopped at the panel's own top edge
+    /// would consider the cursor to have left before it ever arrived, and the
+    /// panel would close the instant it opened. The band above the panel is the
+    /// corridor the cursor travels down; it belongs to the panel.
     public func keepAliveRegion(for phase: PanelPhase) -> CGRect {
-        frame(for: phase).insetBy(dx: -tuning.peekKeepAliveInset, dy: -tuning.peekKeepAliveInset)
+        let inflated = frame(for: phase).insetBy(dx: -tuning.peekKeepAliveInset, dy: -tuning.peekKeepAliveInset)
+        let top = max(inflated.maxY, screen.frame.maxY)
+        return CGRect(
+            x: inflated.minX,
+            y: inflated.minY,
+            width: inflated.width,
+            height: top - inflated.minY
+        )
     }
 
     /// A panel of the given size, hanging from the anchor, clamped so it never

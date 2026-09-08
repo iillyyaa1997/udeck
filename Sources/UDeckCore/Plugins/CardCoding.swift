@@ -96,7 +96,7 @@ extension CardRow: Codable {
         case "meter": self = .meter(try container.decode(MeterRow.self, forKey: key))
         case "list": self = .list(try container.decode([ListItem].self, forKey: key))
         case "spark": self = .spark(try container.decode(SparkRow.self, forKey: key))
-        case "table": self = .table(try container.decode(TableRow.self, forKey: key))
+        case "table": self = .table(try container.decode(CardTable.self, forKey: key))
         case "log": self = .log(try container.decode([String].self, forKey: key))
         case "canvas": self = .canvas(try container.decode(CanvasRow.self, forKey: key))
         default: self = .unsupported(kind: key.stringValue)

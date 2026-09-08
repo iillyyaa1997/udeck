@@ -87,7 +87,7 @@ public struct SparkRow: Equatable, Sendable {
     }
 }
 
-public struct TableColumn: Codable, Equatable, Sendable {
+public struct CardTableColumn: Codable, Equatable, Sendable {
     public enum Alignment: String, Codable, Sendable { case leading, trailing }
 
     public var title: String
@@ -109,11 +109,11 @@ public struct TableColumn: Codable, Equatable, Sendable {
     }
 }
 
-public struct TableRow: Codable, Equatable, Sendable {
-    public var columns: [TableColumn]
+public struct CardTable: Codable, Equatable, Sendable {
+    public var columns: [CardTableColumn]
     public var rows: [[String]]
 
-    public init(columns: [TableColumn], rows: [[String]]) {
+    public init(columns: [CardTableColumn], rows: [[String]]) {
         self.columns = columns
         self.rows = rows
     }
@@ -144,7 +144,7 @@ public enum CardRow: Equatable, Sendable {
     case meter(MeterRow)
     case list([ListItem])
     case spark(SparkRow)
-    case table(TableRow)
+    case table(CardTable)
     case log([String])
     case canvas(CanvasRow)
 
