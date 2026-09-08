@@ -86,6 +86,15 @@ public struct DeckTheme: Sendable {
     public var titleFont: Font { .system(size: density.titleFontSize, weight: .semibold) }
     public var chipFont: Font { .system(size: density.bodyFontSize - 2, design: .monospaced) }
     public let windowCornerRadius: CGFloat = 13
+
+    /// The bar inside the island, which is the whole of what the panel says
+    /// while it is away.
+    ///
+    /// Bigger than it looks like it needs to be, because the island is made of
+    /// glass and glass takes the colour of whatever is behind it — over a dark
+    /// game the island itself all but disappears, and this is then the only
+    /// thing left to find it by.
+    public let islandIndicatorSize = CGSize(width: 56, height: 5)
 }
 
 private struct DeckThemeKey: EnvironmentKey {

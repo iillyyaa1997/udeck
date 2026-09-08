@@ -109,6 +109,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         result.gesture.peekExitGrace = clamp(result.gesture.peekExitGrace, 0.02 ... 30)
         result.gesture.peekKeepAliveInset = clamp(result.gesture.peekKeepAliveInset, 0 ... 500)
         result.gesture.fullscreenCheckInterval = clamp(result.gesture.fullscreenCheckInterval, 0.05 ... 60)
+        result.gesture.islandFullscreenCheckInterval = clamp(result.gesture.islandFullscreenCheckInterval, 0.2 ... 60)
         // Zero is meaningful here — it turns the safety poll off — so it is the
         // only value below the floor that survives.
         if result.gesture.pointerPollInterval != 0 {

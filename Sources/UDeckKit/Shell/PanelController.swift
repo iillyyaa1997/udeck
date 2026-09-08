@@ -50,9 +50,13 @@ public final class PanelController {
     private var placedScreenID: String?
 
     /// Whether the application filling the panel's screen is fullscreen. Only
-    /// the island's width depends on it, and it changes without anything about
-    /// the display arrangement changing, so it is tracked rather than derived.
+    /// how far the island hangs into the screen depends on it, and it changes
+    /// without anything about the display arrangement changing, so it is
+    /// tracked rather than derived.
     private var overFullscreenApp = false
+
+    /// When that was last asked, so it is not asked on every tick.
+    private var lastIslandFullscreenCheck: TimeInterval = -.infinity
 
     /// Whether the cursor has left the peek, and for how long. The rule itself
     /// lives in `UDeckCore`; what is left here is the timer that asks it again
@@ -205,6 +209,7 @@ public final class PanelController {
                 // the first thing to happen at the new position would be a
                 // click against a stale answer.
                 self.updateMousePassthrough(cursor: NSEvent.mouseLocation)
+                self.refreshIslandForFullscreen()
 
                 // The gesture itself is only worth evaluating while there is
                 // something for it to do. A peek is watched because the cursor
@@ -315,15 +320,6 @@ public final class PanelController {
             PanelGeometry(screen: $0, tuning: settings.gesture, metrics: settings.panel)
         }
 
-        // The island narrows over a fullscreen application, so a change here
-        // has to reach the window even though nothing about the panel's state
-        // has moved.
-        if state.phase == .collapsed, environment.frontmostIsFullscreen != overFullscreenApp,
-           screenUnderCursor?.id == currentScreen?.id {
-            overFullscreenApp = environment.frontmostIsFullscreen
-            applyPhase(animated: false)
-        }
-
         let outcome = recognizer.handle(sample, geometry: gestureGeometry, environment: environment, tuning: settings.gesture)
         if case .idle(let reason) = outcome, reason != lastIdleReason {
             lastIdleReason = reason
@@ -369,6 +365,27 @@ public final class PanelController {
     /// Driven from the pointer stream, which is event-driven while the mouse is
     /// moving and polled while it is not — so the flag is already correct by
     /// the time a click arrives, because reaching a target means moving there.
+    /// Keeps the island's depth in step with whether a fullscreen application
+    /// is on its screen.
+    ///
+    /// This deliberately does not reuse the gesture's answer to the same
+    /// question. That one is only computed while the cursor is at the top of
+    /// the screen — the only time the gesture cares — so borrowing it made the
+    /// island permanently full depth for anyone whose cursor was in the middle
+    /// of the game it was supposed to be staying out of.
+    private func refreshIslandForFullscreen() {
+        guard state.phase == .collapsed, let geometry else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastIslandFullscreenCheck >= settings.gesture.islandFullscreenCheckInterval else { return }
+        lastIslandFullscreenCheck = now
+
+        let value = FullscreenDetector.isFrontmostApplicationFullscreen(on: geometry.screen)
+        guard value != overFullscreenApp else { return }
+        overFullscreenApp = value
+        DeckLog.panel.debug("island depth: \(value ? "over a fullscreen app" : "normal", privacy: .public)")
+        applyPhase(animated: false)
+    }
+
     private func updateMousePassthrough(cursor: CGPoint) {
         guard state.phase != .collapsed, let geometry else {
             panel.ignoresMouseEvents = true
@@ -523,6 +540,9 @@ public final class PanelController {
     }
 
     private func handleApplicationActivated(pid: pid_t?) {
+        // A different application in front is the most likely moment for the
+        // answer to have changed, so do not make the island wait out the timer.
+        lastIslandFullscreenCheck = -.infinity
         guard let pid else { return }
 
         // uDeck activating itself must not collapse uDeck. Without this the

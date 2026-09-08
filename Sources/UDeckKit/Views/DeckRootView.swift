@@ -168,8 +168,13 @@ struct CollapsedIslandView: View {
             } else {
                 Capsule()
                     .fill(theme.color(for: summary.worst)
-                        .opacity(summary.placedPlugins == 0 ? 0.25 : 0.85))
-                    .frame(width: 44, height: 3)
+                        .opacity(summary.placedPlugins == 0 ? 0.35 : 1))
+                    .frame(width: theme.islandIndicatorSize.width,
+                           height: theme.islandIndicatorSize.height)
+                    // A dark halo, so the bar reads against a bright document
+                    // as well as against a dark game. Without it the indicator
+                    // only works on half the things the panel sits over.
+                    .shadow(color: .black.opacity(0.55), radius: 2)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
