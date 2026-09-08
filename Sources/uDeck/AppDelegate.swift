@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings: { model.settings },
             screens: screens
         ) { shell in
-            DeckRootView(shell: shell, model: model)
+            AnyView(DeckRootView(shell: shell, model: model))
         }
 
         controller.onPhaseChange = { [weak model] phase in

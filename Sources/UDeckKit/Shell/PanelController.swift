@@ -22,6 +22,21 @@ public final class PanelController {
     private let pointer: PointerMonitor
     private var recognizer = HoverGestureRecognizer()
 
+    /// Builds the content for a shell. Kept because there is one of these per
+    /// screen now, and the ones for the other screens are made as displays come
+    /// and go rather than once at startup.
+    private let makeContent: (ShellState) -> AnyView
+
+    /// The island on every screen the panel is not currently on, by screen id.
+    ///
+    /// The panel is one window and lives where the gesture last fired. Without
+    /// these, opening it on the laptop took the island off the game on the
+    /// other display — which is the one place it was actually wanted.
+    private var islands: [String: IslandWindow] = [:]
+
+    /// Which screens are currently filled by somebody's fullscreen window.
+    private var filledScreens: Set<String> = []
+
     /// The keyboard way in. Owned here rather than by the app delegate so that
     /// it is re-registered by the same `settingsChanged()` that everything else
     /// goes through — a shortcut you have to remember to re-apply is a shortcut
@@ -48,12 +63,6 @@ public final class PanelController {
     /// The screen the window was last placed on, so that arriving at a new one
     /// can be told apart from changing state on the one it is already on.
     private var placedScreenID: String?
-
-    /// Whether the application filling the panel's screen is fullscreen. Only
-    /// how far the island hangs into the screen depends on it, and it changes
-    /// without anything about the display arrangement changing, so it is
-    /// tracked rather than derived.
-    private var overFullscreenApp = false
 
     /// When that was last asked, so it is not asked on every tick.
     private var lastIslandFullscreenCheck: TimeInterval = -.infinity
@@ -125,14 +134,15 @@ public final class PanelController {
     public init(
         settings: @escaping () -> AppSettings,
         screens: ScreenObserver,
-        content: (ShellState) -> some View
+        content: @escaping (ShellState) -> AnyView
     ) {
         self.readSettings = settings
         self.screens = screens
         self.pointer = PointerMonitor(screens: screens)
+        self.makeContent = content
 
         panel = DeckPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200))
-        let hosting = NSHostingView(rootView: AnyView(content(shell)))
+        let hosting = NSHostingView(rootView: content(shell))
         hosting.autoresizingMask = [.width, .height]
         panel.contentView = hosting
 
@@ -240,6 +250,8 @@ public final class PanelController {
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
         keyMonitor = nil
         outsideClickMonitor = nil
+        for island in islands.values { island.close() }
+        islands.removeAll()
         panel.orderOut(nil)
     }
 
@@ -298,14 +310,16 @@ public final class PanelController {
     }
 
     private var geometry: PanelGeometry? {
-        currentScreen.map {
-            PanelGeometry(
-                screen: $0,
-                tuning: settings.gesture,
-                metrics: settings.panel,
-                isOverFullscreenApp: overFullscreenApp
-            )
-        }
+        currentScreen.map { geometry(for: $0) }
+    }
+
+    private func geometry(for screen: ScreenSnapshot) -> PanelGeometry {
+        PanelGeometry(
+            screen: screen,
+            tuning: settings.gesture,
+            metrics: settings.panel,
+            isOverFullscreenApp: filledScreens.contains(screen.id)
+        )
     }
 
     // MARK: - Pointer
@@ -365,24 +379,50 @@ public final class PanelController {
     /// Driven from the pointer stream, which is event-driven while the mouse is
     /// moving and polled while it is not — so the flag is already correct by
     /// the time a click arrives, because reaching a target means moving there.
+    /// Gives every screen but the active one an island of its own, and takes
+    /// away the ones for screens that are gone or have become active.
+    private func syncIslands(activeScreenID: String) {
+        let wanted = Set(screens.screens.map(\.id)).subtracting([activeScreenID])
+
+        for id in islands.keys where !wanted.contains(id) {
+            islands.removeValue(forKey: id)?.close()
+        }
+        for screen in screens.screens where wanted.contains(screen.id) {
+            let island: IslandWindow
+            if let existing = islands[screen.id] {
+                island = existing
+            } else {
+                island = IslandWindow(content: makeContent)
+                islands[screen.id] = island
+            }
+            island.place(using: geometry(for: screen))
+        }
+    }
+
     /// Keeps the island's depth in step with whether a fullscreen application
     /// is on its screen.
     ///
-    /// This deliberately does not reuse the gesture's answer to the same
-    /// question. That one is only computed while the cursor is at the top of
-    /// the screen — the only time the gesture cares — so borrowing it made the
+    /// This deliberately does not reuse the gesture's answer, twice over.
+    ///
+    /// That answer is only computed while the cursor is at the top of the
+    /// screen — the only time the gesture cares — so borrowing it made the
     /// island permanently full depth for anyone whose cursor was in the middle
     /// of the game it was supposed to be staying out of.
+    ///
+    /// And it is a different question. The gesture asks whether the *frontmost
+    /// application* is fullscreen; the island has to ask whether the *screen it
+    /// is on* is filled. Those part company the moment the operator switches to
+    /// another display: the game is no longer frontmost, but it is still there,
+    /// still filling that screen, and the island is still hanging into it.
     private func refreshIslandForFullscreen() {
-        guard state.phase == .collapsed, let geometry else { return }
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastIslandFullscreenCheck >= settings.gesture.islandFullscreenCheckInterval else { return }
         lastIslandFullscreenCheck = now
 
-        let value = FullscreenDetector.isFrontmostApplicationFullscreen(on: geometry.screen)
-        guard value != overFullscreenApp else { return }
-        overFullscreenApp = value
-        DeckLog.panel.debug("island depth: \(value ? "over a fullscreen app" : "normal", privacy: .public)")
+        let filled = FullscreenDetector.screensFilledByFullscreenWindow(screens.screens)
+        guard filled != filledScreens else { return }
+        filledScreens = filled
+        DeckLog.panel.debug("screens filled by a fullscreen window: \(filled.sorted().joined(separator: ", "), privacy: .public)")
         applyPhase(animated: false)
     }
 
@@ -610,6 +650,10 @@ public final class PanelController {
 
     private func applyPhase(animated: Bool) {
         guard let geometry else { return }
+
+        // Every other screen keeps its own island, so that opening the panel
+        // here does not take the mark off the display it was wanted on.
+        syncIslands(activeScreenID: geometry.screen.id)
 
         // Arriving on another screen is a move, not a transition.
         let arrivedOnANewScreen = placedScreenID != geometry.screen.id

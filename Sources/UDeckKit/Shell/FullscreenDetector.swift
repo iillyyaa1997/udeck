@@ -49,6 +49,46 @@ public enum FullscreenDetector {
         return false
     }
 
+    /// Whether *any* application is filling this screen, whoever is in front.
+    ///
+    /// A different question from the one above, and the difference is the whole
+    /// point of having both. The gesture asks about the frontmost application,
+    /// because the thing it is avoiding a fight with is the application the
+    /// operator is interacting with. The island asks about the screen, because
+    /// how far it hangs into a game does not stop mattering when the operator
+    /// alt-tabs to another display — the game is still there, still filling
+    /// that screen, and the island is still hanging into it.
+    ///
+    /// uDeck's own windows are excluded: the panel is allowed to reach the top
+    /// of the screen and must not count as something filling it.
+    /// Asked for every screen at once, because asking means enumerating every
+    /// window on the machine and there is no reason to do that once per display.
+    public static func screensFilledByFullscreenWindow(
+        _ screens: [ScreenSnapshot]
+    ) -> Set<String> {
+        guard let windows = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] else { return [] }
+
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let top = mainScreenTop()
+        var filled: Set<String> = []
+
+        for window in windows {
+            guard let pid = window[kCGWindowOwnerPID as String] as? pid_t, pid != ownPID,
+                  let layer = window[kCGWindowLayer as String] as? Int, layer == 0,
+                  let boundsDictionary = window[kCGWindowBounds as String] as? [String: Any],
+                  let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary)
+            else { continue }
+
+            let inAppKit = QuartzCoordinates.appKitRect(fromQuartz: bounds, mainScreenTop: top)
+            for screen in screens where inAppKit.isApproximately(screen.frame, within: 1) {
+                filled.insert(screen.id)
+            }
+        }
+        return filled
+    }
+
     /// `maxY` of the display both coordinate systems are measured from: the one
     /// whose origin is `(0, 0)`, which is the one with the menu bar.
     ///
