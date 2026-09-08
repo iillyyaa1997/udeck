@@ -25,6 +25,46 @@ public struct DeckRootView: View {
                     height: shell.panelRect.height,
                     alignment: .top
                 )
+                // Clipped to the rectangle being animated, because the content
+                // will not fit inside it and must not be allowed to say so.
+                //
+                // A `frame` proposes a size; it does not impose one. The peek's
+                // text and padding have a minimum height of their own — about
+                // 96 points — so at the start of a reveal, with the animated
+                // rectangle still the size of the island, the stack reported 96
+                // and the material was drawn to match. The width had no such
+                // floor and followed the animation, which is why a reveal looked
+                // like it began three quarters of the way through: measured
+                // frame by frame off a screen recording, the first frame drawn
+                // was 369 points wide (the island, 0% of the way) and 189 tall
+                // (74%).
+                //
+                // Clipping here rather than inside `panel` keeps the corners:
+                // the shape is the one the panel is drawn with, at the size it
+                // is drawn at, so a growing panel is round-bottomed the whole
+                // way rather than square until it arrives.
+                .clipShape(BottomRoundedRectangle(
+                    radius: PanelChrome.cornerRadius(
+                        phase: shell.phase, metrics: model.settings.panel
+                    )
+                ))
+                // Outside the clip, because the mark belongs to the panel's
+                // bottom edge — the animated one, not the one the content would
+                // have liked.
+                .overlay(alignment: .bottom) {
+                    if PanelChrome.drawsIslandMark(
+                        phase: shell.phase,
+                        screenHasNotch: shell.screenHasNotch,
+                        isSettled: shell.isSettled
+                    ) {
+                        IslandMark(theme: theme, summary: summary)
+                    }
+                }
+                .frame(
+                    width: shell.panelRect.width,
+                    height: shell.panelRect.height,
+                    alignment: .top
+                )
                 .offset(x: shell.panelRect.minX, y: shell.panelRect.minY)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -58,19 +98,6 @@ public struct DeckRootView: View {
         .transition(.opacity)
         .animation(shell.contentAnimation, value: contentKind)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // Outside the crossfade above, deliberately. The mark is one object
-        // that rides the panel's bottom edge from the open panel down into the
-        // island; keyed on the content it would be a thing that disappears and
-        // another that appears, which is what it used to be and looked it.
-        .overlay(alignment: .bottom) {
-            if PanelChrome.drawsIslandMark(
-                phase: shell.phase,
-                screenHasNotch: shell.screenHasNotch,
-                isSettled: shell.isSettled
-            ) {
-                IslandMark(theme: theme, summary: summary)
-            }
-        }
         // Any click anywhere in the panel promotes a peek into a held panel.
         // Registering it here rather than on each control means nothing can be
         // added later that forgets to.
