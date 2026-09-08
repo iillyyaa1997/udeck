@@ -63,14 +63,14 @@ public struct DeckRootView: View {
                 GlassBackground(
                     cornerRadius: model.settings.panel.cornerRadius,
                     theme: theme,
-                    tint: model.settings.glassTint,
+                    glass: model.settings.glass,
                     weldedToTopEdge: shell.weldedToTopEdge
                 )
             } else if !shell.screenHasNotch {
                 GlassBackground(
                     cornerRadius: model.settings.panel.islandCornerRadius,
                     theme: theme,
-                    tint: model.settings.glassTint,
+                    glass: model.settings.glass,
                     weldedToTopEdge: shell.weldedToTopEdge
                 )
             }

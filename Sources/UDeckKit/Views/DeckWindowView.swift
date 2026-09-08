@@ -45,7 +45,7 @@ struct DeckWindowView: View {
         .background(GlassSurface(
             shape: RoundedRectangle(cornerRadius: theme.windowCornerRadius),
             fallbackFill: theme.windowFill,
-            tint: model.settings.glassTint
+            glass: model.settings.glass
         ))
         .overlay(RoundedRectangle(cornerRadius: theme.windowCornerRadius).strokeBorder(theme.line))
         .clipShape(RoundedRectangle(cornerRadius: theme.windowCornerRadius))

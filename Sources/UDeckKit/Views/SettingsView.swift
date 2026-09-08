@@ -206,27 +206,36 @@ private struct LookSettings: View {
         }
 
         SettingsGroup("The glass") {
-            Toggle("Tint the glass", isOn: binding(\.glassTint.enabled))
+            LabeledContent("How much glass") {
+                Slider(value: binding(\.glass.opacity), in: 0 ... 1, step: 0.05) {
+                    Text("\(Int(model.settings.glass.opacity * 100)) %")
+                }
+                .frame(width: 260)
+            }
+            Text("At nothing the material is gone entirely and the panel's content floats over whatever is behind it. The system's glass has no opacity of its own — style, tint and corner radius are the whole of it — so this is the view's own alpha, which is the only thing that reaches fully transparent.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            Toggle("Tint the glass", isOn: binding(\.glass.tinted))
             Text("Untinted, the system material takes the colour of whatever is behind it — which is what makes it glass, and also what makes it vanish over a dark game and wash out over a bright document. A tint does not close the glass; it gives it something to be measured from.")
                 .font(.caption).foregroundStyle(.secondary)
 
-            Picker("Lean", selection: binding(\.glassTint.isLight)) {
+            Picker("Lean", selection: binding(\.glass.tintIsLight)) {
                 Text("Lighter than the background").tag(true)
                 Text("Darker than the background").tag(false)
             }
             .pickerStyle(.segmented)
             .frame(width: 380)
-            .disabled(!model.settings.glassTint.enabled)
+            .disabled(!model.settings.glass.tinted)
 
-            LabeledContent("Strength") {
-                Slider(value: binding(\.glassTint.strength), in: 0 ... 0.6, step: 0.02) {
-                    Text("\(Int(model.settings.glassTint.strength * 100)) %")
+            LabeledContent("Tint strength") {
+                Slider(value: binding(\.glass.tintStrength), in: 0 ... 0.6, step: 0.02) {
+                    Text("\(Int(model.settings.glass.tintStrength * 100)) %")
                 }
                 .frame(width: 260)
             }
-            .disabled(!model.settings.glassTint.enabled)
+            .disabled(!model.settings.glass.tinted)
 
-            GlassPreview(tint: model.settings.glassTint, theme: DeckTheme(density: model.settings.density))
+            GlassPreview(glass: model.settings.glass, theme: DeckTheme(density: model.settings.density))
             Text("The sample sits over a dark half and a light one, because those are the two cases that pull in opposite directions: a light tint stands out over a game and washes out over a document, and a dark one does the reverse.")
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -522,7 +531,7 @@ private struct SettingsGroup<Content: View>: View {
 /// panel from a dark game is the same tint that washes it out over a white
 /// document.
 private struct GlassPreview: View {
-    var tint: GlassTint
+    var glass: GlassAppearance
     var theme: DeckTheme
 
     var body: some View {
@@ -534,7 +543,7 @@ private struct GlassPreview: View {
             GlassSurface(
                 shape: RoundedRectangle(cornerRadius: 12),
                 fallbackFill: theme.windowFill,
-                tint: tint
+                glass: glass
             )
             .frame(width: 300, height: 74)
             .overlay {

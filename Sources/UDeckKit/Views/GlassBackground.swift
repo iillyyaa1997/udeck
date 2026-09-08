@@ -17,7 +17,7 @@ import UDeckCore
 struct GlassBackground: View {
     var cornerRadius: CGFloat
     var theme: DeckTheme
-    var tint: GlassTint
+    var glass: GlassAppearance
 
     /// Whether the panel's top edge is the screen's top edge.
     ///
@@ -32,7 +32,7 @@ struct GlassBackground: View {
     var body: some View {
         let shape = BottomRoundedRectangle(radius: cornerRadius)
         if #available(macOS 26, *) {
-            LiquidGlassBackground(tint: tint.nsColor)
+            LiquidGlassBackground(glass: glass)
                 .clipShape(shape)
         } else {
             VisualEffectBackground()
@@ -133,13 +133,13 @@ struct PanelBorder: Shape {
 struct GlassSurface<S: Shape>: View {
     var shape: S
     var fallbackFill: Color
-    var tint: GlassTint
+    var glass: GlassAppearance
 
     var body: some View {
         if #available(macOS 26, *) {
-            LiquidGlassBackground(tint: tint.nsColor).clipShape(shape)
+            LiquidGlassBackground(glass: glass).clipShape(shape)
         } else {
-            shape.fill(fallbackFill)
+            shape.fill(fallbackFill).opacity(glass.opacity)
         }
     }
 }
@@ -151,12 +151,12 @@ struct GlassSurface<S: Shape>: View {
 /// square because it is attached to the edge it hangs from.
 @available(macOS 26, *)
 struct LiquidGlassBackground: NSViewRepresentable {
-    var tint: NSColor?
+    var glass: GlassAppearance
 
     func makeNSView(context: Context) -> NSGlassEffectView {
         let view = NSGlassEffectView()
         view.style = .regular
-        view.tintColor = tint
+        apply(glass, to: view)
         view.cornerRadius = 0
         // One deliberate deviation from "the system's glass as it comes": the
         // panel is drawn dark whatever the system is set to, because the theme
@@ -168,7 +168,18 @@ struct LiquidGlassBackground: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSGlassEffectView, context: Context) {
-        view.tintColor = tint
+        apply(glass, to: view)
+    }
+
+    /// The material has no opacity of its own — `style`, `tintColor` and
+    /// `cornerRadius` are the whole of its API — so "less glass" has to be the
+    /// view's own alpha. At zero there is no material left and the panel's
+    /// content floats over whatever is behind it, which is what "fully
+    /// transparent" has to mean when the thing being made transparent is a
+    /// material rather than a fill.
+    private func apply(_ glass: GlassAppearance, to view: NSGlassEffectView) {
+        view.tintColor = glass.tintComponents.map { NSColor(white: $0.white, alpha: $0.alpha) }
+        view.alphaValue = glass.opacity
     }
 }
 
@@ -186,11 +197,3 @@ private struct VisualEffectBackground: NSViewRepresentable {
     func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
 
-
-extension GlassTint {
-    /// The colour to hand the material, or `nil` for glass exactly as the
-    /// system renders it.
-    var nsColor: NSColor? {
-        components.map { NSColor(white: $0.white, alpha: $0.alpha) }
-    }
-}

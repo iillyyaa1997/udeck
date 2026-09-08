@@ -117,3 +117,51 @@ struct HotKeyTests {
         #expect(binding.modifiers == HotKeyBinding().modifiers)
     }
 }
+
+@Suite("Glass")
+struct GlassAppearanceTests {
+    /// The question that produced the setting: "why can I not get fully
+    /// transparent?" Because the tint only ever adds — turning it off leaves
+    /// the material, it does not remove it. Opacity is the knob that reaches
+    /// nothing at all.
+    @Test("turning the tint off is not the same as having no glass")
+    func tintOffIsNotTransparent() {
+        var glass = GlassAppearance(opacity: 1, tinted: false)
+        #expect(glass.tintComponents == nil)
+        #expect(glass.opacity == 1, "no tint still leaves the whole material")
+
+        glass.opacity = 0
+        #expect(glass.opacity == 0)
+        #expect(glass.tintComponents == nil)
+    }
+
+    @Test("the tint leans the way it is told, and only when it is on")
+    func tintComponents() {
+        #expect(GlassAppearance(tinted: true, tintIsLight: true, tintStrength: 0.2).tintComponents?.white == 1)
+        #expect(GlassAppearance(tinted: true, tintIsLight: false, tintStrength: 0.2).tintComponents?.white == 0)
+        #expect(GlassAppearance(tinted: true, tintIsLight: true, tintStrength: 0.2).tintComponents?.alpha == 0.2)
+        // Zero strength is the same as off: nothing to hand the material.
+        #expect(GlassAppearance(tinted: true, tintStrength: 0).tintComponents == nil)
+        #expect(GlassAppearance(tinted: false, tintStrength: 0.5).tintComponents == nil)
+    }
+
+    @Test("nonsense from a hand-written settings file is brought back into range")
+    func validation() {
+        #expect(GlassAppearance(opacity: 4).validated().opacity == 1)
+        #expect(GlassAppearance(opacity: -2).validated().opacity == 0)
+        #expect(GlassAppearance(opacity: .nan).validated().opacity == 1)
+        #expect(GlassAppearance(tintStrength: 3).validated().tintStrength == 0.9)
+        #expect(GlassAppearance(tintStrength: .infinity).validated().tintStrength == 0.16)
+        // A settings file that says nothing about the glass gets the default.
+        let json = Data(#"{ "version": 1 }"#.utf8)
+        #expect(try! JSONDecoder().decode(AppSettings.self, from: json).glass == GlassAppearance())
+    }
+
+    @Test("a half-written glass block keeps the defaults for the rest")
+    func partialDecode() throws {
+        let glass = try JSONDecoder().decode(GlassAppearance.self, from: Data(#"{ "opacity": 0 }"#.utf8))
+        #expect(glass.opacity == 0)
+        #expect(glass.tinted == GlassAppearance().tinted)
+        #expect(glass.tintStrength == GlassAppearance().tintStrength)
+    }
+}
