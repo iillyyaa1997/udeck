@@ -45,6 +45,15 @@ public final class PanelController {
     /// The screen the panel is currently attached to.
     private var attachedScreenID: String?
 
+    /// The screen the window was last placed on, so that arriving at a new one
+    /// can be told apart from changing state on the one it is already on.
+    private var placedScreenID: String?
+
+    /// Whether the application filling the panel's screen is fullscreen. Only
+    /// the island's width depends on it, and it changes without anything about
+    /// the display arrangement changing, so it is tracked rather than derived.
+    private var overFullscreenApp = false
+
     /// Whether the cursor has left the peek, and for how long. The rule itself
     /// lives in `UDeckCore`; what is left here is the timer that asks it again
     /// when the cursor has stopped moving and no further sample will arrive.
@@ -285,7 +294,12 @@ public final class PanelController {
 
     private var geometry: PanelGeometry? {
         currentScreen.map {
-            PanelGeometry(screen: $0, tuning: settings.gesture, metrics: settings.panel)
+            PanelGeometry(
+                screen: $0,
+                tuning: settings.gesture,
+                metrics: settings.panel,
+                isOverFullscreenApp: overFullscreenApp
+            )
         }
     }
 
@@ -299,6 +313,15 @@ public final class PanelController {
         let screenUnderCursor = screens.screens.screen(containing: sample.location)
         let gestureGeometry = screenUnderCursor.map {
             PanelGeometry(screen: $0, tuning: settings.gesture, metrics: settings.panel)
+        }
+
+        // The island narrows over a fullscreen application, so a change here
+        // has to reach the window even though nothing about the panel's state
+        // has moved.
+        if state.phase == .collapsed, environment.frontmostIsFullscreen != overFullscreenApp,
+           screenUnderCursor?.id == currentScreen?.id {
+            overFullscreenApp = environment.frontmostIsFullscreen
+            applyPhase(animated: false)
         }
 
         let outcome = recognizer.handle(sample, geometry: gestureGeometry, environment: environment, tuning: settings.gesture)
@@ -567,9 +590,14 @@ public final class PanelController {
 
     private func applyPhase(animated: Bool) {
         guard let geometry else { return }
-        let windowFrame = geometry.windowFrame(for: state.phase)
-        let panelFrame = geometry.frame(for: state.phase)
-        let panelRect = geometry.panelRectInWindow(for: state.phase)
+
+        // Arriving on another screen is a move, not a transition.
+        let arrivedOnANewScreen = placedScreenID != geometry.screen.id
+        placedScreenID = geometry.screen.id
+        let phase = state.phase
+        let windowFrame = geometry.windowFrame(for: phase)
+        let panelFrame = geometry.frame(for: phase)
+        let panelRect = geometry.panelRectInWindow(for: phase)
 
         // Facts about the screen, pushed to the views rather than guessed at
         // inside them.
@@ -579,18 +607,13 @@ public final class PanelController {
 
         updateMousePassthrough(cursor: NSEvent.mouseLocation)
 
-        // Only fullscreen is bigger than the stage, so only fullscreen moves
-        // the window at all.
+        // Never animated. The window is invisible — it is a stage, not the
+        // panel — so animating its frame shows nothing and costs everything:
+        // it is what made the panel appear to fly between displays, and what
+        // made the compositor rebuild the glass on every frame. What the
+        // operator actually watches is `shell.panelRect`, below.
         if panel.frame != windowFrame {
-            if animated {
-                NSAnimationContext.runAnimationGroup { context in
-                    context.duration = settings.panel.revealDuration
-                    context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    panel.animator().setFrame(windowFrame, display: true)
-                }
-            } else {
-                panel.setFrame(windowFrame, display: true)
-            }
+            panel.setFrame(windowFrame, display: true)
         }
 
         let metrics = settings.panel
@@ -602,13 +625,33 @@ public final class PanelController {
             ? .easeOut(duration: metrics.contentRevealDuration).delay(metrics.contentRevealDelay)
             : .easeOut(duration: metrics.contentHideDuration)
 
-        if animated {
-            withAnimation(arriving
-                ? .spring(response: metrics.revealSpringResponse,
-                          dampingFraction: metrics.revealSpringDamping)
-                : .easeOut(duration: metrics.collapseDuration)) {
-                shell.panelRect = panelRect
+        let reveal: Animation = arriving
+            ? .spring(response: metrics.revealSpringResponse,
+                      dampingFraction: metrics.revealSpringDamping)
+            : .easeOut(duration: metrics.collapseDuration)
+
+        if arrivedOnANewScreen, animated {
+            // The panel usually opens on the screen it is already on, and the
+            // window never moves. The first reveal on a *different* display is
+            // the exception: the window has to move there, and animating from
+            // where the panel was is what made it appear to fly across the desk
+            // — which is the opposite of a panel that belongs to the screen the
+            // cursor is on.
+            //
+            // So it arrives collapsed, instantly, and grows from there on the
+            // next turn of the run loop. One frame later is invisible; the flight
+            // was not.
+            shell.panelRect = geometry.panelRectInWindow(for: .collapsed)
+            panel.orderFrontRegardless()
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.state.phase == phase else { return }
+                withAnimation(reveal) { self.shell.panelRect = panelRect }
             }
+            return
+        }
+
+        if animated {
+            withAnimation(reveal) { shell.panelRect = panelRect }
         } else {
             shell.panelRect = panelRect
         }

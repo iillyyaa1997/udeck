@@ -210,6 +210,40 @@ struct PanelGeometryTests {
         }
     }
 
+    /// A game is the one time the screen is being watched rather than worked
+    /// on, and something hanging the full depth of a menu bar into it is an
+    /// interruption.
+    @Test("the island hangs half as far over a fullscreen application")
+    func islandShortensOverFullscreen() {
+        let screen = ScreenFixtures.externalMain
+        let normal = geometry(screen)
+        let overGame = PanelGeometry(screen: screen, tuning: tuning, metrics: metrics,
+                                     isOverFullscreenApp: true)
+
+        let visible = { (g: PanelGeometry) in min(g.collapsedFrame.maxY, screen.frame.maxY) - g.collapsedFrame.minY }
+        #expect(visible(overGame) == visible(normal) * metrics.islandFullscreenHeightFactor)
+        // Same width, same top edge, same bleed past it.
+        #expect(overGame.collapsedFrame.width == normal.collapsedFrame.width)
+        #expect(overGame.collapsedFrame.minX == normal.collapsedFrame.minX)
+        #expect(overGame.collapsedFrame.maxY == normal.collapsedFrame.maxY)
+
+        // The gesture must not get harder to make precisely when the panel has
+        // just become reachable.
+        #expect(overGame.triggerStrip == normal.triggerStrip)
+        // And nothing else moves.
+        #expect(overGame.peekFrame == normal.peekFrame)
+        #expect(overGame.openFrame == normal.openFrame)
+        #expect(overGame.windowFrame(for: .collapsed) == normal.windowFrame(for: .collapsed))
+    }
+
+    @Test("a real notch is not narrowed, because nothing is drawn there anyway")
+    func notchIsUnaffectedByFullscreen() {
+        let screen = ScreenFixtures.builtInNotched
+        let overGame = PanelGeometry(screen: screen, tuning: tuning, metrics: metrics,
+                                     isOverFullscreenApp: true)
+        #expect(overGame.collapsedFrame == overGame.anchor)
+    }
+
     @Test("fullscreen never takes the menu bar, on any screen")
     func fullscreenLeavesTheMenuBarAlone() {
         // The hover states are a strip in the middle, with the app menus and the

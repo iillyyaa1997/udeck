@@ -12,10 +12,24 @@ public struct PanelGeometry: Equatable, Sendable {
     public let tuning: GestureTuning
     public let metrics: PanelMetrics
 
-    public init(screen: ScreenSnapshot, tuning: GestureTuning, metrics: PanelMetrics) {
+    /// Whether the application filling this screen is doing so fullscreen.
+    ///
+    /// The only thing it changes is how far the island hangs into the screen
+    /// while the panel is away. It is not a property of the screen, which is why it is passed in
+    /// rather than derived — the answer comes from the window server and
+    /// changes without the display arrangement changing at all.
+    public let isOverFullscreenApp: Bool
+
+    public init(
+        screen: ScreenSnapshot,
+        tuning: GestureTuning,
+        metrics: PanelMetrics,
+        isOverFullscreenApp: Bool = false
+    ) {
         self.screen = screen
         self.tuning = tuning
         self.metrics = metrics
+        self.isOverFullscreenApp = isOverFullscreenApp
     }
 
     /// The anchor the panel grows out of: the real notch when the screen has
@@ -138,11 +152,20 @@ public struct PanelGeometry: Equatable, Sendable {
     /// those points are behind the camera housing.
     public var collapsedFrame: CGRect {
         guard !screen.hasNotch else { return anchor }
+        // Shallower over a fullscreen application: that is the one time the
+        // screen is being watched rather than worked on, and the island should
+        // hang less far into it. The width is left alone — it is the shape the
+        // panel grows out of — and so is the strip the gesture listens on, or
+        // the panel would become harder to open precisely when it has just
+        // become reachable.
+        let visible = isOverFullscreenApp
+            ? anchor.height * metrics.islandFullscreenHeightFactor
+            : anchor.height
         return CGRect(
             x: anchor.minX,
-            y: anchor.minY,
+            y: anchor.maxY - visible,
             width: anchor.width,
-            height: anchor.height + metrics.topEdgeBleed
+            height: visible + metrics.topEdgeBleed
         )
     }
 
