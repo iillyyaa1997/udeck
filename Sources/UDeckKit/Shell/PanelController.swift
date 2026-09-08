@@ -45,8 +45,10 @@ public final class PanelController {
     /// The screen the panel is currently attached to.
     private var attachedScreenID: String?
 
-    /// When the cursor first left the keep-alive region, if it is outside it.
-    private var pointerLeftAt: TimeInterval?
+    /// Whether the cursor has left the peek, and for how long. The rule itself
+    /// lives in `UDeckCore`; what is left here is the timer that asks it again
+    /// when the cursor has stopped moving and no further sample will arrive.
+    private var peekExit = PeekExitTracker()
 
     private var tokens: [NotificationToken] = []
     private var keyMonitor: Any?
@@ -316,24 +318,25 @@ public final class PanelController {
     /// A peek closes when the cursor has been away from the panel for a grace
     /// period — long enough that flicking past a corner does not count.
     private func trackPeekExit(_ sample: PointerSample) {
-        guard state.phase == .peek, let geometry else {
-            pointerLeftAt = nil
+        guard let geometry else {
+            peekExit.reset()
             return
         }
-
-        let region = geometry.keepAliveRegion(for: state.phase)
-        if geometry.containsPointer(sample.location, in: region) {
-            pointerLeftAt = nil
-            return
-        }
-
-        if let since = pointerLeftAt {
-            if sample.timestamp - since >= settings.gesture.peekExitGrace {
-                apply(.pointerLeft)
-            }
-        } else {
-            pointerLeftAt = sample.timestamp
+        let inside = geometry.containsPointer(
+            sample.location, in: geometry.keepAliveRegion(for: state.phase)
+        )
+        switch peekExit.update(
+            isPeeking: state.phase == .peek,
+            isInsideRegion: inside,
+            now: sample.timestamp,
+            grace: settings.gesture.peekExitGrace
+        ) {
+        case .stay, .waiting:
+            break
+        case .leftJustNow:
             scheduleExitCheck()
+        case .close:
+            apply(.pointerLeft)
         }
     }
 
@@ -369,7 +372,7 @@ public final class PanelController {
             every: settings.gesture.peekExitGrace, repeats: false
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.state.phase == .peek, self.pointerLeftAt != nil,
+                guard let self, self.state.phase == .peek, self.peekExit.isTiming,
                       let geometry = self.geometry
                 else { return }
                 if !geometry.containsPointer(NSEvent.mouseLocation, in: geometry.keepAliveRegion(for: .peek)) {
@@ -503,13 +506,13 @@ public final class PanelController {
             // Reveal: hand the gesture a clean slate so a half-armed dwell from
             // before cannot fire into the newly opened panel.
             recognizer.reset()
-            pointerLeftAt = nil
+            peekExit.reset()
         }
 
         if state.phase == .collapsed {
             pointer.lastDismissal = ProcessInfo.processInfo.systemUptime
             recognizer.suppressUntilPointerLeaves()
-            pointerLeftAt = nil
+            peekExit.reset()
             exitTimer?.invalidate()
             releaseKeyboard(restoringPreviousApplication: state.collapseReason == .dismissed)
         }
