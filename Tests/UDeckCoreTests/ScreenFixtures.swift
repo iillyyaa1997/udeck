@@ -54,5 +54,21 @@ enum ScreenFixtures {
         auxiliaryTopRight: CGRect(x: 585, y: 1085, width: 1143, height: 32)
     )
 
+    /// The mirror of `offCentreNotch`: the notch well to the *right*.
+    ///
+    /// Needed because the two clamps in the panel's placement are separate
+    /// branches — one stops it running off the left edge, the other off the
+    /// right — and a notch that leans one way only ever exercises one of them.
+    static let offCentreNotchRight = ScreenSnapshot(
+        id: "lopsided-right",
+        name: "Lopsided Display (right)",
+        frame: CGRect(x: 0, y: 0, width: 1728, height: 1117),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1728, height: 1085),
+        backingScale: 2,
+        safeAreaTop: 32,
+        auxiliaryTopLeft: CGRect(x: 0, y: 1085, width: 1143, height: 32),
+        auxiliaryTopRight: CGRect(x: 1328, y: 1085, width: 400, height: 32)
+    )
+
     static let both = [externalMain, builtInNotched]
 }

@@ -193,15 +193,45 @@ struct PanelGeometryTests {
         #expect(abs(g.triggerStrip.midX - screen.frame.midX) > 100)
     }
 
-    @Test("a panel too wide to centre on an off-centre notch is clamped, not overhung")
-    func offCentreClampingStillWorks() {
+    /// The two clamps that keep the panel on the screen are separate branches,
+    /// and with a centred notch neither of them can ever run: a panel centred
+    /// on the middle of a screen never wants to hang off either edge. They had
+    /// been read and never executed.
+    @Test("a wide panel beside an off-centre notch is clamped to the edge it would overhang",
+          arguments: [ScreenFixtures.offCentreNotch, ScreenFixtures.offCentreNotchRight])
+    func offCentreClampingActuallyFires(_ screen: ScreenSnapshot) {
         var wide = metrics
         wide.openWidthFraction = 0.95
         wide.openMaxWidth = 5000
-        let screen = ScreenFixtures.offCentreNotch
-        let frame = PanelGeometry(screen: screen, tuning: tuning, metrics: wide).openFrame
+
+        let geometry = PanelGeometry(screen: screen, tuning: tuning, metrics: wide)
+        let frame = geometry.openFrame
+
         #expect(frame.minX >= screen.frame.minX)
         #expect(frame.maxX <= screen.frame.maxX)
+        // The clamp must actually have fired, not merely have been in range:
+        // an unclamped panel centred on this notch would run off the screen.
+        let unclamped = geometry.anchor.midX - frame.width / 2
+        #expect(unclamped < screen.frame.minX || unclamped + frame.width > screen.frame.maxX,
+                "the fixture is not lopsided enough to reach a clamp")
+        #expect(frame.minX == screen.frame.minX || frame.maxX == screen.frame.maxX,
+                "the panel should be sitting flush against the edge it would have overhung")
+    }
+
+    /// The strip has its own clamps, for the same reason and never run for the
+    /// same reason.
+    @Test("a strip beside an edge-hugging notch is clamped to the screen")
+    func stripClampingActuallyFires() {
+        var wide = tuning
+        wide.stripSideMargin = 600
+        for screen in [ScreenFixtures.offCentreNotch, ScreenFixtures.offCentreNotchRight] {
+            let strip = PanelGeometry(screen: screen, tuning: wide, metrics: metrics).triggerStrip
+            #expect(strip.minX >= screen.frame.minX)
+            #expect(strip.maxX <= screen.frame.maxX)
+            #expect(strip.minX == screen.frame.minX || strip.maxX == screen.frame.maxX,
+                    "with a 600pt margin either side, the strip must reach an edge")
+            #expect(strip.width > 0)
+        }
     }
 
     @Test("the keep-alive region is the panel, inflated — not the trigger strip")
