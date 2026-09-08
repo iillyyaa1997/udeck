@@ -80,6 +80,14 @@ Until the CLA bot is installed, say in your pull request that you have read
 `docs/cla.md` and agree to it. Once the bot is set up it will ask you on your
 first pull request instead.
 
+## Before you assume something is deliberate
+
+[docs/open-questions.md](docs/open-questions.md) lists the assumptions in this
+codebase that nobody has checked, and how to check each one. If you are about to
+"fix" something that looks wrong, look there first — it may be a known
+uncertainty with a written way to settle it, and settling it is worth more than
+changing the code around it.
+
 ## Reporting a bug in the panel itself
 
 The panel's behaviour depends on your screen arrangement, on how your pointer

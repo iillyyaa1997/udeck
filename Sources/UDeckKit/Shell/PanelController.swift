@@ -58,6 +58,11 @@ public final class PanelController {
     /// is recorded once rather than thousands of times.
     private var lastIdleReason: GestureOutcome.IdleReason?
 
+    /// First-responder types already logged, so the record is written once per
+    /// kind rather than once per keystroke. See `isEditingText()` for why this
+    /// is worth knowing at all.
+    private var loggedResponderTypes: Set<String> = []
+
     /// How finely the dwell is measured while the pointer is not moving.
     ///
     /// Not a setting: it is the resolution of a measurement, not a preference.
@@ -350,6 +355,15 @@ public final class PanelController {
     private func handleKeyDown(_ event: NSEvent) -> Bool {
         guard panel.isKeyWindow, state.phase.isVisible else { return false }
 
+        // Which class actually holds the keyboard decides whether the rule that
+        // Escape must never discard typed text can work at all — it is reached
+        // through an `NSText` cast, and SwiftUI is migrating text to its own
+        // implementation. Recorded once per kind.
+        let responder = String(describing: type(of: panel.firstResponder))
+        if loggedResponderTypes.insert(responder).inserted {
+            DeckLog.panel.debug("first responder while typing: \(responder, privacy: .public)")
+        }
+
         let escape = 53
         let closeShortcut = event.modifierFlags.contains(.command)
             && event.charactersIgnoringModifiers?.lowercased() == "w"
@@ -386,7 +400,17 @@ public final class PanelController {
     /// panel. Losing a half-typed answer to a stray key is the failure that
     /// would make the panel untrustworthy for the one job it exists for.
     private func isEditingText() -> Bool {
-        guard let responder = panel.firstResponder as? NSText else { return false }
+        // Logged because the shape of this is an open question: SwiftUI is
+        // moving to its own text implementation, and if a focused field ever
+        // stops being reachable as `NSText` this returns false and Escape
+        // starts eating typed text instead of protecting it. The type is in the
+        // diagnostics so a bug report can say what it actually was.
+        guard let responder = panel.firstResponder as? NSText else {
+            DeckLog.panel.debug(
+                "escape with first responder \(String(describing: type(of: self.panel.firstResponder)), privacy: .public), which is not NSText"
+            )
+            return false
+        }
         return !responder.string.isEmpty
     }
 
@@ -543,6 +567,7 @@ public final class PanelController {
         screen=\(screen?.name ?? "none") notch=\(screen?.hasNotch == true)
         frame=\(panel.frame)
         key=\(panel.isKeyWindow) appActive=\(NSApp.isActive) activatedForKeyboard=\(didActivateForKeyboard)
+        firstResponder=\(String(describing: type(of: panel.firstResponder))) editingText=\(isEditingText())
         calibration polarity=\(pointer.calibration.polarity) scale=\(String(format: "%.2f", pointer.calibration.scale)) agreement=\(pointer.calibration.agreementRun)
         """
     }
