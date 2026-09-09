@@ -336,6 +336,38 @@ struct PollExecutionTests {
         #expect(Date().timeIntervalSince(started) < 10, "the limit should bite well before the timeout")
     }
 
+    @Test("a runaway producer cannot make uDeck hold more than the limit")
+    func runawayOutputIsNotRetained() async {
+        let temp = TemporaryDirectory()
+        temp.writePlugin(folder: "flood", manifest: """
+        { "id": "flood", "name": "Flood", "version": "1.0.0", "api": 1, "kind": "poll",
+          "run": ["./run.sh"], "interval": 30, "timeout": 20 }
+        """, script: (name: "run.sh",
+                      // 64 KiB a write, ignoring the polite signal, so the bytes
+                      // keep arriving across the whole termination grace.
+                      body: "#!/bin/sh\ntrap '' TERM\nline=$(printf 'x%.0s' $(seq 1 65536))\nwhile true; do printf '%s' \"$line\"; done\n",
+                      executable: true))
+
+        var runner = ProcessRunner()
+        runner.maximumOutputBytes = 200_000
+        let result = await runner.run(
+            executable: temp.url.appendingPathComponent("plugins/flood/run.sh"),
+            arguments: [],
+            workingDirectory: temp.url.appendingPathComponent("plugins/flood"),
+            environment: ["PATH": "/usr/bin:/bin"],
+            timeout: 20
+        )
+
+        // The count reported has to stay honest about the producer even though
+        // the bytes themselves were dropped.
+        guard case .outputLimitExceeded(let bytes) = result.termination else {
+            Issue.record("expected the output limit, got \(result.termination)"); return
+        }
+        #expect(bytes > runner.maximumOutputBytes)
+        #expect(result.standardOutput.count + result.standardError.count <= runner.maximumOutputBytes,
+                "uDeck kept \(result.standardOutput.count + result.standardError.count) bytes of a \(runner.maximumOutputBytes) limit")
+    }
+
     @Test("the producer's environment is built, not inherited")
     func environmentIsNotInherited() {
         let temp = TemporaryDirectory()

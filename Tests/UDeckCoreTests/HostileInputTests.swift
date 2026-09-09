@@ -350,6 +350,55 @@ struct CardSizeTests {
                 "cells beyond the surviving columns would have nowhere to go")
     }
 
+    @Test("a wall of buttons is cut down like any other collection")
+    func manyActionsAreCut() {
+        let card = Card(
+            rows: [.text("fine")],
+            actions: (0 ..< 30_000).map { CardAction(label: "do \($0)", run: ["true"]) }
+        )
+        let drawn = card.withinDrawingLimits()
+
+        #expect(drawn.actions.count == CardLimits.standard.actions)
+        #expect(drawn.actions.first?.label == "do 0")
+        guard case .text(let notice) = drawn.rows.last else { Issue.record("expected a notice"); return }
+        #expect(notice.contains("cut short"))
+    }
+
+    @Test("an action's own strings are trimmed, argv included")
+    func actionStringsAreTrimmed() {
+        let huge = String(repeating: "x", count: 500_000)
+        let drawn = Card(rows: [], actions: [
+            CardAction(label: huge, run: ["open"] + Array(repeating: huge, count: 500), confirm: huge),
+        ]).withinDrawingLimits()
+
+        let action = try! #require(drawn.actions.first)
+        #expect(action.label.count <= CardLimits.standard.textLength + 1)
+        #expect(action.confirm?.count ?? 0 <= CardLimits.standard.textLength + 1)
+        #expect(action.run.count == CardLimits.standard.actionArguments)
+        #expect(action.run.allSatisfy { $0.count <= CardLimits.standard.textLength + 1 })
+    }
+
+    @Test("a row uDeck does not understand is trimmed like the ones it does")
+    func diagnosticRowsAreTrimmed() {
+        let huge = String(repeating: "x", count: 900_000)
+        let drawn = Card(rows: [
+            .unsupported(kind: huge),
+            .canvas(CanvasRow(kind: huge, payload: huge, height: 40)),
+        ]).withinDrawingLimits()
+
+        guard case .unsupported(let kind) = drawn.rows.first else {
+            Issue.record("expected the diagnostic row"); return
+        }
+        #expect(kind.count <= CardLimits.standard.textLength + 1)
+
+        guard case .canvas(let canvas) = drawn.rows.dropFirst().first else {
+            Issue.record("expected the canvas row"); return
+        }
+        #expect(canvas.kind.count <= CardLimits.standard.textLength + 1)
+        #expect(canvas.payload?.count ?? 0 <= CardLimits.standard.textLength + 1)
+        #expect(canvas.height == 40)
+    }
+
     @Test("a card that already fits is returned unchanged, with no notice added")
     func smallCardsAreUntouched() {
         let card = Card(

@@ -373,6 +373,11 @@ private final class OutputCollector: @unchecked Sendable {
     private var out = Data()
     private var err = Data()
     private var overflow: Int?
+
+    /// Every byte the producer sent, including the ones dropped. The number the
+    /// operator is shown has to be the truth about the producer, not the size
+    /// of the buffer that was allowed to hold it.
+    private var observed = 0
     private var stdoutAtEndOfFile = false
     private var stderrAtEndOfFile = false
     private let limit: Int
@@ -449,8 +454,19 @@ private final class OutputCollector: @unchecked Sendable {
         }
 
         lock.lock(); defer { lock.unlock() }
-        if isStandardOutput { out.append(data) } else { err.append(data) }
-        let total = out.count + err.count
-        if total > limit && overflow == nil { overflow = total }
+
+        // The cap has to bound what is *kept*, not only what is noticed. The
+        // watcher that stops an overrunning producer looks every 25 ms and then
+        // waits out a termination grace, and a producer writing as fast as the
+        // pipe allows keeps arriving throughout — so a run nominally limited to
+        // a megabyte could retain hundreds of them. Bytes past the allowance
+        // are counted and dropped.
+        observed += data.count
+        let allowance = limit - (out.count + err.count)
+        if allowance > 0 {
+            let kept = allowance >= data.count ? data : data.prefix(allowance)
+            if isStandardOutput { out.append(kept) } else { err.append(kept) }
+        }
+        if observed > limit && overflow == nil { overflow = observed }
     }
 }

@@ -20,6 +20,15 @@ public struct CardLimits: Sendable, Equatable {
     public var logLines: Int
     public var sparkValues: Int
 
+    /// Buttons. A card is a card, not a control panel, and every action is a
+    /// SwiftUI button with a label to shape. Thirty thousand of them fit inside
+    /// the byte cap comfortably.
+    public var actions: Int
+
+    /// Words in one action's command. A grant is matched on the first element,
+    /// so the rest is unbounded free text that uDeck would hand to a process.
+    public var actionArguments: Int
+
     /// Longest single piece of text. Generous for anything meant to be read,
     /// and far below what makes text layout expensive.
     public var textLength: Int
@@ -31,6 +40,8 @@ public struct CardLimits: Sendable, Equatable {
         tableColumns: Int = 12,
         logLines: Int = 200,
         sparkValues: Int = 512,
+        actions: Int = 12,
+        actionArguments: Int = 64,
         textLength: Int = 1000
     ) {
         self.rows = rows
@@ -39,6 +50,8 @@ public struct CardLimits: Sendable, Equatable {
         self.tableColumns = tableColumns
         self.logLines = logLines
         self.sparkValues = sparkValues
+        self.actions = actions
+        self.actionArguments = actionArguments
         self.textLength = textLength
     }
 
@@ -110,9 +123,29 @@ extension Card {
                 if lines.count > limits.logLines { cut = true }
                 return .log(lines.prefix(limits.logLines).map(trim))
 
-            case .canvas, .unsupported:
-                return row
+            case .canvas(let canvas):
+                return .canvas(CanvasRow(
+                    kind: trim(canvas.kind),
+                    payload: canvas.payload.map(trim),
+                    height: canvas.height
+                ))
+
+            case .unsupported(let kind):
+                // The diagnostic is drawn, and a row's *name* comes straight
+                // out of the plugin's JSON: a 900 KB key was a 900 KB string to
+                // shape, through the one door the trimming did not cover.
+                return .unsupported(kind: trim(kind))
             }
+        }
+
+        if actions.count > limits.actions { cut = true }
+        trimmed.actions = actions.prefix(limits.actions).map { action in
+            if action.run.count > limits.actionArguments { cut = true }
+            return CardAction(
+                label: trim(action.label),
+                run: action.run.prefix(limits.actionArguments).map(trim),
+                confirm: action.confirm.map(trim)
+            )
         }
 
         if cut {
