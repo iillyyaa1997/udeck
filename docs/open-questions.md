@@ -103,7 +103,7 @@ system menu opens.
 
 **Is the fullscreen gate ever reached on this machine?** Not so far. It was
 assumed to be why the gesture stopped responding at one point, and that was
-wrong: measured while Warp was frontmost, its window is
+wrong: measured with a maximised terminal window frontmost, its frame is
 `(244, 0, 2316x1410)` against a screen frame of `(0, 0, 2560x1440)`. That is a
 maximised window, and `FullscreenDetector` correctly declines to call it
 fullscreen — the test is an exact match against the whole screen frame. The gate

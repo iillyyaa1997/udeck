@@ -75,26 +75,25 @@ plugin set under version control somewhere else.
 
 ```json
 {
-  "id": "claude-sessions",
-  "name": "Claude sessions",
+  "id": "disk-space",
+  "name": "Disk space",
   "version": "0.1.0",
   "api": 1,
   "kind": "poll",
-  "description": "Live Claude Code sessions, and how many are waiting for you.",
+  "description": "How much room is left on this machine's disks.",
   "author": "Your Name",
   "homepage": "https://example.com/plugin",
-  "run": ["./sessions.py"],
-  "interval": 5,
+  "run": ["./disk.py"],
+  "interval": 30,
   "timeout": 3,
   "permissions": {
-    "read": ["/private/tmp/claude-tab-title-*"],
-    "exec": ["ps"]
+    "exec": ["df", "open"]
   },
   "settings": [
-    { "key": "waiting_only", "type": "bool", "default": false,
-      "label": "Only sessions waiting for me" }
+    { "key": "warn_percent", "type": "int", "default": 85, "min": 50, "max": 99,
+      "label": "Warn above" }
   ],
-  "window": { "defaultWidth": 4, "defaultHeight": 4, "minWidth": 3, "minHeight": 2 }
+  "window": { "defaultWidth": 4, "defaultHeight": 3, "minWidth": 3, "minHeight": 2 }
 }
 ```
 
@@ -149,14 +148,15 @@ A `poll` plugin prints exactly one JSON object to standard output and exits.
 ```json
 {
   "state": "warn",
-  "title": "Claude sessions",
-  "chip": "16 waiting",
+  "title": "Disk space",
+  "chip": "Backup 92 % full",
   "rows": [
-    { "kv": ["needs you", "16", "warn"] },
-    { "list": [ { "text": "u-pilot", "note": "1d15h", "icon": "wait", "state": "warn" } ] }
+    { "meter": { "value": 0.92, "label": "Backup",
+                 "caption": "40 GB free of 500 GB", "state": "warn" } },
+    { "kv": ["unreadable lines", "1", "warn"] }
   ],
-  "actions": [ { "label": "Focus terminal", "run": ["open", "-a", "Warp"] } ],
-  "ttl": 30
+  "actions": [ { "label": "Open Backup", "run": ["open", "/Volumes/Backup"] } ],
+  "ttl": 120
 }
 ```
 
@@ -247,7 +247,7 @@ waiting to happen.
 ### Actions
 
 ```json
-{ "label": "Focus terminal", "run": ["open", "-a", "Warp"], "confirm": "Bring Warp to the front?" }
+{ "label": "Empty the cache", "run": ["./tools/purge"], "confirm": "Delete every cached file?" }
 ```
 
 **uDeck runs the command, not your plugin.** That is what makes the `exec`
@@ -255,9 +255,9 @@ permission mean something: if the operator did not grant `exec` for that
 command, the button does nothing and says why — in code your plugin does not
 control.
 
-Matching is literal. A grant for `ps` permits the action `["ps"]`, which uDeck
-resolves on its own search path — and nothing else: not `/bin/ps`, not
-`/tmp/mine/ps`, not `./ps`. If your action runs a tool you shipped, declare the
+Matching is literal. A grant for `df` permits the action `["df"]`, which uDeck
+resolves on its own search path — and nothing else: not `/bin/df`, not
+`/tmp/mine/df`, not `./df`. If your action runs a tool you shipped, declare the
 path you will use (`"exec": ["./tools/refresh"]`) and run exactly that. The
 operator then reads the path they are agreeing to rather than a name that could
 mean any file on the machine.
@@ -297,9 +297,9 @@ version of your plugin does not break their settings.
 As environment variables, holding **JSON**:
 
 ```
-UDECK_SETTING_LIST_ROWS=6
-UDECK_SETTING_WAITING_ONLY=false
-UDECK_SETTING_NOTE_SOURCE="project"
+UDECK_SETTING_WARN_PERCENT=85
+UDECK_SETTING_HIDE_SYSTEM=true
+UDECK_SETTING_VOLUMES="physical"
 ```
 
 JSON, not bare text, so a plugin can tell `false` from `"false"` and `12` from
@@ -412,12 +412,12 @@ A manifest declares what it needs:
 
 ```json
 "permissions": {
-  "read":    ["/private/tmp/claude-tab-title-*"],
+  "read":    ["~/Notes/*.md"],
   "write":   ["~/.udeck/cache/mine/*"],
-  "exec":    ["ps", "kubectl"],
+  "exec":    ["df", "open"],
   "network": ["api.example.com"],
   "screen":  false,
-  "secrets": ["bambu-cloud"]
+  "secrets": ["my-service-token"]
 }
 ```
 
@@ -483,9 +483,13 @@ lower one keeps working — that is what the number is for.
   run that overruns `timeout`, and kills whatever it started with it.
 * **Do not leave background children.** They are killed with you, but a producer
   that spawns something long-lived on every run is fighting the runtime.
-* **Never call anything that can block forever.** The classic is `docker ps`,
-  which has been observed to accept a connection and never answer. If a source
-  can hang, read a file it writes instead.
+* **Never call anything that can block forever.** The classic is a command
+  that touches a network mount whose server has gone away: it does not fail, it
+  waits, and it may wait for the rest of the session. Anything speaking to a
+  daemon over a socket can do the same — accept the connection and never
+  answer. Bound the call with a timeout of your own, restrict it to what cannot
+  hang (`df -l` is local filesystems only), or read a file the source writes
+  instead.
 * **Be fast.** A five-second interval means your producer runs seventeen
   thousand times a day. Read small files; avoid walking large directories.
 * **Fail partially, not totally.** One unreadable file out of thirty should
@@ -563,7 +567,8 @@ UDECK_API=1 UDECK_APPEARANCE=dark UDECK_REFRESH_REASON=manual \
 Then let uDeck load it: open the panel, add it to a tab, and watch what it says.
 Use the ⟳ button to run it on demand.
 
-The three plugins in [`examples/`](../examples) are also uDeck's own test
-fixtures: `hello-card` uses every row type, `slow-plugin` hangs on purpose, and
+The four plugins in [`examples/`](../examples) are also uDeck's own test
+fixtures: `hello-card` uses every row type, `disk-space` is a real plugin with
+its own tests and a translation, `slow-plugin` hangs on purpose, and
 `broken-card` prints something that is not a card. They are the fastest way to
 see what each failure looks like.
