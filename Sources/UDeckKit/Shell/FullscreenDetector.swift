@@ -17,8 +17,8 @@ import UDeckCore
 /// frame, from the frontmost application. A merely maximised window stops below
 /// the menu bar and so does not match, which is the right answer: the panel is
 /// welcome over a maximised window. Measured on the machine this was built for,
-/// a maximised Warp is `2316x1410` from the top of a `2560x1440` screen, so the
-/// distinction is not a fine one.
+/// a maximised window is `2316x1410` from the top of a `2560x1440` screen, so
+/// the distinction is not a fine one.
 ///
 /// What is left here is the part that has to ask AppKit questions. The
 /// coordinate arithmetic moved to `QuartzCoordinates` in `UDeckCore`, where it

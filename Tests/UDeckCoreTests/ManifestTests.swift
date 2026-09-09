@@ -4,7 +4,7 @@ import Testing
 
 @Suite("Plugin identifiers")
 struct PluginIdentifierTests {
-    @Test("ordinary ids are accepted", arguments: ["claude-sessions", "a", "x.y_z", "plugin9"])
+    @Test("ordinary ids are accepted", arguments: ["disk-space", "a", "x.y_z", "plugin9"])
     func accepts(_ raw: String) {
         #expect(PluginIdentifier(rawValue: raw) != nil)
     }

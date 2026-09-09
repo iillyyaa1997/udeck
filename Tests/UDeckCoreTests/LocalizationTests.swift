@@ -56,7 +56,7 @@ struct LocalizationTests {
         .pluginLess, .pluginSettings, .pluginEverySeconds(30),
         .pluginLastFailure(reason: "exit 1"), .permissionsAsksNothing, .permissionsAsksTo,
         .permissionsDeclared, .permissionsDeclaredHelp,
-        .permissionsPluginAsksTo(name: "claude-sessions"), .permissionsUnsandboxed,
+        .permissionsPluginAsksTo(name: "disk-space"), .permissionsUnsandboxed,
         .permissionsAllowAndRun,
 
         .capabilityRead(glob: "~/notes/*"), .capabilityWrite(glob: "/tmp/*"),
@@ -152,7 +152,7 @@ struct LocalizationTests {
         #expect(strings(.capabilityExec(command: "git")).contains("git"))
         #expect(strings(.capabilityNetwork(host: "example.com")).contains("example.com"))
         #expect(strings(.capabilitySecret(name: "token")).contains("token"))
-        #expect(strings(.permissionsPluginAsksTo(name: "claude-sessions")).contains("claude-sessions"))
+        #expect(strings(.permissionsPluginAsksTo(name: "disk-space")).contains("disk-space"))
         #expect(strings(.emptyNoPluginsBody(path: "~/.udeck/plugins")).contains("~/.udeck/plugins"))
         #expect(strings(.cardUnsupportedRow(kind: "sankey")).contains("sankey"))
         #expect(strings(.pluginLastFailure(reason: "exit 1")).contains("exit 1"))

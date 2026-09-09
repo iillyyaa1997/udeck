@@ -211,13 +211,13 @@ struct PermissionTests {
 
     @Test("secrets are the one capability the host genuinely holds for a running plugin")
     func secretsAreHostMediated() {
-        #expect(Capability.secret("bambu").processEnforcement == .hostMediated)
+        #expect(Capability.secret("printer").processEnforcement == .hostMediated)
         #expect(Capability.read("/tmp/*").processEnforcement == .declaredOnly)
         #expect(Capability.exec("ps").processEnforcement == .declaredOnly)
 
-        let grant = PluginGrant(granted: [.secret("bambu")], decidedForVersion: "1.0.0")
-        #expect(PermissionGate.mayReceiveSecret("bambu", grant: grant))
-        #expect(!PermissionGate.mayReceiveSecret("telegram", grant: grant))
+        let grant = PluginGrant(granted: [.secret("printer")], decidedForVersion: "1.0.0")
+        #expect(PermissionGate.mayReceiveSecret("printer", grant: grant))
+        #expect(!PermissionGate.mayReceiveSecret("mailer", grant: grant))
     }
 
     @Test("grants survive a round trip through JSON")

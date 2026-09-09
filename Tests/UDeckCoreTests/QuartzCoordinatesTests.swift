@@ -18,7 +18,7 @@ struct QuartzCoordinatesTests {
 
     @Test("a maximised window measured from the running machine converts to what was seen")
     func realMaximisedWindow() {
-        // Warp, maximised on the DELL, as reported by CGWindowListCopyWindowInfo.
+        // A maximised window on the DELL, as reported by CGWindowListCopyWindowInfo.
         let quartz = CGRect(x: 244, y: 30, width: 2316, height: 1410)
         let appKit = QuartzCoordinates.appKitRect(fromQuartz: quartz, mainScreenTop: mainScreenTop)
         #expect(appKit == CGRect(x: 244, y: 0, width: 2316, height: 1410))
