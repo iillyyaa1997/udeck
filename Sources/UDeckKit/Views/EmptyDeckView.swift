@@ -9,6 +9,7 @@ import UDeckCore
 /// as something that failed to load — which means naming what is missing, and
 /// putting the way to fix it within one click.
 struct EmptyDeckView: View {
+    @Environment(\.strings) private var strings
     var model: DeckModel
     var theme: DeckTheme
     var tabID: UUID?
@@ -28,13 +29,13 @@ struct EmptyDeckView: View {
                 .font(.system(size: 26, weight: .light))
                 .foregroundStyle(theme.dim)
 
-            Text(installed.isEmpty ? "No plugins installed" : "This tab is empty")
+            Text(installed.isEmpty ? strings(.emptyNoPlugins) : strings(.emptyTabEmpty))
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(theme.text)
 
             Text(installed.isEmpty
-                 ? "uDeck shows nothing by itself — everything in the panel comes from a plugin. Put one in \(model.pluginsDirectoryDisplayPath) to begin."
-                 : "Add one of the installed plugins to this tab.")
+                 ? strings(.emptyNoPluginsBody(path: model.pluginsDirectoryDisplayPath))
+                 : strings(.emptyTabEmptyBody))
                 .font(theme.bodyFont)
                 .foregroundStyle(theme.dim)
                 .multilineTextAlignment(.center)
@@ -45,13 +46,13 @@ struct EmptyDeckView: View {
             }
 
             HStack(spacing: 8) {
-                Button("Open the plugins folder") {
+                Button(strings(.emptyOpenPluginsFolder)) {
                     shell.onInteract()
                     model.revealPluginsDirectory()
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
 
-                Button("Look for plugins again") {
+                Button(strings(.emptyLookAgain)) {
                     shell.onInteract()
                     model.discoverPlugins()
                 }
@@ -89,7 +90,7 @@ struct EmptyDeckView: View {
                         }
                         Spacer(minLength: 0)
                         if plugin.isUsable {
-                            Text("Add").font(theme.chipFont).foregroundStyle(theme.accent)
+                            Text(strings(.emptyAdd)).font(theme.chipFont).foregroundStyle(theme.accent)
                         }
                     }
                     .padding(.horizontal, 11)

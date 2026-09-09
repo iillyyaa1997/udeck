@@ -232,6 +232,14 @@ public enum ThemeSource: String, Codable, CaseIterable, Sendable, Identifiable {
 
     public var id: String { rawValue }
 
+    public var namePhrase: Phrase {
+        switch self {
+        case .system: .sourceSystem
+        case .manual: .sourceManual
+        case .schedule: .sourceSchedule
+        }
+    }
+
     public var name: String {
         switch self {
         case .system: "System"

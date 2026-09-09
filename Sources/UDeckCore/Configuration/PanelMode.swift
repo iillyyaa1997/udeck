@@ -46,6 +46,21 @@ public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
     public var id: String { rawValue }
 
     /// What to call it in the settings screen.
+    /// The mode's name, for a screen that has a language.
+    ///
+    /// `name` below is the English one, kept because it is what a log line and
+    /// a settings file should say whoever is reading the screen.
+    public var namePhrase: Phrase {
+        switch self {
+        case .light: .modeLight
+        case .dark: .modeDark
+        case .contrast: .modeContrast
+        case .ghost: .modeGhost
+        case .paper: .modePaper
+        case .smoke: .modeSmoke
+        }
+    }
+
     public var name: String {
         switch self {
         case .light: "Light"

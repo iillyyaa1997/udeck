@@ -13,12 +13,21 @@ public struct SettingsView: View {
     @State private var selectedPlugin: String?
 
     enum Section: String, CaseIterable, Identifiable {
-        case opening = "Opening"
-        case look = "Look"
-        case plugins = "Plugins"
-        case about = "About"
+        case opening
+        case look
+        case plugins
+        case about
 
         var id: String { rawValue }
+
+        var title: Phrase {
+            switch self {
+            case .opening: .sectionOpening
+            case .look: .sectionLook
+            case .plugins: .sectionPlugins
+            case .about: .sectionAbout
+            }
+        }
 
         var symbol: String {
             switch self {
@@ -37,7 +46,7 @@ public struct SettingsView: View {
     public var body: some View {
         NavigationSplitView {
             List(Section.allCases, selection: $section) { item in
-                Label(item.rawValue, systemImage: item.symbol).tag(item)
+                Label(model.strings(item.title), systemImage: item.symbol).tag(item)
             }
             .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
         } detail: {
@@ -55,6 +64,16 @@ public struct SettingsView: View {
             }
         }
         .frame(minWidth: 720, minHeight: 480)
+        // The settings window is its own window rather than part of the panel,
+        // so it does not inherit the panel's environment and has to be handed
+        // the language itself.
+        //
+        // This reaches the panes below and not this view: a value put into the
+        // environment by a modifier is read by that view's children, not by the
+        // view that put it there. The sidebar above therefore asks the model
+        // directly — it did not, and it was the one part of the settings window
+        // that stayed in English after the language was changed.
+        .environment(\.strings, model.strings)
     }
 }
 
@@ -70,6 +89,7 @@ public struct SettingsView: View {
 /// about uDeck worth stating once rather than four times.
 private struct OpeningSettings: View {
     @Bindable var model: DeckModel
+    @Environment(\.strings) private var strings
 
     private func binding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
         Binding(
@@ -86,38 +106,38 @@ private struct OpeningSettings: View {
         VStack(alignment: .leading, spacing: 14) {
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
                 GridRow {
-                    label("Gesture")
-                    Toggle("Open by moving the cursor to the top of the screen",
+                    label(strings(.openingGesture))
+                    Toggle(strings(.openingGestureToggle),
                            isOn: binding(\.gesture.enabled))
                 }
 
                 GridRow {
-                    label("Pause first")
+                    label(strings(.openingPauseFirst))
                     slider(binding(\.gesture.dwellDuration), in: 0.08 ... 0.8, step: 0.02,
-                           readout: String(format: "%.0f ms", model.settings.gesture.dwellDuration * 1000))
+                           readout: strings(.unitMilliseconds(Int((model.settings.gesture.dwellDuration * 1000).rounded()))))
                 }
 
                 GridRow {
-                    label("Or push past")
+                    label(strings(.openingPushPast))
                     slider(binding(\.gesture.edgePushDistance), in: 10 ... 120, step: 5,
-                           readout: "\(Int(model.settings.gesture.edgePushDistance)) pt")
+                           readout: strings(.unitPoints(Int(model.settings.gesture.edgePushDistance))))
                 }
 
                 GridRow {
-                    label("Then stay quiet")
+                    label(strings(.openingStayQuiet))
                     slider(binding(\.gesture.reopenCooldown), in: 0 ... 2, step: 0.1,
-                           readout: String(format: "%.1f s", model.settings.gesture.reopenCooldown))
+                           readout: strings(.unitSeconds(model.settings.gesture.reopenCooldown)))
                 }
 
                 divider
 
                 GridRow {
-                    label("Shortcut")
-                    Toggle("Open with a keyboard shortcut", isOn: binding(\.hotkey.enabled))
+                    label(strings(.openingShortcut))
+                    Toggle(strings(.openingShortcutToggle), isOn: binding(\.hotkey.enabled))
                 }
 
                 GridRow {
-                    label("Keys")
+                    label(strings(.openingKeys))
                     HStack(spacing: 8) {
                         ForEach(HotKeyModifier.allCases.sorted(), id: \.self) { modifier in
                             Toggle(modifier.symbol, isOn: Binding(
@@ -154,7 +174,7 @@ private struct OpeningSettings: View {
                 if model.settings.hotkey.modifiers.isEmpty {
                     GridRow {
                         Color.clear.frame(width: 1, height: 1)
-                        Text("Pick at least one modifier — without one this key is taken away from every application on this Mac.")
+                        Text(strings(.openingNeedsModifier))
                             .font(.caption).foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -163,13 +183,13 @@ private struct OpeningSettings: View {
                 divider
 
                 GridRow {
-                    label("Also")
+                    label(strings(.openingAlso))
                     VStack(alignment: .leading, spacing: 6) {
-                        Toggle("Retract when you switch to another application",
+                        Toggle(strings(.openingRetract),
                                isOn: binding(\.collapseOnAppSwitch))
-                        Toggle("Open over fullscreen applications",
+                        Toggle(strings(.openingFullscreen),
                                isOn: binding(\.gesture.enabledInFullscreen))
-                        Toggle("Keep running plugins while the panel is away",
+                        Toggle(strings(.openingKeepPolling),
                                isOn: binding(\.pollWhileCollapsed))
                     }
                 }
@@ -177,7 +197,7 @@ private struct OpeningSettings: View {
 
             Divider()
 
-            Text("uDeck asks macOS for no permissions. It watches the pointer, which needs none, and registers one keyboard combination, which is not the same as watching the keyboard.")
+            Text(strings(.openingPermissions))
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -232,6 +252,7 @@ private struct OpeningSettings: View {
 /// you do not need described.
 private struct LookSettings: View {
     @Bindable var model: DeckModel
+    @Environment(\.strings) private var strings
 
     /// Which of the two looks the knobs below are editing.
     ///
@@ -284,9 +305,9 @@ private struct LookSettings: View {
     /// What the "start from" menu calls itself: the preset this look currently
     /// matches, or the honest answer that it matches none of them.
     private var startingPointName: String {
-        if let built = model.settings.theme.preset(forDark: edited) { return built.name }
+        if let built = model.settings.theme.preset(forDark: edited) { return strings(built.namePhrase) }
         if let mine = model.settings.theme.saved.first(where: { $0.look == editedLook }) { return mine.name }
-        return "Custom"
+        return strings(.lookCustom)
     }
 
     /// The one note worth keeping, because it is the only control on this
@@ -299,7 +320,9 @@ private struct LookSettings: View {
     /// broken, which is what happened.
     private var characterWarning: String? {
         guard editedLook.glass.tinted, editedLook.glass.tintStrength > 0.5 else { return nil }
-        return "At \(percent(editedLook.glass.tintStrength)) tint these two barely differ — the tint covers the material. Turn it down to tell them apart."
+        return strings(.lookTintCoversMaterial(
+            percent: Int((editedLook.glass.tintStrength * 100).rounded())
+        ))
     }
 
     private func pour(_ look: PanelLook) {
@@ -315,7 +338,9 @@ private struct LookSettings: View {
         newPresetName = ""
     }
 
-    private func percent(_ value: Double) -> String { "\(Int((value * 100).rounded())) %" }
+    private func percent(_ value: Double) -> String {
+        strings(.unitPercent(Int((value * 100).rounded())))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -337,21 +362,21 @@ private struct LookSettings: View {
 
             HStack(spacing: 12) {
                 Picker("", selection: Binding(get: { edited }, set: { editingDark = $0 })) {
-                    Text("Light look").tag(false)
-                    Text("Dark look").tag(true)
+                    Text(strings(.lookLightLook)).tag(false)
+                    Text(strings(.lookDarkLook)).tag(true)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 220)
 
                 Menu(startingPointName) {
-                    Section("Built in") {
+                    Section(strings(.lookBuiltIn)) {
                         ForEach(PanelMode.allCases) { preset in
-                            Button(preset.name) { pour(preset.look) }
+                            Button(strings(preset.namePhrase)) { pour(preset.look) }
                         }
                     }
                     if !model.settings.theme.saved.isEmpty {
-                        Section("Saved") {
+                        Section(strings(.lookSaved)) {
                             ForEach(model.settings.theme.saved) { preset in
                                 Button(preset.name) { pour(preset.look) }
                             }
@@ -368,11 +393,11 @@ private struct LookSettings: View {
     private var knobs: some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
             GridRow {
-                label("Shows")
+                label(strings(.lookShows))
                 VStack(alignment: .leading, spacing: 6) {
                     Picker("", selection: theme(\.source)) {
                         ForEach(ThemeSource.allCases) { source in
-                            Text(source.name).tag(source)
+                            Text(strings(source.namePhrase)).tag(source)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -382,17 +407,17 @@ private struct LookSettings: View {
                     switch model.settings.theme.source {
                     case .manual:
                         Picker("", selection: theme(\.manualIsDark)) {
-                            Text("Light").tag(false)
-                            Text("Dark").tag(true)
+                            Text(strings(.lookLight)).tag(false)
+                            Text(strings(.lookDark)).tag(true)
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
                         .frame(width: 160)
                     case .schedule:
                         HStack(spacing: 14) {
-                            Stepper("Light from \(model.settings.theme.schedule.lightFromHour):00",
+                            Stepper(strings(.lookLightFromHour(model.settings.theme.schedule.lightFromHour)),
                                     value: theme(\.schedule.lightFromHour), in: 0 ... 23)
-                            Stepper("Dark from \(model.settings.theme.schedule.darkFromHour):00",
+                            Stepper(strings(.lookDarkFromHour(model.settings.theme.schedule.darkFromHour)),
                                     value: theme(\.schedule.darkFromHour), in: 0 ... 23)
                         }
                         .font(.callout)
@@ -405,10 +430,10 @@ private struct LookSettings: View {
             divider
 
             GridRow {
-                label("Glass")
+                label(strings(.lookGlass))
                 Picker("", selection: look(\.glass.style)) {
-                    Text("Regular").tag(GlassStyle.regular)
-                    Text("Clear").tag(GlassStyle.clear)
+                    Text(strings(.glassRegular)).tag(GlassStyle.regular)
+                    Text(strings(.glassClear)).tag(GlassStyle.clear)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -424,18 +449,18 @@ private struct LookSettings: View {
             }
 
             GridRow {
-                label("Amount")
+                label(strings(.lookAmount))
                 slider(look(\.glass.opacity), in: GlassAppearance.opacityRange,
                        step: 0.05, readout: percent(editedLook.glass.opacity))
             }
 
             GridRow {
-                label("Tint")
+                label(strings(.lookTint))
                 HStack(spacing: 10) {
                     Toggle("", isOn: look(\.glass.tinted)).labelsHidden()
                     Picker("", selection: look(\.glass.tintIsLight)) {
-                        Text("Lighter").tag(true)
-                        Text("Darker").tag(false)
+                        Text(strings(.tintLighter)).tag(true)
+                        Text(strings(.tintDarker)).tag(false)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
@@ -445,7 +470,7 @@ private struct LookSettings: View {
             }
 
             GridRow {
-                label("Strength")
+                label(strings(.lookStrength))
                 slider(look(\.glass.tintStrength), in: GlassAppearance.tintStrengthRange,
                        step: 0.02, readout: percent(editedLook.glass.tintStrength))
                     .disabled(!editedLook.glass.tinted)
@@ -454,10 +479,10 @@ private struct LookSettings: View {
             divider
 
             GridRow {
-                label("Text")
+                label(strings(.lookText))
                 Picker("", selection: look(\.ink)) {
-                    Text("Light").tag(PanelInk.light)
-                    Text("Dark").tag(PanelInk.dark)
+                    Text(strings(.lookLight)).tag(PanelInk.light)
+                    Text(strings(.lookDark)).tag(PanelInk.dark)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -465,13 +490,13 @@ private struct LookSettings: View {
             }
 
             GridRow {
-                label("Brightness")
+                label(strings(.lookBrightness))
                 slider(look(\.inkBrightness), in: 0 ... 1,
                        step: 0.02, readout: percent(editedLook.inkBrightness))
             }
 
             GridRow {
-                label("Colour")
+                label(strings(.lookColour))
                 HStack(spacing: 10) {
                     Toggle("", isOn: Binding(
                         get: { editedLook.inkColor != nil },
@@ -507,7 +532,7 @@ private struct LookSettings: View {
             divider
 
             GridRow {
-                label("Density")
+                label(strings(.lookDensity))
                 Picker("", selection: Binding(
                     get: { model.settings.density },
                     set: { newValue in
@@ -516,12 +541,37 @@ private struct LookSettings: View {
                         model.update(settings: settings)
                     }
                 )) {
-                    Text("Compact").tag(Density.compact)
-                    Text("Normal").tag(Density.normal)
-                    Text("Cozy").tag(Density.cozy)
+                    ForEach(Density.allCases, id: \.self) { density in
+                        Text(strings(density.namePhrase)).tag(density)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .frame(width: 260)
+            }
+
+            GridRow {
+                label(strings(.lookLanguage))
+                Picker("", selection: Binding(
+                    get: { model.settings.language },
+                    set: { newValue in
+                        var settings = model.settings
+                        settings.language = newValue
+                        model.update(settings: settings)
+                    }
+                )) {
+                    // "Follow the Mac" is the absence of a choice rather than a
+                    // language of its own, so it is `nil` here and nothing at
+                    // all in the settings file.
+                    Text(strings(.languageSystem)).tag(Language?.none)
+                    ForEach(Language.allCases) { language in
+                        // Each language names itself. Somebody who landed in a
+                        // language they cannot read is looking for the word
+                        // they *can* — "English", not "Английский".
+                        Text(language.endonym).tag(Language?.some(language))
+                    }
+                }
+                .pickerStyle(.segmented)
                 .frame(width: 260)
             }
         }
@@ -532,19 +582,19 @@ private struct LookSettings: View {
     private var presets: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                TextField("Name this look", text: $newPresetName)
+                TextField(strings(.lookNameThisLook), text: $newPresetName)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 180)
                     .onSubmit(saveCurrent)
-                Button("Save", action: saveCurrent)
+                Button(strings(.actionSave), action: saveCurrent)
                     .disabled(PanelPreset.cleaned(name: newPresetName).isEmpty)
             }
 
             ForEach(model.settings.theme.saved) { preset in
                 HStack(spacing: 10) {
                     Text(preset.name).frame(width: 180, alignment: .leading)
-                    Button("Use") { pour(preset.look) }
-                    Button("Delete", role: .destructive) {
+                    Button(strings(.actionUse)) { pour(preset.look) }
+                    Button(strings(.actionDelete), role: .destructive) {
                         var settings = model.settings
                         settings.theme.remove(preset.id)
                         model.update(settings: settings)
@@ -596,20 +646,21 @@ private struct LookSettings: View {
 private struct PluginSettingsSection: View {
     @Bindable var model: DeckModel
     @Binding var selected: String?
+    @Environment(\.strings) private var strings
 
     var body: some View {
-        SettingsGroup("Installed") {
+        SettingsGroup(strings(.pluginsInstalled)) {
             HStack {
                 Text(model.pluginsDirectoryDisplayPath)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Open the folder") { model.revealPluginsDirectory() }
-                Button("Look again") { model.discoverPlugins() }
+                Button(strings(.pluginsOpenFolder)) { model.revealPluginsDirectory() }
+                Button(strings(.pluginsLookAgain)) { model.discoverPlugins() }
             }
 
             if model.plugins.isEmpty {
-                Text("Nothing installed yet. uDeck shows nothing of its own — everything in the panel comes from a plugin.")
+                Text(strings(.pluginsNothingInstalled))
                     .foregroundStyle(.secondary)
             }
 
@@ -621,7 +672,10 @@ private struct PluginSettingsSection: View {
             // Was a headed group of its own on the Look tab, where it had
             // nothing to do with how the panel looks. It is a fact about cards,
             // it cannot be changed from here, and one line is the whole of it.
-            Text("A card with no lifetime of its own is treated as current for \(Int(model.settings.defaultCardTTL)) s, dimmed after that, and blanked past \(Int(model.settings.silentTTLMultiplier))× it.")
+            Text(strings(.pluginsStaleness(
+                seconds: Int(model.settings.defaultCardTTL),
+                multiplier: Int(model.settings.silentTTLMultiplier)
+            )))
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -630,6 +684,7 @@ private struct PluginSettingsSection: View {
 private struct PluginRow: View {
     @Bindable var model: DeckModel
     var plugin: DiscoveredPlugin
+    @Environment(\.strings) private var strings
     @State private var expanded = false
 
     var body: some View {
@@ -641,13 +696,13 @@ private struct PluginRow: View {
                 }
                 Spacer()
                 if let manifest = plugin.manifest {
-                    Toggle("Enabled", isOn: Binding(
+                    Toggle(strings(.pluginEnabled), isOn: Binding(
                         get: { model.pluginSettings.isEnabled(manifest.id) },
                         set: { model.setEnabled($0, for: manifest.id) }
                     ))
                     .labelsHidden()
                 }
-                Button(expanded ? "Less" : "More") { expanded.toggle() }
+                Button(expanded ? strings(.pluginLess) : strings(.pluginMore)) { expanded.toggle() }
             }
 
             if !plugin.problems.isEmpty {
@@ -668,7 +723,7 @@ private struct PluginRow: View {
     private var subtitle: String {
         guard let manifest = plugin.manifest else { return plugin.folderName }
         var parts = ["\(manifest.kind.rawValue) · v\(manifest.version)"]
-        if let interval = manifest.interval { parts.append("every \(Int(interval))s") }
+        if let interval = manifest.interval { parts.append(strings(.pluginEverySeconds(Int(interval)))) }
         if let author = manifest.author { parts.append(author) }
         return parts.joined(separator: " · ")
     }
@@ -687,7 +742,7 @@ private struct PluginRow: View {
         permissions(manifest)
 
         if !manifest.settings.isEmpty {
-            Text("Settings").font(.subheadline).padding(.top, 4)
+            Text(strings(.pluginSettings)).font(.subheadline).padding(.top, 4)
             // By position: a manifest with two settings sharing a key is
             // reported as a problem, and must still render rather than
             // collapsing two rows into one.
@@ -698,7 +753,7 @@ private struct PluginRow: View {
 
         let snapshot = model.snapshot(for: manifest.id)
         if let failure = snapshot.failure {
-            Text("Last failure: \(failure.reason.description)")
+            Text(strings(.pluginLastFailure(reason: failure.reason.description)))
                 .font(.caption).foregroundStyle(.orange)
             if !failure.diagnostics.isEmpty {
                 Text(failure.diagnostics)
@@ -714,27 +769,27 @@ private struct PluginRow: View {
     private func permissions(_ manifest: PluginManifest) -> some View {
         let requested = manifest.permissions.capabilities
         if requested.isEmpty {
-            Label("Asks for nothing", systemImage: "checkmark.seal")
+            Label(strings(.permissionsAsksNothing), systemImage: "checkmark.seal")
                 .font(.caption).foregroundStyle(.secondary)
         } else {
             VStack(alignment: .leading, spacing: 3) {
-                Text("This plugin asks to:").font(.subheadline)
+                Text(strings(.permissionsAsksTo)).font(.subheadline)
                 ForEach(Array(requested.enumerated()), id: \.offset) { _, capability in
                     HStack(spacing: 6) {
                         Image(systemName: granted(capability, manifest) ? "checkmark.circle.fill" : "circle")
                             .foregroundStyle(granted(capability, manifest) ? .green : .secondary)
-                        Text(capability.summary).font(.caption)
+                        Text(strings(capability.summaryPhrase)).font(.caption)
                         if capability.processEnforcement == .declaredOnly {
-                            Text("declared")
+                            Text(strings(.permissionsDeclared))
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
-                                .help("uDeck shows you this and will not start the plugin without your agreement, but it cannot hold it against a running program — see the plugin documentation.")
+                                .help(strings(.permissionsDeclaredHelp))
                         }
                     }
                 }
                 HStack {
-                    Button("Allow") { model.decidePermissions(for: manifest.id, allow: true) }
-                    Button("Decline") { model.decidePermissions(for: manifest.id, allow: false) }
+                    Button(strings(.actionAllow)) { model.decidePermissions(for: manifest.id, allow: true) }
+                    Button(strings(.actionDecline)) { model.decidePermissions(for: manifest.id, allow: false) }
                 }
                 .padding(.top, 2)
             }
@@ -816,32 +871,33 @@ private struct PluginRow: View {
 
 private struct AboutSection: View {
     @Bindable var model: DeckModel
+    @Environment(\.strings) private var strings
 
     var body: some View {
-        SettingsGroup("uDeck") {
-            Text("A panel at the top edge of the screen. Everything in it is a plugin.")
+        SettingsGroup(strings(.aboutTitle)) {
+            Text(strings(.aboutTagline))
             Text("Apache-2.0 · Copyright 2026 Ilya Volkov")
                 .font(.caption).foregroundStyle(.secondary)
             Link("github.com/iillyyaa1997/udeck", destination: URL(string: "https://github.com/iillyyaa1997/udeck")!)
         }
 
-        SettingsGroup("This build") {
-            Label("Not signed with a Developer ID and not notarised.", systemImage: "exclamationmark.shield")
-            Text("Builds are ad-hoc signed, so macOS will refuse a downloaded copy on first launch — right-click and choose Open. A binary you built yourself is unaffected.")
+        SettingsGroup(strings(.aboutThisBuild)) {
+            Label(strings(.aboutNotSigned), systemImage: "exclamationmark.shield")
+            Text(strings(.aboutAdHoc))
                 .font(.caption).foregroundStyle(.secondary)
-            Label("Not sandboxed, and cannot be: plugins run commands.", systemImage: "shield.slash")
-            Text("Read the permissions section of the plugin documentation before installing a plugin somebody else wrote.")
+            Label(strings(.aboutNotSandboxed), systemImage: "shield.slash")
+            Text(strings(.aboutReadPermissions))
                 .font(.caption).foregroundStyle(.secondary)
         }
 
         if !model.problems.isEmpty {
-            SettingsGroup("Problems") {
+            SettingsGroup(strings(.aboutProblems)) {
                 ForEach(Array(model.problems.enumerated()), id: \.offset) { _, problem in
                     Text(problem)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
                 }
-                Button("Clear") { model.clearProblems() }
+                Button(strings(.actionClear)) { model.clearProblems() }
             }
         }
     }
@@ -884,6 +940,7 @@ private struct SettingsGroup<Content: View>: View {
 private struct GlassPreview: View {
     var glass: GlassAppearance
     var theme: DeckTheme
+    @Environment(\.strings) private var strings
 
     var body: some View {
         ZStack {
@@ -914,20 +971,20 @@ private struct GlassPreview: View {
                 // things the knobs below move and none of them is the glass.
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 8) {
-                        Text("Claude sessions")
+                        Text(strings(.sampleTitle))
                             .font(theme.titleFont)
                             .foregroundStyle(theme.text)
-                        Text("4 running")
+                        Text(strings(.sampleChip))
                             .font(theme.chipFont)
                             .foregroundStyle(theme.color(for: CardState.ok))
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2)
                             .background(Capsule().fill(theme.chipFill(for: .ok)))
                     }
-                    Text("pers · 48 % of the week")
+                    Text(strings(.sampleBody))
                         .font(theme.bodyFont)
                         .foregroundStyle(theme.muted)
-                    Text("last checked a minute ago")
+                    Text(strings(.sampleFooter))
                         .font(theme.chipFont)
                         .foregroundStyle(theme.dim)
                 }

@@ -12,6 +12,7 @@ import UDeckCore
 /// the things uDeck itself does on the plugin's behalf — secrets it hands over,
 /// and commands it runs from a card's buttons.
 struct PermissionRequestView: View {
+    @Environment(\.strings) private var strings
     var model: DeckModel
     var theme: DeckTheme
     var pluginID: PluginIdentifier
@@ -21,7 +22,7 @@ struct PermissionRequestView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("\(manifest?.name ?? pluginID.rawValue) asks to:")
+            Text(strings(.permissionsPluginAsksTo(name: manifest?.name ?? pluginID.rawValue)))
                 .font(theme.bodyFont)
                 .foregroundStyle(theme.text)
 
@@ -40,19 +41,19 @@ struct PermissionRequestView: View {
                 }
             }
 
-            Text("uDeck runs this plugin as you, without a sandbox. Allowing it means agreeing to run this program; declining means uDeck never starts it.")
+            Text(strings(.permissionsUnsandboxed))
                 .font(.system(size: 9.5))
                 .foregroundStyle(theme.dim)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 7) {
-                Button("Allow and run") {
+                Button(strings(.permissionsAllowAndRun)) {
                     shell.onInteract()
                     model.decidePermissions(for: pluginID, allow: true)
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
 
-                Button("Decline") {
+                Button(strings(.actionDecline)) {
                     shell.onInteract()
                     model.decidePermissions(for: pluginID, allow: false)
                 }

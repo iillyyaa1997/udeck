@@ -14,6 +14,7 @@ struct CardBodyView: View {
     var pluginID: PluginIdentifier
     var model: DeckModel
     @Bindable var shell: ShellState
+    @Environment(\.strings) private var strings
 
     @State private var actionProblem: String?
 
@@ -153,10 +154,10 @@ struct CardBodyView: View {
             // When it arrives it will be drawn inside a frame like this one, so
             // that a card drawing itself can never pass as one uDeck drew.
             VStack(alignment: .leading, spacing: 3) {
-                Text("PLUGIN'S OWN DRAWING")
+                Text(strings(.cardOwnDrawing))
                     .font(.system(size: 8, weight: .medium, design: .monospaced))
                     .foregroundStyle(theme.dim)
-                Text("\"\(canvas.kind)\" is not drawn by this version of uDeck")
+                Text(strings(.cardKindNotDrawn(kind: canvas.kind)))
                     .font(theme.chipFont)
                     .foregroundStyle(theme.muted)
             }
@@ -171,7 +172,7 @@ struct CardBodyView: View {
         case .unsupported(let kind):
             // Kept rather than dropped: a hole in a card with no explanation is
             // a bug report waiting to happen.
-            Text("this plugin sent a \"\(kind)\" row, which this version of uDeck does not draw")
+            Text(strings(.cardUnsupportedRow(kind: kind)))
                 .font(theme.chipFont)
                 .foregroundStyle(theme.warn)
                 .fixedSize(horizontal: false, vertical: true)
@@ -208,8 +209,8 @@ struct CardBodyView: View {
             alert.messageText = action.label
             alert.informativeText = question + "\n\n" + action.run.joined(separator: " ")
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "Run")
-            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: strings(.actionRun))
+            alert.addButton(withTitle: strings(.actionCancel))
             // The panel sits at the status-bar level, so an ordinary alert
             // would open behind the thing that asked the question.
             alert.window.level = .popUpMenu

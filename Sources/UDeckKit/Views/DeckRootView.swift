@@ -91,6 +91,7 @@ public struct DeckRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .environment(\.deckTheme, theme)
+        .environment(\.strings, model.strings)
     }
 
     @ViewBuilder
@@ -244,6 +245,7 @@ struct DeckSummary {
 /// and it costs battery for the privilege of being ignored.
 struct IslandMark: View {
     var theme: DeckTheme
+    @Environment(\.strings) private var strings
     var summary: DeckSummary
 
     var body: some View {
@@ -258,24 +260,25 @@ struct IslandMark: View {
             .shadow(color: theme.islandHalo, radius: 2)
             .padding(.bottom, theme.islandIndicatorSize.height)
             .accessibilityLabel(summary.placedPlugins == 0
-                ? "uDeck, nothing placed yet"
-                : "uDeck, worst state \(summary.worst.rawValue)")
+                ? strings(.islandNothingPlaced)
+                : strings(.islandWorstState(summary.worst.rawValue)))
     }
 }
 
 /// The glance: what is asking for attention, in one line.
 struct PeekView: View {
     var theme: DeckTheme
+    @Environment(\.strings) private var strings
     var summary: DeckSummary
     var model: DeckModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.rowSpacing) {
             if summary.placedPlugins == 0 {
-                Text("Nothing placed yet")
+                Text(strings(.deckNothingPlaced))
                     .font(theme.titleFont)
                     .foregroundStyle(theme.text)
-                Text("uDeck shows nothing of its own. Open it and add a plugin.")
+                Text(strings(.deckNothingOwn))
                     .font(theme.bodyFont)
                     .foregroundStyle(theme.dim)
             } else {
@@ -293,7 +296,7 @@ struct PeekView: View {
                     }
                     Spacer(minLength: 0)
                 }
-                Text("Click or press a key to work in here")
+                Text(strings(.deckClickToWork))
                     .font(theme.bodyFont)
                     .foregroundStyle(theme.dim)
             }

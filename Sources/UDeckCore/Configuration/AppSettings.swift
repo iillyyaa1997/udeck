@@ -69,6 +69,15 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// labelled old data rather than a wrong answer.
     public var pollWhileCollapsed: Bool
 
+    /// The language uDeck speaks, or `nil` to follow the Mac.
+    ///
+    /// Optional rather than a third enum case, so that the settings file says
+    /// nothing at all until the operator has chosen — which is what makes
+    /// "follow the system" keep working for somebody who never opens this
+    /// setting, and what lets uDeck start speaking a language it gains later
+    /// without anyone editing a file.
+    public var language: Language?
+
     public init(
         version: Int = 1,
         density: Density = .normal,
@@ -83,7 +92,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         pluginExecutableSearchPath: [String] = [
             "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
         ],
-        pollWhileCollapsed: Bool = false
+        pollWhileCollapsed: Bool = false,
+        language: Language? = nil
     ) {
         self.version = version
         self.density = density
@@ -97,6 +107,17 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.silentTTLMultiplier = silentTTLMultiplier
         self.pluginExecutableSearchPath = pluginExecutableSearchPath
         self.pollWhileCollapsed = pollWhileCollapsed
+        self.language = language
+    }
+
+    /// The language actually in force.
+    ///
+    /// The Mac's own preference is handed in rather than read here, for the
+    /// same reason `resolved(systemIsDark:hour:)` is handed the appearance:
+    /// what the system is set to is the world's business, and a settings type
+    /// that reaches out to ask cannot be tested without the world.
+    public func resolvedLanguage(systemPreferred: Language) -> Language {
+        language ?? systemPreferred
     }
 
     /// Brings decoded settings into ranges that make sense.
@@ -240,6 +261,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
             ?? defaults.pluginExecutableSearchPath
         pollWhileCollapsed = try c.decodeIfPresent(Bool.self, forKey: .pollWhileCollapsed)
             ?? defaults.pollWhileCollapsed
+        // Read as a string and mapped rather than decoded as the enum, for the
+        // same reason as every other name in this file: a language uDeck no
+        // longer has should cost the operator that one setting, not the file.
+        language = (try c.decodeIfPresent(String.self, forKey: .language)).flatMap(Language.init(rawValue:))
     }
 
     /// These settings with `glass` and `ink` brought into line with the look

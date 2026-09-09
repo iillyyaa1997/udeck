@@ -9,6 +9,7 @@ import UDeckCore
 /// keeps a panel of plugins from anyone looking like a collection of unrelated
 /// applications.
 struct DeckWindowView: View {
+    @Environment(\.strings) private var strings
     var model: DeckModel
     var theme: DeckTheme
     var window: GridWindow
@@ -54,8 +55,8 @@ struct DeckWindowView: View {
         .opacity(isMoving ? 0.85 : 1)
         .onHover { isHovering = $0 }
         .contextMenu {
-            Button("Refresh now") { model.refresh(window.pluginID) }
-            Button("Remove from this tab", role: .destructive) {
+            Button(strings(.cardRefreshNow)) { model.refresh(window.pluginID) }
+            Button(strings(.cardRemoveFromTab), role: .destructive) {
                 model.removeWindow(window.id, from: tabID)
             }
         }
@@ -96,7 +97,7 @@ struct DeckWindowView: View {
                 .onChanged { onDragChanged($0.translation) }
                 .onEnded { _ in onGestureEnded() }
         )
-        .help("Drag to move this window")
+        .help(strings(.cardDragToMove))
     }
 
     /// Says out loud when a card is older than it claims to be.
@@ -163,6 +164,6 @@ struct DeckWindowView: View {
                     .onChanged { onResizeChanged($0.translation) }
                     .onEnded { _ in onGestureEnded() }
             )
-            .help("Drag to resize, in whole cells")
+            .help(strings(.cardDragToResize))
     }
 }

@@ -3,6 +3,7 @@ import UDeckCore
 
 /// The working panel: tabs across the top, a grid of windows below.
 struct WorkspaceView: View {
+    @Environment(\.strings) private var strings
     @Bindable var shell: ShellState
     var model: DeckModel
     var theme: DeckTheme
@@ -39,7 +40,7 @@ struct WorkspaceView: View {
                     .padding(.horizontal, 9).padding(.vertical, 4)
             }
             .buttonStyle(.plain)
-            .help("Add a tab")
+            .help(strings(.tabAdd))
 
             Spacer(minLength: 8)
             controls
@@ -51,7 +52,7 @@ struct WorkspaceView: View {
         let isSelected = tab.id == model.layout.selectedTabID
 
         if shell.tabRename?.tabID == tab.id {
-            TextField("Tab name", text: Binding(
+            TextField(strings(.tabName), text: Binding(
                 get: { shell.tabRename?.text ?? tab.name },
                 set: { shell.tabRename = ShellState.TabRename(tabID: tab.id, text: $0) }
             ))
@@ -93,12 +94,12 @@ struct WorkspaceView: View {
                     }
             }
             .buttonStyle(.plain)
-            .help(isSelected ? "Click again to rename" : "Show this tab")
+            .help(isSelected ? strings(.tabClickAgainToRename) : strings(.tabShowThis))
             .contextMenu {
-                Button("Rename") {
+                Button(strings(.tabRename)) {
                     shell.tabRename = ShellState.TabRename(tabID: tab.id, text: tab.name)
                 }
-                Button("Close tab", role: .destructive) { model.removeTab(tab.id) }
+                Button(strings(.tabClose), role: .destructive) { model.removeTab(tab.id) }
                     .disabled(model.layout.tabs.count <= 1)
             }
         }
@@ -114,18 +115,18 @@ struct WorkspaceView: View {
 
     private var controls: some View {
         HStack(spacing: 5) {
-            iconButton("rectangle.compress.vertical", help: "Density: \(model.settings.density.rawValue)") {
+            iconButton("rectangle.compress.vertical", help: strings(.controlDensity(name: strings(model.settings.density.namePhrase)))) {
                 var settings = model.settings
                 settings.density = nextDensity(after: settings.density)
                 model.update(settings: settings)
             }
-            iconButton("arrow.clockwise", help: "Refresh everything now") {
+            iconButton("arrow.clockwise", help: strings(.controlRefresh)) {
                 model.refreshAll(reason: .manual)
             }
-            iconButton("gearshape", help: "Settings") {
+            iconButton("gearshape", help: strings(.controlSettings)) {
                 shell.onOpenSettings()
             }
-            iconButton("chevron.up", help: "Send the panel away") {
+            iconButton("chevron.up", help: strings(.controlSendAway)) {
                 shell.onCollapse()
             }
             iconButton(

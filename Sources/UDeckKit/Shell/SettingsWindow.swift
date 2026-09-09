@@ -26,7 +26,7 @@ public final class SettingsWindowController {
                 backing: .buffered,
                 defer: false
             )
-            window.title = "uDeck Settings"
+            window.title = model.strings(.settingsWindowTitle)
             window.isReleasedWhenClosed = false
             window.center()
             window.contentView = NSHostingView(rootView: SettingsView(model: model))
@@ -49,6 +49,9 @@ public final class SettingsWindowController {
     /// ignored him. A panel written in dark ink is a bright panel, so the
     /// window that configures it is bright too.
     public func applyAppearance() {
+        // The title is a sentence too, and the language can change while the
+        // window is merely closed rather than gone.
+        window?.title = model.strings(.settingsWindowTitle)
         window?.appearance = NSAppearance(
             named: model.settings.ink == .dark ? .aqua : .darkAqua
         )

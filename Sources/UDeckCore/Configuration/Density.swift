@@ -11,6 +11,14 @@ public enum Density: String, Codable, CaseIterable, Sendable {
     case normal
     case cozy
 
+    public var namePhrase: Phrase {
+        switch self {
+        case .compact: .densityCompact
+        case .normal: .densityNormal
+        case .cozy: .densityCozy
+        }
+    }
+
     /// Spacing between windows in the grid, in points.
     public var gridSpacing: CGFloat {
         switch self {

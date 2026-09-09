@@ -332,6 +332,16 @@ public final class DeckModel {
         Calendar.current.component(.hour, from: Date())
     }
 
+    /// Everything uDeck says, in the language in force.
+    ///
+    /// Derived rather than stored, so that changing the setting changes the
+    /// application in the same instant the switch is thrown — the settings
+    /// window is written in the language it is setting, and a stored copy would
+    /// mean the screen you changed it on was the last one to notice.
+    public var strings: Strings {
+        Strings(settings.resolvedLanguage(systemPreferred: Language.preferred()))
+    }
+
     public func setEnabled(_ enabled: Bool, for id: PluginIdentifier) {
         pluginSettings.setEnabled(enabled, for: id)
         savePluginSettings()

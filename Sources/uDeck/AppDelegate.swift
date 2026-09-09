@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.onSettingsChanged = { [weak self, weak controller] _ in
             controller?.settingsChanged()
             self?.settings.applyAppearance()
+            self?.rebuildStatusMenu()
         }
         self.model = model
         self.screens = screens
@@ -80,21 +81,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             systemSymbolName: "rectangle.topthird.inset.filled",
             accessibilityDescription: "uDeck"
         )
+        rebuildStatusMenu()
+    }
 
+    /// The menu, in the language currently in force.
+    ///
+    /// Rebuilt rather than created once, because the language is a setting: a
+    /// menu assembled at launch is the one part of uDeck that would keep
+    /// speaking English after the operator asked for Russian, and it is also
+    /// the part he would look at first to check whether the setting worked.
+    private func rebuildStatusMenu() {
+        // A settings change can arrive before the status item exists: resolving
+        // the look on the way up writes settings, and that is a change like any
+        // other. Nothing to rebuild yet is not a problem — `installStatusItem`
+        // calls this itself once there is.
+        guard statusItem != nil else { return }
+        let strings = model.strings
         let menu = NSMenu()
-        menu.addItem(withTitle: "Show uDeck", action: #selector(showPanel), keyEquivalent: "")
+        menu.addItem(withTitle: strings(.menuShowPanel), action: #selector(showPanel), keyEquivalent: "")
             .target = self
-        menu.addItem(withTitle: "Refresh all plugins", action: #selector(refreshAll), keyEquivalent: "")
+        menu.addItem(withTitle: strings(.menuRefreshAll), action: #selector(refreshAll), keyEquivalent: "")
             .target = self
-        menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
-            .target = self
-        menu.addItem(.separator())
-        menu.addItem(withTitle: "Open the plugins folder", action: #selector(openPlugins), keyEquivalent: "")
-            .target = self
-        menu.addItem(withTitle: "Copy diagnostics", action: #selector(copyDiagnostics), keyEquivalent: "")
+        menu.addItem(withTitle: strings(.menuSettings), action: #selector(openSettings), keyEquivalent: ",")
             .target = self
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit uDeck", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(withTitle: strings(.menuOpenPluginsFolder), action: #selector(openPlugins), keyEquivalent: "")
+            .target = self
+        menu.addItem(withTitle: strings(.menuCopyDiagnostics), action: #selector(copyDiagnostics), keyEquivalent: "")
+            .target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: strings(.menuQuit), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         statusItem.menu = menu
     }
 
