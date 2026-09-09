@@ -8,3 +8,6 @@ dist/
 __pycache__/
 *.pyc
 dist/
+
+# Worktrees live in the repository so they are easy to find, and are never committed.
+.worktrees/
