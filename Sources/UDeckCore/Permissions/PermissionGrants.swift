@@ -114,13 +114,23 @@ public enum PermissionGate {
     /// grant for exactly that path. A plugin that wants to run its own bundled
     /// tool has to say so, and the operator gets to see the path they are
     /// agreeing to.
-    public static func mayRun(_ action: CardAction, grant: PluginGrant?) -> Bool {
+    ///
+    /// The *current* manifest has to ask for it too, and the grant has to have
+    /// been decided for the version now on disk — the same two conditions
+    /// `launchDecision` applies. Without them a grant outlived what it was
+    /// given for: version 1 asked for `exec: ["open"]` and got it, version 2
+    /// replaced it asking for nothing, and the permission screen said the
+    /// plugin asks for nothing while its buttons still ran `open`.
+    public static func mayRun(
+        _ action: CardAction,
+        requestedBy manifest: PluginManifest,
+        grant: PluginGrant?
+    ) -> Bool {
         guard let executable = action.run.first, !executable.isEmpty else { return false }
-        guard let grant else { return false }
-        if grant.granted.contains(.exec(executable)) { return true }
-        // A path is only ever matched literally.
-        guard !executable.contains("/") else { return false }
-        return grant.granted.contains(.exec(executable))
+        guard let grant, grant.decidedForVersion == manifest.version else { return false }
+        let capability = Capability.exec(executable)
+        guard manifest.permissions.capabilities.contains(capability) else { return false }
+        return grant.granted.contains(capability)
     }
 
     /// May the host hand this plugin the named secret?

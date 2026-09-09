@@ -393,7 +393,8 @@ public final class DeckModel {
     /// The host runs it, not the plugin — which is what makes the grant real:
     /// the refusal happens in code the plugin does not control.
     public func run(_ action: CardAction, from id: PluginIdentifier) -> String? {
-        guard PermissionGate.mayRun(action, grant: grants[id]) else {
+        guard let manifest = plugin(withID: id)?.manifest,
+              PermissionGate.mayRun(action, requestedBy: manifest, grant: grants[id]) else {
             return "\(action.run.first ?? "that command") is not one of the commands \(id) was allowed to run"
         }
         guard let executable = resolve(command: action.run[0], for: id) else {
@@ -445,22 +446,9 @@ public final class DeckModel {
     /// or a bare name on the configured search path — never on whatever `PATH`
     /// uDeck happened to inherit.
     private func resolve(command: String, for id: PluginIdentifier) -> URL? {
-        if command.hasPrefix("/") {
-            let url = URL(fileURLWithPath: command)
-            return FileManager.default.isExecutableFile(atPath: url.path) ? url : nil
-        }
-        if command.contains("/") {
-            guard let directory = plugin(withID: id)?.directory.standardizedFileURL else { return nil }
-            let url = directory.appendingPathComponent(command).standardizedFileURL
-            guard url.path.hasPrefix(directory.path + "/"),
-                  FileManager.default.isExecutableFile(atPath: url.path) else { return nil }
-            return url
-        }
-        for entry in settings.pluginExecutableSearchPath {
-            let candidate = URL(fileURLWithPath: entry).appendingPathComponent(command)
-            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }
-        }
-        return nil
+        guard let directory = plugin(withID: id)?.directory else { return nil }
+        let discovery = PluginDiscovery(searchPath: settings.pluginExecutableSearchPath)
+        return try? discovery.resolveExecutable(command, in: directory).get()
     }
 
     // MARK: - The plugins folder

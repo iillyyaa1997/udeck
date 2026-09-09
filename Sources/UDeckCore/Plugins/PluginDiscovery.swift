@@ -272,7 +272,12 @@ public struct PluginDiscovery: Sendable {
     /// never on the environment's `PATH`: uDeck can be launched from Finder,
     /// from a shell or by launchd, and inheriting whichever `PATH` happened to
     /// be around makes a plugin work in one and fail in another.
-    private func resolveExecutable(_ command: String, in directory: URL) -> Result<URL, DiscoveryProblem> {
+    /// Public because a card's action is resolved the same way and used to be
+    /// resolved by a second copy of these rules, which had drifted: that one
+    /// compared paths lexically, so a plugin shipping `tools/refresh` as a
+    /// symlink out of its folder got the operator's consent for one file and
+    /// ran another. One set of rules, one place.
+    public func resolveExecutable(_ command: String, in directory: URL) -> Result<URL, DiscoveryProblem> {
         guard !command.isEmpty else { return .failure(.executableMissing(path: "(empty)")) }
 
         func check(_ url: URL) -> Result<URL, DiscoveryProblem>? {

@@ -169,12 +169,37 @@ struct PermissionTests {
         #expect(PermissionGate.launchDecision(for: m, grant: nil, enabled: false) == .disabled)
     }
 
+    /// The manifest an action is claimed to come from. `mayRun` needs it as
+    /// well as the grant: consent is for what *this* version asked for.
+    func asking(_ exec: [String], version: String = "1.0.0") -> PluginManifest {
+        manifest(PermissionRequest(exec: exec), version: version)
+    }
+
     @Test("an action runs only when exec was granted for that command")
     func actionsAreGatedByExec() {
+        let m = asking(["kubectl"])
         let grant = PluginGrant(granted: [.exec("kubectl")], decidedForVersion: "1.0.0")
-        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["kubectl", "get", "pods"]), grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["rm", "-rf", "/"]), grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["kubectl"]), grant: nil))
+        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["kubectl", "get", "pods"]), requestedBy: m, grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["rm", "-rf", "/"]), requestedBy: m, grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["kubectl"]), requestedBy: m, grant: nil))
+    }
+
+    /// A grant is decided against a version. Keeping it usable after the plugin
+    /// changed under it means the permission screen and the buttons disagree:
+    /// the screen reads the new manifest, the buttons ran on the old consent.
+    @Test("a grant does not outlive the version it was given for")
+    func aGrantDoesNotOutliveItsVersion() {
+        let action = CardAction(label: "a", run: ["open", "/Applications"])
+        let grant = PluginGrant(granted: [.exec("open")], decidedForVersion: "1.0.0")
+
+        #expect(PermissionGate.mayRun(action, requestedBy: asking(["open"]), grant: grant))
+        // Same id, new version, asks for nothing: the screen says so, and now
+        // the button agrees with the screen.
+        #expect(!PermissionGate.mayRun(action, requestedBy: asking([], version: "2.0.0"), grant: grant))
+        // Same version, but this manifest no longer asks for it either.
+        #expect(!PermissionGate.mayRun(action, requestedBy: asking([]), grant: grant))
+        // Asks for it, but the grant was decided against a different version.
+        #expect(!PermissionGate.mayRun(action, requestedBy: asking(["open"], version: "2.0.0"), grant: grant))
     }
 
     /// A grant for `ps` is read by the operator as "may run the `ps` on this
@@ -185,20 +210,22 @@ struct PermissionTests {
     /// sheet said something untrue.
     @Test("a grant for a command name does not permit a different file with that name")
     func aNameIsNotAPath() {
+        let m = asking(["ps"])
         let grant = PluginGrant(granted: [.exec("ps")], decidedForVersion: "1.0.0")
-        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["ps"]), grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["/bin/ps"]), grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["/tmp/evil/ps"]), grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["../../tmp/evil/ps"]), grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["./ps"]), grant: grant))
+        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["ps"]), requestedBy: m, grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["/bin/ps"]), requestedBy: m, grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["/tmp/evil/ps"]), requestedBy: m, grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["../../tmp/evil/ps"]), requestedBy: m, grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["./ps"]), requestedBy: m, grant: grant))
     }
 
     @Test("a plugin that wants to run its own tool has to name the path, and the operator sees it")
     func aPathIsMatchedLiterally() {
+        let m = asking(["./tools/refresh"])
         let grant = PluginGrant(granted: [.exec("./tools/refresh")], decidedForVersion: "1.0.0")
-        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["./tools/refresh"]), grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["refresh"]), grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["./tools/other"]), grant: grant))
+        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["./tools/refresh"]), requestedBy: m, grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["refresh"]), requestedBy: m, grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["./tools/other"]), requestedBy: m, grant: grant))
         // And the operator reads the path they are agreeing to.
         #expect(Capability.exec("./tools/refresh").summary == "run ./tools/refresh")
     }
@@ -206,7 +233,7 @@ struct PermissionTests {
     @Test("an action with no command never runs")
     func emptyActionRefused() {
         let grant = PluginGrant(granted: [.exec("ps")], decidedForVersion: "1.0.0")
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: []), grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: []), requestedBy: asking(["ps"]), grant: grant))
     }
 
     @Test("secrets are the one capability the host genuinely holds for a running plugin")
@@ -313,5 +340,29 @@ struct ContainmentTests {
         let plugin = PluginDiscovery(searchPath: ["/usr/bin", "/bin"]).load(directory)
         #expect(plugin.problems.isEmpty, "\(plugin.problems.map(\.description))")
         #expect(plugin.isUsable)
+    }
+
+    /// A card's action is resolved by the same rules, because it used to be
+    /// resolved by a second copy of them that compared paths lexically. The
+    /// operator agreed to `./tools/refresh`; the plugin then pointed
+    /// `tools/refresh` at something else and uDeck ran that.
+    @Test("an action's command is contained by the same rule as the manifest's")
+    func actionPathsAreContainedToo() throws {
+        let temp = TemporaryDirectory()
+        let directory = temp.url.appendingPathComponent("plugins/swap", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent("tools"), withIntermediateDirectories: true
+        )
+        try FileManager.default.createSymbolicLink(
+            at: directory.appendingPathComponent("tools/refresh"),
+            withDestinationURL: URL(fileURLWithPath: "/bin/sh")
+        )
+
+        let discovery = PluginDiscovery(searchPath: ["/usr/bin", "/bin"])
+        let resolved = discovery.resolveExecutable("./tools/refresh", in: directory)
+        guard case .failure(let problem) = resolved else {
+            Issue.record("a symlink out of the folder resolved to \(resolved)"); return
+        }
+        #expect(problem == .executableOutsidePluginFolder(command: "./tools/refresh"))
     }
 }
