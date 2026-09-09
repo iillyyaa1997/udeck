@@ -576,6 +576,34 @@ public final class PanelController {
         guard pid != ProcessInfo.processInfo.processIdentifier else { return }
 
         apply(.otherAppActivated)
+        reassertKeyWindow()
+    }
+
+    /// Takes the key window back after another application was activated.
+    ///
+    /// The panel's glass is dimmed by AppKit in a window that is not key, and
+    /// the island is that same glass at island size — so the island went dull
+    /// the moment the operator clicked into anything else, and stayed dull
+    /// until something happened to make the window key again. In practice that
+    /// meant opening the panel and closing it, which is why it read as "the
+    /// island is a different colour after opening and closing it": the reveal
+    /// took key status and left it behind.
+    ///
+    /// It has to be here rather than in `applyPhase`, which is where the panel
+    /// takes key status the rest of the time. Activating another application
+    /// while the panel is already away is not a change of phase — `apply`
+    /// resolves to collapsed, which is what it already was, and `applyPhase`
+    /// returns before it reaches the line that takes the key window. So the one
+    /// moment the island needed it was the one moment nothing ran.
+    ///
+    /// Not taken when another of uDeck's own windows already has it: the
+    /// settings window is key while a preset name is being typed into it, and
+    /// pulling the keyboard out of a field being typed in is a worse fault than
+    /// the one this fixes.
+    private func reassertKeyWindow() {
+        guard panel.isVisible else { return }
+        guard NSApp.keyWindow == nil || NSApp.keyWindow === panel else { return }
+        panel.makeKeyAndOrderFront(nil)
     }
 
     /// The screen arrangement changed: a display was plugged in or unplugged,
