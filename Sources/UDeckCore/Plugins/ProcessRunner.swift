@@ -82,33 +82,17 @@ public struct ProcessRunner: Sendable {
         timeout: TimeInterval
     ) async -> ProcessRunResult {
         let started = Date()
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        process.currentDirectoryURL = workingDirectory
-        process.environment = environment
-
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-        process.standardInput = FileHandle.nullDevice
-
         let collector = OutputCollector(limit: maximumOutputBytes)
-        collector.attach(stdout: outPipe.fileHandleForReading, stderr: errPipe.fileHandleForReading)
 
-        // Armed *before* the process starts. Assigning `terminationHandler`
-        // afterwards is a race that a fast producer wins: `echo '{}'` exits in
-        // milliseconds, and if it exits before the property is set, the handler
-        // is never called and the wait below never returns — that plugin stops
-        // updating for the rest of the session with no error anywhere.
-        let ended = TerminationSignal()
-        process.terminationHandler = { _ in ended.signal() }
-
+        let child: SpawnedProcess
         do {
-            try process.run()
+            child = try ProcessGroup.spawn(
+                executable: executable,
+                arguments: arguments,
+                workingDirectory: workingDirectory,
+                environment: environment
+            )
         } catch {
-            await collector.finish(after: 0, pollEvery: Self.drainPollInterval)
             return ProcessRunResult(
                 standardOutput: Data(),
                 standardError: Data("\(error)".utf8),
@@ -117,8 +101,18 @@ public struct ProcessRunner: Sendable {
             )
         }
 
-        let pid = process.processIdentifier
-        let stop = Stopper(pid: pid, grace: terminationGrace)
+        collector.attach(stdout: child.standardOutput, stderr: child.standardError)
+
+        // `waitid` blocks, so it gets a thread of its own rather than one of the
+        // cooperative pool's. The signal is armed before the wait starts, and
+        // both directions of it work: a producer that exits in milliseconds
+        // fires it before anybody is waiting, and it is remembered.
+        let ended = TerminationSignal()
+        let natural = NaturalTermination()
+        Thread.detachNewThread {
+            natural.record(ProcessGroup.waitForExit(pid: child.pid))
+            ended.signal()
+        }
 
         let outcome = Outcome()
 
@@ -126,7 +120,10 @@ public struct ProcessRunner: Sendable {
             try? await Task.sleep(nanoseconds: Seconds.nanoseconds(timeout))
             guard !Task.isCancelled else { return }
             outcome.recordTimeout(after: timeout)
-            await stop.terminate()
+            await ProcessGroup.terminate(
+                group: child.processGroup,
+                grace: terminationGrace, pollEvery: Self.limitCheckInterval
+            )
         }
 
         // A separate watcher for the output cap, for the same reason a deadline
@@ -136,7 +133,10 @@ public struct ProcessRunner: Sendable {
             while !Task.isCancelled {
                 if let overflow = collector.overflowBytes {
                     outcome.recordOverflow(bytes: overflow)
-                    await stop.terminate()
+                    await ProcessGroup.terminate(
+                        group: child.processGroup,
+                        grace: terminationGrace, pollEvery: Self.limitCheckInterval
+                    )
                     return
                 }
                 try? await Task.sleep(nanoseconds: Seconds.nanoseconds(Self.limitCheckInterval))
@@ -147,162 +147,41 @@ public struct ProcessRunner: Sendable {
 
         watchdog.cancel()
         limitWatcher.cancel()
+
+        // On *every* path, not only the two the watchers cover. A producer that
+        // starts something detached and then exits cleanly is the common shape
+        // of this, and it used to leave that child running once per poll for as
+        // long as the panel was open.
+        await ProcessGroup.terminate(
+            group: child.processGroup,
+            grace: terminationGrace, pollEvery: Self.limitCheckInterval
+        )
+        ProcessGroup.reap(pid: child.pid)
+
         await collector.finish(after: drainGrace, pollEvery: Self.drainPollInterval)
 
         return ProcessRunResult(
             standardOutput: collector.standardOutput,
             standardError: collector.standardError,
-            termination: outcome.resolve(
-                status: process.terminationStatus,
-                reason: process.terminationReason
-            ),
+            termination: outcome.resolve(natural: natural.value),
             duration: Date().timeIntervalSince(started)
         )
     }
 }
 
-/// Stops a producer and everything it started, politely first and then not.
-///
-/// The obvious implementation — give the child its own process group and signal
-/// the group — is not available here. Foundation's `Process` exposes no spawn
-/// attributes, and `setpgid` called from the parent afterwards always loses:
-/// `posix_spawn` has already exec'd the child by the time `run()` returns, and
-/// `setpgid` on a process that has exec'd fails with `EACCES`. So the tree is
-/// enumerated instead, before the first signal — once the direct child dies its
-/// children are re-parented to `launchd`, and a later enumeration would no
-/// longer connect them to anything.
-///
-/// Two things here are less obvious than they look.
-///
-/// **The grace period has to survive cancellation, or it is not a grace
-/// period.** When the producer dies on the polite signal — the common case —
-/// the run finishes and cancels this task, which makes the sleep below throw at
-/// once. Swallowing that would fall straight through to the second signal with
-/// no wait at all: pointless, because the process is already gone, and unsafe,
-/// because of the next paragraph.
-///
-/// **A pid is not an identity.** Between enumerating a process and signalling
-/// it, that process can exit and the system can hand its number to something
-/// else. Signalling on the strength of a remembered number is how a tool ends
-/// up killing a stranger's process. Each target therefore carries the moment it
-/// started, and is signalled only while that still matches.
-private struct Stopper: Sendable {
-    let pid: pid_t
-    let grace: TimeInterval
+/// How the child ended when nothing killed it, carried from the waiting thread.
+private final class NaturalTermination: @unchecked Sendable {
+    private let lock = NSLock()
+    private var termination: Termination = .exited(code: 0)
 
-    func terminate() async {
-        // One listing serves both finding the tree and checking the identities
-        // in it. Enumerating every process on the system is not free, and it
-        // was being done four times per termination.
-        let before = ProcessTree.snapshot()
-        let targets = before.identities(for: [pid] + before.descendants(of: pid))
-        signal(SIGTERM, to: targets, confirmedBy: before)
-
-        do {
-            try await Task.sleep(nanoseconds: Seconds.nanoseconds(grace))
-        } catch {
-            // Cancelled: the producer ended while we waited, which is what the
-            // polite signal was for. Nothing left to kill.
-            return
-        }
-
-        // A fresh listing, because time has passed and that is the whole point
-        // of checking identities before the unconditional signal.
-        signal(SIGKILL, to: targets, confirmedBy: ProcessTree.snapshot())
+    func record(_ value: Termination) {
+        lock.lock(); defer { lock.unlock() }
+        termination = value
     }
 
-    private func signal(
-        _ number: Int32,
-        to targets: [ProcessTree.Identity],
-        confirmedBy snapshot: ProcessTree.Snapshot
-    ) {
-        guard !targets.isEmpty else { return }
-        let stillThere = Set(snapshot.identities(for: targets.map(\.pid)))
-        for target in targets where target.pid > 1 {
-            guard stillThere.contains(target) else { continue }
-            kill(target.pid, number)
-        }
-    }
-}
-
-/// Finds processes, and tells them apart, by asking `ps`.
-enum ProcessTree {
-    /// A process, identified by more than its number.
-    ///
-    /// The start time is what makes this an identity rather than a handle: a
-    /// pid is reused as soon as the system feels like it.
-    struct Identity: Hashable, Sendable {
-        let pid: pid_t
-        let startedAt: String
-    }
-
-    /// One reading of the process table, so that finding a tree and checking
-    /// the identities in it do not each pay for their own.
-    struct Snapshot: Sendable {
-        let rows: [(identity: Identity, ppid: pid_t)]
-
-        /// Every process descended from `pid`, excluding `pid` itself.
-        func descendants(of pid: pid_t) -> [pid_t] {
-            var childrenByParent: [pid_t: [pid_t]] = [:]
-            for row in rows {
-                childrenByParent[row.ppid, default: []].append(row.identity.pid)
-            }
-
-            var found: [pid_t] = []
-            var frontier = [pid]
-            var seen: Set<pid_t> = [pid]
-            while let current = frontier.popLast() {
-                for child in childrenByParent[current] ?? [] where seen.insert(child).inserted {
-                    found.append(child)
-                    frontier.append(child)
-                }
-            }
-            return found
-        }
-
-        /// The identities of the given processes, as of this reading. Anything
-        /// that had already exited is simply absent.
-        func identities(for pids: [pid_t]) -> [Identity] {
-            let wanted = Set(pids)
-            return rows.filter { wanted.contains($0.identity.pid) }.map(\.identity)
-        }
-    }
-
-    /// Reads the process table. An empty snapshot means `ps` could not be run —
-    /// the caller still signals the direct child, so a failure here degrades to
-    /// the old behaviour rather than to no behaviour.
-    static func snapshot() -> Snapshot { Snapshot(rows: listing()) }
-
-    private static func listing() -> [(identity: Identity, ppid: pid_t)] {
-        guard let text = run(["/bin/ps", "-axo", "pid=,ppid=,lstart="]) else { return [] }
-        return text.split(separator: "\n").compactMap { line in
-            // `lstart` is a date containing spaces, so it is whatever remains
-            // after the two numeric columns rather than a field of its own.
-            let fields = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
-            guard fields.count == 3,
-                  let pid = pid_t(fields[0]), let ppid = pid_t(fields[1])
-            else { return nil }
-            let started = fields[2].trimmingCharacters(in: .whitespaces)
-            guard !started.isEmpty else { return nil }
-            return (Identity(pid: pid, startedAt: started), ppid)
-        }
-    }
-
-    private static func run(_ argv: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: argv[0])
-        process.arguments = Array(argv.dropFirst())
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        let data = (try? pipe.fileHandleForReading.readToEnd()) ?? nil
-        process.waitUntilExit()
-        return data.map { String(decoding: $0, as: UTF8.self) }
+    var value: Termination {
+        lock.lock(); defer { lock.unlock() }
+        return termination
     }
 }
 
@@ -340,10 +219,10 @@ private final class TerminationSignal: @unchecked Sendable {
     }
 }
 
-/// Why the host killed a process, if it did. `Process` reports a killed child as
-/// "uncaught signal", which on its own would be indistinguishable from a plugin
-/// that crashed — and telling an author "your plugin crashed" when in fact it
-/// ran too long would send them looking in the wrong place.
+/// Why the host killed a process, if it did. The kernel reports a killed child
+/// as "died on a signal", which on its own would be indistinguishable from a
+/// plugin that crashed — and telling an author "your plugin crashed" when in
+/// fact it ran too long would send them looking in the wrong place.
 private final class Outcome: @unchecked Sendable {
     private let lock = NSLock()
     private var timedOutAfter: TimeInterval?
@@ -359,11 +238,11 @@ private final class Outcome: @unchecked Sendable {
         if timedOutAfter == nil && overflowBytes == nil { overflowBytes = bytes }
     }
 
-    func resolve(status: Int32, reason: Process.TerminationReason) -> Termination {
+    func resolve(natural: Termination) -> Termination {
         lock.lock(); defer { lock.unlock() }
         if let seconds = timedOutAfter { return .timedOut(after: seconds) }
         if let bytes = overflowBytes { return .outputLimitExceeded(bytes: bytes) }
-        return reason == .uncaughtSignal ? .signalled(signal: status) : .exited(code: status)
+        return natural
     }
 }
 
