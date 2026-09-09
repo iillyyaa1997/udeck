@@ -700,14 +700,19 @@ public final class PanelController {
         // it will look when it is used, from the moment it is seen — which is
         // the only honest thing for a surface whose whole job is to be glanced
         // at from inside another application.
-        // Only where the material cannot be told to stop dimming itself. Making
-        // a glance take key status is a real change to how focus behaves, and
-        // it is worth it only as the fallback it now is: it covers the panel and
-        // cannot cover the islands, because one application has one key window
-        // and there is an island per screen.
-        if phase.isVisible, #available(macOS 26, *), !LiquidGlassBackground.canUnsubdue {
-            panel.makeKeyAndOrderFront(nil)
-        } else if phase.isVisible, #unavailable(macOS 26) {
+        // Always, not as a fallback.
+        //
+        // This was made conditional on the private switch being unavailable, on
+        // the reasoning that two fixes for one fault is one too many. It is not:
+        // they cover different windows and they land at different moments. The
+        // private switch is re-asserted before a draw, and the operator sees the
+        // panel arrive before it has drawn twice — so with the key window gone
+        // the colour was wrong until he clicked, which is worse than what it
+        // replaced. He said so within the minute.
+        //
+        // Being key is not being active: the frontmost application keeps the
+        // keyboard, measured with Finder in front throughout.
+        if phase.isVisible {
             panel.makeKeyAndOrderFront(nil)
         }
 
