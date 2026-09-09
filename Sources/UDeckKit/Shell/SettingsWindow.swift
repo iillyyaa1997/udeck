@@ -41,19 +41,21 @@ public final class SettingsWindowController {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// Dresses the settings window the way the panel is dressed.
+    /// Brings the window's own text into line with the settings.
     ///
-    /// It is an ordinary application window and was therefore following macOS,
-    /// which is the one thing it should not do: the operator sets a look for
-    /// uDeck, and the window he sets it in was the only part of uDeck that
-    /// ignored him. A panel written in dark ink is a bright panel, so the
-    /// window that configures it is bright too.
+    /// It used to dress the whole window as the panel was dressed — light ink
+    /// meant a dark window — on the reasoning that the window you set a look in
+    /// should wear it. In use that is the wrong thing entirely: the Text control
+    /// flips the panel's ink, and what the operator saw flip was the settings
+    /// window. "I change the text and the application's colour changes, not the
+    /// colours." A control has to change the thing it names, and the panel is
+    /// already on screen twice over — as the sample above the controls, and as
+    /// the panel itself.
+    ///
+    /// So the window follows macOS again, like every other window, and only its
+    /// title is ours to keep current: the language can change while the window
+    /// is merely closed rather than gone.
     public func applyAppearance() {
-        // The title is a sentence too, and the language can change while the
-        // window is merely closed rather than gone.
         window?.title = model.strings(.settingsWindowTitle)
-        window?.appearance = NSAppearance(
-            named: model.settings.ink == .dark ? .aqua : .darkAqua
-        )
     }
 }
