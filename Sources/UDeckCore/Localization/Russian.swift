@@ -64,6 +64,7 @@ struct Russian: Vocabulary {
         case .tintLighter: "Светлее"
         case .tintDarker: "Темнее"
         case .lookStrength: "Сила"
+        case .lookTintColour: "Цвет заливки"
         case .lookText: "Текст"
         case .lookBrightness: "Яркость"
         case .lookColour: "Цвет"

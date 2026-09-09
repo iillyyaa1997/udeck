@@ -60,6 +60,7 @@ struct English: Vocabulary {
         case .tintLighter: "Lighter"
         case .tintDarker: "Darker"
         case .lookStrength: "Strength"
+        case .lookTintColour: "Tint colour"
         case .lookText: "Text"
         case .lookBrightness: "Brightness"
         case .lookColour: "Colour"

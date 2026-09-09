@@ -202,7 +202,7 @@ struct GlassTint<S: Shape>: View {
 
     var body: some View {
         if let tint = glass.tintComponents {
-            shape.fill(Color(white: tint.white).opacity(tint.alpha * glass.opacity))
+            shape.fill(Color(PaletteColor(tint.color, alpha: tint.alpha * glass.opacity)))
         }
     }
 }

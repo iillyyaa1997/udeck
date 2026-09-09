@@ -274,8 +274,7 @@ public struct Palette: Equatable, Sendable {
 
     private static func panelTint(for look: PanelLook) -> PaletteColor {
         if let tint = look.glass.tintComponents {
-            let level = InkColor(red: tint.white, green: tint.white, blue: tint.white)
-            return PaletteColor(level, alpha: tint.alpha)
+            return PaletteColor(tint.color, alpha: tint.alpha)
         }
         let implied: InkColor = look.ink == .light ? shadowInk : .white
         return PaletteColor(implied, alpha: untintedPanelAlpha)

@@ -43,18 +43,36 @@ public struct GlassAppearance: Codable, Equatable, Sendable {
     /// How far towards that colour, from 0 (no tint at all) to 1 (opaque).
     public var tintStrength: Double
 
+    /// A colour for the glass, or `nil` for the grey `tintIsLight` decides.
+    ///
+    /// The tint could only ever be white or black at a strength, so the panel
+    /// could be paler or darker than what was behind it and nothing else — no
+    /// slate, no green, no colour at all. That is the whole of what the
+    /// operator asked for and there was no way to ask for it.
+    ///
+    /// Optional for the same reason the ink's colour is: grey is the right
+    /// default and stays it, nothing changes for anyone who does not open the
+    /// control, and a settings file says nothing until it is used. When it is
+    /// set, `tintIsLight` no longer decides the colour — the colour does — but
+    /// it still decides which way the ink and the hairlines read, because that
+    /// follows from whether the panel is darker or brighter than its
+    /// surroundings rather than from its hue.
+    public var tintColor: InkColor?
+
     public init(
         style: GlassStyle = .regular,
         opacity: Double = 1,
         tinted: Bool = true,
         tintIsLight: Bool = true,
-        tintStrength: Double = 0.16
+        tintStrength: Double = 0.16,
+        tintColor: InkColor? = nil
     ) {
         self.style = style
         self.opacity = opacity
         self.tinted = tinted
         self.tintIsLight = tintIsLight
         self.tintStrength = tintStrength
+        self.tintColor = tintColor
     }
 
     /// See `GestureTuning.init(from:)` — same tolerance, same reasoning.
@@ -70,18 +88,24 @@ public struct GlassAppearance: Codable, Equatable, Sendable {
             opacity: try c.decodeIfPresent(Double.self, forKey: .opacity) ?? d.opacity,
             tinted: try c.decodeIfPresent(Bool.self, forKey: .tinted) ?? d.tinted,
             tintIsLight: try c.decodeIfPresent(Bool.self, forKey: .tintIsLight) ?? d.tintIsLight,
-            tintStrength: try c.decodeIfPresent(Double.self, forKey: .tintStrength) ?? d.tintStrength
+            tintStrength: try c.decodeIfPresent(Double.self, forKey: .tintStrength) ?? d.tintStrength,
+            tintColor: try c.decodeIfPresent(InkColor.self, forKey: .tintColor) ?? d.tintColor
         )
     }
 
-    /// The white level and alpha to build the tint from, or `nil` for glass
-    /// left exactly as the system colours it.
+    /// The colour and alpha to build the tint from, or `nil` for glass left
+    /// exactly as the system colours it.
     ///
     /// Returned as numbers rather than a colour because this target has no
     /// AppKit — the view that needs an `NSColor` is the one that can make one.
-    public var tintComponents: (white: Double, alpha: Double)? {
+    /// Without a chosen colour it is the white or black `tintIsLight` names,
+    /// which is what it always was.
+    public var tintComponents: (color: InkColor, alpha: Double)? {
         guard tinted, tintStrength > 0 else { return nil }
-        return (tintIsLight ? 1 : 0, tintStrength)
+        let plain: InkColor = tintIsLight
+            ? InkColor(red: 1, green: 1, blue: 1)
+            : InkColor(red: 0, green: 0, blue: 0)
+        return (tintColor?.validated() ?? plain, tintStrength)
     }
 
     /// How far the tint is allowed to go.
@@ -113,6 +137,7 @@ public struct GlassAppearance: Codable, Equatable, Sendable {
         }
         result.opacity = clamp(result.opacity, Self.opacityRange, 1)
         result.tintStrength = clamp(result.tintStrength, Self.tintStrengthRange, 0.16)
+        result.tintColor = result.tintColor?.validated()
         return result
     }
 }

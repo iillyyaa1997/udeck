@@ -137,8 +137,18 @@ struct GlassAppearanceTests {
 
     @Test("the tint leans the way it is told, and only when it is on")
     func tintComponents() {
-        #expect(GlassAppearance(tinted: true, tintIsLight: true, tintStrength: 0.2).tintComponents?.white == 1)
-        #expect(GlassAppearance(tinted: true, tintIsLight: false, tintStrength: 0.2).tintComponents?.white == 0)
+        #expect(GlassAppearance(tinted: true, tintIsLight: true, tintStrength: 0.2).tintComponents?.color
+                == InkColor(red: 1, green: 1, blue: 1))
+        #expect(GlassAppearance(tinted: true, tintIsLight: false, tintStrength: 0.2).tintComponents?.color
+                == InkColor(red: 0, green: 0, blue: 0))
+        // A chosen colour wins over the lean, which then decides only which way
+        // the ink and the hairlines read.
+        #expect(GlassAppearance(tinted: true, tintIsLight: true, tintStrength: 0.2,
+                               tintColor: InkColor(red: 0.2, green: 0.3, blue: 0.4)).tintComponents?.color
+                == InkColor(red: 0.2, green: 0.3, blue: 0.4))
+        // And it is still nothing at all when the tint is off, colour or no.
+        #expect(GlassAppearance(tinted: false, tintStrength: 0.5,
+                               tintColor: InkColor(red: 0.2, green: 0.3, blue: 0.4)).tintComponents == nil)
         #expect(GlassAppearance(tinted: true, tintIsLight: true, tintStrength: 0.2).tintComponents?.alpha == 0.2)
         // Zero strength is the same as off: nothing to hand the material.
         #expect(GlassAppearance(tinted: true, tintStrength: 0).tintComponents == nil)

@@ -73,6 +73,7 @@ public enum Phrase: Sendable, Equatable {
     case tintLighter
     case tintDarker
     case lookStrength
+    case lookTintColour
     case lookText
     case lookBrightness
     case lookColour

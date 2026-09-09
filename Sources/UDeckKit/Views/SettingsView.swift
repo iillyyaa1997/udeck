@@ -530,6 +530,47 @@ private struct LookSettings: View {
                     .disabled(!editedLook.glass.tinted)
             }
 
+            GridRow {
+                label(strings(.lookTintColour))
+                HStack(spacing: 10) {
+                    // Empty means the grey that "Lighter"/"Darker" names, which
+                    // is what the tint always was. The toggle is the switch
+                    // between "a shade of the background" and "a colour", and
+                    // it reads better than a colour well that silently means
+                    // grey when nobody has touched it.
+                    Toggle("", isOn: Binding(
+                        get: { editedLook.glass.tintColor != nil },
+                        set: { wantsColour in
+                            var settings = model.settings
+                            var look = settings.theme.look(forDark: edited)
+                            look.glass.tintColor = wantsColour
+                                ? (look.glass.tintIsLight ? .white : InkColor(red: 0, green: 0, blue: 0))
+                                : nil
+                            settings.theme.setLook(look, forDark: edited)
+                            model.update(settings: settings)
+                        }
+                    ))
+                    .labelsHidden()
+                    .disabled(!editedLook.glass.tinted)
+
+                    if let colour = editedLook.glass.tintColor {
+                        ColorPicker("", selection: Binding(
+                            get: { Color(red: colour.red, green: colour.green, blue: colour.blue) },
+                            set: { newValue in
+                                guard let rgb = InkColor(newValue) else { return }
+                                var settings = model.settings
+                                var look = settings.theme.look(forDark: edited)
+                                look.glass.tintColor = rgb
+                                settings.theme.setLook(look, forDark: edited)
+                                model.update(settings: settings)
+                            }
+                        ), supportsOpacity: false)
+                        .labelsHidden()
+                        .disabled(!editedLook.glass.tinted)
+                    }
+                }
+            }
+
             divider
 
             GridRow {
