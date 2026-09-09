@@ -682,6 +682,28 @@ public final class PanelController {
         lastAppliedPhase = phase
         panel.orderFrontRegardless()
 
+        // A visible panel is a key window, whatever else is going on.
+        //
+        // The system's material is dimmed in a window that is not key — that is
+        // what AppKit does to every inactive window, and the glass inherits it:
+        // `NSGlassEffectView` has a `_windowChangedKeyState` and a private
+        // `_subduedState` to prove it. Measured over a flat grey backdrop, the
+        // same panel read 93.2/255 while merely hovered and 122.0 after a click,
+        // and the click is what made the window key. That is the whole of "у
+        // чёлки одна, а если нажать то другая", and every other explanation
+        // offered for it — the tint, the material's size, the backdrop — was
+        // wrong.
+        //
+        // Being key is not being active. The frontmost application stays
+        // frontmost and keeps the keyboard; this was measured too, with Finder
+        // in front throughout. What it buys is that the panel is drawn the way
+        // it will look when it is used, from the moment it is seen — which is
+        // the only honest thing for a surface whose whole job is to be glanced
+        // at from inside another application.
+        if phase.isVisible {
+            panel.makeKeyAndOrderFront(nil)
+        }
+
         guard animated else {
             shell.panelRect = plan.panelRect
             settleWindow()
