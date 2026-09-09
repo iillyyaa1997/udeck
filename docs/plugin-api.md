@@ -105,12 +105,12 @@ plugin set under version control somewhere else.
 | `api` | yes | The contract version this plugin is written against. Currently `1`. |
 | `kind` | yes | `poll` or `resident`. Only `poll` is implemented; see [Runtime kinds](#runtime-kinds). |
 | `run` | yes | The command, as an argument vector. Never a shell string. |
-| `interval` | for `poll` | Seconds between runs. |
-| `timeout` | for `poll` | Seconds a single run may take. Must be shorter than `interval`. |
+| `interval` | for `poll` | Seconds between runs. At least **1** — a producer is a whole process, and asking for one more often than that is a busy loop rather than a poll. |
+| `timeout` | for `poll` | Seconds a single run may take. At least **0.05**, and shorter than `interval`. |
 | `description`, `author`, `homepage` | no | Shown to the operator. |
 | `permissions` | no | What the plugin needs. See [Permissions](#permissions). |
 | `settings` | no | Values the operator can change, which uDeck renders a settings screen for. |
-| `window` | no | Size hints in grid cells: `defaultWidth`/`minWidth` in columns (1–12), `defaultHeight`/`minHeight` in row units. |
+| `window` | no | Size hints in grid cells: `defaultWidth`/`minWidth` in columns (1–12), `defaultHeight`/`minHeight` in row units (1–24). A height past 24 is refused rather than quietly drawn as 24. |
 
 ### How `run` is resolved
 
@@ -267,6 +267,18 @@ path, a UTF-8 locale, and nothing carried over from however uDeck was started.
 
 `confirm`, when present, asks the operator before running. Use it for anything
 that changes something.
+
+**The grant follows the version, and the manifest has to still be asking.** A
+grant is decided against the `version` in your manifest, so bumping it re-asks —
+and an action runs only when the manifest on disk *now* declares `exec` for that
+command. A version that drops a permission drops the buttons that used it, in
+the same release rather than the next one the operator happens to reinstall.
+
+**A relative path is resolved with symlinks followed, on both sides.** Declaring
+`exec: ["./tools/refresh"]` means the file at that path inside your folder. If
+it is a symlink pointing outside the folder, it does not run — the operator read
+a path and agreed to it, and a name that can be repointed afterwards is not a
+path they agreed to.
 
 ---
 
@@ -494,7 +506,9 @@ lower one keeps working — that is what the number is for.
   thousand times a day. Read small files; avoid walking large directories.
 * **Fail partially, not totally.** One unreadable file out of thirty should
   count as one unreadable file, not poison the card.
-* **Do not print more than a megabyte.** uDeck stops a producer that does.
+* **Do not print more than a megabyte.** uDeck stops a producer that does, and
+  keeps only the first megabyte — the count it reports is what you actually
+  sent, the buffer is what it was willing to hold.
 
 ### What uDeck does when a producer misbehaves
 
@@ -509,6 +523,12 @@ Each of these produces a different, readable message on the card:
 | Printed too much | `the producer printed more than the 1048576-byte limit` |
 | Could not be started | the reason it could not |
 | Was never permitted | which capability is missing |
+
+**And it is asked again less often.** After a failure the wait doubles — 5 s,
+10 s, 20 s — capped at a minute, and reset by the first run that produces a
+card. A plugin that is broken should not cost the machine what a plugin that
+works costs. The operator's ⟳ button ignores the backoff, so the way to test a
+fix is to press it rather than to wait.
 
 ---
 
@@ -527,7 +547,14 @@ them out. So a card is also bounded by what it asks uDeck to draw:
 | Columns in a `table` | 12 |
 | Lines in a `log` | 200 |
 | Values in a `spark` | 512 |
+| `actions` on a card | 12 |
+| Words in one action's `run` | 64 |
 | Characters in any single piece of text | 1000 |
+
+"Any single piece of text" is every string uDeck draws, an action's `label` and
+`confirm` and each word of its `run` included. A card is a card, not a control
+panel: if you have twelve buttons, the thirteenth is telling you the plugin
+wants a window of its own rather than a card.
 
 Going over is not an error — the card is drawn up to the limit and gains a row
 saying it was cut short, so a card that is mostly useful and slightly too long

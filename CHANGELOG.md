@@ -64,6 +64,34 @@ The first working version: the shell, the plugin runtime, and one plugin.
 - **`resident` plugins are described by the manifest format** and not
   implemented, so that adding them later cannot break plugins written today.
 
+### uDeck is a platform a plugin cannot break
+
+An audit of what a plugin could still do to the host, and what it found:
+
+- **Two traps a manifest could reach.** `"interval": 1e308` is correctly
+  rejected and the settings row for the plugin it rejected still formatted it —
+  `Int(someDouble)` traps outside `Int`'s range. A setting declaring only
+  `"min": 9223372036854775807` overflowed computing its editing range. A trap
+  cannot be caught; both took the process.
+- **Three ways to freeze the panel that the card limits did not cover.**
+  `actions` were unbounded in count, label and argv; `canvas` and `unsupported`
+  rows walked past the trimming, so a 900 KB row *name* was a 900 KB string to
+  shape; and the output cap bounded what was noticed rather than what was kept,
+  so a fast producer could make a 1 MiB limit retain hundreds of megabytes.
+- **Consent that outlived what it was given for.** A grant is decided against a
+  version; an action consulted only the stored grant, so a new version that
+  asks for nothing still ran the old version's commands. And an action's
+  relative path was contained lexically while a manifest's `run` was contained
+  with symlinks resolved — two copies of one rule, one of them decoration.
+  There is one resolver now.
+- **A floor on the durations.** `"interval": 1e-12` is positive, finite and
+  inside the ceiling, and truncates to a zero-length sleep.
+- **Backoff for a failing poll plugin**, doubling to a minute, reset by the
+  first card. Manual refresh ignores it.
+- **A refresh no longer queues behind its slowest producer**, four at a time.
+- **A window hint taller than the grid draws is refused** rather than silently
+  clamped.
+
 ### The bundled plugin
 
 - **Disk space** — how much room is left, counted per disk rather than per
