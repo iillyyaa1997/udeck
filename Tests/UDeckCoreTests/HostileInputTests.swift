@@ -79,6 +79,85 @@ struct HostileInputTests {
         #expect(manifest(interval: 5.6).intervalInWholeSeconds == 6)
     }
 
+    /// Positive, finite, inside the ceiling — and converted to nanoseconds it
+    /// truncates to nothing, so the poll loop becomes "spawn a process, reap
+    /// it, spawn another" for as long as the panel is open.
+    @Test("an interval too small to sleep on is rejected, not accepted as very eager")
+    func tinyDurationsAreRejected() {
+        func manifest(_ interval: TimeInterval, _ timeout: TimeInterval) -> PluginManifest {
+            PluginManifest(
+                id: PluginIdentifier(rawValue: "p")!, name: "P", version: "1.0.0", kind: .poll,
+                run: ["./x"], interval: interval, timeout: timeout
+            )
+        }
+
+        #expect(Seconds.nanoseconds(1e-12) == 0, "the premise: this sleep is no sleep")
+
+        let tiny = manifest(1e-12, 1e-13).problems()
+        #expect(tiny.contains {
+            if case .durationTooShort(let field, _, _) = $0 { return field == "interval" }
+            return false
+        })
+        #expect(tiny.contains {
+            if case .durationTooShort(let field, _, _) = $0 { return field == "timeout" }
+            return false
+        })
+
+        // The floor is a floor, not a taste: what the examples ship still passes.
+        #expect(!manifest(5, 3).problems().contains {
+            if case .durationTooShort = $0 { return true } else { return false }
+        })
+    }
+
+    /// A producer that fails instantly used to cost exactly what a working one
+    /// costs — a process spawned and reaped every interval, for as long as the
+    /// panel was open.
+    @Test("a plugin that keeps failing is asked less often, within bounds")
+    func failuresBackOff() {
+        let manifest = PluginManifest(
+            id: PluginIdentifier(rawValue: "p")!, name: "P", version: "1.0.0", kind: .poll,
+            run: ["./x"], interval: 5, timeout: 2
+        )
+
+        #expect(manifest.delay(afterConsecutiveFailures: 0) == 5)
+        #expect(manifest.delay(afterConsecutiveFailures: 1) == 10)
+        #expect(manifest.delay(afterConsecutiveFailures: 2) == 20)
+        // Capped, and capped even when the exponent overflows to infinity.
+        #expect(manifest.delay(afterConsecutiveFailures: 40) == PluginManifest.maximumPollBackoff)
+        #expect(manifest.delay(afterConsecutiveFailures: 100_000) == PluginManifest.maximumPollBackoff)
+
+        // A plugin that asked for a longer interval than the cap keeps it: the
+        // backoff exists to slow polling down, never to speed it up.
+        let slow = PluginManifest(
+            id: PluginIdentifier(rawValue: "q")!, name: "Q", version: "1.0.0", kind: .poll,
+            run: ["./x"], interval: 300, timeout: 5
+        )
+        #expect(slow.delay(afterConsecutiveFailures: 0) == 300)
+        #expect(slow.delay(afterConsecutiveFailures: 9) == 300)
+    }
+
+    /// The width is bounded and the grid clamps to it. A manifest that says
+    /// 100000 and a panel that draws 24 is the shape of bug where the file and
+    /// the screen disagree and nobody is told which won.
+    @Test("a window hint taller than the grid allows is reported, not silently clamped")
+    func absurdWindowHeightIsReported() {
+        func manifest(height: Int) -> PluginManifest {
+            PluginManifest(
+                id: PluginIdentifier(rawValue: "p")!, name: "P", version: "1.0.0", kind: .poll,
+                run: ["./x"], interval: 5, timeout: 2,
+                window: WindowHints(defaultWidth: 4, defaultHeight: height,
+                                    minimumWidth: 1, minimumHeight: 1)
+            )
+        }
+
+        #expect(manifest(height: 100_000).problems().contains {
+            if case .invalidWindowHints = $0 { return true } else { return false }
+        })
+        #expect(!manifest(height: DeckLayout.maximumWindowHeight).problems().contains {
+            if case .invalidWindowHints = $0 { return true } else { return false }
+        })
+    }
+
     // MARK: - Setting ranges
 
     /// A manifest may declare one end of a range and not the other. Reversed

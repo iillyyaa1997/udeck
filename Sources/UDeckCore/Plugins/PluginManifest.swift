@@ -188,6 +188,7 @@ public enum ManifestProblem: Equatable, Sendable, CustomStringConvertible {
     case missingTimeout
     case nonPositiveTimeout(TimeInterval)
     case durationOutOfRange(field: String, value: TimeInterval, maximum: TimeInterval)
+    case durationTooShort(field: String, value: TimeInterval, minimum: TimeInterval)
     case timeoutNotShorterThanInterval(timeout: TimeInterval, interval: TimeInterval)
     case residentNotSupportedYet
     case blankName
@@ -211,6 +212,8 @@ public enum ManifestProblem: Equatable, Sendable, CustomStringConvertible {
             "\"timeout\" must be greater than zero, got \(value)"
         case .durationOutOfRange(let field, let value, let maximum):
             "\"\(field)\" is \(value) seconds, past the \(Int(maximum))-second limit — a plausible typo, and a number that large has no sensible meaning here"
+        case .durationTooShort(let field, let value, let minimum):
+            "\"\(field)\" is \(value) seconds, below the \(minimum)-second floor — a producer is a whole process, and asking for one this often is a busy loop rather than a poll"
         case .timeoutNotShorterThanInterval(let timeout, let interval):
             "\"timeout\" (\(timeout)s) must be shorter than \"interval\" (\(interval)s), otherwise a slow run always overlaps the next one"
         case .residentNotSupportedYet:
@@ -259,6 +262,14 @@ extension PluginManifest {
                 // now, but a manifest that means something impossible should be
                 // told so rather than quietly given a different number.
                 found.append(.durationOutOfRange(field: "interval", value: value, maximum: Seconds.ceiling))
+            case .some(let value) where value < Self.minimumInterval:
+                // The other end needs a floor for the same reason. `1e-12`
+                // seconds is positive, finite and inside the ceiling; converted
+                // to nanoseconds it truncates to zero, and the poll loop becomes
+                // "spawn a process, reap it, spawn another" for as long as the
+                // panel is open.
+                found.append(.durationTooShort(field: "interval", value: value,
+                                               minimum: Self.minimumInterval))
             default: break
             }
             switch timeout {
@@ -267,6 +278,9 @@ extension PluginManifest {
                 found.append(.nonPositiveTimeout(value))
             case .some(let value) where value > Seconds.ceiling:
                 found.append(.durationOutOfRange(field: "timeout", value: value, maximum: Seconds.ceiling))
+            case .some(let value) where value < Self.minimumTimeout:
+                found.append(.durationTooShort(field: "timeout", value: value,
+                                               minimum: Self.minimumTimeout))
             default: break
             }
             if let interval, let timeout, interval > 0, timeout > 0, timeout >= interval {
@@ -292,8 +306,12 @@ extension PluginManifest {
         if window.minimumWidth < 1 || window.minimumWidth > window.defaultWidth {
             found.append(.invalidWindowHints(reason: "minWidth must be between 1 and defaultWidth"))
         }
-        if window.defaultHeight < 1 {
-            found.append(.invalidWindowHints(reason: "defaultHeight must be at least 1"))
+        if window.defaultHeight < 1 || window.defaultHeight > DeckLayout.maximumWindowHeight {
+            // The grid clamps to this anyway. Accepting a manifest that says
+            // 100000 and then silently drawing 24 is the shape of bug where the
+            // file and the screen disagree and nobody is told which won.
+            found.append(.invalidWindowHints(
+                reason: "defaultHeight must be between 1 and \(DeckLayout.maximumWindowHeight)"))
         }
         if window.minimumHeight < 1 || window.minimumHeight > window.defaultHeight {
             found.append(.invalidWindowHints(reason: "minHeight must be between 1 and defaultHeight"))
@@ -304,6 +322,42 @@ extension PluginManifest {
 }
 
 extension PluginManifest {
+    /// The shortest poll a manifest may ask for. A producer is a whole process
+    /// — fork, exec, an interpreter starting — so a second is already often.
+    public static let minimumInterval: TimeInterval = 1
+
+    /// The shortest deadline a manifest may give itself. Below this nothing
+    /// could finish starting, so it can only mean a typo.
+    public static let minimumTimeout: TimeInterval = 0.05
+
+    /// How the wait grows while a `poll` plugin keeps failing, and how far.
+    ///
+    /// `RestartPolicy` carries a backoff too, and it is not this one: that
+    /// describes what a `resident` plugin does when it exits, and `resident` is
+    /// a format that exists so it can be added later without breaking plugins
+    /// written today. Nothing implements it. A poll plugin needed its own.
+    public static let pollBackoffFactor: Double = 2
+    public static let maximumPollBackoff: TimeInterval = 60
+
+    /// How long to wait before polling again, given how many times in a row
+    /// this plugin has failed.
+    ///
+    /// Without this a producer that fails instantly costs exactly what a
+    /// working one costs, forever: a process spawned and reaped every interval
+    /// for as long as the panel is open. The floor on `interval` bounds how bad
+    /// that is; backing off is what makes a broken plugin cheap.
+    ///
+    /// Never shorter than the interval the plugin asked for, and never longer
+    /// than `maximumPollBackoff` — including when the exponent overflows to
+    /// infinity, which it does at around a thousand consecutive failures.
+    public func delay(afterConsecutiveFailures failures: Int) -> TimeInterval {
+        guard let interval else { return 0 }
+        guard failures > 0 else { return interval }
+        let grown = interval * pow(Self.pollBackoffFactor, Double(failures))
+        guard grown.isFinite else { return max(interval, Self.maximumPollBackoff) }
+        return max(interval, min(Self.maximumPollBackoff, grown))
+    }
+
     /// The interval as whole seconds, or `nil` when it cannot be one.
     ///
     /// `Int(someDouble)` traps for anything outside `Int`'s range, and a

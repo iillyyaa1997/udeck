@@ -154,6 +154,9 @@ public final class DeckModel {
 
     // MARK: - Polling
 
+    /// How many producers a single refresh may have in flight at once.
+    private static let refreshWidth = 4
+
     /// Plugins with a window somewhere in the layout. Nothing else is run:
     /// a plugin the operator installed but has not placed anywhere is not
     /// something they asked to have executed every few seconds.
@@ -184,12 +187,27 @@ public final class DeckModel {
 
             pollTasks[manifest.id.rawValue] = Task { [weak self] in
                 while !Task.isCancelled {
-                    try? await Task.sleep(nanoseconds: Seconds.nanoseconds(interval))
+                    // Re-read the failure count each time round rather than
+                    // capturing it: the wait after this sleep depends on how the
+                    // poll it follows went.
+                    let wait = self?.pollDelay(for: manifest) ?? interval
+                    try? await Task.sleep(nanoseconds: Seconds.nanoseconds(wait))
                     guard !Task.isCancelled else { return }
                     await self?.poll(plugin, reason: .interval)
                 }
             }
         }
+    }
+
+    /// How long to wait before polling this plugin again.
+    ///
+    /// A plugin that has just failed is asked again later than one that
+    /// answered, which is what stops a broken producer from costing what a
+    /// working one costs for as long as the panel is open.
+    private func pollDelay(for manifest: PluginManifest) -> TimeInterval {
+        manifest.delay(
+            afterConsecutiveFailures: snapshots[manifest.id.rawValue]?.consecutiveFailures ?? 0
+        )
     }
 
     /// Runs everything once, now, replacing any refresh still in flight.
@@ -200,9 +218,23 @@ public final class DeckModel {
             return placedPluginIDs.contains(id)
         }
         refreshTask = Task { [weak self] in
-            for plugin in due {
-                guard !Task.isCancelled else { return }
-                await self?.poll(plugin, reason: reason)
+            // Concurrent, but not unboundedly: one plugin sitting on its
+            // deadline used to delay every plugin behind it in the list, so
+            // opening the panel with one hung producer meant the others were
+            // refreshed seconds late. A width, rather than all of them at once,
+            // because each is a process and a machine with twenty plugins
+            // should not start twenty at the same moment.
+            await withTaskGroup(of: Void.self) { group in
+                var running = 0
+                for plugin in due {
+                    guard !Task.isCancelled else { break }
+                    if running == Self.refreshWidth {
+                        await group.next()
+                        running -= 1
+                    }
+                    group.addTask { await self?.poll(plugin, reason: reason) }
+                    running += 1
+                }
             }
         }
     }
