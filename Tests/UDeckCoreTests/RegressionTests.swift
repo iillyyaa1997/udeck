@@ -734,4 +734,17 @@ struct RegressionTests {
             #expect(g.windowFrame(for: .fullscreen) != stage)
         }
     }
+
+    /// The tint reaches all the way, because "all the way" is the only setting
+    /// that makes two states of the panel provably the same colour: glass shows
+    /// what is behind it, and the small panel and the large one are over
+    /// different parts of the screen.
+    @Test("the tint can be asked for all the way, and the pane can ask for it")
+    func theTintReachesOpaque() {
+        #expect(GlassAppearance.tintStrengthRange.upperBound == 1)
+        var glass = GlassAppearance()
+        glass.tintStrength = 1
+        #expect(glass.validated().tintStrength == 1, "the validator must keep what the pane can offer")
+        #expect(glass.tintComponents?.alpha == 1)
+    }
 }

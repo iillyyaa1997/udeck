@@ -150,7 +150,8 @@ struct GlassAppearanceTests {
         #expect(GlassAppearance(opacity: 4).validated().opacity == 1)
         #expect(GlassAppearance(opacity: -2).validated().opacity == 0)
         #expect(GlassAppearance(opacity: .nan).validated().opacity == 1)
-        #expect(GlassAppearance(tintStrength: 3).validated().tintStrength == 0.9)
+        #expect(GlassAppearance(tintStrength: 3).validated().tintStrength
+            == GlassAppearance.tintStrengthRange.upperBound)
         #expect(GlassAppearance(tintStrength: .infinity).validated().tintStrength == 0.16)
         // A settings file that says nothing about the glass gets the default —
         // stated as "the default" rather than as a literal, because what uDeck

@@ -91,7 +91,14 @@ public struct GlassAppearance: Codable, Equatable, Sendable {
     /// of what the code allowed was unreachable from the only place the
     /// operator sets it — and he found the ceiling by needing what was past it.
     /// A limit stated twice is a limit that will disagree with itself.
-    public static let tintStrengthRange: ClosedRange<Double> = 0 ... 0.9
+    ///
+    /// It reaches 1 now, and 1 is a real answer rather than an overshoot. Glass
+    /// shows what is behind it, so two states of the panel over two different
+    /// parts of the screen are two different colours however carefully the
+    /// material is handled — that is the material working, not failing. The
+    /// only way to make them provably identical is to let nothing through, and
+    /// an operator who wants that should be able to ask for it.
+    public static let tintStrengthRange: ClosedRange<Double> = 0 ... 1
 
     /// How much of the material there can be. Zero is meaningful: no glass at
     /// all, with the content floating over whatever is behind it.
