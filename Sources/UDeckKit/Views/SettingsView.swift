@@ -832,7 +832,9 @@ private struct PluginRow: View {
     private var subtitle: String {
         guard let manifest = model.displayManifest(for: plugin) else { return plugin.folderName }
         var parts = ["\(manifest.kind.rawValue) · v\(manifest.version)"]
-        if let interval = manifest.interval { parts.append(strings(.pluginEverySeconds(Int(interval)))) }
+        if let seconds = manifest.intervalInWholeSeconds {
+            parts.append(strings(.pluginEverySeconds(seconds)))
+        }
         if let author = manifest.author { parts.append(author) }
         return parts.joined(separator: " · ")
     }

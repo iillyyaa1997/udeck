@@ -302,3 +302,18 @@ extension PluginManifest {
         return found
     }
 }
+
+extension PluginManifest {
+    /// The interval as whole seconds, or `nil` when it cannot be one.
+    ///
+    /// `Int(someDouble)` traps for anything outside `Int`'s range, and a
+    /// manifest is a file a stranger wrote: `"interval": 1e308` decodes to a
+    /// perfectly ordinary `Double`, is reported as out of range by validation,
+    /// and then killed the settings window anyway — because the row for an
+    /// unusable plugin still has a subtitle to draw. A display path must not be
+    /// able to trap on a value validation has already rejected.
+    public var intervalInWholeSeconds: Int? {
+        guard let interval, interval.isFinite else { return nil }
+        return Int(exactly: interval.rounded())
+    }
+}

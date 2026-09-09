@@ -154,7 +154,17 @@ public struct SettingDeclaration: Codable, Equatable, Sendable {
     /// settings screen.
     public var editingRange: ClosedRange<Int> {
         let lower = minimum ?? 0
-        let upper = maximum ?? (lower + Self.defaultIntegerSpan)
+        // Saturating, not wrapping and not trapping. A declared minimum of
+        // `Int.max` with no maximum is a legal manifest — nothing rejects it —
+        // and adding the span to it overflowed, which is a trap in Swift and
+        // took the settings window with it the moment the plugin was expanded.
+        let upper: Int
+        if let maximum {
+            upper = maximum
+        } else {
+            let (sum, overflowed) = lower.addingReportingOverflow(Self.defaultIntegerSpan)
+            upper = overflowed ? Int.max : sum
+        }
         return lower ... max(lower, upper)
     }
 

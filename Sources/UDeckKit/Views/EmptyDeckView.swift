@@ -110,7 +110,8 @@ struct EmptyDeckView: View {
         if let problem = plugin.problems.first { return problem.description }
         guard let manifest = model.displayManifest(for: plugin) else { return plugin.folderName }
         if let description = manifest.description { return description }
-        return "\(manifest.kind.rawValue) · every \(Int(manifest.interval ?? 0))s"
+        guard let seconds = manifest.intervalInWholeSeconds else { return manifest.kind.rawValue }
+        return "\(manifest.kind.rawValue) · every \(seconds)s"
     }
 
     private var problems: some View {

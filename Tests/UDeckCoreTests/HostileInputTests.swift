@@ -56,6 +56,29 @@ struct HostileInputTests {
         #expect(manifest.problems().contains { if case .nonPositiveTimeout = $0 { true } else { false } })
     }
 
+    /// Validation rejects the value; the settings row still draws a subtitle
+    /// for the plugin it rejected, and `Int(someDouble)` traps outside `Int`'s
+    /// range. Two correct behaviours that killed the window between them.
+    @Test("an interval no integer can hold has no whole-second form, rather than trapping")
+    func absurdIntervalHasNoWholeSeconds() {
+        func manifest(interval: TimeInterval?) -> PluginManifest {
+            PluginManifest(
+                id: PluginIdentifier(rawValue: "p")!, name: "P", version: "1.0.0", kind: .poll,
+                run: ["./x"], interval: interval, timeout: 2
+            )
+        }
+
+        #expect(manifest(interval: 1e308).intervalInWholeSeconds == nil)
+        #expect(manifest(interval: -1e308).intervalInWholeSeconds == nil)
+        #expect(manifest(interval: .infinity).intervalInWholeSeconds == nil)
+        #expect(manifest(interval: .nan).intervalInWholeSeconds == nil)
+        #expect(manifest(interval: nil).intervalInWholeSeconds == nil)
+
+        #expect(manifest(interval: 5).intervalInWholeSeconds == 5)
+        #expect(manifest(interval: 5.4).intervalInWholeSeconds == 5)
+        #expect(manifest(interval: 5.6).intervalInWholeSeconds == 6)
+    }
+
     // MARK: - Setting ranges
 
     /// A manifest may declare one end of a range and not the other. Reversed
@@ -65,6 +88,9 @@ struct HostileInputTests {
     func editingRangeIsAlwaysLegal() {
         let cases: [(minimum: Int?, maximum: Int?)] = [
             (nil, nil), (2000, nil), (nil, 5), (10, 5), (0, 0), (-50, nil), (nil, -50),
+            // A one-sided minimum at the top of the range: adding the default
+            // span to it overflows, and overflow is a trap, not a large number.
+            (Int.max, nil), (Int.max - 1, nil), (Int.min, nil), (Int.max, Int.max),
         ]
         for bounds in cases {
             let declaration = SettingDeclaration(
