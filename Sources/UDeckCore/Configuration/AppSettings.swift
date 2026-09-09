@@ -69,6 +69,19 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// labelled old data rather than a wrong answer.
     public var pollWhileCollapsed: Bool
 
+    /// How big the panel's text is, in points, or `nil` for whatever the
+    /// density asks for.
+    ///
+    /// Its own control rather than another step of `density`, because the two
+    /// answer different questions: density is how much fits on the panel, and
+    /// this is how big the lettering is. The operator wanted larger text at the
+    /// spacing he already had, and three joint steps could not give him that —
+    /// the top step was still small.
+    ///
+    /// Optional so that a settings file says nothing until he moves it, and so
+    /// that the density keeps deciding for anyone who never does.
+    public var textSize: CGFloat?
+
     /// The language uDeck speaks, or `nil` to follow the Mac.
     ///
     /// Optional rather than a third enum case, so that the settings file says
@@ -93,6 +106,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
             "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
         ],
         pollWhileCollapsed: Bool = false,
+        textSize: CGFloat? = nil,
         language: Language? = nil
     ) {
         self.version = version
@@ -107,8 +121,20 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.silentTTLMultiplier = silentTTLMultiplier
         self.pluginExecutableSearchPath = pluginExecutableSearchPath
         self.pollWhileCollapsed = pollWhileCollapsed
+        self.textSize = textSize
         self.language = language
     }
+
+    /// How big the text actually is.
+    public var resolvedTextSize: CGFloat {
+        guard let textSize, textSize.isFinite else { return density.bodyFontSize }
+        return min(max(textSize, Self.textSizeRange.lowerBound), Self.textSizeRange.upperBound)
+    }
+
+    /// Small enough to be a glance, large enough to read across a room. Below
+    /// ten the chip font — two points smaller again — stops being legible at
+    /// all, which is the real floor.
+    public static let textSizeRange: ClosedRange<CGFloat> = 10 ... 18
 
     /// The language actually in force.
     ///
@@ -265,6 +291,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         // same reason as every other name in this file: a language uDeck no
         // longer has should cost the operator that one setting, not the file.
         language = (try c.decodeIfPresent(String.self, forKey: .language)).flatMap(Language.init(rawValue:))
+        textSize = try c.decodeIfPresent(CGFloat.self, forKey: .textSize)
     }
 
     /// These settings with `glass` and `ink` brought into line with the look

@@ -77,6 +77,7 @@ public enum Phrase: Sendable, Equatable {
     case lookBrightness
     case lookColour
     case lookDensity
+    case lookTextSize
     case densityCompact
     case densityNormal
     case densityCozy

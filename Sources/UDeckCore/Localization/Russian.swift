@@ -68,6 +68,7 @@ struct Russian: Vocabulary {
         case .lookBrightness: "Яркость"
         case .lookColour: "Цвет"
         case .lookDensity: "Плотность"
+        case .lookTextSize: "Размер текста"
         case .densityCompact: "Плотно"
         case .densityNormal: "Обычно"
         case .densityCozy: "Просторно"

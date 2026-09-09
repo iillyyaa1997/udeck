@@ -12,7 +12,8 @@ public struct DeckRootView: View {
     }
 
     public var body: some View {
-        let theme = DeckTheme(density: model.settings.density, look: model.settings.look)
+        let theme = DeckTheme(density: model.settings.density, look: model.settings.look,
+                              textSize: model.settings.resolvedTextSize)
 
         // The window is the stage, sized once per screen; the panel is a
         // rectangle inside it that moves and resizes. Everything around the

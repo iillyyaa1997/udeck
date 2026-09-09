@@ -16,6 +16,13 @@ import UDeckCore
 public struct DeckTheme: Sendable {
     public var density: Density
 
+    /// How big the panel's text is, in points.
+    ///
+    /// Independent of the density, which now owns only the spacings. Everything
+    /// else about type is derived from this one number, so there is one place
+    /// that decides how big the panel reads — the same rule the colours follow.
+    public var textSize: CGFloat
+
     /// Which way the text is written. Everything drawn *on* the panel takes its
     /// colour from this, so that one setting flips all of it together rather
     /// than leaving half the panel unreadable.
@@ -24,15 +31,26 @@ public struct DeckTheme: Sendable {
     /// Every colour, worked out once from the look.
     public let palette: Palette
 
-    public init(density: Density, ink: PanelInk = .light) {
-        self.init(density: density, look: PanelLook(glass: GlassAppearance(), ink: ink))
+    public init(density: Density, ink: PanelInk = .light, textSize: CGFloat? = nil) {
+        self.init(density: density,
+                  look: PanelLook(glass: GlassAppearance(), ink: ink),
+                  textSize: textSize)
     }
 
-    public init(density: Density, look: PanelLook) {
+    public init(density: Density, look: PanelLook, textSize: CGFloat? = nil) {
         self.density = density
+        self.textSize = textSize ?? density.bodyFontSize
         self.ink = look.ink
         self.palette = Palette(look: look)
     }
+
+    /// How far the type has been taken from what the density would have picked.
+    ///
+    /// Sizes that are not the body size — the title, and the height of a grid
+    /// row — are scaled by this rather than offset by a constant, so that at
+    /// rest they land exactly on the numbers the density has always given and
+    /// the panel is unchanged for anyone who never touches the slider.
+    private var typeScale: CGFloat { textSize / density.bodyFontSize }
 
     // MARK: - Surfaces
 
@@ -109,11 +127,17 @@ public struct DeckTheme: Sendable {
     public var gridSpacing: CGFloat { density.gridSpacing }
     public var windowPadding: CGFloat { density.windowPadding }
     public var rowSpacing: CGFloat { density.rowSpacing }
-    public var gridRowHeight: CGFloat { density.gridRowHeight }
-    public var bodyFont: Font { .system(size: density.bodyFontSize) }
-    public var monoFont: Font { .system(size: density.bodyFontSize - 0.5, design: .monospaced) }
-    public var titleFont: Font { .system(size: density.titleFontSize, weight: .semibold) }
-    public var chipFont: Font { .system(size: density.bodyFontSize - 2, design: .monospaced) }
+    /// The larger of what the density asks for and what the text needs.
+    ///
+    /// A row that kept the density's height while the type grew would cut the
+    /// second line off a card rather than admit it did not fit, and clipped
+    /// text is a bug wherever it appears. Cards get taller instead, and the
+    /// layout visibly moves when the size does — which is the honest answer.
+    public var gridRowHeight: CGFloat { density.gridRowHeight * max(1, typeScale) }
+    public var bodyFont: Font { .system(size: textSize) }
+    public var monoFont: Font { .system(size: textSize - 0.5, design: .monospaced) }
+    public var titleFont: Font { .system(size: density.titleFontSize * typeScale, weight: .semibold) }
+    public var chipFont: Font { .system(size: textSize - 2, design: .monospaced) }
     public let windowCornerRadius: CGFloat = 13
 
     /// The bar inside the island, which is the whole of what the panel says

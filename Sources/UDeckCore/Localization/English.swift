@@ -64,6 +64,7 @@ struct English: Vocabulary {
         case .lookBrightness: "Brightness"
         case .lookColour: "Colour"
         case .lookDensity: "Density"
+        case .lookTextSize: "Text size"
         case .densityCompact: "Compact"
         case .densityNormal: "Normal"
         case .densityCozy: "Cozy"

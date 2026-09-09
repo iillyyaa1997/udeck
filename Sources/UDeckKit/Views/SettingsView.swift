@@ -411,7 +411,8 @@ private struct LookSettings: View {
     private var sample: some View {
         VStack(alignment: .leading, spacing: 10) {
             GlassPreview(glass: editedLook.glass,
-                         theme: DeckTheme(density: model.settings.density, look: editedLook))
+                         theme: DeckTheme(density: model.settings.density, look: editedLook,
+                                          textSize: model.settings.resolvedTextSize))
 
             HStack(spacing: 12) {
                 Picker("", selection: Binding(get: { edited }, set: { editingDark = $0 })) {
@@ -602,6 +603,19 @@ private struct LookSettings: View {
                 .labelsHidden()
                 .frame(width: 260)
             }
+
+            GridRow {
+                label(strings(.lookTextSize))
+                slider(Binding(
+                    get: { model.settings.resolvedTextSize },
+                    set: { newValue in
+                        var settings = model.settings
+                        settings.textSize = newValue
+                        model.update(settings: settings)
+                    }
+                ), in: AppSettings.textSizeRange, step: 0.5,
+                   readout: String(format: "%.1f pt", model.settings.resolvedTextSize))
+            }
         }
     }
 
@@ -652,12 +666,14 @@ private struct LookSettings: View {
         }
     }
 
-    private func slider(
-        _ value: Binding<Double>,
-        in range: ClosedRange<Double>,
-        step: Double,
+    /// Generic over the number, because the text size is a `CGFloat` in points
+    /// and everything else here is a plain `Double`.
+    private func slider<V: BinaryFloatingPoint>(
+        _ value: Binding<V>,
+        in range: ClosedRange<V>,
+        step: V.Stride,
         readout: String
-    ) -> some View {
+    ) -> some View where V.Stride: BinaryFloatingPoint {
         HStack(spacing: 10) {
             Slider(value: value, in: range, step: step).frame(width: 230)
             Text(readout)

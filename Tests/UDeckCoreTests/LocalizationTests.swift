@@ -40,7 +40,7 @@ struct LocalizationTests {
         .lookLight, .lookDark, .lookLightFromHour(7), .lookDarkFromHour(19), .lookGlass,
         .glassRegular, .glassClear, .lookTintCoversMaterial(percent: 58), .lookAmount,
         .lookTint, .tintLighter, .tintDarker, .lookStrength, .lookText, .lookBrightness,
-        .lookColour, .lookDensity, .densityCompact, .densityNormal, .densityCozy,
+        .lookColour, .lookDensity, .lookTextSize, .densityCompact, .densityNormal, .densityCozy,
         .lookLanguage, .languageSystem, .lookNameThisLook,
 
         .sampleTitle, .sampleChip, .sampleBody, .sampleFooter,
@@ -89,7 +89,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 141,
+        #expect(Self.all.count == 142,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
