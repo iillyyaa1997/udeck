@@ -38,7 +38,7 @@ struct ScreenGeometryTests {
 
     @Test("the panel hangs below whichever is deeper, menu bar or notch")
     func topInsetTakesTheDeeper() {
-        // Dell: no notch, 30pt menu bar.
+        // External: no notch, 30pt menu bar.
         #expect(ScreenFixtures.externalMain.topInset == 30)
         #expect(ScreenFixtures.externalMain.panelTopY == 1410)
         // Built-in: 32pt notch and a 32pt menu bar.
@@ -51,13 +51,13 @@ struct ScreenGeometryTests {
     @Test("the cursor is attributed to the screen it is on")
     func screenSelection() {
         let screens = ScreenFixtures.both
-        #expect(screens.screen(containing: CGPoint(x: 1280, y: 1439))?.id == "dell")
+        #expect(screens.screen(containing: CGPoint(x: 1280, y: 1439))?.id == "external")
         #expect(screens.screen(containing: CGPoint(x: -860, y: 960))?.id == "builtin")
     }
 
     @Test("a point in the gap between displays falls to the nearest screen rather than nowhere")
     func screenSelectionInGap() {
-        // Above the built-in's top edge but left of the Dell: inside neither.
+        // Above the built-in's top edge but left of the external: inside neither.
         let screens = ScreenFixtures.both
         let orphan = CGPoint(x: -800, y: 1200)
         #expect(screens.first(where: { $0.contains(orphan) }) == nil)
@@ -66,11 +66,11 @@ struct ScreenGeometryTests {
 
     @Test("adjacent screens never both claim the same point")
     func noDoubleClaim() {
-        // The Dell starts at x = 0; the built-in ends at x = 0.
+        // The external starts at x = 0; the built-in ends at x = 0.
         let seam = CGPoint(x: 0, y: 500)
         let claimants = ScreenFixtures.both.filter { $0.contains(seam) }
         #expect(claimants.count == 1)
-        #expect(claimants.first?.id == "dell")
+        #expect(claimants.first?.id == "external")
     }
 }
 
@@ -263,12 +263,12 @@ struct PanelGeometryTests {
 
     @Test("the collapsed state is the island where there is no notch, and nothing where there is")
     func collapsedShapeFollowsTheHardware() {
-        let dell = geometry(ScreenFixtures.externalMain)
-        #expect(dell.collapsedFrame.width == dell.anchor.width)
-        #expect(dell.collapsedFrame.width == tuning.virtualAnchorWidth)
+        let external = geometry(ScreenFixtures.externalMain)
+        #expect(external.collapsedFrame.width == external.anchor.width)
+        #expect(external.collapsedFrame.width == tuning.virtualAnchorWidth)
         // It hangs from the same edge, half the depth, and bleeds past the top.
-        #expect(dell.collapsedFrame.maxY == dell.anchor.maxY + metrics.topEdgeBleed)
-        #expect(dell.collapsedFrame.height
+        #expect(external.collapsedFrame.maxY == external.anchor.maxY + metrics.topEdgeBleed)
+        #expect(external.collapsedFrame.height
             == ScreenFixtures.externalMain.topInset * metrics.islandHeightFactor + metrics.topEdgeBleed)
 
         // Nothing hangs under a real notch. The frame is the notch itself, so

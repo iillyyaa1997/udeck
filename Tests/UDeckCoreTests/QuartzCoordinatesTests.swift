@@ -12,13 +12,14 @@ import Testing
 /// that is 100 tall on a screen that is 1000 tall.
 @Suite("Quartz and AppKit coordinates")
 struct QuartzCoordinatesTests {
-    /// The DELL is the main display: origin `(0, 0)`, so both systems measure
+    /// The external display is the main one: origin `(0, 0)`, so both systems measure
     /// from its top-left and bottom-left respectively.
     let mainScreenTop: CGFloat = 1440
 
     @Test("a maximised window measured from the running machine converts to what was seen")
     func realMaximisedWindow() {
-        // A maximised window on the DELL, as reported by CGWindowListCopyWindowInfo.
+        // A maximised window on the external display, as reported by
+        // CGWindowListCopyWindowInfo.
         let quartz = CGRect(x: 244, y: 30, width: 2316, height: 1410)
         let appKit = QuartzCoordinates.appKitRect(fromQuartz: quartz, mainScreenTop: mainScreenTop)
         #expect(appKit == CGRect(x: 244, y: 0, width: 2316, height: 1410))

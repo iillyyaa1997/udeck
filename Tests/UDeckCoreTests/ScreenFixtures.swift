@@ -7,11 +7,14 @@ import Foundation
 /// the two displays disagreeing — different origins, different menu-bar heights,
 /// different backing scales — and invented round numbers hide exactly that.
 enum ScreenFixtures {
-    /// DELL P2723DE. The main display, and it has no notch. The panel has to
-    /// work here first: this is where the cursor spends most of its time.
+    /// The external display: main, no notch, 2560x1440 at 1x. The panel has to
+    /// work here first — on the machine this was measured on it is where the
+    /// cursor spends most of its time. The numbers are a real display's rather
+    /// than round ones, because the interesting bugs come from two screens
+    /// disagreeing and round numbers hide the disagreement.
     static let externalMain = ScreenSnapshot(
-        id: "dell",
-        name: "DELL P2723DE",
+        id: "external",
+        name: "External 2560x1440",
         frame: CGRect(x: 0, y: 0, width: 2560, height: 1440),
         visibleFrame: CGRect(x: 0, y: 0, width: 2560, height: 1410),
         backingScale: 1,
