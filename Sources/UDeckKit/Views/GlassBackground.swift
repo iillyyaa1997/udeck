@@ -142,6 +142,23 @@ struct PanelSurface<S: Shape>: View {
     var fallbackFill: Color
     var glass: GlassAppearance
 
+    /// How far the material is grown before it is cut to the panel's shape.
+    ///
+    /// The material draws a bright line along its own edge — that is what a
+    /// lens does, and it is the rim the operator has been reporting. Measured
+    /// over a striped backdrop on the settled panel, the last row reads 22.5 %
+    /// brighter than the interior, and it reads 22.5 % brighter with the tint
+    /// turned off too: the tint is a flat multiplier over the whole panel, so
+    /// the rim is in the glass and nowhere else.
+    ///
+    /// A line drawn at the edge of the material cannot be turned off, so the
+    /// material is made bigger than the panel and cut back to it. The clip
+    /// passes through the middle of the material instead of along its edge, and
+    /// the edge — with its line — falls outside and is never drawn. The panel's
+    /// own shape is untouched, so the corners are still the ones he chose
+    /// rather than the ones the material would round for itself.
+    private static var edgeBleed: CGFloat { 2 }
+
     var body: some View {
         if #available(macOS 26, *) {
             // Each layer is clipped on its own, and the tint is a filled path
@@ -154,6 +171,7 @@ struct PanelSurface<S: Shape>: View {
             // time at all, which is exactly what makes it worth avoiding by
             // construction rather than by measurement.
             LiquidGlassBackground(glass: glass)
+                .padding(-Self.edgeBleed)
                 .clipShape(shape)
                 .overlay { GlassTint(glass: glass, shape: shape) }
         } else {
