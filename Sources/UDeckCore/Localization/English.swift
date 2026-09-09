@@ -74,9 +74,9 @@ struct English: Vocabulary {
         case .languageSystem: "System"
         case .lookNameThisLook: "Name this look"
 
-        case .sampleTitle: "Claude sessions"
-        case .sampleChip: "4 running"
-        case .sampleBody: "pers · 48 % of the week"
+        case .sampleTitle: "Disk"
+        case .sampleChip: "78 GB free"
+        case .sampleBody: "startup volume · of 460 GB"
         case .sampleFooter: "last checked a minute ago"
 
         // The built-in looks

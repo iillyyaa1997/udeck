@@ -96,6 +96,10 @@ public enum Phrase: Sendable, Equatable {
     /// The card in the sample. Illustrative, so it is written rather than
     /// translated — a Russian reader should see a card that reads as a card,
     /// not an English one transliterated.
+    ///
+    /// It names nothing outside uDeck. The sample is the one card every
+    /// operator sees before they have installed anything, and one that named a
+    /// product made the application look like it was about that product.
     case sampleTitle
     case sampleChip
     case sampleBody

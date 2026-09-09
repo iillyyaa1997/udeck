@@ -78,9 +78,9 @@ struct Russian: Vocabulary {
         case .languageSystem: "Системный"
         case .lookNameThisLook: "Название вида"
 
-        case .sampleTitle: "Сессии Claude"
-        case .sampleChip: "4 активных"
-        case .sampleBody: "личный · 48 % за неделю"
+        case .sampleTitle: "Диск"
+        case .sampleChip: "78 ГБ свободно"
+        case .sampleBody: "системный том · из 460 ГБ"
         case .sampleFooter: "проверено минуту назад"
 
         // Встроенные виды
