@@ -240,7 +240,7 @@ struct SparkView: View {
             HStack(alignment: .bottom, spacing: spacing) {
                 ForEach(Array(values.enumerated()), id: \.offset) { _, value in
                     RoundedRectangle(cornerRadius: 1)
-                        .fill(theme.accent.opacity(0.75))
+                        .fill(theme.sparkline)
                         .frame(
                             width: barWidth,
                             height: max(1, geometry.size.height * (value - minimum) / span)

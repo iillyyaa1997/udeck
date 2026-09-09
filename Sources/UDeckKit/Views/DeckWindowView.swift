@@ -78,7 +78,7 @@ struct DeckWindowView: View {
                     .foregroundStyle(theme.color(for: presentation.state))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(theme.color(for: presentation.state).opacity(0.18)))
+                    .background(Capsule().fill(theme.chipFill(for: presentation.state)))
             }
 
             staleBadge
@@ -152,7 +152,7 @@ struct DeckWindowView: View {
     private var resizeGrip: some View {
         Image(systemName: "arrow.down.right")
             .font(.system(size: 8, weight: .bold))
-            .foregroundStyle(theme.accent.opacity(isHovering ? 0.9 : 0.25))
+            .foregroundStyle(theme.grip(hovering: isHovering))
             .frame(width: 16, height: 16)
             .contentShape(Rectangle())
             .gesture(

@@ -248,14 +248,14 @@ struct IslandMark: View {
 
     var body: some View {
         Capsule()
-            .fill(theme.color(for: summary.worst)
-                .opacity(summary.placedPlugins == 0 ? 0.35 : 1))
+            .fill(theme.islandMark(for: summary.worst,
+                                   placed: summary.placedPlugins > 0))
             .frame(width: theme.islandIndicatorSize.width,
                    height: theme.islandIndicatorSize.height)
             // A dark halo, so the bar reads against a bright document as well
             // as against a dark game. Without it the indicator only works on
             // half the things the panel sits over.
-            .shadow(color: .black.opacity(0.55), radius: 2)
+            .shadow(color: theme.islandHalo, radius: 2)
             .padding(.bottom, theme.islandIndicatorSize.height)
             .accessibilityLabel(summary.placedPlugins == 0
                 ? "uDeck, nothing placed yet"

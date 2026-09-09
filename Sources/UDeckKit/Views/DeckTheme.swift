@@ -2,14 +2,17 @@ import AppKit
 import SwiftUI
 import UDeckCore
 
-/// The glass look, in one place.
+/// The look, as SwiftUI needs it.
 ///
-/// uDeck draws one deliberate appearance rather than following the system's
-/// light and dark modes. The panel hangs over whatever the operator happens to
-/// have on screen — a bright browser, a dark terminal, a photo wallpaper — so
-/// its legibility cannot depend on any of them. A translucent dark surface with
-/// its own defined edge reads against all three; a surface that inverted with
-/// the system would read against half of them.
+/// Everything about *what colour* is decided in `Palette`, in UDeckCore, where
+/// it can be tested without a window. This type adds only the two things a
+/// palette cannot hold: the conversion to `Color`, and the metrics that follow
+/// from the density setting.
+///
+/// Nothing here thins, tints or picks a colour. When something on screen needs
+/// a shade that is not in the palette, the palette gains an entry — a view that
+/// works one out for itself is a second place the look is decided, and the
+/// panel spent a long time with twelve of those.
 public struct DeckTheme: Sendable {
     public var density: Density
 
@@ -18,12 +21,8 @@ public struct DeckTheme: Sendable {
     /// than leaving half the panel unreadable.
     public var ink: PanelInk
 
-    /// The whole of the ink: direction, how far it goes, and whether it is grey.
-    ///
-    /// The direction still decides everything derived — hairlines, recesses,
-    /// which set of state colours reads — because those follow from whether the
-    /// panel is dark or bright, not from the shade the text happens to be.
-    private let inkColour: InkColor
+    /// Every colour, worked out once from the look.
+    public let palette: Palette
 
     public init(density: Density, ink: PanelInk = .light) {
         self.init(density: density, look: PanelLook(glass: GlassAppearance(), ink: ink))
@@ -32,79 +31,58 @@ public struct DeckTheme: Sendable {
     public init(density: Density, look: PanelLook) {
         self.density = density
         self.ink = look.ink
-        self.inkColour = look.foreground
+        self.palette = Palette(look: look)
     }
 
-    private var isLightInk: Bool { ink == .light }
+    // MARK: - Surfaces
 
-    /// The colour text is written in, and the colour the panel's own lines are
-    /// drawn in — they have to move together, or a light panel keeps hairlines
-    /// meant for a dark one.
-    ///
-    /// Worked out in `PanelLook.foreground`, where it can be checked without a
-    /// view. At full brightness and no colour it is exactly what it always was:
-    /// white, or the near-black light ink is the opposite of.
-    private var foreground: Color {
-        Color(red: inkColour.red, green: inkColour.green, blue: inkColour.blue)
-    }
-
-    // Surfaces
-    public let panelTint = Color(red: 0.078, green: 0.102, blue: 0.149).opacity(0.62)
-    public var windowFill: Color { foreground.opacity(0.07) }
-
-    /// A sunken area — a text field, a slot waiting to be filled.
-    ///
-    /// Follows the ink like everything else here. It was flat black at 28%,
-    /// which is a recess on a dark panel and a hole punched in a light one.
-    public var recess: Color { foreground.opacity(isLightInk ? 0.28 : 0.10) }
-
-    /// The tab that is showing, and anything else marked as chosen.
-    public var selection: Color { foreground.opacity(isLightInk ? 0.14 : 0.10) }
-
-    /// The faintest surface that is still a surface.
-    public var subtleFill: Color { foreground.opacity(isLightInk ? 0.06 : 0.05) }
+    public var panelTint: Color { Color(palette.panelTint) }
+    public var windowFill: Color { Color(palette.windowFill) }
+    public var recess: Color { Color(palette.recess) }
+    public var selection: Color { Color(palette.selection) }
+    public var subtleFill: Color { Color(palette.subtleFill) }
+    public var line: Color { Color(palette.line) }
+    public var panelBorder: Color { Color(palette.panelBorder) }
+    public var innerHighlight: Color { Color(palette.innerHighlight) }
 
     /// A control under the pointer, and the same control being pressed.
     public func hoverFill(pressed: Bool) -> Color {
-        foreground.opacity(pressed ? (isLightInk ? 0.12 : 0.14) : (isLightInk ? 0.05 : 0.06))
-    }
-    public var line: Color { foreground.opacity(isLightInk ? 0.11 : 0.16) }
-    public var panelBorder: Color { foreground.opacity(isLightInk ? 0.14 : 0.20) }
-
-    public let innerHighlight = Color.white.opacity(0.16)
-
-    // Text
-    public var text: Color { foreground }
-    public var muted: Color { foreground.opacity(isLightInk ? 0.58 : 0.66) }
-    public var dim: Color { foreground.opacity(isLightInk ? 0.40 : 0.50) }
-
-    // State
-    /// State colours are picked twice: the pale versions read on a dark panel
-    /// and vanish on a light one, so the dark-ink set is deeper.
-    public var accent: Color { isLightInk ? Color(red: 0.561, green: 0.780, blue: 1.0) : Color(red: 0.10, green: 0.36, blue: 0.62) }
-    public var ok: Color { isLightInk ? Color(red: 0.435, green: 0.827, blue: 0.639) : Color(red: 0.09, green: 0.45, blue: 0.28) }
-    public var warn: Color { isLightInk ? Color(red: 0.949, green: 0.776, blue: 0.541) : Color(red: 0.55, green: 0.36, blue: 0.05) }
-    public var crit: Color { isLightInk ? Color(red: 1.0, green: 0.604, blue: 0.604) : Color(red: 0.63, green: 0.13, blue: 0.13) }
-
-    public func color(for state: CardState) -> Color {
-        switch state {
-        case .ok: ok
-        case .warn: warn
-        case .crit: crit
-        case .unknown: dim
-        }
+        Color(pressed ? palette.hoverPressed : palette.hover)
     }
 
-    public func color(for icon: CardIcon) -> Color {
-        switch icon {
-        case .ok, .done: ok
-        case .warn, .pause: warn
-        case .crit: crit
-        case .wait: warn
-        case .run: accent
-        case .idle, .dot: dim
-        case .info: muted
-        }
+    // MARK: - Text
+
+    public var text: Color { Color(palette.text) }
+    public var muted: Color { Color(palette.muted) }
+    public var dim: Color { Color(palette.dim) }
+
+    // MARK: - State
+
+    public var accent: Color { Color(palette.accent) }
+    public var ok: Color { Color(palette.ok) }
+    public var warn: Color { Color(palette.warn) }
+    public var crit: Color { Color(palette.crit) }
+
+    public func color(for state: CardState) -> Color { Color(palette.color(for: state)) }
+    public func color(for icon: CardIcon) -> Color { Color(palette.color(for: icon)) }
+
+    // MARK: - Marks
+
+    public var sparkline: Color { Color(palette.sparkline) }
+    public var islandHalo: Color { Color(palette.islandHalo) }
+
+    public func grip(hovering: Bool) -> Color {
+        Color(hovering ? palette.gripHover : palette.grip)
+    }
+
+    /// The capsule behind a card's chip.
+    public func chipFill(for state: CardState) -> Color {
+        Color(palette.chipFill(for: state))
+    }
+
+    /// The island's indicator bar.
+    public func islandMark(for state: CardState, placed: Bool) -> Color {
+        Color(palette.islandMark(for: state, placed: placed))
     }
 
     /// SF Symbol names for the closed icon vocabulary. Closed on purpose: an
@@ -156,6 +134,20 @@ public extension EnvironmentValues {
     var deckTheme: DeckTheme {
         get { self[DeckThemeKey.self] }
         set { self[DeckThemeKey.self] = newValue }
+    }
+}
+
+public extension Color {
+    /// A palette entry as SwiftUI sees it. The only bridge between the two, so
+    /// that a colour cannot reach the screen without having come from the table.
+    init(_ palette: PaletteColor) {
+        self.init(
+            .sRGB,
+            red: palette.ink.red,
+            green: palette.ink.green,
+            blue: palette.ink.blue,
+            opacity: palette.alpha
+        )
     }
 }
 
