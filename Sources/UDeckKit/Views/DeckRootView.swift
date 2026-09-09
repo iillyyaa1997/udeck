@@ -127,39 +127,43 @@ public struct DeckRootView: View {
         .onTapGesture { shell.onInteract() }
     }
 
-    /// The panel's surface, at a size that never changes.
+    /// The panel's surface.
     ///
     /// Whether it is drawn at all is `PanelChrome`'s rule — the collapsed state
     /// under a real notch draws nothing once it has arrived, and during the
     /// collapse it still does, which is what makes closing visible there.
+    ///
+    /// It was briefly drawn at the size of the stage and cut to the panel's
+    /// shape with a `mask`, on the theory that `NSGlassEffectView` renders
+    /// differently at different sizes. It does not — measured over a flat grey,
+    /// the material at panel size and at stage size read 97.11 and 96.99, and
+    /// the height it was drawn at changed neither. What the mask did do was
+    /// double the material's own edge: over a striped backdrop, where a
+    /// refraction is visible at all, the panel's rim measured 11.5 points darker
+    /// than its middle when clipped and 19.5 when masked. The operator saw that
+    /// as a frame appearing around the panel, and spotted the difference between
+    /// two of the builds himself.
+    ///
+    /// So it is clipped, as it was before. The mask was cheaper — 53 ms of CPU
+    /// per open-and-close against 77 — and bought nothing that was wrong with
+    /// the panel.
     @ViewBuilder
     private func material(theme: DeckTheme) -> some View {
-        let radius = PanelChrome.cornerRadius(phase: shell.phase, metrics: model.settings.panel)
-        if #available(macOS 26, *) {
-            GlassBackground(
-                cornerRadius: 0,
-                theme: theme,
-                glass: model.settings.glass,
-                weldedToTopEdge: shell.weldedToTopEdge
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .mask(alignment: .topLeading) {
-                BottomRoundedRectangle(radius: radius)
-                    .frame(width: shell.panelRect.width, height: shell.panelRect.height)
-                    .offset(x: shell.panelRect.minX, y: shell.panelRect.minY)
-            }
-        } else {
-            // The fallback is a blur with a border drawn for it, and a border
-            // belongs on the panel's own edges rather than on the stage's.
-            GlassBackground(
-                cornerRadius: radius,
-                theme: theme,
-                glass: model.settings.glass,
-                weldedToTopEdge: shell.weldedToTopEdge
-            )
-            .frame(width: shell.panelRect.width, height: shell.panelRect.height)
-            .offset(x: shell.panelRect.minX, y: shell.panelRect.minY)
-        }
+        surface(
+            radius: PanelChrome.cornerRadius(phase: shell.phase, metrics: model.settings.panel),
+            theme: theme
+        )
+    }
+
+    private func surface(radius: CGFloat, theme: DeckTheme) -> some View {
+        GlassBackground(
+            cornerRadius: radius,
+            theme: theme,
+            glass: model.settings.glass,
+            weldedToTopEdge: shell.weldedToTopEdge
+        )
+        .frame(width: shell.panelRect.width, height: shell.panelRect.height)
+        .offset(x: shell.panelRect.minX, y: shell.panelRect.minY)
     }
 
     /// Which of the three layouts is showing.
