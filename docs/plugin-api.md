@@ -493,8 +493,14 @@ lower one keeps working — that is what the number is for.
 * **Do not police your own deadline — uDeck does.** A stock macOS has neither
   `timeout` nor `gtimeout`, so a shell producer genuinely cannot. uDeck kills a
   run that overruns `timeout`, and kills whatever it started with it.
-* **Do not leave background children.** They are killed with you, but a producer
-  that spawns something long-lived on every run is fighting the runtime.
+* **Do not leave background children.** Every run gets a process group of its
+  own, and uDeck ends the group when the run ends — on a deadline, on the
+  output cap, and on an ordinary successful exit alike. `(sleep 300 &)` does not
+  survive your producer, and neither does a child that ignores `SIGTERM`: the
+  polite signal goes to the group, and what is left after the grace period is
+  killed. If your plugin genuinely needs something long-lived, it wants to be a
+  `resident` plugin, which is a format that exists and an implementation that
+  does not yet.
 * **Never call anything that can block forever.** The classic is a command
   that touches a network mount whose server has gone away: it does not fail, it
   waits, and it may wait for the rest of the session. Anything speaking to a
@@ -567,14 +573,14 @@ and put the detail behind an action.
 ### One thing uDeck cannot clean up
 
 If uDeck itself is killed — force-quit, or crashed — while one of your runs is
-in flight, that run is orphaned. It keeps going until it finishes on its own,
-and a producer that never finishes keeps going until the machine restarts.
+in flight, that run is orphaned along with its process group. It keeps going
+until it finishes on its own, and a producer that never finishes keeps going
+until the machine restarts.
 
 macOS offers no way to say "die when my parent dies", so this is a real hole
-rather than an oversight. It is bounded — at most one stray process per plugin,
-and only when the host died at exactly the wrong moment — but it is a reason to
-write producers that terminate on their own even when nobody is waiting for
-them, and a reason not to have one start something long-lived in the background.
+rather than an oversight. It is bounded — at most one group per plugin, and only
+when the host died at exactly the wrong moment — but it is a reason to write
+producers that terminate on their own even when nobody is waiting for them.
 
 Measured, so the size of the hole is known: with a plugin that hangs on purpose
 and ignores `SIGTERM`, polled every five seconds for a minute, a **running**

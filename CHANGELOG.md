@@ -91,6 +91,20 @@ An audit of what a plugin could still do to the host, and what it found:
 - **A refresh no longer queues behind its slowest producer**, four at a time.
 - **A window hint taller than the grid draws is refused** rather than silently
   clamped.
+- **Every run gets a process group of its own.** Foundation's `Process` cannot
+  ask for one, so the producer is spawned by hand. What it buys: the old cleanup
+  had to enumerate the process tree *before* signalling — once the direct child
+  dies its children belong to `launchd` — and it only ever ran on a deadline or
+  an output overrun, so a producer that started something detached and exited
+  *successfully* left it behind on every poll. Ending a group has no such
+  window. The escalation to `SIGKILL` no longer stops when the direct child
+  exits, either: its comment said "nothing left to kill", which was true only of
+  a producer that had started nothing.
+- **Signal dispositions are reset in the child.** They survive `exec`, so a
+  producer inherited the host's — and a shell cannot trap a signal that was
+  already ignored when it started. The polite `SIGTERM` was reaching producers
+  that could not act on it, and every well-behaved one cost the full grace
+  period and then a `SIGKILL`.
 
 ### The bundled plugin
 

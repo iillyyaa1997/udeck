@@ -368,6 +368,100 @@ struct PollExecutionTests {
                 "uDeck kept \(result.standardOutput.count + result.standardError.count) bytes of a \(runner.maximumOutputBytes) limit")
     }
 
+    /// The old cleanup ran only from the deadline and output-cap watchers, and
+    /// it had to enumerate the process tree *before* signalling, because once
+    /// the direct child dies its children are re-parented to `launchd`. So a
+    /// producer that started something detached and then exited *successfully*
+    /// left it behind — once per poll, for as long as the panel was open.
+    @Test("a producer that exits cleanly does not leave what it started behind")
+    func detachedChildrenAreNotLeftBehind() async throws {
+        let temp = TemporaryDirectory()
+        let directory = temp.url.appendingPathComponent("plugins/detacher")
+        temp.writePlugin(folder: "detacher", manifest: """
+        { "id": "detacher", "name": "Detacher", "version": "1.0.0", "api": 1, "kind": "poll",
+          "run": ["./run.sh"], "interval": 30, "timeout": 5 }
+        """, script: (name: "run.sh", body: """
+        #!/bin/sh
+        sleep 300 &
+        echo $! > child.pid
+        printf '{"state":"ok","rows":[]}'
+        """, executable: true))
+
+        let outcome = await executor.poll(
+            plugin: discovery.load(directory),
+            grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light,
+            reason: .interval, language: "en"
+        )
+        guard case .card = outcome else { Issue.record("expected a card, got \(outcome)"); return }
+
+        let recorded = try String(contentsOf: directory.appendingPathComponent("child.pid"), encoding: .utf8)
+        let child = try #require(pid_t(recorded.trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer { kill(child, SIGKILL) }
+
+        // `kill(pid, 0)` succeeds exactly while the process exists, and a
+        // stale `errno` must not be consulted: it is only set on failure.
+        #expect(kill(child, 0) != 0,
+                "the detached child \(child) is still running after a successful poll")
+    }
+
+    /// The producer takes the polite signal and leaves; its own child does not.
+    /// The escalation used to be cancelled the moment the direct child exited —
+    /// its comment said "nothing left to kill", and that was true only when the
+    /// producer had started nothing.
+    @Test("a child that ignores the polite signal is killed anyway")
+    func stubbornGrandchildrenAreKilled() async throws {
+        let temp = TemporaryDirectory()
+        let directory = temp.url.appendingPathComponent("plugins/stubborn")
+        temp.writePlugin(folder: "stubborn", manifest: """
+        { "id": "stubborn", "name": "Stubborn", "version": "1.0.0", "api": 1, "kind": "poll",
+          "run": ["./run.sh"], "interval": 30, "timeout": 5 }
+        """, script: (name: "run.sh", body: """
+        #!/bin/sh
+        sh -c 'trap "" TERM; sleep 300' &
+        echo $! > child.pid
+        printf '{"state":"ok","rows":[]}'
+        """, executable: true))
+
+        var runner = ProcessRunner()
+        runner.terminationGrace = 0.3
+        let outcome = await PollExecutor(runner: runner).poll(
+            plugin: discovery.load(directory),
+            grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light,
+            reason: .interval, language: "en"
+        )
+        guard case .card = outcome else { Issue.record("expected a card, got \(outcome)"); return }
+
+        let recorded = try String(contentsOf: directory.appendingPathComponent("child.pid"), encoding: .utf8)
+        let child = try #require(pid_t(recorded.trimmingCharacters(in: .whitespacesAndNewlines)))
+        defer { kill(child, SIGKILL) }
+
+        #expect(kill(child, 0) != 0, "the stubborn child \(child) survived the run")
+    }
+
+    /// Spawning by hand means owning the descriptors by hand, and a leak there
+    /// is invisible until the host runs out of them a few thousand polls later.
+    @Test("running a plugin many times leaks no descriptors")
+    func descriptorsAreNotLeaked() async {
+        let temp = TemporaryDirectory()
+        let plugin = example("hello-card")
+
+        func openDescriptors() -> Int {
+            (try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? -1
+        }
+
+        // Warm up first: the first run of anything allocates things that are
+        // not a leak, and counting from zero would call them one.
+        for _ in 0 ..< 3 { _ = await poll(plugin.directory.lastPathComponent, temp: temp) }
+        let before = openDescriptors()
+
+        for _ in 0 ..< 20 { _ = await poll(plugin.directory.lastPathComponent, temp: temp) }
+        let after = openDescriptors()
+
+        #expect(after <= before + 2, "descriptors went from \(before) to \(after) over twenty runs")
+    }
+
     @Test("the producer's environment is built, not inherited")
     func environmentIsNotInherited() {
         let temp = TemporaryDirectory()
