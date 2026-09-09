@@ -71,7 +71,7 @@ struct Russian: Vocabulary {
         case .densityNormal: "Обычно"
         case .densityCozy: "Просторно"
         case .lookLanguage: "Язык"
-        case .languageSystem: "Как на Mac"
+        case .languageSystem: "Системный"
         case .lookNameThisLook: "Название вида"
 
         case .sampleTitle: "Сессии Claude"

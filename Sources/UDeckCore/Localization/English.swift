@@ -67,7 +67,7 @@ struct English: Vocabulary {
         case .densityNormal: "Normal"
         case .densityCozy: "Cozy"
         case .lookLanguage: "Language"
-        case .languageSystem: "Follow the Mac"
+        case .languageSystem: "System"
         case .lookNameThisLook: "Name this look"
 
         case .sampleTitle: "Claude sessions"

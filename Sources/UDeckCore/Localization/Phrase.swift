@@ -82,6 +82,10 @@ public enum Phrase: Sendable, Equatable {
     case lookLanguage
 
     /// The absence of a choice: whichever language the Mac is set to.
+    ///
+    /// Named for what it is rather than for where it comes from — the row
+    /// above it already says "System" for the same idea about the look, and
+    /// two names for one concept on one screen is one name too many.
     case languageSystem
     case lookNameThisLook
 
