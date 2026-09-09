@@ -57,6 +57,7 @@ public enum Phrase: Sendable, Equatable {
     case lookLightLook
     case lookDarkLook
     case lookCustom
+    case lookPresets
     case lookBuiltIn
     case lookSaved
     case lookShows
@@ -108,6 +109,15 @@ public enum Phrase: Sendable, Equatable {
     case modeGhost
     case modePaper
     case modeSmoke
+
+    /// One line on what each built-in look is for. The names do not explain
+    /// themselves — nobody guesses what Ghost or Paper is from the word.
+    case modeLightSummary
+    case modeDarkSummary
+    case modeContrastSummary
+    case modeGhostSummary
+    case modePaperSummary
+    case modeSmokeSummary
 
     // MARK: - What decides which look
 

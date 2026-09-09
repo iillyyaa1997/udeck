@@ -61,6 +61,18 @@ public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
         }
     }
 
+    /// One line on what this look is for.
+    public var summaryPhrase: Phrase {
+        switch self {
+        case .light: .modeLightSummary
+        case .dark: .modeDarkSummary
+        case .contrast: .modeContrastSummary
+        case .ghost: .modeGhostSummary
+        case .paper: .modePaperSummary
+        case .smoke: .modeSmokeSummary
+        }
+    }
+
     public var name: String {
         switch self {
         case .light: "Light"
@@ -73,16 +85,6 @@ public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
     }
 
     /// One line on what it is for.
-    public var summary: String {
-        switch self {
-        case .light: "A bright panel with dark text, for work over documents."
-        case .dark: "A dark panel with light text, for work over dark screens."
-        case .contrast: "Nearly opaque, for a panel that has to be readable over anything."
-        case .ghost: "Barely there — the content hangs over whatever is behind it."
-        case .paper: "A dense light surface, for reading rather than glancing."
-        case .smoke: "Diffused, but still visibly a material."
-        }
-    }
 
     /// The glass this mode is made of.
     public var glass: GlassAppearance {

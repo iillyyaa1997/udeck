@@ -242,8 +242,6 @@ private struct OpeningSettings: View {
                                isOn: binding(\.collapseOnAppSwitch))
                         Toggle(strings(.openingFullscreen),
                                isOn: binding(\.gesture.enabledInFullscreen))
-                        Toggle(strings(.openingKeepPolling),
-                               isOn: binding(\.pollWhileCollapsed))
                     }
                 }
             }
@@ -423,10 +421,24 @@ private struct LookSettings: View {
                 .labelsHidden()
                 .frame(width: 220)
 
+                // Labelled, because it was not. The menu showed only whichever
+                // preset the look currently matched — "Custom" most of the
+                // time — and the operator had to ask what it was.
+                Text(strings(.lookPresets))
+                    .foregroundStyle(.secondary)
+
                 Menu(startingPointName) {
                     Section(strings(.lookBuiltIn)) {
                         ForEach(PanelMode.allCases) { preset in
-                            Button(strings(preset.namePhrase)) { pour(preset.look) }
+                            // Name and summary, because the names do not explain
+                            // themselves: Ghost, Paper and Smoke tell you
+                            // nothing about what you are about to pour in.
+                            Button {
+                                pour(preset.look)
+                            } label: {
+                                Text(strings(preset.namePhrase))
+                                Text(strings(preset.summaryPhrase))
+                            }
                         }
                     }
                     if !model.settings.theme.saved.isEmpty {
@@ -735,6 +747,18 @@ private struct PluginSettingsSection: View {
 
     var body: some View {
         SettingsGroup(strings(.pluginsInstalled)) {
+            // It sat under Opening, which is about how the panel arrives. This
+            // is a fact about plugins — whether they keep running when nobody
+            // is looking — and it belongs with them.
+            Toggle(strings(.openingKeepPolling), isOn: Binding(
+                get: { model.settings.pollWhileCollapsed },
+                set: { newValue in
+                    var settings = model.settings
+                    settings.pollWhileCollapsed = newValue
+                    model.update(settings: settings)
+                }
+            ))
+
             HStack {
                 Text(model.pluginsDirectoryDisplayPath)
                     .font(.system(.caption, design: .monospaced))

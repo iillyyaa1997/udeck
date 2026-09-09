@@ -47,6 +47,7 @@ struct Russian: Vocabulary {
         case .lookLightLook: "Светлый вид"
         case .lookDarkLook: "Тёмный вид"
         case .lookCustom: "Свой"
+        case .lookPresets: "Пресеты"
         case .lookBuiltIn: "Встроенные"
         case .lookSaved: "Сохранённые"
         case .lookShows: "Показывать"
@@ -89,6 +90,12 @@ struct Russian: Vocabulary {
         case .modeGhost: "Призрак"
         case .modePaper: "Бумага"
         case .modeSmoke: "Дым"
+        case .modeLightSummary: "Светлая панель с тёмным текстом, для работы поверх документов."
+        case .modeDarkSummary: "Тёмная панель со светлым текстом, для работы поверх тёмных экранов."
+        case .modeContrastSummary: "Почти непрозрачная, чтобы читалась поверх чего угодно."
+        case .modeGhostSummary: "Почти нет — содержимое висит над тем, что за ним."
+        case .modePaperSummary: "Плотная светлая поверхность, для чтения, а не для взгляда."
+        case .modeSmokeSummary: "Рассеянная, но всё ещё явно материал."
 
         // Чем выбирается вид
         case .sourceSystem: "Система"

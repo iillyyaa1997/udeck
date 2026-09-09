@@ -248,13 +248,6 @@ public enum ThemeSource: String, Codable, CaseIterable, Sendable, Identifiable {
         }
     }
 
-    public var summary: String {
-        switch self {
-        case .system: "Follows macOS, including its own light and dark schedule."
-        case .manual: "Stays where you put it."
-        case .schedule: "Light during the day, dark at night."
-        }
-    }
 }
 
 /// When the scheduled source turns over, in whole hours of local time.

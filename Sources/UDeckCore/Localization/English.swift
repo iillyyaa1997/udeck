@@ -43,6 +43,7 @@ struct English: Vocabulary {
         case .lookLightLook: "Light look"
         case .lookDarkLook: "Dark look"
         case .lookCustom: "Custom"
+        case .lookPresets: "Presets"
         case .lookBuiltIn: "Built in"
         case .lookSaved: "Saved"
         case .lookShows: "Shows"
@@ -85,6 +86,12 @@ struct English: Vocabulary {
         case .modeGhost: "Ghost"
         case .modePaper: "Paper"
         case .modeSmoke: "Smoke"
+        case .modeLightSummary: "A bright panel with dark text, for work over documents."
+        case .modeDarkSummary: "A dark panel with light text, for work over dark screens."
+        case .modeContrastSummary: "Nearly opaque, for a panel that has to be readable over anything."
+        case .modeGhostSummary: "Barely there — the content hangs over whatever is behind it."
+        case .modePaperSummary: "A dense light surface, for reading rather than glancing."
+        case .modeSmokeSummary: "Diffused, but still visibly a material."
 
         // What decides which look
         case .sourceSystem: "System"
