@@ -81,7 +81,7 @@ Scripts/make-app.sh --dmg    # …and a disk image next to it
 ## Installing plugins
 
 Put a plugin folder in `~/.udeck/plugins/`, then open the panel and add it to a
-tab. The three plugins in [`examples/`](examples) are a good place to start —
+tab. The four plugins in [`examples/`](examples) are a good place to start —
 copy one in and see what happens:
 
 ```sh

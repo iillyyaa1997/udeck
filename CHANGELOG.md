@@ -66,11 +66,13 @@ The first working version: the shell, the plugin runtime, and one plugin.
 
 ### The bundled plugin
 
-- **Claude sessions** — how many Claude Code sessions are alive on this machine
-  and how many are waiting for the operator. Liveness is decided from three
-  sources, because a title file proves nothing on its own, a lease with a frozen
-  heartbeat is a dead session, and a keeper process can outlive the tab it was
-  writing for.
+- **Disk space** — how much room is left, counted per disk rather than per
+  mount. A `df` line is not a disk: the five APFS volumes of one container all
+  report the same free pool, so listing them shows the same 657 GB five times
+  and summing them claims three terabytes on a one-terabyte disk. Free space is
+  taken once, used space is summed, and fullness is measured against what the
+  disk can still hold rather than against a total the operator can never
+  reach.
 
 ### Around the code
 

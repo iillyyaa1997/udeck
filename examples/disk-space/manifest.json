@@ -1,0 +1,67 @@
+{
+  "id": "disk-space",
+  "name": "Disk space",
+  "version": "0.1.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "How much room is left on this machine's disks, counted per disk rather than per mount.",
+  "author": "uDeck",
+  "run": ["./disk.py"],
+  "interval": 30,
+  "timeout": 3,
+  "permissions": {
+    "exec": ["df", "open"]
+  },
+  "settings": [
+    {
+      "key": "warn_percent",
+      "type": "int",
+      "default": 85,
+      "min": 50,
+      "max": 99,
+      "label": "Warn above",
+      "help": "How full a disk has to be, in percent, before the card turns amber."
+    },
+    {
+      "key": "crit_percent",
+      "type": "int",
+      "default": 95,
+      "min": 51,
+      "max": 100,
+      "label": "Critical above",
+      "help": "How full a disk has to be before the card turns red. A value below the warning threshold is raised to it."
+    },
+    {
+      "key": "volumes",
+      "type": "enum",
+      "default": "physical",
+      "label": "What to list",
+      "help": "A modern Mac splits its startup disk into several volumes that share one pool of free space. Listing them separately shows the same free space five times over.",
+      "options": [
+        { "value": "physical", "label": "One row per disk" },
+        { "value": "mounts", "label": "One row per mounted volume" },
+        { "value": "startup", "label": "The startup disk only" }
+      ]
+    },
+    {
+      "key": "hide_system",
+      "type": "bool",
+      "default": true,
+      "label": "Hide the system's own volumes",
+      "help": "Preboot, Recovery and the rest. A disk that holds nothing else disappears with them; a disk that also holds your files still counts them, because they take real space on it."
+    },
+    {
+      "key": "watch_path",
+      "type": "string",
+      "default": "",
+      "label": "Path to keep an eye on",
+      "help": "The disk holding this path is always listed, and listed first. Empty means no preference."
+    }
+  ],
+  "window": {
+    "defaultWidth": 4,
+    "defaultHeight": 3,
+    "minWidth": 3,
+    "minHeight": 2
+  }
+}

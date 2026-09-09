@@ -45,5 +45,13 @@ jobs:
             echo "$name: manifest is valid JSON"
           done
 
-      - name: Run the plugin's own tests
-        run: python3 -m unittest discover -s examples/claude-sessions -p 'test_*.py' -v
+      # Whichever examples carry a Python suite, rather than a name that has
+      # to be edited here every time the example set changes.
+      - name: Run the plugins' own tests
+        run: |
+          set -euo pipefail
+          for plugin in examples/*/; do
+            ls "$plugin"test_*.py >/dev/null 2>&1 || continue
+            echo "== $(basename "$plugin")"
+            python3 -m unittest discover -s "$plugin" -p 'test_*.py' -v
+          done

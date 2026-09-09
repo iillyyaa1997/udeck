@@ -110,7 +110,7 @@ struct DiscoveryTests {
     @Test("the examples shipped with the repository all load")
     func examplesAreValid() {
         let discovery = PluginDiscovery(searchPath: AppSettings().pluginExecutableSearchPath)
-        for name in ["hello-card", "slow-plugin", "broken-card"] {
+        for name in ["hello-card", "disk-space", "slow-plugin", "broken-card"] {
             let plugin = discovery.load(RepositoryExamples.plugin(name))
             #expect(plugin.problems.isEmpty, "\(name): \(plugin.problems.map(\.description))")
             #expect(plugin.isUsable, "\(name) should be usable")
