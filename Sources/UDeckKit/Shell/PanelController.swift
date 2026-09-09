@@ -700,7 +700,14 @@ public final class PanelController {
         // it will look when it is used, from the moment it is seen — which is
         // the only honest thing for a surface whose whole job is to be glanced
         // at from inside another application.
-        if phase.isVisible {
+        // Only where the material cannot be told to stop dimming itself. Making
+        // a glance take key status is a real change to how focus behaves, and
+        // it is worth it only as the fallback it now is: it covers the panel and
+        // cannot cover the islands, because one application has one key window
+        // and there is an island per screen.
+        if phase.isVisible, #available(macOS 26, *), !LiquidGlassBackground.canUnsubdue {
+            panel.makeKeyAndOrderFront(nil)
+        } else if phase.isVisible, #unavailable(macOS 26) {
             panel.makeKeyAndOrderFront(nil)
         }
 
