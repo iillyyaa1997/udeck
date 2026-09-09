@@ -60,101 +60,16 @@ public struct SettingsView: View {
 
 // MARK: - Opening
 
+/// How the panel is opened, on one screen.
+///
+/// Same treatment as the Look pane and for the same reason: this was four
+/// headed groups with a paragraph under nearly every control, and the
+/// paragraphs were mine. What survives is the one warning that stops a
+/// shortcut being set to something macOS will take from every other
+/// application, and one line at the foot about permissions — which is a fact
+/// about uDeck worth stating once rather than four times.
 private struct OpeningSettings: View {
     @Bindable var model: DeckModel
-
-    var body: some View {
-        SettingsGroup("The gesture") {
-            Toggle("Open by moving the cursor to the top of the screen", isOn: binding(\.gesture.enabled))
-            Text("uDeck watches the pointer, which needs no permission from macOS. Only keyboard monitoring would, and uDeck does not do it.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            LabeledContent("Pause before opening") {
-                Slider(value: binding(\.gesture.dwellDuration), in: 0.08 ... 0.8, step: 0.02) {
-                    Text(String(format: "%.0f ms", model.settings.gesture.dwellDuration * 1000))
-                }
-                .frame(width: 260)
-            }
-            Text("How long the cursor has to rest at the top edge. Sliding sideways restarts it, which is what keeps travelling along the menu bar from opening the panel.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            LabeledContent("Or push past the edge by") {
-                Slider(value: binding(\.gesture.edgePushDistance), in: 10 ... 120, step: 5) {
-                    Text("\(Int(model.settings.gesture.edgePushDistance)) pt")
-                }
-                .frame(width: 260)
-            }
-            Text("Once the cursor has stopped at the top edge, moving the mouse further opens the panel straight away. Reaching a menu-bar target stops the moment it lands, so continued pressure is a signal nothing else produces.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            LabeledContent("Stay quiet after closing for") {
-                Slider(value: binding(\.gesture.reopenCooldown), in: 0 ... 2, step: 0.1) {
-                    Text(String(format: "%.1f s", model.settings.gesture.reopenCooldown))
-                }
-                .frame(width: 260)
-            }
-        }
-
-        SettingsGroup("The keyboard shortcut") {
-            Toggle("Open with a keyboard shortcut", isOn: binding(\.hotkey.enabled))
-            Text("The other way in, for when the cursor is nowhere near the top of the screen. It opens the panel ready to type in, rather than as a glance. This needs no permission either: macOS hands one registered combination straight to uDeck, which is not the same as watching the keyboard.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            LabeledContent("Shortcut") {
-                HStack(spacing: 10) {
-                    ForEach(HotKeyModifier.allCases.sorted(), id: \.self) { modifier in
-                        Toggle(modifier.symbol, isOn: Binding(
-                            get: { model.settings.hotkey.modifiers.contains(modifier) },
-                            set: { isOn in
-                                var updated = model.settings
-                                if isOn {
-                                    updated.hotkey.modifiers.insert(modifier)
-                                } else {
-                                    updated.hotkey.modifiers.remove(modifier)
-                                }
-                                model.update(settings: updated)
-                            }
-                        ))
-                        .toggleStyle(.button)
-                    }
-                    Picker("", selection: Binding(
-                        get: { model.settings.hotkey.key.uppercased() },
-                        set: { key in
-                            var updated = model.settings
-                            updated.hotkey.key = key
-                            model.update(settings: updated)
-                        }
-                    )) {
-                        ForEach(HotKeyBinding.orderedKeyNames, id: \.self) { name in
-                            Text(name).tag(name)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 120)
-                }
-            }
-            if model.settings.hotkey.modifiers.isEmpty {
-                Text("Pick at least one modifier. A shortcut without one would take that key away from every application on this Mac.")
-                    .font(.caption).foregroundStyle(.orange)
-            } else if model.settings.hotkey.enabled {
-                Text("\(model.settings.hotkey.displayName) — if another application already holds it, macOS gives it to whoever asked first and uDeck will say so in its log rather than pretending.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-
-        SettingsGroup("When to stay out of the way") {
-            Toggle("Retract when you switch to another application", isOn: binding(\.collapseOnAppSwitch))
-            Toggle("Open over fullscreen applications", isOn: binding(\.gesture.enabledInFullscreen))
-            Text("On by default: a fullscreen game or video is exactly when a panel you cannot reach stops being reached for. Turn it off if you ever see macOS's own menu-bar reveal get stuck in a fullscreen app — panels of this kind have been observed to do that, and corrupting the system's state is a worse problem than an unwanted panel.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-
-        SettingsGroup("Plugins") {
-            Toggle("Keep running plugins while the panel is away", isOn: binding(\.pollWhileCollapsed))
-            Text("Off by default: a panel nobody is looking at that still runs a dozen scripts every few seconds is a laptop running out of battery for nothing. Opening the panel refreshes everything, and anything not yet refreshed is drawn as visibly old rather than as current.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
         Binding(
@@ -166,10 +81,155 @@ private struct OpeningSettings: View {
             }
         )
     }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
+                GridRow {
+                    label("Gesture")
+                    Toggle("Open by moving the cursor to the top of the screen",
+                           isOn: binding(\.gesture.enabled))
+                }
+
+                GridRow {
+                    label("Pause first")
+                    slider(binding(\.gesture.dwellDuration), in: 0.08 ... 0.8, step: 0.02,
+                           readout: String(format: "%.0f ms", model.settings.gesture.dwellDuration * 1000))
+                }
+
+                GridRow {
+                    label("Or push past")
+                    slider(binding(\.gesture.edgePushDistance), in: 10 ... 120, step: 5,
+                           readout: "\(Int(model.settings.gesture.edgePushDistance)) pt")
+                }
+
+                GridRow {
+                    label("Then stay quiet")
+                    slider(binding(\.gesture.reopenCooldown), in: 0 ... 2, step: 0.1,
+                           readout: String(format: "%.1f s", model.settings.gesture.reopenCooldown))
+                }
+
+                divider
+
+                GridRow {
+                    label("Shortcut")
+                    Toggle("Open with a keyboard shortcut", isOn: binding(\.hotkey.enabled))
+                }
+
+                GridRow {
+                    label("Keys")
+                    HStack(spacing: 8) {
+                        ForEach(HotKeyModifier.allCases.sorted(), id: \.self) { modifier in
+                            Toggle(modifier.symbol, isOn: Binding(
+                                get: { model.settings.hotkey.modifiers.contains(modifier) },
+                                set: { isOn in
+                                    var updated = model.settings
+                                    if isOn {
+                                        updated.hotkey.modifiers.insert(modifier)
+                                    } else {
+                                        updated.hotkey.modifiers.remove(modifier)
+                                    }
+                                    model.update(settings: updated)
+                                }
+                            ))
+                            .toggleStyle(.button)
+                        }
+                        Picker("", selection: Binding(
+                            get: { model.settings.hotkey.key.uppercased() },
+                            set: { key in
+                                var updated = model.settings
+                                updated.hotkey.key = key
+                                model.update(settings: updated)
+                            }
+                        )) {
+                            ForEach(HotKeyBinding.orderedKeyNames, id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 110)
+                    }
+                }
+
+                if model.settings.hotkey.modifiers.isEmpty {
+                    GridRow {
+                        Color.clear.frame(width: 1, height: 1)
+                        Text("Pick at least one modifier — without one this key is taken away from every application on this Mac.")
+                            .font(.caption).foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
+                divider
+
+                GridRow {
+                    label("Also")
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle("Retract when you switch to another application",
+                               isOn: binding(\.collapseOnAppSwitch))
+                        Toggle("Open over fullscreen applications",
+                               isOn: binding(\.gesture.enabledInFullscreen))
+                        Toggle("Keep running plugins while the panel is away",
+                               isOn: binding(\.pollWhileCollapsed))
+                    }
+                }
+            }
+
+            Divider()
+
+            Text("uDeck asks macOS for no permissions. It watches the pointer, which needs none, and registers one keyboard combination, which is not the same as watching the keyboard.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: 560, alignment: .leading)
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .gridColumnAlignment(.trailing)
+            .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder private var divider: some View {
+        GridRow {
+            Divider()
+                .gridCellColumns(2)
+                .padding(.vertical, 2)
+        }
+    }
+
+    /// Generic over the number, because one of these four is a `CGFloat` — a
+    /// distance in points — and the rest are plain `Double`s.
+    private func slider<V: BinaryFloatingPoint>(
+        _ value: Binding<V>,
+        in range: ClosedRange<V>,
+        step: V.Stride,
+        readout: String
+    ) -> some View where V.Stride: BinaryFloatingPoint {
+        HStack(spacing: 10) {
+            Slider(value: value, in: range, step: step).frame(width: 230)
+            Text(readout)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 52, alignment: .trailing)
+        }
+    }
 }
+
 
 // MARK: - Look
 
+/// Everything about how the panel looks, on one screen.
+///
+/// It was five headed groups down a scroll, with two previews of the same slab
+/// and a paragraph of explanation under nearly every control. The explanation
+/// was mine and there was far too much of it: a settings screen that has to be
+/// read is one that has failed, and the operator said so twice.
+///
+/// So: one sample at the top, every knob under it in a single grid, and prose
+/// only where a control is about to do something surprising. The sample is
+/// live, which is what replaces the paragraphs — a panel you can see is a panel
+/// you do not need described.
 private struct LookSettings: View {
     @Bindable var model: DeckModel
 
@@ -210,6 +270,17 @@ private struct LookSettings: View {
         )
     }
 
+    private func theme<Value>(_ keyPath: WritableKeyPath<ThemeSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { model.settings.theme[keyPath: keyPath] },
+            set: { newValue in
+                var settings = model.settings
+                settings.theme[keyPath: keyPath] = newValue
+                model.update(settings: settings)
+            }
+        )
+    }
+
     /// What the "start from" menu calls itself: the preset this look currently
     /// matches, or the honest answer that it matches none of them.
     private var startingPointName: String {
@@ -218,22 +289,17 @@ private struct LookSettings: View {
         return "Custom"
     }
 
-    /// Says out loud when the character control has almost nothing left to do.
+    /// The one note worth keeping, because it is the only control on this
+    /// screen that can silently do nothing.
     ///
     /// The tint is painted by uDeck over the material rather than handed to it,
-    /// which is what made one setting produce one colour — and the cost is
-    /// that the material only shows through whatever the tint leaves. Measured
-    /// on the running panel: regular against clear is 19 points of 255 apart
-    /// with no tint at all, and 8 with the tint at 72%. A control that does
-    /// almost nothing should say so rather than let the operator conclude it is
-    /// broken.
-    private var characterNote: String {
-        let strength = editedLook.glass.tintStrength
-        guard editedLook.glass.tinted, strength > 0.5 else {
-            return "At this tint the difference between the two is plain to see."
-        }
-        return "At \(Int(strength * 100)) % tint you will barely see the difference: the tint is painted over the material, "
-            + "so only what it leaves through carries the character. Turn the tint down to tell them apart."
+    /// so the material only shows through whatever the tint leaves. Measured on
+    /// the running panel: the two characters are 19 points of 255 apart with no
+    /// tint, and 8 at 72%. Without this the operator concludes the control is
+    /// broken, which is what happened.
+    private var characterWarning: String? {
+        guard editedLook.glass.tinted, editedLook.glass.tintStrength > 0.5 else { return nil }
+        return "At \(percent(editedLook.glass.tintStrength)) tint these two barely differ — the tint covers the material. Turn it down to tell them apart."
     }
 
     private func pour(_ look: PanelLook) {
@@ -249,87 +315,35 @@ private struct LookSettings: View {
         newPresetName = ""
     }
 
-    private func theme<Value>(_ keyPath: WritableKeyPath<ThemeSettings, Value>) -> Binding<Value> {
-        Binding(
-            get: { model.settings.theme[keyPath: keyPath] },
-            set: { newValue in
-                var settings = model.settings
-                settings.theme[keyPath: keyPath] = newValue
-                model.update(settings: settings)
-            }
-        )
-    }
-
-    private func binding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
-        Binding(
-            get: { model.settings[keyPath: keyPath] },
-            set: { newValue in
-                var settings = model.settings
-                settings[keyPath: keyPath] = newValue
-                model.update(settings: settings)
-            }
-        )
-    }
+    private func percent(_ value: Double) -> String { "\(Int((value * 100).rounded())) %" }
 
     var body: some View {
-        SettingsGroup("The look") {
-            Picker("Which look", selection: theme(\.source)) {
-                ForEach(ThemeSource.allCases) { source in
-                    Text(source.name).tag(source)
-                }
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 360)
-            Text(model.settings.theme.source.summary)
-                .font(.caption).foregroundStyle(.secondary)
-
-            if model.settings.theme.source == .manual {
-                Picker("Showing", selection: theme(\.manualIsDark)) {
-                    Text("Light").tag(false)
-                    Text("Dark").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 220)
-            }
-
-            if model.settings.theme.source == .schedule {
-                HStack(spacing: 18) {
-                    Stepper(value: theme(\.schedule.lightFromHour), in: 0 ... 23) {
-                        Text("Light from \(model.settings.theme.schedule.lightFromHour):00")
-                    }
-                    Stepper(value: theme(\.schedule.darkFromHour), in: 0 ... 23) {
-                        Text("Dark from \(model.settings.theme.schedule.darkFromHour):00")
-                    }
-                }
-                .frame(width: 400)
-                Text("By the clock rather than by sunset: sunset needs your location, and uDeck asks macOS for no permissions at all.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
-            Text("Two looks, and something that decides between them. Everything below belongs to one of the two.")
-                .font(.caption).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
+            sample
+            Divider()
+            knobs
+            Divider()
+            presets
         }
+        .frame(maxWidth: 560, alignment: .leading)
+    }
 
-        SettingsGroup("Which one you are editing") {
-            Picker("Editing", selection: Binding(
-                get: { edited },
-                set: { editingDark = $0 }
-            )) {
-                Text("The light look").tag(false)
-                Text("The dark look").tag(true)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 320)
+    // MARK: - The sample
 
-            Text(edited
-                ? "What shows at night, on a dark system, or when you pin it. You can set it up in daylight."
-                : "What shows in the day, on a light system, or when you pin it.")
-                .font(.caption).foregroundStyle(.secondary)
-
+    private var sample: some View {
+        VStack(alignment: .leading, spacing: 10) {
             GlassPreview(glass: editedLook.glass,
                          theme: DeckTheme(density: model.settings.density, look: editedLook))
 
-            LabeledContent("Start from") {
+            HStack(spacing: 12) {
+                Picker("", selection: Binding(get: { edited }, set: { editingDark = $0 })) {
+                    Text("Light look").tag(false)
+                    Text("Dark look").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 220)
+
                 Menu(startingPointName) {
                     Section("Built in") {
                         ForEach(PanelMode.allCases) { preset in
@@ -344,164 +358,238 @@ private struct LookSettings: View {
                         }
                     }
                 }
-                .frame(width: 200)
+                .frame(width: 150)
             }
-            Text(model.settings.theme.preset(forDark: edited).map(\.summary)
-                ?? "Your own mixture. Pouring one in above replaces it.")
-                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
 
-            LabeledContent("Save as") {
-                HStack(spacing: 8) {
-                    TextField("Name", text: $newPresetName)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 160)
-                        .onSubmit(saveCurrent)
-                    Button("Save", action: saveCurrent)
-                        .disabled(PanelPreset.cleaned(name: newPresetName).isEmpty)
-                }
-            }
-            Text("Saves the look you are editing, exactly as it stands. A name you have used before is overwritten rather than added twice.")
-                .font(.caption).foregroundStyle(.secondary)
+    // MARK: - The knobs
 
-            if !model.settings.theme.saved.isEmpty {
+    private var knobs: some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
+            GridRow {
+                label("Shows")
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(model.settings.theme.saved) { preset in
-                        HStack(spacing: 10) {
-                            Text(preset.name).frame(width: 160, alignment: .leading)
-                            Button("Use") { pour(preset.look) }
-                            Button("Delete", role: .destructive) {
-                                var settings = model.settings
-                                settings.theme.remove(preset.id)
-                                model.update(settings: settings)
-                            }
+                    Picker("", selection: theme(\.source)) {
+                        ForEach(ThemeSource.allCases) { source in
+                            Text(source.name).tag(source)
                         }
                     }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 300)
+
+                    switch model.settings.theme.source {
+                    case .manual:
+                        Picker("", selection: theme(\.manualIsDark)) {
+                            Text("Light").tag(false)
+                            Text("Dark").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(width: 160)
+                    case .schedule:
+                        HStack(spacing: 14) {
+                            Stepper("Light from \(model.settings.theme.schedule.lightFromHour):00",
+                                    value: theme(\.schedule.lightFromHour), in: 0 ... 23)
+                            Stepper("Dark from \(model.settings.theme.schedule.darkFromHour):00",
+                                    value: theme(\.schedule.darkFromHour), in: 0 ... 23)
+                        }
+                        .font(.callout)
+                    case .system:
+                        EmptyView()
+                    }
                 }
             }
-        }
 
-        SettingsGroup("Density") {
-            Picker("Density", selection: Binding(
-                get: { model.settings.density },
-                set: { newValue in
-                    var settings = model.settings
-                    settings.density = newValue
-                    model.update(settings: settings)
+            divider
+
+            GridRow {
+                label("Glass")
+                Picker("", selection: look(\.glass.style)) {
+                    Text("Regular").tag(GlassStyle.regular)
+                    Text("Clear").tag(GlassStyle.clear)
                 }
-            )) {
-                Text("Compact").tag(Density.compact)
-                Text("Normal").tag(Density.normal)
-                Text("Cozy").tag(Density.cozy)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 200)
             }
-            .pickerStyle(.segmented)
-            .frame(width: 320)
 
-            Text("Every plugin has to look right in all three, which is why this is one setting rather than something each plugin decides.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-
-        SettingsGroup("The glass") {
-            Picker("Character", selection: look(\.glass.style)) {
-                Text("Regular — what is behind stays legible").tag(GlassStyle.regular)
-                Text("Clear — what is behind is diffused").tag(GlassStyle.clear)
-            }
-            .pickerStyle(.radioGroup)
-            Text("macOS offers exactly these two and nothing in between. Both bend what is behind them towards the edges of the panel; regular keeps it recognisable, clear turns it to milk. There is no control over how much they bend — that is baked into each.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text(characterNote)
-                .font(.caption)
-                .foregroundStyle(editedLook.glass.tintStrength > 0.5 ? .orange : .secondary)
-
-            LabeledContent("How much glass") {
-                Slider(value: look(\.glass.opacity), in: GlassAppearance.opacityRange, step: 0.05) {
-                    Text("\(Int(editedLook.glass.opacity * 100)) %")
+            if let warning = characterWarning {
+                GridRow {
+                    Color.clear.frame(width: 1, height: 1)
+                    Text(warning).font(.caption).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .frame(width: 260)
             }
-            Text("At nothing the material is gone entirely and the panel's content floats over whatever is behind it. The system's glass has no opacity of its own — style, tint and corner radius are the whole of it — so this is the view's own alpha, which is the only thing that reaches fully transparent.")
-                .font(.caption).foregroundStyle(.secondary)
 
-            Toggle("Tint the glass", isOn: look(\.glass.tinted))
-            Text("Untinted, the system material takes the colour of whatever is behind it — which is what makes it glass, and also what makes it vanish over a dark game and wash out over a bright document. A tint does not close the glass; it gives it something to be measured from.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            Picker("Lean", selection: look(\.glass.tintIsLight)) {
-                Text("Lighter than the background").tag(true)
-                Text("Darker than the background").tag(false)
+            GridRow {
+                label("Amount")
+                slider(look(\.glass.opacity), in: GlassAppearance.opacityRange,
+                       step: 0.05, readout: percent(editedLook.glass.opacity))
             }
-            .pickerStyle(.segmented)
-            .frame(width: 380)
-            .disabled(!editedLook.glass.tinted)
 
-            Picker("Text", selection: look(\.ink)) {
-                Text("Light — for a panel darker than what is behind it").tag(PanelInk.light)
-                Text("Dark — for a panel brighter than what is behind it").tag(PanelInk.dark)
-            }
-            LabeledContent("Text brightness") {
-                Slider(value: look(\.inkBrightness), in: 0 ... 1, step: 0.02) {
-                    Text("\(Int(editedLook.inkBrightness * 100)) %")
+            GridRow {
+                label("Tint")
+                HStack(spacing: 10) {
+                    Toggle("", isOn: look(\.glass.tinted)).labelsHidden()
+                    Picker("", selection: look(\.glass.tintIsLight)) {
+                        Text("Lighter").tag(true)
+                        Text("Darker").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 180)
+                    .disabled(!editedLook.glass.tinted)
                 }
-                .frame(width: 260)
             }
-            Text("Full is what the panel had before this was a setting — white, or the near-black light text is the opposite of. Turning it down walks the text back towards the panel it is written on, which is what quieter text means on a surface that is already a wash of one colour.")
-                .font(.caption).foregroundStyle(.secondary)
 
-            Toggle("Colour the text", isOn: Binding(
-                get: { editedLook.inkColor != nil },
-                set: { wantsColour in
-                    var settings = model.settings
-                    var look = settings.theme.look(forDark: edited)
-                    look.inkColor = wantsColour
-                        ? (look.ink == .light ? .white : .black)
-                        : nil
-                    settings.theme.setLook(look, forDark: edited)
-                    model.update(settings: settings)
+            GridRow {
+                label("Strength")
+                slider(look(\.glass.tintStrength), in: GlassAppearance.tintStrengthRange,
+                       step: 0.02, readout: percent(editedLook.glass.tintStrength))
+                    .disabled(!editedLook.glass.tinted)
+            }
+
+            divider
+
+            GridRow {
+                label("Text")
+                Picker("", selection: look(\.ink)) {
+                    Text("Light").tag(PanelInk.light)
+                    Text("Dark").tag(PanelInk.dark)
                 }
-            ))
-            if let colour = editedLook.inkColor {
-                ColorPicker("Text colour", selection: Binding(
-                    get: { Color(red: colour.red, green: colour.green, blue: colour.blue) },
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 200)
+            }
+
+            GridRow {
+                label("Brightness")
+                slider(look(\.inkBrightness), in: 0 ... 1,
+                       step: 0.02, readout: percent(editedLook.inkBrightness))
+            }
+
+            GridRow {
+                label("Colour")
+                HStack(spacing: 10) {
+                    Toggle("", isOn: Binding(
+                        get: { editedLook.inkColor != nil },
+                        set: { wantsColour in
+                            var settings = model.settings
+                            var look = settings.theme.look(forDark: edited)
+                            look.inkColor = wantsColour
+                                ? (look.ink == .light ? .white : .black)
+                                : nil
+                            settings.theme.setLook(look, forDark: edited)
+                            model.update(settings: settings)
+                        }
+                    ))
+                    .labelsHidden()
+
+                    if let colour = editedLook.inkColor {
+                        ColorPicker("", selection: Binding(
+                            get: { Color(red: colour.red, green: colour.green, blue: colour.blue) },
+                            set: { newValue in
+                                guard let rgb = InkColor(newValue) else { return }
+                                var settings = model.settings
+                                var look = settings.theme.look(forDark: edited)
+                                look.inkColor = rgb
+                                settings.theme.setLook(look, forDark: edited)
+                                model.update(settings: settings)
+                            }
+                        ), supportsOpacity: false)
+                        .labelsHidden()
+                    }
+                }
+            }
+
+            divider
+
+            GridRow {
+                label("Density")
+                Picker("", selection: Binding(
+                    get: { model.settings.density },
                     set: { newValue in
-                        guard let rgb = InkColor(newValue) else { return }
                         var settings = model.settings
-                        var look = settings.theme.look(forDark: edited)
-                        look.inkColor = rgb
-                        settings.theme.setLook(look, forDark: edited)
+                        settings.density = newValue
                         model.update(settings: settings)
                     }
-                ), supportsOpacity: false)
-                .frame(width: 260, alignment: .leading)
-            }
-            Text("Grey is the default and stays it: the panel is a wash of one tint, and coloured text on a coloured ground is where legibility goes. Brightness applies to a colour the same way it applies to grey — it decides how far the text travels from the panel towards its own end.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            .pickerStyle(.radioGroup)
-            Text("Not automatic on purpose. Choosing correctly means knowing how bright what is behind the panel is, and uDeck never measures that — the glass samples it, but nothing reports it back. An automatic setting would guess, and it would guess wrong exactly where it matters.")
-                .font(.caption).foregroundStyle(.secondary)
-
-            LabeledContent("Tint strength") {
-                Slider(value: look(\.glass.tintStrength), in: GlassAppearance.tintStrengthRange, step: 0.02) {
-                    Text("\(Int(editedLook.glass.tintStrength * 100)) %")
+                )) {
+                    Text("Compact").tag(Density.compact)
+                    Text("Normal").tag(Density.normal)
+                    Text("Cozy").tag(Density.cozy)
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
                 .frame(width: 260)
             }
-            .disabled(!editedLook.glass.tinted)
-
-            GlassPreview(glass: editedLook.glass, theme: DeckTheme(density: model.settings.density, look: editedLook))
-            Text("The sample sits over a dark half and a light one, because those are the two cases that pull in opposite directions: a light tint stands out over a game and washes out over a document, and a dark one does the reverse. The ruling is there so the refraction is visible at all — the material bends what is behind it, and a flat colour or a field of grass gives it nothing to bend.")
-                .font(.caption).foregroundStyle(.secondary)
         }
+    }
 
-        SettingsGroup("Staleness") {
-            LabeledContent("Assume a card is current for") {
-                Text("\(Int(model.settings.defaultCardTTL)) s")
-                    .foregroundStyle(.secondary)
+    // MARK: - Presets
+
+    private var presets: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                TextField("Name this look", text: $newPresetName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 180)
+                    .onSubmit(saveCurrent)
+                Button("Save", action: saveCurrent)
+                    .disabled(PanelPreset.cleaned(name: newPresetName).isEmpty)
             }
-            Text("Used only for plugins that do not declare a lifetime of their own. Past it a card is dimmed and dated; past \(Int(model.settings.silentTTLMultiplier)) times it, its values are hidden entirely — a number nobody can vouch for should not be on screen.")
-                .font(.caption).foregroundStyle(.secondary)
+
+            ForEach(model.settings.theme.saved) { preset in
+                HStack(spacing: 10) {
+                    Text(preset.name).frame(width: 180, alignment: .leading)
+                    Button("Use") { pour(preset.look) }
+                    Button("Delete", role: .destructive) {
+                        var settings = model.settings
+                        settings.theme.remove(preset.id)
+                        model.update(settings: settings)
+                    }
+                }
+                .font(.callout)
+            }
+        }
+    }
+
+    // MARK: - Pieces
+
+    private func label(_ text: String) -> some View {
+        Text(text)
+            .gridColumnAlignment(.trailing)
+            .foregroundStyle(.secondary)
+    }
+
+    /// A rule across the whole grid, not just the column the controls are in —
+    /// a divider that starts where the second column does reads as a stray mark
+    /// rather than as a break between two groups of knobs.
+    @ViewBuilder private var divider: some View {
+        GridRow {
+            Divider()
+                .gridCellColumns(2)
+                .padding(.vertical, 2)
+        }
+    }
+
+    private func slider(
+        _ value: Binding<Double>,
+        in range: ClosedRange<Double>,
+        step: Double,
+        readout: String
+    ) -> some View {
+        HStack(spacing: 10) {
+            Slider(value: value, in: range, step: step).frame(width: 230)
+            Text(readout)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 46, alignment: .trailing)
         }
     }
 }
+
 
 // MARK: - Plugins
 
@@ -529,6 +617,12 @@ private struct PluginSettingsSection: View {
                 PluginRow(model: model, plugin: plugin)
                 Divider()
             }
+
+            // Was a headed group of its own on the Look tab, where it had
+            // nothing to do with how the panel looks. It is a fact about cards,
+            // it cannot be changed from here, and one line is the whole of it.
+            Text("A card with no lifetime of its own is treated as current for \(Int(model.settings.defaultCardTTL)) s, dimmed after that, and blanked past \(Int(model.settings.silentTTLMultiplier))× it.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }
@@ -775,13 +869,18 @@ private struct SettingsGroup<Content: View>: View {
 }
 
 
-/// The glass, over the two backgrounds that disagree about it.
+/// The panel, as it will actually look, over the two backgrounds that disagree
+/// about it.
 ///
-/// A settings screen that describes a material in prose asks the operator to
-/// imagine it. This shows it — and shows it over a dark half and a light half
-/// at once, because that is the whole of the trade-off: a tint that rescues the
-/// panel from a dark game is the same tint that washes it out over a white
-/// document.
+/// This is what replaced the paragraphs. There is one of it now — there used to
+/// be two of the same slab, once near the top of the pane and once further down
+/// beside the tint, which asked the operator to compare a thing with itself.
+///
+/// The dark half and the light half are the whole of the trade-off: a tint that
+/// rescues the panel from a dark game is the same tint that washes it out over
+/// a white document. The ruling is there so the refraction is visible at all —
+/// the material bends what is behind it, and a flat colour gives it nothing to
+/// bend.
 private struct GlassPreview: View {
     var glass: GlassAppearance
     var theme: DeckTheme
@@ -792,12 +891,6 @@ private struct GlassPreview: View {
                 Color(red: 0.09, green: 0.13, blue: 0.08)
                 Color(red: 0.90, green: 0.89, blue: 0.86)
             }
-            // Ruled, because a flat background cannot show refraction: the
-            // material bends what is behind it, and there is nothing to bend in
-            // a plain colour. On a wallpaper gradient or a field of grass the
-            // effect is equally invisible, which is why it looked as though the
-            // glass did not refract at all. Straight lines make it obvious —
-            // they compress towards the edges of the slab.
             Canvas { context, size in
                 var path = Path()
                 let step: CGFloat = 13
@@ -814,21 +907,40 @@ private struct GlassPreview: View {
                 fallbackFill: theme.windowFill,
                 glass: glass
             )
-            .frame(width: 300, height: 74)
+            .frame(width: 420, height: 92)
             .overlay {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Claude sessions")
-                        .font(theme.chipFont)
-                        .foregroundStyle(theme.muted)
-                    Text("Click or press a key to work in here")
+                // A card, not a caption: the sample has to show the text, the
+                // muted text and a state colour, because those are three of the
+                // things the knobs below move and none of them is the glass.
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 8) {
+                        Text("Claude sessions")
+                            .font(theme.titleFont)
+                            .foregroundStyle(theme.text)
+                        Text("4 running")
+                            .font(theme.chipFont)
+                            .foregroundStyle(theme.color(for: CardState.ok))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(theme.chipFill(for: .ok)))
+                    }
+                    Text("pers · 48 % of the week")
                         .font(theme.bodyFont)
+                        .foregroundStyle(theme.muted)
+                    Text("last checked a minute ago")
+                        .font(theme.chipFont)
                         .foregroundStyle(theme.dim)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
+                // Centred, so the card sits across the seam between the two
+                // backdrops rather than entirely on the dark one. That is the
+                // real case — the panel is a bar the width of the screen and
+                // what is behind it changes along its length — and it is the
+                // only arrangement in which the sample answers the question the
+                // ink controls are actually asking.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
         }
-        .frame(width: 380, height: 120)
+        .frame(width: 520, height: 150)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
     }
