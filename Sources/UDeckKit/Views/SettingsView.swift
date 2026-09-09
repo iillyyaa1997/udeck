@@ -9,10 +9,14 @@ import UDeckCore
 /// installed and what is it allowed to do" *is* the settings screen.
 public struct SettingsView: View {
     @Bindable var model: DeckModel
-    @State private var section: Section = .opening
+    /// Opens on the first pane rather than on the one that was most useful to
+    /// me while building it. Somebody who has landed in a language they cannot
+    /// read needs the language control before anything else, and it is here.
+    @State private var section: Section = .general
     @State private var selectedPlugin: String?
 
     enum Section: String, CaseIterable, Identifiable {
+        case general
         case opening
         case look
         case plugins
@@ -22,6 +26,7 @@ public struct SettingsView: View {
 
         var title: Phrase {
             switch self {
+            case .general: .sectionGeneral
             case .opening: .sectionOpening
             case .look: .sectionLook
             case .plugins: .sectionPlugins
@@ -31,6 +36,7 @@ public struct SettingsView: View {
 
         var symbol: String {
             switch self {
+            case .general: "gearshape"
             case .opening: "cursorarrow.rays"
             case .look: "paintbrush"
             case .plugins: "square.grid.2x2"
@@ -53,6 +59,7 @@ public struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     switch section {
+                    case .general: GeneralSettings(model: model)
                     case .opening: OpeningSettings(model: model)
                     case .look: LookSettings(model: model)
                     case .plugins: PluginSettingsSection(model: model, selected: $selectedPlugin)
@@ -74,6 +81,52 @@ public struct SettingsView: View {
         // directly — it did not, and it was the one part of the settings window
         // that stayed in English after the language was changed.
         .environment(\.strings, model.strings)
+    }
+}
+
+// MARK: - General
+
+/// Settings that belong to the application rather than to the panel.
+///
+/// The language lived on the Look pane, next to the tint and the ink, which is
+/// where it did not belong: Look is about how the panel is dressed, and what
+/// language it speaks is not that. One row for now, and the pane exists so the
+/// next application-wide setting has somewhere obvious to go instead of being
+/// filed under whichever pane has room.
+private struct GeneralSettings: View {
+    @Bindable var model: DeckModel
+    @Environment(\.strings) private var strings
+
+    var body: some View {
+        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
+            GridRow {
+                Text(strings(.lookLanguage))
+                    .gridColumnAlignment(.trailing)
+                    .foregroundStyle(.secondary)
+                Picker("", selection: Binding(
+                    get: { model.settings.language },
+                    set: { newValue in
+                        var settings = model.settings
+                        settings.language = newValue
+                        model.update(settings: settings)
+                    }
+                )) {
+                    // Following the system is the absence of a choice rather
+                    // than a language of its own, so it is `nil` here and
+                    // nothing at all in the settings file.
+                    Text(strings(.languageSystem)).tag(Language?.none)
+                    ForEach(Language.allCases) { language in
+                        // Each language names itself. Somebody who landed in a
+                        // language they cannot read is looking for the word
+                        // they *can* — "English", not "Английский".
+                        Text(language.endonym).tag(Language?.some(language))
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 260)
+            }
+        }
+        .frame(maxWidth: 560, alignment: .leading)
     }
 }
 
@@ -547,31 +600,6 @@ private struct LookSettings: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 260)
-            }
-
-            GridRow {
-                label(strings(.lookLanguage))
-                Picker("", selection: Binding(
-                    get: { model.settings.language },
-                    set: { newValue in
-                        var settings = model.settings
-                        settings.language = newValue
-                        model.update(settings: settings)
-                    }
-                )) {
-                    // "Follow the Mac" is the absence of a choice rather than a
-                    // language of its own, so it is `nil` here and nothing at
-                    // all in the settings file.
-                    Text(strings(.languageSystem)).tag(Language?.none)
-                    ForEach(Language.allCases) { language in
-                        // Each language names itself. Somebody who landed in a
-                        // language they cannot read is looking for the word
-                        // they *can* — "English", not "Английский".
-                        Text(language.endonym).tag(Language?.some(language))
-                    }
-                }
-                .pickerStyle(.segmented)
                 .frame(width: 260)
             }
         }

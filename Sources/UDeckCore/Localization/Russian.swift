@@ -19,6 +19,7 @@ struct Russian: Vocabulary {
 
         // Окно настроек
         case .settingsWindowTitle: "Настройки uDeck"
+        case .sectionGeneral: "Общие"
         case .sectionOpening: "Появление"
         case .sectionLook: "Вид"
         case .sectionPlugins: "Плагины"

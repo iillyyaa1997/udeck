@@ -28,7 +28,8 @@ struct LocalizationTests {
         .menuShowPanel, .menuRefreshAll, .menuSettings, .menuOpenPluginsFolder,
         .menuCopyDiagnostics, .menuQuit,
 
-        .settingsWindowTitle, .sectionOpening, .sectionLook, .sectionPlugins, .sectionAbout,
+        .settingsWindowTitle, .sectionGeneral, .sectionOpening, .sectionLook, .sectionPlugins,
+        .sectionAbout,
 
         .openingGesture, .openingGestureToggle, .openingPauseFirst, .openingPushPast,
         .openingStayQuiet, .openingShortcut, .openingShortcutToggle, .openingKeys,
@@ -88,7 +89,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 140,
+        #expect(Self.all.count == 141,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

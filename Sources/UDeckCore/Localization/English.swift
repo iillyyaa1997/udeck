@@ -15,6 +15,7 @@ struct English: Vocabulary {
 
         // The settings window
         case .settingsWindowTitle: "uDeck Settings"
+        case .sectionGeneral: "General"
         case .sectionOpening: "Opening"
         case .sectionLook: "Look"
         case .sectionPlugins: "Plugins"

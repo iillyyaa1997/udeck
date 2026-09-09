@@ -29,6 +29,7 @@ public enum Phrase: Sendable, Equatable {
     // MARK: - The settings window
 
     case settingsWindowTitle
+    case sectionGeneral
     case sectionOpening
     case sectionLook
     case sectionPlugins
