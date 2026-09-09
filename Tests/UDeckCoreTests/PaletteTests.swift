@@ -77,8 +77,15 @@ struct PaletteTests {
         #expect(p.gripHover.alpha == 0.9)
         #expect(p.chipFill(for: .warn).ink == p.warn.ink)
         #expect(p.chipFill(for: .warn).alpha == 0.18)
-        #expect(p.islandMark(for: .ok, placed: true).alpha == 1)
-        #expect(p.islandMark(for: .ok, placed: false).alpha == 0.35)
+        #expect(p.islandMark(for: .ok, placed: true).ink == p.ok.ink)
+        // Nothing placed is its own colour, not a fainter version of "fine".
+        #expect(p.islandMark(for: .ok, placed: false).ink == p.dim.ink)
+        #expect(p.islandMark(for: .ok, placed: false) != p.islandMark(for: .ok, placed: true))
+        // And it is the same grey whatever the state would have been, because
+        // there is no state to report when nothing is being watched.
+        for state in CardState.allCases {
+            #expect(p.islandMark(for: state, placed: false) == p.dim)
+        }
         #expect(p.islandHalo.alpha == 0.55)
     }
 

@@ -189,10 +189,17 @@ public struct Palette: Equatable, Sendable {
 
     /// The island's indicator bar.
     ///
-    /// Dimmed when nothing has been placed yet, because at full strength it
-    /// reads as a report about plugins that are not there.
+    /// Grey when nothing has been placed, rather than the state's colour at a
+    /// third of the strength. It used to be the latter, and the two readings
+    /// meant opposite things — "everything is fine" and "I am watching nothing"
+    /// — separated only by brightness. The operator had to ask which one he was
+    /// looking at, which is the whole of the evidence.
+    ///
+    /// Grey already means "no data" everywhere else on this scale, so the state
+    /// gets a colour of its own instead of green being asked to carry a second
+    /// meaning.
     public func islandMark(for state: CardState, placed: Bool) -> PaletteColor {
-        color(for: state).at(placed ? 1 : Self.islandEmptyFraction)
+        placed ? color(for: state) : dim
     }
 
     // MARK: - The table
@@ -256,7 +263,6 @@ public struct Palette: Equatable, Sendable {
     private static let gripFraction = 0.25
     private static let gripHoverFraction = 0.9
     private static let chipFillFraction = 0.18
-    private static let islandEmptyFraction = 0.35
 
     /// A shadow is black, not the ink's black — `InkColor.black` is a text
     /// colour that stops short of the bottom of the scale so that dark text
