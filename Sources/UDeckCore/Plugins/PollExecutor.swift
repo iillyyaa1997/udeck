@@ -48,10 +48,15 @@ public struct PollExecutor: Sendable {
         searchPath: [String],
         appearance: Appearance,
         reason: RefreshReason,
+        language: String,
         now: Date = Date()
     ) async -> PollExecution {
-        guard let manifest = plugin.manifest, let executable = plugin.executable, plugin.problems.isEmpty else {
-            return .failure(PluginFailure(reason: .notLoadable(plugin.problems), occurredAt: now))
+        // `isUsable` rather than "no problems at all": a translation that will
+        // not parse is a note against the plugin, not a reason to refuse to run
+        // it. See `DiscoveryProblem.isFatal`.
+        guard let manifest = plugin.manifest, let executable = plugin.executable, plugin.isUsable else {
+            return .failure(PluginFailure(reason: .notLoadable(plugin.problems.filter(\.isFatal)),
+                                          occurredAt: now))
         }
 
         let decision = PermissionGate.launchDecision(for: manifest, grant: grant, enabled: enabled)
@@ -78,7 +83,8 @@ public struct PollExecutor: Sendable {
                 cacheDirectory: cacheDirectory,
                 searchPath: searchPath,
                 appearance: appearance,
-                reason: reason
+                reason: reason,
+                language: language
             ),
             timeout: manifest.timeout ?? 0
         )
@@ -123,7 +129,8 @@ public struct PollExecutor: Sendable {
         cacheDirectory: URL,
         searchPath: [String],
         appearance: Appearance,
-        reason: RefreshReason
+        reason: RefreshReason,
+        language: String
     ) -> [String: String] {
         var environment: [String: String] = [
             "PATH": searchPath.joined(separator: ":"),
@@ -138,6 +145,13 @@ public struct PollExecutor: Sendable {
             "UDECK_CACHE_DIR": cacheDirectory.path,
             "UDECK_APPEARANCE": appearance.rawValue,
             "UDECK_REFRESH_REASON": reason.rawValue,
+            // The language the panel is speaking, so a producer can answer in
+            // it. `LANG` and `LC_ALL` above stay pinned to a UTF-8 locale and
+            // are not this: they exist so a runtime prints UTF-8 rather than
+            // mangling anything non-Latin, and changing them to carry the
+            // language would put that guarantee at the mercy of which locales
+            // happen to be generated on the machine.
+            "UDECK_LANG": language,
         ]
         if let tmp = ProcessInfo.processInfo.environment["TMPDIR"] { environment["TMPDIR"] = tmp }
         environment.merge(settings.environment(for: manifest)) { _, new in new }

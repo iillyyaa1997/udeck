@@ -316,12 +316,93 @@ variable should fall back to your declared default rather than crash.
 | `UDECK_CACHE_DIR` | A directory that is yours to write in. Created before each run. |
 | `UDECK_APPEARANCE` | `dark`. The panel hangs over whatever is on screen, so it does not follow the system appearance; the variable exists so that it can start to without breaking you. |
 | `UDECK_REFRESH_REASON` | `launch`, `interval` or `manual`. |
+| `UDECK_LANG` | The language the panel is currently speaking, as a code: `en`, `ru`. Answer in it if you can, and fall back to whatever you write in if you cannot. |
 | `PATH` | uDeck's configured search path, not the one it inherited. |
 | `HOME`, `LANG`, `LC_ALL`, `TMPDIR` | `LANG` and `LC_ALL` are set to `en_US.UTF-8` so a producer can print UTF-8 without configuring a locale. |
+
+`UDECK_LANG` is the one to read, not `LANG`. `LANG` and `LC_ALL` are pinned to a
+UTF-8 locale on purpose — they are there so your runtime prints UTF-8 rather
+than mangling anything non-Latin, and they stay pinned whatever language the
+panel is in. A producer that picks its language from `LANG` will always be in
+English; one that reads `UDECK_LANG` follows the panel.
 
 The environment is **built, not inherited.** Nothing else from uDeck's own
 environment is passed through, which is deliberate: a third-party plugin should
 never see whatever secrets happen to be in the shell that started the app.
+
+---
+
+## Speaking more than one language
+
+Two different things are translated in two different ways, because they are read
+at two different times.
+
+**Your cards** are made when your producer runs, so uDeck tells it which language
+to answer in and gets out of the way. Read `UDECK_LANG` — `en`, `ru` — and print
+your text in it. There is no format for this and nothing to declare: use
+whatever your language already has, a dictionary, gettext, a table of strings.
+A producer that ignores the variable keeps working exactly as it did.
+
+```sh
+case "$UDECK_LANG" in
+  ru) title="Сборки" ;;
+  *)  title="Builds" ;;
+esac
+```
+
+**Your manifest** is read without running you at all — it is what the operator
+sees in the plugin list and in the sheet that asks whether to allow you — so it
+is translated on disk. Put a `manifest.<code>.json` next to `manifest.json`, one
+file per language, as many as you like:
+
+```
+my-plugin/
+  manifest.json
+  manifest.ru.json
+  manifest.de.json
+  run.sh
+```
+
+A translation holds strings and nothing else:
+
+```json
+{
+  "name": "Наблюдатель",
+  "description": "Смотрит за вещами.",
+  "settings": {
+    "only_failing": {
+      "label": "Только упавшие",
+      "help": "Скрыть всё, что в порядке."
+    },
+    "sort": {
+      "label": "Сортировать по",
+      "options": { "name": "имени", "age": "возрасту" }
+    }
+  }
+}
+```
+
+Rules, all of which follow from that one:
+
+- **A translation can never change what your plugin does.** There is no `run`
+  here, no `permissions`, no `id` — not "ignored", but absent from the format.
+  The operator read what you asked for and agreed to it; a file arriving later
+  must not be able to change what he agreed to.
+- **Settings are matched by `key`, options by `value`.** Those are what the
+  setting is *stored* as and are never translated — only the label beside them.
+  A key you did not declare in `manifest.json` is ignored: a translation renames
+  a setting, it does not invent one.
+- **Anything you leave out falls back**, field by field, to `manifest.json`. A
+  half-finished translation shows the half that is finished.
+- **The file name is `manifest.<code>.json`**, where the code is two or three
+  letters and an optional region: `ru`, `de`, `pt-BR`. Anything else —
+  `manifest.backup.json`, `manifest.old.json` — is not a language and is left
+  alone.
+- **A translation that will not parse costs that one language.** It is reported
+  next to your plugin in the settings, and your plugin goes on running in the
+  language its manifest is written in.
+- **A language uDeck does not speak yet is still kept.** Ship `manifest.ja.json`
+  today and it starts being used the day uDeck learns Japanese.
 
 ---
 

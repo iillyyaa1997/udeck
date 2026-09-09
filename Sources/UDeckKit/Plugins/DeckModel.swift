@@ -222,7 +222,8 @@ public final class DeckModel {
             paths: paths,
             searchPath: settings.pluginExecutableSearchPath,
             appearance: appearance,
-            reason: reason
+            reason: reason,
+            language: strings.language.rawValue
         )
 
         // Re-read rather than reuse the value from before the await: another
@@ -338,6 +339,21 @@ public final class DeckModel {
     /// application in the same instant the switch is thrown — the settings
     /// window is written in the language it is setting, and a stored copy would
     /// mean the screen you changed it on was the last one to notice.
+    /// A plugin's manifest as the operator should read it — its own strings
+    /// replaced by the translation for the language in force, where the plugin
+    /// ships one.
+    ///
+    /// Display only. Everything uDeck acts on — what it runs, what it may do —
+    /// keeps reading `plugin.manifest`, and could not do otherwise: a
+    /// translation is strings and has nowhere to put a command.
+    public func displayManifest(for plugin: DiscoveredPlugin) -> PluginManifest? {
+        plugin.manifest(in: strings.language.rawValue)
+    }
+
+    public func displayManifest(withID id: PluginIdentifier) -> PluginManifest? {
+        plugin(withID: id).flatMap(displayManifest(for:))
+    }
+
     public var strings: Strings {
         Strings(settings.resolvedLanguage(systemPreferred: Language.preferred()))
     }

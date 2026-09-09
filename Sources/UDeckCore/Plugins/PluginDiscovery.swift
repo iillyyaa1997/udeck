@@ -11,6 +11,7 @@ public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertibl
     case executableNotOnSearchPath(command: String, searchPath: [String])
     case executableOutsidePluginFolder(command: String)
     case executableNotExecutable(String)
+    case malformedTranslation(file: String, detail: String)
 
     public var description: String {
         switch self {
@@ -32,6 +33,22 @@ public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertibl
             "\(command) resolves outside the plugin folder, which a plugin is not allowed to do"
         case .executableNotExecutable(let path):
             "\(path) is not executable — try chmod +x"
+        case .malformedTranslation(let file, let detail):
+            "\(file) is not valid and was ignored: \(detail) — the plugin still works in the language manifest.json is written in"
+        }
+    }
+
+    /// Whether this is a reason not to run the plugin.
+    ///
+    /// Nearly all of them are: a plugin with no manifest, or one whose command
+    /// does not exist, cannot be run at all. A translation that will not parse
+    /// is the exception — it costs the plugin one language and nothing else,
+    /// and a plugin that stopped working because a translator left out a comma
+    /// would be a far worse outcome than one that is briefly in English.
+    public var isFatal: Bool {
+        switch self {
+        case .malformedTranslation: false
+        default: true
         }
     }
 }
@@ -44,25 +61,54 @@ public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertibl
 public struct DiscoveredPlugin: Sendable, Equatable, Identifiable {
     public let directory: URL
     public let folderName: String
+    /// The manifest as the author wrote it. Everything uDeck *acts* on — what
+    /// it runs, what it is allowed to do — is read from here and never from a
+    /// translation.
     public let manifest: PluginManifest?
     public let executable: URL?
     public let problems: [DiscoveryProblem]
 
+    /// What the plugin says in other languages, keyed by language code, from the
+    /// `manifest.<code>.json` files beside the manifest. Only strings.
+    public let translations: [String: ManifestTranslation]
+
     public var id: String { folderName }
-    public var isUsable: Bool { manifest != nil && executable != nil && problems.isEmpty }
+    /// Whether uDeck will run it.
+    ///
+    /// Judged on the problems that stop it running, not on every problem there
+    /// is — see `DiscoveryProblem.isFatal`. A plugin whose Russian file has a
+    /// stray comma is a plugin with a note against it, not a plugin that is
+    /// gone.
+    public var isUsable: Bool {
+        manifest != nil && executable != nil && !problems.contains(where: \.isFatal)
+    }
 
     public init(
         directory: URL,
         folderName: String,
         manifest: PluginManifest?,
         executable: URL?,
-        problems: [DiscoveryProblem]
+        problems: [DiscoveryProblem],
+        translations: [String: ManifestTranslation] = [:]
     ) {
         self.directory = directory
         self.folderName = folderName
         self.manifest = manifest
         self.executable = executable
         self.problems = problems
+        self.translations = translations
+    }
+
+    /// The manifest as the operator should read it.
+    ///
+    /// Falls back to the language the manifest itself is written in, field by
+    /// field, so a plugin translated by halves shows the half that is done.
+    /// Everything not a display string is untouched by construction — see
+    /// `ManifestTranslation`.
+    public func manifest(in language: String) -> PluginManifest? {
+        guard let manifest else { return nil }
+        guard let translation = translations[language.lowercased()] else { return manifest }
+        return manifest.applying(translation)
     }
 }
 
@@ -130,7 +176,9 @@ public struct PluginDiscovery: Sendable {
                                     problems: [.malformedManifest(Self.describe(error))])
         }
 
-        var problems: [DiscoveryProblem] = []
+        let (translations, translationProblems) = loadTranslations(in: directory)
+
+        var problems: [DiscoveryProblem] = translationProblems
         if manifest.id.rawValue != folderName {
             problems.append(.identifierMismatch(declared: manifest.id.rawValue, folder: folderName))
         }
@@ -140,12 +188,80 @@ public struct PluginDiscovery: Sendable {
         switch resolved {
         case .success(let url):
             return DiscoveredPlugin(directory: directory, folderName: folderName,
-                                    manifest: manifest, executable: url, problems: problems)
+                                    manifest: manifest, executable: url, problems: problems,
+                                    translations: translations)
         case .failure(let problem):
             problems.append(problem)
             return DiscoveredPlugin(directory: directory, folderName: folderName,
-                                    manifest: manifest, executable: nil, problems: problems)
+                                    manifest: manifest, executable: nil, problems: problems,
+                                    translations: translations)
         }
+    }
+
+    /// Reads every `manifest.<code>.json` beside the manifest.
+    ///
+    /// A language uDeck does not itself speak is kept rather than rejected: the
+    /// plugin was translated by somebody, and the day uDeck learns that language
+    /// the translation is already there. A file that will not parse costs its
+    /// own language and is reported — the plugin still works in the language its
+    /// manifest is written in, and a plugin that vanished because a translator
+    /// left out a comma would be the worse outcome by far.
+    private func loadTranslations(
+        in directory: URL
+    ) -> ([String: ManifestTranslation], [DiscoveryProblem]) {
+        let entries: [URL]
+        do {
+            entries = try fileManager.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+            )
+        } catch {
+            return ([:], [])
+        }
+
+        var translations: [String: ManifestTranslation] = [:]
+        var problems: [DiscoveryProblem] = []
+
+        for url in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            let file = url.lastPathComponent
+            guard let code = Self.languageCode(ofTranslationFile: file) else { continue }
+            do {
+                let decoded = try JSONDecoder().decode(
+                    ManifestTranslation.self, from: try Data(contentsOf: url)
+                )
+                translations[code] = decoded
+            } catch {
+                problems.append(.malformedTranslation(file: file, detail: Self.describe(error)))
+            }
+        }
+        return (translations, problems)
+    }
+
+    /// The language a `manifest.<code>.json` is for, or `nil` if the name is not
+    /// one of those.
+    ///
+    /// Two or three letters, and an optional region after a dash — the shape
+    /// ISO 639 codes actually come in.
+    ///
+    /// Strictness here is not pedantry. "letters, any number of them" accepts
+    /// `manifest.backup.json`, and it did: a file somebody left lying about
+    /// became a language uDeck claimed to speak, and then reported as broken
+    /// because it was never a translation to begin with.
+    static func languageCode(ofTranslationFile file: String) -> String? {
+        guard file.hasPrefix("manifest."), file.hasSuffix(".json") else { return nil }
+        let middle = String(file.dropFirst("manifest.".count).dropLast(".json".count))
+        guard !middle.isEmpty else { return nil }
+
+        let parts = middle.split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count <= 2 else { return nil }
+        guard let language = parts.first,
+              (2 ... 3).contains(language.count),
+              language.allSatisfy(\.isLetter) else { return nil }
+        if parts.count == 2 {
+            let region = parts[1]
+            guard (2 ... 8).contains(region.count),
+                  region.allSatisfy({ $0.isLetter || $0.isNumber }) else { return nil }
+        }
+        return middle.lowercased()
     }
 
     /// Turns `run[0]` into a real file.

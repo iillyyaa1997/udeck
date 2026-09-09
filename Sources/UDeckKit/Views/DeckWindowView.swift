@@ -22,7 +22,7 @@ struct DeckWindowView: View {
 
     @State private var isHovering = false
 
-    private var manifest: PluginManifest? { model.plugin(withID: window.pluginID)?.manifest }
+    private var manifest: PluginManifest? { model.displayManifest(withID: window.pluginID) }
     private var presentation: CardPresentation { model.presentation(for: window.pluginID) }
 
     var body: some View {

@@ -26,7 +26,8 @@ struct PollExecutionTests {
             paths: temp.paths,
             searchPath: AppSettings().pluginExecutableSearchPath,
             appearance: .dark,
-            reason: .interval
+            reason: .interval,
+            language: "en"
         )
     }
 
@@ -96,7 +97,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/leaky")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en"
         )
         guard case .failure(let failure) = outcome else { Issue.record("expected a failure"); return }
         #expect(failure.reason == .timedOut(after: 1))
@@ -150,7 +151,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/polite")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en"
         )
         let elapsed = Date().timeIntervalSince(started)
 
@@ -186,7 +187,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: plugin, grant: nil, enabled: true, settings: PluginSettings(),
             paths: temp.paths, searchPath: AppSettings().pluginExecutableSearchPath,
-            appearance: .light, reason: .launch
+            appearance: .light, reason: .launch, language: "en"
         )
         guard case .failure(let failure) = outcome else { Issue.record("expected a failure"); return }
         guard case .notPermitted = failure.reason else {
@@ -207,7 +208,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/angry")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en"
         )
         guard case .failure(let failure) = outcome else { Issue.record("expected a failure"); return }
         #expect(failure.reason == .exited(code: 3))
@@ -236,7 +237,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/quiet")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en"
         )
         let spent = Self.hostCPUSeconds() - before
 
@@ -267,7 +268,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/mute")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en"
         )
         guard case .failure(let failure) = outcome else { Issue.record("expected a failure"); return }
         #expect(failure.reason == .emptyOutput)
@@ -297,7 +298,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/chatty")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en"
         )
         // The claim under test is that large output is delivered rather than
         // deadlocking on a full pipe buffer. What arrives is then cut down to
@@ -326,7 +327,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/runaway")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en"
         )
         guard case .failure(let failure) = outcome else { Issue.record("expected a failure"); return }
         guard case .outputLimitExceeded = failure.reason else {
@@ -341,7 +342,7 @@ struct PollExecutionTests {
         let plugin = example("hello-card")
         let environment = executor.environment(
             for: plugin.manifest!, plugin: plugin, settings: PluginSettings(),
-            cacheDirectory: temp.url, searchPath: ["/usr/bin"], appearance: .dark, reason: .manual
+            cacheDirectory: temp.url, searchPath: ["/usr/bin"], appearance: .dark, reason: .manual, language: "en"
         )
         #expect(environment["PATH"] == "/usr/bin")
         #expect(environment["UDECK_API"] == "1")

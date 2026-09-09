@@ -205,7 +205,7 @@ struct DeckSummary {
             let presentation = model.presentation(for: id)
             worst = DeckSummary.worse(worst, presentation.state)
             let label = presentation.card?.chip
-                ?? model.plugin(withID: id)?.manifest?.name
+                ?? model.displayManifest(withID: id)?.name
                 ?? id.rawValue
             chips.append((presentation.state, label))
         }

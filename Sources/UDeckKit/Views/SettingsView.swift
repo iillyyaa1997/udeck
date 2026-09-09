@@ -719,7 +719,7 @@ private struct PluginRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(plugin.manifest?.name ?? plugin.folderName).font(.headline)
+                    Text(model.displayManifest(for: plugin)?.name ?? plugin.folderName).font(.headline)
                     Text(subtitle).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -741,7 +741,7 @@ private struct PluginRow: View {
                 }
             }
 
-            if expanded, let manifest = plugin.manifest {
+            if expanded, let manifest = model.displayManifest(for: plugin) {
                 details(manifest)
             }
         }
@@ -749,7 +749,7 @@ private struct PluginRow: View {
     }
 
     private var subtitle: String {
-        guard let manifest = plugin.manifest else { return plugin.folderName }
+        guard let manifest = model.displayManifest(for: plugin) else { return plugin.folderName }
         var parts = ["\(manifest.kind.rawValue) · v\(manifest.version)"]
         if let interval = manifest.interval { parts.append(strings(.pluginEverySeconds(Int(interval)))) }
         if let author = manifest.author { parts.append(author) }

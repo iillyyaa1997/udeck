@@ -79,7 +79,7 @@ struct EmptyDeckView: View {
                         Image(systemName: plugin.isUsable ? "square.dashed.inset.filled" : "exclamationmark.triangle")
                             .foregroundStyle(plugin.isUsable ? theme.accent : theme.warn)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(plugin.manifest?.name ?? plugin.folderName)
+                            Text(model.displayManifest(for: plugin)?.name ?? plugin.folderName)
                                 .font(theme.bodyFont)
                                 .foregroundStyle(theme.text)
                             Text(subtitle(for: plugin))
@@ -108,7 +108,7 @@ struct EmptyDeckView: View {
 
     private func subtitle(for plugin: DiscoveredPlugin) -> String {
         if let problem = plugin.problems.first { return problem.description }
-        guard let manifest = plugin.manifest else { return plugin.folderName }
+        guard let manifest = model.displayManifest(for: plugin) else { return plugin.folderName }
         if let description = manifest.description { return description }
         return "\(manifest.kind.rawValue) · every \(Int(manifest.interval ?? 0))s"
     }
