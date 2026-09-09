@@ -600,6 +600,22 @@ public final class PanelController {
     /// settings window is key while a preset name is being typed into it, and
     /// pulling the keyboard out of a field being typed in is a worse fault than
     /// the one this fixes.
+    ///
+    /// **The private route does not work, and this replaced it.** A previous
+    /// session concluded that `NSGlassEffectView`'s private `_subduedState` was
+    /// what AppKit set when a window stopped being key, and built a subclass to
+    /// re-assert it on every draw and every key-state notification. Logged from
+    /// inside the running application, that property reads 0 at *every* call —
+    /// including while the island is visibly dimmed — so AppKit was never
+    /// setting it here and re-asserting it did nothing. Measured over the
+    /// desktop with Finder frontmost, alternating old build and new: dimming
+    /// tracks window key state exactly (194.8/255 with it, 184.2 without), and
+    /// re-asserting the private value, with or without a forced redraw, moved
+    /// nothing. The subclass has been deleted.
+    ///
+    /// What that leaves open: the islands on screens the panel is not on are
+    /// separate windows, only one window of an application can be key, and the
+    /// private switch was the plan for them. See `docs/open-questions.md`.
     private func reassertKeyWindow() {
         guard panel.isVisible else { return }
         guard NSApp.keyWindow == nil || NSApp.keyWindow === panel else { return }

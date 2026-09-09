@@ -40,6 +40,34 @@ possible: end of file is recorded per pipe rather than counted down.
 
 ## Open
 
+**Can the islands on non-active screens stop being dimmed?** AppKit dims a
+system material in a window that is not key, and only one window of an
+application can be key at a time — there is one island per screen. The panel's
+own island is fine, because the panel window takes key status; the others are
+separate windows and cannot all have it.
+
+The route previously planned for this does not exist. `NSGlassEffectView` has a
+private `_subduedState`, and a previous session concluded it was what AppKit set
+on a key change. Logged from inside the running application it reads 0 at every
+call, including while the island is visibly dimmed, and re-asserting it — with
+or without forcing a redraw afterwards — moved nothing measurable. Dimming
+tracks key state and nothing else: 194.8/255 with it, 184.2 without, measured
+over the desktop with Finder frontmost, alternating builds twice each.
+
+The idea that has not been tried: stop using the system material for those
+islands and draw them ourselves, matched to the undimmed appearance. An island
+is 185×32 points with one indicator bar on it, so there may be nothing in it a
+hand-drawn fill cannot carry.
+
+*To settle:* measure the real gap first. Put a striped backdrop on the second
+display, another application frontmost, and compare an island there against the
+one on the active screen. If the difference is small, this is not worth code; if
+it is the ~11 points the panel used to show, draw those islands directly and
+compare again. The operator's own reading is that it does not currently bother
+him, so the bar for changing shared drawing code here is high — that path is the
+one this session watched two confident changes fail in.
+
+
 **Does macOS still let uDeck restore the previously frontmost application?**
 When the panel has taken the keyboard by activating uDeck, closing it calls
 `activate()` on whatever was in front before. Cooperative activation on recent

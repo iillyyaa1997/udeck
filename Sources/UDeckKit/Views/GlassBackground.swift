@@ -217,7 +217,7 @@ struct LiquidGlassBackground: NSViewRepresentable {
     var glass: GlassAppearance
 
     func makeNSView(context: Context) -> NSGlassEffectView {
-        let view = UnsubduedGlassView()
+        let view = NSGlassEffectView()
         apply(glass, to: view)
         view.cornerRadius = 0
         // One deliberate deviation from "the system's glass as it comes": the
@@ -239,27 +239,6 @@ struct LiquidGlassBackground: NSViewRepresentable {
     /// content floats over whatever is behind it, which is what "fully
     /// transparent" has to mean when the thing being made transparent is a
     /// material rather than a fill.
-    /// Whether the material can be told not to dim itself in a window that is
-    /// not key.
-    ///
-    /// Read once. Where it is false the shell falls back to making the panel a
-    /// key window, which covers the panel and cannot cover the islands — only
-    /// one window of an application can be key at a time, and there is one
-    /// island per screen.
-    @available(macOS 26, *)
-    static let canUnsubdue: Bool = NSGlassEffectView().responds(to: Selector(("set_subduedState:")))
-
-    /// The value that means "do not dim".
-    ///
-    /// Found by measurement rather than by documentation, and got wrong the
-    /// first time by measuring each value once: the island on a second display,
-    /// with another application frontmost, reads 32/94/136 dimmed and 52/120/165
-    /// undimmed, and a single run of each value put those the wrong way round.
-    /// Run as an alternating sequence instead, 0 gives the undimmed reading
-    /// every time and 2 gives the dimmed one — 2 being what AppKit itself sets
-    /// when the window stops being key.
-    static let unsubduedState = 0
-
     private func apply(_ glass: GlassAppearance, to view: NSGlassEffectView) {
         view.style = glass.style == .clear ? .clear : .regular
         // No tint. The system applies one in proportion to something it does
@@ -274,88 +253,15 @@ struct LiquidGlassBackground: NSViewRepresentable {
         // glass inherits it. That is right for an ordinary window and wrong for
         // this one: the panel's whole job is to be looked at from inside
         // another application, so the state it is dimmed in is the state it is
-        // normally seen in — the operator spent an evening reporting it as the
-        // panel changing colour when clicked.
+        // normally seen in.
         //
-        // There is no public way to decline. `_subduedState` is private and is
-        // used here deliberately, guarded so that a macOS which removes it
-        // degrades to the dimmed look rather than to a crash — and so that the
-        // shell knows to fall back to the public workaround. See `canUnsubdue`.
-        (view as? UnsubduedGlassView)?.reassert()
+        // Nothing is done about it here. It is handled by keeping the panel a
+        // key window — see `PanelController.reassertKeyWindow`, which also
+        // records why the private route that used to sit in this file was
+        // removed.
     }
 }
 
-/// The system's glass, with its own dimming declined.
-///
-/// AppKit dims a system material in a window that is not key — `NSGlassEffectView`
-/// has a `_windowChangedKeyState` and a private `_subduedState` to prove it —
-/// and it re-applies that on every change of key or active state. Setting the
-/// property once is therefore not enough: it is set, and then the first time
-/// the operator clicks away it is set back.
-///
-/// So the value is re-asserted after each of those events, on the turn of the
-/// run loop *after* AppKit's own handling, which is the only ordering that
-/// survives it.
-///
-/// Everything here is guarded on the property existing. A macOS that removes it
-/// leaves a view that behaves exactly like the stock one.
-@available(macOS 26, *)
-final class UnsubduedGlassView: NSGlassEffectView {
-    private var tokens: [NSObjectProtocol] = []
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        observe()
-        reassert()
-    }
-
-    /// The one hook that cannot lose the race.
-    ///
-    /// Re-asserting from the notifications alone left it dimmed about one run
-    /// in three: AppKit resets the state as part of handling the key change,
-    /// and a re-assertion scheduled for the next turn of the run loop is only
-    /// reliably after it when the view already existed to hear the
-    /// notification. Drawing happens after every reset, whatever caused it.
-    override func viewWillDraw() {
-        reassert()
-        super.viewWillDraw()
-    }
-
-    private func observe() {
-        guard tokens.isEmpty else { return }
-        let centre = NotificationCenter.default
-        let names: [Notification.Name] = [
-            NSWindow.didBecomeKeyNotification,
-            NSWindow.didResignKeyNotification,
-            NSWindow.didBecomeMainNotification,
-            NSWindow.didResignMainNotification,
-            NSApplication.didBecomeActiveNotification,
-            NSApplication.didResignActiveNotification,
-        ]
-        for name in names {
-            tokens.append(centre.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                // After AppKit has had its turn, not during it.
-                DispatchQueue.main.async { self?.reassert() }
-            })
-        }
-    }
-
-    /// Says again what was already said, because something said otherwise.
-    func reassert() {
-        guard LiquidGlassBackground.canUnsubdue else { return }
-        // Only when it has actually been changed back: setting a property to
-        // what it already holds is cheap, but this runs before every draw and
-        // KVC on a private property is not free.
-        guard value(forKey: "_subduedState") as? Int != LiquidGlassBackground.unsubduedState else { return }
-        setValue(LiquidGlassBackground.unsubduedState, forKey: "_subduedState")
-    }
-
-    // No `deinit` unregistration: the block-based observers are held by the
-    // centre for the life of the process, and this view lives as long as the
-    // panel does — one per window, made once. Reaching into the array from a
-    // nonisolated `deinit` is what the compiler objects to, and it would be
-    // objecting to a cleanup that has nothing to clean.
-}
 
 private struct VisualEffectBackground: NSViewRepresentable {
     func makeNSView(context: Context) -> NSVisualEffectView {
