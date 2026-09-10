@@ -8,9 +8,15 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [0.2.0] — 2026-09-10
+## [0.2.1] — 2026-09-10
 
 The first update anybody can install, and the screen it is installed from.
+
+There is no 0.2.0. Its tag was pushed against a commit whose `Info.plist` still
+said 0.1.0 — the version bump had been written and then lost to a failed script
+— and the release refused to build, which is the whole reason that check is the
+first step. The number is skipped rather than the tag moved: a tag that has
+been pushed means one commit forever, even when nothing consumed it.
 
 - **No window.** Sparkle's standard driver answers a check with a modal alert,
   and the commonest answer is "you are up to date" — an interruption to deliver
