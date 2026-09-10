@@ -8,7 +8,10 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.3.0] — 2026-09-10
+
+A mark of its own, and the glass under it is the system's rather than a drawing
+of one.
 
 ### uDeck has a mark of its own
 
