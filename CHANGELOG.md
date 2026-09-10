@@ -8,7 +8,28 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.2.0] — 2026-09-10
+
+The first update anybody can install, and the screen it is installed from.
+
+- **No window.** Sparkle's standard driver answers a check with a modal alert,
+  and the commonest answer is "you are up to date" — an interruption to deliver
+  the least interesting thing the check could have found, in a window uDeck did
+  not draw and cannot translate. A custom `SPUUserDriver` writes what happened
+  into the settings screen instead: installed version, latest version, and one
+  sentence beside the button. Two numbers rather than a claim — "up to date"
+  asks to be believed, "installed 0.1.0, latest 0.2.0" can be checked.
+- **The settings window is in the ⌘-Tab switcher** while it is open. uDeck is an
+  accessory application, which is right for a panel at the edge of the screen
+  and wrong for a window somebody is working in: a window you cannot switch back
+  to is a window you have to close and reopen. The policy is `.regular` for
+  exactly as long as the window is open, Dock icon and all.
+- **Relative times follow the panel's language, not the system's.** Without the
+  locale the sentence came out half-translated — "Проверено 35 seconds ago" —
+  and a check that has just finished says so in words, because the formatter
+  rounds the zero and picks the future tense for it.
+
+## [0.1.0] — 2026-09-10
 
 The first working version: the shell, the plugin runtime, and one plugin.
 
@@ -96,23 +117,6 @@ The first working version: the shell, the plugin runtime, and one plugin.
   folder is watched.
 
 ### uDeck updates itself
-
-- **No window.** Sparkle's standard driver answers a check with a modal alert,
-  and the commonest answer is "you are up to date" — an interruption to deliver
-  the least interesting thing the check could have found, in a window uDeck did
-  not draw and cannot translate. A custom `SPUUserDriver` writes what happened
-  into the settings screen instead: installed version, latest version, and one
-  sentence beside the button. Two numbers rather than a claim — "up to date"
-  asks to be believed, "installed 0.1.0, latest 0.1.0" can be checked.
-- **The settings window is in the ⌘-Tab switcher** while it is open. uDeck is an
-  accessory application, which is right for a panel at the edge of the screen
-  and wrong for a window somebody is working in: a window you cannot switch back
-  to is a window you have to close and reopen. The policy is `.regular` for
-  exactly as long as the window is open, Dock icon and all.
-- **Relative times follow the panel's language, not the system's.** Without the
-  locale the sentence came out half-translated — "Проверено 35 seconds ago" —
-  and a check that has just finished says so in words, because the formatter
-  rounds the zero and picks the future tense for it.
 
 - **Sparkle**, and it is the project's first dependency. The parts of updating
   an application that look easy — checking a feed, downloading, replacing a
