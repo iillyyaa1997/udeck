@@ -85,6 +85,30 @@ The first working version: the shell, the plugin runtime, and one plugin.
   first plugin should *run* before it is edited, so that when it stops working
   its author knows which of their own changes did it.
 
+### uDeck updates itself
+
+- **Sparkle**, and it is the project's first dependency. The parts of updating
+  an application that look easy — checking a feed, downloading, replacing a
+  bundle that is currently running, relaunching — are the parts that fail
+  quietly, on the machine of somebody who is not watching.
+- **Automatic checks are off until switched on.** uDeck otherwise makes no
+  network connection at all and asks macOS for no permissions, so the first
+  outbound connection this application ever makes is one the operator chose.
+  The switch says what it will start doing rather than just "check".
+- **A tag is the whole release.** `.github/workflows/release.yml` builds on
+  `v*`, refuses a tag that disagrees with `CFBundleShortVersionString`, runs the
+  tests, assembles the bundle, archives it with `ditto` (which keeps the
+  symlinks a signed bundle is made of), signs the archive with an EdDSA key from
+  the repository's secrets, and publishes the archive and the appcast as release
+  assets. The feed is `releases/latest/download/appcast.xml` — a stable URL that
+  needs no hosting.
+- **`Scripts/adhoc.entitlements`** exists because of one rule: the hardened
+  runtime turns on library validation, which requires every loaded library to be
+  signed by the same team as the application — and ad-hoc signing expresses no
+  team, so an ad-hoc app and an ad-hoc framework are not the same team but two
+  things with no team. dyld refuses the framework and the application does not
+  start. Scoped to ad-hoc, so a Developer ID build keeps library validation.
+
 ### The plugins folder is watched
 
 - **Adding or removing a plugin no longer needs telling.** The list used to be

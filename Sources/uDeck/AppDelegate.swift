@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: PanelController!
     private var statusItem: NSStatusItem!
     private var settings: SettingsWindowController!
+    private var updater: SparkleUpdater!
 
     /// Watches macOS's own appearance, so the `system` theme source means what
     /// it says rather than "whatever macOS was set to when uDeck started".
@@ -49,7 +50,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.model = model
         self.screens = screens
         self.controller = controller
-        self.settings = SettingsWindowController(model: model)
+        // Built here rather than lazily: Sparkle's scheduler has to be running
+        // for a scheduled check to happen at all, and an updater created the
+        // first time somebody opens the settings screen is an updater that
+        // never checks for the operator who never opens it.
+        self.updater = SparkleUpdater()
+        self.settings = SettingsWindowController(model: model, updater: self.updater)
         // The panel sits above ordinary windows, so leaving it open would put
         // it on top of the settings it was asked to show.
         controller.shell.onOpenSettings = { [weak self] in

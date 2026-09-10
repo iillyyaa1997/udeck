@@ -170,6 +170,17 @@ public enum Phrase: Sendable, Equatable {
     case aboutReadPermissions
     case aboutProblems
 
+    // MARK: - Updates
+
+    /// uDeck makes no network connection until this is switched on, which is
+    /// why the switch says what it will start doing rather than just "check".
+    case updatesTitle
+    case updatesCheckNow
+    case updatesAutomatically
+    case updatesAutomaticallyHelp
+    case updatesNeverChecked
+    case updatesLastChecked(String)
+
     // MARK: - The panel
 
     case deckNothingPlaced

@@ -13,9 +13,11 @@ import UDeckCore
 public final class SettingsWindowController {
     private var window: NSWindow?
     private let model: DeckModel
+    private let updater: (any UpdateChecking)?
 
-    public init(model: DeckModel) {
+    public init(model: DeckModel, updater: (any UpdateChecking)? = nil) {
         self.model = model
+        self.updater = updater
     }
 
     public func show() {
@@ -29,7 +31,9 @@ public final class SettingsWindowController {
             window.title = model.strings(.settingsWindowTitle)
             window.isReleasedWhenClosed = false
             window.center()
-            window.contentView = NSHostingView(rootView: SettingsView(model: model))
+            window.contentView = NSHostingView(
+                rootView: SettingsView(model: model, updater: updater)
+            )
             self.window = window
         }
 

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Only for an ad-hoc signed build, and only because of one rule.
+
+        The hardened runtime turns on library validation, which requires every
+        library loaded into the process to be signed by the same team as the
+        application. Ad-hoc signing expresses no team at all, so an ad-hoc app
+        and an ad-hoc framework are not "the same team" — they are two things
+        with no team — and dyld refuses the framework with "different Team IDs".
+        The application does not start.
+
+        A Developer ID gives both halves the same team and this file stops being
+        needed. Until there is one, this is the difference between a build that
+        runs and a build that does not, and it is scoped to the ad-hoc case so
+        that a signed build keeps the full hardened runtime.
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>

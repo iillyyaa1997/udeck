@@ -120,6 +120,17 @@ for plugin trust is spelled out honestly in
 [the permissions section of the plugin API](docs/plugin-api.md#permissions) —
 please read it before installing a plugin somebody else wrote.
 
+## Updates
+
+uDeck can update itself, through [Sparkle](https://sparkle-project.org). It is
+**off until you turn it on**, in Settings → About: uDeck makes no network
+connection of any kind otherwise, and an application that quietly starts talking
+to a server because it was updated is doing something you did not ask for.
+
+A release is a tag. `v0.2.0` on `main` builds, tests, signs and publishes the
+archive and the update feed; the version in the tag has to match the one in
+`Info.plist` or the release fails rather than shipping two different numbers.
+
 ## What it costs to leave running
 
 Measured on an M5 Pro, release build, with two plugins installed:

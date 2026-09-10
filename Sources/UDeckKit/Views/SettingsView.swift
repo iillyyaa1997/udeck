@@ -9,6 +9,11 @@ import UDeckCore
 /// installed and what is it allowed to do" *is* the settings screen.
 public struct SettingsView: View {
     @Bindable var model: DeckModel
+
+    /// Absent in a build with no updater — a development build, or a copy
+    /// somebody assembled themselves. The Updates group is simply not drawn
+    /// then, rather than drawn with a button that cannot do anything.
+    var updater: (any UpdateChecking)?
     /// Opens on the first pane rather than on the one that was most useful to
     /// me while building it. Somebody who has landed in a language they cannot
     /// read needs the language control before anything else, and it is here.
@@ -45,8 +50,9 @@ public struct SettingsView: View {
         }
     }
 
-    public init(model: DeckModel) {
+    public init(model: DeckModel, updater: (any UpdateChecking)? = nil) {
         self.model = model
+        self.updater = updater
     }
 
     public var body: some View {
@@ -63,7 +69,7 @@ public struct SettingsView: View {
                     case .opening: OpeningSettings(model: model)
                     case .look: LookSettings(model: model)
                     case .plugins: PluginSettingsSection(model: model, selected: $selectedPlugin)
-                    case .about: AboutSection(model: model)
+                    case .about: AboutSection(model: model, updater: updater)
                     }
                 }
                 .padding(20)
@@ -982,7 +988,12 @@ private struct PluginRow: View {
 
 private struct AboutSection: View {
     @Bindable var model: DeckModel
+    var updater: (any UpdateChecking)?
     @Environment(\.strings) private var strings
+
+    /// Mirrors the updater's own switch rather than owning the answer: Sparkle
+    /// stores it, and a copy here would be a second place it could be true.
+    @State private var checksAutomatically = false
 
     var body: some View {
         SettingsGroup(strings(.aboutTitle)) {
@@ -990,6 +1001,24 @@ private struct AboutSection: View {
             Text("Apache-2.0 · Copyright 2026 Ilya Volkov")
                 .font(.caption).foregroundStyle(.secondary)
             Link("github.com/iillyyaa1997/udeck", destination: URL(string: "https://github.com/iillyyaa1997/udeck")!)
+        }
+
+        if let updater {
+            SettingsGroup(strings(.updatesTitle)) {
+                Toggle(strings(.updatesAutomatically), isOn: Binding(
+                    get: { checksAutomatically },
+                    set: { checksAutomatically = $0; updater.checksAutomatically = $0 }
+                ))
+                Text(strings(.updatesAutomaticallyHelp))
+                    .font(.caption).foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    Button(strings(.updatesCheckNow)) { updater.checkNow() }
+                    Text(lastChecked(updater.lastCheck))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .onAppear { checksAutomatically = updater.checksAutomatically }
         }
 
         SettingsGroup(strings(.aboutThisBuild)) {
@@ -1011,6 +1040,15 @@ private struct AboutSection: View {
                 Button(strings(.actionClear)) { model.clearProblems() }
             }
         }
+    }
+}
+
+private extension AboutSection {
+    func lastChecked(_ date: Date?) -> String {
+        guard let date else { return strings(.updatesNeverChecked) }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return strings(.updatesLastChecked(formatter.localizedString(for: date, relativeTo: Date())))
     }
 }
 

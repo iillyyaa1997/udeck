@@ -144,6 +144,14 @@ struct Russian: Vocabulary {
         case .aboutNotSandboxed: "Без песочницы, и иначе нельзя: плагины запускают команды."
         case .aboutReadPermissions:
             "Прочитайте раздел о разрешениях в документации по плагинам, прежде чем ставить чужой плагин."
+        case .updatesTitle: "Обновления"
+        case .updatesCheckNow: "Проверить сейчас"
+        case .updatesAutomatically: "Проверять обновления автоматически"
+        case .updatesAutomaticallyHelp:
+            "Раз в сутки. Пока это выключено, uDeck не выходит в сеть вообще."
+        case .updatesNeverChecked: "Ещё не проверялось."
+        case .updatesLastChecked(let when): "Проверено \(when)."
+
         case .aboutProblems: "Проблемы"
 
         // Панель

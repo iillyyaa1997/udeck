@@ -140,6 +140,14 @@ struct English: Vocabulary {
         case .aboutNotSandboxed: "Not sandboxed, and cannot be: plugins run commands."
         case .aboutReadPermissions:
             "Read the permissions section of the plugin documentation before installing a plugin somebody else wrote."
+        case .updatesTitle: "Updates"
+        case .updatesCheckNow: "Check now"
+        case .updatesAutomatically: "Check for updates automatically"
+        case .updatesAutomaticallyHelp:
+            "Once a day. uDeck makes no network connection of any kind until you turn this on."
+        case .updatesNeverChecked: "Never checked."
+        case .updatesLastChecked(let when): "Last checked \(when)."
+
         case .aboutProblems: "Problems"
 
         // The panel

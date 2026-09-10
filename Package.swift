@@ -14,7 +14,13 @@ let package = Package(
         .executable(name: "uDeck", targets: ["uDeck"]),
         .library(name: "UDeckCore", targets: ["UDeckCore"]),
     ],
-    dependencies: [],
+    dependencies: [
+        // The project's first dependency, and it earns it: Sparkle is what a
+        // Mac application outside the App Store uses to update itself, and the
+        // parts of that job that look easy — verifying a download, replacing a
+        // running bundle, relaunching — are the parts that go wrong quietly.
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+    ],
     targets: [
         // Pure model + logic. Foundation and CoreGraphics only — no AppKit, no
         // SwiftUI — so all of it is testable without a window server.
@@ -26,7 +32,10 @@ let package = Package(
 
         .executableTarget(
             name: "uDeck",
-            dependencies: ["UDeckKit", "UDeckCore"],
+            dependencies: [
+                "UDeckKit", "UDeckCore",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
             path: "Sources/uDeck",
             exclude: ["Support/Info.plist"],
             linkerSettings: [
@@ -40,6 +49,14 @@ let package = Package(
                     "-Xlinker", "__TEXT",
                     "-Xlinker", "__info_plist",
                     "-Xlinker", "Sources/uDeck/Support/Info.plist",
+
+                    // Where Sparkle.framework lives inside a packaged .app.
+                    // SwiftPM leaves the framework next to the binary, which
+                    // `@loader_path` already covers for a development build;
+                    // this is the same answer for the bundle layout, so one
+                    // binary works in both places.
+                    "-Xlinker", "-rpath",
+                    "-Xlinker", "@executable_path/../Frameworks",
                 ]),
             ]
         ),

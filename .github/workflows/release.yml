@@ -1,0 +1,89 @@
+name: Release
+
+# A tag is the whole trigger. Everything a release consists of — the built app,
+# the archive, the signature over it and the feed that points at it — is made
+# here, so that a release is never a sequence somebody has to remember.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign and publish
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check that the tag matches the version in the app
+        run: |
+          set -euo pipefail
+          plist=Sources/uDeck/Support/Info.plist
+          version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")
+          tag=${GITHUB_REF_NAME#v}
+          if [ "$version" != "$tag" ]; then
+            echo "tag $GITHUB_REF_NAME says $tag, Info.plist says $version" >&2
+            echo "The version an operator sees and the version they can download" >&2
+            echo "have to be the same number, so this is a failure rather than a" >&2
+            echo "warning." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: swift test
+
+      - name: Build the application bundle
+        run: Scripts/make-app.sh
+
+      - name: Archive it
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          # `ditto` rather than `zip`: it is the one that preserves the symlinks
+          # and extended attributes a signed bundle is made of, and an archive
+          # that loses them is an application that will not launch.
+          ditto -c -k --sequesterRsrc --keepParent dist/uDeck.app "release/uDeck-$version.zip"
+
+      - name: Sign the archive and write the appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          tools=$(find .build -path '*/sparkle/Sparkle/bin' -type d | head -1)
+          if [ -z "$tools" ]; then
+            echo "Sparkle's tools are not in .build — no build ran before this step" >&2
+            exit 1
+          fi
+
+          # The key reaches the tool through a file rather than an argument:
+          # arguments are visible in the process list to anything on the runner.
+          key=$(mktemp)
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$key"
+          trap 'rm -f "$key"' EXIT
+
+          "$tools/generate_appcast" \
+            --ed-key-file "$key" \
+            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/" \
+            --link "https://github.com/${GITHUB_REPOSITORY}" \
+            release/
+
+          test -f release/appcast.xml
+          echo "--- appcast ---"
+          cat release/appcast.xml
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The appcast is an asset of the release rather than a page on a site:
+          # `releases/latest/download/appcast.xml` is a stable URL that needs no
+          # hosting, no Pages setup and no second place to keep in sync.
+          gh release create "$GITHUB_REF_NAME" \
+            --title "uDeck $version" \
+            --generate-notes \
+            "release/uDeck-$version.zip" \
+            release/appcast.xml

@@ -20,6 +20,14 @@
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>SUFeedURL</key>
+    <string>https://github.com/iillyyaa1997/udeck/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>pxUvxCxwUBF6ftsanVsAhrjGKlvWP5Qfdzf+c1BpMCw=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <false/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright 2026 Ilya Volkov. Licensed under the Apache License, Version 2.0.</string>
     <key>NSSupportsAutomaticTermination</key>
