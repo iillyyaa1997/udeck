@@ -50,14 +50,33 @@ The route previously planned for this does not exist. `NSGlassEffectView` has a
 private `_subduedState`, and a previous session concluded it was what AppKit set
 on a key change. Logged from inside the running application it reads 0 at every
 call, including while the island is visibly dimmed, and re-asserting it — with
-or without forcing a redraw afterwards — moved nothing measurable. Dimming
+or without forcing a redraw afterwards — moved nothing measurable. A later
+session extended that to the other two private integers the class carries,
+`_scrimState` and `_interactionState`, and to the whole layer tree: all three
+read 0 in both states, and the layers are identical — same opacities, no
+filters, no compositing filter, every superview at alpha 1. Dimming
 tracks key state and nothing else: 194.8/255 with it, 184.2 without, measured
 over the desktop with Finder frontmost, alternating builds twice each.
 
-The idea that has not been tried: stop using the system material for those
-islands and draw them ourselves, matched to the undimmed appearance. An island
-is 185×32 points with one indicator bar on it, so there may be nothing in it a
-hand-drawn fill cannot carry.
+**This has probably been answered since, as a side effect.** The idea below —
+stop using the system material and draw the island ourselves — has been
+implemented, for a different reason: the panel used to take the key window back
+on every application switch to stay bright, and that made uDeck reach for focus
+the operator had not given it. An inactive uDeck now draws
+`SteadyGlassBackground` (`NSVisualEffectView` pinned to `state = .active`),
+which does not dim, and the material follows *application* activation rather
+than window key state — so an island on a screen the panel is not on should no
+longer be a special case at all. Nobody has looked at a second screen since.
+
+Also worth recording, because it changes what the paragraph above assumes:
+`isKeyWindow` stays **true** with another application verifiably frontmost. The
+panel is non-activating and does not hide on deactivate, and key status is per
+application. The signal that tracks the dimming is `NSApp.isActive`.
+
+The idea that had not been tried, and now has: stop using the system material
+for those islands and draw them ourselves, matched to the undimmed appearance.
+An island is 185×32 points with one indicator bar on it, so there may be nothing
+in it a hand-drawn fill cannot carry.
 
 *To settle:* measure the real gap first. Put a striped backdrop on the second
 display, another application frontmost, and compare an island there against the
