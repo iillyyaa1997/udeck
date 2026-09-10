@@ -8,6 +8,15 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [Unreleased]
+
+- **`Scripts/make-app.sh --debug` bundles the debug build**, into
+  `dist/uDeck-debug.app`. A bare `.build/debug/uDeck` is not an application as
+  far as macOS is concerned — no Resources, so the generic executable tile
+  wherever an icon is asked for, and only the embedded `Info.plist` to go on —
+  which means the copy being developed did not behave like the copy being
+  shipped. Now it does, and a released uDeck can stay installed beside it.
+
 ## [0.3.0] — 2026-09-10
 
 A mark of its own, and the glass under it is the system's rather than a drawing

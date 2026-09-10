@@ -8,7 +8,16 @@
 # build runs perfectly well without any of this; the bundle exists for handing a
 # copy to somebody else.
 #
-# Usage:  Scripts/make-app.sh [--sign IDENTITY] [--dmg]
+# Usage:  Scripts/make-app.sh [--debug] [--sign IDENTITY] [--dmg]
+#
+# --debug bundles the debug build instead of the release one, into
+# dist/uDeck-debug.app. It exists because a bare `.build/debug/uDeck` is not an
+# application as far as macOS is concerned: it has no Resources, so it shows the
+# system's generic executable tile wherever an icon is asked for, and the
+# embedded Info.plist is all it has to go on. Working against a real bundle
+# means the copy being developed behaves like the copy being shipped — same
+# icon, same layout, same Sparkle framework beside it — while the released
+# application stays installed and untouched.
 #
 # Without --sign the bundle is ad-hoc signed. That is enough for the machine it
 # was built on and not enough for anyone else: macOS will refuse a downloaded
@@ -23,25 +32,37 @@ cd "$(dirname "$0")/.."
 
 IDENTITY="-"
 MAKE_DMG=0
+CONFIG="release"
 while [ $# -gt 0 ]; do
     case "$1" in
         --sign) IDENTITY="$2"; shift 2 ;;
         --dmg) MAKE_DMG=1; shift ;;
+        --debug) CONFIG="debug"; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
 
-APP="dist/uDeck.app"
+if [ "$CONFIG" = "debug" ]; then
+    APP="dist/uDeck-debug.app"
+    BUILT="./.build/debug/uDeck"
+else
+    APP="dist/uDeck.app"
+    BUILT="./.build/release/uDeck"
+fi
 PLIST="Sources/uDeck/Support/Info.plist"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
 
-echo "==> Building uDeck $VERSION for release"
-swift build -c release
+echo "==> Building uDeck $VERSION for $CONFIG"
+if [ "$CONFIG" = "debug" ]; then
+    swift build
+else
+    swift build -c release
+fi
 
 echo "==> Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/uDeck "$APP/Contents/MacOS/uDeck"
+cp "$BUILT" "$APP/Contents/MacOS/uDeck"
 cp "$PLIST" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
@@ -57,7 +78,7 @@ for icon in Assets.car uDeck.icns; do
 done
 
 # Any SwiftPM resource bundles that exist alongside the binary belong inside.
-for bundle in .build/release/*.bundle; do
+for bundle in "$(dirname "$BUILT")"/*.bundle; do
     [ -e "$bundle" ] || continue
     cp -R "$bundle" "$APP/Contents/Resources/"
 done
@@ -66,10 +87,10 @@ done
 # its own helpers — Autoupdate and the XPC services that install an update while
 # the application it is replacing is shutting down — so it is copied whole
 # rather than reduced to a dylib.
-if [ -d .build/release/Sparkle.framework ]; then
+if [ -d "$(dirname "$BUILT")/Sparkle.framework" ]; then
     echo "==> Embedding Sparkle.framework"
     mkdir -p "$APP/Contents/Frameworks"
-    cp -R .build/release/Sparkle.framework "$APP/Contents/Frameworks/"
+    cp -R "$(dirname "$BUILT")/Sparkle.framework" "$APP/Contents/Frameworks/"
 fi
 
 echo "==> Signing with identity: $IDENTITY"
