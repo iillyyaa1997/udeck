@@ -64,6 +64,15 @@ The first working version: the shell, the plugin runtime, and one plugin.
 - **`resident` plugins are described by the manifest format** and not
   implemented, so that adding them later cannot break plugins written today.
 
+### The examples are one shape
+
+- **Every example has a manifest, a translation beside it, a README saying what
+  it demonstrates and what you should see, and an executable producer** — and CI
+  checks all four, because otherwise the shape is a convention and a convention
+  is whatever the last person to add an example happened to do.
+- **[examples/README.md](examples/README.md)** says which example answers which
+  question, so the four stop being a pile to read in order.
+
 ### Writing a plugin
 
 - **A walkthrough**, [docs/writing-a-plugin.md](docs/writing-a-plugin.md): an

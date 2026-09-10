@@ -35,14 +35,29 @@ jobs:
       - name: Test
         run: swift test
 
-      - name: Check that the example plugins still produce valid cards
+      # The examples are documentation and test fixtures at once, so they are
+      # held to one shape: a manifest, at least one translation beside it, a
+      # README saying what the example is for, and an executable producer.
+      # Without this the shape is a convention, and a convention is whatever the
+      # last person to add an example happened to do.
+      - name: Check that the example plugins are all the same shape
         run: |
           set -euo pipefail
           for plugin in examples/*/; do
             name=$(basename "$plugin")
-            test -f "$plugin/manifest.json" || { echo "$name: no manifest"; exit 1; }
-            python3 -c "import json,sys; json.load(open('$plugin/manifest.json'))"
-            echo "$name: manifest is valid JSON"
+            test -f "$plugin/manifest.json" || { echo "$name: no manifest.json"; exit 1; }
+            python3 -c "import json; json.load(open('$plugin/manifest.json'))"
+            test -f "$plugin/README.md" || { echo "$name: no README.md"; exit 1; }
+            translations=$(ls "$plugin"manifest.*.json 2>/dev/null | wc -l)
+            test "$translations" -ge 1 || { echo "$name: no manifest.<lang>.json"; exit 1; }
+            for translation in "$plugin"manifest.*.json; do
+              python3 -c "import json; json.load(open('$translation'))"
+            done
+            run=$(python3 -c "import json; print(json.load(open('$plugin/manifest.json'))['run'][0])")
+            case "$run" in
+              ./*) test -x "$plugin${run#./}" || { echo "$name: $run is not executable"; exit 1; } ;;
+            esac
+            echo "$name: manifest, $translations translation(s), README, executable producer"
           done
 
       # Whichever examples carry a Python suite, rather than a name that has
