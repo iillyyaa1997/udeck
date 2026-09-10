@@ -76,6 +76,10 @@ public final class DeckModel {
     /// waves, each launching a process per placed plugin.
     private var refreshTask: Task<Void, Never>?
 
+    /// Watches the plugins folder so the list is what is on disk rather than
+    /// what was on disk at launch.
+    private var folderWatcher: PluginFolderWatcher?
+
     private var settingsStore: JSONFileStore<AppSettings> { .init(url: paths.settingsFile) }
     private var layoutStore: JSONFileStore<DeckLayout> { .init(url: paths.layoutFile) }
     private var grantsStore: JSONFileStore<PermissionGrants> { .init(url: paths.grantsFile) }
@@ -109,13 +113,27 @@ public final class DeckModel {
         for directory in paths.directoriesToCreate {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
+
+        folderWatcher = PluginFolderWatcher { [weak self] in
+            self?.discoverPlugins()
+        }
+        folderWatcher?.start(watching: paths.plugins)
     }
 
     // MARK: - Plugins
 
+    /// Re-reads the plugins folder.
+    ///
+    /// Called by the watcher whenever something in that folder changes, and by
+    /// the button in the settings screen — which stays, because a watcher is a
+    /// thing that can fail quietly and a button is a thing the operator can
+    /// press when they suspect it has.
     public func discoverPlugins() {
         let discovery = PluginDiscovery(searchPath: settings.pluginExecutableSearchPath)
         plugins = discovery.scan(paths.plugins)
+        DeckLog.plugins.debug(
+            "read the plugins folder: \(self.plugins.count, privacy: .public) found"
+        )
 
         let installed = Set(plugins.compactMap { $0.manifest?.id })
         let orphaned = layout.pruneWindows(keepingPlugins: installed)

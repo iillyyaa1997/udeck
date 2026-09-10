@@ -64,6 +64,17 @@ The first working version: the shell, the plugin runtime, and one plugin.
 - **`resident` plugins are described by the manifest format** and not
   implemented, so that adding them later cannot break plugins written today.
 
+### The plugins folder is watched
+
+- **Adding or removing a plugin no longer needs telling.** The list used to be
+  whatever was on disk when uDeck started: a plugin copied in did nothing until
+  the operator found the "Look again" button, and one taken out stayed in the
+  picker offering to add something that was not there. FSEvents rather than a
+  directory source, because half of what matters happens *inside* a plugin's
+  folder — a manifest edited in place, a translation dropped beside it, a
+  producer made executable. Coalesced twice, so expanding an archive is one
+  re-read rather than one per file.
+
 ### uDeck is a platform a plugin cannot break
 
 An audit of what a plugin could still do to the host, and what it found:

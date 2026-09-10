@@ -60,6 +60,13 @@ uDeck looks in `~/.udeck/plugins/` for folders containing a `manifest.json`.
 operator sees, and the key under which their settings and permission decisions
 are stored; letting the two differ would make an id collision silent.
 
+**The folder is watched, so you do not have to tell uDeck you changed it.**
+Copying a plugin in, taking one out, editing a manifest in place, adding a
+translation beside it, `chmod +x` on a producer — each is noticed within about a
+second and the list is re-read. Events are coalesced, so expanding an archive is
+one re-read rather than one per file. The **Look again** button in the settings
+screen stays, because a watcher is a thing that can fail quietly.
+
 A folder that fails to load is not skipped — it appears in the panel with the
 reason next to it. A plugin that simply never shows up is a support question; a
 plugin that shows up saying `run.sh is not executable — try chmod +x` is a
