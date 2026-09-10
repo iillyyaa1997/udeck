@@ -1012,10 +1012,35 @@ private struct AboutSection: View {
                 Text(strings(.updatesAutomaticallyHelp))
                     .font(.caption).foregroundStyle(.secondary)
 
+                // Two numbers rather than one sentence. "Up to date" asks to be
+                // believed; "installed 0.1.0, latest 0.1.0" can be checked.
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 3) {
+                    GridRow {
+                        Text(strings(.updatesInstalled)).foregroundStyle(.secondary)
+                        Text(updater.status.installedVersion).monospacedDigit()
+                    }
+                    if let latest = updater.status.latestVersion {
+                        GridRow {
+                            Text(strings(.updatesLatest)).foregroundStyle(.secondary)
+                            Text(latest).monospacedDigit()
+                        }
+                    }
+                }
+                .font(.callout)
+                .padding(.top, 2)
+
                 HStack(spacing: 10) {
                     Button(strings(.updatesCheckNow)) { updater.checkNow() }
-                    Text(lastChecked(updater.lastCheck))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .disabled(updater.status.stage == .checking)
+                    if case .available(let version) = updater.status.stage {
+                        Button(strings(.updatesInstallNow(version))) { updater.install() }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    if case .readyToInstall = updater.status.stage {
+                        Button(strings(.updatesRestartToInstall)) { updater.install() }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    updateSentence(updater.status)
                 }
             }
             .onAppear { checksAutomatically = updater.checksAutomatically }
@@ -1044,10 +1069,59 @@ private struct AboutSection: View {
 }
 
 private extension AboutSection {
+    /// One line, in the state's own colour, saying what happened.
+    @ViewBuilder
+    func updateSentence(_ status: UpdateStatus) -> some View {
+        switch status.stage {
+        case .idle:
+            Text(lastChecked(status.lastCheck)).font(.caption).foregroundStyle(.secondary)
+        case .checking:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(strings(.updatesChecking))
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        case .upToDate:
+            HStack(spacing: 5) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                Text(strings(.updatesUpToDate) + " " + lastChecked(status.lastCheck))
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        case .available(let version):
+            Text(strings(.updatesAvailable(version))).font(.caption).foregroundStyle(.secondary)
+        case .downloading(let fraction):
+            HStack(spacing: 6) {
+                if let fraction {
+                    ProgressView(value: fraction).controlSize(.small).frame(width: 80)
+                } else {
+                    ProgressView().controlSize(.small)
+                }
+                Text(strings(.updatesDownloading))
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        case .readyToInstall:
+            Text(strings(.updatesReady)).font(.caption).foregroundStyle(.secondary)
+        case .failed(let reason):
+            HStack(spacing: 5) {
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                Text(strings(.updatesFailed(reason)))
+            }
+            .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
     func lastChecked(_ date: Date?) -> String {
         guard let date else { return strings(.updatesNeverChecked) }
+        // Under a minute the formatter rounds to zero and then picks the
+        // future tense for it: "checked in 0 seconds", about something that has
+        // already happened.
+        guard Date().timeIntervalSince(date) >= 60 else { return strings(.updatesJustChecked) }
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .full
+        // The panel's language, not the system's. Without this the sentence
+        // came out half-translated — "Проверено 35 seconds ago" — which is the
+        // one thing worse than being in the wrong language entirely.
+        formatter.locale = Locale(identifier: strings.language.rawValue)
         return strings(.updatesLastChecked(formatter.localizedString(for: date, relativeTo: Date())))
     }
 }

@@ -179,7 +179,27 @@ public enum Phrase: Sendable, Equatable {
     case updatesAutomatically
     case updatesAutomaticallyHelp
     case updatesNeverChecked
+
+    /// A check that has just finished. `RelativeDateTimeFormatter` rounds the
+    /// zero to the nearest unit and picks the future while doing it — the
+    /// screen said "checked in 0 seconds", about something that had already
+    /// happened.
+    case updatesJustChecked
     case updatesLastChecked(String)
+
+    /// The answer to a check belongs on the screen that asked, not in a window
+    /// over it: the commonest answer is "nothing to do", and interrupting to
+    /// say that is worse than not saying it.
+    case updatesInstalled
+    case updatesLatest
+    case updatesChecking
+    case updatesUpToDate
+    case updatesAvailable(String)
+    case updatesInstallNow(String)
+    case updatesDownloading
+    case updatesReady
+    case updatesRestartToInstall
+    case updatesFailed(String)
 
     // MARK: - Plugins that will not run
 

@@ -150,7 +150,19 @@ struct Russian: Vocabulary {
         case .updatesAutomaticallyHelp:
             "Раз в сутки. Пока это выключено, uDeck не выходит в сеть вообще."
         case .updatesNeverChecked: "Ещё не проверялось."
+        case .updatesJustChecked: "Проверено только что."
         case .updatesLastChecked(let when): "Проверено \(when)."
+
+        case .updatesInstalled: "Установлена"
+        case .updatesLatest: "Последняя"
+        case .updatesChecking: "Проверяем…"
+        case .updatesUpToDate: "Установлена последняя версия."
+        case .updatesAvailable(let version): "Доступна версия \(version)."
+        case .updatesInstallNow(let version): "Обновить до \(version)"
+        case .updatesDownloading: "Скачиваем…"
+        case .updatesReady: "Скачано и готово."
+        case .updatesRestartToInstall: "Перезапустить и установить"
+        case .updatesFailed(let reason): "Проверка не завершилась: \(reason)"
 
         case .menuBrokenPlugins(let count):
             {

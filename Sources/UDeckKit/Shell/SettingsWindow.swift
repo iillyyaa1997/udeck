@@ -10,7 +10,7 @@ import UDeckCore
 /// the panel would mean either breaking that rule or losing the settings
 /// half-way through changing them.
 @MainActor
-public final class SettingsWindowController {
+public final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model: DeckModel
     private let updater: (any UpdateChecking)?
@@ -18,6 +18,7 @@ public final class SettingsWindowController {
     public init(model: DeckModel, updater: (any UpdateChecking)? = nil) {
         self.model = model
         self.updater = updater
+        super.init()
     }
 
     public func show() {
@@ -34,15 +35,36 @@ public final class SettingsWindowController {
             window.contentView = NSHostingView(
                 rootView: SettingsView(model: model, updater: updater)
             )
+            window.delegate = self
             self.window = window
         }
 
         applyAppearance()
 
+        // uDeck is an accessory application: no Dock icon, and — the part that
+        // matters here — not in the ⌘-Tab switcher. That is right for a panel
+        // that lives at the edge of the screen and wrong for a window somebody
+        // is working in, because a window you cannot switch back to is a window
+        // you have to close and reopen.
+        //
+        // So the policy is `.regular` for exactly as long as this window is
+        // open. The Dock icon that comes with it is the price, and it leaves
+        // again with the window.
+        NSApp.setActivationPolicy(.regular)
+
         // Settings are the one part of uDeck the operator works in with the
         // keyboard, so this is the one place activation is unambiguously right.
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    public func windowWillClose(_ notification: Notification) {
+        // Back to an accessory. Deferred by one turn of the run loop because
+        // changing the policy while the window that made it necessary is still
+        // closing leaves the Dock icon behind.
+        DispatchQueue.main.async {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     /// Brings the window's own text into line with the settings.

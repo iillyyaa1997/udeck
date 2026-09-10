@@ -146,7 +146,19 @@ struct English: Vocabulary {
         case .updatesAutomaticallyHelp:
             "Once a day. uDeck makes no network connection of any kind until you turn this on."
         case .updatesNeverChecked: "Never checked."
+        case .updatesJustChecked: "Checked just now."
         case .updatesLastChecked(let when): "Last checked \(when)."
+
+        case .updatesInstalled: "Installed"
+        case .updatesLatest: "Latest"
+        case .updatesChecking: "Checking…"
+        case .updatesUpToDate: "uDeck is up to date."
+        case .updatesAvailable(let version): "Version \(version) is available."
+        case .updatesInstallNow(let version): "Update to \(version)"
+        case .updatesDownloading: "Downloading…"
+        case .updatesReady: "Downloaded and ready."
+        case .updatesRestartToInstall: "Restart and install"
+        case .updatesFailed(let reason): "The check did not finish: \(reason)"
 
         case .menuBrokenPlugins(let count):
             count == 1 ? "1 plugin will not run" : "\(count) plugins will not run"
