@@ -52,6 +52,15 @@ public final class ShellState {
     /// to draw.
     public internal(set) var screenHasNotch = false
 
+    /// Whether uDeck is the active application.
+    ///
+    /// Not the panel's key status, which is a different thing and was measured
+    /// to be the wrong signal: the panel is non-activating and does not
+    /// `hidesOnDeactivate`, so `isKeyWindow` stays true with another
+    /// application verifiably frontmost. What the system material follows is
+    /// application activation.
+    public internal(set) var applicationIsActive = true
+
     /// Whether the panel has finished moving.
     ///
     /// False for the whole of a transition in either direction, true at rest.

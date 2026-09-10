@@ -162,6 +162,7 @@ public struct DeckRootView: View {
             cornerRadius: radius,
             theme: theme,
             glass: model.settings.glass,
+            applicationIsActive: shell.applicationIsActive,
             weldedToTopEdge: shell.weldedToTopEdge
         )
         .frame(width: shell.panelRect.width, height: shell.panelRect.height)

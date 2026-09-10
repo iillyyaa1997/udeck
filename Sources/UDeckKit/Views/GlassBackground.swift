@@ -19,6 +19,9 @@ struct GlassBackground: View {
     var theme: DeckTheme
     var glass: GlassAppearance
 
+    /// Whether uDeck is the active application. See `PanelSurface`.
+    var applicationIsActive: Bool
+
     /// Whether the panel's top edge is the screen's top edge.
     ///
     /// When it is, the two lines that normally define that edge have to go. A
@@ -34,7 +37,10 @@ struct GlassBackground: View {
         if #available(macOS 26, *) {
             // The same surface the settings screen previews, built in one
             // place so the two cannot drift apart.
-            PanelSurface(shape: shape, fallbackFill: theme.panelTint, glass: glass)
+            PanelSurface(
+                shape: shape, fallbackFill: theme.panelTint, glass: glass,
+                applicationIsActive: applicationIsActive
+            )
         } else {
             VisualEffectBackground()
                 .overlay(theme.panelTint)
@@ -142,6 +148,22 @@ struct PanelSurface<S: Shape>: View {
     var fallbackFill: Color
     var glass: GlassAppearance
 
+    /// Whether uDeck is the active application.
+    ///
+    /// The system's glass dims itself in an inactive application, and for this
+    /// panel that is backwards: it exists to be looked at from *inside* another
+    /// application, so the state it dims in is the state it is normally seen
+    /// in. uDeck used to answer that by taking the key window back on every
+    /// application switch, which made it grab focus the operator had not given
+    /// it — the thing he actually noticed and asked to stop.
+    ///
+    /// So the material changes instead of the focus. Nothing on
+    /// `NSGlassEffectView` carries the dimming — `_subduedState`, `_scrimState`
+    /// and `_interactionState` were all measured at 0 in both states, and the
+    /// layer tree is identical — so the dimming cannot be pinned and the view
+    /// has to be swapped for one that does not do it.
+    var applicationIsActive: Bool = true
+
     /// How far the material is grown before it is cut to the panel's shape.
     ///
     /// The material draws a bright line along its own edge — that is what a
@@ -170,10 +192,22 @@ struct PanelSurface<S: Shape>: View {
             // every reveal — work that does not show up in this process's CPU
             // time at all, which is exactly what makes it worth avoiding by
             // construction rather than by measurement.
-            LiquidGlassBackground(glass: glass)
-                .padding(-Self.edgeBleed)
-                .clipShape(shape)
-                .overlay { GlassTint(glass: glass, shape: shape) }
+            ZStack {
+                // Both are kept and crossfaded rather than swapped outright: a
+                // material appearing where another one was is a visible jump,
+                // and this happens every time the operator clicks away.
+                SteadyGlassBackground(glass: glass)
+                    .padding(-Self.edgeBleed)
+                    .clipShape(shape)
+                    .opacity(applicationIsActive ? 0 : 1)
+
+                LiquidGlassBackground(glass: glass)
+                    .padding(-Self.edgeBleed)
+                    .clipShape(shape)
+                    .opacity(applicationIsActive ? 1 : 0)
+            }
+            .animation(.easeInOut(duration: 0.18), value: applicationIsActive)
+            .overlay { GlassTint(glass: glass, shape: shape) }
         } else {
             shape.fill(fallbackFill).opacity(glass.opacity)
         }
@@ -212,6 +246,42 @@ struct GlassTint<S: Shape>: View {
 /// `cornerRadius` is left at zero and the shape comes from the caller's clip
 /// instead: the property rounds all four corners, and the panel's top two are
 /// square because it is attached to the edge it hangs from.
+/// The material uDeck draws when it is not the active application.
+///
+/// `NSVisualEffectView` is the previous generation of the same idea, and it has
+/// the one knob the new one does not: `state`. Pinned to `.active` it stops
+/// following the window's activation and keeps blurring whatever is behind it
+/// whoever is in front. It is not the same picture — the system's glass
+/// refracts and this only blurs — which is why it is used for the state the
+/// panel is *glanced* at in and not the state it is worked in.
+///
+/// `.hudWindow` is the closest of the stock materials, and it is the one the
+/// pre-macOS-26 path already uses, so the two agree.
+struct SteadyGlassBackground: NSViewRepresentable {
+    var glass: GlassAppearance
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        view.state = .active
+        // The panel is drawn dark whatever the system is set to; see DeckTheme.
+        view.appearance = NSAppearance(named: .vibrantDark)
+        apply(glass, to: view)
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        apply(glass, to: view)
+    }
+
+    private func apply(_ glass: GlassAppearance, to view: NSVisualEffectView) {
+        // The same meaning `opacity` has for the glass: at zero there is no
+        // material left and the content floats over whatever is behind it.
+        view.alphaValue = glass.opacity
+    }
+}
+
 @available(macOS 26, *)
 struct LiquidGlassBackground: NSViewRepresentable {
     var glass: GlassAppearance
@@ -249,16 +319,18 @@ struct LiquidGlassBackground: NSViewRepresentable {
         view.tintColor = nil
         view.alphaValue = glass.opacity
 
-        // AppKit dims a system material in a window that is not key, and the
-        // glass inherits it. That is right for an ordinary window and wrong for
-        // this one: the panel's whole job is to be looked at from inside
-        // another application, so the state it is dimmed in is the state it is
-        // normally seen in.
+        // AppKit dims a system material in an application that is not active,
+        // and the glass inherits it. That is right for an ordinary window and
+        // wrong for this one: the panel's whole job is to be looked at from
+        // inside another application, so the state it is dimmed in is the state
+        // it is normally seen in.
         //
-        // Nothing is done about it here. It is handled by keeping the panel a
-        // key window — see `PanelController.reassertKeyWindow`, which also
-        // records why the private route that used to sit in this file was
-        // removed.
+        // Nothing is done about it here, and nothing can be. Two sessions of
+        // measurement from inside the running application say so: the private
+        // `_subduedState`, `_scrimState` and `_interactionState` all read 0 in
+        // both states, the layer tree is byte-for-byte the same, and asserting
+        // any of them moves nothing. The dimming is inside the material's own
+        // drawing. `PanelSurface` swaps the material instead.
     }
 }
 
