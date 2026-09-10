@@ -45,12 +45,16 @@ cp .build/release/uDeck "$APP/Contents/MacOS/uDeck"
 cp "$PLIST" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
-# The icon. Committed rather than generated here, so an ordinary build needs
-# neither a renderer nor a toolchain step; `Scripts/make-icon.sh` rebuilds it
-# from `Scripts/icon/render-icon.swift` when the icon itself changes.
-if [ -f Sources/uDeck/Support/uDeck.icns ]; then
-    cp Sources/uDeck/Support/uDeck.icns "$APP/Contents/Resources/uDeck.icns"
-fi
+# The icon, in both of the forms a bundle can carry it: Assets.car is what
+# macOS 26 and later read, and where the glass is still a material the system
+# draws rather than a picture of one; the .icns is the same icon flattened, for
+# earlier systems. Both are committed, so an ordinary build needs neither Xcode
+# nor a rendering step; `Scripts/make-icon.sh` rebuilds them from
+# `Sources/uDeck/Support/uDeck.icon` when the icon itself changes.
+for icon in Assets.car uDeck.icns; do
+    [ -f "Sources/uDeck/Support/$icon" ] || continue
+    cp "Sources/uDeck/Support/$icon" "$APP/Contents/Resources/$icon"
+done
 
 # Any SwiftPM resource bundles that exist alongside the binary belong inside.
 for bundle in .build/release/*.bundle; do

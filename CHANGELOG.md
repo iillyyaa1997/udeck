@@ -17,8 +17,8 @@ for what that promises.
   executable's `exec` tile in the Dock, and the system's
   `rectangle.topthird.inset.filled` in the menu bar — accurate, and
   indistinguishable from every other rectangle up there.
-- **Both are drawn, not stored.** `Scripts/icon/render-icon.swift` is the app
-  icon's source and `Scripts/make-icon.sh` turns it into the `.icns`, so
+- **Both are drawn, not stored.** `Scripts/icon/draw-mark.swift` is where the
+  letter's geometry lives and `Scripts/make-icon.sh` turns it into the icon, so
   changing the weight of the letter is a line and a re-run rather than a round
   trip through an image editor. The menu-bar mark is drawn at whatever size
   AppKit asks for, because the menu bar's height is not a constant.
@@ -26,6 +26,36 @@ for what that promises.
   symbol. An icon that changes shape when something is wrong reads as a
   different application, and the operator has to learn two silhouettes instead
   of noticing one dot.
+
+### The icon is glass the system draws, not a picture of glass
+
+- **The icon is an Icon Composer document**, `Sources/uDeck/Support/uDeck.icon`
+  — a JSON file and two SVGs. macOS draws the tile, its thickness, the light
+  along the top edge and the shadow under the mark, and derives six appearances
+  from the one document: light, dark, two clear and two tinted. A painted icon
+  can only ever be one of those six.
+- **Written as text, not in a window.** Icon Composer is a GUI application, but
+  it ships `ictool`, which renders any appearance from the command line, and
+  `actool` compiles the document into what a bundle carries. Nothing about the
+  icon has to be opened in an editor to be changed or reviewed.
+- **A painted tile was paying for a border twice.** Measured: macOS composites
+  its own tile behind any `.icns`, scales the artwork to 80.5% of the canvas and
+  masks it with its own corner radius — so the tile and lit edge we drew sat
+  just inside the system's own. A fully transparent source comes back on that
+  same tile, which is why "no tile at all" was never available.
+- **The mark is an outlined path rather than a stroke.** As an SVG stroke, the
+  letter's counter filled in when the system derived the dark appearance and ū
+  became a blob. `draw-mark.swift` states the geometry once and converts the pen
+  stroke into an outline, which every appearance reads the same way.
+- **The tile is `#1A2A3E`, and the number is load-bearing.** The dark appearance
+  repaints a white mark, and how it repaints it depends on how light the tile is:
+  above roughly `#223650` the letter takes the tile's own colour and goes muddy
+  against near-black, below it the letter stays white. The blue is the deepest
+  one that keeps a white ū in the dark.
+- **Two files are committed, both built by `Scripts/make-icon.sh`.**
+  `Assets.car` is what macOS 26 and later read; `uDeck.icns` is the same icon
+  flattened, for macOS 14 through 25. An ordinary build needs neither Xcode nor
+  a rendering step.
 
 ## [0.2.1] — 2026-09-10
 
