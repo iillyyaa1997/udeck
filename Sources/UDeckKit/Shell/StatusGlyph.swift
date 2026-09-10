@@ -39,24 +39,28 @@ public enum StatusGlyph {
         // Heavier than a text stroke would be: at this size a hairline
         // disappears into the menu bar's own contrast, and the mark has to
         // survive being the smallest thing on the screen.
-        let stroke = s * 0.145
+        let stroke = s * 0.155
         ctx.setLineWidth(stroke)
         ctx.setLineCap(.round)
 
-        let left = s * 0.29, right = s * 0.71
-        let top = s * 0.50, bottom = s * 0.27
+        // The mark fills the box rather than sitting in the middle of it. At
+        // the first size it occupied a little under half the height, and next
+        // to its neighbours in the menu bar — which run to the full cap height
+        // a symbol is given — it read as somebody else's icon shrunk.
+        let left = s * 0.20, right = s * 0.80
+        let top = s * 0.585, bottom = s * 0.135
         let u = CGMutablePath()
         u.move(to: CGPoint(x: left, y: top))
-        u.addLine(to: CGPoint(x: left, y: bottom + s * 0.06))
+        u.addLine(to: CGPoint(x: left, y: bottom + s * 0.07))
         u.addArc(tangent1End: CGPoint(x: left, y: bottom),
-                 tangent2End: CGPoint(x: s * 0.5, y: bottom), radius: s * 0.11)
+                 tangent2End: CGPoint(x: s * 0.5, y: bottom), radius: s * 0.14)
         u.addArc(tangent1End: CGPoint(x: right, y: bottom),
-                 tangent2End: CGPoint(x: right, y: top), radius: s * 0.11)
+                 tangent2End: CGPoint(x: right, y: top), radius: s * 0.14)
         u.addLine(to: CGPoint(x: right, y: top))
         ctx.addPath(u)
         ctx.strokePath()
 
-        let bar = CGRect(x: left - stroke / 2, y: s * 0.63,
+        let bar = CGRect(x: left - stroke / 2, y: s * 0.735,
                          width: right - left + stroke, height: stroke * 0.9)
         ctx.addPath(CGPath(roundedRect: bar, cornerWidth: stroke * 0.45,
                            cornerHeight: stroke * 0.45, transform: nil))
@@ -65,7 +69,7 @@ public enum StatusGlyph {
         guard warning else { return }
         // Punched out of the letter before the dot is drawn, so the dot reads
         // as a separate thing rather than as a bulge on the stroke.
-        let dot = CGRect(x: s * 0.60, y: s * 0.16, width: s * 0.30, height: s * 0.30)
+        let dot = CGRect(x: s * 0.62, y: s * 0.02, width: s * 0.30, height: s * 0.30)
         ctx.setBlendMode(.clear)
         ctx.addPath(CGPath(ellipseIn: dot.insetBy(dx: -s * 0.045, dy: -s * 0.045), transform: nil))
         ctx.fillPath()
