@@ -45,6 +45,13 @@ cp .build/release/uDeck "$APP/Contents/MacOS/uDeck"
 cp "$PLIST" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
+# The icon. Committed rather than generated here, so an ordinary build needs
+# neither a renderer nor a toolchain step; `Scripts/make-icon.sh` rebuilds it
+# from `Scripts/icon/render-icon.swift` when the icon itself changes.
+if [ -f Sources/uDeck/Support/uDeck.icns ]; then
+    cp Sources/uDeck/Support/uDeck.icns "$APP/Contents/Resources/uDeck.icns"
+fi
+
 # Any SwiftPM resource bundles that exist alongside the binary belong inside.
 for bundle in .build/release/*.bundle; do
     [ -e "$bundle" ] || continue

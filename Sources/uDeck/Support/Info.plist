@@ -6,6 +6,8 @@
     <string>uDeck</string>
     <key>CFBundleDisplayName</key>
     <string>uDeck</string>
+    <key>CFBundleIconFile</key>
+    <string>uDeck</string>
     <key>CFBundleIdentifier</key>
     <string>place.unicorns.udeck</string>
     <key>CFBundleExecutable</key>

@@ -37,7 +37,7 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/uDeck",
-            exclude: ["Support/Info.plist"],
+            exclude: ["Support/Info.plist", "Support/uDeck.icns"],
             linkerSettings: [
                 // Embed Info.plist into __TEXT,__info_plist so the bare SwiftPM
                 // binary already behaves as an LSUIElement (no Dock icon, no

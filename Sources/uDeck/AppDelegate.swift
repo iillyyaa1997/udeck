@@ -84,10 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func installStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(
-            systemSymbolName: "rectangle.topthird.inset.filled",
-            accessibilityDescription: "uDeck"
-        )
+        statusItem.button?.image = StatusGlyph.image()
+        statusItem.button?.image?.accessibilityDescription = "uDeck"
         rebuildStatusMenu()
     }
 
@@ -114,12 +112,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // belongs: the icon carries a badge and the first row of the menu says
         // how many and opens the screen that says why.
         let broken = model.plugins.filter { !$0.isUsable }
-        statusItem.button?.image = NSImage(
-            systemSymbolName: broken.isEmpty
-                ? "rectangle.topthird.inset.filled"
-                : "exclamationmark.rectangle",
-            accessibilityDescription: "uDeck"
-        )
+        statusItem.button?.image = StatusGlyph.image(warning: !broken.isEmpty)
+        statusItem.button?.image?.accessibilityDescription = "uDeck"
         if !broken.isEmpty {
             let item = menu.addItem(
                 withTitle: strings(.menuBrokenPlugins(count: broken.count)),

@@ -8,6 +8,25 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [Unreleased]
+
+### uDeck has a mark of its own
+
+- **`ū` — the first letter of the name and the bar the panel hangs from**, which
+  happen to be the same shape. It replaces two placeholders: the SwiftPM
+  executable's `exec` tile in the Dock, and the system's
+  `rectangle.topthird.inset.filled` in the menu bar — accurate, and
+  indistinguishable from every other rectangle up there.
+- **Both are drawn, not stored.** `Scripts/icon/render-icon.swift` is the app
+  icon's source and `Scripts/make-icon.sh` turns it into the `.icns`, so
+  changing the weight of the letter is a line and a re-run rather than a round
+  trip through an image editor. The menu-bar mark is drawn at whatever size
+  AppKit asks for, because the menu bar's height is not a constant.
+- **The warning state is the same mark with a dot**, rather than a different
+  symbol. An icon that changes shape when something is wrong reads as a
+  different application, and the operator has to learn two silhouettes instead
+  of noticing one dot.
+
 ## [0.2.1] — 2026-09-10
 
 The first update anybody can install, and the screen it is installed from.
