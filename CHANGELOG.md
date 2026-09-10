@@ -64,6 +64,18 @@ The first working version: the shell, the plugin runtime, and one plugin.
 - **`resident` plugins are described by the manifest format** and not
   implemented, so that adding them later cannot break plugins written today.
 
+### Writing a plugin
+
+- **A walkthrough**, [docs/writing-a-plugin.md](docs/writing-a-plugin.md): an
+  empty folder to something on the panel, then a card, a source, settings,
+  permissions, buttons, two languages, what the host does when a producer
+  misbehaves, and a checklist to run before shipping. The contract stays what it
+  was and is now named as the reference rather than the starting point.
+- **`Scripts/new-plugin.sh`** writes a plugin that already works into the folder
+  uDeck watches. The point is not saving twenty lines of manifest: it is that a
+  first plugin should *run* before it is edited, so that when it stops working
+  its author knows which of their own changes did it.
+
 ### The plugins folder is watched
 
 - **Adding or removing a plugin no longer needs telling.** The list used to be

@@ -22,7 +22,12 @@ echo '{ "rows": [ { "text": "Hello from a shell script." } ], "ttl": 30 }'
 ```
 
 Any language, no SDK, no compiler. uDeck runs it on an interval and draws what
-it prints. The full contract is in **[docs/plugin-api.md](docs/plugin-api.md)**.
+it prints.
+
+* **[Writing a plugin](docs/writing-a-plugin.md)** — the walkthrough: an empty
+  folder to something on the panel, in ten minutes.
+* **[The plugin contract](docs/plugin-api.md)** — the reference: every field,
+  every rule, every limit, and why each is there.
 
 ---
 
@@ -81,13 +86,22 @@ Scripts/make-app.sh --dmg    # …and a disk image next to it
 ## Installing plugins
 
 Put a plugin folder in `~/.udeck/plugins/`, then open the panel and add it to a
-tab. The four plugins in [`examples/`](examples) are a good place to start —
-copy one in and see what happens:
+tab. The folder is watched, so a plugin copied in appears by itself — there is
+nothing to press. The four plugins in [`examples/`](examples) are a good place
+to start:
 
 ```sh
 mkdir -p ~/.udeck/plugins
 cp -R examples/hello-card ~/.udeck/plugins/
 ```
+
+To write one of your own, start from a plugin that already works:
+
+```sh
+Scripts/new-plugin.sh my-first-plugin
+```
+
+and follow **[Writing a plugin](docs/writing-a-plugin.md)** from there.
 
 `~/.udeck` can be moved with the `UDECK_HOME` environment variable.
 

@@ -1,4 +1,7 @@
-# Writing a uDeck plugin
+# The uDeck plugin contract
+
+This is the reference. If you are writing your first plugin, start with
+**[the walkthrough](writing-a-plugin.md)** and come back here for the detail.
 
 uDeck ships no content of its own. The panel, the tabs and the grid are the
 whole application; everything inside a window comes from a plugin. This document
