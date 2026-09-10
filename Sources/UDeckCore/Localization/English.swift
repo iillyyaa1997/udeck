@@ -148,6 +148,9 @@ struct English: Vocabulary {
         case .updatesNeverChecked: "Never checked."
         case .updatesLastChecked(let when): "Last checked \(when)."
 
+        case .menuBrokenPlugins(let count):
+            count == 1 ? "1 plugin will not run" : "\(count) plugins will not run"
+
         case .aboutProblems: "Problems"
 
         // The panel

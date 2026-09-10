@@ -152,6 +152,19 @@ struct Russian: Vocabulary {
         case .updatesNeverChecked: "Ещё не проверялось."
         case .updatesLastChecked(let when): "Проверено \(when)."
 
+        case .menuBrokenPlugins(let count):
+            {
+                // 1 плагин, 2-4 плагина, 5+ плагинов — и 11-14 всегда «плагинов».
+                let tail = count % 100
+                let last = count % 10
+                let word: String
+                if (11 ... 14).contains(tail) { word = "плагинов" }
+                else if last == 1 { word = "плагин" }
+                else if (2 ... 4).contains(last) { word = "плагина" }
+                else { word = "плагинов" }
+                return "\(count) \(word) не запустится"
+            }()
+
         case .aboutProblems: "Проблемы"
 
         // Панель

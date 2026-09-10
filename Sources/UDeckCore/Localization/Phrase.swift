@@ -181,6 +181,12 @@ public enum Phrase: Sendable, Equatable {
     case updatesNeverChecked
     case updatesLastChecked(String)
 
+    // MARK: - Plugins that will not run
+
+    /// The menu-bar item is the only part of uDeck an operator sees without
+    /// asking for it, so it is where a plugin that cannot run has to say so.
+    case menuBrokenPlugins(count: Int)
+
     // MARK: - The panel
 
     case deckNothingPlaced

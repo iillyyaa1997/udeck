@@ -65,6 +65,12 @@ public final class DeckModel {
     /// anything that was created with one.
     public var onSettingsChanged: ((AppSettings) -> Void)?
 
+    /// Told after the plugins folder has been read, which now happens whenever
+    /// something in it changes rather than only at launch. The menu-bar item
+    /// carries whether any of them will not run, and that answer is only as
+    /// current as the last thing that told it.
+    public var onPluginsChanged: (() -> Void)?
+
     private let paths: UDeckPaths
     private let executor: PollExecutor
     private var pollTasks: [String: Task<Void, Never>] = [:]
@@ -145,6 +151,7 @@ public final class DeckModel {
             saveLayout()
         }
         restartPolling()
+        onPluginsChanged?()
     }
 
     public func plugin(withID id: PluginIdentifier) -> DiscoveredPlugin? {

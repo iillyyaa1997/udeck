@@ -85,6 +85,16 @@ The first working version: the shell, the plugin runtime, and one plugin.
   first plugin should *run* before it is edited, so that when it stops working
   its author knows which of their own changes did it.
 
+### A plugin that will not run says so where you are looking
+
+- **The menu-bar item carries it.** A plugin's problems were already written
+  down — in the settings screen and next to the plugin in the picker — and both
+  of those need somebody to go and look. The menu-bar item is the only part of
+  uDeck on screen without being asked for, so the icon takes a warning badge and
+  the first row of the menu says how many will not run and opens the screen that
+  says why. It clears itself when the plugin is fixed or removed, because the
+  folder is watched.
+
 ### uDeck updates itself
 
 - **Sparkle**, and it is the project's first dependency. The parts of updating

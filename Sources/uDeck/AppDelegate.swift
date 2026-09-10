@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onPhaseChange = { [weak model] phase in
             model?.panelIsVisible = phase.isVisible
         }
+        model.onPluginsChanged = { [weak self] in self?.rebuildStatusMenu() }
         model.onSettingsChanged = { [weak self, weak controller] _ in
             controller?.settingsChanged()
             self?.settings.applyAppearance()
@@ -104,6 +105,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard statusItem != nil else { return }
         let strings = model.strings
         let menu = NSMenu()
+
+        // A plugin that will not run is the one thing uDeck knows and the
+        // operator does not. It was already written down — in the settings
+        // screen and next to the plugin in the picker — and both of those need
+        // somebody to go and look. The menu-bar item is the only part of uDeck
+        // that is on screen without being asked for, so it is where this
+        // belongs: the icon carries a badge and the first row of the menu says
+        // how many and opens the screen that says why.
+        let broken = model.plugins.filter { !$0.isUsable }
+        statusItem.button?.image = NSImage(
+            systemSymbolName: broken.isEmpty
+                ? "rectangle.topthird.inset.filled"
+                : "exclamationmark.rectangle",
+            accessibilityDescription: "uDeck"
+        )
+        if !broken.isEmpty {
+            let item = menu.addItem(
+                withTitle: strings(.menuBrokenPlugins(count: broken.count)),
+                action: #selector(openSettings), keyEquivalent: ""
+            )
+            item.target = self
+            item.image = NSImage(
+                systemSymbolName: "exclamationmark.triangle", accessibilityDescription: nil
+            )
+            menu.addItem(.separator())
+        }
+
         menu.addItem(withTitle: strings(.menuShowPanel), action: #selector(showPanel), keyEquivalent: "")
             .target = self
         menu.addItem(withTitle: strings(.menuRefreshAll), action: #selector(refreshAll), keyEquivalent: "")
