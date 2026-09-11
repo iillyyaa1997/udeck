@@ -39,6 +39,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Which way the panel's text is written, in the look currently in force.
     public var ink: PanelInk { look.ink }
 
+    /// How far the island fades back while it is away, and whether it does.
+    public var quiet: IslandQuiet
+
     /// Retract the panel when the operator activates another application.
     public var collapseOnAppSwitch: Bool
 
@@ -99,6 +102,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         hotkey: HotKeyBinding = HotKeyBinding(),
         theme: ThemeSettings = ThemeSettings(),
         look: PanelLook = .light,
+        quiet: IslandQuiet = IslandQuiet(),
         collapseOnAppSwitch: Bool = true,
         defaultCardTTL: TimeInterval = 60,
         silentTTLMultiplier: Double = 3,
@@ -116,6 +120,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.hotkey = hotkey
         self.theme = theme
         self.look = look
+        self.quiet = quiet
         self.collapseOnAppSwitch = collapseOnAppSwitch
         self.defaultCardTTL = defaultCardTTL
         self.silentTTLMultiplier = silentTTLMultiplier
@@ -165,6 +170,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         }
 
         result.theme = result.theme.validated()
+        result.quiet.level = result.quiet.clampedLevel
         result.gesture.stripHeight = clamp(result.gesture.stripHeight, 1 ... 200)
         result.gesture.stripSideMargin = clamp(result.gesture.stripSideMargin, 0 ... 2000)
         result.gesture.virtualAnchorWidth = clamp(result.gesture.virtualAnchorWidth, 20 ... 2000)
@@ -277,6 +283,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
                 dark: isDark ? carried : .dark
             )
         }
+        quiet = try c.decodeIfPresent(IslandQuiet.self, forKey: .quiet) ?? defaults.quiet
         collapseOnAppSwitch = try c.decodeIfPresent(Bool.self, forKey: .collapseOnAppSwitch)
             ?? defaults.collapseOnAppSwitch
         defaultCardTTL = try c.decodeIfPresent(TimeInterval.self, forKey: .defaultCardTTL)

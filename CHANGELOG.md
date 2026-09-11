@@ -10,6 +10,13 @@ for what that promises.
 
 ## [Unreleased]
 
+- **The island can fade back while it is away.** One switch and one slider in
+  «Вид»: the collapsed island keeps the share of itself the operator sets — five
+  percent at the lowest, because an island at zero cannot be found with the
+  pointer — and comes back whole the moment the panel opens. It fades in 0.3 s
+  and wakes in 0.12 s, because coming back answers something the operator just
+  did and going quiet answers nothing. This is the first step of per-state
+  looks: the same rule will later be one state among several.
 - **`Scripts/make-app.sh --install` puts the built bundle in `~/Applications`.**
   An application outside an Applications folder does not get its icon
   everywhere: measured, the same ad-hoc signed bundle shows the system's

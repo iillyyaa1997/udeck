@@ -91,8 +91,24 @@ public struct DeckRootView: View {
                 .offset(x: shell.panelRect.minX, y: shell.panelRect.minY)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // The whole island fades, not the material alone: what is on screen
+        // while the panel is away is the material and the mark drawn over it,
+        // and fading one of the two would mean a bright mark floating on
+        // nothing. Opacity rather than a quieter look for the same reason the
+        // operator asked for it — "не мешало, но было видно" is about how much
+        // of the island is there, not about what colour it is.
+        //
+        // Hit testing is untouched by opacity, so the island still catches the
+        // pointer at five percent and wakes on the way in.
+        .opacity(quietOpacity)
+        .animation(.easeOut(duration: IslandQuiet.duration(reaching: quietOpacity)), value: quietOpacity)
         .environment(\.deckTheme, theme)
         .environment(\.strings, model.strings)
+    }
+
+    /// How much of the island is on screen right now.
+    private var quietOpacity: Double {
+        model.settings.quiet.opacity(for: shell.phase)
     }
 
     @ViewBuilder

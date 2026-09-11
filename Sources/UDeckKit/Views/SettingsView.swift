@@ -70,6 +70,11 @@ public struct SettingsView: View {
                 Label(model.strings(item.title), systemImage: item.symbol).tag(item)
             }
             .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
+            // On the sidebar's own content, which is where this modifier is
+            // read: applied to the split view it is silently ignored, and the
+            // button stays — inert, because the column visibility above is a
+            // constant it cannot change.
+            .toolbar(removing: .sidebarToggle)
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -85,7 +90,6 @@ public struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .toolbar(removing: .sidebarToggle)
         .frame(minWidth: 720, minHeight: 480)
         // The settings window is its own window rather than part of the panel,
         // so it does not inherit the panel's environment and has to be handed
@@ -358,6 +362,20 @@ private struct LookSettings: View {
         )
     }
 
+    /// A binding straight into the settings, for the rows that are not about
+    /// the look being edited. `look` and `theme` above write into one pole of
+    /// the theme; this writes the setting itself.
+    private func settings<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { model.settings[keyPath: keyPath] },
+            set: { newValue in
+                var settings = model.settings
+                settings[keyPath: keyPath] = newValue
+                model.update(settings: settings)
+            }
+        )
+    }
+
     private func theme<Value>(_ keyPath: WritableKeyPath<ThemeSettings, Value>) -> Binding<Value> {
         Binding(
             get: { model.settings.theme[keyPath: keyPath] },
@@ -507,6 +525,24 @@ private struct LookSettings: View {
                         EmptyView()
                     }
                 }
+            }
+
+            divider
+
+            // Before the material and the tint rather than after them: this is
+            // the one row about when the panel is *not* being looked at, and it
+            // is the answer to the commonest complaint about a panel that lives
+            // at the top of the screen all day.
+            GridRow {
+                label(strings(.lookQuiet))
+                Toggle(strings(.lookQuietToggle), isOn: settings(\.quiet.enabled))
+            }
+
+            GridRow {
+                label(strings(.lookQuietLevel))
+                slider(settings(\.quiet.level), in: IslandQuiet.levelRange,
+                       step: 0.05, readout: percent(model.settings.quiet.level))
+                    .disabled(!model.settings.quiet.enabled)
             }
 
             divider
