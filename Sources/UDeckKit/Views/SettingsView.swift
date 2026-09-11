@@ -56,7 +56,16 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
-        NavigationSplitView {
+        // The sidebar is the window's only navigation, so it does not collapse.
+        //
+        // NavigationSplitView offers a toggle for it by default, and in a window
+        // without a real toolbar that button has nothing to anchor to: it sits
+        // beside the title while the sidebar is open and jumps to the far right
+        // corner when it closes. Even placed correctly it would be a control
+        // whose whole effect is to hide the list of sections and leave no way
+        // back to them — so it is removed rather than fixed, and the column
+        // visibility is stated rather than left to be remembered.
+        NavigationSplitView(columnVisibility: .constant(.all)) {
             List(Section.allCases, selection: $section) { item in
                 Label(model.strings(item.title), systemImage: item.symbol).tag(item)
             }
@@ -76,6 +85,7 @@ public struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .toolbar(removing: .sidebarToggle)
         .frame(minWidth: 720, minHeight: 480)
         // The settings window is its own window rather than part of the panel,
         // so it does not inherit the panel's environment and has to be handed

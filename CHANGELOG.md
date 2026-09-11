@@ -10,6 +10,12 @@ for what that promises.
 
 ## [Unreleased]
 
+- **The settings sidebar no longer has a toggle.** The button
+  `NavigationSplitView` adds by default had nothing to anchor to in a window
+  without a toolbar: it sat beside the title while the sidebar was open and
+  jumped to the far right corner when it closed. It is removed rather than
+  repositioned — its whole effect was to hide the window's only navigation and
+  leave no way back to it.
 - **`Scripts/make-app.sh --debug` bundles the debug build**, into
   `dist/uDeck-debug.app`. A bare `.build/debug/uDeck` is not an application as
   far as macOS is concerned — no Resources, so the generic executable tile
