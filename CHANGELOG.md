@@ -10,6 +10,12 @@ for what that promises.
 
 ## [Unreleased]
 
+- **`Scripts/make-app.sh --install` puts the built bundle in `~/Applications`.**
+  An application outside an Applications folder does not get its icon
+  everywhere: measured, the same ad-hoc signed bundle shows the system's
+  placeholder tile in Stage Manager's strip when it is run from a build
+  directory and its own icon when it is run from `~/Applications` — identifier
+  and contents unchanged, only the path.
 - **The settings sidebar no longer has a toggle.** The button
   `NavigationSplitView` adds by default had nothing to anchor to in a window
   without a toolbar: it sat beside the title while the sidebar was open and

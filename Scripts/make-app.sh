@@ -8,7 +8,7 @@
 # build runs perfectly well without any of this; the bundle exists for handing a
 # copy to somebody else.
 #
-# Usage:  Scripts/make-app.sh [--debug] [--sign IDENTITY] [--dmg]
+# Usage:  Scripts/make-app.sh [--debug] [--install] [--sign IDENTITY] [--dmg]
 #
 # --debug bundles the debug build instead of the release one, into
 # dist/uDeck-debug.app. It exists because a bare `.build/debug/uDeck` is not an
@@ -32,12 +32,14 @@ cd "$(dirname "$0")/.."
 
 IDENTITY="-"
 MAKE_DMG=0
+INSTALL=0
 CONFIG="release"
 while [ $# -gt 0 ]; do
     case "$1" in
         --sign) IDENTITY="$2"; shift 2 ;;
         --dmg) MAKE_DMG=1; shift ;;
         --debug) CONFIG="debug"; shift ;;
+        --install) INSTALL=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -141,6 +143,22 @@ if [ "$IDENTITY" = "-" ]; then
     without that step, sign with a Developer ID and notarise it.
 
 WARNING
+fi
+
+# An application outside one of the Applications folders does not get its icon
+# everywhere. Measured: the same ad-hoc signed bundle shows the system's
+# placeholder tile in Stage Manager's strip when it is run from a build
+# directory, and its own icon when it is run from ~/Applications or
+# /Applications — bundle identifier and contents unchanged, only the path. So a
+# copy that is going to be used rather than tested belongs in one of them.
+if [ "$INSTALL" = "1" ]; then
+    DEST="$HOME/Applications/$(basename "$APP")"
+    echo "==> Installing to $DEST"
+    rm -rf "$DEST"
+    mkdir -p "$HOME/Applications"
+    # ditto rather than cp -R: it keeps the symlinks and extended attributes a
+    # signed bundle is made of, and a copy that loses them will not launch.
+    ditto "$APP" "$DEST"
 fi
 
 if [ "$MAKE_DMG" = "1" ]; then
