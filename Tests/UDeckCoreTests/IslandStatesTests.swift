@@ -257,4 +257,64 @@ struct IslandStatesTests {
         #expect(all.count == 8)
         #expect(Set(all) == Set(IslandState.allCases))
     }
+
+    // MARK: - Values kept the same everywhere, switched on and off
+
+    @Test("sharing a value makes what is on screen the one everybody gets")
+    func sharingTakesTheVisibleValue() {
+        var theme = ThemeSettings(light: loud, dark: loud)
+        let away = IslandState(phase: .collapsed)
+        theme.states.unlink([away], lightBase: loud, darkBase: loud)
+        let link = theme.states.link(for: away)!
+        theme.states.light[link.id] = quiet
+
+        // Looking at the away state and marking its brightness as shared.
+        theme.setShared([.inkBrightness], true, editing: false, source: quiet)
+
+        #expect(theme.states.shared.contains(.inkBrightness))
+        // Every state now has the brightness the away state had…
+        for state in IslandState.allCases {
+            let look = theme.states.look(for: state, isDark: false, base: theme.light)
+            #expect(look.inkBrightness == quiet.inkBrightness)
+        }
+        // …and the away state has not otherwise changed.
+        #expect(theme.states.look(for: away, isDark: false, base: theme.light).glass.opacity
+                == quiet.glass.opacity)
+    }
+
+    @Test("letting a value go leaves every state showing what it showed")
+    func unsharingMovesNothing() {
+        var theme = ThemeSettings(light: loud, dark: loud)
+        let away = IslandState(phase: .collapsed)
+        theme.states.unlink([away], lightBase: loud, darkBase: loud)
+        theme.states.light[theme.states.link(for: away)!.id] = quiet
+        theme.setShared([.inkBrightness], true, editing: false, source: quiet)
+
+        let before = IslandState.allCases.map {
+            theme.states.look(for: $0, isDark: false, base: theme.light)
+        }
+        theme.setShared([.inkBrightness], false, editing: false, source: quiet)
+        let after = IslandState.allCases.map {
+            theme.states.look(for: $0, isDark: false, base: theme.light)
+        }
+
+        #expect(before == after)
+        #expect(!theme.states.shared.contains(.inkBrightness))
+    }
+
+    @Test("a shared value is not touched by editing a link")
+    func sharedSurvivesLinkEdits() {
+        var theme = ThemeSettings(light: loud, dark: loud)
+        let away = IslandState(phase: .collapsed)
+        theme.states.unlink([away], lightBase: loud, darkBase: loud)
+        let link = theme.states.link(for: away)!
+        theme.setShared([.ink], true, editing: false, source: loud)
+
+        // The link is given a look whose ink disagrees with the theme's.
+        var own = quiet
+        own.ink = .dark
+        theme.states.light[link.id] = own
+
+        #expect(theme.states.look(for: away, isDark: false, base: theme.light).ink == loud.ink)
+    }
 }

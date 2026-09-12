@@ -90,7 +90,7 @@ public struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(minWidth: 720, minHeight: 480)
+        .frame(minWidth: 900, minHeight: 520)
         // The settings window is its own window rather than part of the panel,
         // so it does not inherit the panel's environment and has to be handed
         // the language itself.
@@ -395,7 +395,16 @@ private struct LookSettings: View {
     /// A binding into the look being edited, rather than into the resolved copy
     /// everything draws from — writing to that would be writing to a cache the
     /// next resolve throws away.
-    private func look<Value>(_ keyPath: WritableKeyPath<PanelLook, Value>) -> Binding<Value> {
+    /// A binding into whatever the controls are pointed at.
+    ///
+    /// `field` is which value it is, and it decides where the write lands: a
+    /// value the operator has marked as the same everywhere is kept in the
+    /// theme's own look, whatever states are selected, which is what makes
+    /// "everywhere" true rather than a label.
+    private func look<Value>(
+        _ keyPath: WritableKeyPath<PanelLook, Value>,
+        _ field: LookField? = nil
+    ) -> Binding<Value> {
         Binding(
             get: { editedLook[keyPath: keyPath] },
             set: { newValue in
@@ -406,7 +415,8 @@ private struct LookSettings: View {
                 var settings = model.settings
                 var look = editedLook
                 look[keyPath: keyPath] = newValue
-                if let link = editedLink {
+                let isShared = field.map { settings.theme.states.shared.contains($0) } ?? false
+                if let link = editedLink, !isShared {
                     // A link of its own keeps its own copy. The theme's look
                     // stays where it was, so unlinking the states later lands
                     // them back on something sensible.
@@ -421,6 +431,45 @@ private struct LookSettings: View {
                 model.update(settings: settings)
             }
         )
+    }
+
+    /// The switch that says "this value is the same in every state".
+    ///
+    /// Drawn beside the value it governs rather than gathered into a list
+    /// somewhere, because it is a fact about that value and nothing else.
+    /// Hidden while there is only one link and nothing is shared: with every
+    /// state already set up together the switch would be a no-op with an
+    /// explanation attached.
+    @ViewBuilder
+    private func chain(_ fields: Set<LookField>) -> some View {
+        let shared = model.settings.theme.states.shared
+        if model.settings.theme.states.links.count > 1 || !shared.isEmpty {
+            Toggle(isOn: Binding(
+                get: { fields.allSatisfy(shared.contains) },
+                set: { share(fields, $0) }
+            )) {
+                Image(systemName: fields.allSatisfy(shared.contains) ? "link" : "link.badge.plus")
+            }
+            .toggleStyle(.button)
+            .controlSize(.small)
+            .labelStyle(.iconOnly)
+            .help(strings(.lookSharedEverywhere))
+        } else {
+            Color.clear.frame(width: 1, height: 1)
+        }
+    }
+
+    /// Marking a value as the same everywhere, or letting it go again.
+    ///
+    /// Both directions are written so that nothing on screen moves at the
+    /// moment of the click. Turning it on takes the value the operator is
+    /// looking at and makes it the one everybody gets; turning it off writes
+    /// that same value into every link that had one of its own, so each state
+    /// keeps what it was showing and simply stops following.
+    private func share(_ fields: Set<LookField>, _ shared: Bool) {
+        var settings = model.settings
+        settings.theme.setShared(fields, shared, editing: edited, source: editedLook)
+        model.update(settings: settings)
     }
 
     /// A binding straight into the settings, for the rows that are not about
@@ -489,14 +538,38 @@ private struct LookSettings: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sample
-            Divider()
-            knobs
-            Divider()
-            presets
+        // Two columns rather than one long scroll: the situations stay put on
+        // the left while the right half changes under them, and the sample sits
+        // directly above the knobs that move it. In one column the operator was
+        // setting a slider at the bottom of the window and watching for the
+        // result at the top of it.
+        HStack(alignment: .top, spacing: 20) {
+            situations
+            VStack(alignment: .leading, spacing: 14) {
+                Text(editingSummary)
+                    .font(.caption)
+                    .foregroundStyle(selectionIsMixed ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .fixedSize(horizontal: false, vertical: true)
+                sample
+                Divider()
+                knobs
+                Divider()
+                presets
+            }
+            .frame(maxWidth: 560, alignment: .leading)
         }
-        .frame(maxWidth: 560, alignment: .leading)
+    }
+
+    /// The left column: every situation the island can be in, and which of them
+    /// are set up together.
+    private var situations: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(strings(.lookStates))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            IslandStatesEditor(model: model, selection: $selection)
+        }
+        .frame(width: 236, alignment: .leading)
     }
 
     // MARK: - The sample
@@ -592,21 +665,6 @@ private struct LookSettings: View {
 
             divider
 
-            GridRow(alignment: .top) {
-                label(strings(.lookStates))
-                IslandStatesEditor(model: model, selection: $selection)
-            }
-
-            GridRow {
-                Color.clear.frame(width: 1, height: 1)
-                Text(editingSummary)
-                    .font(.caption)
-                    .foregroundStyle(selectionIsMixed ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            divider
-
             // Before the material and the tint rather than after them: this is
             // the one row about when the panel is *not* being looked at, and it
             // is the answer to the commonest complaint about a panel that lives
@@ -627,13 +685,14 @@ private struct LookSettings: View {
 
             GridRow {
                 label(strings(.lookGlass))
-                Picker("", selection: look(\.glass.style)) {
+                Picker("", selection: look(\.glass.style, .glassStyle)) {
                     Text(strings(.glassRegular)).tag(GlassStyle.regular)
                     Text(strings(.glassClear)).tag(GlassStyle.clear)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 200)
+                chain([.glassStyle])
             }
 
             if let warning = characterWarning {
@@ -646,15 +705,16 @@ private struct LookSettings: View {
 
             GridRow {
                 label(strings(.lookAmount))
-                slider(look(\.glass.opacity), in: GlassAppearance.opacityRange,
+                slider(look(\.glass.opacity, .glassOpacity), in: GlassAppearance.opacityRange,
                        step: 0.05, readout: percent(editedLook.glass.opacity))
+                chain([.glassOpacity])
             }
 
             GridRow {
                 label(strings(.lookTint))
                 HStack(spacing: 10) {
-                    Toggle("", isOn: look(\.glass.tinted)).labelsHidden()
-                    Picker("", selection: look(\.glass.tintIsLight)) {
+                    Toggle("", isOn: look(\.glass.tinted, .tinted)).labelsHidden()
+                    Picker("", selection: look(\.glass.tintIsLight, .tintDirection)) {
                         Text(strings(.tintLighter)).tag(true)
                         Text(strings(.tintDarker)).tag(false)
                     }
@@ -663,13 +723,15 @@ private struct LookSettings: View {
                     .frame(width: 180)
                     .disabled(!editedLook.glass.tinted)
                 }
+                chain([.tinted, .tintDirection])
             }
 
             GridRow {
                 label(strings(.lookStrength))
-                slider(look(\.glass.tintStrength), in: GlassAppearance.tintStrengthRange,
+                slider(look(\.glass.tintStrength, .tintStrength), in: GlassAppearance.tintStrengthRange,
                        step: 0.02, readout: percent(editedLook.glass.tintStrength))
                     .disabled(!editedLook.glass.tinted)
+                chain([.tintStrength])
             }
 
             GridRow {
@@ -683,13 +745,12 @@ private struct LookSettings: View {
                     Toggle("", isOn: Binding(
                         get: { editedLook.glass.tintColor != nil },
                         set: { wantsColour in
-                            var settings = model.settings
-                            var look = settings.theme.look(forDark: edited)
-                            look.glass.tintColor = wantsColour
-                                ? (look.glass.tintIsLight ? .white : InkColor(red: 0, green: 0, blue: 0))
+                            // Through the same binding as every other value, so
+                            // that it lands wherever the selection points rather
+                            // than always in the theme's own look.
+                            look(\.glass.tintColor, .tintColour).wrappedValue = wantsColour
+                                ? (editedLook.glass.tintIsLight ? .white : InkColor(red: 0, green: 0, blue: 0))
                                 : nil
-                            settings.theme.setLook(look, forDark: edited)
-                            model.update(settings: settings)
                         }
                     ))
                     .labelsHidden()
@@ -700,36 +761,35 @@ private struct LookSettings: View {
                             get: { Color(red: colour.red, green: colour.green, blue: colour.blue) },
                             set: { newValue in
                                 guard let rgb = InkColor(newValue) else { return }
-                                var settings = model.settings
-                                var look = settings.theme.look(forDark: edited)
-                                look.glass.tintColor = rgb
-                                settings.theme.setLook(look, forDark: edited)
-                                model.update(settings: settings)
+                                look(\.glass.tintColor, .tintColour).wrappedValue = rgb
                             }
                         ), supportsOpacity: false)
                         .labelsHidden()
                         .disabled(!editedLook.glass.tinted)
                     }
                 }
+                chain([.tintColour])
             }
 
             divider
 
             GridRow {
                 label(strings(.lookText))
-                Picker("", selection: look(\.ink)) {
+                Picker("", selection: look(\.ink, .ink)) {
                     Text(strings(.lookLight)).tag(PanelInk.light)
                     Text(strings(.lookDark)).tag(PanelInk.dark)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 200)
+                chain([.ink])
             }
 
             GridRow {
                 label(strings(.lookBrightness))
-                slider(look(\.inkBrightness), in: 0 ... 1,
+                slider(look(\.inkBrightness, .inkBrightness), in: 0 ... 1,
                        step: 0.02, readout: percent(editedLook.inkBrightness))
+                chain([.inkBrightness])
             }
 
             GridRow {
@@ -738,13 +798,9 @@ private struct LookSettings: View {
                     Toggle("", isOn: Binding(
                         get: { editedLook.inkColor != nil },
                         set: { wantsColour in
-                            var settings = model.settings
-                            var look = settings.theme.look(forDark: edited)
-                            look.inkColor = wantsColour
-                                ? (look.ink == .light ? .white : .black)
+                            look(\.inkColor, .inkColour).wrappedValue = wantsColour
+                                ? (editedLook.ink == .light ? .white : .black)
                                 : nil
-                            settings.theme.setLook(look, forDark: edited)
-                            model.update(settings: settings)
                         }
                     ))
                     .labelsHidden()
@@ -754,16 +810,13 @@ private struct LookSettings: View {
                             get: { Color(red: colour.red, green: colour.green, blue: colour.blue) },
                             set: { newValue in
                                 guard let rgb = InkColor(newValue) else { return }
-                                var settings = model.settings
-                                var look = settings.theme.look(forDark: edited)
-                                look.inkColor = rgb
-                                settings.theme.setLook(look, forDark: edited)
-                                model.update(settings: settings)
+                                look(\.inkColor, .inkColour).wrappedValue = rgb
                             }
                         ), supportsOpacity: false)
                         .labelsHidden()
                     }
                 }
+                chain([.inkColour])
             }
 
             divider

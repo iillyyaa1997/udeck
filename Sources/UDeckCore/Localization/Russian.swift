@@ -67,6 +67,7 @@ struct Russian: Vocabulary {
         case .lookStrength: "Сила"
         case .lookTintColour: "Цвет заливки"
         case .lookStates: "Состояния"
+        case .lookSharedEverywhere: "Одинаково во всех состояниях"
         case .lookStateLink: "Связать"
         case .lookStateUnlink: "Разъединить"
         case .lookStateMixed: "Выделены состояния из разных связок"

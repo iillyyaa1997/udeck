@@ -410,6 +410,34 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
         if isDark { dark = look } else { light = look }
     }
 
+    /// Marks values as the same in every state, or lets them go again.
+    ///
+    /// Written so that nothing on screen moves at the moment of the click.
+    /// Sharing takes the value the operator is looking at — `source`, whatever
+    /// state that is — and makes it the one every state gets. Letting go writes
+    /// that same value into every link that had one of its own, so each state
+    /// keeps what it was showing and simply stops following.
+    public mutating func setShared(
+        _ fields: Set<LookField>,
+        _ isShared: Bool,
+        editing isDark: Bool,
+        source: PanelLook
+    ) {
+        guard !fields.isEmpty else { return }
+        if isShared {
+            setLook(look(forDark: isDark).taking(fields, from: source), forDark: isDark)
+            states.shared.formUnion(fields)
+        } else {
+            for (id, stored) in states.light {
+                states.light[id] = stored.taking(fields, from: light)
+            }
+            for (id, stored) in states.dark {
+                states.dark[id] = stored.taking(fields, from: dark)
+            }
+            states.shared.subtract(fields)
+        }
+    }
+
     public func validated() -> ThemeSettings {
         var result = self
         result.schedule = result.schedule.validated()

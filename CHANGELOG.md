@@ -10,6 +10,15 @@ for what that promises.
 
 ## [Unreleased]
 
+- **«Вид» is two columns, and a value can be marked as the same everywhere.**
+  The situations stay put on the left; the right half — what is being edited,
+  the sample, the knobs — changes under them, so the sample sits directly above
+  the controls that move it rather than a window away. Each value carries a
+  small link switch: on, it is taken from the theme's own look whatever state is
+  selected, and that beats any grouping. Both directions are written so nothing
+  on screen moves at the click: switching it on makes the value you are looking
+  at the one everybody gets, switching it off writes that same value into every
+  group that had one of its own.
 - **«Вид» has a states editor.** The eight situations are drawn as chips; the
   ones set up together sit in a frame. Click to select, «Связать» puts the
   selection in one frame, «Разъединить» takes states out of it — and a state
