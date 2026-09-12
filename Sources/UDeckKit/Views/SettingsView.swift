@@ -331,6 +331,9 @@ private struct LookSettings: View {
     /// and a settings screen that only lets you edit what you can currently see
     /// is one you have to wait until evening to finish.
     @State private var editingDark: Bool?
+    /// Which situations the controls below are setting up. Empty means all of
+    /// them, which is what the panel had before there were any.
+    @State private var selection: Set<IslandState> = []
 
     /// What the operator is typing into the name field. Held here rather than
     /// in the settings, because a half-typed name is not a setting.
@@ -344,19 +347,77 @@ private struct LookSettings: View {
         )
     }
 
-    private var editedLook: PanelLook { model.settings.theme.look(forDark: edited) }
+    /// The link the controls are editing, or `nil` when they edit the theme's
+    /// own look — which is the case both when nothing is selected and when the
+    /// selection is a link that holds every state.
+    private var editedLink: IslandLink? {
+        guard !selection.isEmpty else { return nil }
+        let ids = Set(selection.compactMap { model.settings.theme.states.link(for: $0)?.id })
+        guard ids.count == 1, let id = ids.first,
+              let link = model.settings.theme.states.links.first(where: { $0.id == id }),
+              link.states.count < IslandState.allCases.count
+        else { return nil }
+        return link
+    }
+
+    /// What the controls below are setting up, in words.
+    private var editingSummary: String {
+        if selectionIsMixed { return strings(.lookStateMixed) }
+        guard let link = editedLink else { return strings(.lookEditingEverything) }
+        let names = link.states.map { state -> String in
+            let phase: Phrase = switch state.phase {
+            case .collapsed: .statePhaseCollapsed
+            case .peek: .statePhasePeek
+            case .open: .statePhaseOpen
+            case .fullscreen: .statePhaseFullscreen
+            }
+            let surrounding = state.surrounding == .fullscreenApp
+                ? " · \(strings(.stateSurroundingFullscreen))"
+                : ""
+            return strings(phase) + surrounding
+        }
+        return "\(strings(.lookEditingStates)): " + names.joined(separator: ", ")
+    }
+
+    /// The selection reaches into more than one link, so there is no single
+    /// look to edit. Said out loud rather than silently editing one of them.
+    private var selectionIsMixed: Bool {
+        guard !selection.isEmpty else { return false }
+        return Set(selection.compactMap { model.settings.theme.states.link(for: $0)?.id }).count > 1
+    }
+
+    private var editedLook: PanelLook {
+        let base = model.settings.theme.look(forDark: edited)
+        guard let link = editedLink, let state = link.states.first else { return base }
+        return model.settings.theme.states.look(for: state, isDark: edited, base: base)
+    }
 
     /// A binding into the look being edited, rather than into the resolved copy
     /// everything draws from — writing to that would be writing to a cache the
     /// next resolve throws away.
     private func look<Value>(_ keyPath: WritableKeyPath<PanelLook, Value>) -> Binding<Value> {
         Binding(
-            get: { model.settings.theme.look(forDark: edited)[keyPath: keyPath] },
+            get: { editedLook[keyPath: keyPath] },
             set: { newValue in
+                // Nothing sensible to write: the selection spans two links with
+                // two different answers, and picking one of them silently is
+                // how a settings screen loses the operator's trust.
+                guard !selectionIsMixed else { return }
                 var settings = model.settings
-                var look = settings.theme.look(forDark: edited)
+                var look = editedLook
                 look[keyPath: keyPath] = newValue
-                settings.theme.setLook(look, forDark: edited)
+                if let link = editedLink {
+                    // A link of its own keeps its own copy. The theme's look
+                    // stays where it was, so unlinking the states later lands
+                    // them back on something sensible.
+                    if edited {
+                        settings.theme.states.dark[link.id] = look
+                    } else {
+                        settings.theme.states.light[link.id] = look
+                    }
+                } else {
+                    settings.theme.setLook(look, forDark: edited)
+                }
                 model.update(settings: settings)
             }
         )
@@ -525,6 +586,23 @@ private struct LookSettings: View {
                         EmptyView()
                     }
                 }
+            }
+
+            divider
+
+            divider
+
+            GridRow(alignment: .top) {
+                label(strings(.lookStates))
+                IslandStatesEditor(model: model, selection: $selection)
+            }
+
+            GridRow {
+                Color.clear.frame(width: 1, height: 1)
+                Text(editingSummary)
+                    .font(.caption)
+                    .foregroundStyle(selectionIsMixed ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             divider

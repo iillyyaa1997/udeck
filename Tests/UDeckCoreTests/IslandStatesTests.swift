@@ -180,4 +180,81 @@ struct IslandStatesTests {
         let night = settings.resolved(systemIsDark: false, hour: 12)
         #expect(night.look(for: IslandState(phase: .collapsed)) == loud)
     }
+
+    // MARK: - Linking and unlinking
+
+    @Test("linking takes the states out of their old links")
+    func linkingMoves() {
+        var states = IslandStates()
+        let away = IslandState(phase: .collapsed, surrounding: .ordinary)
+        let awayFull = IslandState(phase: .collapsed, surrounding: .fullscreenApp)
+        states.link([away, awayFull], lightBase: loud, darkBase: loud)
+
+        #expect(states.link(for: away)?.id == states.link(for: awayFull)?.id)
+        #expect(states.link(for: away)?.states.count == 2)
+        // Everything else is still together, and still accounted for.
+        #expect(Set(states.links.flatMap(\.states)) == Set(IslandState.allCases))
+        #expect(states.links.count == 2)
+    }
+
+    @Test("linking one state does nothing")
+    func linkingOneIsNoOp() {
+        var states = IslandStates()
+        let before = states
+        states.link([IslandState(phase: .open)], lightBase: loud, darkBase: loud)
+        #expect(states == before)
+    }
+
+    @Test("a linked state carries the look it had, not the theme's")
+    func linkingCarriesTheLook() {
+        var states = IslandStates()
+        let away = IslandState(phase: .collapsed)
+        let peek = IslandState(phase: .peek)
+        // Give the away state a look of its own first.
+        states.unlink([away], lightBase: loud, darkBase: loud)
+        let awayLink = states.link(for: away)!
+        states.light[awayLink.id] = quiet
+
+        states.link([away, peek], lightBase: loud, darkBase: loud)
+        // Both now look like what the away state looked like.
+        #expect(states.look(for: away, isDark: false, base: loud) == quiet)
+        #expect(states.look(for: peek, isDark: false, base: loud) == quiet)
+    }
+
+    @Test("unlinking keeps what the state looked like a moment ago")
+    func unlinkingKeepsTheLook() {
+        var states = IslandStates()
+        let away = IslandState(phase: .collapsed)
+        let peek = IslandState(phase: .peek)
+        states.link([away, peek], lightBase: loud, darkBase: loud)
+        states.light[states.link(for: away)!.id] = quiet
+
+        states.unlink([peek], lightBase: loud, darkBase: loud)
+        #expect(states.link(for: peek)?.states == [peek])
+        #expect(states.look(for: peek, isDark: false, base: loud) == quiet)
+        // And the one left behind is unchanged.
+        #expect(states.look(for: away, isDark: false, base: loud) == quiet)
+    }
+
+    @Test("unlinking a state that is already alone does nothing")
+    func unlinkingAloneIsNoOp() {
+        var states = IslandStates()
+        states.unlink([IslandState(phase: .open)], lightBase: loud, darkBase: loud)
+        let before = states
+        states.unlink([IslandState(phase: .open)], lightBase: loud, darkBase: loud)
+        #expect(states == before)
+    }
+
+    @Test("every state still belongs somewhere after any of this")
+    func partitionHolds() {
+        var states = IslandStates()
+        states.link([IslandState(phase: .collapsed), IslandState(phase: .peek)], lightBase: loud, darkBase: loud)
+        states.unlink([IslandState(phase: .peek)], lightBase: loud, darkBase: loud)
+        states.link([IslandState(phase: .peek), IslandState(phase: .open),
+                     IslandState(phase: .open, surrounding: .fullscreenApp)], lightBase: loud, darkBase: loud)
+
+        let all = states.links.flatMap(\.states)
+        #expect(all.count == 8)
+        #expect(Set(all) == Set(IslandState.allCases))
+    }
 }

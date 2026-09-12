@@ -232,3 +232,66 @@ public extension PanelLook {
         return result
     }
 }
+
+public extension IslandStates {
+    /// Puts the given states in one link together.
+    ///
+    /// They leave whatever links they were in, and a link left empty goes away.
+    /// The new link starts from the look the first of them had, which is the
+    /// answer that surprises least: linking two states means one of them is
+    /// about to change, and the one the operator clicked first is the one he
+    /// was looking at.
+    mutating func link(_ states: Set<IslandState>, lightBase: PanelLook, darkBase: PanelLook) {
+        guard states.count > 1 else { return }
+        let first = order(states).first!
+        let carriedLight = look(for: first, isDark: false, base: lightBase)
+        let carriedDark = look(for: first, isDark: true, base: darkBase)
+
+        links = links.compactMap { link in
+            var link = link
+            link.states.removeAll { states.contains($0) }
+            return link.states.isEmpty ? nil : link
+        }
+        let made = IslandLink(states: order(states))
+        links.append(made)
+        if carriedLight != lightBase { light[made.id] = carriedLight }
+        if carriedDark != darkBase { dark[made.id] = carriedDark }
+        self = validated()
+    }
+
+    /// Takes the given states out of the links they share with others.
+    ///
+    /// Each one leaves with a copy of what it looked like a moment ago rather
+    /// than falling back to the theme: unlinking is "stop following", not
+    /// "forget what you looked like", and a panel that jumps when a group is
+    /// broken up is a panel that has just lost the operator's settings.
+    mutating func unlink(_ states: Set<IslandState>, lightBase: PanelLook, darkBase: PanelLook) {
+        let leaving = states.filter { (link(for: $0)?.states.count ?? 0) > 1 }
+        guard !leaving.isEmpty else { return }
+        let carried = Dictionary(uniqueKeysWithValues: leaving.map { state in
+            (state, (light: look(for: state, isDark: false, base: lightBase),
+                     dark: look(for: state, isDark: true, base: darkBase)))
+        })
+
+        links = links.compactMap { link in
+            var link = link
+            link.states.removeAll { leaving.contains($0) }
+            return link.states.isEmpty ? nil : link
+        }
+        for state in order(Set(leaving)) {
+            let made = IslandLink(states: [state])
+            links.append(made)
+            if let had = carried[state] {
+                if had.light != lightBase { light[made.id] = had.light }
+                if had.dark != darkBase { dark[made.id] = had.dark }
+            }
+        }
+        self = validated()
+    }
+
+    /// States in the order they are declared, so that a link reads the same way
+    /// every time it is drawn.
+    func order(_ states: Set<IslandState>) -> [IslandState] {
+        IslandState.allCases.filter { states.contains($0) }
+    }
+}

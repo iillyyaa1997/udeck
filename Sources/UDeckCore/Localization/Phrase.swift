@@ -75,6 +75,18 @@ public enum Phrase: Sendable, Equatable {
     case tintDarker
     case lookStrength
     case lookTintColour
+    case lookStates
+    case lookStateLink
+    case lookStateUnlink
+    case lookStateMixed
+    case lookEditingEverything
+    case lookEditingStates
+    case statePhaseCollapsed
+    case statePhasePeek
+    case statePhaseOpen
+    case statePhaseFullscreen
+    case stateSurroundingOrdinary
+    case stateSurroundingFullscreen
     case lookQuiet
     case lookQuietToggle
     case lookQuietLevel

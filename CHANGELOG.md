@@ -10,6 +10,16 @@ for what that promises.
 
 ## [Unreleased]
 
+- **«Вид» has a states editor.** The eight situations are drawn as chips; the
+  ones set up together sit in a frame. Click to select, «Связать» puts the
+  selection in one frame, «Разъединить» takes states out of it — and a state
+  that leaves keeps the look it had rather than snapping back to the theme's.
+  Everything below the row edits whatever is selected, and a line under it says
+  so in words. A selection that spans two frames edits nothing and says that
+  too, instead of silently picking one of them.
+
+  Not yet: dragging states between frames, and the per-value «как везде»
+  switches. Both are the next slice.
 - **The island has eight situations, and each can look its own way.** A state is
   a phase — away, revealed, open, full-screen — and what is behind it: ordinary
   windows, or another application holding the whole screen. States are grouped
