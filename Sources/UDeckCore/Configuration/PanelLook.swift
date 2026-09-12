@@ -73,6 +73,20 @@ public struct PanelLook: Codable, Equatable, Sendable {
     /// the thing it is written on is already a wash of one colour.
     public var inkBrightness: Double
 
+    /// How much of the panel is on screen at all, 0.05 to 1.
+    ///
+    /// Not the glass's own opacity, which is about what the material lets
+    /// through: this is the whole island — surface, tint and mark together —
+    /// being more or less there. It is what "не мешало, но было видно" asks
+    /// for, and it belongs to the look rather than to a switch of its own
+    /// because every situation gets to answer it differently: away over a film
+    /// is not the same question as open on the desktop.
+    ///
+    /// Five percent is the floor rather than zero. An island nobody can see is
+    /// one the pointer cannot find, and finding it with the pointer is how it
+    /// comes back.
+    public var presence: Double
+
     /// A colour instead of grey, or `nil` for grey.
     ///
     /// Grey is the right default and stays it: the panel is a wash of one tint
@@ -85,12 +99,32 @@ public struct PanelLook: Codable, Equatable, Sendable {
         glass: GlassAppearance = GlassAppearance(),
         ink: PanelInk = .light,
         inkBrightness: Double = 1,
-        inkColor: InkColor? = nil
+        inkColor: InkColor? = nil,
+        presence: Double = 1
     ) {
         self.glass = glass
         self.ink = ink
         self.inkBrightness = inkBrightness
         self.inkColor = inkColor
+        self.presence = presence
+    }
+
+    /// How far the island is allowed to fade back.
+    public static let presenceRange: ClosedRange<Double> = 0.05 ... 1
+
+    /// Waking is nearly immediate and fading is not.
+    ///
+    /// The two directions carry different meanings. Coming back is an answer to
+    /// something the operator just did, and an answer that takes a third of a
+    /// second reads as the application thinking about it. Going quiet answers
+    /// nothing — it happens while attention is elsewhere — so it is slow enough
+    /// not to catch the eye.
+    public static let presenceWake: TimeInterval = 0.12
+    public static let presenceFade: TimeInterval = 0.3
+
+    /// How long a move to `presence` should take.
+    public static func presenceDuration(reaching presence: Double) -> TimeInterval {
+        presence < 1 ? presenceFade : presenceWake
     }
 
     /// The colour the text is actually written in.
@@ -130,6 +164,9 @@ public struct PanelLook: Codable, Equatable, Sendable {
             ? min(max(result.inkBrightness, 0), 1)
             : 1
         result.inkColor = result.inkColor?.validated()
+        result.presence = result.presence.isFinite
+            ? min(max(result.presence, Self.presenceRange.lowerBound), Self.presenceRange.upperBound)
+            : 1
         return result
     }
 
@@ -157,7 +194,8 @@ public struct PanelLook: Codable, Equatable, Sendable {
             glass: try c.decodeIfPresent(GlassAppearance.self, forKey: .glass) ?? d.glass,
             ink: (try c.decodeIfPresent(String.self, forKey: .ink)).flatMap(PanelInk.init(rawValue:)) ?? d.ink,
             inkBrightness: try c.decodeIfPresent(Double.self, forKey: .inkBrightness) ?? d.inkBrightness,
-            inkColor: try c.decodeIfPresent(InkColor.self, forKey: .inkColor) ?? d.inkColor
+            inkColor: try c.decodeIfPresent(InkColor.self, forKey: .inkColor) ?? d.inkColor,
+            presence: try c.decodeIfPresent(Double.self, forKey: .presence) ?? d.presence
         )
     }
 
@@ -166,6 +204,7 @@ public struct PanelLook: Codable, Equatable, Sendable {
         case ink
         case inkBrightness
         case inkColor
+        case presence
     }
 }
 

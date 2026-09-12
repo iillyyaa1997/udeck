@@ -42,13 +42,17 @@ for what that promises.
   none of them a look of its own, which resolves to the panel that was already
   there. The editor for all of this is the next step; this one is the model
   underneath it, the resolution, and the panel drawing per state.
-- **The island can fade back while it is away.** One switch and one slider in
-  «Вид»: the collapsed island keeps the share of itself the operator sets — five
-  percent at the lowest, because an island at zero cannot be found with the
-  pointer — and comes back whole the moment the panel opens. It fades in 0.3 s
-  and wakes in 0.12 s, because coming back answers something the operator just
-  did and going quiet answers nothing. This is the first step of per-state
-  looks: the same rule will later be one state among several.
+- **How much of the island is there is a value of the look, per state.** «Видно»
+  says what share of the island — surface, tint and mark together — is on screen
+  in that situation; five percent is the floor, because an island nobody can see
+  is one the pointer cannot find, and that is how it comes back. It fades in
+  0.3 s and wakes in 0.12 s: coming back answers something the operator just
+  did, and going quiet answers nothing.
+
+  This began as a switch of its own — «Приглушать остров», one number for every
+  situation at once — and that switch is gone. A settings file that still has it
+  becomes what it always meant: the two collapsed states, linked, at that much
+  presence. One mechanism instead of two.
 - **`Scripts/make-app.sh --install` puts the built bundle in `~/Applications`.**
   An application outside an Applications folder does not get its icon
   everywhere: measured, the same ad-hoc signed bundle shows the system's

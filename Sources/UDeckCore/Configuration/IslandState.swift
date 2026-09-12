@@ -96,6 +96,7 @@ public struct IslandLink: Identifiable, Equatable, Codable, Sendable {
 /// theme's own look whatever link a state belongs to, which is what makes it
 /// stronger than any link.
 public enum LookField: String, Codable, CaseIterable, Sendable {
+    case presence
     case glassStyle
     case glassOpacity
     case tinted
@@ -218,6 +219,7 @@ public extension PanelLook {
         var result = self
         for field in fields {
             switch field {
+            case .presence: result.presence = other.presence
             case .glassStyle: result.glass.style = other.glass.style
             case .glassOpacity: result.glass.opacity = other.glass.opacity
             case .tinted: result.glass.tinted = other.glass.tinted

@@ -317,4 +317,82 @@ struct IslandStatesTests {
 
         #expect(theme.states.look(for: away, isDark: false, base: theme.light).ink == loud.ink)
     }
+
+    // MARK: - How much of the island is there
+
+    @Test("presence belongs to the look, and a fresh one is all there")
+    func presenceDefaults() {
+        #expect(PanelLook().presence == 1)
+        #expect(PanelLook.presenceRange.lowerBound > 0)
+    }
+
+    @Test("presence outside its range is brought inside it")
+    func presenceClamped() {
+        #expect(PanelLook(presence: 4).validated().presence == 1)
+        #expect(PanelLook(presence: 0).validated().presence == PanelLook.presenceRange.lowerBound)
+        #expect(PanelLook(presence: .nan).validated().presence == 1)
+    }
+
+    @Test("coming back is quicker than fading away")
+    func presenceTiming() {
+        #expect(PanelLook.presenceDuration(reaching: 1) == PanelLook.presenceWake)
+        #expect(PanelLook.presenceDuration(reaching: 0.3) == PanelLook.presenceFade)
+        #expect(PanelLook.presenceWake < PanelLook.presenceFade)
+    }
+
+    @Test("one situation can be faint while the rest are whole")
+    func presencePerState() {
+        var theme = ThemeSettings(light: loud, dark: loud)
+        let away = IslandState(phase: .collapsed)
+        theme.states.unlink([away], lightBase: loud, darkBase: loud)
+        var faint = loud
+        faint.presence = 0.3
+        theme.states.light[theme.states.link(for: away)!.id] = faint
+
+        #expect(theme.states.look(for: away, isDark: false, base: loud).presence == 0.3)
+        #expect(theme.states.look(for: IslandState(phase: .peek), isDark: false, base: loud).presence == 1)
+    }
+
+    // MARK: - The switch that used to do this
+
+    @Test("the old quiet switch becomes the two collapsed states, linked")
+    func legacyQuietMigrates() throws {
+        let json = Data(#"{ "quiet": { "enabled": true, "level": 0.35 } }"#.utf8)
+        let settings = try JSONDecoder().decode(AppSettings.self, from: json).validated()
+
+        let away = IslandState(phase: .collapsed, surrounding: .ordinary)
+        let awayFull = IslandState(phase: .collapsed, surrounding: .fullscreenApp)
+        let link = settings.theme.states.link(for: away)
+        #expect(link?.id == settings.theme.states.link(for: awayFull)?.id)
+        #expect(link?.states.count == 2)
+
+        for isDark in [false, true] {
+            let look = settings.theme.states.look(for: away, isDark: isDark,
+                                                  base: settings.theme.look(forDark: isDark))
+            #expect(look.presence == 0.35)
+        }
+        // Everything else is still whole.
+        #expect(settings.theme.states.look(for: IslandState(phase: .peek), isDark: false,
+                                           base: settings.theme.light).presence == 1)
+    }
+
+    @Test("the old switch, turned off, migrates to nothing at all")
+    func legacyQuietOffMigratesToNothing() throws {
+        let json = Data(#"{ "quiet": { "enabled": false, "level": 0.2 } }"#.utf8)
+        let settings = try JSONDecoder().decode(AppSettings.self, from: json).validated()
+        #expect(settings.theme.states.links.count == 1)
+        for state in IslandState.allCases {
+            #expect(settings.theme.states.look(for: state, isDark: false,
+                                               base: settings.theme.light).presence == 1)
+        }
+    }
+
+    @Test("a level the old file could not hold is clamped on the way in")
+    func legacyQuietClamped() throws {
+        let json = Data(#"{ "quiet": { "enabled": true, "level": 0 } }"#.utf8)
+        let settings = try JSONDecoder().decode(AppSettings.self, from: json).validated()
+        let look = settings.theme.states.look(for: IslandState(phase: .collapsed), isDark: false,
+                                              base: settings.theme.light)
+        #expect(look.presence == PanelLook.presenceRange.lowerBound)
+    }
 }

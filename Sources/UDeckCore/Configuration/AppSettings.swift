@@ -48,9 +48,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Which way the panel's text is written, in the look currently in force.
     public var ink: PanelInk { look.ink }
 
-    /// How far the island fades back while it is away, and whether it does.
-    public var quiet: IslandQuiet
-
     /// Retract the panel when the operator activates another application.
     public var collapseOnAppSwitch: Bool
 
@@ -112,7 +109,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         theme: ThemeSettings = ThemeSettings(),
         look: PanelLook = .light,
         resolvedIsDark: Bool = false,
-        quiet: IslandQuiet = IslandQuiet(),
         collapseOnAppSwitch: Bool = true,
         defaultCardTTL: TimeInterval = 60,
         silentTTLMultiplier: Double = 3,
@@ -131,7 +127,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.theme = theme
         self.look = look
         self.resolvedIsDark = resolvedIsDark
-        self.quiet = quiet
         self.collapseOnAppSwitch = collapseOnAppSwitch
         self.defaultCardTTL = defaultCardTTL
         self.silentTTLMultiplier = silentTTLMultiplier
@@ -181,7 +176,6 @@ public struct AppSettings: Codable, Equatable, Sendable {
         }
 
         result.theme = result.theme.validated()
-        result.quiet.level = result.quiet.clampedLevel
         result.gesture.stripHeight = clamp(result.gesture.stripHeight, 1 ... 200)
         result.gesture.stripSideMargin = clamp(result.gesture.stripSideMargin, 0 ... 2000)
         result.gesture.virtualAnchorWidth = clamp(result.gesture.virtualAnchorWidth, 20 ... 2000)
@@ -260,6 +254,13 @@ public struct AppSettings: Codable, Equatable, Sendable {
         enum LegacyKeys: String, CodingKey {
             case glass
             case ink
+            case quiet
+        }
+
+        /// The interim switch, as its file wrote it.
+        struct LegacyQuiet: Decodable {
+            var enabled = false
+            var level = 0.35
         }
         let legacy = try decoder.container(keyedBy: LegacyKeys.self)
         version = try c.decodeIfPresent(Int.self, forKey: .version) ?? defaults.version
@@ -295,7 +296,27 @@ public struct AppSettings: Codable, Equatable, Sendable {
             )
         }
         resolvedIsDark = try c.decodeIfPresent(Bool.self, forKey: .resolvedIsDark) ?? (look.ink == .light)
-        quiet = try c.decodeIfPresent(IslandQuiet.self, forKey: .quiet) ?? defaults.quiet
+
+        // A file from the day the island's fading was a switch of its own, with
+        // one number for every situation at once. It becomes what it always
+        // meant: the two collapsed states, linked, at that much presence. The
+        // switch itself is gone — one mechanism, not two.
+        if let quiet = try legacy.decodeIfPresent(LegacyQuiet.self, forKey: .quiet), quiet.enabled {
+            let away = Set(IslandState.allCases.filter { $0.phase == .collapsed })
+            theme.states.link(away, lightBase: theme.light, darkBase: theme.dark)
+            if let link = theme.states.link(for: IslandState(phase: .collapsed)) {
+                let level = min(max(quiet.level.isFinite ? quiet.level : 1,
+                                    PanelLook.presenceRange.lowerBound),
+                                PanelLook.presenceRange.upperBound)
+                for isDark in [false, true] {
+                    var carried = theme.states.look(for: IslandState(phase: .collapsed),
+                                                    isDark: isDark,
+                                                    base: theme.look(forDark: isDark))
+                    carried.presence = level
+                    if isDark { theme.states.dark[link.id] = carried } else { theme.states.light[link.id] = carried }
+                }
+            }
+        }
         collapseOnAppSwitch = try c.decodeIfPresent(Bool.self, forKey: .collapseOnAppSwitch)
             ?? defaults.collapseOnAppSwitch
         defaultCardTTL = try c.decodeIfPresent(TimeInterval.self, forKey: .defaultCardTTL)

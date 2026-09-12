@@ -105,8 +105,8 @@ public struct DeckRootView: View {
         //
         // Hit testing is untouched by opacity, so the island still catches the
         // pointer at five percent and wakes on the way in.
-        .opacity(quietOpacity)
-        .animation(.easeOut(duration: IslandQuiet.duration(reaching: quietOpacity)), value: quietOpacity)
+        .opacity(presence)
+        .animation(.easeOut(duration: PanelLook.presenceDuration(reaching: presence)), value: presence)
         .environment(\.deckTheme, theme)
         .environment(\.strings, model.strings)
     }
@@ -117,9 +117,10 @@ public struct DeckRootView: View {
                     surrounding: shell.surroundingIsFullscreen ? .fullscreenApp : .ordinary)
     }
 
-    /// How much of the island is on screen right now.
-    private var quietOpacity: Double {
-        model.settings.quiet.opacity(for: shell.phase)
+    /// How much of the island is on screen right now — the presence of the
+    /// look belonging to the situation it is in.
+    private var presence: Double {
+        model.settings.look(for: islandState).presence
     }
 
     @ViewBuilder

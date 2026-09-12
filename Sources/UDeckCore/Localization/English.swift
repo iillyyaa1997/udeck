@@ -75,8 +75,6 @@ struct English: Vocabulary {
         case .statePhaseFullscreen: "Full screen"
         case .stateSurroundingOrdinary: "ordinary"
         case .stateSurroundingFullscreen: "another app full-screen"
-        case .lookQuiet: "When away"
-        case .lookQuietToggle: "Fade the island back"
         case .lookQuietLevel: "Visible"
         case .lookText: "Text"
         case .lookBrightness: "Brightness"

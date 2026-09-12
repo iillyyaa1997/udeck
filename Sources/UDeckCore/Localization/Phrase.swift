@@ -88,8 +88,6 @@ public enum Phrase: Sendable, Equatable {
     case statePhaseFullscreen
     case stateSurroundingOrdinary
     case stateSurroundingFullscreen
-    case lookQuiet
-    case lookQuietToggle
     case lookQuietLevel
     case lookText
     case lookBrightness

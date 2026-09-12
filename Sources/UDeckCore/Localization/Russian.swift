@@ -79,8 +79,6 @@ struct Russian: Vocabulary {
         case .statePhaseFullscreen: "На весь экран"
         case .stateSurroundingOrdinary: "обычно"
         case .stateSurroundingFullscreen: "другое приложение на весь экран"
-        case .lookQuiet: "Когда закрыт"
-        case .lookQuietToggle: "Приглушать остров"
         case .lookQuietLevel: "Видно"
         case .lookText: "Текст"
         case .lookBrightness: "Яркость"

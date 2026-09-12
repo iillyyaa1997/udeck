@@ -665,20 +665,14 @@ private struct LookSettings: View {
 
             divider
 
-            // Before the material and the tint rather than after them: this is
-            // the one row about when the panel is *not* being looked at, and it
-            // is the answer to the commonest complaint about a panel that lives
-            // at the top of the screen all day.
-            GridRow {
-                label(strings(.lookQuiet))
-                Toggle(strings(.lookQuietToggle), isOn: settings(\.quiet.enabled))
-            }
-
+            // First of the values rather than last, because it is the one that
+            // answers "should this situation be noticeable at all" — and every
+            // other row is about a panel that has already decided to be there.
             GridRow {
                 label(strings(.lookQuietLevel))
-                slider(settings(\.quiet.level), in: IslandQuiet.levelRange,
-                       step: 0.05, readout: percent(model.settings.quiet.level))
-                    .disabled(!model.settings.quiet.enabled)
+                slider(look(\.presence, .presence), in: PanelLook.presenceRange,
+                       step: 0.05, readout: percent(editedLook.presence))
+                chain([.presence])
             }
 
             divider
