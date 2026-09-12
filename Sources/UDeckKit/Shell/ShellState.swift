@@ -52,6 +52,14 @@ public final class ShellState {
     /// to draw.
     public internal(set) var screenHasNotch = false
 
+    /// Whether another application currently has the whole screen.
+    ///
+    /// Half of which state the island is in — the phase is the other half. It
+    /// arrives with the pointer samples, which is also its limit: a film
+    /// started without touching the mouse is noticed at the next sample rather
+    /// than at the instant it goes full-screen.
+    public internal(set) var surroundingIsFullscreen = false
+
     /// Whether uDeck is the active application.
     ///
     /// Not the panel's key status, which is a different thing and was measured

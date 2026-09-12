@@ -12,7 +12,12 @@ public struct DeckRootView: View {
     }
 
     public var body: some View {
-        let theme = DeckTheme(density: model.settings.density, look: model.settings.look,
+        // The look of the state the island is actually in, rather than the one
+        // look the panel used to have. Until the operator gives a state its
+        // own, every state resolves to the same look and this is the panel
+        // that was there before.
+        let theme = DeckTheme(density: model.settings.density,
+                              look: model.settings.look(for: islandState),
                               textSize: model.settings.resolvedTextSize)
 
         // The window is the stage, sized once per screen; the panel is a
@@ -104,6 +109,12 @@ public struct DeckRootView: View {
         .animation(.easeOut(duration: IslandQuiet.duration(reaching: quietOpacity)), value: quietOpacity)
         .environment(\.deckTheme, theme)
         .environment(\.strings, model.strings)
+    }
+
+    /// Which of the island's eight situations is on screen.
+    private var islandState: IslandState {
+        IslandState(phase: shell.phase,
+                    surrounding: shell.surroundingIsFullscreen ? .fullscreenApp : .ordinary)
     }
 
     /// How much of the island is on screen right now.

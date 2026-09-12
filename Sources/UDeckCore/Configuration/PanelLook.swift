@@ -315,13 +315,23 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
     /// The operator's own presets, in the order he made them.
     public var saved: [PanelPreset]
 
+    /// How the island looks in each of its eight situations.
+    ///
+    /// `light` and `dark` above stay what they always were — the look of the
+    /// theme — and this says where a state differs from it. A settings file
+    /// written before this existed has one link holding every state and no
+    /// values of its own, which resolves to exactly the look above: the panel
+    /// that was there yesterday.
+    public var states: IslandStates
+
     public init(
         source: ThemeSource = .manual,
         manualIsDark: Bool = false,
         schedule: ThemeSchedule = ThemeSchedule(),
         light: PanelLook = .light,
         dark: PanelLook = .dark,
-        saved: [PanelPreset] = []
+        saved: [PanelPreset] = [],
+        states: IslandStates = IslandStates()
     ) {
         self.source = source
         self.manualIsDark = manualIsDark
@@ -329,6 +339,19 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
         self.light = light
         self.dark = dark
         self.saved = saved
+        self.states = states
+    }
+
+    /// The look of one state, in the pole in force.
+    public func look(for state: IslandState, systemIsDark: Bool, hour: Int) -> PanelLook {
+        let isDark = isDark(systemIsDark: systemIsDark, hour: hour)
+        return states.look(for: state, isDark: isDark, base: look(forDark: isDark))
+    }
+
+    /// The look of one state in a named pole, which is what the settings screen
+    /// edits: the dark half has to be set up in daylight.
+    public func look(for state: IslandState, forDark isDark: Bool) -> PanelLook {
+        states.look(for: state, isDark: isDark, base: look(forDark: isDark))
     }
 
     /// Saves the look currently in one of the poles under a name.
@@ -392,6 +415,7 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
         result.schedule = result.schedule.validated()
         result.light = result.light.validated()
         result.dark = result.dark.validated()
+        result.states = result.states.validated()
         result.saved = result.saved.compactMap { preset in
             var preset = preset
             preset.name = PanelPreset.cleaned(name: preset.name)
@@ -412,11 +436,13 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
             schedule: try c.decodeIfPresent(ThemeSchedule.self, forKey: .schedule) ?? d.schedule,
             light: try c.decodeIfPresent(PanelLook.self, forKey: .light) ?? d.light,
             dark: try c.decodeIfPresent(PanelLook.self, forKey: .dark) ?? d.dark,
-            saved: try c.decodeIfPresent([PanelPreset].self, forKey: .saved) ?? d.saved
+            saved: try c.decodeIfPresent([PanelPreset].self, forKey: .saved) ?? d.saved,
+            states: try c.decodeIfPresent(IslandStates.self, forKey: .states) ?? d.states
         )
     }
 
     enum CodingKeys: String, CodingKey {
+        case states
         case source
         case manualIsDark
         case schedule

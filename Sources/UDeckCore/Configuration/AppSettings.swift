@@ -33,6 +33,15 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// overwrites it. The settings screen edits `theme.light` and `theme.dark`.
     public var look: PanelLook
 
+    /// Which pole the look in force came from.
+    ///
+    /// **Derived**, like `look` itself and for the same reason: the states
+    /// below keep their own values for each half of the day, so resolving one
+    /// of them needs to know which half it is. Written by
+    /// `resolved(systemIsDark:hour:)`; editing it by hand lasts until the next
+    /// resolve.
+    public var resolvedIsDark: Bool
+
     /// How the panel's glass is made, in the look currently in force.
     public var glass: GlassAppearance { look.glass }
 
@@ -102,6 +111,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         hotkey: HotKeyBinding = HotKeyBinding(),
         theme: ThemeSettings = ThemeSettings(),
         look: PanelLook = .light,
+        resolvedIsDark: Bool = false,
         quiet: IslandQuiet = IslandQuiet(),
         collapseOnAppSwitch: Bool = true,
         defaultCardTTL: TimeInterval = 60,
@@ -120,6 +130,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.hotkey = hotkey
         self.theme = theme
         self.look = look
+        self.resolvedIsDark = resolvedIsDark
         self.quiet = quiet
         self.collapseOnAppSwitch = collapseOnAppSwitch
         self.defaultCardTTL = defaultCardTTL
@@ -283,6 +294,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
                 dark: isDark ? carried : .dark
             )
         }
+        resolvedIsDark = try c.decodeIfPresent(Bool.self, forKey: .resolvedIsDark) ?? (look.ink == .light)
         quiet = try c.decodeIfPresent(IslandQuiet.self, forKey: .quiet) ?? defaults.quiet
         collapseOnAppSwitch = try c.decodeIfPresent(Bool.self, forKey: .collapseOnAppSwitch)
             ?? defaults.collapseOnAppSwitch
@@ -310,8 +322,18 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// time it is are the world's business, not the operator's.
     public func resolved(systemIsDark: Bool, hour: Int) -> AppSettings {
         var result = self
+        result.resolvedIsDark = theme.isDark(systemIsDark: systemIsDark, hour: hour)
         result.look = theme.look(systemIsDark: systemIsDark, hour: hour)
         return result
+    }
+
+    /// The look of one state of the island, in the pole in force.
+    ///
+    /// This is what everything that draws the panel asks for. `look` above is
+    /// the same answer for a panel that has only one appearance, and stays the
+    /// answer for every state until the operator gives one of them its own.
+    public func look(for state: IslandState) -> PanelLook {
+        theme.states.look(for: state, isDark: resolvedIsDark, base: look)
     }
 
     /// Whether the dark look is the one in force.

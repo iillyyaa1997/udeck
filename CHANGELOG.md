@@ -10,6 +10,19 @@ for what that promises.
 
 ## [Unreleased]
 
+- **The island has eight situations, and each can look its own way.** A state is
+  a phase — away, revealed, open, full-screen — and what is behind it: ordinary
+  windows, or another application holding the whole screen. States are grouped
+  into links, and a link is a set of states edited together; every state belongs
+  to exactly one. Values are per theme, because a Mac that switches itself at
+  dusk needs both halves of the day set up; the grouping is shared, because it
+  is structure rather than colour. Individual values can be marked as the same
+  everywhere, and that beats any link.
+
+  Nothing changes yet: out of the box one link holds all eight states and gives
+  none of them a look of its own, which resolves to the panel that was already
+  there. The editor for all of this is the next step; this one is the model
+  underneath it, the resolution, and the panel drawing per state.
 - **The island can fade back while it is away.** One switch and one slider in
   «Вид»: the collapsed island keeps the share of itself the operator sets — five
   percent at the lowest, because an island at zero cannot be found with the

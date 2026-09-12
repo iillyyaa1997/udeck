@@ -342,6 +342,12 @@ public final class PanelController {
             PanelGeometry(screen: $0, tuning: settings.gesture, metrics: settings.panel)
         }
 
+        // What is behind the panel decides half of which state it is in, and
+        // the gesture has already worked it out for its own reasons.
+        if shell.surroundingIsFullscreen != environment.frontmostIsFullscreen {
+            shell.surroundingIsFullscreen = environment.frontmostIsFullscreen
+        }
+
         let outcome = recognizer.handle(sample, geometry: gestureGeometry, environment: environment, tuning: settings.gesture)
         if case .idle(let reason) = outcome, reason != lastIdleReason {
             lastIdleReason = reason
