@@ -16,6 +16,11 @@ for what that promises.
   shape leaving. Colours and the material's own alpha now move over the same
   time the panel does: 0.12 s coming back, 0.3 s going away. Sampled mid-collapse
   over one wallpaper: `51,74,89` → `42,93,125` → `62,128,169` at rest.
+- **A frame means "together", so one state does not get one.** Clearing
+  «Настроить все вместе» left eight lone states in eight frames — eight
+  statements about nothing. And clearing it now goes back to the arrangement it
+  replaced rather than to that pile: the box remembers what it covered for as
+  long as the window is open.
 - **«Настроить все вместе» is back**, under the states. Checked means one group
   holding every situation — what uDeck shipped with — and clearing it puts each
   situation on its own, keeping what it looked like a moment before.

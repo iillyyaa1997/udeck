@@ -15,6 +15,10 @@ struct IslandStatesEditor: View {
     /// states are set up together or not at all, so picking one state out of
     /// two groups is not a thing to be expressed.
     @Binding var selected: UUID?
+
+    /// The arrangement "настроить все вместе" replaced, for as long as the
+    /// window is open. Clearing the box puts it back.
+    @State private var previous: IslandStates?
     @Environment(\.strings) private var strings
 
     var body: some View {
@@ -48,10 +52,22 @@ struct IslandStatesEditor: View {
             Toggle(strings(.lookStateAllTogether), isOn: Binding(
                 get: { model.settings.theme.states.links.count == 1 },
                 set: { together in
-                    change { states, light, dark in
-                        if together {
+                    if together {
+                        // What it is replacing, so that clearing the box is a
+                        // way back rather than a way to eight lone states. The
+                        // operator ticked it, cleared it, and got an
+                        // arrangement he had never made.
+                        previous = model.settings.theme.states
+                        change { states, light, dark in
                             states.link(Set(IslandState.allCases), lightBase: light, darkBase: dark)
-                        } else {
+                        }
+                    } else if let previous, previous.links.count > 1 {
+                        var settings = model.settings
+                        settings.theme.states = previous.validated()
+                        model.update(settings: settings)
+                        self.previous = nil
+                    } else {
+                        change { states, light, dark in
                             states.unlink(Set(IslandState.allCases), lightBase: light, darkBase: dark)
                         }
                     }
@@ -68,18 +84,24 @@ struct IslandStatesEditor: View {
 
     private func frame(for link: IslandLink) -> some View {
         let isEdited = selected == link.id
+        // A frame says "these are set up together", so one state does not get
+        // one: eight lone states in eight frames is eight statements about
+        // nothing, which is what the operator saw after clearing the checkbox.
+        let isGroup = link.states.count > 1
         return FlowRow(spacing: 6) {
             ForEach(link.states, id: \.self) { state in
                 chip(state, lit: isEdited, selects: link.id)
             }
         }
-        .padding(7)
+        .padding(isGroup ? 7 : 0)
         .background {
-            RoundedRectangle(cornerRadius: 9)
-                .strokeBorder(Color.accentColor.opacity(isEdited ? 0.9 : 0.35),
-                              lineWidth: isEdited ? 2 : 1)
-                .background(RoundedRectangle(cornerRadius: 9)
-                    .fill(Color.accentColor.opacity(isEdited ? 0.12 : 0.05)))
+            if isGroup {
+                RoundedRectangle(cornerRadius: 9)
+                    .strokeBorder(Color.accentColor.opacity(isEdited ? 0.9 : 0.35),
+                                  lineWidth: isEdited ? 2 : 1)
+                    .background(RoundedRectangle(cornerRadius: 9)
+                        .fill(Color.accentColor.opacity(isEdited ? 0.12 : 0.05)))
+            }
         }
         // The frame is the thing you point at: everything in it is set up
         // together, so there is nothing smaller to select.
