@@ -16,6 +16,11 @@ for what that promises.
   shape leaving. Colours and the material's own alpha now move over the same
   time the panel does: 0.12 s coming back, 0.3 s going away. Sampled mid-collapse
   over one wallpaper: `51,74,89` → `42,93,125` → `62,128,169` at rest.
+- **Collapsing actually lets the keyboard go.** The panel does not disappear when
+  it collapses — it is the island — so it kept first responder and key status,
+  and uDeck kept the keyboard: the operator hovered, moved away, and could no
+  longer type in the application he had been typing in. Collapsing gives up the
+  responder and deactivates uDeck before handing the keyboard back.
 - **Revealing the panel takes the keyboard, and collapsing gives it back.** A
   peek used to be deliberately non-activating, which meant the panel was on
   screen, under the pointer, and typing went into whatever was behind it. Now

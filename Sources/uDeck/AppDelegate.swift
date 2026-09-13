@@ -155,6 +155,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// report can carry the answer instead of a guess.
     @objc private func copyDiagnostics() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(controller.debugDescription, forType: .string)
+        // `controller` is an optional, and an optional has a debugDescription of
+        // its own: this pasted the words "Optional(UDeckKit.PanelController)"
+        // for as long as the menu item has existed. Found by pressing it.
+        NSPasteboard.general.setString(
+            controller?.debugDescription ?? "uDeck has no panel yet",
+            forType: .string
+        )
     }
 }

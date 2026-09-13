@@ -830,6 +830,18 @@ public final class PanelController {
         didActivateForKeyboard = false
         let previous = applicationToRestore
         applicationToRestore = nil
+
+        // Let go of the keyboard before handing it anywhere.
+        //
+        // The panel does not go away when it collapses — it is the island — so
+        // it keeps first responder and key status, and uDeck keeps the
+        // keyboard. Measured after a hover: the frontmost application was Warp,
+        // and the system's focused application was *nobody*; nothing typed
+        // reached either of them. Giving up the responder and deactivating is
+        // what actually releases it.
+        panel.makeFirstResponder(nil)
+        NSApp.deactivate()
+
         guard shouldRestore else { return }
         previous?.activate()
     }
