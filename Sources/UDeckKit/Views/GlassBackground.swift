@@ -272,13 +272,35 @@ struct SteadyGlassBackground: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSVisualEffectView, context: Context) {
-        apply(glass, to: view)
+        apply(glass, to: view, animated: true)
     }
 
-    private func apply(_ glass: GlassAppearance, to view: NSVisualEffectView) {
+    private func apply(_ glass: GlassAppearance, to view: NSVisualEffectView, animated: Bool = false) {
         // The same meaning `opacity` has for the glass: at zero there is no
         // material left and the content floats over whatever is behind it.
-        view.alphaValue = glass.opacity
+        setAlpha(glass.opacity, on: view, animated: animated)
+    }
+}
+
+
+/// Moving a material's alpha rather than snapping it.
+///
+/// SwiftUI animates what it draws itself; the alpha of a wrapped `NSView` is
+/// not that, so a state change swapped materials in one frame while the panel's
+/// shape was still travelling — "остров прозрачный, я навел он стал темным…и
+/// начала уезжать вверх". AppKit's own animator does the moving, over the same
+/// time the panel takes.
+@MainActor
+func setAlpha(_ alpha: CGFloat, on view: NSView, animated: Bool) {
+    guard abs(view.alphaValue - alpha) > 0.001 else { return }
+    guard animated else {
+        view.alphaValue = alpha
+        return
+    }
+    NSAnimationContext.runAnimationGroup { context in
+        context.duration = alpha < view.alphaValue ? PanelLook.presenceFade : PanelLook.presenceWake
+        context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        view.animator().alphaValue = alpha
     }
 }
 
@@ -300,7 +322,7 @@ struct LiquidGlassBackground: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSGlassEffectView, context: Context) {
-        apply(glass, to: view)
+        apply(glass, to: view, animated: true)
     }
 
     /// The material has no opacity of its own — `style`, `tintColor` and
@@ -309,7 +331,7 @@ struct LiquidGlassBackground: NSViewRepresentable {
     /// content floats over whatever is behind it, which is what "fully
     /// transparent" has to mean when the thing being made transparent is a
     /// material rather than a fill.
-    private func apply(_ glass: GlassAppearance, to view: NSGlassEffectView) {
+    private func apply(_ glass: GlassAppearance, to view: NSGlassEffectView, animated: Bool = false) {
         view.style = glass.style == .clear ? .clear : .regular
         // No tint. The system applies one in proportion to something it does
         // not document — below a panel height of about 170 points it applies
@@ -317,7 +339,7 @@ struct LiquidGlassBackground: NSViewRepresentable {
         // colours depending on which state the panel was in. `GlassTint` paints
         // it instead, where it means the same thing at every size.
         view.tintColor = nil
-        view.alphaValue = glass.opacity
+        setAlpha(glass.opacity, on: view, animated: animated)
 
         // AppKit dims a system material in an application that is not active,
         // and the glass inherits it. That is right for an ordinary window and

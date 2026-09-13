@@ -76,6 +76,7 @@ public enum Phrase: Sendable, Equatable {
     case lookStrength
     case lookTintColour
     case lookStates
+    case lookStateAllTogether
     case stateNotchIsTheIsland
     case stateDropToSeparate
     case lookSharedEverywhere

@@ -10,6 +10,18 @@ for what that promises.
 
 ## [Unreleased]
 
+- **The look travels instead of snapping.** Changing state used to swap the
+  colours in one frame while the panel's shape was still moving — quiet island,
+  hover, instantly dark, pointer away, instantly transparent, and only then the
+  shape leaving. Colours and the material's own alpha now move over the same
+  time the panel does: 0.12 s coming back, 0.3 s going away. Sampled mid-collapse
+  over one wallpaper: `51,74,89` → `42,93,125` → `62,128,169` at rest.
+- **«Настроить все вместе» is back**, under the states. Checked means one group
+  holding every situation — what uDeck shipped with — and clearing it puts each
+  situation on its own, keeping what it looked like a moment before.
+- **The settings file names its groups.** A dictionary keyed by anything but a
+  string is encoded by Swift as a flat `[id, look, id, look]` array: correct,
+  round-trips, and unreadable in the one file uDeck invites a person to open.
 - **The island's material follows its state too.** The surface read the theme's
   glass while the text colours came from the state's look, so a state given its
   own material — a ghost island, say — was drawn with the theme's: the sample

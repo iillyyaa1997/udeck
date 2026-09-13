@@ -395,4 +395,21 @@ struct IslandStatesTests {
                                               base: settings.theme.light)
         #expect(look.presence == PanelLook.presenceRange.lowerBound)
     }
+
+    @Test("the file names its links rather than listing them flat")
+    func looksAreWrittenByName() throws {
+        var theme = ThemeSettings(light: loud, dark: loud)
+        let away = IslandState(phase: .collapsed)
+        theme.states.unlink([away], lightBase: loud, darkBase: loud)
+        let id = theme.states.link(for: away)!.id
+        theme.states.light[id] = quiet
+
+        let data = try JSONEncoder().encode(theme.states)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.contains("\"\(id.uuidString)\""),
+                "a person opening the settings file can see which group a look belongs to")
+
+        let back = try JSONDecoder().decode(IslandStates.self, from: data)
+        #expect(back.light[id] == quiet)
+    }
 }

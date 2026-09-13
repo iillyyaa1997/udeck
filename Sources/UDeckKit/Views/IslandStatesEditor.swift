@@ -40,6 +40,27 @@ struct IslandStatesEditor: View {
                     separate(ids)
                     return true
                 }
+
+            // The way back to one panel with one appearance, and the way out of
+            // it. Checked means one group holding everything — which is what
+            // uDeck shipped with — and clearing it puts every situation on its
+            // own, each keeping what it looked like a moment before.
+            Toggle(strings(.lookStateAllTogether), isOn: Binding(
+                get: { model.settings.theme.states.links.count == 1 },
+                set: { together in
+                    change { states, light, dark in
+                        if together {
+                            states.link(Set(IslandState.allCases), lightBase: light, darkBase: dark)
+                        } else {
+                            states.unlink(Set(IslandState.allCases), lightBase: light, darkBase: dark)
+                        }
+                    }
+                    selected = nil
+                }
+            ))
+            .toggleStyle(.checkbox)
+            .font(.caption)
+            .padding(.top, 2)
         }
     }
 

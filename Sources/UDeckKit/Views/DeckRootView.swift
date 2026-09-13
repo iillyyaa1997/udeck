@@ -108,6 +108,14 @@ public struct DeckRootView: View {
         // pointer at five percent and wakes on the way in.
         .opacity(presence)
         .animation(.easeOut(duration: PanelLook.presenceDuration(reaching: presence)), value: presence)
+        // The colours travel with the shape rather than snapping at the moment
+        // the state changes. Going away is slower than coming back, for the
+        // same reason presence is: one answers something the operator just did
+        // and the other happens while he is looking elsewhere.
+        .animation(.easeOut(duration: shell.phase == .collapsed
+                            ? PanelLook.presenceFade
+                            : PanelLook.presenceWake),
+                   value: islandLook)
         .environment(\.deckTheme, theme)
         .environment(\.strings, model.strings)
     }

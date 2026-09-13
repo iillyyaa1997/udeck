@@ -193,16 +193,32 @@ public struct IslandStates: Codable, Equatable, Sendable {
         links = try c.decodeIfPresent([IslandLink].self, forKey: .links) ?? defaults.links
         let names = try c.decodeIfPresent([String].self, forKey: .shared) ?? []
         shared = Set(names.compactMap(LookField.init(rawValue:)))
-        light = try c.decodeIfPresent([UUID: PanelLook].self, forKey: .light) ?? [:]
-        dark = try c.decodeIfPresent([UUID: PanelLook].self, forKey: .dark) ?? [:]
+        light = Self.byLink(try c.decodeIfPresent([String: PanelLook].self, forKey: .light) ?? [:])
+        dark = Self.byLink(try c.decodeIfPresent([String: PanelLook].self, forKey: .dark) ?? [:])
     }
 
     public func encode(to encoder: any Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(links, forKey: .links)
         try c.encode(shared.map(\.rawValue).sorted(), forKey: .shared)
-        try c.encode(light, forKey: .light)
-        try c.encode(dark, forKey: .dark)
+        try c.encode(Self.byName(light), forKey: .light)
+        try c.encode(Self.byName(dark), forKey: .dark)
+    }
+
+    /// Written keyed by the link's identifier as text.
+    ///
+    /// A dictionary whose key is not a string is encoded by Swift as a flat
+    /// array — `[id, look, id, look]` — which is correct, round-trips, and
+    /// makes the one file in uDeck that a person is invited to open by hand
+    /// unreadable. The keys are strings here for that reason and no other.
+    private static func byName(_ looks: [UUID: PanelLook]) -> [String: PanelLook] {
+        Dictionary(uniqueKeysWithValues: looks.map { ($0.key.uuidString, $0.value) })
+    }
+
+    private static func byLink(_ looks: [String: PanelLook]) -> [UUID: PanelLook] {
+        Dictionary(uniqueKeysWithValues: looks.compactMap { name, look in
+            UUID(uuidString: name).map { ($0, look) }
+        })
     }
 }
 
