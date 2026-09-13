@@ -10,6 +10,22 @@ for what that promises.
 
 ## [Unreleased]
 
+- **The sample is the state you are editing.** It takes that state's shape —
+  the island is an island, the open panel is a panel — fades to that state's
+  «Видно», and over "another application full-screen" the two backdrops give way
+  to a dark one, because the question there is whether the island is still
+  findable on a film rather than whether it survives a white document.
+- **States can be dragged.** Onto a frame to join it, onto the strip below to
+  stand on their own; the buttons still do the same thing for anyone who would
+  rather select and click.
+- **A collapsed state says when it cannot be seen.** On a screen with a notch
+  the hardware plays the island and nothing is drawn, so those two states carry
+  a note saying so — and keep their controls, because an external monitor is
+  where they apply.
+- **Presets land where the knobs point.** Pouring one in changes the link being
+  edited rather than always the theme, and saving one keeps what is on screen.
+  Values marked as the same everywhere are left alone: a preset is about the
+  character of the panel, not about undoing that decision.
 - **«Вид» is two columns, and a value can be marked as the same everywhere.**
   The situations stay put on the left; the right half — what is being edited,
   the sample, the knobs — changes under them, so the sample sits directly above

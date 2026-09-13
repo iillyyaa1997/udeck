@@ -63,6 +63,8 @@ struct English: Vocabulary {
         case .lookStrength: "Strength"
         case .lookTintColour: "Tint colour"
         case .lookStates: "States"
+        case .stateNotchIsTheIsland: "on this screen the notch is the island"
+        case .stateDropToSeparate: "Drop here to set up on its own"
         case .lookSharedEverywhere: "The same in every state"
         case .lookStateLink: "Link"
         case .lookStateUnlink: "Unlink"

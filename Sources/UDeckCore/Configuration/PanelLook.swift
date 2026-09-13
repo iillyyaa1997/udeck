@@ -401,10 +401,10 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
     /// regard to case or surrounding space, because that is how a person
     /// re-types a name they mean to overwrite.
     @discardableResult
-    public mutating func save(forDark isDark: Bool, as name: String) -> PanelPreset? {
+    public mutating func save(_ look: PanelLook, as name: String) -> PanelPreset? {
         let cleaned = PanelPreset.cleaned(name: name)
         guard !cleaned.isEmpty else { return nil }
-        let preset = PanelPreset(name: cleaned, look: look(forDark: isDark))
+        let preset = PanelPreset(name: cleaned, look: look)
         if let index = saved.firstIndex(where: { $0.name.lowercased() == cleaned.lowercased() }) {
             saved[index].look = preset.look
             return saved[index]

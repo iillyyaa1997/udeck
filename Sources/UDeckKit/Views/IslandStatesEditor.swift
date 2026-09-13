@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UDeckCore
 
@@ -18,6 +19,23 @@ struct IslandStatesEditor: View {
             ForEach(links, id: \.id) { link in
                 frame(for: link)
             }
+
+            // Somewhere to drop a state that should stop following the others.
+            // Without it, dragging could only ever join things.
+            Text(strings(.stateDropToSeparate))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(7)
+                .background {
+                    RoundedRectangle(cornerRadius: 9)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .foregroundStyle(.tertiary)
+                }
+                .dropDestination(for: String.self) { ids, _ in
+                    separate(ids)
+                    return true
+                }
 
             HStack(spacing: 8) {
                 Button(strings(.lookStateLink)) { link() }
@@ -40,13 +58,19 @@ struct IslandStatesEditor: View {
                 chip(state)
             }
         }
-        .padding(isGroup ? 7 : 0)
+        .padding(7)
         .background {
             if isGroup {
                 RoundedRectangle(cornerRadius: 9)
                     .strokeBorder(Color.accentColor.opacity(0.45), lineWidth: 1)
                     .background(RoundedRectangle(cornerRadius: 9).fill(Color.accentColor.opacity(0.06)))
             }
+        }
+        // A frame takes what is dropped on it, which is the whole of what a
+        // frame means: things inside it are set up together.
+        .dropDestination(for: String.self) { ids, _ in
+            join(ids, to: link)
+            return true
         }
     }
 
@@ -60,6 +84,9 @@ struct IslandStatesEditor: View {
                 if state.surrounding == .fullscreenApp {
                     Text(strings(.stateSurroundingFullscreen)).font(.caption2).opacity(0.7)
                 }
+                if state.phase == .collapsed, screenHasNotch {
+                    Text(strings(.stateNotchIsTheIsland)).font(.caption2).opacity(0.55)
+                }
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
@@ -71,6 +98,15 @@ struct IslandStatesEditor: View {
             }
         }
         .buttonStyle(.plain)
+        .draggable(state.id)
+    }
+
+    /// Whether the screen this is being read on has a notch, where a collapsed
+    /// island is not drawn at all — the hardware plays it. Worth saying next to
+    /// the states it applies to, because the controls still matter: the same
+    /// settings are what an external monitor will use.
+    private var screenHasNotch: Bool {
+        NSScreen.main?.auxiliaryTopLeftArea != nil
     }
 
     // MARK: - What is where
@@ -127,6 +163,24 @@ struct IslandStatesEditor: View {
     private func unlink() {
         change { states, light, dark in
             states.unlink(selection, lightBase: light, darkBase: dark)
+        }
+    }
+
+    /// Everything dropped on a frame joins it.
+    private func join(_ ids: [String], to link: IslandLink) {
+        let dropped = Set(ids.compactMap(IslandState.init(id:)))
+        guard !dropped.isEmpty, !dropped.isSubset(of: Set(link.states)) else { return }
+        change { states, light, dark in
+            states.link(dropped.union(link.states), lightBase: light, darkBase: dark)
+        }
+    }
+
+    /// Everything dropped outside a frame stands on its own.
+    private func separate(_ ids: [String]) {
+        let dropped = Set(ids.compactMap(IslandState.init(id:)))
+        guard !dropped.isEmpty else { return }
+        change { states, light, dark in
+            states.unlink(dropped, lightBase: light, darkBase: dark)
         }
     }
 

@@ -532,18 +532,18 @@ struct RegressionTests {
     func savingAPreset() {
         var theme = ThemeSettings()
         theme.dark.glass.tintStrength = 0.42
-        theme.save(forDark: true, as: "  Night  ")
+        theme.save(theme.look(forDark: true), as: "  Night  ")
 
         #expect(theme.saved.count == 1)
         #expect(theme.saved[0].name == "Night", "the name is what is left after a person stops typing")
         #expect(theme.saved[0].look.glass.tintStrength == 0.42)
 
         theme.dark.glass.tintStrength = 0.7
-        theme.save(forDark: true, as: "night")
+        theme.save(theme.look(forDark: true), as: "night")
         #expect(theme.saved.count == 1, "the same name, however typed, is the same preset")
         #expect(theme.saved[0].look.glass.tintStrength == 0.7)
 
-        theme.save(forDark: true, as: "Another")
+        theme.save(theme.look(forDark: true), as: "Another")
         #expect(theme.saved.count == 2)
     }
 
@@ -552,7 +552,7 @@ struct RegressionTests {
     @Test("a preset with no name is not saved")
     func anEmptyNameSavesNothing() {
         var theme = ThemeSettings()
-        #expect(theme.save(forDark: false, as: "   ") == nil)
+        #expect(theme.save(theme.look(forDark: false), as: "   ") == nil)
         #expect(theme.saved.isEmpty)
     }
 
@@ -562,7 +562,7 @@ struct RegressionTests {
         var theme = ThemeSettings()
         let light = theme.light
         theme.dark.glass.tintStrength = 0.42
-        guard let preset = theme.save(forDark: true, as: "Night") else {
+        guard let preset = theme.save(theme.look(forDark: true), as: "Night") else {
             Issue.record("nothing saved"); return
         }
         theme.dark = .dark
@@ -577,7 +577,7 @@ struct RegressionTests {
     func presetsRoundTrip() throws {
         var settings = AppSettings()
         settings.theme.dark.glass.tintStrength = 0.31
-        settings.theme.save(forDark: true, as: "Night")
+        settings.theme.save(settings.theme.look(forDark: true), as: "Night")
 
         let data = try JSONEncoder().encode(settings)
         let back = try JSONDecoder().decode(AppSettings.self, from: data).validated()

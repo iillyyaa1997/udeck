@@ -500,7 +500,9 @@ private struct LookSettings: View {
     /// What the "start from" menu calls itself: the preset this look currently
     /// matches, or the honest answer that it matches none of them.
     private var startingPointName: String {
-        if let built = model.settings.theme.preset(forDark: edited) { return strings(built.namePhrase) }
+        if let built = PanelMode.allCases.first(where: { $0.look == editedLook }) {
+            return strings(built.namePhrase)
+        }
         if let mine = model.settings.theme.saved.first(where: { $0.look == editedLook }) { return mine.name }
         return strings(.lookCustom)
     }
@@ -520,15 +522,30 @@ private struct LookSettings: View {
         ))
     }
 
-    private func pour(_ look: PanelLook) {
+    /// Pouring a preset in goes wherever the knobs go: into the link being
+    /// edited if there is one, otherwise into the theme's own look. One rule
+    /// for the whole pane — a preset that ignored the selection would be the
+    /// one control on the screen that means something else.
+    private func pour(_ poured: PanelLook) {
         var settings = model.settings
-        settings.theme.setLook(look, forDark: edited)
+        var look = poured
+        // Values marked as the same everywhere stay that way: a preset is about
+        // the character of the panel, not about undoing that decision.
+        look = look.taking(settings.theme.states.shared, from: editedLook)
+        if let link = editedLink {
+            if edited { settings.theme.states.dark[link.id] = look }
+            else { settings.theme.states.light[link.id] = look }
+        } else {
+            settings.theme.setLook(look, forDark: edited)
+        }
         model.update(settings: settings)
     }
 
     private func saveCurrent() {
         var settings = model.settings
-        guard settings.theme.save(forDark: edited, as: newPresetName) != nil else { return }
+        // What is on screen, which is the selected state's look rather than the
+        // theme's when the two differ.
+        guard settings.theme.save(editedLook, as: newPresetName) != nil else { return }
         model.update(settings: settings)
         newPresetName = ""
     }
@@ -560,6 +577,16 @@ private struct LookSettings: View {
         }
     }
 
+    /// Which situation the sample draws.
+    ///
+    /// The first of the selected ones, in the order they are declared, so that
+    /// selecting a link shows the state that link is mostly about — a group
+    /// made of "away" and "away over a film" is a group about being away.
+    private var sampledState: IslandState {
+        model.settings.theme.states.order(selection).first
+            ?? IslandState(phase: .peek, surrounding: .ordinary)
+    }
+
     /// The left column: every situation the island can be in, and which of them
     /// are set up together.
     private var situations: some View {
@@ -578,7 +605,10 @@ private struct LookSettings: View {
         VStack(alignment: .leading, spacing: 10) {
             GlassPreview(glass: editedLook.glass,
                          theme: DeckTheme(density: model.settings.density, look: editedLook,
-                                          textSize: model.settings.resolvedTextSize))
+                                          textSize: model.settings.resolvedTextSize),
+                         phase: sampledState.phase,
+                         surrounding: sampledState.surrounding,
+                         presence: editedLook.presence)
 
             HStack(spacing: 12) {
                 Picker("", selection: Binding(get: { edited }, set: { editingDark = $0 })) {
@@ -1334,13 +1364,44 @@ private struct SettingsGroup<Content: View>: View {
 private struct GlassPreview: View {
     var glass: GlassAppearance
     var theme: DeckTheme
+    /// Which situation is being set up. The sample is the panel as it will
+    /// actually look, and "as it will look" includes how big it is: a slab the
+    /// size of the open panel says nothing about the island.
+    var phase: PanelPhase = .peek
+    var surrounding: IslandSurrounding = .ordinary
+    /// How much of it is there, so that «Видно» is visible here rather than
+    /// only on the real panel.
+    var presence: Double = 1
     @Environment(\.strings) private var strings
+
+    /// The panel's size in each phase, in the sample's own scale.
+    private var cardSize: CGSize {
+        switch phase {
+        case .collapsed: CGSize(width: 180, height: 30)
+        case .peek: CGSize(width: 420, height: 92)
+        case .open: CGSize(width: 470, height: 118)
+        case .fullscreen: CGSize(width: 500, height: 132)
+        }
+    }
+
+    private var cardRadius: CGFloat { phase == .collapsed ? 9 : 12 }
+
+    /// Whether the card has room for the sample card's three lines.
+    private var showsContent: Bool { phase != .collapsed }
 
     var body: some View {
         ZStack {
-            HStack(spacing: 0) {
-                Color(red: 0.09, green: 0.13, blue: 0.08)
-                Color(red: 0.90, green: 0.89, blue: 0.86)
+            // What is behind the panel, which is half of what the operator is
+            // judging. Over another application's full screen there is no white
+            // document to worry about — there is a film, and the question is
+            // whether the island is still findable on it.
+            if surrounding == .fullscreenApp {
+                Color(red: 0.05, green: 0.05, blue: 0.06)
+            } else {
+                HStack(spacing: 0) {
+                    Color(red: 0.09, green: 0.13, blue: 0.08)
+                    Color(red: 0.90, green: 0.89, blue: 0.86)
+                }
             }
             Canvas { context, size in
                 var path = Path()
@@ -1354,17 +1415,23 @@ private struct GlassPreview: View {
                 context.stroke(path, with: .color(.gray.opacity(0.75)), lineWidth: 1.5)
             }
             PanelSurface(
-                shape: RoundedRectangle(cornerRadius: 12),
+                shape: RoundedRectangle(cornerRadius: cardRadius),
                 fallbackFill: theme.windowFill,
                 glass: glass
             )
-            .frame(width: 420, height: 92)
+            .frame(width: cardSize.width, height: cardSize.height)
             .overlay {
                 // A card, not a caption: the sample has to show the text, the
                 // muted text and a state colour, because those are three of the
                 // things the knobs below move and none of them is the glass.
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 8) {
+                    if !showsContent {
+                        // The island carries the mark and nothing else, which is
+                        // what it carries on the screen.
+                        Capsule().fill(theme.text.opacity(0.55))
+                            .frame(width: 44, height: 4)
+                    }
+                    if showsContent { HStack(spacing: 8) {
                         Text(strings(.sampleTitle))
                             .font(theme.titleFont)
                             .foregroundStyle(theme.text)
@@ -1374,13 +1441,15 @@ private struct GlassPreview: View {
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2)
                             .background(Capsule().fill(theme.chipFill(for: .ok)))
+                    } }
+                    if showsContent {
+                        Text(strings(.sampleBody))
+                            .font(theme.bodyFont)
+                            .foregroundStyle(theme.muted)
+                        Text(strings(.sampleFooter))
+                            .font(theme.chipFont)
+                            .foregroundStyle(theme.dim)
                     }
-                    Text(strings(.sampleBody))
-                        .font(theme.bodyFont)
-                        .foregroundStyle(theme.muted)
-                    Text(strings(.sampleFooter))
-                        .font(theme.chipFont)
-                        .foregroundStyle(theme.dim)
                 }
                 // Centred, so the card sits across the seam between the two
                 // backdrops rather than entirely on the dark one. That is the
@@ -1390,6 +1459,8 @@ private struct GlassPreview: View {
                 // ink controls are actually asking.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
+            .opacity(presence)
+            .animation(.easeOut(duration: PanelLook.presenceDuration(reaching: presence)), value: presence)
         }
         .frame(width: 520, height: 150)
         .clipShape(RoundedRectangle(cornerRadius: 10))
