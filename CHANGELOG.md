@@ -8,7 +8,13 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.4.0] — 2026-09-13
+
+The island stops being one appearance. Every situation it can be in — away,
+revealed, open, full-screen, and each of those over another application's full
+screen — can look its own way, and the ones that should look alike are grouped
+by dragging them together. And revealing the panel now takes the keyboard, which
+it had been asking for and not receiving since there was a panel.
 
 - **The look travels instead of snapping.** Changing state used to swap the
   colours in one frame while the panel's shape was still moving — quiet island,
