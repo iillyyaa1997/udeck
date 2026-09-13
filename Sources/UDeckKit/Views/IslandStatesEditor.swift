@@ -53,6 +53,7 @@ struct IslandStatesEditor: View {
         // Its own frame only when it is a group. A state on its own in a box
         // would say "these are set up together" about one thing.
         let isGroup = link.states.count > 1
+        let isEdited = link.states.contains { selection.contains($0) }
         return FlowRow(spacing: 6) {
             ForEach(link.states, id: \.self) { state in
                 chip(state)
@@ -60,10 +61,12 @@ struct IslandStatesEditor: View {
         }
         .padding(7)
         .background {
-            if isGroup {
+            if isGroup || isEdited {
                 RoundedRectangle(cornerRadius: 9)
-                    .strokeBorder(Color.accentColor.opacity(0.45), lineWidth: 1)
-                    .background(RoundedRectangle(cornerRadius: 9).fill(Color.accentColor.opacity(0.06)))
+                    .strokeBorder(Color.accentColor.opacity(isEdited ? 0.9 : 0.45),
+                                  lineWidth: isEdited ? 2 : 1)
+                    .background(RoundedRectangle(cornerRadius: 9)
+                        .fill(Color.accentColor.opacity(isEdited ? 0.12 : 0.06)))
             }
         }
         // A frame takes what is dropped on it, which is the whole of what a
@@ -76,6 +79,8 @@ struct IslandStatesEditor: View {
 
     private func chip(_ state: IslandState) -> some View {
         let selected = selection.contains(state)
+        let edited = model.settings.theme.states.link(for: state)?.states
+            .contains { selection.contains($0) } ?? false
         return Button {
             if selected { selection.remove(state) } else { selection.insert(state) }
         } label: {
@@ -90,8 +95,9 @@ struct IslandStatesEditor: View {
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
-            .frame(maxWidth: 190, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(selected ? 0.14 : 0.06)))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 7)
+                .fill(Color.primary.opacity(selected ? 0.16 : edited ? 0.10 : 0.06)))
             .overlay {
                 RoundedRectangle(cornerRadius: 7)
                     .strokeBorder(Color.accentColor, lineWidth: selected ? 2 : 0)
