@@ -10,6 +10,12 @@ for what that promises.
 
 ## [Unreleased]
 
+- **The island's material follows its state too.** The surface read the theme's
+  glass while the text colours came from the state's look, so a state given its
+  own material — a ghost island, say — was drawn with the theme's: the sample
+  showed one panel and the screen showed another. Measured on the real island
+  over the same wallpaper, before `67, 103, 126` and after `62, 128, 169`
+  against a wallpaper of `60, 138, 186`.
 - **A group is what you point at.** The buttons are gone and so is picking
   individual states: clicking anywhere in a frame sets the controls on that
   whole group, which is what a group is for. Joining and separating happen by

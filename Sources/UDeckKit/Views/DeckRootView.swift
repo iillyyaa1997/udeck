@@ -16,8 +16,9 @@ public struct DeckRootView: View {
         // look the panel used to have. Until the operator gives a state its
         // own, every state resolves to the same look and this is the panel
         // that was there before.
+        let look = islandLook
         let theme = DeckTheme(density: model.settings.density,
-                              look: model.settings.look(for: islandState),
+                              look: look,
                               textSize: model.settings.resolvedTextSize)
 
         // The window is the stage, sized once per screen; the panel is a
@@ -117,11 +118,19 @@ public struct DeckRootView: View {
                     surrounding: shell.surroundingIsFullscreen ? .fullscreenApp : .ordinary)
     }
 
-    /// How much of the island is on screen right now — the presence of the
-    /// look belonging to the situation it is in.
-    private var presence: Double {
-        model.settings.look(for: islandState).presence
+    /// The look belonging to the situation the island is in.
+    ///
+    /// One source for the whole view. The material used to read
+    /// `settings.glass` — the resolved *theme's* glass — while the text colours
+    /// came from the state's look, so a state given its own material was drawn
+    /// with the theme's: the sample showed one panel and the screen showed
+    /// another.
+    private var islandLook: PanelLook {
+        model.settings.look(for: islandState)
     }
+
+    /// How much of the island is on screen right now.
+    private var presence: Double { islandLook.presence }
 
     @ViewBuilder
     private func panel(theme: DeckTheme) -> some View {
@@ -189,7 +198,7 @@ public struct DeckRootView: View {
         GlassBackground(
             cornerRadius: radius,
             theme: theme,
-            glass: model.settings.glass,
+            glass: islandLook.glass,
             applicationIsActive: shell.applicationIsActive,
             weldedToTopEdge: shell.weldedToTopEdge
         )
