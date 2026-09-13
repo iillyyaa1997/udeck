@@ -16,6 +16,20 @@ for what that promises.
   shape leaving. Colours and the material's own alpha now move over the same
   time the panel does: 0.12 s coming back, 0.3 s going away. Sampled mid-collapse
   over one wallpaper: `51,74,89` → `42,93,125` → `62,128,169` at rest.
+- **Revealing the panel takes the keyboard, and collapsing gives it back.** A
+  peek used to be deliberately non-activating, which meant the panel was on
+  screen, under the pointer, and typing went into whatever was behind it. Now
+  the application that had the keyboard is remembered on the way in and
+  activated again on the way out — except over another application's full
+  screen, where activating uDeck would not swap a focus ring but switch spaces
+  and take the film away.
+
+  It never worked before either: `takeKeyboard` asked `NSApp.isActive`, which
+  for an accessory application reads `true` while another application is
+  verifiably in front — measured through the panel's own log with Warp
+  frontmost. So the activation never ran and nothing was ever restored. It asks
+  the workspace who is in front now. Measured across a full cycle: Warp → uDeck
+  → Warp.
 - **A frame means "together", so one state does not get one.** Clearing
   «Настроить все вместе» left eight lone states in eight frames — eight
   statements about nothing. And clearing it now goes back to the arrangement it

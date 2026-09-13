@@ -647,7 +647,20 @@ public final class PanelController {
         onPhaseChange?(state.phase)
         applyPhase(animated: true)
 
-        if state.phase.isHeld { takeKeyboard() }
+        // The keyboard comes with the panel, not with the first click.
+        //
+        // A peek used to be deliberately non-activating: a glance should not
+        // pull the application forward. In use that meant the panel was on
+        // screen, under the pointer, and typing into whatever was behind it —
+        // so revealing it takes the keyboard too, and collapsing gives it back
+        // along with the application that had it.
+        //
+        // Not over another application's full screen. Activating uDeck there
+        // does not swap a focus ring, it switches spaces: the game or the film
+        // goes away, which is the one place the island exists to stay out of.
+        if state.phase.isHeld || (state.phase.isVisible && !shell.surroundingIsFullscreen) {
+            takeKeyboard()
+        }
     }
 
     private func applyPhase(animated: Bool) {
@@ -771,11 +784,28 @@ public final class PanelController {
     /// whether it worked — and only then does the least intrusive thing that
     /// makes typing possible.
     private func takeKeyboard() {
-        applicationToRestore = NSWorkspace.shared.frontmostApplication
+        // Whether uDeck is the application in front, asked of the workspace
+        // rather than of `NSApp`.
+        //
+        // `NSApp.isActive` is not that for an accessory application: measured
+        // through the panel's own log while Warp was verifiably frontmost, it
+        // read `active=true` — so the activation below never ran, the keyboard
+        // stayed where it was, and nothing was ever restored on the way out.
+        // The same shape of mistake as `isKeyWindow`, in the same place.
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let alreadyInFront = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+
+        // Only while somebody else has it. Taking the keyboard twice — once for
+        // the peek and again when the peek becomes a working panel — would
+        // otherwise record uDeck as the application to go back to, and going
+        // back to yourself is staying.
+        if !alreadyInFront {
+            applicationToRestore = frontmost
+        }
         panel.makeKeyAndOrderFront(nil)
 
-        if !NSApp.isActive {
-            NSApp.activate(ignoringOtherApps: true)
+        if !alreadyInFront {
+            NSApp.activate()
             panel.makeKeyAndOrderFront(nil)
             didActivateForKeyboard = true
         }
