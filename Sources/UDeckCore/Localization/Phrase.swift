@@ -84,6 +84,7 @@ public enum Phrase: Sendable, Equatable {
     case lookStateMixed
     case lookEditingEverything
     case lookEditingStates
+    case lookEditingCount(Int)
     case statePhaseCollapsed
     case statePhasePeek
     case statePhaseOpen

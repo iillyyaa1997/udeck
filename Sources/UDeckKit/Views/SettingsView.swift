@@ -87,6 +87,12 @@ public struct SettingsView: View {
                     }
                 }
                 .padding(20)
+                // Room under the last row. Measured on the look pane: scrolled
+                // to the very end, the scroll bar at 1.0, the last control was
+                // still cut by the window's bottom edge — the content is a
+                // little taller than the scroll view decides it is, and a pane
+                // whose last setting cannot be reached is a broken pane.
+                .padding(.bottom, 28)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -331,9 +337,10 @@ private struct LookSettings: View {
     /// and a settings screen that only lets you edit what you can currently see
     /// is one you have to wait until evening to finish.
     @State private var editingDark: Bool?
-    /// Which situations the controls below are setting up. Empty means all of
-    /// them, which is what the panel had before there were any.
-    @State private var selection: Set<IslandState> = []
+    /// Which group of situations the controls below are setting up. Nothing
+    /// selected means the theme's own look, which is what the panel had before
+    /// there were any groups.
+    @State private var selectedLink: UUID?
 
     /// What the operator is typing into the name field. Held here rather than
     /// in the settings, because a half-typed name is not a setting.
@@ -351,10 +358,8 @@ private struct LookSettings: View {
     /// own look — which is the case both when nothing is selected and when the
     /// selection is a link that holds every state.
     private var editedLink: IslandLink? {
-        guard !selection.isEmpty else { return nil }
-        let ids = Set(selection.compactMap { model.settings.theme.states.link(for: $0)?.id })
-        guard ids.count == 1, let id = ids.first,
-              let link = model.settings.theme.states.links.first(where: { $0.id == id }),
+        guard let selectedLink,
+              let link = model.settings.theme.states.links.first(where: { $0.id == selectedLink }),
               link.states.count < IslandState.allCases.count
         else { return nil }
         return link
@@ -364,6 +369,9 @@ private struct LookSettings: View {
     private var editingSummary: String {
         if selectionIsMixed { return strings(.lookStateMixed) }
         guard let link = editedLink else { return strings(.lookEditingEverything) }
+        // Past three, the list is longer than the column it is explaining and
+        // the frame already shows which ones they are.
+        guard link.states.count <= 3 else { return strings(.lookEditingCount(link.states.count)) }
         let names = link.states.map { state -> String in
             let phase: Phrase = switch state.phase {
             case .collapsed: .statePhaseCollapsed
@@ -379,12 +387,9 @@ private struct LookSettings: View {
         return "\(strings(.lookEditingStates)): " + names.joined(separator: ", ")
     }
 
-    /// The selection reaches into more than one link, so there is no single
-    /// look to edit. Said out loud rather than silently editing one of them.
-    private var selectionIsMixed: Bool {
-        guard !selection.isEmpty else { return false }
-        return Set(selection.compactMap { model.settings.theme.states.link(for: $0)?.id }).count > 1
-    }
+    /// Kept so the editing line can say something is odd; a group is now the
+    /// only thing that can be selected, so nothing is ever mixed.
+    private var selectionIsMixed: Bool { false }
 
     private var editedLook: PanelLook {
         let base = model.settings.theme.look(forDark: edited)
@@ -583,7 +588,10 @@ private struct LookSettings: View {
     /// selecting a link shows the state that link is mostly about — a group
     /// made of "away" and "away over a film" is a group about being away.
     private var sampledState: IslandState {
-        model.settings.theme.states.order(selection).first
+        editedLink?.states.first
+            ?? selectedLink.flatMap { id in
+                model.settings.theme.states.links.first { $0.id == id }?.states.first
+            }
             ?? IslandState(phase: .peek, surrounding: .ordinary)
     }
 
@@ -594,7 +602,7 @@ private struct LookSettings: View {
             Text(strings(.lookStates))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            IslandStatesEditor(model: model, selection: $selection)
+            IslandStatesEditor(model: model, selected: $selectedLink)
         }
         .frame(width: 236, alignment: .leading)
     }

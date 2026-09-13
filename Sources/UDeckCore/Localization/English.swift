@@ -71,6 +71,7 @@ struct English: Vocabulary {
         case .lookStateMixed: "The selection spans more than one link"
         case .lookEditingEverything: "Editing every state"
         case .lookEditingStates: "Editing"
+        case .lookEditingCount(let n): "Editing \(n) situations"
         case .statePhaseCollapsed: "Away"
         case .statePhasePeek: "Revealed"
         case .statePhaseOpen: "Open"

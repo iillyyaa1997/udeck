@@ -11,7 +11,10 @@ import UDeckCore
 /// not called anything, it is just visibly a group.
 struct IslandStatesEditor: View {
     @Bindable var model: DeckModel
-    @Binding var selection: Set<IslandState>
+    /// Which group the controls are pointed at. A group is the unit here:
+    /// states are set up together or not at all, so picking one state out of
+    /// two groups is not a thing to be expressed.
+    @Binding var selected: UUID?
     @Environment(\.strings) private var strings
 
     var body: some View {
@@ -21,7 +24,8 @@ struct IslandStatesEditor: View {
             }
 
             // Somewhere to drop a state that should stop following the others.
-            // Without it, dragging could only ever join things.
+            // Dragging is the whole of how groups change now: onto a frame to
+            // join it, here to stand alone.
             Text(strings(.stateDropToSeparate))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -36,53 +40,55 @@ struct IslandStatesEditor: View {
                     separate(ids)
                     return true
                 }
-
-            HStack(spacing: 8) {
-                Button(strings(.lookStateLink)) { link() }
-                    .disabled(!canLink)
-                Button(strings(.lookStateUnlink)) { unlink() }
-                    .disabled(!canUnlink)
-            }
-            .controlSize(.small)
         }
     }
 
     // MARK: - Drawing
 
     private func frame(for link: IslandLink) -> some View {
-        // Its own frame only when it is a group. A state on its own in a box
-        // would say "these are set up together" about one thing.
-        let isGroup = link.states.count > 1
-        let isEdited = link.states.contains { selection.contains($0) }
+        let isEdited = selected == link.id
         return FlowRow(spacing: 6) {
             ForEach(link.states, id: \.self) { state in
-                chip(state)
+                chip(state, lit: isEdited, selects: link.id)
             }
         }
         .padding(7)
         .background {
-            if isGroup || isEdited {
-                RoundedRectangle(cornerRadius: 9)
-                    .strokeBorder(Color.accentColor.opacity(isEdited ? 0.9 : 0.45),
-                                  lineWidth: isEdited ? 2 : 1)
-                    .background(RoundedRectangle(cornerRadius: 9)
-                        .fill(Color.accentColor.opacity(isEdited ? 0.12 : 0.06)))
-            }
+            RoundedRectangle(cornerRadius: 9)
+                .strokeBorder(Color.accentColor.opacity(isEdited ? 0.9 : 0.35),
+                              lineWidth: isEdited ? 2 : 1)
+                .background(RoundedRectangle(cornerRadius: 9)
+                    .fill(Color.accentColor.opacity(isEdited ? 0.12 : 0.05)))
         }
+        // The frame is the thing you point at: everything in it is set up
+        // together, so there is nothing smaller to select.
+        .contentShape(RoundedRectangle(cornerRadius: 9))
+        .onTapGesture { selected = (selected == link.id) ? nil : link.id }
+        // And it says so to the accessibility layer. A tap gesture alone is a
+        // control only a pointer can find: nothing about it reaches VoiceOver,
+        // the keyboard, or anything else driving the application — which is
+        // also how this was caught, by trying to press it from outside.
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(link.states.map { strings(phrase(for: $0.phase)) }.joined(separator: ", "))
+        .accessibilityAction { selected = (selected == link.id) ? nil : link.id }
         // A frame takes what is dropped on it, which is the whole of what a
-        // frame means: things inside it are set up together.
+        // frame means.
         .dropDestination(for: String.self) { ids, _ in
             join(ids, to: link)
             return true
         }
     }
 
-    private func chip(_ state: IslandState) -> some View {
-        let selected = selection.contains(state)
-        let edited = model.settings.theme.states.link(for: state)?.states
-            .contains { selection.contains($0) } ?? false
-        return Button {
-            if selected { selection.remove(state) } else { selection.insert(state) }
+    /// One situation.
+    ///
+    /// A real button rather than a tap gesture on a rectangle: a gesture is a
+    /// control only a pointer can find — nothing about it reaches the keyboard
+    /// or VoiceOver — and pressing the whole group is what a click on any of
+    /// its members means anyway.
+    private func chip(_ state: IslandState, lit: Bool, selects link: UUID) -> some View {
+        Button {
+            selected = (selected == link) ? nil : link
         } label: {
             VStack(alignment: .leading, spacing: 1) {
                 Text(strings(phrase(for: state.phase))).font(.callout)
@@ -96,12 +102,8 @@ struct IslandStatesEditor: View {
             .padding(.horizontal, 9)
             .padding(.vertical, 5)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 7)
-                .fill(Color.primary.opacity(selected ? 0.16 : edited ? 0.10 : 0.06)))
-            .overlay {
-                RoundedRectangle(cornerRadius: 7)
-                    .strokeBorder(Color.accentColor, lineWidth: selected ? 2 : 0)
-            }
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.primary.opacity(lit ? 0.14 : 0.06)))
+            .contentShape(RoundedRectangle(cornerRadius: 7))
         }
         .buttonStyle(.plain)
         .draggable(state.id)
@@ -112,7 +114,14 @@ struct IslandStatesEditor: View {
     /// the states it applies to, because the controls still matter: the same
     /// settings are what an external monitor will use.
     private var screenHasNotch: Bool {
-        NSScreen.main?.auxiliaryTopLeftArea != nil
+        // The panel's screen, not `NSScreen.main`. Main is wherever the
+        // keyboard is, which flips as the operator clicks between windows — the
+        // note appeared and disappeared while the settings window had not moved
+        // at all.
+        NSApp.windows
+            .first { $0 is DeckPanel }?
+            .screen?
+            .auxiliaryTopLeftArea != nil
     }
 
     // MARK: - What is where
@@ -140,38 +149,6 @@ struct IslandStatesEditor: View {
         }
     }
 
-    // MARK: - Linking
-
-    private var canLink: Bool {
-        guard selection.count > 1 else { return false }
-        // Already one link, exactly: nothing to do.
-        let ids = Set(selection.compactMap { model.settings.theme.states.link(for: $0)?.id })
-        if ids.count == 1, let id = ids.first,
-           let link = model.settings.theme.states.links.first(where: { $0.id == id }),
-           Set(link.states) == selection {
-            return false
-        }
-        return true
-    }
-
-    private var canUnlink: Bool {
-        selection.contains { state in
-            (model.settings.theme.states.link(for: state)?.states.count ?? 0) > 1
-        }
-    }
-
-    private func link() {
-        change { states, light, dark in
-            states.link(selection, lightBase: light, darkBase: dark)
-        }
-    }
-
-    private func unlink() {
-        change { states, light, dark in
-            states.unlink(selection, lightBase: light, darkBase: dark)
-        }
-    }
-
     /// Everything dropped on a frame joins it.
     private func join(_ ids: [String], to link: IslandLink) {
         let dropped = Set(ids.compactMap(IslandState.init(id:)))
@@ -179,6 +156,7 @@ struct IslandStatesEditor: View {
         change { states, light, dark in
             states.link(dropped.union(link.states), lightBase: light, darkBase: dark)
         }
+        selected = model.settings.theme.states.link(for: link.states[0])?.id
     }
 
     /// Everything dropped outside a frame stands on its own.
@@ -188,6 +166,7 @@ struct IslandStatesEditor: View {
         change { states, light, dark in
             states.unlink(dropped, lightBase: light, darkBase: dark)
         }
+        selected = dropped.first.flatMap { model.settings.theme.states.link(for: $0)?.id }
     }
 
     private func change(_ edit: (inout IslandStates, PanelLook, PanelLook) -> Void) {

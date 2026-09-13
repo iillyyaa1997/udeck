@@ -75,6 +75,12 @@ struct Russian: Vocabulary {
         case .lookStateMixed: "Выделены состояния из разных связок"
         case .lookEditingEverything: "Правим все состояния"
         case .lookEditingStates: "Правим"
+        case .lookEditingCount(let n):
+            switch n % 10 {
+            case 1 where n % 100 != 11: "Правим \(n) состояние"
+            case 2...4 where !(11...14).contains(n % 100): "Правим \(n) состояния"
+            default: "Правим \(n) состояний"
+            }
         case .statePhaseCollapsed: "Закрыт"
         case .statePhasePeek: "Наведён"
         case .statePhaseOpen: "Раскрыт"

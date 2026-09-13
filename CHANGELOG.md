@@ -10,6 +10,17 @@ for what that promises.
 
 ## [Unreleased]
 
+- **A group is what you point at.** The buttons are gone and so is picking
+  individual states: clicking anywhere in a frame sets the controls on that
+  whole group, which is what a group is for. Joining and separating happen by
+  dragging — onto a frame, or onto the strip below it. Selecting one state out
+  of one frame and another out of a second was possible and meant nothing, and
+  that is the shape of bug that survives a whole release because everyone
+  assumes it is a feature.
+- **The pane scrolls to its own end.** Scrolled to the very bottom, with the
+  scroll bar at 1.0, the last control was still cut by the window's edge.
+- **The notch note follows the panel's screen**, not whichever screen has the
+  keyboard: it appeared and disappeared while the settings window had not moved.
 - **The sample is the state you are editing.** It takes that state's shape —
   the island is an island, the open panel is a panel — fades to that state's
   «Видно», and over "another application full-screen" the two backdrops give way
