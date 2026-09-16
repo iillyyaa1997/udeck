@@ -31,12 +31,16 @@ You need [Tart](https://tart.run) — exactly the version pinned in
 
 Before starting anything, the pre-flight checks the Tart version, that the host
 can run the guest, free disk and memory, and that no other virtual machine is
-running — macOS runs at most two macOS guests at once. It stops only the lab's
-own orphans: a `tart run` for a `udeck-e2e-…` machine left behind by a run that
-died. It does not touch anything else, and it does not keep your Mac awake: if
-the Mac sleeps during a run, the run is interrupted.
+running — macOS runs at most two macOS guests at once, so a `tart run` from
+another Tart home or another user counts too. It stops only the lab's own
+orphans: your `tart run udeck-e2e-…` of a clone left behind by a run that died,
+identified again by pid and start time right before each signal. A kept clone
+or a golden image you opened yourself is never stopped; the run refuses to start
+until you close it. Nothing else is touched, and the lab does not keep your Mac
+awake: if the Mac sleeps during a run, the run is interrupted.
 
-Only one run at a time.
+Only one run at a time for your user on this Mac, whichever checkout or
+worktree it starts from: the lock is `~/Library/Caches/udeck-e2e/lab.lock`.
 
 ## Reading the result
 
@@ -61,9 +65,16 @@ There are three outcomes, and they are kept apart on purpose:
 A run that checked nothing exits 2, never 0. So does a run where every check
 passed but a clone could not be cleaned up.
 
-Each run leaves `.build/e2e/<run>/`: `ledger.jsonl`, one JSON line per event
-written as it happens, and a directory per check with what it collected. The
-last ten runs are kept.
+Each run leaves `.build/e2e/<run>/`, named by its start in UTC: `ledger.jsonl`,
+one JSON line per event written as it happens — including every signal the
+pre-flight sends, before it sends it — and a directory per check with what it
+collected. The last ten runs that checked something are kept, and separately the
+last ten the pre-flight refused, so retrying a refused run cannot delete the
+evidence of a real one.
+
+Ctrl-C stops the run and still cleans up: the interrupted check's machine is
+torn down while the lock is held, a verdict the check had already reached stands,
+and anything unfinished counts as "could not check".
 
 ## Writing a check
 
@@ -78,6 +89,9 @@ called `<group>.<name>` on the command line — `check_wrong_key` in
   outside a check file, is also treated as the lab failing, never as uDeck
   failing.
 * The `check_dir` fixture is the check's own directory in the run's report.
+* Check files live directly in `checks/`, and a file must not skip itself — a
+  skipped file would silently drop its whole group. An exception in a thread the
+  check started makes the check "could not check".
 
 ## The lab's own tests
 

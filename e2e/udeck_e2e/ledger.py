@@ -13,17 +13,26 @@ import json
 import os
 import re
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Any
 
-RUN_NAME = re.compile(r"^\d{8}-\d{6}(-\d+)?$")
+# Runs are named by their start in UTC. Local time would let a daylight-saving
+# change or a flight name a newer run so that it sorts before an older one, and
+# pruning would then delete the newest evidence.
+RUN_NAME = re.compile(r"^\d{8}-\d{6}Z(-\d+)?$")
+
+# Written into a run's directory once its pre-flight has passed. Runs the
+# pre-flight refused are kept and pruned separately, so ten refused attempts in
+# a row cannot push out the evidence of the last run that actually checked.
+STARTED_MARKER = ".checks-started"
 
 
 def new_run_dir(root: Path, now: datetime) -> Path:
-    """A fresh directory for this run, named by its local start time."""
+    """A fresh directory for this run, named by its start time in UTC."""
     root.mkdir(parents=True, exist_ok=True)
-    base = now.strftime("%Y%m%d-%H%M%S")
+    base = now.astimezone(timezone.utc).strftime("%Y%m%d-%H%M%SZ")
     candidate = root / base
     suffix = 2
     while True:
@@ -35,50 +44,128 @@ def new_run_dir(root: Path, now: datetime) -> Path:
             suffix += 1
 
 
-def prune_runs(root: Path, keep: int, current: Path) -> list[Path]:
-    """Delete all but the newest `keep` runs, never `current`. Returns what went.
+def mark_started(run_dir: Path) -> None:
+    (run_dir / STARTED_MARKER).touch()
 
+
+def prune_runs(root: Path, keep: int, current: Path) -> tuple[list[Path], list[str]]:
+    """Keep the newest `keep` runs that checked something, `current` among them,
+    and the newest `keep` runs the pre-flight refused. Delete the rest.
+
+    Returns what was deleted, and a description of anything that could not be.
     Only directories named like a run are considered, so nothing else the lab
     keeps under the same root — its Python environment, for one — can be
-    mistaken for an old report. Symlinks are never followed or removed.
+    mistaken for an old report; symlinks are never followed or removed. A
+    directory that will not delete is reported, not raised: an old report is
+    never a reason for a new run not to start.
     """
-    runs = sorted(
-        (p for p in root.iterdir() if RUN_NAME.match(p.name) and p.is_dir() and not p.is_symlink()),
-        key=_run_sort_key,
-    )
-    doomed = [p for p in runs[: max(0, len(runs) - keep)] if p != current]
+    runs = [
+        p
+        for p in root.iterdir()
+        if RUN_NAME.match(p.name) and p.is_dir() and not p.is_symlink() and p != current
+    ]
+    started = sorted((p for p in runs if (p / STARTED_MARKER).exists()), key=_run_sort_key)
+    refused = sorted((p for p in runs if not (p / STARTED_MARKER).exists()), key=_run_sort_key)
+    doomed = started[: max(0, len(started) - (keep - 1))] + refused[: max(0, len(refused) - keep)]
+
+    removed, failures = [], []
     for path in doomed:
-        shutil.rmtree(path)
-    return doomed
+        failure = _remove_tree(path)
+        if failure:
+            failures.append(failure)
+        else:
+            removed.append(path)
+    return removed, failures
+
+
+def _remove_tree(path: Path) -> str | None:
+    """rmtree that makes read-only directories writable once before giving up."""
+    failures: list[str] = []
+
+    def retry_writable(function: Any, target: str, error: BaseException) -> None:
+        try:
+            parent = os.path.dirname(target)
+            # Never loosen anything outside the run being deleted.
+            if os.path.commonpath([parent, str(path)]) == str(path):
+                os.chmod(parent, 0o700)
+            if os.path.isdir(target) and not os.path.islink(target):
+                os.chmod(target, 0o700)
+            function(target)
+        except OSError as again:
+            failures.append(f"{target}: {again.strerror or again}")
+
+    shutil.rmtree(path, onexc=retry_writable)
+    if failures or path.exists():
+        return f"could not delete the old run {path.name}: " + (failures[0] if failures else "still there")
+    return None
 
 
 def _run_sort_key(path: Path) -> tuple[str, int]:
-    # "20260916-172233-2" sorts after "20260916-172233": a plain string sort
+    # "20260916-172233Z-2" sorts after "20260916-172233Z": a plain string sort
     # would put "-10" before "-2".
     day, time, *suffix = path.name.split("-")
     return f"{day}-{time}", int(suffix[0]) if suffix else 1
 
 
 class Ledger:
-    """Append-only JSON lines, one event each, flushed to disk as written."""
+    """Append-only JSON lines, one event each, flushed to disk as written.
+
+    A write that fails — a full disk — does not stop the run. The first failure
+    is kept in `error` and said on stderr once; the run reports it as a lab
+    problem, so a run whose record is incomplete never exits 0.
+    """
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._file: IO[str] = open(path, "a", encoding="utf-8")
+        self.error: str | None = None
+        self._file: IO[str] | None = None
+        try:
+            # backslashreplace: a message carrying bytes that are not UTF-8 is
+            # written escaped rather than failing the write.
+            self._file = open(path, "a", encoding="utf-8", errors="backslashreplace")
+        except OSError as error:
+            self._fail(error)
 
     def write(self, event: str, **fields: Any) -> None:
+        if self._file is None:
+            return
         record = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "event": event}
         record.update(fields)
-        self._file.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-        self._file.flush()
-        os.fsync(self._file.fileno())
+        try:
+            self._file.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+            self._file.flush()
+            os.fsync(self._file.fileno())
+        except (OSError, ValueError) as error:
+            self._fail(error)
+
+    def _fail(self, error: BaseException) -> None:
+        if self.error is None:
+            self.error = f"the ledger {self.path} could not be written: {error}"
+            print(self.error, file=sys.stderr)
 
     def close(self) -> None:
-        self._file.close()
+        if self._file is not None:
+            try:
+                self._file.close()
+            except OSError as error:
+                self._fail(error)
+            self._file = None
+
+
+def host_lock_path(home: Path | None = None) -> Path:
+    """One lock for all of this user's lab runs on this Mac.
+
+    Not under the checkout's `.build/`: the pre-flight stops orphaned lab
+    machines host-wide, so a run in a second clone or a worktree must see the
+    first run's lock, or it would stop that run's machines as orphans. And
+    `rm -rf .build` in the middle of a run would otherwise free the lock.
+    """
+    home = Path.home() if home is None else home
+    return home / "Library" / "Caches" / "udeck-e2e" / "lab.lock"
 
 
 class RunLock:
-    """Only one lab run at a time on a machine.
+    """Only one lab run at a time for this user on this Mac.
 
     The pre-flight treats any lab virtual machine it finds running as an orphan
     of a run that died, and stops it. That is only safe if no other run is

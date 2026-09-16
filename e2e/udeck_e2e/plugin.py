@@ -8,14 +8,13 @@ terminal output is switched off, so there is one voice in the console.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import time
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, Any
 
@@ -24,19 +23,15 @@ import pytest
 from udeck_e2e import config, names, preflight
 from udeck_e2e.config import Guest
 from udeck_e2e.errors import CheckFailed, LabError
-from udeck_e2e.ledger import Ledger, RunLock, new_run_dir, prune_runs
+from udeck_e2e.ledger import Ledger, RunLock, host_lock_path, mark_started, new_run_dir, prune_runs
 from udeck_e2e.outcomes import EXIT_NOT_CHECKED, EXIT_PASSED, Outcome, duration, exit_code, summary
 
-PreflightResult = tuple[preflight.Assessment, list[str], dict[str, Any]]
+Note = Callable[[str], None]
+Preflight = Callable[[Guest, Note], tuple[preflight.Assessment, dict[str, Any]]]
 
 
-def real_preflight(guest: Guest) -> PreflightResult:
-    """Stop the lab's orphans, then look at the host. Needs the run lock held."""
-    table, problem = preflight.process_table()
-    stopped = preflight.stop_orphans(preflight.find_orphans(table or "", os.getpid()))
-    facts = preflight.gather()
-    if problem:
-        facts.gathering.append(problem)
+def real_preflight(guest: Guest, note: Note) -> tuple[preflight.Assessment, dict[str, Any]]:
+    assessment, facts = preflight.run(guest, note)
     about = {
         "tart": str(facts.tart) if facts.tart else None,
         "tart_version": facts.tart_version,
@@ -44,8 +39,9 @@ def real_preflight(guest: Guest) -> PreflightResult:
         "free_disk_gb": round(facts.free_disk_gb, 1),
         "memory_gb": round(facts.memory_gb, 1),
         "memory_pressure": facts.memory_pressure,
+        "running_machines": [p.args for p in facts.machines],
     }
-    return preflight.assess(facts, guest), stopped, about
+    return assessment, about
 
 
 @dataclass
@@ -56,7 +52,10 @@ class CheckRecord:
     reason: str = ""
     details: list[str] = field(default_factory=list)
     cleanup_problem: str = ""
-    finished: bool = False
+    # The check's own body ran to an end — passed, or pronounced a verdict. An
+    # interrupt after that point does not take the verdict away.
+    called: bool = False
+    reported: bool = False
 
 
 class LabPlugin:
@@ -69,9 +68,10 @@ class LabPlugin:
         repo_root: Path,
         checks_dir: Path,
         runs_root: Path,
+        lock_path: Path | None = None,
         stream: IO[str] | None = None,
-        run_preflight: Callable[[Guest], PreflightResult] = real_preflight,
-        now: Callable[[], datetime] = datetime.now,
+        run_preflight: Preflight = real_preflight,
+        now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.wanted = wanted
@@ -95,12 +95,25 @@ class LabPlugin:
         self.interrupted = False
         self.run_dir: Path | None = None
         self.ledger: Ledger | None = None
-        self.lock = RunLock(runs_root / "lab.lock")
+        self.lock = RunLock(lock_path or host_lock_path())
+
+    @property
+    def saw_failure(self) -> bool:
+        """Whether any check has pronounced a verdict against uDeck so far."""
+        return any(
+            record.outcome is Outcome.FAILED and record.called for record in self.records.values()
+        )
 
     # --- Output ------------------------------------------------------------
 
     def say(self, text: str = "") -> None:
-        print(text, file=self.stream, flush=True)
+        # A message can carry anything a guest printed; escape what the
+        # console cannot encode rather than lose the line.
+        safe = text.encode("utf-8", "backslashreplace").decode("utf-8")
+        try:
+            print(safe, file=self.stream, flush=True)
+        except (OSError, ValueError):
+            pass
 
     def shown(self, path: Path) -> str:
         try:
@@ -112,20 +125,40 @@ class LabPlugin:
         self.blocked = True
         self.exit_code = code
 
+    def record_event(self, event: str, **fields: Any) -> None:
+        if self.ledger is not None:
+            self.ledger.write(event, **fields)
+
     # --- Collection --------------------------------------------------------
 
     def pytest_collectreport(self, report: pytest.CollectReport) -> None:
+        where = report.nodeid or "checks"
         if report.failed:
-            self.collection_errors.append(f"{report.nodeid or 'checks'}:\n{report.longreprtext}")
+            self.collection_errors.append(f"{where}:\n{report.longreprtext}")
+        elif report.skipped:
+            # A skip at file level would silently drop a whole group — from the
+            # run and from --list — and the run could still exit 0.
+            reason = report.longrepr[2] if isinstance(report.longrepr, tuple) else report.longreprtext
+            self.collection_errors.append(
+                f"{where}: the whole file skipped itself ({reason}). A check file must "
+                "not skip; a check that cannot run raises LabError, so it is reported."
+            )
 
     def pytest_collection_modifyitems(
         self, session: pytest.Session, config: pytest.Config, items: list[pytest.Item]
     ) -> None:
         by_name: dict[str, pytest.Item] = {}
         for item in items:
+            path = Path(str(item.path)).resolve()
+            if path.parent != self.checks_dir:
+                self.collection_errors.append(
+                    f"{path}: check files live directly in {self.shown(self.checks_dir)}/, "
+                    "not in a subdirectory"
+                )
+                continue
             function = getattr(item, "originalname", item.name)
             try:
-                name = names.check_name(Path(str(item.path)).stem, function)
+                name = names.check_name(path.stem, function)
             except names.CheckNameError as error:
                 self.collection_errors.append(str(error))
                 continue
@@ -173,7 +206,12 @@ class LabPlugin:
             self.stop(EXIT_NOT_CHECKED)
             return
 
-        holder = self.lock.acquire()
+        try:
+            holder = self.lock.acquire()
+        except OSError as error:
+            self.say(f"The lab could not take its run lock at {self.lock.path}: {error}")
+            self.stop(EXIT_NOT_CHECKED)
+            return
         if holder is not None:
             self.say(
                 "Another lab run is in progress"
@@ -183,28 +221,43 @@ class LabPlugin:
             self.stop(EXIT_NOT_CHECKED)
             return
 
-        self.run_dir = new_run_dir(self.runs_root, self.now())
+        try:
+            self.run_dir = new_run_dir(self.runs_root, self.now())
+        except OSError as error:
+            self.say(f"The lab could not create its report directory under {self.runs_root}: {error}")
+            self.stop(EXIT_NOT_CHECKED)
+            return
         self.ledger = Ledger(self.run_dir / "ledger.jsonl")
-        removed = prune_runs(self.runs_root, config.KEEP_RUNS, self.run_dir)
-        self.ledger.write(
+        self.record_event(
             "run-start",
             argv=sys.argv[1:],
             guest=self.guest.key,
             base_image=self.guest.base_image,
             checks=list(self.names.values()),
             repo=_git_state(self.repo_root),
-            pruned_runs=[p.name for p in removed],
         )
 
-        assessment, stopped, about = self.run_preflight(self.guest)
-        self.ledger.write(
+        def note(text: str) -> None:
+            # Written before the thing it describes is done, so a run cut off
+            # half-way still says what it did to the host.
+            self.say(text)
+            self.record_event("host", text=text)
+
+        try:
+            assessment, about = self.run_preflight(self.guest, note)
+        except Exception as error:  # noqa: BLE001 — reported, never swallowed
+            assessment = preflight.Assessment(
+                [preflight.Problem(f"The pre-flight itself failed: {error!r}.", "This is a bug in the lab.")],
+                [],
+            )
+            about = {}
+        self.record_event(
             "preflight",
             host=about,
-            orphans_stopped=stopped,
             problems=[{"what": p.what, "todo": p.todo} for p in assessment.problems],
             notes=assessment.notes,
         )
-        for line in stopped + assessment.notes:
+        for line in assessment.notes:
             self.say(line)
         if assessment.problems:
             self.say("The lab cannot start:")
@@ -212,6 +265,15 @@ class LabPlugin:
                 self.say(f"  • {problem.render()}")
             self.stop(EXIT_NOT_CHECKED)
             return
+
+        try:
+            mark_started(self.run_dir)
+            removed, failures = prune_runs(self.runs_root, config.KEEP_RUNS, self.run_dir)
+        except OSError as error:
+            removed, failures = [], [f"could not look at old runs: {error}"]
+        for failure in failures:
+            self.say(f"Note: {failure}")
+        self.record_event("pruned", removed=[p.name for p in removed], failures=failures)
 
         count = len(self.names)
         self.say(
@@ -227,7 +289,8 @@ class LabPlugin:
     @pytest.fixture
     def check_dir(self, request: pytest.FixtureRequest) -> Path:
         """This check's directory in the run's report, for whatever it collects."""
-        assert self.run_dir is not None, "check_dir is only available during a run"
+        if self.run_dir is None:
+            raise LabError("preparing the check's report directory", "there is no run directory")
         path = self.run_dir / self.names[request.node.nodeid]
         path.mkdir(exist_ok=True)
         return path
@@ -236,11 +299,11 @@ class LabPlugin:
         self.records[nodeid] = CheckRecord(self.names[nodeid], self.clock())
 
     @pytest.hookimpl(wrapper=True)
-    def pytest_runtest_makereport(
-        self, item: pytest.Item, call: pytest.CallInfo[None]
-    ) -> Any:
+    def pytest_runtest_makereport(self, item: pytest.Item, call: pytest.CallInfo[None]) -> Any:
         report = yield
         record = self.records[item.nodeid]
+        if call.when == "call":
+            record.called = True
         excinfo = call.excinfo
         if excinfo is None:
             return report
@@ -270,21 +333,26 @@ class LabPlugin:
         """
         if excinfo.errisinstance(CheckFailed):
             return True
-        if not excinfo.errisinstance(AssertionError) or excinfo.errisinstance(
-            pytest.skip.Exception
-        ):
+        if not excinfo.errisinstance(AssertionError):
             return False
         innermost = Path(str(excinfo.traceback[-1].path)).resolve()
         return innermost.parent == self.checks_dir and innermost.name.startswith("check_")
 
     def pytest_runtest_logfinish(self, nodeid: str, location: Any) -> None:
-        record = self.records[nodeid]
-        record.finished = True
+        self._report(self.records[nodeid], finished=True)
+
+    def _report(self, record: CheckRecord, finished: bool) -> None:
+        record.reported = True
         seconds = self.clock() - record.started
         evidence = self.run_dir / record.name if self.run_dir else None
         if record.details and evidence is not None:
-            evidence.mkdir(exist_ok=True)
-            (evidence / "error.txt").write_text("\n\n".join(record.details), encoding="utf-8")
+            try:
+                evidence.mkdir(exist_ok=True)
+                (evidence / "error.txt").write_text(
+                    "\n\n".join(record.details), encoding="utf-8", errors="backslashreplace"
+                )
+            except OSError as error:
+                self.lab_problems.append(f"{record.name}: could not save its evidence: {error}")
 
         line = f"{record.outcome.mark} {record.name}  {duration(seconds)}"
         if record.outcome is Outcome.FAILED:
@@ -298,11 +366,11 @@ class LabPlugin:
             self.lab_problems.append(f"{record.name}: {record.cleanup_problem}")
             self.say(f"   ⚠️ cleanup failed: {record.cleanup_problem}")
 
-        assert self.ledger is not None
-        self.ledger.write(
+        self.record_event(
             "check",
             name=record.name,
             outcome=record.outcome.value,
+            finished=finished,
             seconds=round(seconds, 1),
             reason=record.reason,
             cleanup_problem=record.cleanup_problem,
@@ -314,40 +382,76 @@ class LabPlugin:
 
     # --- The end -----------------------------------------------------------
 
-    def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> None:
-        if self.run_dir is None:
+    @pytest.hookimpl(wrapper=True)
+    def pytest_sessionfinish(self, session: pytest.Session, exitstatus: int) -> Any:
+        # A wrapper, so that everything else finishes first. After Ctrl-C the
+        # fixtures of the interrupted check — the clone, its VM — are torn down
+        # by pytest's own sessionfinish, and the lock must still be held and the
+        # ledger still open while that happens.
+        teardown_error: BaseException | None = None
+        try:
+            return (yield)
+        except BaseException as error:  # noqa: BLE001 — recorded as a lab problem below
+            teardown_error = error
+            return None
+        finally:
+            self._finish_run(teardown_error)
+
+    def _finish_run(self, teardown_error: BaseException | None) -> None:
+        try:
+            if self.run_dir is None:
+                return
+            if teardown_error is not None:
+                problem = (
+                    f"cleaning up after the run: {type(teardown_error).__name__}: "
+                    f"{_first_line(teardown_error)}"
+                )
+                self.lab_problems.append(problem)
+                self.say(f"⚠️ {problem}")
+            if self.interrupted:
+                self.say("Interrupted.")
+
+            never_started: list[str] = []
+            for nodeid, name in self.names.items():
+                record = self.records.get(nodeid)
+                if record is None:
+                    never_started.append(name)
+                    continue
+                if record.reported:
+                    continue
+                # Cut off by Ctrl-C. A verdict already pronounced stands; so does a
+                # pass whose cleanup was interrupted, which is a lab problem.
+                if record.called and record.outcome is Outcome.PASSED:
+                    record.cleanup_problem = record.cleanup_problem or "interrupted while cleaning up"
+                elif not record.called and record.outcome is Outcome.PASSED:
+                    record.outcome = Outcome.COULD_NOT_CHECK
+                    record.reason = "interrupted before it finished"
+                self._report(record, finished=False)
+
+            outcomes = [record.outcome for record in self.records.values()]
+            outcomes += [Outcome.COULD_NOT_CHECK] * len(never_started)
+            seconds = self.clock() - self.started
+            if not self.blocked:
+                line = summary(outcomes, seconds)
+                if never_started:
+                    line += f" ({len(never_started)} never started: {', '.join(never_started)})"
+                self.say(line)
+            if self.ledger is not None and self.ledger.error:
+                self.lab_problems.append(self.ledger.error)
+            if not self.blocked:
+                self.exit_code = exit_code(outcomes, len(self.lab_problems))
+            self.record_event(
+                "run-end",
+                exit_code=self.exit_code,
+                seconds=round(seconds, 1),
+                interrupted=self.interrupted,
+                never_started=never_started,
+                lab_problems=self.lab_problems,
+            )
+        finally:
+            if self.ledger is not None:
+                self.ledger.close()
             self.lock.release()
-            return
-
-        # A check that never finished — Ctrl-C arrived in the middle of it, or
-        # before it started — was not checked, whatever its record says so far.
-        finished = [record for record in self.records.values() if record.finished]
-        unfinished = [name for nodeid, name in self.names.items()
-                      if nodeid not in self.records or not self.records[nodeid].finished]
-        outcomes = [record.outcome for record in finished]
-        outcomes += [Outcome.COULD_NOT_CHECK] * len(unfinished)
-        if not self.blocked:
-            self.exit_code = exit_code(outcomes, len(self.lab_problems))
-        if self.interrupted:
-            self.say("Interrupted.")
-
-        seconds = self.clock() - self.started
-        if not self.blocked:
-            line = summary(outcomes, seconds)
-            if unfinished:
-                line += f" ({len(unfinished)} never finished: {', '.join(unfinished)})"
-            self.say(line)
-        assert self.ledger is not None
-        self.ledger.write(
-            "run-end",
-            exit_code=self.exit_code,
-            seconds=round(seconds, 1),
-            interrupted=self.interrupted,
-            never_finished=unfinished,
-            lab_problems=self.lab_problems,
-        )
-        self.ledger.close()
-        self.lock.release()
 
 
 def _first_line(value: BaseException) -> str:
@@ -371,7 +475,14 @@ def _git_state(root: Path) -> dict[str, Any]:
     def git(*args: str) -> str | None:
         try:
             done = subprocess.run(
-                ["git", "-C", str(root), *args], capture_output=True, text=True, timeout=10
+                # --no-optional-locks: a plain `git status` refreshes the index and
+                # takes index.lock, which would break a commit the operator is
+                # making at that moment.
+                ["git", "--no-optional-locks", "-C", str(root), *args],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=10,
             )
         except (OSError, subprocess.TimeoutExpired):
             return None

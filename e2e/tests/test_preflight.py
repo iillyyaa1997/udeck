@@ -8,10 +8,13 @@ from udeck_e2e import config
 from udeck_e2e.preflight import (
     VM,
     HostFacts,
+    Process,
     assess,
     find_orphans,
     find_tart,
+    parse_ps,
     parse_tart_list,
+    run_command,
     stop_orphans,
 )
 
@@ -92,7 +95,7 @@ def test_a_running_machine_the_lab_did_not_create_blocks_the_run_and_a_stopped_o
 
 
 def test_a_lab_machine_still_running_after_the_orphans_were_stopped_blocks_the_run():
-    facts = healthy(vms=[VM("udeck-e2e-20260916-120000-updates.sparkle", running=True)])
+    facts = healthy(vms=[VM("udeck-e2e-20260916-120000Z-updates.sparkle", running=True)])
     assert any("still running" in p for p in problems(facts))
 
 
@@ -101,8 +104,8 @@ def test_kept_and_left_behind_clones_are_notes_not_problems_and_golden_images_ar
         vms=[
             VM(GUEST_27.golden_vm, running=False),
             VM(GUEST_26.golden_vm, running=False),
-            VM(f"{config.KEPT_PREFIX}20260916-120000-panel.push", running=False),
-            VM("udeck-e2e-20260916-120000-updates.sparkle", running=False),
+            VM(f"{config.KEPT_PREFIX}20260916-120000Z-panel.push", running=False),
+            VM("udeck-e2e-20260916-120000Z-updates.sparkle", running=False),
         ]
     )
     assessment = assess(facts, GUEST_27)
@@ -113,73 +116,159 @@ def test_kept_and_left_behind_clones_are_notes_not_problems_and_golden_images_ar
     assert not any("golden" in note for note in assessment.notes)
 
 
-# --- Orphans ---------------------------------------------------------------
+# --- Processes and orphans ---------------------------------------------------
 
-PS = """\
-  101 tart             /Users/John Doe/Applications/tart.app/Contents/MacOS/tart run udeck-e2e-20260916-120000-panel.push --no-graphics --vnc-experimental
-  102 zsh              /bin/zsh -c ~/Applications/tart.app/Contents/MacOS/tart run udeck-e2e-20260916-120000-panel.dwell
-  103 tart             /Users/someone/Applications/tart.app/Contents/MacOS/tart run udeck-lab --no-graphics
-  104 tart             /Users/someone/Applications/tart.app/Contents/MacOS/tart list
-  105 tart             tart run udeck-e2e-golden-27
-  106 python3.13       python3 -m udeck_e2e tart run udeck-e2e-x
-  107 tart             /opt/tart run udeck-e2e-20260916-120000-updates.sparkle
+ME = 501
+START = "Wed Sep 16 17:04:32 2026"
+PS = f"""\
+  101   501 {START}     tart             /Users/John Doe/Applications/tart.app/Contents/MacOS/tart run udeck-e2e-20260916-120000Z-panel.push --no-graphics --vnc-experimental
+  102   501 {START}     zsh              /bin/zsh -c ~/Applications/tart.app/Contents/MacOS/tart run udeck-e2e-20260916-120000Z-panel.dwell
+  103   501 {START}     tart             /Users/someone/Applications/tart.app/Contents/MacOS/tart run udeck-lab --no-graphics
+  104   501 {START}     tart             /Users/someone/Applications/tart.app/Contents/MacOS/tart list
+  105   501 {START}     tart             tart run udeck-e2e-golden-27
+  106   501 {START}     python3.13       python3 -m udeck_e2e tart run udeck-e2e-x
+  107   501 {START}     tart             /opt/tart run udeck-e2e-20260916-120000Z-updates.sparkle
+  108   501 {START}     tart             tart run udeck-e2e-kept-20260916-120000Z-panel.push
+  109   502 {START}     tart             tart run udeck-e2e-20260916-130000Z-panel.dwell
+  110   501 {START}     tart             tart run --no-graphics udeck-e2e-20260916-120000Z-panel.edge
+garbage line
 """
 
 
-def test_only_tart_processes_running_a_lab_machine_are_orphans():
-    assert find_orphans(PS, own_pid=107) == [
-        (101, "udeck-e2e-20260916-120000-panel.push"),
-        (105, "udeck-e2e-golden-27"),
-    ]
+def test_ps_lines_are_read_with_their_start_time():
+    processes = parse_ps(PS)
+    assert len(processes) == 10
+    first = processes[0]
+    assert (first.pid, first.uid, first.started, first.name) == (101, 501, START, "tart")
+    assert first.args.endswith("--vnc-experimental")
 
 
-class FakeProcesses:
-    def __init__(self, ignores_term=()):
-        self.alive = {1, 2, 3}
+def test_only_this_users_tart_running_a_lab_clone_is_an_orphan():
+    orphans = find_orphans(parse_ps(PS), uid=ME, own_pid=107)
+    assert [p.pid for p in orphans] == [101]
+    # Not orphans: a shell that mentions tart (102), someone else's machine
+    # (103), not a run (104), a golden image (105), not tart (106), this
+    # process (107), a kept clone (108), another user's run (109), a run
+    # written with options first, which the lab never does (110).
+
+
+def test_every_tart_run_counts_as_a_running_machine():
+    assert [p.pid for p in parse_ps(PS) if p.runs_a_machine] == [101, 103, 105, 107, 108, 109, 110]
+
+
+class FakeHost:
+    """Processes that come and go, a clock, and every signal sent."""
+
+    def __init__(self, processes, ignores_term=()):
+        self.table = {p.pid: p for p in processes}
         self.ignores_term = set(ignores_term)
-        self.sent = []
+        self.events = []
         self.now = 0.0
 
+    def identify(self, pid):
+        return self.table.get(pid)
+
     def send(self, pid, sig):
-        self.sent.append((pid, sig))
-        if pid not in self.alive:
+        self.events.append(("signal", pid, sig))
+        if pid not in self.table:
             raise ProcessLookupError(pid)
         if sig == signal.SIGKILL or pid not in self.ignores_term:
-            self.alive.discard(pid)
+            del self.table[pid]
+
+    def note(self, text):
+        self.events.append(("note", text))
 
     def sleep(self, seconds):
         self.now += seconds
 
+    def stop(self, orphans, **kwargs):
+        stop_orphans(
+            orphans, self.note, self.identify, send=kwargs.get("send", self.send),
+            sleep=kwargs.get("sleep", self.sleep), clock=lambda: self.now, grace=30,
+        )
+
+    def signals(self):
+        return [(pid, sig) for kind, *rest in self.events if kind == "signal" for pid, sig in [rest]]
+
+
+def orphan(pid, name="udeck-e2e-a", started=START):
+    return Process(pid, ME, started, "tart", f"tart run {name}")
+
 
 def test_an_orphan_that_exits_on_sigterm_is_not_killed():
-    fake = FakeProcesses()
-    report = stop_orphans(
-        [(1, "udeck-e2e-a")], send=fake.send, alive=fake.alive.__contains__,
-        sleep=fake.sleep, clock=lambda: fake.now, grace=30,
-    )
-    assert fake.sent == [(1, signal.SIGTERM)]
-    assert report == ["Stopped the orphaned 'tart run udeck-e2e-a' (pid 1)."]
+    host = FakeHost([orphan(1)])
+    host.stop([orphan(1)])
+    assert host.signals() == [(1, signal.SIGTERM)]
 
 
-def test_an_orphan_that_ignores_sigterm_is_killed_after_the_grace_period():
-    fake = FakeProcesses(ignores_term={2})
-    report = stop_orphans(
-        [(2, "udeck-e2e-b")], send=fake.send, alive=fake.alive.__contains__,
-        sleep=fake.sleep, clock=lambda: fake.now, grace=30,
-    )
-    assert fake.sent == [(2, signal.SIGTERM), (2, signal.SIGKILL)]
-    assert fake.now >= 30
-    assert "Killed" in report[0]
+def test_every_signal_is_noted_before_it_is_sent():
+    host = FakeHost([orphan(2)], ignores_term={2})
+    host.stop([orphan(2)])
+    kinds = [event[0] for event in host.events]
+    assert host.signals() == [(2, signal.SIGTERM), (2, signal.SIGKILL)]
+    assert kinds.index("signal") > 0 and kinds[kinds.index("signal") - 1] == "note"
+    last_signal = len(kinds) - 1 - kinds[::-1].index("signal")
+    assert kinds[last_signal - 1] == "note"
+    assert host.now >= 30
 
 
 def test_an_orphan_that_is_already_gone_is_skipped_quietly():
-    fake = FakeProcesses()
-    fake.alive.clear()
-    report = stop_orphans(
-        [(3, "udeck-e2e-c")], send=fake.send, alive=fake.alive.__contains__,
-        sleep=fake.sleep, clock=lambda: fake.now,
+    host = FakeHost([])
+    host.stop([orphan(3)])
+    assert host.events == []
+
+
+def test_a_pid_reused_by_another_process_is_never_signalled():
+    # Listed as the orphan; by the time of the signal the pid is someone else.
+    host = FakeHost([Process(4, ME, "Thu Sep 17 09:00:00 2026", "Safari", "/Applications/Safari.app")])
+    host.stop([orphan(4)])
+    assert host.signals() == []
+
+
+def test_a_pid_reused_while_waiting_for_sigterm_is_not_sigkilled():
+    host = FakeHost([orphan(5)], ignores_term={5})
+
+    def sleep_and_reuse(seconds):
+        host.now += seconds
+        host.table[5] = Process(5, ME, "Thu Sep 17 09:00:00 2026", "Safari", "/Applications/Safari.app")
+
+    host.stop([orphan(5)], sleep=sleep_and_reuse)
+    assert host.signals() == [(5, signal.SIGTERM)]
+
+
+def test_a_signal_that_is_not_permitted_is_noted_not_raised():
+    host = FakeHost([orphan(6)])
+
+    def refuse(pid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    host.stop([orphan(6)], send=refuse)
+    assert any("Not allowed" in e[1] for e in host.events if e[0] == "note")
+
+
+# --- Machines seen in ps -----------------------------------------------------
+
+
+def test_a_tart_run_from_another_tart_home_blocks_the_run():
+    facts = healthy(vms=[], machines=[Process(9, ME, START, "tart", "tart run --no-graphics elsewhere")])
+    assert any("elsewhere" in p for p in problems(facts))
+
+
+def test_another_users_lab_machine_is_foreign_not_an_orphan_to_report_as_stuck():
+    machine = Process(9, 502, START, "tart", "tart run udeck-e2e-20260916-130000Z-panel.dwell")
+    found = problems(healthy(vms=[], machines=[machine], uid=ME))
+    assert any("Another virtual machine" in p and "uid 502" in p for p in found)
+    assert not any("still running" in p for p in found)
+
+
+def test_a_kept_clone_or_golden_image_opened_by_hand_blocks_but_is_named_as_such():
+    facts = healthy(
+        vms=[VM(f"{config.KEPT_PREFIX}20260916-120000Z-panel.push", running=True)],
+        machines=[Process(9, ME, START, "tart", f"tart run {GUEST_27.golden_vm}")],
+        uid=ME,
     )
-    assert report == []
+    found = problems(facts)
+    assert len(found) == 1 and "kept clone or a golden image is running" in found[0]
 
 
 # --- Finding Tart ----------------------------------------------------------
@@ -226,3 +315,9 @@ def test_tart_list_json_is_read_including_escaped_slashes():
 def test_unreadable_tart_list_output_raises(text):
     with pytest.raises((ValueError, KeyError)):
         parse_tart_list(text)
+
+
+def test_a_command_printing_bytes_that_are_not_utf8_does_not_stop_the_lab():
+    out, problem = run_command(["/usr/bin/printf", "ok \\377\\376 done"], "printing")
+    assert problem is None
+    assert out.startswith("ok ") and out.endswith(" done")

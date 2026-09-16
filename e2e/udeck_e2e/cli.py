@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from udeck_e2e import config
-from udeck_e2e.outcomes import EXIT_NOT_CHECKED
+from udeck_e2e.outcomes import EXIT_FAILED, EXIT_NOT_CHECKED
 from udeck_e2e.plugin import LabPlugin
 
 E2E_DIR = Path(__file__).resolve().parent.parent
@@ -74,10 +74,24 @@ def main(argv: list[str] | None = None) -> int:
         checks_dir=checks_dir,
         runs_root=REPO_ROOT / ".build" / "e2e",
     )
-    status = pytest.main(pytest_args(checks_dir, args.list), plugins=[plugin])
+    return run_pytest(plugin, pytest_args(checks_dir, args.list))
+
+
+def run_pytest(plugin: LabPlugin, args: list[str]) -> int:
+    """pytest.main, with every way it can end mapped onto the lab's exit codes.
+
+    An exception that escapes pytest — a second Ctrl-C during cleanup, a bug in
+    the lab — would otherwise make Python exit 1, which the lab reserves for
+    "uDeck failed". It exits 1 only if a check really did fail before that.
+    """
+    try:
+        status = pytest.main(args, plugins=[plugin])
+    except BaseException as error:  # noqa: BLE001 — reported, and mapped to an exit code
+        print(f"The lab stopped unexpectedly: {type(error).__name__}: {error}", file=sys.stderr)
+        return EXIT_FAILED if plugin.saw_failure else EXIT_NOT_CHECKED
     if status in (pytest.ExitCode.INTERNAL_ERROR, pytest.ExitCode.USAGE_ERROR):
         print(f"pytest could not run the checks ({pytest.ExitCode(status).name}).", file=sys.stderr)
-        return EXIT_NOT_CHECKED
+        return EXIT_FAILED if plugin.saw_failure else EXIT_NOT_CHECKED
     return plugin.exit_code
 
 

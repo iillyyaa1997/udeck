@@ -3,9 +3,10 @@
 Everything here is a question asked of the host — which Tart, which macOS, how
 much disk and memory, which machines are running — and every problem comes back
 with what to do about it. The only thing the pre-flight changes is the lab's own
-orphans: a `tart run` for a `udeck-e2e-` machine that outlived the run that
-started it. Nothing else on the host is touched: not its sleep settings, not
-machines the lab did not create, not a clone kept for inspection.
+orphans: a `tart run` of a lab clone, started by this user, that outlived the run
+that started it. Nothing else on the host is touched: not its sleep settings,
+not machines the lab did not create, not a kept clone or a golden image someone
+opened by hand, not another user's processes.
 """
 
 from __future__ import annotations
@@ -44,6 +45,46 @@ class VM:
     running: bool
 
 
+@dataclass(frozen=True)
+class Process:
+    """One line of `ps`, as much of it as the pre-flight needs."""
+
+    pid: int
+    uid: int
+    # `lstart`, the start time. With the pid it identifies a process: a pid can
+    # be reused by the time a signal is sent, a pid and a start time cannot.
+    started: str
+    name: str
+    args: str
+
+    @property
+    def runs_a_machine(self) -> bool:
+        return self.name == "tart" and _TART_RUN_ANY.search(self.args) is not None
+
+    @property
+    def lab_machine(self) -> str | None:
+        """The lab clone this process runs, if it is `tart run udeck-e2e-…` exactly.
+
+        The name has to follow `run` directly, which is how the lab starts its
+        machines; anything written differently is not recognised as the lab's
+        and is never signalled.
+        """
+        if self.name != "tart":
+            return None
+        match = _TART_RUN_LAB.search(self.args)
+        return match.group(1) if match else None
+
+
+_TART_RUN_ANY = re.compile(r"(?:^|/)tart run(?:\s|$)")
+_TART_RUN_LAB = re.compile(r"(?:^|/)tart run (" + re.escape(config.VM_PREFIX) + r"\S+)(?:\s|$)")
+
+
+def protected(name: str) -> bool:
+    """Lab machines a person may have opened on purpose: never an orphan."""
+    golden = {g.golden_vm for g in config.GUESTS.values()}
+    return name.startswith(config.KEPT_PREFIX) or name in golden
+
+
 @dataclass
 class HostFacts:
     tart: Path | None
@@ -53,6 +94,9 @@ class HostFacts:
     memory_gb: float
     memory_pressure: int
     vms: list[VM]
+    # `tart run` processes of any user, whatever Tart home they use.
+    machines: list[Process] = field(default_factory=list)
+    uid: int = field(default_factory=os.getuid)
     # Problems met while gathering the facts themselves.
     gathering: list[Problem] = field(default_factory=list)
 
@@ -128,33 +172,63 @@ def assess(facts: HostFacts, guest: Guest, jobs: int = 1) -> Assessment:
             )
         )
 
-    ours = [vm for vm in facts.vms if vm.name.startswith(config.VM_PREFIX)]
-    foreign_running = [vm.name for vm in facts.vms if vm.running and vm not in ours]
-    if foreign_running:
+    # Running machines, from both sources: `tart list` knows names in this Tart
+    # home, `ps` sees every `tart run` on the host — another Tart home, another
+    # user — and every one of them counts against macOS's two-guest limit.
+    running: dict[str, str] = {}
+    for vm in facts.vms:
+        if vm.running:
+            running[vm.name] = "this user"
+    for process in facts.machines:
+        name = process.lab_machine or _machine_name(process.args)
+        owner = "this user" if process.uid == facts.uid else f"uid {process.uid}"
+        running.setdefault(name, owner)
+
+    foreign = sorted(
+        f"{name} ({owner})"
+        for name, owner in running.items()
+        if not name.startswith(config.VM_PREFIX) or owner != "this user"
+    )
+    opened = sorted(
+        name
+        for name, owner in running.items()
+        if owner == "this user" and name.startswith(config.VM_PREFIX) and protected(name)
+    )
+    stuck = sorted(
+        name
+        for name, owner in running.items()
+        if owner == "this user" and name.startswith(config.VM_PREFIX) and not protected(name)
+    )
+    if foreign:
         problems.append(
             Problem(
-                "Another virtual machine is running: " + ", ".join(foreign_running) + ". "
+                "Another virtual machine is running: " + ", ".join(foreign) + ". "
                 "macOS runs at most two macOS guests at once, and the lab does not stop "
                 "machines it did not create.",
                 "Stop it, or run the lab once it is done.",
             )
         )
-    still_running = [vm.name for vm in ours if vm.running]
-    if still_running:
+    if opened:
+        problems.append(
+            Problem(
+                "A kept clone or a golden image is running: " + ", ".join(opened) + ". "
+                "The lab never stops these; somebody opened them on purpose.",
+                "Shut it down from inside, or 'tart stop <name>', when you are done with it.",
+            )
+        )
+    if stuck:
         problems.append(
             Problem(
                 "A lab machine is still running after its orphaned process was stopped: "
-                + ", ".join(still_running)
+                + ", ".join(stuck)
                 + ".",
                 "Run 'tart stop <name>' for it, then run the lab again.",
             )
         )
 
+    ours = [vm for vm in facts.vms if vm.name.startswith(config.VM_PREFIX)]
     kept = [vm.name for vm in ours if vm.name.startswith(config.KEPT_PREFIX)]
-    golden = {g.golden_vm for g in config.GUESTS.values()}
-    leftover = [
-        vm.name for vm in ours if not vm.running and vm.name not in golden and vm.name not in kept
-    ]
+    leftover = [vm.name for vm in ours if not vm.running and not protected(vm.name)]
     if kept:
         notes.append(
             f"{len(kept)} clone(s) kept for inspection: {', '.join(kept)}. "
@@ -174,75 +248,117 @@ def _major(version: str) -> int | None:
     return int(head) if head.isdigit() else None
 
 
-# --- Orphans ---------------------------------------------------------------
+def _machine_name(args: str) -> str:
+    """Best effort at the machine a `tart run` names, options allowed before it."""
+    after = _TART_RUN_ANY.split(args, maxsplit=1)[-1].split()
+    names = [word for word in after if not word.startswith("-")]
+    return names[0] if names else "(unnamed)"
 
-_TART_RUN = re.compile(r"(?:^|/)tart run (" + re.escape(config.VM_PREFIX) + r"\S+)(?:\s|$)")
+
+# --- Processes and orphans ---------------------------------------------------
+
+PS_COLUMNS = "pid=,uid=,lstart=,ucomm=,args="
 
 
-def find_orphans(ps_output: str, own_pid: int) -> list[tuple[int, str]]:
-    """`(pid, machine)` for each `tart run` of a lab machine.
+def parse_ps(text: str) -> list[Process]:
+    """Parse `ps -axww -o pid=,uid=,lstart=,ucomm=,args=` run with LC_ALL=C.
 
-    `ps_output` is `ps -axww -o pid=,ucomm=,args=`. The process's own name has
-    to be `tart`: matching the arguments alone would also catch a shell whose
-    command line merely mentions `tart run udeck-e2e-…`, and the pre-flight
-    must never signal a process that is not a lab machine.
-
-    Called only while holding the run lock, so any such process belongs to a
-    run that is no longer alive. Clones kept for inspection are shut down by
-    the run that keeps them and never appear here.
+    `lstart` is five words in the C locale ("Wed Sep 16 17:04:32 2026").
     """
-    orphans = []
-    for line in ps_output.splitlines():
-        fields = line.split(None, 2)
-        if len(fields) < 3 or not fields[0].isdigit():
+    processes = []
+    for line in text.splitlines():
+        fields = line.split(None, 8)
+        if len(fields) < 9 or not fields[0].isdigit() or not fields[1].isdigit():
             continue
-        pid, name, args = int(fields[0]), fields[1], fields[2]
-        if name != "tart" or pid == own_pid:
-            continue
-        match = _TART_RUN.search(args)
-        if match:
-            orphans.append((pid, match.group(1)))
-    return orphans
+        processes.append(
+            Process(
+                pid=int(fields[0]),
+                uid=int(fields[1]),
+                started=" ".join(fields[2:7]),
+                name=fields[7],
+                args=fields[8],
+            )
+        )
+    return processes
+
+
+def find_orphans(processes: list[Process], uid: int, own_pid: int) -> list[Process]:
+    """This user's `tart run udeck-e2e-…` processes, except kept and golden machines.
+
+    Called only while holding the run lock, which is one per user on the host,
+    so any such process belongs to a run that is no longer alive.
+    """
+    return [
+        p
+        for p in processes
+        if p.uid == uid
+        and p.pid != own_pid
+        and p.lab_machine is not None
+        and not protected(p.lab_machine)
+    ]
 
 
 def stop_orphans(
-    orphans: list[tuple[int, str]],
+    orphans: list[Process],
+    note: Callable[[str], None],
+    identify: Callable[[int], Process | None],
     send: Callable[[int, int], None] = os.kill,
-    alive: Callable[[int], bool] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
     grace: float = config.ORPHAN_TERM_GRACE_SECONDS,
-) -> list[str]:
-    """SIGTERM each orphan, SIGKILL whatever is left after `grace`. Says what it did."""
-    alive = alive or _alive
-    report = []
-    for pid, name in orphans:
-        try:
-            send(pid, signal.SIGTERM)
-        except ProcessLookupError:
+) -> None:
+    """SIGTERM each orphan, SIGKILL whatever is left after `grace`.
+
+    `note` hears about every signal *before* it is sent, so a run interrupted
+    half-way still leaves a record of what it did to the host. Before each
+    signal the process is identified again, and a pid that now belongs to a
+    different process — or to nobody — is left alone.
+    """
+    for orphan in orphans:
+        name = orphan.lab_machine
+        if identify(orphan.pid) != orphan:
+            continue
+        note(f"Stopping the orphaned 'tart run {name}' (pid {orphan.pid}) with SIGTERM.")
+        if not _signal(orphan, signal.SIGTERM, send, note):
             continue
         deadline = clock() + grace
-        while alive(pid) and clock() < deadline:
+        while identify(orphan.pid) == orphan and clock() < deadline:
             sleep(0.5)
-        if alive(pid):
-            try:
-                send(pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            report.append(f"Killed the orphaned 'tart run {name}' (pid {pid}); it ignored SIGTERM.")
-        else:
-            report.append(f"Stopped the orphaned 'tart run {name}' (pid {pid}).")
-    return report
+        if identify(orphan.pid) != orphan:
+            note(f"The orphaned 'tart run {name}' (pid {orphan.pid}) has exited.")
+            continue
+        note(
+            f"The orphaned 'tart run {name}' (pid {orphan.pid}) ignored SIGTERM for "
+            f"{grace:.0f}s; sending SIGKILL."
+        )
+        _signal(orphan, signal.SIGKILL, send, note)
 
 
-def _alive(pid: int) -> bool:
+def _signal(
+    orphan: Process, sig: int, send: Callable[[int, int], None], note: Callable[[str], None]
+) -> bool:
     try:
-        os.kill(pid, 0)
+        send(orphan.pid, sig)
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True
+        note(f"Not allowed to signal pid {orphan.pid}; leaving it alone.")
+        return False
     return True
+
+
+def identify(pid: int) -> Process | None:
+    """The process that has `pid` right now, or None."""
+    out, _ = run_command(["/bin/ps", "-ww", "-o", PS_COLUMNS, "-p", str(pid)], "identifying a process")
+    if not out:
+        return None
+    found = [p for p in parse_ps(out) if p.pid == pid]
+    return found[0] if found else None
+
+
+def process_table() -> tuple[list[Process], Problem | None]:
+    out, problem = run_command(["/bin/ps", "-axww", "-o", PS_COLUMNS], "listing processes")
+    return (parse_ps(out) if out else []), problem
 
 
 # --- Gathering -------------------------------------------------------------
@@ -276,7 +392,16 @@ def parse_tart_list(text: str) -> list[VM]:
 def run_command(args: list[str], step: str) -> tuple[str | None, Problem | None]:
     try:
         done = subprocess.run(
-            args, capture_output=True, text=True, timeout=COMMAND_DEADLINE_SECONDS, check=False
+            args,
+            capture_output=True,
+            text=True,
+            # A process list can hold any bytes at all; one argument that is not
+            # UTF-8 must not stop the lab.
+            errors="replace",
+            timeout=COMMAND_DEADLINE_SECONDS,
+            check=False,
+            # `ps` prints start times in the locale's words; the parser reads C.
+            env={**os.environ, "LC_ALL": "C"},
         )
     except subprocess.TimeoutExpired:
         return None, Problem(
@@ -295,7 +420,7 @@ def run_command(args: list[str], step: str) -> tuple[str | None, Problem | None]
     return done.stdout, None
 
 
-def gather() -> HostFacts:
+def gather(machines: list[Process]) -> HostFacts:
     gathering: list[Problem] = []
 
     tart = find_tart()
@@ -324,7 +449,13 @@ def gather() -> HostFacts:
     gathering += [problem] if problem else []
 
     tart_home = Path(os.environ.get("TART_HOME") or Path.home() / ".tart")
-    free = shutil.disk_usage(tart_home if tart_home.exists() else Path.home()).free / 1e9
+    try:
+        free = shutil.disk_usage(tart_home if tart_home.is_dir() else Path.home()).free / 1e9
+    except OSError as error:
+        free = 0.0
+        gathering.append(
+            Problem(f"reading free disk space: {error}.", "Check that TART_HOME is a directory.")
+        )
 
     out, problem = run_command(["/usr/sbin/sysctl", "-n", "hw.memsize"], "reading memory size")
     memory_gb = int(out) / 2**30 if out and out.strip().isdigit() else 0.0
@@ -344,9 +475,21 @@ def gather() -> HostFacts:
         memory_gb=memory_gb,
         memory_pressure=pressure,
         vms=vms,
+        machines=machines,
         gathering=gathering,
     )
 
 
-def process_table() -> tuple[str | None, Problem | None]:
-    return run_command(["/bin/ps", "-axww", "-o", "pid=,ucomm=,args="], "listing processes")
+def run(guest: Guest, note: Callable[[str], None]) -> tuple[Assessment, HostFacts]:
+    """The whole pre-flight: stop the lab's orphans, then look at the host.
+
+    Needs the run lock held.
+    """
+    processes, problem = process_table()
+    stop_orphans(find_orphans(processes, os.getuid(), os.getpid()), note, identify)
+    if problem is None:
+        processes, problem = process_table()
+    facts = gather([p for p in processes if p.runs_a_machine])
+    if problem:
+        facts.gathering.append(problem)
+    return assess(facts, guest), facts

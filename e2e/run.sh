@@ -12,7 +12,9 @@
 
 set -eu
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# CDPATH cleared: with it exported, `cd` prints the directory it chose and ROOT
+# would hold that line twice.
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 
 if ! command -v uv >/dev/null 2>&1; then
     echo "uv is not installed, and the lab runs its Python through it." >&2
