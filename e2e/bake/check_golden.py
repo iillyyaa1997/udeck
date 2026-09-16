@@ -6,7 +6,7 @@ ledger and cleanup — and anything that goes wrong is "could not check": a bake
 says nothing about uDeck.
 """
 
-from udeck_e2e import config, golden, probes
+from udeck_e2e import config, golden, interrupts, probes
 from udeck_e2e.errors import LabError
 
 
@@ -48,16 +48,36 @@ def check_bake(lab):
         if problem:
             raise LabError("shutting the bake down", f"{problem} — a power-off can lose settings")
 
-        if lab.tart.exists(guest.golden_vm):
-            lab.note(f"Replacing the previous {guest.golden_vm}.")
-            golden.forget(guest, lab.state_dir)
-            lab.tart.delete(guest.golden_vm)
-        lab.tart.rename(machine.name, guest.golden_vm)
-        machine.created = False
-        golden.write(guest, build, lab.state_dir)
+        with interrupts.deferred(lab.note, f"putting the new {guest.golden_vm} in place"):
+            replace_golden(lab, machine, build)
         lab.note(f"Baked {guest.golden_vm} from macOS {build}.")
     finally:
         if machine.created:
             for problem in machine.close(keep=False):
                 lab.note(f"   ⚠️ {problem}")
+
+
+def replace_golden(lab, machine, build):
+    """Swap the new image in so that a failure at any step leaves a usable one.
+
+    The old golden image is moved aside, not deleted, until the new one holds
+    its name and its record is written. Deleting it first once meant a failed
+    rename lost both the old image and the new.
+    """
+    guest = lab.guest
+    aside = None
+    if lab.tart.exists(guest.golden_vm):
+        aside = f"{guest.golden_vm}-previous-{lab.run_dir.name}"
+        lab.tart.rename(guest.golden_vm, aside)
+    try:
+        lab.tart.rename(machine.name, guest.golden_vm)
+    except LabError:
+        if aside:
+            lab.tart.rename(aside, guest.golden_vm)
+        raise
+    machine.created = False
+    golden.write(guest, build, lab.state_dir)
+    if aside:
+        lab.note(f"Replaced the previous {guest.golden_vm}.")
+        lab.tart.delete(aside)
 

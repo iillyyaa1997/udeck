@@ -25,7 +25,11 @@ fi
 # The lab's Python environment lives under .build/, which git already ignores,
 # so running the lab adds nothing to the working tree.
 export UV_PROJECT_ENVIRONMENT="$ROOT/.build/e2e/venv"
-uv sync --quiet --frozen --project "$ROOT/e2e"
+if ! uv sync --quiet --frozen --project "$ROOT/e2e"; then
+    # 2, not uv's own 1: the lab exits 1 only for "uDeck failed".
+    echo "The lab could not prepare its Python environment (uv sync failed)." >&2
+    exit 2
+fi
 
 # The lab runs as this shell's own process, not under `uv run`. uv forwards
 # Ctrl-C to its child, which then receives it twice — once from the terminal,

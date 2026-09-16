@@ -15,13 +15,23 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import IO, Any
 
-from udeck_e2e import config
+from udeck_e2e import config, interrupts
 from udeck_e2e.errors import LabError
 from udeck_e2e.preflight import VM, parse_tart_list
 
 Note = Callable[[str], None]
 
 VM_LIMIT_TEXT = "exceeds the system limit"
+
+
+def tart_environment() -> dict[str, str]:
+    return {
+        **os.environ,
+        "LC_ALL": "C",
+        # Tart otherwise makes room for a pull or a clone by deleting cached
+        # images to fit — images that may be the operator's own, not the lab's.
+        "TART_NO_AUTO_PRUNE": "1",
+    }
 
 
 class Tart:
@@ -44,24 +54,24 @@ class Tart:
         seconds: float = config.TART_CALL_SECONDS,
         retry_if_hung: bool = False,
         check: bool = True,
+        changes_state: bool = False,
     ) -> subprocess.CompletedProcess[str]:
+        """Run `tart args…`.
+
+        `changes_state`: a call that alters Tart's store — clone, set, rename,
+        delete, stop — is finished even if the lab is told to stop meanwhile,
+        and the stop takes effect right after. Killed half-way, it could leave
+        a clone moved into place but not yet known to the lab.
+        """
         attempts = 1 + (config.KNOWN_FAILURE_RETRIES if retry_if_hung else 0)
         shown = "tart " + " ".join(args)
         for attempt in range(1, attempts + 1):
             try:
-                done = self._run(
-                    [str(self.binary), *args],
-                    capture_output=True,
-                    text=True,
-                    errors="replace",
-                    timeout=seconds,
-                    check=False,
-                    env={**os.environ, "LC_ALL": "C"},
-                    # Out of the terminal's process group: Ctrl-C is for the lab
-                    # to handle, and must not kill the `tart stop` or `tart
-                    # delete` of the cleanup it starts.
-                    start_new_session=True,
-                )
+                if changes_state:
+                    with interrupts.deferred(self.note, f"'{shown}'"):
+                        done = self._invoke(args, seconds)
+                else:
+                    done = self._invoke(args, seconds)
             except subprocess.TimeoutExpired:
                 if attempt < attempts:
                     self.note(f"   retry {attempt}/{attempts - 1}: '{shown}' hung for {seconds:.0f}s ({step})")
@@ -73,6 +83,21 @@ class Tart:
                 raise LabError(step, f"'{shown}' exited {done.returncode}: {last_line(done)}")
             return done
         raise AssertionError("unreachable")
+
+    def _invoke(self, args: list[str], seconds: float) -> subprocess.CompletedProcess[str]:
+        return self._run(
+            [str(self.binary), *args],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=seconds,
+            check=False,
+            env=tart_environment(),
+            # Never the operator's terminal: whatever is typed there is not for Tart.
+            stdin=subprocess.DEVNULL,
+            # Out of the terminal's process group, so Ctrl-C reaches the lab only.
+            start_new_session=True,
+        )
 
     # --- The calls the lab makes ---------------------------------------------
 
@@ -86,6 +111,9 @@ class Tart:
     def exists(self, name: str) -> bool:
         return any(vm.name == name for vm in self.list())
 
+    def running(self, name: str) -> bool:
+        return any(vm.name == name and vm.running for vm in self.list())
+
     def get(self, name: str) -> dict[str, Any]:
         done = self.call(["get", name, "--format", "json"], f"reading {name}'s settings", retry_if_hung=True)
         try:
@@ -97,19 +125,19 @@ class Tart:
         self.call(["pull", image], f"downloading {image}", seconds=config.PULL_SECONDS)
 
     def clone(self, source: str, name: str) -> None:
-        self.call(["clone", source, name], f"cloning {name}", seconds=config.CLONE_SECONDS)
+        self.call(["clone", source, name], f"cloning {name}", seconds=config.CLONE_SECONDS, changes_state=True)
 
     def set(self, name: str, *options: str) -> None:
-        self.call(["set", name, *options], f"configuring {name}")
+        self.call(["set", name, *options], f"configuring {name}", changes_state=True)
 
     def rename(self, name: str, new_name: str) -> None:
-        self.call(["rename", name, new_name], f"renaming {name} to {new_name}")
+        self.call(["rename", name, new_name], f"renaming {name} to {new_name}", changes_state=True)
 
     def delete(self, name: str) -> None:
-        self.call(["delete", name], f"deleting {name}")
+        self.call(["delete", name], f"deleting {name}", changes_state=True)
 
     def stop(self, name: str) -> None:
-        self.call(["stop", name], f"stopping {name}")
+        self.call(["stop", name], f"stopping {name}", changes_state=True)
 
     def ip(self, name: str) -> str | None:
         """The machine's address now, or None while it has none."""
@@ -131,8 +159,10 @@ class Tart:
         try:
             return self._popen(
                 [str(self.binary), "run", name, "--no-graphics", "--vnc-experimental"],
+                stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=subprocess.STDOUT,
+                env=tart_environment(),
                 start_new_session=True,
             )
         except OSError as error:

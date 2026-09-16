@@ -79,6 +79,10 @@ KEEP_RUNS = 10
 # writes inside it — builds, logs, an update — with a margin for the host.
 MIN_FREE_DISK_GB_PER_VM = 20
 
+# Free space a bake asks for: the base image's disk is 40–50 GB when pulled, and
+# the lab tells Tart never to delete cached images to make room.
+MIN_FREE_DISK_GB_FOR_BAKE = 60
+
 # Memory a guest is given, and what the pre-flight leaves for the host on top.
 # The Cirrus images default to 8 GB.
 VM_MEMORY_GB = 8

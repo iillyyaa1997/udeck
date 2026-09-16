@@ -8,15 +8,12 @@ never a verdict on uDeck.
 
 from __future__ import annotations
 
-import signal
-import threading
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from pathlib import Path
 from typing import IO, Any
 
-from udeck_e2e import config
+from udeck_e2e import config, interrupts
 from udeck_e2e.errors import LabError
 from udeck_e2e.guest import SSH
 from udeck_e2e.tart import VM_LIMIT_TEXT, Tart
@@ -55,15 +52,21 @@ class Machine:
         self.display = display
         self.process: Any = None
         self.created = False
+        # Where the Mac's sleep marker stood when this machine was made, so a
+        # sleep during any check that shared it is noticed (see the plugin).
+        self.slept_at = ""
         self._log: IO[bytes] | None = None
+        self._log_start = 0
         self._sleep = sleep
         self._clock = clock
 
     # --- Coming up -----------------------------------------------------------
 
     def create(self) -> None:
-        self.tart.clone(self.source, self.name)
+        # Marked before cloning: a clone interrupted or failed half-way may still
+        # have left the machine in Tart's store, and close() must try to delete it.
         self.created = True
+        self.tart.clone(self.source, self.name)
         # Clones of one image share a serial number, and with it an identity
         # macOS services key on; each clone gets its own.
         options = ["--random-serial"]
@@ -89,7 +92,7 @@ class Machine:
         self._wait_for_agent()
         self._install_key()
         self.ssh.host = address
-        self.ssh.wait_up(f"waiting for SSH on {self.name}")
+        self.ssh.wait_up(f"waiting for SSH on {self.name}", alive=self.ensure_running)
         self.wait_for_desktop(f"waiting for {self.name}'s desktop")
 
     def _start(self) -> None:
@@ -97,13 +100,25 @@ class Machine:
         if self._log is not None:
             self._log.close()
         self._log = open(self.work_dir / "tart-run.log", "ab")
+        # One log for all attempts, read from where this attempt began: the limit
+        # message of a refused first attempt must not explain a later, different
+        # failure.
+        self._log_start = self._log.tell()
         self.process = self.tart.start(self.name, self._log)
 
     def _log_text(self) -> str:
         try:
-            return (self.work_dir / "tart-run.log").read_text(errors="replace")
+            with open(self.work_dir / "tart-run.log", "rb") as log:
+                log.seek(self._log_start)
+                return log.read().decode(errors="replace")
         except OSError:
             return ""
+
+    def ensure_running(self, step: str) -> None:
+        """Raise at once if `tart run` has exited, with what it said."""
+        if self.process is not None and self.process.poll() is not None:
+            tail = self._log_text().strip().splitlines()[-1:] or ["(no output)"]
+            raise LabError(step, f"the machine stopped: 'tart run' exited {self.process.returncode}: {tail[0]}")
 
     def _wait_for_address(self) -> str:
         step = f"waiting for {self.name} to get an address"
@@ -126,6 +141,7 @@ class Machine:
         step = f"waiting for the guest agent on {self.name}"
         deadline = self._clock() + config.AGENT_SECONDS
         while True:
+            self.ensure_running(step)
             # Until the agent is up, `tart exec` does not fail — it waits (measured:
             # more than 30 s on a first boot). A single attempt that runs out of
             # time is "not yet", not an answer.
@@ -158,6 +174,7 @@ class Machine:
         """Until the user is logged in at the console and Finder is running."""
         deadline = self._clock() + config.DESKTOP_SECONDS
         while True:
+            self.ensure_running(step)
             try:
                 done = self.ssh.run(
                     "stat -f %Su /dev/console; pgrep -x Finder >/dev/null && echo finder",
@@ -178,25 +195,32 @@ class Machine:
     # --- Rebooting -----------------------------------------------------------
 
     def reboot(self) -> None:
-        """Restart from inside, the way a person would, and wait for the desktop."""
-        before = self.ssh.boot_time()
+        """Restart from inside, the way a person would, and wait until it is usable again.
+
+        Proved by the boot session changing — a UUID macOS makes on every boot —
+        not by the boot time, which a clock change moves without a restart.
+        """
+        before = self.ssh.boot_session()
         self.ssh.run("sudo -n shutdown -r now", f"restarting {self.name}", seconds=30, check=False)
         step = f"waiting for {self.name} to come back after the restart"
         deadline = self._clock() + config.REBOOT_SECONDS
         while True:
+            self.ensure_running(step)
             address = self.tart.ip(self.name)
             if address:
                 self.ssh.host = address
                 try:
-                    now = self.ssh.boot_time()
+                    now = self.ssh.boot_session()
                 except LabError:
                     now = before
                 if now != before:
                     break
             if self._clock() >= deadline:
-                raise LabError(step, f"the guest's boot time did not change within {config.REBOOT_SECONDS}s")
+                raise LabError(step, f"the guest did not restart within {config.REBOOT_SECONDS}s")
             self._sleep(3)
         self.wait_for_desktop(f"waiting for {self.name}'s desktop after the restart")
+        # The agent starts late after a restart too, and the lab reads the screen through it.
+        self._wait_for_agent()
 
     # --- Going away ----------------------------------------------------------
 
@@ -247,7 +271,7 @@ class Machine:
         Every step is attempted even if an earlier one failed; what went wrong
         comes back as a list, empty when all is well.
         """
-        with ctrl_c_deferred(self.note, self.name):
+        with interrupts.deferred(self.note, f"cleaning up {self.name}"):
             return self._close(keep)
 
     def _close(self, keep: bool) -> list[str]:
@@ -264,6 +288,14 @@ class Machine:
         if not self.created:
             return problems
         try:
+            # A `tart run` the lab lost track of — started, but interrupted before
+            # it was remembered — would keep the machine running and refuse the delete.
+            if self.tart.running(self.name):
+                problems.append(f"{self.name} was still running with no process the lab knew of; stopped with 'tart stop'")
+                self.tart.stop(self.name)
+        except LabError as error:
+            problems.append(str(error))
+        try:
             if keep:
                 kept = config.KEPT_PREFIX + self.name.removeprefix(config.VM_PREFIX)
                 self.tart.rename(self.name, kept)
@@ -272,45 +304,12 @@ class Machine:
                 self.tart.delete(self.name)
             self.created = False
         except LabError as error:
-            problems.append(str(error))
+            if "does not exist" in error.reason:
+                self.created = False  # the clone never got as far as Tart's store
+            else:
+                problems.append(str(error))
         return problems
 
 
 class _RefusedByLimit(Exception):
     pass
-
-
-# Presses of Ctrl-C during a cleanup before the lab gives up on it.
-ABANDON_CLEANUP_AFTER = 3
-
-
-@contextmanager
-def ctrl_c_deferred(note: Note, name: str) -> Iterator[None]:
-    """Let a cleanup finish although Ctrl-C is pressed again.
-
-    The first Ctrl-C stops the run and starts the cleanup; an impatient second
-    one used to cut the cleanup short and leave the clone running or behind.
-    Now further presses are acknowledged, and only the third abandons it.
-    """
-    if threading.current_thread() is not threading.main_thread():
-        yield
-        return
-    previous = signal.getsignal(signal.SIGINT)
-    presses = 0
-
-    def acknowledge(signum: int, frame: object) -> None:
-        nonlocal presses
-        presses += 1
-        if presses >= ABANDON_CLEANUP_AFTER:
-            signal.signal(signal.SIGINT, previous)
-            raise KeyboardInterrupt
-        note(
-            f"   still cleaning up {name}; press Ctrl-C {ABANDON_CLEANUP_AFTER - presses} more "
-            "time(s) to abandon it and leave the clone behind"
-        )
-
-    signal.signal(signal.SIGINT, acknowledge)
-    try:
-        yield
-    finally:
-        signal.signal(signal.SIGINT, previous)

@@ -112,6 +112,7 @@ class FakeMachine:
     def __init__(self, lab, *, name, source, display, label):
         self.lab, self.name, self.source, self.display, self.label = lab, name, source, display, label
         self.events = []
+        self.slept_at = ""
 
     def create(self):
         self.events.append("create")
@@ -423,7 +424,8 @@ def test_ctrl_c_during_cleanup_of_a_passing_check_keeps_the_pass_and_spoils_the_
     lab.write("check_panel.py", "def check_dwell(vm): pass\n")
     code, out = lab.run()
     assert code == 2
-    assert "✅ panel.dwell" in out and "interrupted while cleaning up" in out
+    assert "✅ panel.dwell" in out and "stopped while this check's machine was being cleaned up" in out
+    assert lab.ledger_checks()["panel.dwell"]["stopped_in_cleanup"] is True
 
 
 def test_after_ctrl_c_the_lock_is_held_until_fixtures_are_torn_down_and_their_errors_count(lab):
@@ -652,12 +654,19 @@ def test_a_mac_that_slept_during_a_check_turns_its_failure_into_could_not_check(
         "    expect(False, 'SSH timed out after the pointer moved')\n"
         "def check_push(machine): pass\n",
     )
-    moments = iter(["{ sec = 0 }", "{ sec = 1790000000 }"] + ["{ sec = 1790000000 }"] * 10)
-    lab.slept = None
-    plugin_slept = lambda: next(moments)  # noqa: E731
+    marker = lab.pytester.path / "slept"
+    marker.write_text("{ sec = 0 }")
+    lab.write(
+        "check_panel.py",
+        "from udeck_e2e.errors import expect\n"
+        "def check_dwell(machine):\n"
+        f"    open({str(marker)!r}, 'w').write('{{ sec = 1790000000 }}')  # the Mac sleeps\n"
+        "    expect(False, 'SSH timed out after the pointer moved')\n"
+        "def check_push(machine): pass\n",
+    )
     out = io.StringIO()
     plugin = lab.plugin(out=out)
-    plugin.slept_at = plugin_slept
+    plugin.slept_at = marker.read_text
     lab.pytester.inline_run(*pytest_args(lab.checks, False), plugins=[plugin])
     text = out.getvalue()
     assert plugin.exit_code == 2
@@ -666,3 +675,50 @@ def test_a_mac_that_slept_during_a_check_turns_its_failure_into_could_not_check(
 
 def test_what_the_lab_says_during_a_check_is_not_captured_by_pytest():
     assert "--capture=no" in pytest_args(E2E_DIR / "checks", False)
+
+
+def test_a_sleep_during_an_earlier_passing_check_on_a_shared_machine_still_counts(lab):
+    marker = lab.pytester.path / "slept"
+    marker.write_text("{ sec = 0 }")
+    lab.write(
+        "check_panel.py",
+        "from udeck_e2e.errors import expect\n"
+        "def check_dwell(machine):\n"
+        f"    open({str(marker)!r}, 'w').write('{{ sec = 1790000000 }}')  # sleeps, but passes\n"
+        "def check_push(machine):\n    expect(False, 'the frozen guest missed the pointer')\n",
+    )
+    out = io.StringIO()
+    plugin = lab.plugin(out=out, vm_mode="per-group")
+    plugin.slept_at = marker.read_text
+    lab.pytester.inline_run(*pytest_args(lab.checks, False), plugins=[plugin])
+    assert plugin.exit_code == 2
+    assert "went to sleep" in out.getvalue()
+
+
+def test_a_bake_needs_room_for_the_base_image(lab):
+    lab.mode = "bake"
+    lab.write("check_golden.py", "def check_bake(lab): pass\n")
+    original = lab.fake_preflight
+
+    def little_disk(guest, note):
+        assessment, about = original(guest, note)
+        return assessment, {**about, "free_disk_gb": 30}
+
+    lab.fake_preflight = little_disk
+    code, out = lab.run()
+    assert code == 2 and "a bake wants" in out
+
+
+def test_the_self_check_reports_a_restart_that_did_not_happen_as_could_not_check(lab):
+    import shutil
+
+    shutil.copy(E2E_DIR / "selfcheck" / "check_lab.py", lab.checks / "check_lab.py")
+    FakeMachine.boot_session = lambda self: "same-session"
+    FakeMachine.reboot = lambda self: None
+    FakeMachine.ssh = property(lambda self: self)
+    try:
+        code, out = lab.run("lab.restart-comes-back")
+    finally:
+        del FakeMachine.boot_session, FakeMachine.reboot, FakeMachine.ssh
+    assert code == 2
+    assert "could not check: checking the restart" in out

@@ -66,3 +66,17 @@ def test_cleanup_removes_golden_images_only_when_asked_and_forgets_them(tmp_path
 def test_a_clone_that_will_not_delete_makes_cleanup_exit_2(tmp_path):
     tart = FakeTart([VM("udeck-e2e-x", False)], fails={"udeck-e2e-x"})
     assert clean(tart, print, include_golden=False, state_dir=tmp_path) == 2
+
+
+def test_cleanup_list_says_what_would_go_and_deletes_nothing(tmp_path):
+    tart, said = FakeTart(VMS[:4]), []
+    assert clean(tart, said.append, include_golden=True, dry_run=True, state_dir=tmp_path) == 0
+    assert tart.deleted == []
+    assert sum("would delete" in s for s in said) == 3
+
+
+def test_cleanup_golden_for_one_guest_leaves_the_other_guests_golden_image(tmp_path):
+    other = config.GUESTS["26"]
+    tart = FakeTart([VM(GUEST.golden_vm, False), VM(other.golden_vm, False)])
+    clean(tart, print, include_golden=True, guests=[other], state_dir=tmp_path)
+    assert tart.deleted == [other.golden_vm]

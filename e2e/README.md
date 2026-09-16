@@ -27,8 +27,12 @@ e2e/run.sh updates.wrong-key   # one check
 e2e/run.sh --guest 26          # on macOS 26 instead of 27 (bake it first)
 e2e/run.sh --vm per-group      # one machine per group instead of per check
 e2e/run.sh --keep-on-failure   # keep a failed check's machine to look at
+e2e/run.sh cleanup --list      # what cleanup would remove, removing nothing
 e2e/run.sh cleanup             # remove kept or left-behind clones
+e2e/run.sh cleanup --golden --guest 26   # …and macOS 26's golden image
 ```
+
+An option a command would ignore is refused rather than ignored.
 
 You need [Tart](https://tart.run) — exactly the version pinned in
 [`udeck_e2e/config.py`](udeck_e2e/config.py) — and
@@ -56,7 +60,9 @@ Every machine is an APFS clone of a **golden image**: Cirrus Labs' pinned
 read back after a restart before the image is kept. The golden image lives in
 Tart's store as `udeck-e2e-golden-<guest>`, shared by every checkout; a note of
 what it was baked from sits in `~/Library/Application Support/udeck-e2e/`, and a
-golden image baked from another base image or by an older bake is refused.
+golden image baked from another base image or by an older bake is refused. A
+bake wants 60 GB free, and the lab never lets Tart delete cached images to make
+room; a new golden image replaces the old one only once it holds the name.
 
 A clone gets its own serial number, boots headless, receives this run's
 throwaway SSH key through Tart's guest agent, and is ready when SSH answers and
@@ -102,9 +108,13 @@ collected. The last ten runs that checked something are kept, and separately the
 last ten the pre-flight refused, so retrying a refused run cannot delete the
 evidence of a real one.
 
-Ctrl-C stops the run and still cleans up: the interrupted check's machine is
-torn down while the lock is held, a verdict the check had already reached stands,
-and anything unfinished counts as "could not check".
+Ctrl-C stops the run and still cleans up, and so do closing the terminal and
+`kill`: the interrupted check's machine is shut down from inside and deleted
+while the lock is held, a verdict the check had already reached stands, anything
+unfinished counts as "could not check", and a stopped run never exits 0. A
+cleanup that has started is finished before the lab stops — pressing Ctrl-C
+again is acknowledged, not obeyed, until the third press, which abandons the
+machine.
 
 ## Writing a check
 

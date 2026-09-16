@@ -43,14 +43,12 @@ def screen(machine: Machine) -> tuple[int, int, float]:
 
 
 def spotlight_enabled(machine: Machine) -> bool:
-    done = machine.ssh.run("mdutil -s /", f"asking {machine.name} about Spotlight", check=False)
+    done = machine.ssh.ask("mdutil -s /", f"asking {machine.name} about Spotlight")
     return "Indexing enabled" in done.stdout
 
 
 def running(machine: Machine, process: str) -> bool:
-    done = machine.ssh.run(
-        f"pgrep -x {shlex.quote(process)}", f"looking for {process} on {machine.name}", check=False
-    )
+    done = machine.ssh.ask(f"pgrep -x {shlex.quote(process)}", f"looking for {process} on {machine.name}")
     return done.returncode == 0
 
 
@@ -61,9 +59,7 @@ def system_events_allowed(machine: Machine) -> tuple[bool, str]:
         'tell application "System Events" to get name of every process whose frontmost is true\n'
         'end timeout'
     )
-    done = machine.ssh.run(
-        f"osascript -e {shlex.quote(script)}", f"asking System Events on {machine.name}", seconds=60, check=False
-    )
+    done = machine.ssh.ask(f"osascript -e {shlex.quote(script)}", f"asking System Events on {machine.name}", seconds=60)
     said = (done.stdout or done.stderr).strip()
     return done.returncode == 0, said
 

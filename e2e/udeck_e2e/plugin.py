@@ -80,6 +80,7 @@ class CheckRecord:
     # interrupt after that point does not take the verdict away.
     called: bool = False
     reported: bool = False
+    stopped_in_cleanup: bool = False
     slept_at: str = ""
 
 
@@ -338,6 +339,14 @@ class LabPlugin:
         )
         for line in assessment.notes:
             self.say(line)
+        if self.mode == "bake" and about.get("free_disk_gb", 0) < config.MIN_FREE_DISK_GB_FOR_BAKE:
+            assessment.problems.append(
+                preflight.Problem(
+                    f"Only {about.get('free_disk_gb', 0):.0f} GB is free; a bake wants "
+                    f"{config.MIN_FREE_DISK_GB_FOR_BAKE} GB for the base image.",
+                    "Free some space. The lab never lets Tart delete cached images to make room.",
+                )
+            )
         if not assessment.problems and self.mode != "bake":
             missing = golden.problem(self.guest, about.get("vms", []), self.state_dir)
             if missing:
@@ -409,6 +418,7 @@ class LabPlugin:
         else:
             label = "run"
         machine = self.new_machine(label)
+        machine.slept_at = self.slept_at()
         try:
             machine.create()
             machine.boot()
@@ -429,6 +439,12 @@ class LabPlugin:
     def pytest_runtest_makereport(self, item: pytest.Item, call: pytest.CallInfo[None]) -> Any:
         report = yield
         record = self.records[item.nodeid]
+        if call.when == "setup":
+            shared = getattr(item, "funcargs", {}).get("machine")
+            if shared is not None and getattr(shared, "slept_at", ""):
+                # A machine that outlives one check (per group, per run) may have
+                # slept through an earlier check that passed; measure from its birth.
+                record.slept_at = shared.slept_at
         if call.when == "call":
             record.called = True
         excinfo = call.excinfo
@@ -498,6 +514,8 @@ class LabPlugin:
         if record.cleanup_problem:
             self.lab_problems.append(f"{record.name}: {record.cleanup_problem}")
             self.say(f"   ⚠️ cleanup failed: {record.cleanup_problem}")
+        if record.stopped_in_cleanup:
+            self.say("   the run was stopped while this check's machine was being cleaned up")
 
         self.record_event(
             "check",
@@ -507,6 +525,7 @@ class LabPlugin:
             seconds=round(seconds, 1),
             reason=record.reason,
             cleanup_problem=record.cleanup_problem,
+            stopped_in_cleanup=record.stopped_in_cleanup,
             evidence=self.shown(evidence) if evidence is not None and evidence.exists() else None,
         )
 
@@ -555,7 +574,9 @@ class LabPlugin:
                 # Cut off by Ctrl-C. A verdict already pronounced stands; so does a
                 # pass whose cleanup was interrupted, which is a lab problem.
                 if record.called and record.outcome is Outcome.PASSED:
-                    record.cleanup_problem = record.cleanup_problem or "interrupted while cleaning up"
+                    # The stop waited for the cleanup to finish (see interrupts),
+                    # so this is not a failed cleanup — only a run that did not end.
+                    record.stopped_in_cleanup = True
                 elif not record.called and record.outcome is Outcome.PASSED:
                     record.outcome = Outcome.COULD_NOT_CHECK
                     record.reason = "interrupted before it finished"
@@ -573,6 +594,10 @@ class LabPlugin:
                 self.lab_problems.append(self.ledger.error)
             if not self.blocked:
                 self.exit_code = exit_code(outcomes, len(self.lab_problems))
+                if self.interrupted and self.exit_code == EXIT_PASSED:
+                    # A run somebody stopped is never green, even if every check it
+                    # got to had passed.
+                    self.exit_code = EXIT_NOT_CHECKED
             self.record_event(
                 "run-end",
                 exit_code=self.exit_code,

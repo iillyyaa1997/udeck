@@ -168,7 +168,8 @@ class FakeTart:
 
     def stop(self, name):
         self.calls.append(("stop", name))
-        self.host.process.returncode = 0
+        if self.host.process is not None:
+            self.host.process.returncode = 0
 
     def rename(self, name, new):
         self.calls.append(("rename", name, new))
@@ -177,6 +178,9 @@ class FakeTart:
         self.calls.append(("delete", name))
         if self.host.delete_fails:
             raise LabError(f"deleting {name}", "busy")
+
+    def running(self, name):
+        return self.host.still_running
 
 
 class FakeGuest:
@@ -187,16 +191,20 @@ class FakeGuest:
         self.host = None
         self.commands = []
         self.boot = 1000
+        self.session = "00000000-0000-0000-0000-000000000001"
 
     def run(self, command, step, seconds=0, check=True):
         self.commands.append(command)
         if command == "sysctl -n kern.boottime":
             return done([], 0, f"{{ sec = {self.boot}, usec = 5 }} Thu")
+        if command == "sysctl -n kern.bootsessionuuid":
+            return done([], 0, self.session + "\n")
         if command.startswith("stat -f %Su"):
             return done([], 0, "admin\nfinder\n")
         if "shutdown -r" in command:
             if self.lab_host.restarts:
                 self.boot += 60
+                self.session = "00000000-0000-0000-0000-000000000002"
             return done([], 255)
         if "shutdown -h" in command:
             if self.lab_host.shuts_down:
@@ -207,8 +215,13 @@ class FakeGuest:
     def boot_time(self):
         return parse_boot_time(self.run("sysctl -n kern.boottime", "boot time").stdout)
 
-    def wait_up(self, step, seconds=0):
+    def boot_session(self):
+        return self.run("sysctl -n kern.bootsessionuuid", "boot session").stdout.strip()
+
+    def wait_up(self, step, seconds=0, alive=None):
         self.commands.append("wait_up")
+        if alive:
+            alive(step)
 
 
 class Host:
@@ -220,6 +233,7 @@ class Host:
         self.restarts = True
         self.shuts_down = True
         self.delete_fails = False
+        self.still_running = False
         self.process = None
         self.tart = FakeTart(self)
         self.guest = FakeGuest(self)
@@ -295,18 +309,42 @@ def test_an_agent_that_never_answers_is_a_lab_error_at_its_deadline(host):
     assert host.clock.now >= config.AGENT_SECONDS
 
 
-def test_a_restart_is_proved_by_the_boot_time_moving(host):
+def test_a_restart_is_proved_by_the_boot_session_changing(host):
     host.machine.create()
     host.machine.boot()
     host.machine.reboot()
-    assert host.guest.boot == 1060
+    assert host.guest.session.endswith("2")
+
+
+def test_a_clock_step_that_moves_the_boot_time_is_not_a_restart(host):
+    host.restarts = False
+    host.machine.create()
+    host.machine.boot()
+    original = host.guest.run
+
+    def clock_steps(command, step, seconds=0, check=True):
+        if "shutdown -r" in command:
+            host.guest.boot += 3600  # the clock moved; nothing restarted
+        return original(command, step, seconds, check)
+
+    host.guest.run = clock_steps
+    with pytest.raises(LabError, match="did not restart"):
+        host.machine.reboot()
+
+
+def test_after_a_restart_the_agent_is_waited_for_again(host):
+    host.machine.create()
+    host.machine.boot()
+    before = sum(1 for c in host.tart.calls if c[0] == "exec")
+    host.machine.reboot()
+    assert sum(1 for c in host.tart.calls if c[0] == "exec") > before
 
 
 def test_a_restart_that_never_happens_is_a_lab_error(host):
     host.restarts = False
     host.machine.create()
     host.machine.boot()
-    with pytest.raises(LabError, match="boot time did not change"):
+    with pytest.raises(LabError, match="did not restart"):
         host.machine.reboot()
 
 
@@ -377,7 +415,7 @@ def test_a_machine_that_never_reached_ssh_is_stopped_at_once_not_after_a_minute(
     assert host.tart.calls[-1] == ("delete", host.machine.name)
 
 
-def test_ctrl_c_during_cleanup_does_not_cut_it_short(host):
+def test_ctrl_c_during_cleanup_finishes_the_cleanup_and_then_stops(host):
     import os
     import signal
 
@@ -390,9 +428,11 @@ def test_ctrl_c_during_cleanup_does_not_cut_it_short(host):
         original(name)
 
     host.tart.delete = interrupted_delete
-    assert host.machine.close(keep=False) == []
+    with pytest.raises(KeyboardInterrupt):
+        host.machine.close(keep=False)
+    # The cleanup ran to its end before the stop took effect.
     assert host.tart.calls[-1] == ("delete", host.machine.name)
-    assert any("still cleaning up" in n for n in host.notes)
+    assert any("stopping once cleaning up" in n for n in host.notes)
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
 
 
@@ -400,7 +440,7 @@ def test_ctrl_c_pressed_again_and_again_abandons_the_cleanup(host):
     import os
     import signal
 
-    from udeck_e2e.machine import ABANDON_CLEANUP_AFTER
+    from udeck_e2e.interrupts import ABANDON_CLEANUP_AFTER
 
     host.machine.create()
     host.machine.boot()
@@ -422,3 +462,123 @@ def test_tart_and_ssh_children_are_out_of_the_terminals_process_group(tmp_path):
     ssh.host = "h"
     ssh.run("true", "testing")
     assert [k.get("start_new_session") for k in seen] == [True, True]
+
+
+# --- Found by the review of the machines ---------------------------------------------
+
+
+def test_a_state_changing_tart_call_finishes_although_ctrl_c_arrives_then_stops():
+    import os
+    import signal
+
+    finished = []
+
+    def delete_that_takes_a_while(args, **kwargs):
+        os.kill(os.getpid(), signal.SIGINT)
+        finished.append(args)
+        return done(args)
+
+    tart = Tart(Path("/tart"), print, run=delete_that_takes_a_while)
+    with pytest.raises(KeyboardInterrupt):
+        tart.delete("x")
+    assert finished and finished[0][1:] == ["delete", "x"]
+
+
+def test_tart_never_prunes_cached_images_and_never_reads_the_terminal():
+    seen = []
+    tart = Tart(
+        Path("/tart"),
+        print,
+        run=lambda args, **k: seen.append(k) or done(args, out="[]"),
+        popen=lambda args, **k: seen.append(k) or FakeProcess(),
+    )
+    tart.list()
+    tart.start("x", log=None)
+    assert all(k["env"]["TART_NO_AUTO_PRUNE"] == "1" for k in seen)
+    assert all(k["stdin"] is subprocess.DEVNULL for k in seen)
+
+
+def test_ssh_never_reads_the_terminal_and_ask_still_raises_when_ssh_itself_fails(tmp_path):
+    seen = []
+    ssh = SSH(tmp_path / "key", print, run=lambda args, **k: seen.append(k) or done(args, 255, err="Connection closed"))
+    ssh.host = "h"
+    with pytest.raises(LabError, match="Connection closed"):
+        ssh.ask("pgrep -x uDeck", "looking for uDeck")
+    assert seen[0]["stdin"] is subprocess.DEVNULL
+    ssh = SSH(tmp_path / "key", print, run=lambda args, **k: done(args, 1))
+    ssh.host = "h"
+    assert ssh.ask("pgrep -x uDeck", "looking for uDeck").returncode == 1
+
+
+def test_a_probe_does_not_read_a_dropped_connection_as_not_running(host):
+    from udeck_e2e import probes
+
+    host.machine.create()
+    host.machine.boot()
+    host.machine.ssh = SSH(host.guest.key, print, run=lambda args, **k: done(args, 255, err="Connection reset"))
+    host.machine.ssh.host = "h"
+    with pytest.raises(LabError):
+        probes.running(host.machine, "NotificationCenter")
+
+
+def test_a_later_different_failure_is_not_blamed_on_an_earlier_limit_refusal(host):
+    host.limit_refusals = 1
+    starts = []
+    original = host.tart.start
+
+    def start(name, log):
+        process = original(name, log)
+        starts.append(process)
+        if len(starts) == 2:
+            log.write(b"Error: disk image is corrupt\n")
+            log.flush()
+            process = FakeProcess(exits_after=0, code=1)
+            host.process = process
+        return process
+
+    host.tart.start = start
+    host.machine.create()
+    with pytest.raises(LabError) as raised:
+        host.machine.boot()
+    assert "disk image is corrupt" in raised.value.reason
+    assert raised.value.reason != VM_LIMIT_ADVICE
+    assert len(starts) == 2
+
+
+def test_a_machine_that_dies_after_getting_an_address_is_reported_at_once(host):
+    host.agent_up = False
+    host.next_process = lambda: FakeProcess(exits_after=2, code=1)
+    host.machine.create()
+    with pytest.raises(LabError, match="the machine stopped"):
+        host.machine.boot()
+    assert host.clock.now < config.AGENT_SECONDS
+
+
+def test_a_clone_that_failed_half_way_is_still_deleted(host):
+    def clone_fails(source, name):
+        raise LabError(f"cloning {name}", "did not finish in 900s")
+
+    host.tart.clone = clone_fails
+    with pytest.raises(LabError):
+        host.machine.create()
+    assert host.machine.close(keep=False) == []
+    assert host.tart.calls[-1] == ("delete", host.machine.name)
+
+
+def test_a_clone_that_never_reached_tarts_store_is_not_a_cleanup_problem(host):
+    host.machine.create()
+
+    def gone(name):
+        raise LabError(f"deleting {name}", 'the specified VM "x" does not exist')
+
+    host.tart.delete = gone
+    assert host.machine.close(keep=False) == []
+
+
+def test_a_machine_still_running_without_a_known_process_is_stopped_before_delete(host):
+    host.machine.create()
+    host.still_running = True
+    problems = host.machine.close(keep=False)
+    names = [c[0] for c in host.tart.calls]
+    assert names.index("stop") < names.index("delete")
+    assert len(problems) == 1 and "still running" in problems[0]

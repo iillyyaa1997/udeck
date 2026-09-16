@@ -103,6 +103,9 @@ class SSH:
                 errors="replace",
                 timeout=seconds,
                 check=False,
+                # Never the operator's terminal: without this, ssh read lines he
+                # typed into the lab's terminal and sent them to the guest.
+                stdin=subprocess.DEVNULL,
                 # See Tart.call: Ctrl-C belongs to the lab, not to its children.
                 start_new_session=True,
             )
@@ -116,12 +119,31 @@ class SSH:
             raise LabError(step, f"exited {done.returncode}: {_last(done)}")
         return done
 
-    def wait_up(self, step: str, seconds: float = config.SSH_UP_SECONDS) -> None:
-        """Until SSH answers. Refusals right after a boot are expected and counted."""
+    def ask(self, command: str, step: str, seconds: float = config.SSH_COMMAND_SECONDS) -> subprocess.CompletedProcess[str]:
+        """Run a command whose own exit code is the answer, e.g. `pgrep`.
+
+        SSH failing is still a LabError: a connection that dropped must not read
+        as "no such process" and become a verdict.
+        """
+        done = self.run(command, step, seconds=seconds, check=False)
+        if done.returncode == SSH_FAILED:
+            raise LabError(step, f"SSH to {self.host} failed: {_last(done)}")
+        return done
+
+    def wait_up(
+        self, step: str, seconds: float = config.SSH_UP_SECONDS, alive: Callable[[str], None] | None = None
+    ) -> None:
+        """Until SSH answers. Refusals right after a boot are expected and counted.
+
+        `alive` is asked between attempts and raises if the machine itself has
+        gone, so a dead `tart run` is reported at once rather than at the deadline.
+        """
         deadline = self._clock() + seconds
         refusals = 0
         last = ""
         while True:
+            if alive is not None:
+                alive(step)
             try:
                 done = self.run("true", step, seconds=15, check=False)
                 answered, said = done.returncode == 0, _last(done)
@@ -139,6 +161,17 @@ class SSH:
 
     def boot_time(self) -> int:
         return parse_boot_time(self.run("sysctl -n kern.boottime", "reading the guest's boot time").stdout)
+
+    def boot_session(self) -> str:
+        """A UUID macOS makes afresh on every boot.
+
+        The proof of a restart. The boot time is not: setting the clock moves
+        `kern.boottime` without any restart.
+        """
+        value = self.run("sysctl -n kern.bootsessionuuid", "reading the guest's boot session").stdout.strip()
+        if not re.fullmatch(r"[0-9A-Fa-f-]{36}", value):
+            raise LabError("reading the guest's boot session", f"unexpected output {value!r}")
+        return value
 
 
 def _last(done: subprocess.CompletedProcess[str]) -> str:

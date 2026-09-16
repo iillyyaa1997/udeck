@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from udeck_e2e import cleanup, config, preflight
+from udeck_e2e import cleanup, config, interrupts, preflight
 from udeck_e2e.ledger import RunLock, host_lock_path
 from udeck_e2e.errors import LabError
 from udeck_e2e.outcomes import EXIT_FAILED, EXIT_NOT_CHECKED
@@ -49,13 +49,13 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--guest",
         choices=sorted(config.GUESTS),
-        default=config.DEFAULT_GUEST,
-        help=f"which macOS runs the checks (default {config.DEFAULT_GUEST})",
+        default=None,
+        help=f"which macOS runs the checks (default {config.DEFAULT_GUEST}); with cleanup --golden, whose golden image",
     )
     p.add_argument(
         "--vm",
         choices=list(VM_SCOPES),
-        default="per-check",
+        default=None,
         help="a fresh machine for every check (default), for every group, or one for the whole run",
     )
     p.add_argument(
@@ -63,7 +63,7 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="keep the machine of a check that did not pass, stopped and renamed udeck-e2e-kept-…",
     )
-    p.add_argument("--golden", action="store_true", help="with cleanup: remove the golden images too")
+    p.add_argument("--golden", action="store_true", help="with cleanup: remove golden images too")
     # For the lab's own tests: run checks from somewhere else.
     p.add_argument("--checks-dir", type=Path, default=E2E_DIR / "checks", help=argparse.SUPPRESS)
     return p
@@ -94,25 +94,51 @@ def pytest_args(target_dir: Path, listing: bool) -> list[str]:
     return args
 
 
+# Which options each command takes. An option a command would ignore is refused:
+# `cleanup --list` once deleted the kept clones it was asked to list.
+ALLOWED = {
+    "checks": {"list", "guest", "vm", "keep_on_failure"},
+    "selfcheck": {"list", "guest", "vm", "keep_on_failure"},
+    "bake": {"list", "guest"},
+    "cleanup": {"list", "guest", "golden"},
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     command = args.names[0] if args.names and args.names[0] in (*COMMAND_DIRS, "cleanup") else None
+    mode = command or "checks"
     if command and len(args.names) > 1:
         print(f"'{command}' takes no check names.", file=sys.stderr)
         return EXIT_NOT_CHECKED
-    if command == "cleanup":
-        return run_cleanup(args.golden)
-    if args.golden:
-        print("--golden only goes with cleanup.", file=sys.stderr)
+    given = {
+        name
+        for name, value in (
+            ("list", args.list), ("guest", args.guest), ("vm", args.vm),
+            ("keep_on_failure", args.keep_on_failure), ("golden", args.golden),
+        )
+        if value not in (None, False)
+    }  # fmt: skip
+    refused = sorted(given - ALLOWED[mode])
+    if refused:
+        flags = ", ".join("--" + name.replace("_", "-") for name in refused)
+        print(f"{flags} does nothing with {'checks' if mode == 'checks' else repr(mode)}.", file=sys.stderr)
         return EXIT_NOT_CHECKED
+
+    # Closing the terminal or `kill` stops the lab the way Ctrl-C does, cleanup included.
+    interrupts.stop_on_hangup_and_terminate()
+
+    if command == "cleanup":
+        guests = [config.GUESTS[args.guest]] if args.guest else list(config.GUESTS.values())
+        return run_cleanup(args.golden, guests, dry_run=args.list)
 
     target = COMMAND_DIRS[command] if command else args.checks_dir.resolve()
     plugin = LabPlugin(
         wanted=[] if command else args.names,
         listing=args.list,
-        guest=config.GUESTS[args.guest],
-        mode=command or "checks",
-        vm_mode=args.vm,
+        guest=config.GUESTS[args.guest or config.DEFAULT_GUEST],
+        mode=mode,
+        vm_mode=args.vm or "per-check",
         keep_on_failure=args.keep_on_failure,
         repo_root=REPO_ROOT,
         checks_dir=target,
@@ -139,7 +165,7 @@ def run_pytest(plugin: LabPlugin, args: list[str]) -> int:
     return plugin.exit_code
 
 
-def run_cleanup(include_golden: bool) -> int:
+def run_cleanup(include_golden: bool, guests: list[config.Guest], dry_run: bool) -> int:
     lock = RunLock(host_lock_path())
     holder = lock.acquire()
     if holder is not None:
@@ -150,7 +176,7 @@ def run_cleanup(include_golden: bool) -> int:
         if binary is None:
             print("Tart was not found, so there is nothing the lab could clean up.")
             return EXIT_NOT_CHECKED
-        return cleanup.clean(Tart(binary, print), print, include_golden)
+        return cleanup.clean(Tart(binary, print), print, include_golden, guests=guests, dry_run=dry_run)
     except LabError as error:
         print(f"Cleanup stopped: {error}")
         return EXIT_NOT_CHECKED
