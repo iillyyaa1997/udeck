@@ -81,8 +81,20 @@ public enum GestureOutcome: Equatable, Sendable {
     /// closer to completing.
     case arming(progress: Double)
 
-    /// Reveal the panel.
-    case fire
+    /// Reveal the panel, and which of the two paths got there.
+    ///
+    /// The path is carried rather than inferred because the two are driven by
+    /// different input. A dwell only needs the pointer to stay in the strip; a
+    /// push needs upward movement reported while the pointer is already pinned
+    /// to the edge. Absolute-position input — a VNC client, say — can produce the
+    /// first and probably not the second, so a check that only asks "did the
+    /// panel open" could pass for the wrong reason.
+    case fire(via: FirePath)
+
+    public enum FirePath: String, Equatable, Sendable {
+        case push
+        case dwell
+    }
 
     public enum IdleReason: String, Equatable, Sendable {
         case disabled

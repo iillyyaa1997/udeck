@@ -53,7 +53,20 @@ private struct Driver {
         return last
     }
 
-    var fired: Bool { outcomes.contains(.fire) }
+    var fired: Bool { outcomes.contains { $0.isFire } }
+
+    /// The path of the first reveal, if there was one.
+    var firedVia: GestureOutcome.FirePath? {
+        for outcome in outcomes { if case .fire(let path) = outcome { return path } }
+        return nil
+    }
+}
+
+private extension GestureOutcome {
+    var isFire: Bool {
+        if case .fire = self { return true }
+        return false
+    }
 }
 
 @Suite("Pointer gesture")
@@ -68,6 +81,10 @@ struct GestureTests {
         driver.move(dx: 0, dy: 25)    // still pushing, against the edge
         driver.move(dx: 0, dy: 25)
         #expect(driver.fired)
+        // Said by the outcome, not inferred from timing: a test harness that
+        // drives only absolute positions can open the panel by dwelling, and
+        // "it opened" must not be mistaken for "the push works".
+        #expect(driver.firedVia == .push)
     }
 
     /// Stated against the tuning rather than against a number.
@@ -94,6 +111,7 @@ struct GestureTests {
         driver.move(dx: 0, dy: 300)
         driver.rest(for: 0.3)
         #expect(driver.fired)
+        #expect(driver.firedVia == .dwell)
     }
 
     /// The row the gesture actually ends on. Shoving the cursor at the top of
@@ -188,7 +206,7 @@ struct GestureTests {
         driver.recognizer.suppressUntilPointerLeaves()
         driver.environment.lastDismissal = driver.clock
         driver.rest(for: 2)
-        #expect(driver.outcomes.suffix(8).allSatisfy { $0 != .fire },
+        #expect(driver.outcomes.suffix(8).allSatisfy { !$0.isFire },
                 "the panel re-opened under a cursor that never moved away")
     }
 
@@ -287,7 +305,7 @@ struct GestureTests {
         var driver = Driver(startingAt: CGPoint(x: 1280, y: 1200))
         driver.move(dx: 0, dy: 300)
         driver.rest(for: 0.6)
-        #expect(driver.outcomes.filter { $0 == .fire }.count == 1)
+        #expect(driver.outcomes.filter(\.isFire).count == 1)
     }
 
     @Test("leaving and coming back arms the gesture again")
@@ -300,10 +318,10 @@ struct GestureTests {
         driver.move(dx: 0, dy: -400)          // away from the edge
         driver.recognizer.reset()             // as the host does when the panel opens
         driver.environment.panelVisible = false
-        let before = driver.outcomes.filter { $0 == .fire }.count
+        let before = driver.outcomes.filter(\.isFire).count
         driver.move(dx: 0, dy: 400)
         driver.rest(for: 0.3)
-        #expect(driver.outcomes.filter { $0 == .fire }.count == before + 1)
+        #expect(driver.outcomes.filter(\.isFire).count == before + 1)
     }
 
     @Test("the notched screen behaves the same as the notchless one")
@@ -377,7 +395,7 @@ struct GestureRearmTests {
         _ = send(inStrip, visible: false)
         var fired = false
         for _ in 0 ..< 10 where !fired {
-            if send(inStrip, visible: false) == .fire { fired = true }
+            if send(inStrip, visible: false).isFire { fired = true }
         }
         #expect(fired)
 
@@ -388,14 +406,14 @@ struct GestureRearmTests {
         // has still not moved. Long enough after that the cooldown has expired.
         clock += 5
         for _ in 0 ..< 20 {
-            #expect(send(inStrip, visible: false, dismissedAt: clock - 5) != .fire)
+            #expect(!send(inStrip, visible: false, dismissedAt: clock - 5).isFire)
         }
 
         // Leaving and coming back is what re-arms it.
         _ = send(away, visible: false, dismissedAt: clock - 5)
         var refired = false
         for _ in 0 ..< 15 where !refired {
-            if send(inStrip, visible: false, dismissedAt: clock - 5) == .fire { refired = true }
+            if send(inStrip, visible: false, dismissedAt: clock - 5).isFire { refired = true }
         }
         #expect(refired)
     }
@@ -453,6 +471,6 @@ struct GestureBoundsTests {
         recognizer.reset()
         // A dwell that was nearly complete must start again from nothing.
         clock += 1
-        #expect(send() != .fire, "the dwell should have restarted, not completed")
+        #expect(!send().isFire, "the dwell should have restarted, not completed")
     }
 }

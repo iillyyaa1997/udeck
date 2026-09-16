@@ -26,6 +26,12 @@ for what that promises.
   them as "button" and they could only be pressed by screen position — and every
   title is translated, so anything scripting the window broke on a language
   change.
+- **The gesture says which path opened the panel.** The debug log line is now
+  `fired by push on …` or `fired by dwell on …`. The two paths answer different
+  input — a dwell only needs the pointer to stay in the strip, a push needs
+  upward movement against the edge — and a test that drives the pointer by
+  absolute position can open the panel by dwelling alone, so "it opened" is not
+  evidence that the push works.
 
 ## [0.4.0] — 2026-09-13
 

@@ -115,12 +115,12 @@ public struct HoverGestureRecognizer: Sendable {
         if accumulatedPush(tuning: tuning, now: sample.timestamp) >= tuning.edgePushDistance {
             firedThisVisit = true
             wasPinned = geometry.isPinnedToTopEdge(sample.location)
-            return .fire
+            return .fire(via: .push)
         }
 
         if let start = dwellStart, sample.timestamp - start >= requiredDwell {
             firedThisVisit = true
-            return .fire
+            return .fire(via: .dwell)
         }
 
         return .arming(progress: progress(tuning: tuning, now: sample.timestamp))

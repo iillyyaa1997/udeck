@@ -354,8 +354,8 @@ public final class PanelController {
             DeckLog.gesture.debug("idle: \(reason.rawValue, privacy: .public)")
         }
         switch outcome {
-        case .fire:
-            DeckLog.gesture.debug("fired on \(screenUnderCursor?.name ?? "no screen", privacy: .public)")
+        case .fire(let path):
+            DeckLog.gesture.debug("fired by \(path.rawValue, privacy: .public) on \(screenUnderCursor?.name ?? "no screen", privacy: .public)")
             armingTimer?.invalidate()
             if let screenUnderCursor { attachedScreenID = screenUnderCursor.id }
             apply(.revealRequested)
