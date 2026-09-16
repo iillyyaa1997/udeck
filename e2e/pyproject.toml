@@ -1,0 +1,25 @@
+[project]
+name = "udeck-e2e"
+version = "0"
+description = "uDeck's end-to-end lab: real builds, checked inside throwaway macOS virtual machines"
+requires-python = ">=3.12"
+dependencies = [
+    "pytest>=9.1,<10",
+]
+
+[project.scripts]
+udeck-e2e = "udeck_e2e.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "udeck_e2e"
+module-root = ""
+
+# These settings are for the lab's own unit tests, in tests/. The checks in
+# checks/ are run by the lab, with the configuration in checks/pytest.ini.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-p", "pytester"]
