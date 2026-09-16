@@ -20,6 +20,12 @@ for what that promises.
 - **`--test-feed` and `--test-key`** build the release configuration against a
   throwaway appcast and public key, baked into the bundle so they survive
   Sparkle's relaunch, for testing an update end to end without the real feed.
+- **The settings window can be driven without reading its titles.** The sidebar
+  sections and the update controls carry accessibility identifiers. The update
+  buttons used to reach accessibility with no name at all — System Events read
+  them as "button" and they could only be pressed by screen position — and every
+  title is translated, so anything scripting the window broke on a language
+  change.
 
 ## [0.4.0] — 2026-09-13
 

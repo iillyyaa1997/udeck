@@ -68,6 +68,13 @@ public struct SettingsView: View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(Section.allCases, selection: $section) { item in
                 Label(model.strings(item.title), systemImage: item.symbol).tag(item)
+                    // Identifiers, not titles: every title here is translated,
+                    // and the language is a setting inside this same window, so
+                    // anything driving the screen from outside — the end-to-end
+                    // lab, VoiceOver scripting, a bug report's reproduction —
+                    // would otherwise break the moment the operator switches
+                    // language.
+                    .accessibilityIdentifier("section.\(item)")
             }
             .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
             // On the sidebar's own content, which is where this modifier is
@@ -1218,6 +1225,7 @@ private struct AboutSection: View {
                     get: { checksAutomatically },
                     set: { checksAutomatically = $0; updater.checksAutomatically = $0 }
                 ))
+                .accessibilityIdentifier("updates.automatic")
                 Text(strings(.updatesAutomaticallyHelp))
                     .font(.caption).foregroundStyle(.secondary)
 
@@ -1238,16 +1246,25 @@ private struct AboutSection: View {
                 .font(.callout)
                 .padding(.top, 2)
 
+                // These buttons reached accessibility with no name of their own:
+                // System Events read `name` as missing value and the description
+                // as just "button", so the only way to press one from outside was
+                // by its position on screen. An identifier fixes both halves of that: it addresses
+                // the control without depending on the translated title, and it
+                // is what a screen reader's scripting hooks look for.
                 HStack(spacing: 10) {
                     Button(strings(.updatesCheckNow)) { updater.checkNow() }
                         .disabled(updater.status.stage == .checking)
+                        .accessibilityIdentifier("updates.checkNow")
                     if case .available(let version) = updater.status.stage {
                         Button(strings(.updatesInstallNow(version))) { updater.install() }
                             .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("updates.install")
                     }
                     if case .readyToInstall = updater.status.stage {
                         Button(strings(.updatesRestartToInstall)) { updater.install() }
                             .buttonStyle(.borderedProminent)
+                            .accessibilityIdentifier("updates.restartAndInstall")
                     }
                     updateSentence(updater.status)
                 }
