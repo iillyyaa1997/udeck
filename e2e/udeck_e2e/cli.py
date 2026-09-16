@@ -8,12 +8,20 @@ from pathlib import Path
 
 import pytest
 
-from udeck_e2e import config
+from udeck_e2e import cleanup, config, preflight
+from udeck_e2e.ledger import RunLock, host_lock_path
+from udeck_e2e.errors import LabError
 from udeck_e2e.outcomes import EXIT_FAILED, EXIT_NOT_CHECKED
-from udeck_e2e.plugin import LabPlugin
+from udeck_e2e.plugin import VM_SCOPES, LabPlugin
+from udeck_e2e.tart import Tart
 
 E2E_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = E2E_DIR.parent
+
+# The lab's own work goes through the same machinery as the checks: the same
+# lock, pre-flight, ledger and outcomes. Each is a directory of check files.
+COMMAND_DIRS = {"bake": E2E_DIR / "bake", "selfcheck": E2E_DIR / "selfcheck"}
+INI = E2E_DIR / "checks" / "pytest.ini"
 
 
 def parser() -> argparse.ArgumentParser:
@@ -23,6 +31,12 @@ def parser() -> argparse.ArgumentParser:
             "Run uDeck's end-to-end checks in throwaway macOS virtual machines. "
             "Exits 0 when every check passed, 1 when any check failed, and 2 when "
             "the lab could not check something — or checked nothing."
+        ),
+        epilog=(
+            "Commands instead of checks: 'bake' makes the golden image a guest's machines "
+            "are cloned from (once per guest); 'selfcheck' checks the lab itself; "
+            "'cleanup' removes clones the lab kept or left behind (--golden removes the "
+            "golden images too)."
         ),
     )
     p.add_argument(
@@ -38,21 +52,39 @@ def parser() -> argparse.ArgumentParser:
         default=config.DEFAULT_GUEST,
         help=f"which macOS runs the checks (default {config.DEFAULT_GUEST})",
     )
+    p.add_argument(
+        "--vm",
+        choices=list(VM_SCOPES),
+        default="per-check",
+        help="a fresh machine for every check (default), for every group, or one for the whole run",
+    )
+    p.add_argument(
+        "--keep-on-failure",
+        action="store_true",
+        help="keep the machine of a check that did not pass, stopped and renamed udeck-e2e-kept-…",
+    )
+    p.add_argument("--golden", action="store_true", help="with cleanup: remove the golden images too")
     # For the lab's own tests: run checks from somewhere else.
     p.add_argument("--checks-dir", type=Path, default=E2E_DIR / "checks", help=argparse.SUPPRESS)
     return p
 
 
-def pytest_args(checks_dir: Path, listing: bool) -> list[str]:
+def pytest_args(target_dir: Path, listing: bool) -> list[str]:
+    # The bake and the self-check share the checks' settings.
+    own = target_dir / "pytest.ini"
     args = [
-        str(checks_dir),
+        str(target_dir),
         "-c",
-        str(checks_dir / "pytest.ini"),
+        str(own if own.exists() else INI),
         "--rootdir",
-        str(checks_dir),
+        str(target_dir),
         # One voice in the console: the plugin's.
         "-p",
         "no:terminal",
+        # And it has to reach the console while a check runs: with pytest's
+        # capturing on, everything the lab says during a check — a retry, a
+        # download, a machine kept for inspection — vanished until the end.
+        "--capture=no",
         # Nothing written into the source tree.
         "-p",
         "no:cacheprovider",
@@ -64,17 +96,29 @@ def pytest_args(checks_dir: Path, listing: bool) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    checks_dir: Path = args.checks_dir.resolve()
+    command = args.names[0] if args.names and args.names[0] in (*COMMAND_DIRS, "cleanup") else None
+    if command and len(args.names) > 1:
+        print(f"'{command}' takes no check names.", file=sys.stderr)
+        return EXIT_NOT_CHECKED
+    if command == "cleanup":
+        return run_cleanup(args.golden)
+    if args.golden:
+        print("--golden only goes with cleanup.", file=sys.stderr)
+        return EXIT_NOT_CHECKED
 
+    target = COMMAND_DIRS[command] if command else args.checks_dir.resolve()
     plugin = LabPlugin(
-        wanted=args.names,
+        wanted=[] if command else args.names,
         listing=args.list,
         guest=config.GUESTS[args.guest],
+        mode=command or "checks",
+        vm_mode=args.vm,
+        keep_on_failure=args.keep_on_failure,
         repo_root=REPO_ROOT,
-        checks_dir=checks_dir,
+        checks_dir=target,
         runs_root=REPO_ROOT / ".build" / "e2e",
     )
-    return run_pytest(plugin, pytest_args(checks_dir, args.list))
+    return run_pytest(plugin, pytest_args(target, args.list))
 
 
 def run_pytest(plugin: LabPlugin, args: list[str]) -> int:
@@ -93,6 +137,25 @@ def run_pytest(plugin: LabPlugin, args: list[str]) -> int:
         print(f"pytest could not run the checks ({pytest.ExitCode(status).name}).", file=sys.stderr)
         return EXIT_FAILED if plugin.saw_failure else EXIT_NOT_CHECKED
     return plugin.exit_code
+
+
+def run_cleanup(include_golden: bool) -> int:
+    lock = RunLock(host_lock_path())
+    holder = lock.acquire()
+    if holder is not None:
+        print(f"A lab run is in progress (pid {holder}); cleanup waits for it to finish.")
+        return EXIT_NOT_CHECKED
+    try:
+        binary = preflight.find_tart()
+        if binary is None:
+            print("Tart was not found, so there is nothing the lab could clean up.")
+            return EXIT_NOT_CHECKED
+        return cleanup.clean(Tart(binary, print), print, include_golden)
+    except LabError as error:
+        print(f"Cleanup stopped: {error}")
+        return EXIT_NOT_CHECKED
+    finally:
+        lock.release()
 
 
 if __name__ == "__main__":

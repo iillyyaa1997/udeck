@@ -1,0 +1,101 @@
+"""Questions asked of a running guest, shared by the bake and the self-check.
+
+Each answers from the system's own state, not from a setting the lab wrote:
+whether Spotlight is indexing, whether a process is running, what size the
+screen is. System Events is only ever asked over SSH — the channel the guest
+permits to drive the interface — and never Finder, whose AppleEvents over SSH
+raise a consent dialog that then sits in the guest until it restarts.
+"""
+
+from __future__ import annotations
+
+import json
+import shlex
+
+from udeck_e2e import config
+from udeck_e2e.errors import LabError
+from udeck_e2e.machine import Machine
+
+WIDTH, HEIGHT = (int(n) for n in config.GOLDEN_DISPLAY.removesuffix("px").split("x"))
+
+SCREEN_SCRIPT = (
+    'ObjC.import("AppKit");'
+    "var s = $.NSScreen.mainScreen;"
+    "JSON.stringify({width: s.frame.size.width, height: s.frame.size.height, scale: s.backingScaleFactor})"
+)
+
+
+def screen(machine: Machine) -> tuple[int, int, float]:
+    """The main screen in points, and its scale, as the logged-in session sees it.
+
+    Through `tart exec`, which runs inside that session; over SSH AppKit has no
+    window server to ask. `system_profiler` prints nothing about displays in a VM.
+    """
+    step = f"reading {machine.name}'s screen size"
+    done = machine.tart.exec(
+        machine.name, ["/usr/bin/osascript", "-l", "JavaScript", "-e", SCREEN_SCRIPT], step, seconds=60
+    )
+    try:
+        size = json.loads(done.stdout)
+        return int(size["width"]), int(size["height"]), float(size["scale"])
+    except (ValueError, KeyError, TypeError):
+        raise LabError(step, f"unexpected answer {(done.stdout or done.stderr).strip()!r}") from None
+
+
+def spotlight_enabled(machine: Machine) -> bool:
+    done = machine.ssh.run("mdutil -s /", f"asking {machine.name} about Spotlight", check=False)
+    return "Indexing enabled" in done.stdout
+
+
+def running(machine: Machine, process: str) -> bool:
+    done = machine.ssh.run(
+        f"pgrep -x {shlex.quote(process)}", f"looking for {process} on {machine.name}", check=False
+    )
+    return done.returncode == 0
+
+
+def system_events_allowed(machine: Machine) -> tuple[bool, str]:
+    """Whether a command over SSH may ask System Events about the interface."""
+    script = (
+        'with timeout of 20 seconds\n'
+        'tell application "System Events" to get name of every process whose frontmost is true\n'
+        'end timeout'
+    )
+    done = machine.ssh.run(
+        f"osascript -e {shlex.quote(script)}", f"asking System Events on {machine.name}", seconds=60, check=False
+    )
+    said = (done.stdout or done.stderr).strip()
+    return done.returncode == 0, said
+
+
+def guest_build(machine: Machine) -> str:
+    return machine.ssh.run("sw_vers -buildVersion", f"reading {machine.name}'s macOS build").stdout.strip()
+
+
+def languages(machine: Machine) -> tuple[str, str]:
+    """The first preferred language and the locale."""
+    done = machine.ssh.run(
+        "defaults read -g AppleLanguages | sed -n 2p | tr -d ' \",'; defaults read -g AppleLocale",
+        f"reading {machine.name}'s language",
+    )
+    lines = done.stdout.split()
+    return (lines[0] if lines else ""), (lines[1] if len(lines) > 1 else "")
+
+
+def verify_golden(machine: Machine) -> None:
+    """Everything the bake sets, read back from the running guest."""
+    width, height, scale = screen(machine)
+    if (width, height, scale) != (WIDTH, HEIGHT, 1.0):
+        raise LabError("checking the screen", f"{width}×{height} at {scale}×, wanted {WIDTH}×{HEIGHT} at 1×")
+    if not spotlight_enabled(machine):
+        raise LabError("checking Spotlight", "indexing is not enabled after the restart")
+    if running(machine, "NotificationCenter"):
+        raise LabError("checking notifications", "NotificationCenter is running after the restart")
+    if running(machine, "UserNotificationCenter"):
+        raise LabError("checking for dialogs", "a system dialog (UserNotificationCenter) is open")
+    language, locale = languages(machine)
+    if (language, locale) != ("en", "en_US"):
+        raise LabError("checking the language", f"{language} / {locale}, wanted en / en_US")
+    allowed, said = system_events_allowed(machine)
+    if not allowed:
+        raise LabError("checking that SSH may drive System Events", said)

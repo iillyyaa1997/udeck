@@ -10,18 +10,24 @@ macOS virtual machines instead, headless, and puts everything back afterwards.
 It runs on an Apple Silicon Mac only, and not in GitHub CI: hosted runners do
 not offer nested virtualisation.
 
-> **Being built.** What exists today is the command itself — selection,
-> pre-flight, outcomes and the report. The virtual machines, the golden image
-> and the first checks follow.
+> **Being built.** What exists today: the command, its pre-flight and report,
+> the machines and the golden image they are cloned from, and a self-check.
+> The first checks of uDeck itself follow.
 
 ## Running it
 
 ```sh
+e2e/run.sh bake                # once: make the golden image for macOS 27
+e2e/run.sh selfcheck           # does the lab work on this Mac?
+
 e2e/run.sh --list              # what checks exist
 e2e/run.sh                     # all of them
 e2e/run.sh updates             # one group
 e2e/run.sh updates.wrong-key   # one check
-e2e/run.sh --guest 26          # on macOS 26 instead of 27
+e2e/run.sh --guest 26          # on macOS 26 instead of 27 (bake it first)
+e2e/run.sh --vm per-group      # one machine per group instead of per check
+e2e/run.sh --keep-on-failure   # keep a failed check's machine to look at
+e2e/run.sh cleanup             # remove kept or left-behind clones
 ```
 
 You need [Tart](https://tart.run) — exactly the version pinned in
@@ -41,6 +47,30 @@ awake: if the Mac sleeps during a run, the run is interrupted.
 
 Only one run at a time for your user on this Mac, whichever checkout or
 worktree it starts from: the lock is `~/Library/Caches/udeck-e2e/lab.lock`.
+
+## Machines
+
+Every machine is an APFS clone of a **golden image**: Cirrus Labs' pinned
+`-base` image with the lab's settings baked in once by `e2e/run.sh bake` — a
+2560×1440 screen at 1×, Spotlight on, notifications silenced, English — and
+read back after a restart before the image is kept. The golden image lives in
+Tart's store as `udeck-e2e-golden-<guest>`, shared by every checkout; a note of
+what it was baked from sits in `~/Library/Application Support/udeck-e2e/`, and a
+golden image baked from another base image or by an older bake is refused.
+
+A clone gets its own serial number, boots headless, receives this run's
+throwaway SSH key through Tart's guest agent, and is ready when SSH answers and
+the desktop is up. Commands go over the system's `ssh` with your SSH
+configuration ignored; System Events is driven only that way, because the image
+permits it for SSH and not for Tart's agent. A restart is proved by the boot
+time moving. A machine is shut down from inside; `tart stop`, which is a
+power-off, is used only after a minute of silence and is reported. With
+`--vm per-check` (the default) every check gets its own clone; `per-group` and
+`per-run` share one, so a check must find out the state it needs rather than
+assume it.
+
+If the Mac goes to sleep during a check, anything that went wrong in it becomes
+"could not check".
 
 ## Reading the result
 

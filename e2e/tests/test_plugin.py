@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from udeck_e2e import config, preflight
+from udeck_e2e import config, golden, preflight
+from udeck_e2e.errors import LabError
 from udeck_e2e.cli import E2E_DIR, pytest_args, run_pytest
 from udeck_e2e.ledger import RunLock
 from udeck_e2e.plugin import LabPlugin
@@ -32,6 +33,12 @@ class Lab:
         self.problems: list[preflight.Problem] = []
         self.host_notes: list[str] = []
         self.preflights = 0
+        self.state_dir = pytester.path / "state"
+        self.vms = [config.GUESTS["27"].golden_vm]
+        golden.write(config.GUESTS["27"], "26A5416b", self.state_dir)
+        self.machines: list[FakeMachine] = []
+        self.slept = "{ sec = 0, usec = 0 }"
+        self.mode = "checks"
 
     def write(self, name: str, source: str) -> None:
         path = self.checks / name
@@ -42,13 +49,23 @@ class Lab:
         self.preflights += 1
         for text in self.host_notes:
             note(text)
-        return preflight.Assessment(list(self.problems), []), {"host_macos": "27.0"}
+        return preflight.Assessment(list(self.problems), []), {"host_macos": "27.0", "vms": self.vms}
 
-    def plugin(self, *wanted: str, listing: bool = False, out: io.StringIO | None = None):
+    def factory(self, **kwargs):
+        machine = FakeMachine(self, **kwargs)
+        self.machines.append(machine)
+        return machine
+
+    def plugin(self, *wanted: str, listing: bool = False, out: io.StringIO | None = None, **options):
         return LabPlugin(
             wanted=list(wanted),
             listing=listing,
             guest=config.GUESTS["27"],
+            mode=self.mode,
+            machine_factory=self.factory,
+            state_dir=self.state_dir,
+            slept_at=lambda: self.slept,
+            **options,
             repo_root=self.pytester.path,
             checks_dir=self.checks,
             runs_root=self.runs,
@@ -58,9 +75,9 @@ class Lab:
             now=lambda: datetime(2026, 9, 16, 12, 0, 0, tzinfo=timezone.utc),
         )
 
-    def run(self, *wanted: str, listing: bool = False, out=None):
+    def run(self, *wanted: str, listing: bool = False, out=None, **options):
         out = out if out is not None else io.StringIO()
-        plugin = self.plugin(*wanted, listing=listing, out=out)
+        plugin = self.plugin(*wanted, listing=listing, out=out, **options)
         self.pytester.inline_run(
             *pytest_args(self.checks, listing), plugins=[plugin], no_reraise_ctrlc=True
         )
@@ -87,6 +104,26 @@ class Lab:
 
     def ledger_checks(self) -> dict[str, dict]:
         return {e["name"]: e for e in self.ledger() if e["event"] == "check"}
+
+
+class FakeMachine:
+    """Stands in for a Machine: records what the fixture asked of it."""
+
+    def __init__(self, lab, *, name, source, display, label):
+        self.lab, self.name, self.source, self.display, self.label = lab, name, source, display, label
+        self.events = []
+
+    def create(self):
+        self.events.append("create")
+        if "create" in getattr(self.lab, "break_machine", ()):
+            raise LabError(f"cloning {self.name}", "disk full")
+
+    def boot(self):
+        self.events.append("boot")
+
+    def close(self, keep):
+        self.events.append(f"close keep={keep}")
+        return list(getattr(self.lab, "close_problems", []))
 
 
 @pytest.fixture
@@ -495,3 +532,137 @@ def test_run_sh_works_with_cdpath_exported(tmp_path):
         cwd=E2E_DIR.parent, env=env, capture_output=True, text=True, timeout=120,
     )
     assert done.returncode == 0, done.stderr
+
+
+# --- Machines -------------------------------------------------------------------------
+
+THREE_CHECKS = (
+    "check_panel.py",
+    "def check_dwell(machine): pass\n"
+    "def check_push(machine):\n    assert False, 'panel stayed closed'\n",
+    "check_updates.py",
+    "def check_sparkle(machine): pass\n",
+)
+
+
+def write_three(lab):
+    lab.write(THREE_CHECKS[0], THREE_CHECKS[1])
+    lab.write(THREE_CHECKS[2], THREE_CHECKS[3])
+
+
+def labels(lab):
+    return [m.label for m in lab.machines]
+
+
+def test_per_check_gives_every_check_its_own_machine(lab):
+    write_three(lab)
+    lab.run(vm_mode="per-check")
+    assert labels(lab) == ["panel.dwell", "panel.push", "updates.sparkle"]
+    assert all(m.events[:2] == ["create", "boot"] for m in lab.machines)
+    assert all(m.source == config.GUESTS["27"].golden_vm for m in lab.machines)
+
+
+def test_per_group_gives_every_file_one_machine(lab):
+    write_three(lab)
+    lab.run(vm_mode="per-group")
+    assert labels(lab) == ["panel", "updates"]
+
+
+def test_per_run_gives_the_whole_run_one_machine(lab):
+    write_three(lab)
+    lab.run(vm_mode="per-run")
+    assert labels(lab) == ["run"]
+
+
+def test_machines_are_named_after_the_run_so_the_pre_flight_knows_whose_they_are(lab):
+    write_three(lab)
+    lab.run("updates")
+    (machine,) = lab.machines
+    assert machine.name == "udeck-e2e-20260916-120000Z-updates.sparkle"
+
+
+@pytest.mark.parametrize(
+    "mode, kept",
+    [
+        ("per-check", {"panel.push"}),
+        ("per-group", {"panel"}),
+        ("per-run", {"run"}),
+    ],
+)
+def test_keep_on_failure_keeps_only_the_machine_that_saw_a_failure(lab, mode, kept):
+    write_three(lab)
+    lab.run(vm_mode=mode, keep_on_failure=True)
+    assert {m.label for m in lab.machines if "close keep=True" in m.events} == kept
+    assert all(m.events[-1].startswith("close") for m in lab.machines)
+
+
+def test_without_keep_on_failure_every_machine_goes(lab):
+    write_three(lab)
+    lab.run()
+    assert all(m.events[-1] == "close keep=False" for m in lab.machines)
+
+
+def test_a_machine_that_cannot_be_made_is_closed_and_the_check_could_not_be_checked(lab):
+    lab.write("check_panel.py", "def check_dwell(machine): pass\n")
+    lab.break_machine = {"create"}
+    code, out = lab.run()
+    assert code == 2
+    assert "could not check" in out and "disk full" in out
+    assert lab.machines[0].events == ["create", "close keep=False"]
+
+
+def test_a_machine_that_cannot_be_cleaned_up_spoils_the_run(lab):
+    lab.write("check_panel.py", "def check_dwell(machine): pass\n")
+    lab.close_problems = ["did not shut down from inside within 60s"]
+    code, out = lab.run()
+    assert code == 2
+    assert "✅ panel.dwell" in out and "did not shut down" in out
+
+
+def test_checks_are_refused_without_a_golden_image_and_the_bake_is_not(lab):
+    lab.write("check_panel.py", "def check_dwell(machine): pass\n")
+    lab.vms = []
+    code, out = lab.run()
+    assert code == 2
+    assert "no golden image for macOS 27" in out and "e2e/run.sh bake --guest 27" in out
+    assert lab.machines == []
+
+    lab.mode = "bake"
+    code, out = lab.run()
+    assert "golden image" not in out
+
+
+def test_a_golden_image_baked_from_another_base_is_refused(lab):
+    import json
+
+    path = golden.metadata_path(config.GUESTS["27"], lab.state_dir)
+    record = json.loads(path.read_text())
+    record["base_image"] = "ghcr.io/cirruslabs/macos-golden-gate-base@sha256:0000"
+    path.write_text(json.dumps(record))
+    lab.write("check_panel.py", "def check_dwell(machine): pass\n")
+    code, out = lab.run()
+    assert code == 2 and "Bake it again" in out
+
+
+def test_a_mac_that_slept_during_a_check_turns_its_failure_into_could_not_check(lab):
+    lab.write(
+        "check_panel.py",
+        "from udeck_e2e.errors import expect\n"
+        "def check_dwell(machine):\n"
+        "    expect(False, 'SSH timed out after the pointer moved')\n"
+        "def check_push(machine): pass\n",
+    )
+    moments = iter(["{ sec = 0 }", "{ sec = 1790000000 }"] + ["{ sec = 1790000000 }"] * 10)
+    lab.slept = None
+    plugin_slept = lambda: next(moments)  # noqa: E731
+    out = io.StringIO()
+    plugin = lab.plugin(out=out)
+    plugin.slept_at = plugin_slept
+    lab.pytester.inline_run(*pytest_args(lab.checks, False), plugins=[plugin])
+    text = out.getvalue()
+    assert plugin.exit_code == 2
+    assert "went to sleep" in text and "✅ panel.push" in text
+
+
+def test_what_the_lab_says_during_a_check_is_not_captured_by_pytest():
+    assert "--capture=no" in pytest_args(E2E_DIR / "checks", False)

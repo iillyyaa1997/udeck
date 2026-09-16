@@ -8,6 +8,7 @@ terminal output is switched off, so there is one voice in the console.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import time
@@ -20,9 +21,12 @@ from typing import IO, Any
 
 import pytest
 
-from udeck_e2e import config, names, preflight
+from udeck_e2e import config, golden, names, preflight
 from udeck_e2e.config import Guest
 from udeck_e2e.errors import CheckFailed, LabError
+from udeck_e2e.guest import SSH, make_key
+from udeck_e2e.machine import Machine
+from udeck_e2e.tart import Tart
 from udeck_e2e.ledger import Ledger, RunLock, host_lock_path, mark_started, new_run_dir, prune_runs
 from udeck_e2e.outcomes import EXIT_NOT_CHECKED, EXIT_PASSED, Outcome, duration, exit_code, summary
 
@@ -40,8 +44,28 @@ def real_preflight(guest: Guest, note: Note) -> tuple[preflight.Assessment, dict
         "memory_gb": round(facts.memory_gb, 1),
         "memory_pressure": facts.memory_pressure,
         "running_machines": [p.args for p in facts.machines],
+        "framework_machines": facts.framework_machines,
+        "vms": [vm.name for vm in facts.vms],
     }
     return assessment, about
+
+
+def host_slept_at() -> str:
+    """When the Mac last went to sleep, from the kernel; changes if it sleeps."""
+    try:
+        done = subprocess.run(
+            ["/usr/sbin/sysctl", "-n", "kern.sleeptime"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return done.stdout.strip()
+
+
+# How a --vm mode maps onto pytest's fixture scopes: a machine per check, per
+# group (a check file) or per run.
+VM_SCOPES = {"per-check": "function", "per-group": "module", "per-run": "session"}
+
+MachineFactory = Callable[..., Machine]
 
 
 @dataclass
@@ -56,6 +80,7 @@ class CheckRecord:
     # interrupt after that point does not take the verdict away.
     called: bool = False
     reported: bool = False
+    slept_at: str = ""
 
 
 class LabPlugin:
@@ -65,6 +90,12 @@ class LabPlugin:
         wanted: list[str],
         listing: bool,
         guest: Guest,
+        mode: str = "checks",
+        vm_mode: str = "per-check",
+        keep_on_failure: bool = False,
+        machine_factory: MachineFactory | None = None,
+        state_dir: Path = config.STATE_DIR,
+        slept_at: Callable[[], str] = host_slept_at,
         repo_root: Path,
         checks_dir: Path,
         runs_root: Path,
@@ -77,6 +108,14 @@ class LabPlugin:
         self.wanted = wanted
         self.listing = listing
         self.guest = guest
+        self.mode = mode
+        self.vm_mode = vm_mode
+        self.keep_on_failure = keep_on_failure
+        self.machine_factory = machine_factory
+        self.state_dir = state_dir
+        self.slept_at = slept_at
+        self.tart: Tart | None = None
+        self.ssh_key: Path | None = None
         self.repo_root = repo_root
         self.checks_dir = checks_dir.resolve()
         self.runs_root = runs_root
@@ -128,6 +167,46 @@ class LabPlugin:
     def record_event(self, event: str, **fields: Any) -> None:
         if self.ledger is not None:
             self.ledger.write(event, **fields)
+
+    def note(self, text: str) -> None:
+        """Something the lab did or retried, for the console and the ledger."""
+        self.say(text)
+        self.record_event("lab", text=text)
+
+    # --- Machines ----------------------------------------------------------
+
+    def new_machine(self, label: str, source: str | None = None, display: str | None = None) -> Machine:
+        """A machine for this run, named so the pre-flight can tell whose it is."""
+        if self.run_dir is None:
+            raise LabError("making a machine", "there is no run in progress")
+        name = f"{config.VM_PREFIX}{self.run_dir.name}-{label}"
+        source = source or self.guest.golden_vm
+        if self.machine_factory is not None:
+            return self.machine_factory(name=name, source=source, display=display, label=label)
+        if self.tart is None or self.ssh_key is None:
+            raise LabError("making a machine", "the pre-flight did not find Tart")
+        return Machine(
+            name=name,
+            source=source,
+            tart=self.tart,
+            ssh=SSH(self.ssh_key, self.note),
+            work_dir=self.run_dir / label,
+            note=self.note,
+            display=display,
+        )
+
+    def failed_in(self, scope: str, request: pytest.FixtureRequest) -> bool:
+        """Whether any check that used this scope's machine did not pass."""
+        if scope == "function":
+            nodeids = [request.node.nodeid]
+        elif scope == "module":
+            prefix = f"{request.node.nodeid}::"
+            nodeids = [n for n in self.records if n.startswith(prefix)]
+        else:
+            nodeids = list(self.records)
+        return any(
+            self.records[n].outcome is not Outcome.PASSED for n in nodeids if n in self.records
+        )
 
     # --- Collection --------------------------------------------------------
 
@@ -259,6 +338,18 @@ class LabPlugin:
         )
         for line in assessment.notes:
             self.say(line)
+        if not assessment.problems and self.mode != "bake":
+            missing = golden.problem(self.guest, about.get("vms", []), self.state_dir)
+            if missing:
+                assessment.problems.append(missing)
+        if not assessment.problems and self.machine_factory is None:
+            try:
+                self.tart = Tart(Path(about["tart"]), self.note)
+                self.ssh_key = make_key(self.run_dir / "ssh")
+            except (KeyError, TypeError, LabError) as error:
+                assessment.problems.append(
+                    preflight.Problem(f"Preparing the run failed: {error}.", "This is a bug in the lab.")
+                )
         if assessment.problems:
             self.say("The lab cannot start:")
             for problem in assessment.problems:
@@ -276,9 +367,11 @@ class LabPlugin:
         self.record_event("pruned", removed=[p.name for p in removed], failures=failures)
 
         count = len(self.names)
+        what = {"checks": "check", "selfcheck": "self-check", "bake": "bake"}[self.mode]
         self.say(
-            f"Running {count} check{'' if count == 1 else 's'} on macOS {self.guest.key} — "
-            f"report in {self.shown(self.run_dir)}/"
+            f"Running {count} {what}{'' if count == 1 else 's'} on macOS {self.guest.key}"
+            + (f", a machine {self.vm_mode.replace('-', ' ')}" if self.mode == "checks" else "")
+            + f" — report in {self.shown(self.run_dir)}/"
         )
 
     def pytest_runtestloop(self, session: pytest.Session) -> bool | None:
@@ -295,8 +388,42 @@ class LabPlugin:
         path.mkdir(exist_ok=True)
         return path
 
+    @pytest.fixture
+    def lab(self) -> "LabPlugin":
+        """The run itself, for the bake and anything else that makes its own machines."""
+        return self
+
+    @pytest.fixture(scope=lambda fixture_name, config: VM_SCOPES[_lab(config).vm_mode])
+    def machine(self, request: pytest.FixtureRequest) -> Any:
+        """A clone of the golden image, booted to the desktop, removed afterwards.
+
+        One per check, per group or per run, as --vm says. The check that uses it
+        does not know which: in the chained modes it must find out what state the
+        machine is in, never assume it.
+        """
+        scope = VM_SCOPES[self.vm_mode]
+        if scope == "function":
+            label = self.names[request.node.nodeid]
+        elif scope == "module":
+            label = names.group_of(names.check_name(Path(str(request.node.path)).stem, "check_x"))
+        else:
+            label = "run"
+        machine = self.new_machine(label)
+        try:
+            machine.create()
+            machine.boot()
+        except BaseException:
+            for problem in machine.close(keep=False):
+                self.note(f"   ⚠️ cleaning up after a machine that did not start: {problem}")
+            raise
+        yield machine
+        keep = self.keep_on_failure and self.failed_in(scope, request)
+        problems = machine.close(keep=keep)
+        if problems:
+            raise LabError(f"cleaning up {machine.name}", "; ".join(problems))
+
     def pytest_runtest_logstart(self, nodeid: str, location: Any) -> None:
-        self.records[nodeid] = CheckRecord(self.names[nodeid], self.clock())
+        self.records[nodeid] = CheckRecord(self.names[nodeid], self.clock(), slept_at=self.slept_at())
 
     @pytest.hookimpl(wrapper=True)
     def pytest_runtest_makereport(self, item: pytest.Item, call: pytest.CallInfo[None]) -> Any:
@@ -343,6 +470,12 @@ class LabPlugin:
 
     def _report(self, record: CheckRecord, finished: bool) -> None:
         record.reported = True
+        if record.outcome is not Outcome.PASSED and self.slept_at() != record.slept_at:
+            # A sleeping Mac freezes the guest mid-step; nothing that went wrong
+            # afterwards is evidence about uDeck.
+            record.details.append(f"(originally: {record.outcome.words}: {record.reason})")
+            record.outcome = Outcome.COULD_NOT_CHECK
+            record.reason = "the Mac went to sleep during this check — run it again"
         seconds = self.clock() - record.started
         evidence = self.run_dir / record.name if self.run_dir else None
         if record.details and evidence is not None:
@@ -449,6 +582,9 @@ class LabPlugin:
                 lab_problems=self.lab_problems,
             )
         finally:
+            if self.ssh_key is not None:
+                # The key opens only this run's clones, which are gone; it goes too.
+                shutil.rmtree(self.ssh_key.parent, ignore_errors=True)
             if self.ledger is not None:
                 self.ledger.close()
             self.lock.release()
@@ -490,3 +626,10 @@ def _git_state(root: Path) -> dict[str, Any]:
 
     status = git("status", "--porcelain")
     return {"commit": git("rev-parse", "HEAD"), "dirty": bool(status) if status is not None else None}
+
+
+def _lab(config: pytest.Config) -> LabPlugin:
+    for plugin in config.pluginmanager.get_plugins():
+        if isinstance(plugin, LabPlugin):
+            return plugin
+    raise LabError("finding the lab", "the lab's plugin is not loaded")

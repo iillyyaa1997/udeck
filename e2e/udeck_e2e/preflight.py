@@ -96,6 +96,8 @@ class HostFacts:
     vms: list[VM]
     # `tart run` processes of any user, whatever Tart home they use.
     machines: list[Process] = field(default_factory=list)
+    # Virtualization.framework machines of any app, Tart's included.
+    framework_machines: int = 0
     uid: int = field(default_factory=os.getuid)
     # Problems met while gathering the facts themselves.
     gathering: list[Problem] = field(default_factory=list)
@@ -224,6 +226,15 @@ def assess(facts: HostFacts, guest: Guest, jobs: int = 1) -> Assessment:
                 + ".",
                 "Run 'tart stop <name>' for it, then run the lab again.",
             )
+        )
+
+    others = facts.framework_machines - len(facts.machines)
+    if others > 0:
+        # Not a refusal: Docker Desktop's Linux machine is one of these, and only
+        # macOS guests count against the limit.
+        notes.append(
+            f"{others} virtual machine(s) of another app are running (Docker Desktop, UTM, "
+            "Parallels…). If one is a macOS guest, macOS may refuse the lab's machine."
         )
 
     ours = [vm for vm in facts.vms if vm.name.startswith(config.VM_PREFIX)]
@@ -480,6 +491,9 @@ def gather(machines: list[Process]) -> HostFacts:
     )
 
 
+FRAMEWORK_MACHINE = "/com.apple.Virtualization.VirtualMachine.xpc/"
+
+
 def run(guest: Guest, note: Callable[[str], None]) -> tuple[Assessment, HostFacts]:
     """The whole pre-flight: stop the lab's orphans, then look at the host.
 
@@ -490,6 +504,7 @@ def run(guest: Guest, note: Callable[[str], None]) -> tuple[Assessment, HostFact
     if problem is None:
         processes, problem = process_table()
     facts = gather([p for p in processes if p.runs_a_machine])
+    facts.framework_machines = sum(1 for p in processes if FRAMEWORK_MACHINE in p.args)
     if problem:
         facts.gathering.append(problem)
     return assess(facts, guest), facts

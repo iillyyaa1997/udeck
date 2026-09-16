@@ -9,6 +9,7 @@ whatever happened to be downloaded that day.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 # Tart is pinned exactly. Its `--vnc-experimental` flag is experimental by name,
 # and the lab leans on the exact output of `tart list --format json` and
@@ -91,3 +92,44 @@ REFUSE_AT_MEMORY_PRESSURE = 4
 # Seconds the pre-flight waits for an orphaned `tart run` to exit after SIGTERM
 # before it sends SIGKILL.
 ORPHAN_TERM_GRACE_SECONDS = 30
+
+# --- The golden image ---------------------------------------------------------
+
+# 2560×1440 at 1×, like the operator's main display. In pixels, not points: in
+# points Tart sizes the guest by the host's *main* screen, so the same setting
+# would become Retina the day the laptop is used without its monitor.
+GOLDEN_DISPLAY = "2560x1440px"
+
+# Bump when the bake's steps change. A golden image baked by an older version,
+# or from a base image other than the pinned one, is refused by the pre-flight.
+BAKE_VERSION = 1
+
+# What the lab remembers about each golden image. Not in the checkout: golden
+# images live in Tart's store and are shared by every checkout on this Mac.
+STATE_DIR = Path.home() / "Library" / "Application Support" / "udeck-e2e"
+
+# The account Cirrus Labs' images log in as.
+GUEST_USER = "admin"
+
+# --- Deadlines, in seconds ------------------------------------------------------
+#
+# Every call the lab makes has one. The numbers are measured times on an Apple
+# Silicon laptop with generous room: a clone boots to an IP in ~7–20 s, answers
+# `tart exec` in ~25 s, reboots in ~20 s and shuts down in ~10 s.
+
+TART_CALL_SECONDS = 120
+CLONE_SECONDS = 900
+PULL_SECONDS = 3 * 3600
+BOOT_IP_SECONDS = 240
+AGENT_SECONDS = 180
+SSH_UP_SECONDS = 180
+DESKTOP_SECONDS = 180
+REBOOT_SECONDS = 360
+SHUTDOWN_SECONDS = 60
+SSH_COMMAND_SECONDS = 120
+
+# How often a known lab failure is retried before the check becomes "could not
+# check": SSH refusing right after a clone boots, a hung `tart` call, and macOS
+# refusing a machine because it believes two are already running.
+KNOWN_FAILURE_RETRIES = 2
+VM_LIMIT_RETRY_WAIT_SECONDS = 15

@@ -321,3 +321,15 @@ def test_a_command_printing_bytes_that_are_not_utf8_does_not_stop_the_lab():
     out, problem = run_command(["/usr/bin/printf", "ok \\377\\376 done"], "printing")
     assert problem is None
     assert out.startswith("ok ") and out.endswith(" done")
+
+
+def test_machines_of_other_virtualization_apps_are_a_note_not_a_refusal():
+    # Docker Desktop's Linux machine is one of these; only macOS guests count
+    # against the limit, and the lab cannot tell them apart from the outside.
+    tart_run = Process(9, ME, START, "tart", "tart run udeck-e2e-20260916-120000Z-panel.dwell")
+    facts = healthy(vms=[], machines=[tart_run], framework_machines=2, uid=ME)
+    assessment = assess(facts, GUEST_27)
+    assert any("another app" in note for note in assessment.notes)
+    assert not any("another app" in p.what for p in assessment.problems)
+    quiet = assess(healthy(vms=[], machines=[tart_run], framework_machines=1, uid=ME), GUEST_27)
+    assert not any("another app" in note for note in quiet.notes)
