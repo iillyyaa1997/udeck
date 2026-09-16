@@ -8,6 +8,19 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [Unreleased]
+
+- **A debug build is its own application.** `Scripts/make-app.sh --debug` now
+  gives the bundle the identifier `place.unicorns.udeck.debug` and no update
+  feed. Measured in a virtual machine: a second copy carrying the release's
+  identifier takes over the release's login item just by being launched, either
+  copy switching it off switches it off for both, and a debug build offered a
+  release update installs the release over itself — becoming that second copy
+  again.
+- **`--test-feed` and `--test-key`** build the release configuration against a
+  throwaway appcast and public key, baked into the bundle so they survive
+  Sparkle's relaunch, for testing an update end to end without the real feed.
+
 ## [0.4.0] — 2026-09-13
 
 The island stops being one appearance. Every situation it can be in — away,

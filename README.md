@@ -81,7 +81,13 @@ To build a real application bundle:
 ```sh
 Scripts/make-app.sh          # dist/uDeck.app, ad-hoc signed
 Scripts/make-app.sh --dmg    # …and a disk image next to it
+Scripts/make-app.sh --debug  # dist/uDeck-debug.app — its own bundle id, never updates itself
 ```
+
+The debug bundle is a separate application on purpose. Two copies that share a
+bundle identifier share one login item — whichever ran last owns it, and either
+can switch it off for both — so a debug build that pretended to be uDeck would
+quietly take the login item away from the copy you actually use.
 
 ## Installing plugins
 

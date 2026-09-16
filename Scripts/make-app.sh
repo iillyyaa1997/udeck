@@ -9,6 +9,7 @@
 # copy to somebody else.
 #
 # Usage:  Scripts/make-app.sh [--debug] [--install] [--sign IDENTITY] [--dmg]
+#                             [--test-feed URL --test-key PUBLIC_KEY]
 #
 # --debug bundles the debug build instead of the release one, into
 # dist/uDeck-debug.app. It exists because a bare `.build/debug/uDeck` is not an
@@ -17,7 +18,14 @@
 # embedded Info.plist is all it has to go on. Working against a real bundle
 # means the copy being developed behaves like the copy being shipped — same
 # icon, same layout, same Sparkle framework beside it — while the released
-# application stays installed and untouched.
+# application stays installed and untouched. It is also its own application:
+# `place.unicorns.udeck.debug`, with no update feed, so it can sit beside the
+# release without taking its login item or updating itself into a second copy of
+# it.
+#
+# --test-feed and --test-key build the release configuration against a throwaway
+# appcast and public key, which is how the end-to-end lab in `e2e/` tests an
+# update without going near the real feed.
 #
 # Without --sign the bundle is ad-hoc signed. That is enough for the machine it
 # was built on and not enough for anyone else: macOS will refuse a downloaded
@@ -34,15 +42,32 @@ IDENTITY="-"
 MAKE_DMG=0
 INSTALL=0
 CONFIG="release"
+TEST_FEED=""
+TEST_KEY=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --sign) IDENTITY="$2"; shift 2 ;;
         --dmg) MAKE_DMG=1; shift ;;
         --debug) CONFIG="debug"; shift ;;
         --install) INSTALL=1; shift ;;
+        --test-feed) TEST_FEED="$2"; shift 2 ;;
+        --test-key) TEST_KEY="$2"; shift 2 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+if [ -n "$TEST_FEED$TEST_KEY" ]; then
+    if [ -z "$TEST_FEED" ] || [ -z "$TEST_KEY" ]; then
+        echo "--test-feed and --test-key are only useful together" >&2
+        exit 2
+    fi
+    if [ "$CONFIG" = "debug" ]; then
+        # A debug build carries no feed at all (see below), so pointing one at a
+        # test feed would silently do nothing.
+        echo "--test-feed builds the release configuration; drop --debug" >&2
+        exit 2
+    fi
+fi
 
 if [ "$CONFIG" = "debug" ]; then
     APP="dist/uDeck-debug.app"
@@ -67,6 +92,36 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BUILT" "$APP/Contents/MacOS/uDeck"
 cp "$PLIST" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+
+# A debug build is a different application as far as macOS is concerned, and it
+# does not update itself.
+#
+# Both halves were measured in a virtual machine rather than assumed. A second
+# copy carrying the *release's* bundle identifier takes over the release's login
+# item merely by being launched — one record exists per identifier, and the copy
+# that ran last owns it — and switching "Open at Login" off in either copy
+# switches it off for both. Sparkle then closes the loop: offered a release
+# update, a debug build installs it over itself and becomes a second copy of the
+# release identifier again. Hence no feed here.
+if [ "$CONFIG" = "debug" ]; then
+    BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$PLIST")"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${BUNDLE_ID}.debug" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Delete :SUFeedURL" "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
+fi
+
+# A lab build is the release pointed at a throwaway feed and signing key, so an
+# end-to-end update test never involves the real ones. Both are baked into the
+# bundle rather than passed at run time because Sparkle relaunches the
+# application to install an update, and an environment override does not survive
+# that relaunch. `NSAllowsLocalNetworking` is what lets the feed be plain HTTP on
+# the loopback address inside the test machine.
+if [ -n "$TEST_FEED" ]; then
+    /usr/libexec/PlistBuddy -c "Set :SUFeedURL $TEST_FEED" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $TEST_KEY" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity" "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
+    /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$APP/Contents/Info.plist"
+fi
 
 # The icon, in both of the forms a bundle can carry it: Assets.car is what
 # macOS 26 and later read, and where the glass is still a material the system
