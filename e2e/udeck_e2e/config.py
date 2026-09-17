@@ -155,6 +155,12 @@ SIGN_SECONDS = 120
 # Until the guest's own web server answers on its loopback address.
 FEED_UP_SECONDS = 30
 
+# One AppleScript against the guest's interface: a walk of the settings window
+# took ~2 s measured, and a slow machine may take longer.
+UI_SECONDS = 180
+# Until a control appears after something was pressed.
+UI_APPEAR_SECONDS = 30
+
 # The port the appcast and its archive are served on, inside the guest. It is
 # baked into every lab build (SUFeedURL), so a check and its builds agree on it.
 FEED_PORT = 8765

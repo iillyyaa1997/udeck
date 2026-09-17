@@ -316,3 +316,12 @@ def test_the_client_that_never_connected_does_not_wait_to_disconnect(monkeypatch
     monkeypatch.setenv(PASSWORD_VARIABLE, PASSWORD)
     assert vnc_client.main(["move", "1", "1"]) == 1
     assert [event[0] for event in api.events] == ["connect", "move", "shutdown"]
+
+
+def test_a_click_goes_through_the_machines_own_pointing_device():
+    client = Client((0, "", ""))
+    screen(client).click(1280, 720, "the About section")
+    args, _ = client.calls[0]
+    assert args[-3:] == ["click", "1280", "720"]
+    assert vnc_client.parse_action(["click", "10", "20"]) == ("click", ["10", "20"])
+    assert vnc_client.parse_action(["click", "-1", "20"]) is None

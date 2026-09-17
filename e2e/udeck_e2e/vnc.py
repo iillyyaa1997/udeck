@@ -132,6 +132,10 @@ class Screen:
         """Put the pointer at (x, y), in pixels from the screen's top-left corner."""
         self._act(["move", str(x), str(y)], step)
 
+    def click(self, x: int, y: int, step: str) -> None:
+        """Click where a person would, through the machine's own pointing device."""
+        self._act(["click", str(x), str(y)], step)
+
     def capture(self, path: Path, step: str) -> Frame:
         """Save the screen as a PNG at `path`. A capture cut short leaves no file there."""
         partial = path.with_name(f".{path.stem}.partial.png")

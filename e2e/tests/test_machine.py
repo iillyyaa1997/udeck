@@ -253,6 +253,9 @@ class FakeScreen:
     def move(self, x, y, step):
         self.calls.append(("move", x, y))
 
+    def click(self, x, y, step):
+        self.calls.append(("click", x, y))
+
 
 class Host:
     def __init__(self, tmp_path):
@@ -744,3 +747,12 @@ def test_a_copy_into_the_guest_that_fails_or_hangs_is_a_lab_error(tmp_path):
     ssh.host = "h"
     with pytest.raises(LabError, match="took longer than 60s"):
         ssh.copy_in(source, "/tmp/uDeck.zip", "installing", seconds=60)
+
+
+def test_a_click_off_the_screen_is_refused_and_one_on_it_goes_through(host):
+    host.machine.create()
+    host.machine.boot()
+    with pytest.raises(LabError, match="off the 2560×1440 screen"):
+        host.machine.click(2560, 10, "nowhere")
+    host.machine.click(2559, 1439, "the corner")
+    assert ("click", 2559, 1439) in host.screens[0].calls

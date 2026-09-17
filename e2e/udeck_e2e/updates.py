@@ -132,8 +132,12 @@ class Feed:
         self.serving = False
 
     @property
+    def base_url(self) -> str:
+        return f"http://127.0.0.1:{self.port}"
+
+    @property
     def url(self) -> str:
-        return f"http://127.0.0.1:{self.port}/appcast.xml"
+        return f"{self.base_url}/appcast.xml"
 
     def serve(self, appcast_file: Path, *archives: Path) -> None:
         """Put the feed and its archives in the guest and start serving them."""

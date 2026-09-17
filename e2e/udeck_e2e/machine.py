@@ -275,8 +275,7 @@ class Machine:
         """Put the pointer at (x, y): pixels from the screen's top-left corner, as in a screenshot."""
         what = f"moving the pointer {step}"
         screen = self._screen_for(what)
-        if not (0 <= x < config.SCREEN_WIDTH and 0 <= y < config.SCREEN_HEIGHT):
-            raise LabError(what, f"({x}, {y}) is off the {config.SCREEN_WIDTH}×{config.SCREEN_HEIGHT} screen")
+        self._refuse_off_screen(x, y, what)
         self._on_screen(what, lambda: screen.move(x, y, what))
 
     # The lab's own clock and pauses, so that anything built on a machine waits
@@ -286,6 +285,17 @@ class Machine:
 
     def sleep(self, seconds: float) -> None:
         self._sleep(seconds)
+
+    def click(self, x: int, y: int, step: str) -> None:
+        """Click at (x, y): pixels from the screen's top-left corner, as in a screenshot."""
+        what = f"clicking {step}"
+        screen = self._screen_for(what)
+        self._refuse_off_screen(x, y, what)
+        self._on_screen(what, lambda: screen.click(x, y, what))
+
+    def _refuse_off_screen(self, x: int, y: int, what: str) -> None:
+        if not (0 <= x < config.SCREEN_WIDTH and 0 <= y < config.SCREEN_HEIGHT):
+            raise LabError(what, f"({x}, {y}) is off the {config.SCREEN_WIDTH}×{config.SCREEN_HEIGHT} screen")
 
     def _screen_for(self, step: str) -> Screen:
         if self.screen is None:
