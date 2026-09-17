@@ -127,12 +127,16 @@ echo "==> Assembling $APP"
 # failed codesign, a full disk, a signal — and not only on the way out of a
 # successful run.
 #
-# EXIT alone, deliberately. Bash runs an EXIT trap when a signal kills it, and it
-# does so at once; adding INT and TERM traps instead makes it *wait* for whatever
-# command is running — a `swift build` of several minutes — before it reacts
-# (measured).
+# Three traps, each measured rather than assumed. EXIT covers an ordinary failure
+# under `set -e`. It is not enough on its own: killed by SIGTERM while waiting for
+# a child, bash sometimes dies without running it (twice in twenty tries), and the
+# bundle stayed. The INT and TERM traps close that hole; the price is that bash
+# acts on the signal only once the command it is running returns, which is
+# immediate when — as the lab does — the whole process group is signalled.
 if [ "$MAKE_ZIP" = "1" ]; then
     trap 'rm -rf "$APP"' EXIT
+    trap 'rm -rf "$APP"; exit 130' INT
+    trap 'rm -rf "$APP"; exit 143' TERM
 fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -288,7 +292,7 @@ if [ "$MAKE_ZIP" = "1" ]; then
     rm -f "$ZIP"
     ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
     rm -rf "$APP"
-    trap - EXIT
+    trap - EXIT INT TERM
     echo "==> Done: $ZIP"
     exit 0
 fi

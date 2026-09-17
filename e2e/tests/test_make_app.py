@@ -112,9 +112,9 @@ def test_a_build_that_dies_after_assembly_leaves_no_bundle_behind(checkout):
     assert not (checkout / "lab-builds" / "uDeck.app").exists(), sorted(p.name for p in (checkout / "lab-builds").iterdir())
 
 
-def test_a_build_stopped_by_a_signal_leaves_no_bundle_behind(checkout):
-    """The lab ends a build by its process group when a deadline passes."""
-    (checkout / "stubs" / "ditto").write_text("#!/bin/sh\nsleep 60\n")
+def start_a_build_that_waits(checkout, seconds=60):
+    """A build stopped at ditto, with the bundle already assembled."""
+    (checkout / "stubs" / "ditto").write_text(f"#!/bin/sh\nsleep {seconds}\n")
     (checkout / "stubs" / "ditto").chmod(0o755)
     process = subprocess.Popen(
         [str(checkout / "Scripts" / "make-app.sh"), "--out", "lab-builds", "--version", "9.9.9",
@@ -125,10 +125,38 @@ def test_a_build_stopped_by_a_signal_leaves_no_bundle_behind(checkout):
     )  # fmt: skip
     deadline = time.monotonic() + 30
     while not (checkout / "lab-builds" / "uDeck.app").exists() and time.monotonic() < deadline:
-        time.sleep(0.2)
+        time.sleep(0.05)
     assert (checkout / "lab-builds" / "uDeck.app").exists(), "the bundle was never assembled"
-    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-    process.wait(timeout=30)
+    return process
+
+
+def test_a_build_stopped_by_a_signal_leaves_no_bundle_behind(checkout):
+    """How the lab ends a build that overran: SIGTERM to the whole process group.
+
+    Ten times over, because the hole this closes was a race — with only an EXIT
+    trap the bundle survived twice in twenty tries, bash having died from the
+    signal without running it.
+    """
+    for _ in range(10):
+        process = start_a_build_that_waits(checkout)
+        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        process.wait(timeout=30)
+        assert not (checkout / "lab-builds" / "uDeck.app").exists()
+
+
+def test_the_bundle_is_armed_for_removal_against_signals_as_well_as_failures(checkout):
+    """The invariant behind the test above, where a race could otherwise hide it."""
+    script = (checkout / "Scripts" / "make-app.sh").read_text()
+    assert """trap 'rm -rf "$APP"' EXIT""" in script
+    assert """trap 'rm -rf "$APP"; exit 130' INT""" in script
+    assert """trap 'rm -rf "$APP"; exit 143' TERM""" in script
+
+
+def test_a_build_killed_while_it_waits_takes_its_bundle_once_the_step_it_ran_returns(checkout):
+    """`kill` on the script alone: bash acts on the signal when the running step ends."""
+    process = start_a_build_that_waits(checkout, seconds=2)
+    process.terminate()  # the shell alone, not its process group
+    assert process.wait(timeout=30) == 143
     assert not (checkout / "lab-builds" / "uDeck.app").exists()
 
 
@@ -138,22 +166,3 @@ def test_a_zip_without_an_out_directory_is_refused_so_dist_is_never_emptied(chec
     assert not (checkout / "dist").exists()
 
 
-def test_a_build_killed_while_it_waits_still_takes_its_bundle_with_it(checkout):
-    """`kill` on the script itself, while ditto is running: the bundle must not survive."""
-    (checkout / "stubs" / "ditto").write_text("#!/bin/sh\nsleep 60\n")
-    (checkout / "stubs" / "ditto").chmod(0o755)
-    process = subprocess.Popen(
-        [str(checkout / "Scripts" / "make-app.sh"), "--out", "lab-builds", "--version", "9.9.9",
-         "--build", "99", "--zip", "--test-feed", FEED, "--test-key", KEY],
-        cwd=str(checkout), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        env={**os.environ, "PATH": f"{checkout / 'stubs'}:{os.environ['PATH']}"},
-        start_new_session=True,
-    )  # fmt: skip
-    deadline = time.monotonic() + 30
-    while not (checkout / "lab-builds" / "uDeck.app").exists() and time.monotonic() < deadline:
-        time.sleep(0.2)
-    assert (checkout / "lab-builds" / "uDeck.app").exists(), "the bundle was never assembled"
-    process.terminate()  # the shell alone, not its process group
-    process.wait(timeout=30)
-    assert not (checkout / "lab-builds" / "uDeck.app").exists()
-    os.killpg(os.getpgid(process.pid), signal.SIGKILL) if process.poll() is None else None
