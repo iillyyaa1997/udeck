@@ -11,8 +11,8 @@ It runs on an Apple Silicon Mac only, and not in GitHub CI: hosted runners do
 not offer nested virtualisation.
 
 > **Being built.** What exists today: the command, its pre-flight and report,
-> the machines and the golden image they are cloned from, and a self-check.
-> The first checks of uDeck itself follow.
+> the machines and the golden image they are cloned from, their screen and
+> pointer over VNC, and a self-check. The first checks of uDeck itself follow.
 
 ## Running it
 
@@ -69,7 +69,8 @@ throwaway SSH key through Tart's guest agent, and is ready when SSH answers and
 the desktop is up. Commands go over the system's `ssh` with your SSH
 configuration ignored; System Events is driven only that way, because the image
 permits it for SSH and not for Tart's agent. A restart is proved by the boot
-time moving. A machine is shut down from inside; `tart stop`, which is a
+session changing — a UUID macOS makes on every boot — not by the boot time,
+which a clock change moves. A machine is shut down from inside; `tart stop`, which is a
 power-off, is used only after a minute of silence and is reported. With
 `--vm per-check` (the default) every check gets its own clone; `per-group` and
 `per-run` share one, so a check must find out the state it needs rather than
@@ -77,6 +78,44 @@ assume it.
 
 If the Mac goes to sleep during a check, anything that went wrong in it becomes
 "could not check".
+
+## Screen and pointer
+
+Every machine runs with Tart's VNC server, which is Virtualization.framework's
+own: moving the pointer through it moves the machine's virtual pointing device,
+the way a physical mouse does, and a screenshot is the machine's framebuffer, so
+nothing in the guest needs a screen-recording permission. A machine is ready
+only once a screenshot is 2560×1440 and not one flat colour, after a boot and
+after a restart alike.
+
+A screenshot can be stale. Once, the one taken at the end of a check still
+showed the boot screen, half a minute after the desktop was up; the server seems
+to hand out what it last saw until something in the guest repaints. Until that
+is understood, read a screenshot as "at least this old", not "now".
+
+Each pointer move and each screenshot is a connection of its own, in a short
+process with a deadline (about half a second each). The server answers one
+full frame per connection — a second request on the same connection waits until
+something on the screen repaints — so the lab never asks twice. Coordinates are
+pixels from the top-left corner, as in a screenshot. After a restart macOS puts
+the pointer near the top-left corner, 10 pixels below the top edge, so a check
+that cares where the pointer is puts it there first.
+
+**While a machine runs, its screen can be reached from your local network**, not
+only from this Mac. Tart prints the address as `127.0.0.1`, but the server
+listens on every interface, and macOS's firewall lets the notarized Tart in by
+default. It asks for a password made for that machine, of which VNC checks the
+first 8 characters, and it exists only while the machine does — minutes per
+check. The lab connects to `127.0.0.1` only and says this before every run. To
+keep the screen to this Mac, block incoming connections for tart in System
+Settings → Network → Firewall → Options; the lab reads that setting and stops
+saying it. The password stays out of the lab's console, ledger and command
+lines; it is in `tart-run.log` in the run's report, as Tart printed it.
+
+Once, in the lab's measurements, Tart itself crashed inside that VNC server
+(`_VZVNCServer`) and took the machine with it; it did not happen again in
+dozens of connections. If it does, the check that was running says the machine
+was killed by SIGTRAP and where macOS keeps the crash report.
 
 ## Reading the result
 
@@ -129,6 +168,13 @@ called `<group>.<name>` on the command line — `check_wrong_key` in
   outside a check file, is also treated as the lab failing, never as uDeck
   failing.
 * The `check_dir` fixture is the check's own directory in the run's report.
+* `machine.screenshot(check_dir, "after the update")` saves the screen there as
+  `01-after-the-update.png`, numbered in the order taken. Take one after every
+  step that changes what is on screen; they are kept whether the check passes
+  or not, and the lab adds `…-at-the-end.png` itself before the machine is shut
+  down. A screenshot is evidence for a person, never a verdict.
+* `machine.move_pointer(x, y, "to the top edge")` puts the pointer at a pixel;
+  `probes.pointer(machine)` reads back where the guest has it.
 * Check files live directly in `checks/`, and a file must not skip itself — a
   skipped file would silently drop its whole group. An exception in a thread the
   check started makes the check "could not check".
@@ -136,7 +182,10 @@ called `<group>.<name>` on the command line — `check_wrong_key` in
 ## The lab's own tests
 
 ```sh
-UV_PROJECT_ENVIRONMENT=.build/e2e/venv uv run --frozen --project e2e pytest e2e/tests
+UV_PROJECT_ENVIRONMENT="$PWD/.build/e2e/venv" uv run --frozen --project e2e pytest e2e/tests
 ```
+
+From the repository's root. The path must be absolute: uv reads a relative one
+from `e2e/`, and would quietly make a second environment there.
 
 They need neither Tart nor a virtual machine.

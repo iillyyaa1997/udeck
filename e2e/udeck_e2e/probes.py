@@ -16,7 +16,7 @@ from udeck_e2e import config
 from udeck_e2e.errors import LabError
 from udeck_e2e.machine import Machine
 
-WIDTH, HEIGHT = (int(n) for n in config.GOLDEN_DISPLAY.removesuffix("px").split("x"))
+WIDTH, HEIGHT = config.SCREEN_WIDTH, config.SCREEN_HEIGHT
 
 SCREEN_SCRIPT = (
     'ObjC.import("AppKit");'
@@ -38,6 +38,32 @@ def screen(machine: Machine) -> tuple[int, int, float]:
     try:
         size = json.loads(done.stdout)
         return int(size["width"]), int(size["height"]), float(size["scale"])
+    except (ValueError, KeyError, TypeError):
+        raise LabError(step, f"unexpected answer {(done.stdout or done.stderr).strip()!r}") from None
+
+
+POINTER_SCRIPT = (
+    'ObjC.import("AppKit");'
+    "var p = $.NSEvent.mouseLocation;"
+    "var primary = $.NSScreen.screens.objectAtIndex(0);"
+    "JSON.stringify({x: p.x, y: p.y, height: primary.frame.size.height})"
+)
+
+
+def pointer(machine: Machine) -> tuple[int, int]:
+    """Where the guest's pointer is, in the coordinates `Machine.move_pointer` takes.
+
+    AppKit counts from the bottom-left corner of the primary screen and in
+    fractions (1279.996 for 1280); the lab counts pixels from the top-left, as
+    in a screenshot. Through `tart exec`, which runs inside the logged-in session.
+    """
+    step = f"reading where {machine.name}'s pointer is"
+    done = machine.tart.exec(
+        machine.name, ["/usr/bin/osascript", "-l", "JavaScript", "-e", POINTER_SCRIPT], step, seconds=60
+    )
+    try:
+        at = json.loads(done.stdout)
+        return round(float(at["x"])), round(float(at["height"]) - float(at["y"]))
     except (ValueError, KeyError, TypeError):
         raise LabError(step, f"unexpected answer {(done.stdout or done.stderr).strip()!r}") from None
 

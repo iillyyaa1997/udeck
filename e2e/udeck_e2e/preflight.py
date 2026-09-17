@@ -98,6 +98,9 @@ class HostFacts:
     machines: list[Process] = field(default_factory=list)
     # Virtualization.framework machines of any app, Tart's included.
     framework_machines: int = 0
+    # Whether other machines on the network can reach a running machine's VNC
+    # server, as far as the firewall says; None when it could not be read.
+    vnc_reachable_from_network: bool | None = None
     uid: int = field(default_factory=os.getuid)
     # Problems met while gathering the facts themselves.
     gathering: list[Problem] = field(default_factory=list)
@@ -235,6 +238,20 @@ def assess(facts: HostFacts, guest: Guest, jobs: int = 1) -> Assessment:
         notes.append(
             f"{others} virtual machine(s) of another app are running (Docker Desktop, UTM, "
             "Parallels…). If one is a macOS guest, macOS may refuse the lab's machine."
+        )
+
+    if facts.tart is not None and facts.vnc_reachable_from_network is not False:
+        notes.append(
+            "While a machine runs, Tart shares its screen over VNC on every network interface, "
+            "not only on this Mac, behind a password made for that machine (VNC checks its "
+            "first 8 characters). "
+            + (
+                "The firewall lets tart in, so the local network can reach it. "
+                if facts.vnc_reachable_from_network
+                else "Whether the firewall lets tart in could not be read. "
+            )
+            + "To keep it to this Mac, block incoming connections for tart in System Settings "
+            "→ Network → Firewall → Options."
         )
 
     ours = [vm for vm in facts.vms if vm.name.startswith(config.VM_PREFIX)]
@@ -491,6 +508,43 @@ def gather(machines: list[Process]) -> HostFacts:
     )
 
 
+FIREWALL = "/usr/libexec/ApplicationFirewall/socketfilterfw"
+
+_FIREWALL_STATE = re.compile(r"\(State = (\d+)\)")
+
+
+def reachable_through_firewall(global_state: str, block_all: str, app: str) -> bool | None:
+    """Whether the firewall lets other machines connect to Tart, from `socketfilterfw`'s words.
+
+    Its three read-only answers: `--getglobalstate` ("Firewall is enabled. (State
+    = 1)"; 0 is off, 2 blocks everything), `--getblockall` ("… block all state set
+    to enabled."), and `--getappblocked <tart>` ("Incoming connection to … is
+    permitted."). None when the words are not ones the lab knows.
+    """
+    state = _FIREWALL_STATE.search(global_state)
+    if state is None:
+        return None
+    if state.group(1) == "0":
+        return True
+    if state.group(1) == "2" or "set to enabled" in block_all:
+        return False
+    if "is permitted" in app:
+        return True
+    if "is blocked" in app:
+        return False
+    return None
+
+
+def firewall_lets_tart_in(tart: Path) -> bool | None:
+    answers = []
+    for args in (["--getglobalstate"], ["--getblockall"], ["--getappblocked", str(tart.resolve())]):
+        out, problem = run_command([FIREWALL, *args], "asking the firewall about Tart")
+        if problem is not None:
+            return None
+        answers.append(out or "")
+    return reachable_through_firewall(*answers)
+
+
 FRAMEWORK_MACHINE = "/com.apple.Virtualization.VirtualMachine.xpc/"
 
 
@@ -505,6 +559,8 @@ def run(guest: Guest, note: Callable[[str], None]) -> tuple[Assessment, HostFact
         processes, problem = process_table()
     facts = gather([p for p in processes if p.runs_a_machine])
     facts.framework_machines = sum(1 for p in processes if FRAMEWORK_MACHINE in p.args)
+    if facts.tart is not None:
+        facts.vnc_reachable_from_network = firewall_lets_tart_in(facts.tart)
     if problem:
         facts.gathering.append(problem)
     return assess(facts, guest), facts

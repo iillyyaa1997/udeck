@@ -31,6 +31,7 @@ def healthy(**changes) -> HostFacts:
         memory_gb=48,
         memory_pressure=1,
         vms=[VM(config.GUESTS["27"].golden_vm, running=False)],
+        vnc_reachable_from_network=False,
     )
     return replace(facts, **changes)
 
@@ -333,3 +334,31 @@ def test_machines_of_other_virtualization_apps_are_a_note_not_a_refusal():
     assert not any("another app" in p.what for p in assessment.problems)
     quiet = assess(healthy(vms=[], machines=[tart_run], framework_machines=1, uid=ME), GUEST_27)
     assert not any("another app" in note for note in quiet.notes)
+
+
+# --- Tart's VNC and the firewall -----------------------------------------------------------
+
+
+def test_the_firewall_is_read_from_socketfilterfws_own_words():
+    from udeck_e2e.preflight import reachable_through_firewall as reachable
+
+    on, off, block_state = "Firewall is enabled. (State = 1)", "Firewall is disabled. (State = 0)", "Firewall is blocking all non-essential incoming connections. (State = 2)"
+    no_block_all, block_all = "Firewall has block all state set to disabled.", "Firewall has block all state set to enabled."
+    permitted = "Incoming connection to /Users/x/Applications/tart.app/Contents/MacOS/tart is permitted."
+    blocked = "Incoming connection to /Users/x/Applications/tart.app/Contents/MacOS/tart is blocked."
+    assert reachable(off, no_block_all, blocked) is True
+    assert reachable(on, no_block_all, permitted) is True
+    assert reachable(on, no_block_all, blocked) is False
+    assert reachable(on, block_all, permitted) is False
+    assert reachable(block_state, no_block_all, permitted) is False
+    assert reachable(on, no_block_all, "The application is not part of the firewall") is None
+    assert reachable("", "", "") is None
+
+
+def test_the_run_says_the_screen_is_reachable_from_the_network_unless_the_firewall_blocks_tart():
+    (reachable,) = assess(healthy(vnc_reachable_from_network=True), GUEST_27).notes
+    assert "local network can reach it" in reachable and "Firewall → Options" in reachable
+    (unknown,) = assess(healthy(vnc_reachable_from_network=None), GUEST_27).notes
+    assert "could not be read" in unknown and "every network interface" in unknown
+    assert assess(healthy(vnc_reachable_from_network=False), GUEST_27).notes == []
+    assert not any("VNC" in n for n in assess(healthy(tart=None, vnc_reachable_from_network=True), GUEST_27).notes)

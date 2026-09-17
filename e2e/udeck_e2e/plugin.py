@@ -45,6 +45,7 @@ def real_preflight(guest: Guest, note: Note) -> tuple[preflight.Assessment, dict
         "memory_pressure": facts.memory_pressure,
         "running_machines": [p.args for p in facts.machines],
         "framework_machines": facts.framework_machines,
+        "vnc_reachable_from_network": facts.vnc_reachable_from_network,
         "vms": [vm.name for vm in facts.vms],
     }
     return assessment, about
@@ -431,6 +432,27 @@ class LabPlugin:
         problems = machine.close(keep=keep)
         if problems:
             raise LabError(f"cleaning up {machine.name}", "; ".join(problems))
+
+    @pytest.hookimpl(wrapper=True)
+    def pytest_runtest_teardown(self, item: pytest.Item, nextitem: pytest.Item | None) -> Any:
+        # Before the fixtures are torn down, while the check's machine still runs.
+        self._screenshot_at_the_end(item)
+        return (yield)
+
+    def _screenshot_at_the_end(self, item: pytest.Item) -> None:
+        """The screen as the check left it, whatever the outcome.
+
+        Evidence for the person reading the report, so a screenshot that cannot
+        be taken is said, and changes no outcome.
+        """
+        machine = getattr(item, "funcargs", {}).get("machine")
+        record = self.records.get(item.nodeid)
+        if machine is None or record is None or self.run_dir is None:
+            return
+        try:
+            machine.screenshot(self.run_dir / record.name, "at the end")
+        except Exception as error:  # noqa: BLE001 — said, and the check's outcome stands
+            self.note(f"   no screenshot at the end of {record.name}: {error}")
 
     def pytest_runtest_logstart(self, nodeid: str, location: Any) -> None:
         self.records[nodeid] = CheckRecord(self.names[nodeid], self.clock(), slept_at=self.slept_at())

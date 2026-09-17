@@ -126,6 +126,15 @@ class FakeMachine:
         self.events.append(f"close keep={keep}")
         return list(getattr(self.lab, "close_problems", []))
 
+    def screenshot(self, directory, step):
+        self.events.append(f"screenshot {step}")
+        if "screenshot" in getattr(self.lab, "break_machine", ()):
+            raise LabError(f"taking the screenshot '{step}'", "the VNC capture failed: ConnectionRefusedError")
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"01-{step.replace(' ', '-')}.png"
+        path.write_bytes(b"png")
+        return path
+
 
 @pytest.fixture
 def lab(pytester):
@@ -722,3 +731,27 @@ def test_the_self_check_reports_a_restart_that_did_not_happen_as_could_not_check
         del FakeMachine.boot_session, FakeMachine.reboot, FakeMachine.ssh
     assert code == 2
     assert "could not check: checking the restart" in out
+
+
+# --- Screenshots -----------------------------------------------------------------------------
+
+
+def test_every_check_with_a_machine_leaves_a_screenshot_at_the_end_whatever_its_outcome(lab):
+    write_three(lab)
+    lab.write("check_notes.py", "def check_plain(): pass\n")
+    code, out = lab.run()
+    assert code == 1
+    (run,) = lab.run_dirs()
+    for name in ("panel.dwell", "panel.push", "updates.sparkle"):
+        assert (run / name / "01-at-the-end.png").exists(), name
+    assert not (run / "notes.plain").exists()
+    # Taken before the machine is closed, while it still runs.
+    assert all(m.events.index("screenshot at the end") < m.events.index("close keep=False") for m in lab.machines)
+
+
+def test_a_screenshot_that_cannot_be_taken_at_the_end_is_said_and_changes_no_outcome(lab):
+    lab.write("check_panel.py", "def check_dwell(machine): pass\n")
+    lab.break_machine = {"screenshot"}
+    code, out = lab.run()
+    assert code == 0
+    assert "✅ panel.dwell" in out and "no screenshot at the end of panel.dwell" in out

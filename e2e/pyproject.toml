@@ -4,7 +4,9 @@ version = "0"
 description = "uDeck's end-to-end lab: real builds, checked inside throwaway macOS virtual machines"
 requires-python = ">=3.12"
 dependencies = [
+    "pillow>=12,<13",
     "pytest>=9.1,<10",
+    "vncdotool>=1.4.2,<1.5",
 ]
 
 [project.scripts]

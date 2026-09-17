@@ -8,6 +8,8 @@ never a verdict on uDeck.
 
 from __future__ import annotations
 
+import re
+import signal
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -17,6 +19,7 @@ from udeck_e2e import config, interrupts
 from udeck_e2e.errors import LabError
 from udeck_e2e.guest import SSH
 from udeck_e2e.tart import VM_LIMIT_TEXT, Tart
+from udeck_e2e.vnc import Address, Screen, find_address
 
 Note = Callable[[str], None]
 
@@ -40,6 +43,7 @@ class Machine:
         work_dir: Path,
         note: Note,
         display: str | None = None,
+        screen_factory: Callable[[Address], Screen] = Screen,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -52,6 +56,9 @@ class Machine:
         self.display = display
         self.process: Any = None
         self.created = False
+        # The machine's VNC server, known once it has booted.
+        self.screen: Screen | None = None
+        self._screen_factory = screen_factory
         # Where the Mac's sleep marker stood when this machine was made, so a
         # sleep during any check that shared it is noticed (see the plugin).
         self.slept_at = ""
@@ -94,6 +101,8 @@ class Machine:
         self.ssh.host = address
         self.ssh.wait_up(f"waiting for SSH on {self.name}", alive=self.ensure_running)
         self.wait_for_desktop(f"waiting for {self.name}'s desktop")
+        self._find_screen()
+        self.wait_for_screen(f"waiting for {self.name}'s screen")
 
     def _start(self) -> None:
         self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -118,7 +127,7 @@ class Machine:
         """Raise at once if `tart run` has exited, with what it said."""
         if self.process is not None and self.process.poll() is not None:
             tail = self._log_text().strip().splitlines()[-1:] or ["(no output)"]
-            raise LabError(step, f"the machine stopped: 'tart run' exited {self.process.returncode}: {tail[0]}")
+            raise LabError(step, f"the machine stopped: 'tart run' {ended(self.process.returncode)}: {tail[0]}")
 
     def _wait_for_address(self) -> str:
         step = f"waiting for {self.name} to get an address"
@@ -129,7 +138,7 @@ class Machine:
                 if VM_LIMIT_TEXT in log:
                     raise _RefusedByLimit()
                 tail = log.strip().splitlines()[-1:] or ["(no output)"]
-                raise LabError(step, f"'tart run' exited {self.process.returncode}: {tail[0]}")
+                raise LabError(step, f"'tart run' {ended(self.process.returncode)}: {tail[0]}")
             address = self.tart.ip(self.name)
             if address:
                 return address
@@ -221,6 +230,58 @@ class Machine:
         self.wait_for_desktop(f"waiting for {self.name}'s desktop after the restart")
         # The agent starts late after a restart too, and the lab reads the screen through it.
         self._wait_for_agent()
+        self.wait_for_screen(f"waiting for {self.name}'s screen after the restart")
+
+    # --- The screen and the pointer -----------------------------------------
+
+    def _find_screen(self) -> None:
+        address = find_address(self._log_text())
+        if address is None:
+            raise LabError(f"finding {self.name}'s screen", "'tart run' did not print the address of its VNC server")
+        self.screen = self._screen_factory(address)
+
+    def wait_for_screen(self, step: str) -> None:
+        """Until a screenshot is the golden size and not one flat colour."""
+        screen = self._screen_for(step)
+        screen.wait_for_screen(self.work_dir / ".screen-probe.png", step, alive=self.ensure_running)
+
+    def screenshot(self, directory: Path, step: str) -> Path:
+        """The screen now, saved in `directory` as `<NN>-<step>.png`, numbered in the order taken.
+
+        Screenshots are evidence for a person reading the report, never a verdict.
+        """
+        what = f"taking the screenshot '{step}'"
+        screen = self._screen_for(what)
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"{next_number(directory):02d}-{slug(step)}.png"
+        except OSError as error:
+            raise LabError(what, f"could not prepare {directory}: {error}") from None
+        self._on_screen(what, lambda: screen.capture(path, what))
+        return path
+
+    def move_pointer(self, x: int, y: int, step: str) -> None:
+        """Put the pointer at (x, y): pixels from the screen's top-left corner, as in a screenshot."""
+        what = f"moving the pointer {step}"
+        screen = self._screen_for(what)
+        if not (0 <= x < config.SCREEN_WIDTH and 0 <= y < config.SCREEN_HEIGHT):
+            raise LabError(what, f"({x}, {y}) is off the {config.SCREEN_WIDTH}×{config.SCREEN_HEIGHT} screen")
+        self._on_screen(what, lambda: screen.move(x, y, what))
+
+    def _screen_for(self, step: str) -> Screen:
+        if self.screen is None:
+            raise LabError(step, f"{self.name} has not booted, so the lab does not know its screen yet")
+        return self.screen
+
+    def _on_screen(self, step: str, action: Callable[[], Any]) -> Any:
+        self.ensure_running(step)
+        try:
+            return action()
+        except LabError:
+            # A VNC connection refused because Tart itself went away is about the
+            # machine, and that is the story to tell.
+            self.ensure_running(step)
+            raise
 
     # --- Going away ----------------------------------------------------------
 
@@ -313,3 +374,34 @@ class Machine:
 
 class _RefusedByLimit(Exception):
     pass
+
+
+def ended(returncode: int) -> str:
+    """How a process ended, in words: a signal is named, and a crash says where its report is."""
+    if returncode >= 0:
+        return f"exited {returncode}"
+    try:
+        name = signal.Signals(-returncode).name
+    except ValueError:
+        name = f"signal {-returncode}"
+    words = f"was killed by {name}"
+    if -returncode in CRASH_SIGNALS:
+        words += " (a crash; macOS keeps its report in ~/Library/Logs/DiagnosticReports/)"
+    return words
+
+
+CRASH_SIGNALS = frozenset({signal.SIGTRAP, signal.SIGABRT, signal.SIGSEGV, signal.SIGBUS, signal.SIGILL})
+
+_NUMBERED = re.compile(r"^(\d+)-.*\.png$")
+
+
+def next_number(directory: Path) -> int:
+    """One more than the highest numbered screenshot already in `directory`."""
+    numbers = [int(m.group(1)) for p in directory.iterdir() if (m := _NUMBERED.match(p.name))]
+    return max(numbers, default=0) + 1
+
+
+def slug(step: str) -> str:
+    """A step's words as a file name: `after the update` → `after-the-update`."""
+    words = re.sub(r"[^a-z0-9]+", "-", step.lower()).strip("-")
+    return words[:60].rstrip("-") or "screen"

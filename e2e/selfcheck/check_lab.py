@@ -5,12 +5,45 @@ restart pieces, so a normal run checks the lab on its way. This is for when the
 lab is in doubt: after a Tart update, a macOS update, a new golden image.
 """
 
-from udeck_e2e import probes
+import time
+
+from udeck_e2e import config, probes
 from udeck_e2e.errors import LabError
+
+# Where the pointer is put and read back: the middle, the corners, the top edge
+# the panel checks aim at.
+POINTS = [
+    (config.SCREEN_WIDTH // 2, config.SCREEN_HEIGHT // 2),
+    (0, 0),
+    (config.SCREEN_WIDTH - 1, config.SCREEN_HEIGHT - 1),
+    (config.SCREEN_WIDTH // 2, 0),
+    (config.SCREEN_WIDTH // 2, config.SCREEN_HEIGHT // 2),
+]
 
 
 def check_machine_is_as_baked(machine):
     probes.verify_golden(machine)
+
+
+def check_screen_and_pointer(machine, check_dir):
+    # The boot already waited for a real frame; this one is saved for the report.
+    machine.screenshot(check_dir, "the desktop")
+    for x, y in POINTS:
+        machine.move_pointer(x, y, f"to ({x}, {y})")
+        at = pointer_settles_at(machine, (x, y))
+        if at != (x, y):
+            raise LabError("checking the pointer", f"moved to ({x}, {y}); the guest reports {at}")
+    machine.screenshot(check_dir, "the pointer in the middle")
+
+
+def pointer_settles_at(machine, wanted, seconds=10):
+    """The pointer's position once it is where it was sent, or the last one read."""
+    deadline = time.monotonic() + seconds
+    while True:
+        at = probes.pointer(machine)
+        if at == wanted or time.monotonic() >= deadline:
+            return at
+        time.sleep(1)
 
 
 def check_restart_comes_back(machine):

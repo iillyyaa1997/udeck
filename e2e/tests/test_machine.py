@@ -10,6 +10,7 @@ from udeck_e2e.errors import LabError
 from udeck_e2e.guest import SSH, parse_boot_time
 from udeck_e2e.machine import VM_LIMIT_ADVICE, Machine
 from udeck_e2e.tart import Tart
+from udeck_e2e.vnc import Frame
 
 
 def done(args, rc=0, out="", err=""):
@@ -156,6 +157,9 @@ class FakeTart:
             log.write(b"Error: The number of VMs exceeds the system limit\n")
             log.flush()
             process = FakeProcess(exits_after=0, code=1)
+        else:
+            log.write(f"VNC server is running at vnc://:{self.host.vnc_password}@127.0.0.1:61000\n".encode())
+            log.flush()
         self.host.process = process
         return process
 
@@ -224,6 +228,32 @@ class FakeGuest:
             alive(step)
 
 
+class FakeScreen:
+    """The VNC side: frames and pointer moves, recorded."""
+
+    def __init__(self, lab_host, address):
+        self.lab_host = lab_host
+        self.address = address
+        self.calls = []
+
+    def wait_for_screen(self, scratch, step, alive=None):
+        self.calls.append(("wait", step))
+        if alive:
+            alive(step)
+
+    def capture(self, path, step):
+        self.calls.append(("capture", path.name))
+        if self.lab_host.capture_fails:
+            if self.lab_host.capture_kills_tart:
+                self.lab_host.process.returncode = -5
+            raise LabError(step, "the VNC capture failed: ConnectionRefusedError: Connection was refused")
+        path.write_bytes(b"png")
+        return Frame(2560, 1440, False)
+
+    def move(self, x, y, step):
+        self.calls.append(("move", x, y))
+
+
 class Host:
     def __init__(self, tmp_path):
         self.clock = Clock()
@@ -234,6 +264,10 @@ class Host:
         self.shuts_down = True
         self.delete_fails = False
         self.still_running = False
+        self.capture_fails = False
+        self.capture_kills_tart = False
+        self.vnc_password = "anchor-basket-cider-dune"
+        self.screens = []
         self.process = None
         self.tart = FakeTart(self)
         self.guest = FakeGuest(self)
@@ -248,9 +282,15 @@ class Host:
             ssh=self.guest,
             work_dir=tmp_path / "panel.dwell",
             note=self.notes.append,
+            screen_factory=self.make_screen,
             sleep=self.clock.sleep,
             clock=self.clock,
         )
+
+    def make_screen(self, address):
+        screen = FakeScreen(self, address)
+        self.screens.append(screen)
+        return screen
 
     def next_process(self):
         return FakeProcess()
@@ -582,3 +622,73 @@ def test_a_machine_still_running_without_a_known_process_is_stopped_before_delet
     names = [c[0] for c in host.tart.calls]
     assert names.index("stop") < names.index("delete")
     assert len(problems) == 1 and "still running" in problems[0]
+
+
+# --- The screen and the pointer --------------------------------------------------------
+
+
+def test_booting_finds_the_screen_tart_printed_and_waits_for_a_real_frame(host):
+    host.machine.create()
+    host.machine.boot()
+    (screen,) = host.screens
+    assert screen.address.port == 61000 and screen.address.password == host.vnc_password
+    assert screen.calls == [("wait", f"waiting for {host.machine.name}'s screen")]
+
+
+def test_a_tart_run_that_prints_no_vnc_address_leaves_the_machine_unusable(host):
+    host.tart.start = lambda name, log: setattr(host, "process", FakeProcess()) or host.process
+    host.machine.create()
+    with pytest.raises(LabError, match="did not print the address of its VNC server"):
+        host.machine.boot()
+
+
+def test_a_restart_waits_for_the_screen_again(host):
+    host.machine.create()
+    host.machine.boot()
+    host.machine.reboot()
+    assert host.screens[0].calls[-1] == ("wait", f"waiting for {host.machine.name}'s screen after the restart")
+
+
+def test_screenshots_are_numbered_in_the_order_taken_and_named_by_their_step(host, tmp_path):
+    host.machine.create()
+    host.machine.boot()
+    report = tmp_path / "report" / "panel.dwell"
+    first = host.machine.screenshot(report, "the desktop")
+    second = host.machine.screenshot(report, "After the update!")
+    assert (first.name, second.name) == ("01-the-desktop.png", "02-after-the-update.png")
+    (report / "07-by-hand.png").write_bytes(b"")
+    assert host.machine.screenshot(report, "later").name == "08-later.png"
+
+
+def test_the_screen_is_unknown_until_the_machine_has_booted(host, tmp_path):
+    with pytest.raises(LabError, match="has not booted"):
+        host.machine.screenshot(tmp_path, "too early")
+
+
+def test_a_pointer_off_the_screen_is_refused_without_a_connection(host):
+    host.machine.create()
+    host.machine.boot()
+    for x, y in ((config.SCREEN_WIDTH, 0), (0, config.SCREEN_HEIGHT), (-1, 5)):
+        with pytest.raises(LabError, match="off the 2560×1440 screen"):
+            host.machine.move_pointer(x, y, "nowhere")
+    host.machine.move_pointer(config.SCREEN_WIDTH - 1, 0, "to the top-right corner")
+    assert [c for c in host.screens[0].calls if c[0] == "move"] == [("move", 2559, 0)]
+
+
+def test_a_screenshot_lost_because_tart_crashed_says_so_and_where_the_report_is(host, tmp_path):
+    host.machine.create()
+    host.machine.boot()
+    host.capture_fails = host.capture_kills_tart = True
+    with pytest.raises(LabError) as raised:
+        host.machine.screenshot(tmp_path, "the desktop")
+    assert "the machine stopped: 'tart run' was killed by SIGTRAP" in raised.value.reason
+    assert "DiagnosticReports" in raised.value.reason
+
+
+def test_a_screenshot_lost_on_a_running_machine_is_reported_as_it_happened(host, tmp_path):
+    host.machine.create()
+    host.machine.boot()
+    host.capture_fails = True
+    with pytest.raises(LabError, match="Connection was refused") as raised:
+        host.machine.screenshot(tmp_path, "the desktop")
+    assert raised.value.step == "taking the screenshot 'the desktop'"

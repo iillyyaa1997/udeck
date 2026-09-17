@@ -104,6 +104,9 @@ ORPHAN_TERM_GRACE_SECONDS = 30
 # would become Retina the day the laptop is used without its monitor.
 GOLDEN_DISPLAY = "2560x1440px"
 
+# The same screen in pixels, as a screenshot and the pointer see it.
+SCREEN_WIDTH, SCREEN_HEIGHT = (int(n) for n in GOLDEN_DISPLAY.removesuffix("px").split("x"))
+
 # Bump when the bake's steps change. A golden image baked by an older version,
 # or from a base image other than the pinned one, is refused by the pre-flight.
 BAKE_VERSION = 1
@@ -131,6 +134,11 @@ DESKTOP_SECONDS = 180
 REBOOT_SECONDS = 360
 SHUTDOWN_SECONDS = 60
 SSH_COMMAND_SECONDS = 120
+# One VNC action — a pointer move or a screenshot — in its own process: ~0.5 s
+# measured, most of it starting Python.
+VNC_ACTION_SECONDS = 30
+# Until the screen shows a real frame after a boot or a restart.
+SCREEN_SECONDS = 60
 
 # How often a known lab failure is retried before the check becomes "could not
 # check": SSH refusing right after a clone boots, a hung `tart` call, and macOS
