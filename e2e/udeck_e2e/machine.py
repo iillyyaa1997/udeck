@@ -279,6 +279,14 @@ class Machine:
             raise LabError(what, f"({x}, {y}) is off the {config.SCREEN_WIDTH}×{config.SCREEN_HEIGHT} screen")
         self._on_screen(what, lambda: screen.move(x, y, what))
 
+    # The lab's own clock and pauses, so that anything built on a machine waits
+    # the way the machine does — and can be tested without waiting at all.
+    def clock(self) -> float:
+        return self._clock()
+
+    def sleep(self, seconds: float) -> None:
+        self._sleep(seconds)
+
     def _screen_for(self, step: str) -> Screen:
         if self.screen is None:
             raise LabError(step, f"{self.name} has not booted, so the lab does not know its screen yet")

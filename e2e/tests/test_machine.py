@@ -712,3 +712,35 @@ def test_a_machine_that_never_starts_is_quoted_without_the_vnc_password(host):
     with pytest.raises(LabError) as raised:
         host.machine.boot()
     assert host.vnc_password not in raised.value.reason
+
+
+def test_a_file_copied_into_the_guest_travels_over_the_runs_key_with_a_deadline(tmp_path):
+    seen = []
+    ssh = SSH(tmp_path / "key", print, run=lambda args, **k: seen.append((args, k)) or done(args))
+    ssh.host = "192.168.64.9"
+    build = tmp_path / "uDeck-0.4.1.zip"
+    build.write_bytes(b"x")
+    ssh.copy_in(build, "/tmp/uDeck-0.4.1.zip", "installing")
+    args, kwargs = seen[0]
+    assert args[0] == "/usr/bin/scp" and args[-2:] == [str(build), "admin@192.168.64.9:/tmp/uDeck-0.4.1.zip"]
+    assert args[args.index("-i") + 1] == str(tmp_path / "key")
+    assert "-F" in args and args[args.index("-F") + 1] == "/dev/null"
+    assert isinstance(kwargs["timeout"], (int, float)) and kwargs["timeout"] > 0
+    assert kwargs["stdin"] is subprocess.DEVNULL and kwargs["start_new_session"] is True
+
+
+def test_a_copy_into_the_guest_that_fails_or_hangs_is_a_lab_error(tmp_path):
+    ssh = SSH(tmp_path / "key", print, run=lambda args, **k: done(args, 1, err="scp: /tmp: No space left on device"))
+    ssh.host = "h"
+    source = tmp_path / "uDeck.zip"
+    source.write_bytes(b"x")
+    with pytest.raises(LabError, match="No space left"):
+        ssh.copy_in(source, "/tmp/uDeck.zip", "installing")
+
+    def hangs(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    ssh = SSH(tmp_path / "key", print, run=hangs)
+    ssh.host = "h"
+    with pytest.raises(LabError, match="took longer than 60s"):
+        ssh.copy_in(source, "/tmp/uDeck.zip", "installing", seconds=60)

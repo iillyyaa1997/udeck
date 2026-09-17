@@ -119,6 +119,28 @@ class SSH:
             raise LabError(step, f"exited {done.returncode}: {_last(done)}")
         return done
 
+    def copy_in(self, local: Path, remote: str, step: str, seconds: float = config.COPY_SECONDS) -> None:
+        """Put a file into the guest, over the same connection as everything else."""
+        if self.host is None:
+            raise LabError(step, "the guest has no address yet")
+        try:
+            done = self._run(
+                ["/usr/bin/scp", *SSH_OPTIONS, "-i", str(self.key), str(local), f"{config.GUEST_USER}@{self.host}:{remote}"],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=seconds,
+                check=False,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except subprocess.TimeoutExpired:
+            raise LabError(step, f"copying {local.name} into the guest took longer than {seconds:.0f}s") from None
+        except OSError as error:
+            raise LabError(step, f"could not run scp: {error}") from None
+        if done.returncode != 0:
+            raise LabError(step, f"copying {local.name} into the guest failed: {_last(done)}")
+
     def ask(self, command: str, step: str, seconds: float = config.SSH_COMMAND_SECONDS) -> subprocess.CompletedProcess[str]:
         """Run a command whose own exit code is the answer, e.g. `pgrep`.
 

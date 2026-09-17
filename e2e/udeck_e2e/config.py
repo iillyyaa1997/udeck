@@ -134,6 +134,8 @@ DESKTOP_SECONDS = 180
 REBOOT_SECONDS = 360
 SHUTDOWN_SECONDS = 60
 SSH_COMMAND_SECONDS = 120
+# A 4 MB build over scp takes a moment; a slow machine, a little longer.
+COPY_SECONDS = 300
 # One VNC action — a pointer move or a screenshot — in its own process: ~0.5 s
 # measured, most of it starting Python.
 VNC_ACTION_SECONDS = 30
@@ -148,6 +150,14 @@ SCREEN_MAX_UNIFORM = 0.98
 BUILD_SECONDS = 1800
 # How long a build that overran its deadline is given to stop before it is killed.
 BUILD_STOP_GRACE_SECONDS = 10
+# Sparkle's own signing tool, on one zip.
+SIGN_SECONDS = 120
+# Until the guest's own web server answers on its loopback address.
+FEED_UP_SECONDS = 30
+
+# The port the appcast and its archive are served on, inside the guest. It is
+# baked into every lab build (SUFeedURL), so a check and its builds agree on it.
+FEED_PORT = 8765
 
 # How often a known lab failure is retried before the check becomes "could not
 # check": SSH refusing right after a clone boots, a hung `tart` call, and macOS
