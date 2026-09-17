@@ -17,11 +17,15 @@ it does:
   interface, so while a machine runs its screen can be reached from the local
   network with the password. The lab connects to the loopback address only and
   refuses any other.
-* The first frame after a boot was once a black 1280×720 one; `wait_for_screen`
-  waits for the right size and more than one colour instead of trusting the first.
-* A frame can be stale: a screenshot at the end of a check once still showed the
-  boot screen half a minute after the desktop was up. Not understood yet, so
-  nothing here claims a screenshot shows the screen as it is now.
+* A screen that is not drawn yet answers with the right size but almost no
+  content: a black 1280×720 frame right after one boot, and the Apple boot screen
+  — 99.8% of it one colour — for half a minute after another. `wait_for_screen`
+  therefore waits for a frame with real content in it, not merely for a frame.
+* The server does follow what the guest draws: measured over a minute of frames,
+  an application opening and closing changed them within a second. But nothing
+  here can prove that a frame is *recent*: a still screen is answered with a
+  frame identical to the last, and the pointer does not appear in it (measured),
+  so there is nothing the lab can change to force a repaint of its own.
 """
 
 from __future__ import annotations
@@ -69,24 +73,35 @@ def find_address(log_text: str) -> Address | None:
     return Address(last["host"], int(last["port"]), last["password"])
 
 
+def without_password(text: str) -> str:
+    """Tart's VNC line with the password taken out, for anything a person may read.
+
+    `tart run` prints that line and usually nothing else, so it is the last line
+    of the log — which is what the lab quotes when a machine dies unexpectedly.
+    """
+    return URL.sub(lambda m: f"VNC server is running at vnc://:…@{m['host']}:{m['port']}", text)
+
+
 @dataclass(frozen=True)
 class Frame:
     width: int
     height: int
-    # Every pixel the same colour: a screen not drawn yet, or switched off.
-    blank: bool
+    # How much of the frame one colour covers, between 0 and 1. A screen that is
+    # not drawn yet is one flat colour (1.0); the boot screen — an Apple logo on
+    # black — measured 0.998; a desktop measured 0.002.
+    uniform: float
 
     def describe(self) -> str:
-        return f"{self.width}×{self.height}" + (", every pixel the same colour" if self.blank else "")
+        return f"{self.width}×{self.height}, {self.uniform:.1%} of it one colour"
 
 
 def parse_frame(text: str) -> Frame:
     """The client's report of the frame it saved: one JSON object on stdout."""
     facts = json.loads(text)
-    width, height, blank = facts["width"], facts["height"], facts["blank"]
-    if not (isinstance(width, int) and isinstance(height, int) and isinstance(blank, bool)):
+    width, height, uniform = facts["width"], facts["height"], facts["uniform"]
+    if not (isinstance(width, int) and isinstance(height, int) and isinstance(uniform, (int, float))):
         raise ValueError(f"unexpected types in {facts!r}")
-    return Frame(width, height, blank)
+    return Frame(width, height, float(uniform))
 
 
 class Screen:
@@ -142,7 +157,7 @@ class Screen:
         seconds: float = config.SCREEN_SECONDS,
         size: tuple[int, int] = (config.SCREEN_WIDTH, config.SCREEN_HEIGHT),
     ) -> Frame:
-        """Until the screen shows a real frame: the expected size, not one flat colour.
+        """Until the screen shows a drawn frame: the expected size, and content in it.
 
         `alive` is asked between attempts and raises if the machine itself has
         gone, so a dead `tart run` is reported rather than a refused connection.
@@ -155,14 +170,14 @@ class Screen:
                     alive(step)
                 try:
                     frame = self.capture(scratch, step)
-                    if (frame.width, frame.height) == size and not frame.blank:
+                    if (frame.width, frame.height) == size and frame.uniform <= config.SCREEN_MAX_UNIFORM:
                         return frame
                     last = frame.describe()
                 except LabError as error:
                     last = error.reason
                 if self._clock() >= deadline:
                     raise LabError(
-                        step, f"no {size[0]}×{size[1]} frame within {seconds:.0f}s; last: {last}"
+                        step, f"no {size[0]}×{size[1]} frame with a drawn screen within {seconds:.0f}s; last: {last}"
                     )
                 self._sleep(1)
         finally:

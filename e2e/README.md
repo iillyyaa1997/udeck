@@ -85,13 +85,17 @@ Every machine runs with Tart's VNC server, which is Virtualization.framework's
 own: moving the pointer through it moves the machine's virtual pointing device,
 the way a physical mouse does, and a screenshot is the machine's framebuffer, so
 nothing in the guest needs a screen-recording permission. A machine is ready
-only once a screenshot is 2560×1440 and not one flat colour, after a boot and
-after a restart alike.
+only once a screenshot shows a drawn screen: 2560×1440, with no single colour
+covering nearly all of it. That rules out the two ways a screen answers before it
+is ready — a flat black frame, and the Apple boot screen, which measured 99.8%
+one colour half a minute after the desktop was up.
 
-A screenshot can be stale. Once, the one taken at the end of a check still
-showed the boot screen, half a minute after the desktop was up; the server seems
-to hand out what it last saw until something in the guest repaints. Until that
-is understood, read a screenshot as "at least this old", not "now".
+What a screenshot cannot prove is that it is *recent*. A still screen is answered
+with the same frame as before, and the pointer is not drawn into it, so the lab
+has no way to force a repaint and check that the picture followed. It does check
+that the server follows the guest at all: the self-check opens a window inside
+the guest and requires the next frame to differ. Read a screenshot as "the screen
+as of the last thing that was drawn on it".
 
 Each pointer move and each screenshot is a connection of its own, in a short
 process with a deadline (about half a second each). The server answers one
@@ -108,8 +112,9 @@ default. It asks for a password made for that machine, of which VNC checks the
 first 8 characters, and it exists only while the machine does — minutes per
 check. The lab connects to `127.0.0.1` only and says this before every run. To
 keep the screen to this Mac, block incoming connections for tart in System
-Settings → Network → Firewall → Options; the lab reads that setting and stops
-saying it. The password stays out of the lab's console, ledger and command
+Settings → Network → Firewall → Options; the lab reads that setting — for the
+`tart.app` bundle and for the binary inside it, since macOS may hold the block
+against either — and stops saying it. The password stays out of the lab's console, ledger and command
 lines; it is in `tart-run.log` in the run's report, as Tart printed it.
 
 Once, in the lab's measurements, Tart itself crashed inside that VNC server

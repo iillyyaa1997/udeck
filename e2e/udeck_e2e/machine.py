@@ -19,7 +19,7 @@ from udeck_e2e import config, interrupts
 from udeck_e2e.errors import LabError
 from udeck_e2e.guest import SSH
 from udeck_e2e.tart import VM_LIMIT_TEXT, Tart
-from udeck_e2e.vnc import Address, Screen, find_address
+from udeck_e2e.vnc import Address, Screen, find_address, without_password
 
 Note = Callable[[str], None]
 
@@ -123,11 +123,23 @@ class Machine:
         except OSError:
             return ""
 
+    def _last_log_line(self) -> str:
+        """What `tart run` said last, without the password.
+
+        Tart prints the VNC address and, at a clean end, one line more; a machine
+        that dies otherwise leaves that address as the last line — and this line
+        is quoted into the report, the console and the ledger.
+        """
+        lines = self._log_text().strip().splitlines()
+        return without_password(lines[-1]) if lines else "(no output)"
+
     def ensure_running(self, step: str) -> None:
         """Raise at once if `tart run` has exited, with what it said."""
         if self.process is not None and self.process.poll() is not None:
-            tail = self._log_text().strip().splitlines()[-1:] or ["(no output)"]
-            raise LabError(step, f"the machine stopped: 'tart run' {ended(self.process.returncode)}: {tail[0]}")
+            raise LabError(
+                step,
+                f"the machine stopped: 'tart run' {ended(self.process.returncode)}: {self._last_log_line()}",
+            )
 
     def _wait_for_address(self) -> str:
         step = f"waiting for {self.name} to get an address"
@@ -137,8 +149,7 @@ class Machine:
                 log = self._log_text()
                 if VM_LIMIT_TEXT in log:
                     raise _RefusedByLimit()
-                tail = log.strip().splitlines()[-1:] or ["(no output)"]
-                raise LabError(step, f"'tart run' {ended(self.process.returncode)}: {tail[0]}")
+                raise LabError(step, f"'tart run' {ended(self.process.returncode)}: {self._last_log_line()}")
             address = self.tart.ip(self.name)
             if address:
                 return address

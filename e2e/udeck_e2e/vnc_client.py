@@ -5,7 +5,7 @@
 
 Started by `udeck_e2e.vnc`, never by a person: the server, the password and the
 deadline arrive in the environment. A capture prints what it saved as one JSON
-object — width, height, and whether every pixel is the same colour. Exit 0 when
+object — width, height, and how much of the frame one colour covers. Exit 0 when
 the action was done, 1 when it could not be, with the reason as the last line
 on stderr, and 2 when the client was started wrongly.
 """
@@ -22,16 +22,25 @@ from udeck_e2e.vnc import PASSWORD_VARIABLE, SECONDS_VARIABLE, SERVER_VARIABLE
 
 USAGE = "usage: python -m udeck_e2e.vnc_client move X Y | capture PATH (run by the lab)"
 
+# A frame is measured on a small copy of itself: the question is only whether
+# anything is drawn, and 640×360 answers it in milliseconds.
+SAMPLE = (640, 360)
+
+# A disconnect waits on its own; it must not double the client's deadline.
+DISCONNECT_SECONDS = 5.0
+
 
 def frame_of(path: Path) -> dict[str, object]:
     from PIL import Image
 
     with Image.open(path) as image:
-        extrema = image.convert("RGB").getextrema()
+        small = image.convert("RGB").resize(SAMPLE)
+        pixels = SAMPLE[0] * SAMPLE[1]
+        colours = small.getcolors(maxcolors=pixels) or [(pixels, (0, 0, 0))]
         return {
             "width": image.width,
             "height": image.height,
-            "blank": all(low == high for low, high in extrema),
+            "uniform": round(max(count for count, _ in colours) / pixels, 4),
         }
 
 
@@ -61,27 +70,36 @@ def main(argv: list[str] | None = None) -> int:
     from vncdotool import api
 
     kind, values = action
+    client = None
+    code = 0
     try:
         client = api.connect(server, password=password, timeout=seconds)
-        try:
-            if kind == "move":
-                client.mouseMove(int(values[0]), int(values[1]))
-            else:
-                # The one full frame this connection gets; see udeck_e2e.vnc.
-                client.captureScreen(values[0])
-                print(json.dumps(frame_of(Path(values[0]))))
-        finally:
-            # Only a connection that was made: vncdotool's disconnect otherwise
-            # waits out the whole deadline for one that never will be.
-            if client.protocol is not None:
-                client.disconnect()
+        if kind == "move":
+            client.mouseMove(int(values[0]), int(values[1]))
+        else:
+            # The one full frame this connection gets; see udeck_e2e.vnc.
+            client.captureScreen(values[0])
+            print(json.dumps(frame_of(Path(values[0]))))
     except Exception as error:  # noqa: BLE001 — the reason is the output
         text = str(error).strip().replace("\n", " ") or "no details"
         print(f"{type(error).__name__}: {text}", file=sys.stderr)
-        return 1
+        code = 1
     finally:
+        # The reason goes out before anything else waits: an action that used up
+        # the client's deadline leaves none for a disconnect to wait as well, and
+        # the lab would kill the client with nothing said.
+        sys.stdout.flush()
+        sys.stderr.flush()
+        # Only a connection that was made: vncdotool's disconnect otherwise waits
+        # out the whole deadline for one that never will be.
+        if client is not None and client.protocol is not None:
+            client.timeout = min(DISCONNECT_SECONDS, seconds)
+            try:
+                client.disconnect()
+            except Exception:  # noqa: BLE001 — the action's outcome is what matters
+                pass
         api.shutdown()
-    return 0
+    return code
 
 
 if __name__ == "__main__":

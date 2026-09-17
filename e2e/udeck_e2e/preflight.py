@@ -99,8 +99,10 @@ class HostFacts:
     # Virtualization.framework machines of any app, Tart's included.
     framework_machines: int = 0
     # Whether other machines on the network can reach a running machine's VNC
-    # server, as far as the firewall says; None when it could not be read.
+    # server, as far as the firewall says; None when it could not be read, and
+    # then `firewall_unreadable` says what went wrong.
     vnc_reachable_from_network: bool | None = None
+    firewall_unreadable: str = ""
     uid: int = field(default_factory=os.getuid)
     # Problems met while gathering the facts themselves.
     gathering: list[Problem] = field(default_factory=list)
@@ -248,6 +250,8 @@ def assess(facts: HostFacts, guest: Guest, jobs: int = 1) -> Assessment:
             + (
                 "The firewall lets tart in, so the local network can reach it. "
                 if facts.vnc_reachable_from_network
+                else f"Whether the firewall lets tart in could not be read ({facts.firewall_unreadable}). "
+                if facts.firewall_unreadable
                 else "Whether the firewall lets tart in could not be read. "
             )
             + "To keep it to this Mac, block incoming connections for tart in System Settings "
@@ -417,7 +421,9 @@ def parse_tart_list(text: str) -> list[VM]:
     return [VM(name=entry["Name"], running=bool(entry["Running"])) for entry in json.loads(text)]
 
 
-def run_command(args: list[str], step: str) -> tuple[str | None, Problem | None]:
+def run_command(
+    args: list[str], step: str, seconds: float = COMMAND_DEADLINE_SECONDS
+) -> tuple[str | None, Problem | None]:
     try:
         done = subprocess.run(
             args,
@@ -426,14 +432,14 @@ def run_command(args: list[str], step: str) -> tuple[str | None, Problem | None]
             # A process list can hold any bytes at all; one argument that is not
             # UTF-8 must not stop the lab.
             errors="replace",
-            timeout=COMMAND_DEADLINE_SECONDS,
+            timeout=seconds,
             check=False,
             # `ps` prints start times in the locale's words; the parser reads C.
             env={**os.environ, "LC_ALL": "C"},
         )
     except subprocess.TimeoutExpired:
         return None, Problem(
-            f"{step}: '{' '.join(args)}' did not finish in {COMMAND_DEADLINE_SECONDS}s.",
+            f"{step}: '{' '.join(args)}' did not finish in {seconds:.0f}s.",
             "If it is tart that hangs, quit any Tart processes and run the lab again.",
         )
     except OSError as error:
@@ -510,16 +516,25 @@ def gather(machines: list[Process]) -> HostFacts:
 
 FIREWALL = "/usr/libexec/ApplicationFirewall/socketfilterfw"
 
+# Three local reads; a second each is generous, and the pre-flight must not sit
+# here while a person waits for their machines.
+FIREWALL_SECONDS = 10
+
 _FIREWALL_STATE = re.compile(r"\(State = (\d+)\)")
 
 
-def reachable_through_firewall(global_state: str, block_all: str, app: str) -> bool | None:
+def reachable_through_firewall(global_state: str, block_all: str, apps: list[str]) -> bool | None:
     """Whether the firewall lets other machines connect to Tart, from `socketfilterfw`'s words.
 
-    Its three read-only answers: `--getglobalstate` ("Firewall is enabled. (State
-    = 1)"; 0 is off, 2 blocks everything), `--getblockall` ("… block all state set
-    to enabled."), and `--getappblocked <tart>` ("Incoming connection to … is
-    permitted."). None when the words are not ones the lab knows.
+    Its read-only answers: `--getglobalstate` ("Firewall is enabled. (State = 1)";
+    0 is off, 2 blocks everything), `--getblockall` ("… block all state set to
+    enabled."), and `--getappblocked <path>` ("Incoming connection to … is
+    permitted."). The last is asked for more than one path — the firewall's own
+    list holds Tart as the `.app` bundle while the lab runs the binary inside it —
+    and one "is blocked" among them settles it. `--getappblocked` answers
+    "permitted" for a path it has never heard of too, which is the truth while
+    macOS allows signed software in by itself. None when the words are not ones
+    the lab knows.
     """
     state = _FIREWALL_STATE.search(global_state)
     if state is None:
@@ -528,21 +543,37 @@ def reachable_through_firewall(global_state: str, block_all: str, app: str) -> b
         return True
     if state.group(1) == "2" or "set to enabled" in block_all:
         return False
-    if "is permitted" in app:
-        return True
-    if "is blocked" in app:
+    if any("is blocked" in app for app in apps):
         return False
+    if any("is permitted" in app for app in apps):
+        return True
     return None
 
 
-def firewall_lets_tart_in(tart: Path) -> bool | None:
+def firewall_paths(tart: Path) -> list[Path]:
+    """The paths the firewall may hold Tart under: the binary, and its .app bundle."""
+    binary = tart.resolve()
+    bundle = next((p for p in binary.parents if p.suffix == ".app"), None)
+    return [binary] if bundle is None else [binary, bundle]
+
+
+def firewall_lets_tart_in(tart: Path) -> tuple[bool | None, str]:
+    """(what the firewall says, why it could not be read)."""
     answers = []
-    for args in (["--getglobalstate"], ["--getblockall"], ["--getappblocked", str(tart.resolve())]):
-        out, problem = run_command([FIREWALL, *args], "asking the firewall about Tart")
+    for args in (["--getglobalstate"], ["--getblockall"]):
+        out, problem = run_command([FIREWALL, *args], "asking the firewall about Tart", FIREWALL_SECONDS)
         if problem is not None:
-            return None
+            return None, problem.what
         answers.append(out or "")
-    return reachable_through_firewall(*answers)
+    apps = []
+    for path in firewall_paths(tart):
+        out, problem = run_command(
+            [FIREWALL, "--getappblocked", str(path)], "asking the firewall about Tart", FIREWALL_SECONDS
+        )
+        if problem is not None:
+            return None, problem.what
+        apps.append(out or "")
+    return reachable_through_firewall(answers[0], answers[1], apps), ""
 
 
 FRAMEWORK_MACHINE = "/com.apple.Virtualization.VirtualMachine.xpc/"
@@ -560,7 +591,7 @@ def run(guest: Guest, note: Callable[[str], None]) -> tuple[Assessment, HostFact
     facts = gather([p for p in processes if p.runs_a_machine])
     facts.framework_machines = sum(1 for p in processes if FRAMEWORK_MACHINE in p.args)
     if facts.tart is not None:
-        facts.vnc_reachable_from_network = firewall_lets_tart_in(facts.tart)
+        facts.vnc_reachable_from_network, facts.firewall_unreadable = firewall_lets_tart_in(facts.tart)
     if problem:
         facts.gathering.append(problem)
     return assess(facts, guest), facts

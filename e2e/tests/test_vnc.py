@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from udeck_e2e import probes, vnc_client
+from udeck_e2e import config, probes, vnc_client
 from udeck_e2e.errors import LabError
 from udeck_e2e.vnc import (
     PASSWORD_VARIABLE,
@@ -19,6 +19,7 @@ from udeck_e2e.vnc import (
     Frame,
     Screen,
     find_address,
+    without_password,
 )
 
 PASSWORD = "anchor-basket-cider-dune"
@@ -40,8 +41,8 @@ class Clock:
         self.now += seconds
 
 
-def frame_json(width=2560, height=1440, blank=False):
-    return json.dumps({"width": width, "height": height, "blank": blank})
+def frame_json(width=2560, height=1440, uniform=0.002):
+    return json.dumps({"width": width, "height": height, "uniform": uniform})
 
 
 class Client:
@@ -111,7 +112,7 @@ def test_the_password_travels_in_the_environment_never_on_the_command_line():
 
 def test_a_capture_lands_at_its_path_only_when_it_completed(tmp_path):
     good = screen(Client((0, frame_json(), "")))
-    assert good.capture(tmp_path / "01-desktop.png", "taking") == Frame(2560, 1440, False)
+    assert good.capture(tmp_path / "01-desktop.png", "taking") == Frame(2560, 1440, 0.002)
     assert [p.name for p in tmp_path.iterdir()] == ["01-desktop.png"]
 
     bad = screen(Client((1, "", "TimeoutError: Timeout while waiting for client response")))
@@ -132,32 +133,34 @@ def test_an_answer_the_lab_cannot_read_is_a_lab_error(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_waiting_for_the_screen_passes_over_blank_small_and_failed_frames(tmp_path):
+def test_waiting_for_the_screen_passes_over_blank_boot_small_and_failed_frames(tmp_path):
     clock = Clock()
     client = Client(
-        (0, frame_json(1280, 720, blank=True), ""),
+        (0, frame_json(1280, 720, uniform=1.0), ""),
         (1, "", "ConnectionRefusedError: Connection was refused"),
-        (0, frame_json(blank=True), ""),
+        (0, frame_json(uniform=1.0), ""),
+        # The Apple boot screen: the right size, drawn, and not the desktop.
+        (0, frame_json(uniform=0.998), ""),
         (0, frame_json(1024, 768), ""),
         (0, frame_json(), ""),
     )
     frame = screen(client, clock).wait_for_screen(tmp_path / ".probe.png", "waiting")
-    assert frame == Frame(2560, 1440, False)
-    assert len(client.calls) == 5 and clock.now == 4
+    assert frame == Frame(2560, 1440, 0.002)
+    assert len(client.calls) == 6 and clock.now == 5
     assert list(tmp_path.iterdir()) == []
 
 
-def test_a_screen_that_never_shows_a_real_frame_gives_up_saying_what_it_last_saw(tmp_path):
+def test_a_screen_that_never_gets_drawn_gives_up_saying_what_it_last_saw(tmp_path):
     clock = Clock()
-    with pytest.raises(LabError, match="every pixel the same colour"):
-        screen(Client((0, frame_json(blank=True), "")), clock).wait_for_screen(
+    with pytest.raises(LabError, match="99.8% of it one colour"):
+        screen(Client((0, frame_json(uniform=0.998), "")), clock).wait_for_screen(
             tmp_path / ".probe.png", "waiting", seconds=10
         )
     assert clock.now >= 10
 
 
 def test_waiting_for_the_screen_stops_at_once_when_the_machine_has_gone(tmp_path):
-    client = Client((0, frame_json(blank=True), ""))
+    client = Client((0, frame_json(uniform=1.0), ""))
 
     def gone(step):
         raise LabError(step, "the machine stopped: 'tart run' was killed by SIGTRAP")
@@ -170,13 +173,20 @@ def test_waiting_for_the_screen_stops_at_once_when_the_machine_has_gone(tmp_path
 # --- The client process -----------------------------------------------------------------
 
 
-def test_the_client_knows_a_blank_frame_from_a_real_one(tmp_path):
+def test_the_client_measures_how_much_of_a_frame_is_one_colour(tmp_path):
     Image.new("RGB", (1280, 720), (0, 0, 0)).save(tmp_path / "black.png")
-    real = Image.new("RGB", (2560, 1440), (142, 124, 116))
-    real.putpixel((2559, 0), (255, 255, 255))
-    real.save(tmp_path / "real.png")
-    assert vnc_client.frame_of(tmp_path / "black.png") == {"width": 1280, "height": 720, "blank": True}
-    assert vnc_client.frame_of(tmp_path / "real.png") == {"width": 2560, "height": 1440, "blank": False}
+    assert vnc_client.frame_of(tmp_path / "black.png") == {"width": 1280, "height": 720, "uniform": 1.0}
+
+    # The boot screen: a logo and a progress bar on black.
+    boot = Image.new("RGB", (2560, 1440), (0, 0, 0))
+    boot.paste(Image.new("RGB", (230, 280), (255, 255, 255)), (1165, 580))
+    boot.save(tmp_path / "boot.png")
+    assert vnc_client.frame_of(tmp_path / "boot.png")["uniform"] > config.SCREEN_MAX_UNIFORM
+
+    # A desktop: a photograph, nothing like one colour.
+    desktop = Image.effect_noise((2560, 1440), 60).convert("RGB")
+    desktop.save(tmp_path / "desktop.png")
+    assert vnc_client.frame_of(tmp_path / "desktop.png")["uniform"] < 0.1
 
 
 def test_the_client_takes_exactly_one_action():
@@ -230,3 +240,79 @@ def test_the_pointer_is_read_back_in_pixels_from_the_top_left_corner():
     assert probes.pointer(at) == (2559, 1439)
     with pytest.raises(LabError, match="unexpected answer"):
         probes.pointer(ExecOnly("execution error: -1743"))
+
+
+# --- Found by the review of the screen and the pointer -------------------------------------
+
+
+def test_tarts_line_can_be_quoted_without_the_password():
+    line = f"VNC server is running at vnc://:{PASSWORD}@127.0.0.1:62979"
+    said = without_password(line)
+    assert PASSWORD not in said and "127.0.0.1:62979" in said
+    assert without_password("guest has stopped the virtual machine") == "guest has stopped the virtual machine"
+
+
+class FakeApi:
+    """vncdotool's api, as the client uses it: connect, act, disconnect, shutdown."""
+
+    def __init__(self, fails=None):
+        self.fails = fails
+        self.events = []
+        self.client = self
+
+        # the client proxy's own attributes
+        self.protocol = object()
+        self.timeout = 60 * 60
+
+    def connect(self, server, password=None, timeout=None):
+        self.events.append(("connect", timeout))
+        return self
+
+    def captureScreen(self, path):  # noqa: N802 — vncdotool's name
+        self.events.append(("capture", path))
+        if self.fails:
+            raise self.fails
+
+    def mouseMove(self, x, y):  # noqa: N802 — vncdotool's name
+        self.events.append(("move", x, y))
+        if self.fails:
+            raise self.fails
+
+    def disconnect(self):
+        self.events.append(("disconnect", self.timeout))
+
+    def shutdown(self):
+        self.events.append(("shutdown", None))
+
+
+def run_client(monkeypatch, capsys, argv, fails=None, seconds="20"):
+    api = FakeApi(fails)
+    monkeypatch.setitem(sys.modules, "vncdotool.api", api)
+    monkeypatch.setenv(SERVER_VARIABLE, "127.0.0.1::62979")
+    monkeypatch.setenv(PASSWORD_VARIABLE, PASSWORD)
+    monkeypatch.setenv("UDECK_E2E_VNC_SECONDS", seconds)
+    code = vnc_client.main(argv)
+    return code, api, capsys.readouterr()
+
+
+def test_the_client_says_why_before_it_waits_for_anything_else(monkeypatch, capsys):
+    """A capture that used up the client's deadline leaves none for the disconnect."""
+    code, api, output = run_client(
+        monkeypatch, capsys, ["capture", "/tmp/x.png"], fails=TimeoutError("Timeout while waiting for client response")
+    )
+    assert code == 1
+    assert "TimeoutError" in output.err
+    names = [event[0] for event in api.events]
+    assert names == ["connect", "capture", "disconnect", "shutdown"]
+    # The disconnect waits a few seconds, not the whole deadline over again.
+    assert api.events[2][1] <= vnc_client.DISCONNECT_SECONDS
+
+
+def test_the_client_that_never_connected_does_not_wait_to_disconnect(monkeypatch, capsys):
+    api = FakeApi(ConnectionRefusedError("Connection was refused by other side"))
+    api.protocol = None
+    monkeypatch.setitem(sys.modules, "vncdotool.api", api)
+    monkeypatch.setenv(SERVER_VARIABLE, "127.0.0.1::62979")
+    monkeypatch.setenv(PASSWORD_VARIABLE, PASSWORD)
+    assert vnc_client.main(["move", "1", "1"]) == 1
+    assert [event[0] for event in api.events] == ["connect", "move", "shutdown"]

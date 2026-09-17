@@ -137,8 +137,11 @@ SSH_COMMAND_SECONDS = 120
 # One VNC action — a pointer move or a screenshot — in its own process: ~0.5 s
 # measured, most of it starting Python.
 VNC_ACTION_SECONDS = 30
-# Until the screen shows a real frame after a boot or a restart.
+# Until the screen shows a drawn frame after a boot or a restart.
 SCREEN_SECONDS = 60
+# How much of a frame one colour may cover for the screen to count as drawn.
+# Measured: a blank screen 1.0, the Apple boot screen 0.998, a desktop 0.002.
+SCREEN_MAX_UNIFORM = 0.98
 
 # How often a known lab failure is retried before the check becomes "could not
 # check": SSH refusing right after a clone boots, a hung `tart` call, and macOS

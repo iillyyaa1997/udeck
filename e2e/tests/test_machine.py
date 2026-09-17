@@ -692,3 +692,23 @@ def test_a_screenshot_lost_on_a_running_machine_is_reported_as_it_happened(host,
     with pytest.raises(LabError, match="Connection was refused") as raised:
         host.machine.screenshot(tmp_path, "the desktop")
     assert raised.value.step == "taking the screenshot 'the desktop'"
+
+
+def test_a_machine_that_dies_is_quoted_without_the_vnc_password(host, tmp_path):
+    host.machine.create()
+    host.machine.boot()
+    # Tart prints the VNC address and nothing else while a machine lives, so on a
+    # crash that address is the last line of its log.
+    host.process.returncode = -5
+    with pytest.raises(LabError) as raised:
+        host.machine.screenshot(tmp_path, "the desktop")
+    assert host.vnc_password not in raised.value.reason
+    assert "vnc://:…@127.0.0.1:61000" in raised.value.reason
+
+
+def test_a_machine_that_never_starts_is_quoted_without_the_vnc_password(host):
+    host.next_process = lambda: FakeProcess(exits_after=0, code=1)
+    host.machine.create()
+    with pytest.raises(LabError) as raised:
+        host.machine.boot()
+    assert host.vnc_password not in raised.value.reason

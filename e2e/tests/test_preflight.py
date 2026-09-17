@@ -346,13 +346,13 @@ def test_the_firewall_is_read_from_socketfilterfws_own_words():
     no_block_all, block_all = "Firewall has block all state set to disabled.", "Firewall has block all state set to enabled."
     permitted = "Incoming connection to /Users/x/Applications/tart.app/Contents/MacOS/tart is permitted."
     blocked = "Incoming connection to /Users/x/Applications/tart.app/Contents/MacOS/tart is blocked."
-    assert reachable(off, no_block_all, blocked) is True
-    assert reachable(on, no_block_all, permitted) is True
-    assert reachable(on, no_block_all, blocked) is False
-    assert reachable(on, block_all, permitted) is False
-    assert reachable(block_state, no_block_all, permitted) is False
-    assert reachable(on, no_block_all, "The application is not part of the firewall") is None
-    assert reachable("", "", "") is None
+    assert reachable(off, no_block_all, [blocked]) is True
+    assert reachable(on, no_block_all, [permitted]) is True
+    assert reachable(on, no_block_all, [blocked]) is False
+    assert reachable(on, block_all, [permitted]) is False
+    assert reachable(block_state, no_block_all, [permitted]) is False
+    assert reachable(on, no_block_all, ["The application is not part of the firewall"]) is None
+    assert reachable("", "", []) is None
 
 
 def test_the_run_says_the_screen_is_reachable_from_the_network_unless_the_firewall_blocks_tart():
@@ -362,3 +362,35 @@ def test_the_run_says_the_screen_is_reachable_from_the_network_unless_the_firewa
     assert "could not be read" in unknown and "every network interface" in unknown
     assert assess(healthy(vnc_reachable_from_network=False), GUEST_27).notes == []
     assert not any("VNC" in n for n in assess(healthy(tart=None, vnc_reachable_from_network=True), GUEST_27).notes)
+
+
+def test_the_firewall_is_asked_about_the_app_bundle_as_well_as_the_binary():
+    from udeck_e2e.preflight import firewall_paths, reachable_through_firewall as reachable
+
+    tart = Path("/Users/someone/Applications/tart.app/Contents/MacOS/tart")
+    assert firewall_paths(tart) == [tart, Path("/Users/someone/Applications/tart.app")]
+    assert firewall_paths(Path("/opt/homebrew/bin/tart")) == [Path("/opt/homebrew/bin/tart")]
+
+    # macOS holds the block against the bundle; the binary then reads "permitted",
+    # which is its answer for any path it has never heard of.
+    on, no_block_all = "Firewall is enabled. (State = 1)", "Firewall has block all state set to disabled."
+    answers = ["Incoming connection to …/MacOS/tart is permitted.", "Incoming connection to …/tart.app is blocked."]
+    assert reachable(on, no_block_all, answers) is False
+
+
+def test_a_firewall_that_cannot_be_read_says_why_in_the_note():
+    facts = healthy(vnc_reachable_from_network=None, firewall_unreadable="'socketfilterfw --getglobalstate' did not finish in 10s.")
+    (note,) = assess(facts, GUEST_27).notes
+    assert "could not be read (" in note and "did not finish in 10s" in note
+
+
+def test_a_firewall_that_will_not_answer_comes_back_with_the_reason(monkeypatch):
+    from udeck_e2e import preflight
+
+    def refuses(args, step, seconds=60):
+        return None, preflight.Problem(f"{step}: '{' '.join(args)}' did not finish in {seconds:.0f}s.", "Try again.")
+
+    monkeypatch.setattr(preflight, "run_command", refuses)
+    answer, why = preflight.firewall_lets_tart_in(Path("/Users/someone/Applications/tart.app/Contents/MacOS/tart"))
+    assert answer is None
+    assert "socketfilterfw" in why and "did not finish in 10s" in why

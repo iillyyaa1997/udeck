@@ -26,24 +26,58 @@ def check_machine_is_as_baked(machine):
 
 
 def check_screen_and_pointer(machine, check_dir):
-    # The boot already waited for a real frame; this one is saved for the report.
+    # The boot already waited for a drawn frame; this one is saved for the report.
     machine.screenshot(check_dir, "the desktop")
     for x, y in POINTS:
         machine.move_pointer(x, y, f"to ({x}, {y})")
         at = pointer_settles_at(machine, (x, y))
         if at != (x, y):
             raise LabError("checking the pointer", f"moved to ({x}, {y}); the guest reports {at}")
-    machine.screenshot(check_dir, "the pointer in the middle")
+    before = machine.screenshot(check_dir, "the pointer in the middle").read_bytes()
+
+    # Everything above would also pass against a server that answers every
+    # connection with the same old frame — and then every screenshot the lab
+    # collects would be a picture of a moment it never showed. So: make the guest
+    # draw something, and watch the screen follow.
+    machine.ssh.run("open -a Calculator", "opening a window in the guest")
+    try:
+        wait_for_the_screen_to_change(machine, check_dir, before)
+    finally:
+        machine.ssh.run(
+            "osascript -e 'tell application \"Calculator\" to quit'",
+            "closing the window in the guest",
+            check=False,
+        )
+    machine.screenshot(check_dir, "the window closed again")
 
 
-def pointer_settles_at(machine, wanted, seconds=10):
+def wait_for_the_screen_to_change(machine, check_dir, before, seconds=20, sleep=None, clock=None):
+    """Until a frame differs from `before` — the proof that frames are not cached."""
+    sleep, clock = sleep or time.sleep, clock or time.monotonic
+    step = "checking that the screen follows the guest"
+    probe = check_dir / ".repaint-probe.png"
+    deadline = clock() + seconds
+    try:
+        while True:
+            machine.screen.capture(probe, step)
+            if probe.read_bytes() != before:
+                return
+            if clock() >= deadline:
+                raise LabError(step, f"the frame was the same {seconds:.0f}s after a window opened in the guest")
+            sleep(2)
+    finally:
+        probe.unlink(missing_ok=True)
+
+
+def pointer_settles_at(machine, wanted, seconds=10, sleep=None, clock=None):
     """The pointer's position once it is where it was sent, or the last one read."""
-    deadline = time.monotonic() + seconds
+    sleep, clock = sleep or time.sleep, clock or time.monotonic
+    deadline = clock() + seconds
     while True:
         at = probes.pointer(machine)
-        if at == wanted or time.monotonic() >= deadline:
+        if at == wanted or clock() >= deadline:
             return at
-        time.sleep(1)
+        sleep(1)
 
 
 def check_restart_comes_back(machine):
