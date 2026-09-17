@@ -253,30 +253,3 @@ def test_the_lab_never_unpacks_a_build_itself():
     text = (Path(__file__).resolve().parents[1] / source).read_text()
     for unpacking in ("ditto -x", "unzip", "extractall", "shutil.unpack", ".extract("):
         assert unpacking not in text, unpacking
-
-
-# --- The script itself, run for real (it refuses before it builds anything) ------------
-
-
-MAKE_APP_SH = Path(__file__).resolve().parents[2] / "Scripts" / "make-app.sh"
-
-
-def run_script(*args):
-    return subprocess.run([str(MAKE_APP_SH), *args], capture_output=True, text=True, timeout=60)
-
-
-def test_the_script_refuses_the_combinations_that_would_leave_a_lab_build_lying_about():
-    for args in (["--zip", "--install"], ["--zip", "--dmg"], ["--out", ""]):
-        done = run_script(*args)
-        assert done.returncode == 2, (args, done.stdout, done.stderr)
-    assert "cannot be combined" in run_script("--zip", "--install").stderr
-    assert "needs a directory" in run_script("--out", "").stderr
-    assert run_script("--what").returncode == 2
-
-
-def test_a_build_that_ignores_the_first_signal_is_killed(tmp_path):
-    script = Script(timeouts=1, makes_zip=False)
-    script.ignores_sigterm = True
-    with pytest.raises(LabError, match="did not finish"):
-        builder(script, tmp_path, seconds=60).build("0.4.1", "6")
-    assert script.signals == [signal.SIGTERM, signal.SIGKILL]

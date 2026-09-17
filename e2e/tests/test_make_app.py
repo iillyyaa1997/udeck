@@ -166,3 +166,27 @@ def test_a_zip_without_an_out_directory_is_refused_so_dist_is_never_emptied(chec
     assert not (checkout / "dist").exists()
 
 
+
+
+def test_the_options_that_would_leave_a_lab_build_lying_about_are_refused(checkout):
+    """Refusals, checked against a toy checkout — never the repository's own dist/."""
+    for args in (["--zip", "--install"], ["--zip", "--dmg"], ["--out", ""], ["--what"]):
+        done = make_app(checkout, *args)
+        assert done.returncode == 2, (args, done.stdout, done.stderr)
+    assert "cannot be combined" in make_app(checkout, "--zip", "--install").stderr
+    assert "needs a directory" in make_app(checkout, "--out", "").stderr
+    assert not (checkout / "dist").exists()
+
+
+def test_this_is_the_only_file_that_reaches_the_repository_itself():
+    """Running the real script from a test can build in the checkout and empty dist/.
+
+    It happened: a mutation that disabled one of the script's refusals let a test
+    in tests/test_builds.py build for real and take dist/uDeck.app with it
+    (2026-09-17). Here the script only ever runs against a toy checkout in a
+    temporary directory, and no other test file may reach the repository at all —
+    `parents[2]` from tests/ is its root.
+    """
+    for path in sorted(Path(__file__).parent.glob("test_*.py")):
+        if path.name != Path(__file__).name:
+            assert "parents[2]" not in path.read_text(), path.name
