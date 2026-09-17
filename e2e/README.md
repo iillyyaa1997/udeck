@@ -12,7 +12,8 @@ not offer nested virtualisation.
 
 > **Being built.** What exists today: the command, its pre-flight and report,
 > the machines and the golden image they are cloned from, their screen and
-> pointer over VNC, and a self-check. The first checks of uDeck itself follow.
+> pointer over VNC, a self-check, and the builds an update check needs. The
+> first checks of uDeck itself follow.
 
 ## Running it
 
@@ -121,6 +122,29 @@ Once, in the lab's measurements, Tart itself crashed inside that VNC server
 (`_VZVNCServer`) and took the machine with it; it did not happen again in
 dozens of connections. If it does, the check that was running says the machine
 was killed by SIGTRAP and where macOS keeps the crash report.
+
+## Builds
+
+An update check needs two real builds of uDeck: one to install and a newer one to
+be offered. The lab makes them from the checkout it is running in, through
+`Scripts/make-app.sh`, and they differ from a build you would make by hand in
+three ways — each of them something a check depends on:
+
+* they go to `.build/e2e/<run>/builds/<version>-<build>/`, never `dist/`;
+* they carry the version the lab asked for in both keys, including
+  `CFBundleVersion`, which is the one Sparkle compares when it decides whether an
+  update is newer;
+* they stay zips on this Mac. A lab build is the *released* application,
+  identifier and all, so an unpacked copy here could take the release's login
+  item merely by being launched. It is unpacked inside the machine and nowhere
+  else, and the lab reads the bundle's plist out of the zip — in memory — to
+  check it got the build it asked for.
+
+The update is signed with a key made for the run and deleted with it. Sparkle's
+own `generate_keys` would leave a private key in your login keychain; the lab
+generates the key itself and hands `sign_update` a file holding the base64 of the
+32-byte seed (measured: that is the form it reads, and its signatures verify
+against the public key baked into the bundle).
 
 ## Reading the result
 

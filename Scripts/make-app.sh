@@ -10,6 +10,7 @@
 #
 # Usage:  Scripts/make-app.sh [--debug] [--install] [--sign IDENTITY] [--dmg]
 #                             [--test-feed URL --test-key PUBLIC_KEY]
+#                             [--out DIR] [--version X.Y.Z] [--build N] [--zip]
 #
 # --debug bundles the debug build instead of the release one, into
 # dist/uDeck-debug.app. It exists because a bare `.build/debug/uDeck` is not an
@@ -26,6 +27,15 @@
 # --test-feed and --test-key build the release configuration against a throwaway
 # appcast and public key, which is how the end-to-end lab in `e2e/` tests an
 # update without going near the real feed.
+#
+# The lab also needs three things an ordinary build does not. --out puts the
+# bundle somewhere other than dist/, so a test build never lands where the
+# copies a person uses are kept. --version and --build set the two version keys
+# — the one people read and CFBundleVersion, which is the one Sparkle compares —
+# so that two builds of one commit can stand as an update pair. --zip leaves the
+# bundle only as a zip: a lab build carries the *release's* bundle identifier,
+# so an unpacked copy on this Mac could take the release's login item merely by
+# being launched. It is unpacked inside the test machine and nowhere else.
 #
 # Without --sign the bundle is ad-hoc signed. That is enough for the machine it
 # was built on and not enough for anyone else: macOS will refuse a downloaded
@@ -44,6 +54,10 @@ INSTALL=0
 CONFIG="release"
 TEST_FEED=""
 TEST_KEY=""
+OUT="dist"
+SET_VERSION=""
+SET_BUILD=""
+MAKE_ZIP=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --sign) IDENTITY="$2"; shift 2 ;;
@@ -52,9 +66,23 @@ while [ $# -gt 0 ]; do
         --install) INSTALL=1; shift ;;
         --test-feed) TEST_FEED="$2"; shift 2 ;;
         --test-key) TEST_KEY="$2"; shift 2 ;;
+        --out) OUT="$2"; shift 2 ;;
+        --version) SET_VERSION="$2"; shift 2 ;;
+        --build) SET_BUILD="$2"; shift 2 ;;
+        --zip) MAKE_ZIP=1; shift ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
+
+if [ -z "$OUT" ]; then
+    echo "--out needs a directory" >&2
+    exit 2
+fi
+if [ "$MAKE_ZIP" = "1" ] && { [ "$INSTALL" = "1" ] || [ "$MAKE_DMG" = "1" ]; }; then
+    # --zip removes the bundle it made; the other two need it.
+    echo "--zip cannot be combined with --install or --dmg" >&2
+    exit 2
+fi
 
 if [ -n "$TEST_FEED$TEST_KEY" ]; then
     if [ -z "$TEST_FEED" ] || [ -z "$TEST_KEY" ]; then
@@ -70,14 +98,14 @@ if [ -n "$TEST_FEED$TEST_KEY" ]; then
 fi
 
 if [ "$CONFIG" = "debug" ]; then
-    APP="dist/uDeck-debug.app"
+    APP="$OUT/uDeck-debug.app"
     BUILT="./.build/debug/uDeck"
 else
-    APP="dist/uDeck.app"
+    APP="$OUT/uDeck.app"
     BUILT="./.build/release/uDeck"
 fi
 PLIST="Sources/uDeck/Support/Info.plist"
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
+VERSION="${SET_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")}"
 
 echo "==> Building uDeck $VERSION for $CONFIG"
 if [ "$CONFIG" = "debug" ]; then
@@ -92,6 +120,15 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BUILT" "$APP/Contents/MacOS/uDeck"
 cp "$PLIST" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+
+# The two version keys. CFBundleVersion is the one Sparkle compares when it
+# decides whether an update is newer, so an update pair differs in both.
+if [ -n "$SET_VERSION" ]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $SET_VERSION" "$APP/Contents/Info.plist"
+fi
+if [ -n "$SET_BUILD" ]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $SET_BUILD" "$APP/Contents/Info.plist"
+fi
 
 # A debug build is a different application as far as macOS is concerned, and it
 # does not update itself.
@@ -217,10 +254,23 @@ if [ "$INSTALL" = "1" ]; then
 fi
 
 if [ "$MAKE_DMG" = "1" ]; then
-    echo "==> Making dist/uDeck-$VERSION.dmg"
-    rm -f "dist/uDeck-$VERSION.dmg"
+    echo "==> Making $OUT/uDeck-$VERSION.dmg"
+    rm -f "$OUT/uDeck-$VERSION.dmg"
     hdiutil create -volname "uDeck $VERSION" -srcfolder "$APP" \
-        -ov -format UDZO "dist/uDeck-$VERSION.dmg"
+        -ov -format UDZO "$OUT/uDeck-$VERSION.dmg"
+fi
+
+# A zip, and nothing unpacked left behind. ditto rather than zip(1): it keeps the
+# symlinks and extended attributes a signed bundle is made of, and a copy that
+# loses them will not launch.
+if [ "$MAKE_ZIP" = "1" ]; then
+    ZIP="${APP%.app}-$VERSION.zip"
+    echo "==> Zipping $ZIP"
+    rm -f "$ZIP"
+    ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+    rm -rf "$APP"
+    echo "==> Done: $ZIP"
+    exit 0
 fi
 
 echo "==> Done: $APP"

@@ -20,6 +20,12 @@ for what that promises.
 - **`--test-feed` and `--test-key`** build the release configuration against a
   throwaway appcast and public key, baked into the bundle so they survive
   Sparkle's relaunch, for testing an update end to end without the real feed.
+- **`--out`, `--version`, `--build` and `--zip`** in `Scripts/make-app.sh`, for
+  the builds the lab tests updates with: somewhere other than `dist/`, a version
+  of the caller's choosing in both keys — including `CFBundleVersion`, the one
+  Sparkle compares — and the bundle left only as a zip. A lab build carries the
+  release's identifier, so an unpacked copy could take the release's login item
+  by being launched; it is unpacked inside a test machine and nowhere else.
 - **The settings window can be driven without reading its titles.** The sidebar
   sections and the update controls carry accessibility identifiers. The update
   buttons used to reach accessibility with no name at all — System Events read

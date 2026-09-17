@@ -143,6 +143,10 @@ SCREEN_SECONDS = 60
 # Measured: a blank screen 1.0, the Apple boot screen 0.998, a desktop 0.002.
 SCREEN_MAX_UNIFORM = 0.98
 
+# A release build of uDeck plus the bundle around it. Minutes from cold, seconds
+# when SwiftPM has everything already.
+BUILD_SECONDS = 1800
+
 # How often a known lab failure is retried before the check becomes "could not
 # check": SSH refusing right after a clone boots, a hung `tart` call, and macOS
 # refusing a machine because it believes two are already running.

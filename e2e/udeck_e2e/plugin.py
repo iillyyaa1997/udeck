@@ -21,7 +21,7 @@ from typing import IO, Any
 
 import pytest
 
-from udeck_e2e import config, golden, names, preflight
+from udeck_e2e import builds, config, golden, names, preflight
 from udeck_e2e.config import Guest
 from udeck_e2e.errors import CheckFailed, LabError
 from udeck_e2e.guest import SSH, make_key
@@ -118,6 +118,7 @@ class LabPlugin:
         self.slept_at = slept_at
         self.tart: Tart | None = None
         self.ssh_key: Path | None = None
+        self.signing_key: builds.SigningKey | None = None
         self.repo_root = repo_root
         self.checks_dir = checks_dir.resolve()
         self.runs_root = runs_root
@@ -195,6 +196,22 @@ class LabPlugin:
             work_dir=self.run_dir / label,
             note=self.note,
             display=display,
+        )
+
+    # --- Builds ------------------------------------------------------------
+
+    def builder(self, feed_url: str) -> builds.Builder:
+        """Lab builds for this run, pointed at `feed_url` and signed with its own key."""
+        if self.run_dir is None:
+            raise LabError("preparing a build", "there is no run in progress")
+        if self.signing_key is None:
+            self.signing_key = builds.make_key(self.run_dir / "signing")
+        return builds.Builder(
+            repo_root=self.repo_root,
+            work_dir=self.run_dir / "builds",
+            feed_url=feed_url,
+            key=self.signing_key,
+            note=self.note,
         )
 
     def failed_in(self, scope: str, request: pytest.FixtureRequest) -> bool:
@@ -632,6 +649,9 @@ class LabPlugin:
             if self.ssh_key is not None:
                 # The key opens only this run's clones, which are gone; it goes too.
                 shutil.rmtree(self.ssh_key.parent, ignore_errors=True)
+            if self.signing_key is not None:
+                # So does the key this run's builds were signed with.
+                shutil.rmtree(self.signing_key.private_key_file.parent, ignore_errors=True)
             if self.ledger is not None:
                 self.ledger.close()
             self.lock.release()
