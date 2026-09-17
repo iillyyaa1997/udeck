@@ -146,6 +146,8 @@ SCREEN_MAX_UNIFORM = 0.98
 # A release build of uDeck plus the bundle around it. Minutes from cold, seconds
 # when SwiftPM has everything already.
 BUILD_SECONDS = 1800
+# How long a build that overran its deadline is given to stop before it is killed.
+BUILD_STOP_GRACE_SECONDS = 10
 
 # How often a known lab failure is retried before the check becomes "could not
 # check": SSH refusing right after a clone boots, a hung `tart` call, and macOS

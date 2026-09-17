@@ -83,6 +83,12 @@ if [ "$MAKE_ZIP" = "1" ] && { [ "$INSTALL" = "1" ] || [ "$MAKE_DMG" = "1" ]; }; 
     echo "--zip cannot be combined with --install or --dmg" >&2
     exit 2
 fi
+if [ "$MAKE_ZIP" = "1" ] && [ "$OUT" = "dist" ]; then
+    # --zip removes the bundle it packed, and dist/ is where the copies a person
+    # builds and uses live. A zipped build says where it goes.
+    echo "--zip needs --out: it removes the bundle it packed, and that must not be dist/" >&2
+    exit 2
+fi
 
 if [ -n "$TEST_FEED$TEST_KEY" ]; then
     if [ -z "$TEST_FEED" ] || [ -z "$TEST_KEY" ]; then
@@ -115,6 +121,19 @@ else
 fi
 
 echo "==> Assembling $APP"
+# A zipped build is a lab build: it carries the *release's* bundle identifier, so
+# a copy left unpacked on this Mac could take the release's login item merely by
+# being launched. The bundle is therefore removed however this script ends — a
+# failed codesign, a full disk, a signal — and not only on the way out of a
+# successful run.
+#
+# EXIT alone, deliberately. Bash runs an EXIT trap when a signal kills it, and it
+# does so at once; adding INT and TERM traps instead makes it *wait* for whatever
+# command is running — a `swift build` of several minutes — before it reacts
+# (measured).
+if [ "$MAKE_ZIP" = "1" ]; then
+    trap 'rm -rf "$APP"' EXIT
+fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BUILT" "$APP/Contents/MacOS/uDeck"
@@ -269,6 +288,7 @@ if [ "$MAKE_ZIP" = "1" ]; then
     rm -f "$ZIP"
     ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
     rm -rf "$APP"
+    trap - EXIT
     echo "==> Done: $ZIP"
     exit 0
 fi

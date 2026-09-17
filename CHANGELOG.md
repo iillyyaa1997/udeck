@@ -25,7 +25,10 @@ for what that promises.
   of the caller's choosing in both keys — including `CFBundleVersion`, the one
   Sparkle compares — and the bundle left only as a zip. A lab build carries the
   release's identifier, so an unpacked copy could take the release's login item
-  by being launched; it is unpacked inside a test machine and nowhere else.
+  by being launched; it is unpacked inside a test machine and nowhere else. The
+  bundle is removed however the script ends — a failed signature, a full disk, a
+  signal — and `--zip` refuses to work without `--out`, so it can never empty
+  `dist/`.
 - **The settings window can be driven without reading its titles.** The sidebar
   sections and the update controls carry accessibility identifiers. The update
   buttons used to reach accessibility with no name at all — System Events read

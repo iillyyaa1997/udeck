@@ -8,8 +8,10 @@ it does in earnest: PlistBuddy, ditto, codesign and all.
 
 import os
 import plistlib
+import signal
 import shutil
 import subprocess
+import time
 import zipfile
 from pathlib import Path
 
@@ -96,3 +98,62 @@ def test_a_debug_build_is_its_own_application_wherever_it_is_built(checkout):
     plist = plistlib.loads((checkout / "elsewhere" / "uDeck-debug.app" / "Contents" / "Info.plist").read_bytes())
     assert plist["CFBundleIdentifier"] == "place.unicorns.udeck.debug"
     assert "SUFeedURL" not in plist
+
+
+def test_a_build_that_dies_after_assembly_leaves_no_bundle_behind(checkout):
+    """The bundle carries the release's identifier: it must not outlive a failed build."""
+    (checkout / "stubs" / "codesign").write_text("#!/bin/sh\necho 'codesign: the disk is full' >&2\nexit 1\n")
+    (checkout / "stubs" / "codesign").chmod(0o755)
+    done = make_app(
+        checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99",
+        "--zip", "--test-feed", FEED, "--test-key", KEY,
+    )  # fmt: skip
+    assert done.returncode != 0
+    assert not (checkout / "lab-builds" / "uDeck.app").exists(), sorted(p.name for p in (checkout / "lab-builds").iterdir())
+
+
+def test_a_build_stopped_by_a_signal_leaves_no_bundle_behind(checkout):
+    """The lab ends a build by its process group when a deadline passes."""
+    (checkout / "stubs" / "ditto").write_text("#!/bin/sh\nsleep 60\n")
+    (checkout / "stubs" / "ditto").chmod(0o755)
+    process = subprocess.Popen(
+        [str(checkout / "Scripts" / "make-app.sh"), "--out", "lab-builds", "--version", "9.9.9",
+         "--build", "99", "--zip", "--test-feed", FEED, "--test-key", KEY],
+        cwd=str(checkout), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env={**os.environ, "PATH": f"{checkout / 'stubs'}:{os.environ['PATH']}"},
+        start_new_session=True,
+    )  # fmt: skip
+    deadline = time.monotonic() + 30
+    while not (checkout / "lab-builds" / "uDeck.app").exists() and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert (checkout / "lab-builds" / "uDeck.app").exists(), "the bundle was never assembled"
+    os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+    process.wait(timeout=30)
+    assert not (checkout / "lab-builds" / "uDeck.app").exists()
+
+
+def test_a_zip_without_an_out_directory_is_refused_so_dist_is_never_emptied(checkout):
+    done = make_app(checkout, "--zip")
+    assert done.returncode == 2 and "--zip needs --out" in done.stderr
+    assert not (checkout / "dist").exists()
+
+
+def test_a_build_killed_while_it_waits_still_takes_its_bundle_with_it(checkout):
+    """`kill` on the script itself, while ditto is running: the bundle must not survive."""
+    (checkout / "stubs" / "ditto").write_text("#!/bin/sh\nsleep 60\n")
+    (checkout / "stubs" / "ditto").chmod(0o755)
+    process = subprocess.Popen(
+        [str(checkout / "Scripts" / "make-app.sh"), "--out", "lab-builds", "--version", "9.9.9",
+         "--build", "99", "--zip", "--test-feed", FEED, "--test-key", KEY],
+        cwd=str(checkout), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env={**os.environ, "PATH": f"{checkout / 'stubs'}:{os.environ['PATH']}"},
+        start_new_session=True,
+    )  # fmt: skip
+    deadline = time.monotonic() + 30
+    while not (checkout / "lab-builds" / "uDeck.app").exists() and time.monotonic() < deadline:
+        time.sleep(0.2)
+    assert (checkout / "lab-builds" / "uDeck.app").exists(), "the bundle was never assembled"
+    process.terminate()  # the shell alone, not its process group
+    process.wait(timeout=30)
+    assert not (checkout / "lab-builds" / "uDeck.app").exists()
+    os.killpg(os.getpgid(process.pid), signal.SIGKILL) if process.poll() is None else None

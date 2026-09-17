@@ -2,6 +2,7 @@
 
 import base64
 import plistlib
+import signal
 import subprocess
 import zipfile
 from pathlib import Path
@@ -21,20 +22,54 @@ def done(args, rc=0, out="", err=""):
     return subprocess.CompletedProcess(args, rc, out, err)
 
 
+class Process:
+    """A `make-app.sh` that has been started: answers like Popen, kills like Popen."""
+
+    def __init__(self, script):
+        self.script = script
+        script.process = self
+        self.pid = 4242
+        self.returncode = None
+        self._left = script.timeouts
+
+    def communicate(self, timeout=None):
+        if timeout is not None and self._left > 0:
+            self._left -= 1
+            raise subprocess.TimeoutExpired(self.script.args, timeout, output=self.script.out, stderr=self.script.err)
+        if timeout is not None and self.script.interrupts:
+            # Ctrl-C while the lab was waiting for the build.
+            self.script.interrupts = False
+            raise KeyboardInterrupt
+        if self.returncode is None:
+            self.returncode = self.script.rc if not self.script.stopped else -15
+        return self.script.out, self.script.err
+
+    def poll(self):
+        return self.returncode
+
+
 class Script:
     """Stands in for Scripts/make-app.sh: records the call, makes what it would make."""
 
     def __init__(self, rc=0, out="==> Done", err="", leaves_bundle=False, makes_zip=True,
-                 wrong_version="", identifier="place.unicorns.udeck"):
+                 wrong_version="", identifier="place.unicorns.udeck", timeouts=0, interrupts=False):
         self.rc, self.out, self.err = rc, out, err
         self.leaves_bundle = leaves_bundle
         self.makes_zip = makes_zip
         self.wrong_version = wrong_version
         self.identifier = identifier
+        self.timeouts = timeouts
+        self.interrupts = interrupts
+        self.stopped = False
+        self.ignores_sigterm = False
+        self.process = None
+        self.signals = []
         self.calls = []
+        self.args = []
 
     def __call__(self, args, **kwargs):
         self.calls.append((args, kwargs))
+        self.args = args
         options = dict(zip(args[1:], args[2:]))
         out = Path(options["--out"])
         if self.makes_zip:
@@ -49,18 +84,45 @@ class Script:
                 archive.writestr("uDeck.app/Contents/Info.plist", plistlib.dumps(plist))
         if self.leaves_bundle:
             (out / "uDeck.app").mkdir(parents=True, exist_ok=True)
-        return done(args, self.rc, self.out, self.err)
+        return Process(self)
+
+    def killpg(self, group, sig):
+        self.signals.append(sig)
+        if sig == signal.SIGTERM and self.ignores_sigterm:
+            return
+        self.stopped = True
+        # A build that was signalled dies, as a real one does.
+        self.process.returncode = -15 if sig == signal.SIGTERM else -9
 
 
-def builder(script, tmp_path, key=None, seconds=config.BUILD_SECONDS):
+class Clock:
+    """Moves only when something waits on it, so a loop with no end shows up as one."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+def builder(script, tmp_path, key=None, seconds=config.BUILD_SECONDS, feed=FEED):
+    killpg = script.killpg if isinstance(script, Script) else (lambda group, sig: None)
+    clock = Clock()
     return Builder(
         repo_root=tmp_path / "repo",
         work_dir=tmp_path / "run" / "builds",
-        feed_url=FEED,
+        feed_url=feed,
         key=key or make_key(tmp_path / "signing"),
         note=lambda text: None,
-        run=script,
+        popen=script,
         seconds=seconds,
+        sleep=clock.sleep,
+        clock=clock,
+        killpg=killpg,
+        getpgid=lambda pid: pid,
     )
 
 
@@ -89,6 +151,12 @@ def test_two_runs_never_share_a_key(tmp_path):
 # --- What make-app.sh is asked --------------------------------------------------------
 
 
+def digest(feed=FEED):
+    import hashlib
+
+    return hashlib.sha256(feed.encode()).hexdigest()[:8]
+
+
 def test_a_lab_build_goes_to_its_own_directory_with_its_own_versions_and_stays_zipped(tmp_path):
     script = Script()
     build = builder(script, tmp_path).build("0.4.1", "6")
@@ -97,10 +165,9 @@ def test_a_lab_build_goes_to_its_own_directory_with_its_own_versions_and_stays_z
     options = dict(zip(args[1:], args[2:]))
     assert options["--version"] == "0.4.1" and options["--build"] == "6"
     assert options["--test-feed"] == FEED
-    assert Path(options["--out"]) == tmp_path / "run" / "builds" / "0.4.1-6"
+    assert Path(options["--out"]) == tmp_path / "run" / "builds" / digest() / "0.4.1-6"
     assert "--zip" in args and "--install" not in args and "--dmg" not in args
     assert "dist" not in options["--out"].split("/")[-3:]
-    assert kwargs["timeout"] == config.BUILD_SECONDS
     assert kwargs["cwd"] == str(tmp_path / "repo")
     assert kwargs["stdin"] is subprocess.DEVNULL and kwargs["start_new_session"] is True
     assert build.zip.name == "uDeck-0.4.1.zip" and build.zip.is_file()
@@ -127,7 +194,7 @@ def test_a_build_that_failed_says_what_the_script_said_and_keeps_its_log(tmp_pat
     with pytest.raises(LabError, match="no such module 'Sparkle'") as raised:
         builder(script, tmp_path).build("0.4.1", "6")
     assert raised.value.step.startswith("building uDeck 0.4.1")
-    assert "no such module" in (tmp_path / "run" / "builds" / "0.4.1-6" / "build.log").read_text()
+    assert "no such module" in (tmp_path / "run" / "builds" / digest() / "0.4.1-6" / "build.log").read_text()
 
 
 def test_a_build_that_made_no_zip_is_a_lab_error(tmp_path):
@@ -135,12 +202,36 @@ def test_a_build_that_made_no_zip_is_a_lab_error(tmp_path):
         builder(Script(makes_zip=False), tmp_path).build("0.4.1", "6")
 
 
-def test_a_build_that_hangs_is_a_lab_error_at_its_deadline(tmp_path):
-    def hangs(args, **kwargs):
-        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
-
+def test_a_build_that_hangs_is_stopped_whole_and_keeps_the_log_of_how_far_it_got(tmp_path):
+    """A shell that starts a compiler: killing the shell alone leaves swift build running."""
+    script = Script(timeouts=1, out="==> Building uDeck 0.4.1 for release", makes_zip=False)
     with pytest.raises(LabError, match="did not finish in 60s"):
-        builder(hangs, tmp_path, seconds=60).build("0.4.1", "6")
+        builder(script, tmp_path, seconds=60).build("0.4.1", "6")
+    assert script.signals[0] == signal.SIGTERM
+    log = (tmp_path / "run" / "builds" / digest() / "0.4.1-6" / "build.log").read_text()
+    assert "==> Building uDeck 0.4.1" in log and "killed at the deadline" in log
+
+
+def test_ctrl_c_during_a_build_does_not_leave_it_running(tmp_path):
+    script = Script(interrupts=True, makes_zip=False)
+    with pytest.raises(KeyboardInterrupt):
+        builder(script, tmp_path).build("0.4.1", "6")
+    assert script.signals[0] == signal.SIGTERM
+
+
+def test_builds_for_two_feeds_do_not_overwrite_each_other(tmp_path):
+    """Two checks, each serving its own appcast, build the same versions."""
+    first = builder(Script(), tmp_path, feed="http://127.0.0.1:8765/appcast.xml").build("0.4.1", "6")
+    second = builder(Script(), tmp_path, feed="http://127.0.0.1:8899/appcast.xml").build("0.4.1", "6")
+    assert first.zip != second.zip and first.zip.is_file() and second.zip.is_file()
+
+
+def test_a_bundle_the_build_left_behind_is_removed_even_when_the_build_failed(tmp_path):
+    """It carries the release's identifier: launching it would take the release's login item."""
+    script = Script(rc=1, err="error: no space left on device", makes_zip=False, leaves_bundle=True)
+    with pytest.raises(LabError, match="no space left"):
+        builder(script, tmp_path).build("0.4.1", "6")
+    assert not (tmp_path / "run" / "builds" / digest() / "0.4.1-6" / "uDeck.app").exists()
 
 
 def test_a_build_that_is_not_the_one_that_was_asked_for_is_refused(tmp_path):
@@ -149,7 +240,7 @@ def test_a_build_that_is_not_the_one_that_was_asked_for_is_refused(tmp_path):
         builder(Script(wrong_version="0.4.0"), tmp_path).build("0.4.1", "6")
     with pytest.raises(LabError, match="which is the debug application"):
         builder(Script(identifier="place.unicorns.udeck.debug"), tmp_path).build("0.4.1", "6")
-    out = tmp_path / "run" / "builds" / "0.4.1-6"
+    out = tmp_path / "run" / "builds" / digest() / "0.4.1-6"
     out.mkdir(parents=True, exist_ok=True)
     (out / "uDeck-0.4.1.zip").write_bytes(b"not a zip at all")
     with pytest.raises(LabError, match="could not read"):
@@ -181,3 +272,11 @@ def test_the_script_refuses_the_combinations_that_would_leave_a_lab_build_lying_
     assert "cannot be combined" in run_script("--zip", "--install").stderr
     assert "needs a directory" in run_script("--out", "").stderr
     assert run_script("--what").returncode == 2
+
+
+def test_a_build_that_ignores_the_first_signal_is_killed(tmp_path):
+    script = Script(timeouts=1, makes_zip=False)
+    script.ignores_sigterm = True
+    with pytest.raises(LabError, match="did not finish"):
+        builder(script, tmp_path, seconds=60).build("0.4.1", "6")
+    assert script.signals == [signal.SIGTERM, signal.SIGKILL]

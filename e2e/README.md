@@ -130,7 +130,9 @@ be offered. The lab makes them from the checkout it is running in, through
 `Scripts/make-app.sh`, and they differ from a build you would make by hand in
 three ways — each of them something a check depends on:
 
-* they go to `.build/e2e/<run>/builds/<version>-<build>/`, never `dist/`;
+* they go to `.build/e2e/<run>/builds/<feed>/<version>-<build>/`, never `dist/` —
+  a directory per feed, so two checks serving their own appcast never overwrite
+  each other's builds;
 * they carry the version the lab asked for in both keys, including
   `CFBundleVersion`, which is the one Sparkle compares when it decides whether an
   update is newer;
@@ -138,7 +140,12 @@ three ways — each of them something a check depends on:
   identifier and all, so an unpacked copy here could take the release's login
   item merely by being launched. It is unpacked inside the machine and nowhere
   else, and the lab reads the bundle's plist out of the zip — in memory — to
-  check it got the build it asked for.
+  check it got the build it asked for. A bundle that a failed or killed build
+  left behind is removed, by the script itself and by the lab after it.
+
+A build is stopped as a whole — the script and the compiler it started share a
+process group — so a run that gives up on a build does not leave `swift build`
+using the Mac afterwards, and Ctrl-C ends it too.
 
 The update is signed with a key made for the run and deleted with it. Sparkle's
 own `generate_keys` would leave a private key in your login keychain; the lab
