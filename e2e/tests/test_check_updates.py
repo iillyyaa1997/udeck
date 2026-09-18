@@ -1,0 +1,530 @@
+"""The update checks themselves: what they prove, and what they must never pass on.
+
+The checks in `checks/` are the only code in the lab whose mistakes are invisible
+— a check that proves nothing looks exactly like a check that passed. So they are
+driven here against a machine made of answers: every SSH command, every click and
+every screenshot is scripted, including the ones that fail.
+
+Two questions are asked of every test below. Would this check still be green if
+uDeck did nothing at all? And when something goes wrong, does the run say "uDeck
+is broken" (CheckFailed) or "the lab could not tell" (LabError) — because saying
+the first about the second is how a lab loses the right to be believed.
+"""
+
+import importlib.util
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from udeck_e2e import ui, updates
+from udeck_e2e.builds import Build, SigningKey
+from udeck_e2e.errors import CheckFailed, LabError, NotThere
+
+
+def _load():
+    """The check file, loaded the way the lab loads it: by path, not as a package."""
+    path = Path(__file__).resolve().parents[1] / "checks" / "check_updates.py"
+    spec = importlib.util.spec_from_file_location("check_updates_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+checks = _load()
+
+
+# --- A machine made of answers ---------------------------------------------------------
+
+
+def done(out="", rc=0):
+    return subprocess.CompletedProcess([], rc, out, "")
+
+
+class Dropped:
+    """A connection that failed, as each of the two calls sees it.
+
+    `run(check=False)` gets an exit code and no output — which is why a check
+    must never read a pid with it — and `ask` turns the same thing into a lab
+    failure. A fake that raised from both would let that difference go untested.
+    """
+
+
+class Guest:
+    """The SSH side: scripted answers by substring, and a record of what was asked.
+
+    An answer may be a string, a list (one per call, the last one repeating),
+    `Dropped`, or an exception to raise.
+    """
+
+    def __init__(self, answers=None):
+        self.answers = dict(answers or {})
+        self.commands = []
+        self.copied = []
+
+    def _answer(self, command):
+        for pattern, answer in self.answers.items():
+            if pattern in command:
+                if isinstance(answer, list):
+                    return answer.pop(0) if len(answer) > 1 else answer[0]
+                return answer
+        return ""
+
+    def run(self, command, step, seconds=None, check=True):
+        self.commands.append(command)
+        answer = self._answer(command)
+        if answer is Dropped:
+            if check:
+                raise LabError(step, "SSH to 192.168.64.2 failed")
+            return done("", rc=255)
+        if isinstance(answer, BaseException):
+            raise answer
+        return done(answer)
+
+    def ask(self, command, step, seconds=None):
+        """A command whose own exit code is the answer: 0 when this guest knows it."""
+        self.commands.append(command)
+        answer = self._answer(command)
+        if answer is Dropped:
+            raise LabError(step, "SSH to 192.168.64.2 failed")
+        if isinstance(answer, BaseException):
+            raise answer
+        return done(answer, rc=0 if self._knows(command) else 1)
+
+    def _knows(self, command):
+        return any(pattern in command for pattern in self.answers)
+
+    def copy_in(self, local, remote, step, seconds=None):
+        self.copied.append((Path(local).name, remote))
+
+
+class Machine:
+    """Everything a check asks of a machine, with a clock that only moves when it sleeps."""
+
+    def __init__(self, answers=None):
+        self.name = "udeck-e2e-probe"
+        self.ssh = Guest(answers)
+        self.now = 0.0
+        self.shots = []
+        self.clicks = []
+        self.screenshot_fails = None
+        # Which step's screenshot fails; None means every one of them.
+        self.screenshot_fails_at = None
+        self.click_fails = None
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+    def screenshot(self, directory, step):
+        if self.screenshot_fails is not None and self.screenshot_fails_at in (None, step):
+            raise self.screenshot_fails
+        self.shots.append(step)
+        return Path(directory) / f"{step}.png"
+
+    def click(self, x, y, step):
+        if self.click_fails is not None:
+            raise self.click_fails
+        self.clicks.append((x, y, step))
+
+
+class FakeBuild:
+    def __init__(self, directory, version, number):
+        self.zip = directory / f"uDeck-{version}.zip"
+        self.zip.write_bytes(b"x" * 16)
+        self.version, self.build_number = version, number
+
+
+class Builder:
+    def __init__(self, directory):
+        self.directory = directory
+
+    def build(self, version, number):
+        return FakeBuild(self.directory, version, number)
+
+
+class Lab:
+    """The run, as a check sees it."""
+
+    def __init__(self, tmp_path):
+        self.notes = []
+        # A checkout of its own: nothing here may reach the real one, the way
+        # `test_make_app` is the only test allowed to (see its own guard).
+        self.repo_root = tmp_path / "repo"
+        self.signing_key = SigningKey(tmp_path / "sparkle-key", "public-key")
+        self.builders = []
+        self._tmp = tmp_path
+
+    def note(self, text):
+        self.notes.append(text)
+
+    def builder(self, feed_url, for_check):
+        self.builders.append((feed_url, for_check))
+        directory = self._tmp / "builds" / for_check
+        directory.mkdir(parents=True, exist_ok=True)
+        return Builder(directory)
+
+
+@pytest.fixture
+def machine():
+    return Machine()
+
+
+@pytest.fixture
+def lab(tmp_path):
+    return Lab(tmp_path)
+
+
+@pytest.fixture
+def check_dir(tmp_path):
+    path = tmp_path / "updates.sparkle"
+    path.mkdir()
+    return path
+
+
+@pytest.fixture(autouse=True)
+def no_real_work(monkeypatch, tmp_path):
+    """Nothing here signs, serves or reaches a real machine."""
+    monkeypatch.setattr(updates, "sign", lambda *a, **k: "a-signature")
+    monkeypatch.setattr(updates, "find_sign_update", lambda root: tmp_path / "sign_update")
+    monkeypatch.setattr(updates.Feed, "serve", lambda self, *a: setattr(self, "serving", True))
+    monkeypatch.setattr(updates.Feed, "stop", lambda self: setattr(self, "serving", False))
+    monkeypatch.setattr(updates.Feed, "collect_log", lambda self, directory, name="feed-server.log": self.log)
+    monkeypatch.setattr(updates.Feed, "log", "", raising=False)
+
+
+def prepared(monkeypatch, version="0.4.2", number="7", zip_name="uDeck-0.4.2.zip"):
+    """Skip the preparation: its own tests are further down."""
+    offer = Build(version, number, Path("/tmp") / zip_name)
+    monkeypatch.setattr(checks, "_prepare", lambda machine, check_dir, lab, feed, signed_by: offer)
+    monkeypatch.setattr(checks, "_open_the_about_pane", lambda machine, check_dir: None)
+    return offer
+
+
+def at(machine, identifier):
+    return ui.Element(identifier, 100, 200, 40, 20)
+
+
+def finds(monkeypatch, **answers):
+    """What `ui.wait_for` says for each identifier: an Element, or something raised."""
+
+    def wait_for(machine, identifier, step, window=ui.SETTINGS_WINDOW, seconds=None):
+        answer = answers.get(identifier, at(machine, identifier))
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+    monkeypatch.setattr(ui, "wait_for", wait_for)
+    monkeypatch.setattr(ui, "click", lambda machine, identifier, step, window=ui.SETTINGS_WINDOW: at(machine, identifier))
+
+
+def says(monkeypatch, *sentences):
+    monkeypatch.setattr(ui, "static_texts", lambda machine, step, window=ui.SETTINGS_WINDOW: list(sentences))
+
+
+def says_nothing_readable(monkeypatch, error=None):
+    def refuse(machine, step, window=ui.SETTINGS_WINDOW):
+        raise error or LabError(step, "System Events refused: … (-1728)")
+
+    monkeypatch.setattr(ui, "static_texts", refuse)
+
+
+def feed_log(text):
+    return lambda self, directory, name="feed-server.log": text
+
+
+# --- The negative control: it has to prove uDeck tried ---------------------------------
+
+
+def test_a_click_the_lab_could_not_make_is_not_a_passed_control(machine, lab, check_dir, monkeypatch):
+    """The control used to swallow every lab failure as "uDeck did not even offer it".
+
+    System Events refusing once, a pointer that did not land, a click that timed
+    out: nothing installed afterwards either, so the check read the old version
+    off the disk and passed — having pressed nothing and checked no signature.
+    """
+    prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+    machine.click_fails = LabError("pressing Install", "the VNC click did not finish in 30s")
+
+    with pytest.raises(LabError, match="the VNC click did not finish"):
+        checks.check_wrong_key(machine, check_dir, lab)
+    assert "   uDeck did not even offer it" not in lab.notes
+
+
+def test_system_events_refusing_is_not_uDeck_declining_to_offer(machine, lab, check_dir, monkeypatch):
+    """Only the deadline says something about uDeck; a refusal says something about the lab.
+
+    Both used to arrive as one LabError, and the control caught both — so a guest
+    whose System Events refused once was written down as "uDeck did not even
+    offer it" and the check passed, having watched nothing at all.
+    """
+    prepared(monkeypatch)
+    finds(monkeypatch, **{"updates.install": LabError("waiting", "System Events refused: … (-1728)")})
+    says(monkeypatch, "Installed 0.4.1")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+
+    with pytest.raises(LabError, match="System Events refused"):
+        checks.check_wrong_key(machine, check_dir, lab)
+    assert "   uDeck did not even offer it" not in lab.notes
+
+
+def test_an_update_that_was_never_offered_does_not_pass_as_a_refusal(machine, lab, check_dir, monkeypatch):
+    """Nothing offered, nothing fetched, nothing said: the signature was never reached."""
+    prepared(monkeypatch)
+    finds(monkeypatch, **{"updates.install": NotThere("waiting", "'updates.install' did not appear")})
+    says(monkeypatch, "Installed 0.4.1", "Latest 0.4.1")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log('"GET /appcast.xml HTTP/1.1" 200 -'))
+
+    with pytest.raises(LabError, match="nothing exercised the signature"):
+        checks.check_wrong_key(machine, check_dir, lab)
+    assert "   uDeck did not even offer it" in lab.notes
+
+
+def test_the_control_passes_when_the_guest_saw_uDeck_fetch_the_archive(machine, lab, check_dir, monkeypatch):
+    """Downloaded and not installed: Sparkle checks the signature after downloading."""
+    offer = prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1", "Latest 0.4.2")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 200 -'))
+
+    checks.check_wrong_key(machine, check_dir, lab)
+    assert machine.clicks and machine.clicks[-1][2].startswith("pressing Install")
+    assert machine.now >= checks.REFUSAL_SECONDS
+
+
+def test_the_control_passes_when_uDeck_says_its_check_did_not_finish(machine, lab, check_dir, monkeypatch):
+    """The other witness: uDeck's own sentence about a refusal, for a person to read."""
+    prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1", "The check did not finish: The update is improperly signed")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(""))
+
+    checks.check_wrong_key(machine, check_dir, lab)
+
+
+def test_a_window_that_cannot_be_read_does_not_hide_an_update_that_installed(machine, lab, check_dir, monkeypatch):
+    """The worst case the control exists for: uDeck installed it, and the pane went away.
+
+    Reading the pane is evidence, so it may not decide the outcome. If it could,
+    the one run that finds uDeck trusting a key it must not trust would be filed
+    as "could not check" and nobody would look.
+    """
+    prepared(monkeypatch)
+    finds(monkeypatch)
+    says_nothing_readable(monkeypatch)
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.SECOND)
+
+    with pytest.raises(CheckFailed, match="which was signed with a key it does not trust"):
+        checks.check_wrong_key(machine, check_dir, lab)
+
+
+def test_a_screenshot_that_fails_does_not_hide_an_update_that_installed(machine, lab, check_dir, monkeypatch):
+    prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.2")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.SECOND)
+    machine.screenshot_fails = LabError("taking a screenshot", "the machine is gone")
+    machine.screenshot_fails_at = "after the refusal"
+
+    with pytest.raises(CheckFailed, match="signed with a key it does not trust"):
+        checks.check_wrong_key(machine, check_dir, lab)
+    assert any("no screenshot 'after the refusal'" in note for note in lab.notes)
+
+
+def test_an_install_still_in_flight_is_not_nothing_installed(machine, lab, check_dir, monkeypatch):
+    """The wait is a fixed window; a running installer means it was simply too short."""
+    offer = prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name}" 200 -'))
+    machine.ssh.answers["pgrep -fl"] = "941 /Applications/uDeck.app/Contents/Frameworks/Autoupdate"
+
+    with pytest.raises(LabError, match="still installing"):
+        checks.check_wrong_key(machine, check_dir, lab)
+
+
+def test_the_running_installer_is_looked_for_in_a_way_that_cannot_match_the_question(machine, lab, check_dir, monkeypatch):
+    """`pgrep -f` reads the arguments of the shell running this very command."""
+    offer = prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name}" 200 -'))
+
+    checks.check_wrong_key(machine, check_dir, lab)
+    asked = [c for c in machine.ssh.commands if "pgrep -fl" in c]
+    assert asked and "Autoupdate" not in asked[0] and "[A]utoupdate" in asked[0]
+
+
+# --- The update itself -----------------------------------------------------------------
+
+
+def test_a_slow_relaunch_is_not_a_failed_update(machine, lab, check_dir, monkeypatch):
+    """Sparkle swaps the bundle and relaunches; the pid read at once catches the gap."""
+    prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1", "Version 0.4.2 is available.")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.SECOND)
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "", "", "202"]
+
+    checks.check_sparkle(machine, check_dir, lab)
+    assert "after the update" in machine.shots
+
+
+def test_a_dropped_connection_never_reads_as_uDeck_is_not_running(machine, lab, check_dir, monkeypatch):
+    """"uDeck did not come back" is a verdict; SSH failing is not evidence for it."""
+    prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Version 0.4.2 is available.")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.SECOND)
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", Dropped]
+
+    with pytest.raises(LabError, match="SSH to 192.168.64.2 failed"):
+        checks.check_sparkle(machine, check_dir, lab)
+
+
+def test_a_screenshot_that_fails_does_not_hide_an_update_that_did_not_happen(machine, lab, check_dir, monkeypatch):
+    prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Version 0.4.2 is available.")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "202"]
+    machine.screenshot_fails = LabError("taking a screenshot", "the machine is gone")
+    machine.screenshot_fails_at = "after the update"
+
+    with pytest.raises(CheckFailed, match=r"the version on disk is \('0.4.1', '6'\)"):
+        checks.check_sparkle(machine, check_dir, lab)
+
+
+def test_uDeck_saying_it_is_up_to_date_is_a_failure(machine, lab, check_dir, monkeypatch):
+    """The feed was proved to answer and declares a newer build: this is uDeck's answer."""
+    prepared(monkeypatch)
+    finds(monkeypatch, **{"updates.install": NotThere("waiting", "'updates.install' did not appear")})
+    says(monkeypatch, "Installed 0.4.1", "uDeck is up to date.")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+
+    with pytest.raises(CheckFailed, match="did not offer 0.4.2"):
+        checks.check_sparkle(machine, check_dir, lab)
+
+
+def test_uDeck_still_looking_is_a_lab_problem_and_not_a_failure(machine, lab, check_dir, monkeypatch):
+    """Nothing finished: the press may not have landed, and that is the lab's own."""
+    prepared(monkeypatch)
+    finds(monkeypatch, **{"updates.install": NotThere("waiting", "'updates.install' did not appear")})
+    says(monkeypatch, "Installed 0.4.1", "Checking…")
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+
+    with pytest.raises(NotThere):
+        checks.check_sparkle(machine, check_dir, lab)
+
+
+# --- Preparing the machine --------------------------------------------------------------
+
+
+def test_the_check_ends_the_uDeck_a_previous_check_left_running(machine, lab, check_dir, monkeypatch):
+    """--vm per-group and per-run hand over a machine with uDeck installed and running.
+
+    `ditto` would replace the bundle underneath it: the copy keeps running from
+    the old one, `open -a` only brings it forward, and the control is then offered
+    nothing by an application that has already updated itself.
+    """
+    monkeypatch.setattr(checks.ui, "open_settings_and_wait", lambda *a, **k: None)
+    machine.ssh.answers["pgrep -x uDeck"] = ["777", "", "", "808"]
+    machine.ssh.answers["stat -f %Su"] = "admin"
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+
+    feed = updates.Feed(machine, lab.note)
+    checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+
+    quit_asked = [i for i, c in enumerate(machine.ssh.commands) if "to quit" in c]
+    unpacked = [i for i, c in enumerate(machine.ssh.commands) if "ditto -x -k" in c]
+    assert quit_asked and unpacked and quit_asked[0] < unpacked[0]
+
+
+def test_two_copies_of_uDeck_running_is_a_lab_problem(machine, lab, check_dir, monkeypatch):
+    machine.ssh.answers["pgrep -x uDeck"] = ["", "", "101\n202"]
+    machine.ssh.answers["stat -f %Su"] = "admin"
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+
+    feed = updates.Feed(machine, lab.note)
+    with pytest.raises(LabError, match="2 copies of uDeck are running"):
+        checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+
+
+def test_the_lab_installing_the_wrong_version_is_not_a_verdict_about_uDeck(machine, lab, check_dir, monkeypatch):
+    """The lab put it there a second earlier: if it is wrong, the lab is wrong."""
+    machine.ssh.answers["stat -f %Su"] = "admin"
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.SECOND)
+
+    feed = updates.Feed(machine, lab.note)
+    with pytest.raises(LabError, match="the lab installed"):
+        checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+
+
+def test_each_check_builds_into_a_directory_of_its_own(machine, lab, check_dir, monkeypatch):
+    """Both checks build the same two versions; the second must not overwrite the first."""
+    machine.ssh.answers["pgrep -x uDeck"] = ["", "", "101"]
+    machine.ssh.answers["stat -f %Su"] = "admin"
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+
+    feed = updates.Feed(machine, lab.note)
+    checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+    assert lab.builders == [(feed.url, check_dir.name)]
+
+
+def test_a_machine_that_never_starts_uDeck_is_a_lab_problem(machine, lab, check_dir, monkeypatch):
+    machine.ssh.answers["pgrep -x uDeck"] = ""
+    machine.ssh.answers["stat -f %Su"] = "admin"
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+
+    feed = updates.Feed(machine, lab.note)
+    with pytest.raises(LabError, match="uDeck was not running within"):
+        checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+    assert machine.now >= 30
+
+
+def test_waiting_for_the_relaunch_spends_the_installs_budget_and_not_a_second_one(machine, lab, check_dir, monkeypatch):
+    """Sparkle's whole job has one deadline; the relaunch is inside it, never on top.
+
+    The swap takes most of the budget here, exactly as a slow machine would, so
+    a relaunch given a fresh deadline of its own would run the check to twice
+    what it documents.
+    """
+    prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Version 0.4.2 is available.")
+    reads = []
+
+    def slowly(machine_):
+        reads.append(None)
+        return checks.SECOND if len(reads) > 20 else checks.FIRST
+
+    monkeypatch.setattr(updates, "installed_version", slowly)
+    machine.ssh.answers["pgrep -x uDeck"] = "101"  # it never comes back as a new process
+
+    with pytest.raises(CheckFailed, match="did not come back as a new process"):
+        checks.check_sparkle(machine, check_dir, lab)
+    assert machine.now >= 100, "the swap has to eat into the budget for this to mean anything"
+    assert machine.now <= checks.INSTALL_SECONDS + 5
+
+
+def test_a_blip_while_uDeck_starts_is_not_uDeck_failing_to_start(machine, lab, check_dir, monkeypatch):
+    """Every wait in the lab tolerates one refusal and keeps to its deadline."""
+    machine.ssh.answers["pgrep -x uDeck"] = ["", Dropped, "", "303"]
+    machine.ssh.answers["stat -f %Su"] = "admin"
+    monkeypatch.setattr(updates, "installed_version", lambda m: checks.FIRST)
+
+    feed = updates.Feed(machine, lab.note)
+    checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+    assert "uDeck running" in machine.shots

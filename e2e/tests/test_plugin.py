@@ -755,3 +755,21 @@ def test_a_screenshot_that_cannot_be_taken_at_the_end_is_said_and_changes_no_out
     code, out = lab.run()
     assert code == 0
     assert "✅ panel.dwell" in out and "no screenshot at the end of panel.dwell" in out
+
+
+def test_every_check_builds_into_a_directory_of_its_own(lab, tmp_path):
+    """Both update checks build the same two versions, and one run holds both.
+
+    Without a directory per check the second overwrites the first's zips and its
+    build log — the evidence the first check's report is made of (Q38).
+    """
+    plugin = lab.plugin()
+    plugin.run_dir = tmp_path / "run"
+    (plugin.run_dir).mkdir()
+    feed = "http://127.0.0.1:8765/appcast.xml"
+    first = plugin.builder(feed, "updates.sparkle")
+    second = plugin.builder(feed, "updates.wrong-key")
+    assert first.work_dir != second.work_dir
+    assert "updates.sparkle" in str(first.work_dir) and "updates.wrong-key" in str(second.work_dir)
+    # One key for the run, not one per check: the builds of both are this run's.
+    assert plugin.signing_key is not None

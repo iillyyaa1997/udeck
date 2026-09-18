@@ -31,6 +31,16 @@ class LabError(Exception):
         self.reason = reason
 
 
+class NotThere(LabError):
+    """A control the lab waited for never appeared.
+
+    Kept apart from every other lab failure on purpose. "uDeck did not offer the
+    update" is an observation about uDeck, and a check may act on it; "System
+    Events refused", "the click did not go through", "the machine is gone" are
+    the lab failing, and must never be read as an observation about uDeck.
+    """
+
+
 def expect(condition: bool, message: str) -> None:
     """Fail the check with `message` unless `condition` holds."""
     if not condition:

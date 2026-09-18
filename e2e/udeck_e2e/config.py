@@ -158,6 +158,10 @@ BUILD_STOP_GRACE_SECONDS = 10
 SIGN_SECONDS = 120
 # Until the guest's own web server answers on its loopback address.
 FEED_UP_SECONDS = 30
+# How long a uDeck already running in the guest is given to quit before its
+# bundle is replaced. It matters on a shared machine (--vm per-group, per-run),
+# where what is running is the previous check's copy.
+QUIT_SECONDS = 30
 
 # One AppleScript against the guest's interface: a walk of the settings window
 # took ~2 s measured, and a slow machine may take longer.

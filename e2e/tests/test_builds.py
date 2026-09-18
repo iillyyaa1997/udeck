@@ -247,9 +247,46 @@ def test_a_build_that_is_not_the_one_that_was_asked_for_is_refused(tmp_path):
         builder(Script(makes_zip=False), tmp_path).build("0.4.1", "6")
 
 
-def test_the_lab_never_unpacks_a_build_itself():
-    """A lab build may be read, never extracted, on this Mac (Q41)."""
-    source = Path(Builder.__module__.replace(".", "/") + ".py")
-    text = (Path(__file__).resolve().parents[1] / source).read_text()
-    for unpacking in ("ditto -x", "unzip", "extractall", "shutil.unpack", ".extract("):
-        assert unpacking not in text, unpacking
+def test_the_lab_never_unpacks_a_build_on_this_mac():
+    """A lab build may be read, never extracted, on this Mac (Q41).
+
+    Every module, not only the one that builds: the guard is about the Mac, and
+    the code that unpacks has already moved once — `updates.install` unpacks in
+    the guest, where it belongs. So `ditto -x` is allowed in exactly one file,
+    which has to be named here, and a second one has to be argued for.
+    """
+    package = Path(Builder.__module__.replace(".", "/")).parent
+    here = Path(__file__).resolve().parents[1]
+    sources = sorted((here / package).glob("*.py"))
+    assert len(sources) > 5, sources
+    for source in sources:
+        text = source.read_text()
+        for unpacking in ("unzip", "extractall", "shutil.unpack", ".extract("):
+            assert unpacking not in text, f"{source.name}: {unpacking}"
+        if "ditto -x" in text:
+            assert source.name == "updates.py", f"{source.name} unpacks a build; only the guest may"
+    # And there it is the guest that runs it, over SSH, never this Mac.
+    install = (here / package / "updates.py").read_text()
+    unpacks = install[install.index("def install("):]
+    assert "machine.ssh.run(" in unpacks[: unpacks.rindex("ditto -x")]
+
+
+# --- The script itself, ended by the lab ------------------------------------------------
+
+
+def test_a_build_that_ignores_the_first_signal_is_killed(tmp_path):
+    """The deadline must end the compiler, not only the shell that started it.
+
+    `swift build` left running is reparented, still compiling into the checkout
+    and still holding SwiftPM's lock after the lab has given up on it — on the
+    operator's own Mac.
+    """
+    script = Script(timeouts=1, makes_zip=False)
+    script.ignores_sigterm = True
+    lab = builder(script, tmp_path, seconds=60)
+    with pytest.raises(LabError, match="did not finish"):
+        lab.build("0.4.1", "6")
+    assert script.signals == [signal.SIGTERM, signal.SIGKILL]
+    # The clock moves only when something waits on it: this is the grace period
+    # actually being waited out before the kill.
+    assert lab._clock() >= config.BUILD_STOP_GRACE_SECONDS

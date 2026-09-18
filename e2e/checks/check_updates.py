@@ -8,17 +8,39 @@ inside the machine — and nothing is asked of uDeck that a person could not do:
 the settings window is opened from uDeck's own menu, the section is chosen and
 the buttons are pressed with the machine's pointer, and what counts as success is
 the version on disk afterwards, never what the screen says about itself.
+
+Two rules run through the whole file, both learned from this check:
+
+* A control that proves nothing does not pass. "Nothing installed" is the answer
+  to a question nobody asked unless uDeck *tried* the update and refused it, so
+  the control ends by showing it tried (Q37).
+* Between a measurement and the sentence that judges it, nothing may raise. The
+  screenshots and the pane's words there are evidence for a person, and evidence
+  that cannot be collected must not turn a failed check into "could not check" —
+  the failure the control exists to catch would be the first one lost (Q34).
 """
 
 from udeck_e2e import builds, ui, updates
-from udeck_e2e.errors import LabError, expect
+from udeck_e2e.errors import LabError, NotThere, expect
 
 FIRST = ("0.4.1", "6")
 SECOND = ("0.4.2", "7")
 
 # From pressing Install to the new version being on disk: Sparkle unpacks the
-# archive, swaps the bundle and relaunches uDeck.
+# archive, swaps the bundle and relaunches uDeck. The relaunch is waited for
+# inside this, not on top of it.
 INSTALL_SECONDS = 180
+
+# How long the control waits for the button on an update it expects to be
+# refused only when it is installed, and how long it then watches nothing happen.
+OFFER_SECONDS = 60
+REFUSAL_SECONDS = 90
+
+# What uDeck says on the About pane once it has an answer of its own. The guest
+# runs in English (Q43), and these are its words: `updatesUpToDate` and
+# `updatesFailed` in Sources/UDeckCore/Localization/English.swift.
+UP_TO_DATE = "is up to date"
+DID_NOT_FINISH = "The check did not finish"
 
 
 def check_sparkle(machine, check_dir, lab):
@@ -29,24 +51,29 @@ def check_sparkle(machine, check_dir, lab):
         _open_the_about_pane(machine, check_dir)
 
         ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
-        ui.wait_for(machine, "updates.install", "waiting for uDeck to offer the update")
+        install = _wait_until_it_is_offered(machine, check_dir, lab, offered)
         machine.screenshot(check_dir, "the update is offered")
-        said = _the_panes_words(machine)
+        said = _what_the_pane_says(machine)
         expect(
             offered.version in said,
             f"uDeck offered an update but does not name {offered.version}; it says: {said}",
         )
 
-        before = _pid(machine)
-        ui.click(machine, "updates.install", "installing the update")
-        version = _wait_for_the_version_on_disk(machine, SECOND, "installing the update")
-        machine.screenshot(check_dir, "after the update")
+        before = updates.running_pids(machine)
+        machine.click(*install.middle, "installing the update")
+        deadline = machine.clock() + INSTALL_SECONDS
+        version = _the_version_once_it_is(machine, SECOND, deadline)
+        after = _wait_for_the_relaunch(machine, before, deadline)
+        _evidence(machine, check_dir, "after the update", lab)
 
         expect(version == SECOND, f"the version on disk is {version}, not {SECOND}")
-        after = _pid(machine)
-        expect(after != "", "uDeck is not running after the update")
-        expect(after != before, f"uDeck did not restart: it is still pid {before}")
+        expect(
+            bool(after - before),
+            f"uDeck did not come back as a new process after the update: it was "
+            f"{sorted(before) or 'not running'} before and is {sorted(after) or 'not running'} now",
+        )
     finally:
+        feed.collect_log(check_dir)
         feed.stop()
 
 
@@ -54,26 +81,38 @@ def check_wrong_key(machine, check_dir, lab):
     """An update signed with another key is refused — the control for the check above."""
     feed = updates.Feed(machine, lab.note)
     try:
-        _prepare(machine, check_dir, lab, feed, signed_by=builds.make_key(check_dir / "another-key"))
+        offered = _prepare(machine, check_dir, lab, feed, signed_by=builds.make_key(check_dir / "another-key"))
         _open_the_about_pane(machine, check_dir)
 
         ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
-        # It may still be offered — the signature is checked when it is installed —
-        # so the check presses Install when it appears and waits either way.
+        # The signature is checked when the update is installed, not when it is
+        # offered, so the control presses Install. Only the control never
+        # appearing is caught here: every other lab failure — System Events
+        # refusing, a click that did not go through, a machine that went away —
+        # must come out as "could not check" and never as "uDeck did not offer
+        # it", which is how this check used to pass without pressing anything.
+        step = "waiting for what uDeck does with an update signed by another key"
         try:
-            ui.wait_for(machine, "updates.install", "waiting for what uDeck does with it", seconds=60)
-            ui.click(machine, "updates.install", "trying to install an update signed with another key")
-        except LabError:
+            install = ui.wait_for(machine, "updates.install", step, seconds=OFFER_SECONDS)
+        except NotThere:
+            install = None
             lab.note("   uDeck did not even offer it")
-        version = _the_version_after(machine, 90)
-        machine.screenshot(check_dir, "after the refusal")
-        said = _the_panes_words(machine)
+        if install is not None:
+            machine.click(*install.middle, "pressing Install on an update signed with another key")
+
+        version = _the_version_after(machine, REFUSAL_SECONDS)
+        _evidence(machine, check_dir, "after the refusal", lab)
+        said = _what_the_pane_says_or_why_not(machine)
+        log = feed.collect_log(check_dir)
 
         expect(
             version == FIRST,
             f"uDeck installed {version}, which was signed with a key it does not trust; the pane says: {said}",
         )
+        _nothing_is_still_installing(machine)
+        _prove_it_tried_and_refused(offered, log, said)
     finally:
+        feed.collect_log(check_dir)
         feed.stop()
 
 
@@ -81,16 +120,22 @@ def check_wrong_key(machine, check_dir, lab):
 
 
 def _prepare(machine, check_dir, lab, feed, signed_by):
-    """Two builds, the older one installed and running, the newer one offered."""
-    builder = lab.builder(feed.url)
+    """Two builds, the older one installed and running, the newer one offered.
+
+    The machine may not be fresh: with --vm per-group or per-run the previous
+    check left its own uDeck installed and running, so this establishes the
+    state rather than assuming it (Q17).
+    """
+    builder = lab.builder(feed.url, check_dir.name)
     installed = builder.build(*FIRST)
     offered = builder.build(*SECOND)
 
     updates.install(machine, installed.zip, lab.note)
-    expect(
-        updates.installed_version(machine) == FIRST,
-        f"the machine starts with {updates.installed_version(machine)} installed, not {FIRST}",
-    )
+    step = "preparing the machine for the update check"
+    there = updates.installed_version(machine)
+    if there != FIRST:
+        # The lab installed it a moment ago: this is the lab, not uDeck.
+        raise LabError(step, f"the lab installed {FIRST}, but the machine has {there}")
 
     key = signed_by or lab.signing_key
     signature = updates.sign(offered.zip, key, updates.find_sign_update(lab.repo_root))
@@ -99,13 +144,15 @@ def _prepare(machine, check_dir, lab, feed, signed_by):
     feed.serve(appcast, offered.zip)
 
     machine.ssh.run("open -a /Applications/uDeck.app", "starting uDeck")
-    _wait_until_running(machine)
+    running = _wait_until_running(machine)
+    if len(running) != 1:
+        raise LabError(step, f"{len(running)} copies of uDeck are running in the guest: {sorted(running)}")
     machine.screenshot(check_dir, "uDeck running")
     return offered
 
 
 def _open_the_about_pane(machine, check_dir):
-    ui.open_settings(machine, "opening uDeck's settings")
+    ui.open_settings_and_wait(machine, "opening uDeck's settings")
     ui.wait_for(machine, "section.about", "waiting for the settings window")
     ui.click(machine, "section.about", "choosing the About section")
     element = ui.wait_for(machine, "updates.checkNow", "waiting for the About section")
@@ -113,28 +160,130 @@ def _open_the_about_pane(machine, check_dir):
     return element
 
 
-def _the_panes_words(machine):
-    """Every sentence the settings window shows — for a reason a person can read."""
+def _wait_until_it_is_offered(machine, check_dir, lab, offered):
+    """Until uDeck offers the update — or says something that means it will not.
+
+    The button never appearing is not by itself uDeck being wrong: the press may
+    not have landed, or uDeck may still be looking. What the pane says decides
+    which it is. A finished answer — "up to date", "the check did not finish" —
+    against a feed that was proved to answer from inside the guest and an appcast
+    that declares a newer build is uDeck getting it wrong, and a failure. Anything
+    else is the lab's own, and stays "could not check".
+    """
+    try:
+        return ui.wait_for(machine, "updates.install", "waiting for uDeck to offer the update")
+    except NotThere:
+        _evidence(machine, check_dir, "no update offered", lab)
+        said = _what_the_pane_says_or_why_not(machine)
+        expect(
+            UP_TO_DATE not in said and DID_NOT_FINISH not in said,
+            f"uDeck did not offer {offered.version}, although the feed it was given declares it; "
+            f"the pane says: {said}",
+        )
+        raise
+
+
+def _prove_it_tried_and_refused(offered, log, said):
+    """The control has to show uDeck tried the update, not merely that nothing happened.
+
+    Two witnesses, either of which is enough. The guest's own access log naming
+    the archive is the language-independent one: Sparkle checks the signature
+    after downloading, so a fetched archive is a signature that was checked and
+    rejected. The pane saying the check did not finish is the one a person reads.
+
+    Neither means nothing exercised the signature — the check watched an
+    application that never did anything — and that is not a pass (Q34, Q37).
+    """
+    if f"/{offered.zip.name}" in log or DID_NOT_FINISH in said:
+        return
+    raise LabError(
+        "proving the update was refused",
+        "uDeck neither fetched the archive nor said its check did not finish, so nothing "
+        f"exercised the signature; the guest's server saw: {log.strip()[-300:] or 'nothing'}; "
+        f"the pane says: {said}",
+    )
+
+
+def _nothing_is_still_installing(machine):
+    """Nothing may be mid-install when the control says nothing installed.
+
+    The verdict is the version on disk after a fixed wait, which on its own is
+    only true of the moment it was read. Sparkle installs through a helper of its
+    own, so one still running means the wait was simply too short and the control
+    has not measured what it claims to measure.
+    """
+    step = "looking for an install still in flight"
+    # The pattern is broken up so that this command's own shell in the guest,
+    # whose arguments `pgrep -f` also reads, cannot match it.
+    running = machine.ssh.ask("pgrep -fl '[A]utoupdate|[o]rg.sparkle-project' || true", step).stdout.strip()
+    if running:
+        raise LabError(step, f"something was still installing after {REFUSAL_SECONDS:.0f}s: {running}")
+
+
+def _evidence(machine, check_dir, step, lab):
+    """A screenshot as evidence: collected, never raised.
+
+    Anything that can raise between a measurement and the sentence that judges it
+    turns a failed check into "could not check" (Q34) — and takes the artefact
+    with it, which is the one Q38 wants most.
+    """
+    try:
+        machine.screenshot(check_dir, step)
+    except LabError as error:
+        lab.note(f"   no screenshot '{step}': {error.reason}")
+
+
+def _what_the_pane_says(machine):
+    """Every sentence the settings window shows — when the verdict turns on them."""
     return " | ".join(ui.static_texts(machine, "reading what the pane says"))
 
 
-def _pid(machine):
-    return machine.ssh.run("pgrep -x uDeck || true", "looking for uDeck", check=False).stdout.strip()
+def _what_the_pane_says_or_why_not(machine):
+    """The same, where they are only evidence: a window that cannot be read is not a verdict."""
+    try:
+        return _what_the_pane_says(machine)
+    except LabError as error:
+        return f"(the settings window could not be read: {error.reason})"
 
 
 def _wait_until_running(machine, seconds=30):
+    """The pids uDeck has once it is running.
+
+    A failure while it is starting is "not yet" — `SSH.wait_up` and
+    `Machine.wait_for_desktop` treat theirs the same way — but one that lasts the
+    whole window belongs to the lab and comes out as the lab's.
+    """
     deadline = machine.clock() + seconds
+    last = ""
     while True:
-        if _pid(machine):
-            return
+        try:
+            pids = updates.running_pids(machine)
+            if pids:
+                return pids
+        except LabError as error:
+            last = f"; last: {error.reason}"
         if machine.clock() >= deadline:
-            raise LabError("starting uDeck", f"it was not running within {seconds:.0f}s")
+            raise LabError("starting uDeck", f"uDeck was not running within {seconds:.0f}s{last}")
         machine.sleep(2)
 
 
-def _wait_for_the_version_on_disk(machine, wanted, step, seconds=INSTALL_SECONDS):
+def _wait_for_the_relaunch(machine, before, deadline):
+    """The pids uDeck has once one of them is new: Sparkle relaunches after the swap.
+
+    Read once, the moment the version changes, this catches uDeck mid-relaunch
+    and pronounces "it did not come back" against an update that worked. The
+    deadline is the install's own — what the check gives the whole install is
+    what it gives the relaunch inside it, never a second budget on top.
+    """
+    while True:
+        now = updates.running_pids(machine)
+        if now - before or machine.clock() >= deadline:
+            return now
+        machine.sleep(2)
+
+
+def _the_version_once_it_is(machine, wanted, deadline):
     """The version on disk once it is `wanted`, or what it still is at the deadline."""
-    deadline = machine.clock() + seconds
     while True:
         version = updates.installed_version(machine)
         if version == wanted or machine.clock() >= deadline:

@@ -105,6 +105,15 @@ class Clock:
         self.now += seconds
 
 
+class Dropped:
+    """A connection that failed, as each of the two calls sees it.
+
+    `run(check=False)` gets an exit code and no output; `ask` turns that into a
+    lab failure. A fake that raised from both would let a check read a pid with
+    the wrong one and never be caught.
+    """
+
+
 class FakeGuest:
     """The SSH side of a machine: answers commands, remembers what was copied in."""
 
@@ -114,22 +123,39 @@ class FakeGuest:
         self.answers = answers or {}
         self.serving_after = 0
 
-    def run(self, command, step, seconds=None, check=True):
-        self.commands.append(command)
+    def _answer(self, command):
+        """The scripted answer, or None. A list answers once per call, the last one repeating."""
         for pattern, answer in self.answers.items():
             if pattern in command:
-                return done([], 0, answer)
-        return done([], 0, "")
+                if isinstance(answer, list):
+                    return answer.pop(0) if len(answer) > 1 else answer[0]
+                return answer
+        return None
+
+    def run(self, command, step, seconds=None, check=True):
+        self.commands.append(command)
+        answer = self._answer(command)
+        if answer is Dropped:
+            if check:
+                raise LabError(step, "SSH to 192.168.64.2 failed")
+            return done([], 255, "")
+        if isinstance(answer, BaseException):
+            raise answer
+        return done([], 0, answer or "")
 
     def ask(self, command, step, seconds=None):
         self.commands.append(command)
         if "curl" in command:
             self.serving_after -= 1
             return done([], 0, "200" if self.serving_after < 0 else "000")
-        for pattern, answer in self.answers.items():
-            if pattern in command:
-                return done([], 0 if answer else 1, answer)
-        return done([], 1, "")
+        answer = self._answer(command)
+        if answer is Dropped:
+            raise LabError(step, "SSH to 192.168.64.2 failed")
+        if isinstance(answer, BaseException):
+            raise answer
+        if answer is None:
+            return done([], 1, "")
+        return done([], 0 if answer else 1, answer)
 
     def copy_in(self, local, remote, step, seconds=None):
         self.copied.append((Path(local).name, remote))
@@ -211,3 +237,80 @@ def test_the_version_on_disk_is_read_from_the_bundle_in_the_guest():
     # One line instead of two: one of the two reads answered with nothing.
     with pytest.raises(LabError, match="unexpected answer"):
         updates.installed_version(FakeMachine({"defaults read": "0.4.1\n"}))
+
+
+# --- What is running in the guest ------------------------------------------------------
+
+
+def test_the_pids_uDeck_has_are_read_in_a_way_a_dropped_connection_cannot_answer():
+    """`ask`, not `run(check=False)`: SSH failing must not read as "it is not running"."""
+    machine = FakeMachine({"pgrep -x uDeck": "101\n202\n"})
+    assert updates.running_pids(machine) == {"101", "202"}
+
+    dropped = FakeMachine({"pgrep -x uDeck": Dropped})
+    with pytest.raises(LabError, match="SSH to 192.168.64.2 failed"):
+        updates.running_pids(dropped)
+
+
+def test_a_running_uDeck_is_asked_to_quit_before_its_bundle_is_replaced():
+    """A copy left by the previous check keeps running from the bundle ditto deletes.
+
+    `open -a` then only brings that one forward, and the check drives an
+    application that is not the one it installed.
+    """
+    machine = FakeMachine({"pgrep -x uDeck": ["909", "909", ""]})
+    updates.quit_app(machine, "quitting uDeck")
+    asked = [c for c in machine.ssh.commands if "to quit" in c]
+    assert asked and "System Events" in asked[0], "a bare quit resolves the bundle that is going"
+    assert not any("pkill" in c for c in machine.ssh.commands), "it went when it was asked"
+
+
+def test_a_uDeck_that_will_not_quit_is_killed_and_then_given_up_on():
+    killed = FakeMachine({"pgrep -x uDeck": ["909"] * 20 + [""]})
+    updates.quit_app(killed, "quitting uDeck")
+    assert any("pkill -x uDeck" in c for c in killed.ssh.commands)
+    assert killed._clock.now >= config.QUIT_SECONDS / 2
+
+    stuck = FakeMachine({"pgrep -x uDeck": "909"})
+    with pytest.raises(LabError, match="still running in the guest as"):
+        updates.quit_app(stuck, "quitting uDeck")
+    assert stuck._clock.now >= config.QUIT_SECONDS
+
+
+def test_nothing_is_asked_to_quit_when_nothing_is_running():
+    machine = FakeMachine()
+    updates.quit_app(machine, "quitting uDeck")
+    assert not any("quit" in c or "pkill" in c for c in machine.ssh.commands)
+
+
+def test_installing_ends_what_is_running_before_it_replaces_the_bundle(tmp_path):
+    machine = FakeMachine({"pgrep -x uDeck": ["909", ""], "stat -f %Su": config.GUEST_USER})
+    updates.install(machine, a_build(tmp_path, version="0.4.1", size=10).zip, note=lambda text: None)
+    quit_at = next(i for i, c in enumerate(machine.ssh.commands) if "to quit" in c)
+    ditto_at = next(i for i, c in enumerate(machine.ssh.commands) if "ditto -x -k" in c)
+    assert quit_at < ditto_at
+
+
+# --- The feed's own log, as evidence ---------------------------------------------------
+
+
+def test_the_feeds_log_is_brought_back_as_evidence(tmp_path):
+    """For the negative control it is the proof: a fetched archive is a checked signature."""
+    line = '127.0.0.1 - - [18/Sep/2026] "GET /uDeck-0.4.2.zip HTTP/1.1" 200 -'
+    machine = FakeMachine({"server.log": line})
+    text = updates.Feed(machine, note=lambda t: None).collect_log(tmp_path)
+    assert line in text
+    assert line in (tmp_path / "feed-server.log").read_text()
+
+
+def test_a_log_that_cannot_be_collected_is_said_and_not_raised(tmp_path):
+    """Evidence, not a verdict: a check must not turn on whether its artefacts arrived."""
+    machine = FakeMachine({"server.log": Dropped})
+    said = []
+    assert updates.Feed(machine, note=said.append).collect_log(tmp_path) == ""
+    assert any("could not be read" in note for note in said)
+
+    unwritable = FakeMachine({"server.log": "a line"})
+    said = []
+    assert updates.Feed(machine=unwritable, note=said.append).collect_log(tmp_path / "nowhere") == "a line"
+    assert any("could not be written" in note for note in said)

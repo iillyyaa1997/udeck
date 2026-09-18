@@ -200,15 +200,20 @@ class LabPlugin:
 
     # --- Builds ------------------------------------------------------------
 
-    def builder(self, feed_url: str) -> builds.Builder:
-        """Lab builds for this run, pointed at `feed_url` and signed with its own key."""
+    def builder(self, feed_url: str, for_check: str) -> builds.Builder:
+        """Lab builds for this run, pointed at `feed_url` and signed with its own key.
+
+        A directory per check, because two checks build the same versions: the
+        second would otherwise write over the zips and the build log the first
+        one's report is made of (Q38, Q39).
+        """
         if self.run_dir is None:
             raise LabError("preparing a build", "there is no run in progress")
         if self.signing_key is None:
             self.signing_key = builds.make_key(self.run_dir / "signing")
         return builds.Builder(
             repo_root=self.repo_root,
-            work_dir=self.run_dir / "builds",
+            work_dir=self.run_dir / "builds" / for_check,
             feed_url=feed_url,
             key=self.signing_key,
             note=self.note,

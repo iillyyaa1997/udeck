@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from udeck_e2e import config
-from udeck_e2e.errors import LabError
+from udeck_e2e.errors import LabError, NotThere
 
 SETTINGS_WINDOW = "uDeck Settings"
 PROCESS = "uDeck"
@@ -214,14 +214,20 @@ def find(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDOW
 
 def wait_for(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDOW,
              seconds: float = config.UI_APPEAR_SECONDS) -> Element:
-    """Until the control is there. What is there instead goes into the reason."""
+    """Until the control is there. What is there instead goes into the reason.
+
+    The deadline raises `NotThere`, and only the deadline: a check that reads
+    "the control never appeared" as something uDeck did must be able to tell it
+    apart from System Events refusing or the machine going away, which keep
+    arriving as an ordinary `LabError` through `find`.
+    """
     deadline = machine.clock() + seconds
     while True:
         element = find(machine, identifier, step, window)
         if element is not None:
             return element
         if machine.clock() >= deadline:
-            raise LabError(
+            raise NotThere(
                 step,
                 f"'{identifier}' did not appear in '{window}' within {seconds:.0f}s; "
                 f"what is there: {', '.join(identifiers(machine, step, window)) or 'nothing with an identifier'}",
@@ -239,3 +245,29 @@ def click(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDO
 def open_settings(machine: Any, step: str, item: str = "Settings…") -> None:
     """uDeck's settings window, opened from its own menu."""
     ask(machine, _applescript(_OPEN_SETTINGS, process=PROCESS, item=item), step)
+
+
+def open_settings_and_wait(machine: Any, step: str, item: str = "Settings…",
+                           seconds: float = config.UI_APPEAR_SECONDS) -> None:
+    """The settings window, opened and there — pressing the menu item again if it is not.
+
+    The press is one shot, and it is made moments after uDeck was launched: a
+    status item that has not been put in the menu bar yet makes System Events
+    refuse, and a press that lands before the application is ready does nothing
+    at all. Both are the lab being early rather than uDeck being wrong, so the
+    press is repeated until the window is there — and pressing it again while it
+    is open only brings it forward.
+    """
+    deadline = machine.clock() + seconds
+    last = ""
+    while True:
+        try:
+            open_settings(machine, step, item)
+            if SETTINGS_WINDOW in windows(machine, step):
+                return
+            last = f"'{SETTINGS_WINDOW}' is not among uDeck's windows"
+        except LabError as error:
+            last = error.reason
+        if machine.clock() >= deadline:
+            raise LabError(step, f"uDeck's settings window did not open within {seconds:.0f}s; last: {last}")
+        machine.sleep(1)
