@@ -7,8 +7,9 @@ installs, that the panel opens when the pointer reaches the top edge, that
 on means the tests take over your screen. The lab runs them inside throwaway
 macOS virtual machines instead, headless, and puts everything back afterwards.
 
-It runs on an Apple Silicon Mac only, and not in GitHub CI: hosted runners do
-not offer nested virtualisation.
+The checks run on an Apple Silicon Mac only, and not in GitHub CI: hosted
+runners do not offer nested virtualisation. The lab's own tests do run there —
+see the last section.
 
 > **Being built.** What exists today: the command, its pre-flight and report,
 > the machines and the golden image they are cloned from, their screen and
@@ -294,4 +295,7 @@ UV_PROJECT_ENVIRONMENT="$PWD/.build/e2e/venv" uv run --frozen --project e2e pyte
 From the repository's root. The path must be absolute: uv reads a relative one
 from `e2e/`, and would quietly make a second environment there.
 
-They need neither Tart nor a virtual machine.
+They need neither Tart nor a virtual machine, so they run in CI on every push —
+unlike the checks, which need a machine to drive. That is the part worth running
+everywhere: a mistake in the harness is invisible, because a check that proves
+nothing looks exactly like a check that passed.
