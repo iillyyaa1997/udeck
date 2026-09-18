@@ -141,6 +141,10 @@ COPY_SECONDS = 300
 VNC_ACTION_SECONDS = 30
 # Until the screen shows a drawn frame after a boot or a restart.
 SCREEN_SECONDS = 60
+# How often the lab takes a frame nobody asked for, to keep Tart's VNC server in
+# use. Measured: a connection made after ~60 s with none crashes it (0 s and 30 s
+# are fine), and the crash takes the machine with it.
+SCREEN_HEARTBEAT_SECONDS = 20
 # How much of a frame one colour may cover for the screen to count as drawn.
 # Measured: a blank screen 1.0, the Apple boot screen 0.998, a desktop 0.002.
 SCREEN_MAX_UNIFORM = 0.98

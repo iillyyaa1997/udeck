@@ -756,3 +756,53 @@ def test_a_click_off_the_screen_is_refused_and_one_on_it_goes_through(host):
         host.machine.click(2560, 10, "nowhere")
     host.machine.click(2559, 1439, "the corner")
     assert ("click", 2559, 1439) in host.screens[0].calls
+
+
+# --- Keeping Tart's VNC server in use ---------------------------------------------------
+
+
+def test_the_screen_is_used_often_enough_that_tarts_server_does_not_crash(host):
+    """Measured: a connection after ~60 s with none kills the machine."""
+    import time as real_time
+
+    host.machine.create()
+    host.machine.boot()
+    # boot() already started it at the real interval; this test wants a fast one.
+    host.machine._stop_the_heartbeat()
+    host.machine.keep_the_screen_in_use(interval=0.05)
+    deadline = real_time.monotonic() + 5
+    while len([c for c in host.screens[0].calls if c[0] == "capture"]) < 3:
+        if real_time.monotonic() > deadline:
+            raise AssertionError(f"the screen was used {host.screens[0].calls} times")
+        real_time.sleep(0.05)
+    assert config.SCREEN_HEARTBEAT_SECONDS < 60
+
+
+def test_the_heartbeat_stops_with_the_machine_and_leaves_nothing_behind(host, tmp_path):
+    import time as real_time
+
+    host.machine.create()
+    host.machine.boot()
+    # boot() already started it at the real interval; this test wants a fast one.
+    host.machine._stop_the_heartbeat()
+    host.machine.keep_the_screen_in_use(interval=0.05)
+    real_time.sleep(0.2)
+    host.machine.close(keep=False)
+    taken = len([c for c in host.screens[0].calls if c[0] == "capture"])
+    real_time.sleep(0.3)
+    assert len([c for c in host.screens[0].calls if c[0] == "capture"]) == taken
+    assert not (host.machine.work_dir / ".screen-in-use.png").exists()
+
+
+def test_a_heartbeat_that_fails_is_said_once_and_changes_no_verdict(host):
+    import time as real_time
+
+    host.machine.create()
+    host.machine.boot()
+    host.capture_fails = True
+    host.machine._stop_the_heartbeat()
+    host.machine.keep_the_screen_in_use(interval=0.05)
+    real_time.sleep(0.3)
+    host.machine._stop_the_heartbeat()
+    complaints = [n for n in host.notes if "could not keep" in n]
+    assert len(complaints) == 1, host.notes

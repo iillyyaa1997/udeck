@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import signal
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -59,6 +60,11 @@ class Machine:
         # The machine's VNC server, known once it has booted.
         self.screen: Screen | None = None
         self._screen_factory = screen_factory
+        # One VNC action at a time, including the heartbeat below.
+        self._screen_lock = threading.Lock()
+        self._heartbeat: threading.Thread | None = None
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_complained = False
         # Where the Mac's sleep marker stood when this machine was made, so a
         # sleep during any check that shared it is noticed (see the plugin).
         self.slept_at = ""
@@ -103,6 +109,7 @@ class Machine:
         self.wait_for_desktop(f"waiting for {self.name}'s desktop")
         self._find_screen()
         self.wait_for_screen(f"waiting for {self.name}'s screen")
+        self.keep_the_screen_in_use()
 
     def _start(self) -> None:
         self.work_dir.mkdir(parents=True, exist_ok=True)
@@ -245,6 +252,44 @@ class Machine:
 
     # --- The screen and the pointer -----------------------------------------
 
+    def keep_the_screen_in_use(self, interval: float = config.SCREEN_HEARTBEAT_SECONDS) -> None:
+        """Take a frame nobody asked for, often enough that the server stays in use.
+
+        Measured: a VNC connection made after about a minute with none crashes
+        Tart's server — `-[_VZVNCServer _setupVirtualMachineAccessor]` asserts —
+        and the machine dies with it. A check that waits, as the one watching for
+        an update that must not install does, would otherwise kill its own machine.
+        """
+        if self._heartbeat is not None:
+            return
+        # Cleared, or a heartbeat started after one was stopped would end at once.
+        self._heartbeat_stop.clear()
+        self._heartbeat = threading.Thread(
+            target=self._heartbeat_loop, args=(interval,), name=f"{self.name}-screen", daemon=True
+        )
+        self._heartbeat.start()
+
+    def _heartbeat_loop(self, interval: float) -> None:
+        while not self._heartbeat_stop.wait(interval):
+            if self.screen is None or self.process is None or self.process.poll() is not None:
+                return
+            try:
+                with self._screen_lock:
+                    self.screen.capture(self.work_dir / ".screen-in-use.png", f"keeping {self.name}'s screen in use")
+            except LabError as error:
+                # Said once: a check's verdict never turns on this, and a machine
+                # that has gone is reported by whatever the check does next.
+                if not self._heartbeat_complained:
+                    self._heartbeat_complained = True
+                    self.note(f"   could not keep {self.name}'s screen in use: {error}")
+
+    def _stop_the_heartbeat(self) -> None:
+        self._heartbeat_stop.set()
+        if self._heartbeat is not None:
+            self._heartbeat.join(timeout=config.VNC_ACTION_SECONDS + 5)
+            self._heartbeat = None
+        (self.work_dir / ".screen-in-use.png").unlink(missing_ok=True)
+
     def _find_screen(self) -> None:
         address = find_address(self._log_text())
         if address is None:
@@ -305,7 +350,8 @@ class Machine:
     def _on_screen(self, step: str, action: Callable[[], Any]) -> Any:
         self.ensure_running(step)
         try:
-            return action()
+            with self._screen_lock:
+                return action()
         except LabError:
             # A VNC connection refused because Tart itself went away is about the
             # machine, and that is the story to tell.
@@ -366,6 +412,7 @@ class Machine:
 
     def _close(self, keep: bool) -> list[str]:
         problems = []
+        self._stop_the_heartbeat()
         try:
             problem = self.shut_down()
             if problem:
