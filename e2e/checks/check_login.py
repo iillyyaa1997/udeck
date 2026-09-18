@@ -19,6 +19,9 @@ from udeck_e2e import app, login, ui, updates
 from udeck_e2e.errors import LabError, expect
 
 VERSION = ("0.4.1", "6")
+# What uDeck updates itself to in the fourth check. The build number is what Sparkle
+# compares; the version people read only has to differ so a person can see it happened.
+NEWER = ("0.4.2", "7")
 
 # After the desktop is up, how long the system is given to open what it was told to open.
 OPENS_WITHIN_SECONDS = 60
@@ -100,18 +103,64 @@ def check_off_stays_off(machine, check_dir, lab):
     )
 
 
-# --- What all three do --------------------------------------------------------------
+def check_survives_an_update(machine, check_dir, lab):
+    """uDeck updates itself, and the system's record comes through it intact.
 
+    The record names a path, and an update replaces what is at that path — so this is the
+    check that would catch a login item pointing at a bundle Sparkle has since swapped, or
+    an application that quietly re-registers itself on every launch and racks up
+    generations (which is what makes macOS post "Login Item Added" at every login).
 
-def _prepare(machine, check_dir, lab):
-    """A lab build of uDeck installed and running, with its settings open on General.
-
-    The build carries a feed nobody serves, on the guest's own loopback: a lab build must
-    not be able to update itself against anything real (Q41), and none of these checks is
-    about updating.
+    Installing the update is a precondition here, not the thing under test: that it works
+    at all is what `updates.sparkle` is for. So a failure to offer or to install is the
+    lab being unable to carry this check out, never a verdict about uDeck.
     """
     feed = updates.Feed(machine, lab.note)
-    build = lab.builder(feed.url, check_dir.name).build(*VERSION)
+    try:
+        builder = _prepare(machine, check_dir, lab, feed)
+        before = _switch_on(machine, check_dir, lab)
+
+        newer = builder.build(*NEWER)
+        signature = updates.sign(newer.zip, lab.signing_key, updates.find_sign_update(lab.repo_root))
+        appcast = check_dir / "appcast.xml"
+        appcast.write_text(
+            updates.appcast(updates.Offer(newer, signature, newer.zip.stat().st_size), feed.base_url)
+        )
+        feed.serve(appcast, newer.zip)
+        _install_the_update(machine, check_dir, lab)
+
+        after = login.collect(machine, check_dir, name="login-records-after-the-update.txt")
+        machine.screenshot(check_dir, "after the update")
+
+        expect(
+            app.installed_version(machine) == NEWER,
+            f"the update did not happen: the version on disk is {app.installed_version(machine)}",
+        )
+        expect(after is not None, f"the update left uDeck with no login record at all; before it was {before.describe()}")
+        expect(after.enabled, f"the record did not survive the update: {after.describe()}")
+        expect(
+            after.url == f"{app.GUEST_APPLICATIONS}/{app.APP}",
+            f"after the update the record points at {after.url or 'nothing'}",
+        )
+        lab.note(f"   the record came through as: {after.describe()}")
+    finally:
+        feed.collect_log(check_dir)
+        feed.stop()
+
+
+# --- What all four do ---------------------------------------------------------------
+
+
+def _prepare(machine, check_dir, lab, feed=None):
+    """A lab build of uDeck installed and running, with its settings open on General.
+
+    The build points at the guest's own loopback, and for three of the four checks nothing
+    serves it: a lab build must not be able to update itself against anything real (Q41).
+    The fourth passes its own feed in and then serves something on it.
+    """
+    feed = feed or updates.Feed(machine, lab.note)
+    builder = lab.builder(feed.url, check_dir.name)
+    build = builder.build(*VERSION)
 
     app.install(machine, build.zip, lab.note)
     there = app.installed_version(machine)
@@ -124,6 +173,7 @@ def _prepare(machine, check_dir, lab):
     ui.click(machine, "section.general", "choosing General")
     ui.wait_for(machine, "general.openAtLogin", "waiting for the login card")
     machine.screenshot(check_dir, "uDeck running")
+    return builder
 
 
 def _switch_on(machine, check_dir, lab):
@@ -136,6 +186,35 @@ def _switch_on(machine, check_dir, lab):
         # The rest of the check is about what happens to a record that is there.
         raise LabError("switching Open at Login on", f"the system did not take it: {_describe(record)}")
     lab.note(f"   the system now has: {record.describe()}")
+    return record
+
+
+def _install_the_update(machine, check_dir, lab, seconds=240):
+    """Drive uDeck's own About pane until the newer version is the one on disk.
+
+    Every step here is a precondition, so every failure is the lab's: that uDeck can
+    update itself is checked by `updates.sparkle`, and a check about login records must
+    not pronounce on it.
+    """
+    step = "installing the update uDeck is offered"
+    ui.click(machine, "section.about", "choosing the About section")
+    ui.wait_for(machine, "updates.checkNow", "waiting for the About section")
+    ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
+    try:
+        install = ui.wait_for(machine, "updates.install", "waiting for uDeck to offer the update", seconds=60)
+    except LabError as error:
+        raise LabError(step, f"uDeck did not offer the update: {error.reason}") from None
+    machine.screenshot(check_dir, "the update is offered")
+    machine.click(*install.middle, "installing the update")
+
+    deadline = machine.clock() + seconds
+    while True:
+        if app.installed_version(machine) == NEWER:
+            lab.note(f"   uDeck updated itself to {NEWER[0]}")
+            return
+        if machine.clock() >= deadline:
+            raise LabError(step, f"uDeck was still {app.installed_version(machine)} after {seconds:.0f}s")
+        machine.sleep(5)
 
 
 def _wait_until_it_opens(machine, seconds):

@@ -171,3 +171,72 @@ def test_a_switch_off_the_system_ignored_fails_before_the_restart(lab, check_dir
     with pytest.raises(CheckFailed, match="switched off and the system still has"):
         checks.check_off_stays_off(machine, check_dir, lab)
     assert not restarted
+
+
+# --- Surviving an update ---------------------------------------------------------------
+
+
+def versions(monkeypatch, *answers):
+    """What `installed_version` says, in turn — the preparation reads it before the update
+    and the check reads it after, and they are not the same answer."""
+    seen = iter(answers)
+    last = answers[-1]
+    monkeypatch.setattr(app, "installed_version", lambda machine: next(seen, last))
+
+
+@pytest.fixture
+def update_flow(monkeypatch, tmp_path):
+    """Everything about updating stubbed: this check is not the one that tests updating."""
+    import udeck_e2e.updates as updates_module
+
+    monkeypatch.setattr(updates_module, "sign", lambda *a, **k: "a-signature")
+    monkeypatch.setattr(updates_module, "find_sign_update", lambda root: tmp_path / "sign_update")
+    monkeypatch.setattr(updates_module.Feed, "serve", lambda self, *a: setattr(self, "serving", True))
+    monkeypatch.setattr(updates_module.Feed, "stop", lambda self: None)
+    monkeypatch.setattr(updates_module.Feed, "collect_log", lambda self, directory, name="feed-server.log": "")
+
+
+def test_a_record_that_comes_through_an_update_passes(lab, check_dir, update_flow, monkeypatch):
+    machine = a_machine([ON, ON])
+    versions(monkeypatch, checks.VERSION, checks.NEWER)
+    checks.check_survives_an_update(machine, check_dir, lab)
+
+
+def test_a_record_the_update_took_with_it_fails(lab, check_dir, update_flow, monkeypatch):
+    """What this check exists for: the record names a path, and an update replaces what is
+    at that path."""
+    machine = a_machine([ON, NOTHING])
+    versions(monkeypatch, checks.VERSION, checks.NEWER)
+    with pytest.raises(CheckFailed, match="no login record at all"):
+        checks.check_survives_an_update(machine, check_dir, lab)
+
+
+def test_a_record_left_pointing_elsewhere_after_the_update_fails(lab, check_dir, update_flow, monkeypatch):
+    machine = a_machine([ON, ELSEWHERE])
+    versions(monkeypatch, checks.VERSION, checks.NEWER)
+    with pytest.raises(CheckFailed, match="the record points at"):
+        checks.check_survives_an_update(machine, check_dir, lab)
+
+
+def test_an_update_that_did_not_happen_is_the_labs_problem(lab, check_dir, update_flow, monkeypatch):
+    """Installing the update is a precondition here; `updates.sparkle` is the check that
+    pronounces on whether uDeck can update itself at all."""
+    machine = a_machine([ON, ON])
+    versions(monkeypatch, checks.VERSION)
+    with pytest.raises(LabError, match="was still"):
+        checks.check_survives_an_update(machine, check_dir, lab)
+    assert machine.now >= 240, "it is given the whole window before that is said"
+
+
+def test_an_update_uDeck_never_offered_is_also_the_labs_problem(lab, check_dir, update_flow, monkeypatch):
+    machine = a_machine([ON, ON])
+    versions(monkeypatch, checks.VERSION, checks.NEWER)
+
+    def never(machine_, identifier, step, window=None, seconds=None):
+        if identifier == "updates.install":
+            raise LabError(step, "'updates.install' did not appear")
+        return ui.Element(identifier, 1, 2, 3, 4)
+
+    monkeypatch.setattr(ui, "wait_for", never)
+    with pytest.raises(LabError, match="did not offer the update"):
+        checks.check_survives_an_update(machine, check_dir, lab)
