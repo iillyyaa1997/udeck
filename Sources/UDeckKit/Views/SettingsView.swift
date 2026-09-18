@@ -221,9 +221,22 @@ private struct LoginCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
         }
+        // Three moments, and there is no fourth to be had: `ServiceManagement` publishes
+        // no notification when a login record changes, so asking is the only way to know.
+        // The pane appearing, uDeck being activated again — which is what coming back
+        // from System Settings looks like — and this window being brought forward.
+        //
+        // What that leaves, measured in a machine: while uDeck is the active application
+        // with this window already open and key, nothing re-reads, so a record taken away
+        // at that moment sits on screen as a switch that is no longer true until anything
+        // at all moves. Polling would close it and is what this deliberately does not do:
+        // asking the system ten times a minute to catch a minute that almost never comes.
         .onAppear { loginItem.refresh() }
         .onReceive(NotificationCenter.default.publisher(
             for: NSApplication.didBecomeActiveNotification
+        )) { _ in loginItem.refresh() }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSWindow.didBecomeKeyNotification
         )) { _ in loginItem.refresh() }
     }
 
