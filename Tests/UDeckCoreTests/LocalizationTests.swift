@@ -36,6 +36,10 @@ struct LocalizationTests {
         .openingNeedsModifier, .openingAlso, .openingRetract, .openingFullscreen,
         .openingKeepPolling, .openingPermissions,
 
+        .generalStartup, .generalOpenAtLogin, .generalOpensWhich("/Applications/uDeck.app"),
+        .generalRecordVanished, .generalDidNotTake, .generalAnotherCopy("/x/uDeck.app"),
+        .generalWaitsForApproval, .generalLoginFailed("no"), .generalOpenLoginItems,
+
         .lookLightLook, .lookDarkLook, .lookCustom, .lookPresets, .lookBuiltIn, .lookSaved, .lookShows,
         .lookLight, .lookDark, .lookLightFromHour(7), .lookDarkFromHour(19), .lookGlass,
         .glassRegular, .glassClear, .lookTintCoversMaterial(percent: 58), .lookAmount,
@@ -91,7 +95,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 150,
+        #expect(Self.all.count == 159,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

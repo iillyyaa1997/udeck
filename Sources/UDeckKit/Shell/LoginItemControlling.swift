@@ -19,8 +19,21 @@ public final class LoginItemStatus {
     /// What the switch shows. The system's answer, never a memory of what was asked.
     public var opensAtLogin: Bool { judgement.opensAtLogin }
 
+    /// The other copies of uDeck on this Mac, as of the last reading.
+    ///
+    /// Not a problem in itself — most Macs that have ever had a debug build have two —
+    /// and so never shown on its own. It is what turns "the record went away" into
+    /// something the operator can act on, and it is the only part of that failure an
+    /// application is allowed to see: the system will not say which copy holds the record.
+    public var otherCopies: [URL] = []
+
     /// What there is to say about it, if anything. Nothing, on an ordinary day.
     public var trouble: LoginItemTrouble? { judgement.trouble }
+
+    /// The sentence the card shows under the switch, or none.
+    public var message: LoginItemMessage? {
+        UDeckCore.message(for: judgement.trouble, otherCopies: otherCopies)
+    }
 
     /// When the system last answered.
     public var lastRead: Date? { judgement.reading?.at }
@@ -44,6 +57,14 @@ public final class LoginItemStatus {
 public protocol LoginItemControlling: AnyObject {
     /// Everything the screen draws.
     var status: LoginItemStatus { get }
+
+    /// The copy of uDeck that is running, and therefore the one that would be registered.
+    ///
+    /// On the card every day, not only when something is wrong: the day it matters is the
+    /// day the operator has forgotten there is a second copy, and by then the card is
+    /// telling them about a path they have to trust it about. Stating it always makes it
+    /// ordinary.
+    var thisCopy: URL { get }
 
     /// Ask the system again.
     ///

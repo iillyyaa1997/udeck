@@ -191,3 +191,70 @@ struct LoginItemTests {
         #expect(second.trouble == nil)
     }
 }
+
+/// Naming the other copy is the only useful thing uDeck can say about the failure it
+/// actually suffers: the system will not tell an application which copy holds the record,
+/// so what is offered instead is the list of copies that exist — and the first rule of
+/// that list is that uDeck must not point at itself.
+@Suite("The other copies of uDeck")
+struct LoginItemCopiesTests {
+    let running = URL(fileURLWithPath: "/Applications/uDeck.app")
+
+    @Test("the running copy is never named")
+    func excludesItself() {
+        let found = otherCopies(than: running, among: [running])
+        #expect(found.isEmpty)
+    }
+
+    @Test("a copy somewhere else is named")
+    func namesTheOther() {
+        let debug = URL(fileURLWithPath: "/Users/x/Applications/uDeck-debug.app")
+        #expect(otherCopies(than: running, among: [running, debug]) == [debug])
+    }
+
+    /// The same bundle arrives spelled three ways from `NSWorkspace`, a trailing slash and
+    /// a different case among them, and each one would have uDeck accusing itself.
+    @Test("the same copy spelled differently is still itself")
+    func spelling() {
+        let withSlash = URL(fileURLWithPath: "/Applications/uDeck.app/")
+        let otherCase = URL(fileURLWithPath: "/applications/UDECK.app")
+        let doubled = URL(fileURLWithPath: "/Applications/./uDeck.app")
+        #expect(otherCopies(than: running, among: [withSlash, otherCase, doubled]).isEmpty)
+    }
+
+    @Test("several copies all come through, in the order the system gave them")
+    func several() {
+        let a = URL(fileURLWithPath: "/Users/x/Desktop/uDeck.app")
+        let b = URL(fileURLWithPath: "/Volumes/Backup/uDeck.app")
+        #expect(otherCopies(than: running, among: [a, running, b]) == [a, b])
+    }
+
+    // MARK: - What is said
+
+    @Test("an ordinary day says nothing at all")
+    func quiet() {
+        #expect(message(for: nil, otherCopies: []) == nil)
+        #expect(message(for: nil, otherCopies: [URL(fileURLWithPath: "/x/uDeck.app")]) == nil,
+                "another copy existing is not itself a problem")
+    }
+
+    @Test("a record that went away carries the copies that might explain it")
+    func vanishedNamesCopies() {
+        let debug = URL(fileURLWithPath: "/Users/x/Applications/uDeck-debug.app")
+        #expect(message(for: .recordVanished, otherCopies: [debug]) == .vanished(otherCopies: [debug]))
+        #expect(message(for: .recordVanished, otherCopies: []) == .vanished(otherCopies: []),
+                "and says it plainly when there is nothing to name")
+    }
+
+    @Test("a refusal to take carries them too, for the same reason")
+    func didNotTakeNamesCopies() {
+        let debug = URL(fileURLWithPath: "/Users/x/Applications/uDeck-debug.app")
+        #expect(message(for: .didNotTake, otherCopies: [debug]) == .didNotTake(otherCopies: [debug]))
+    }
+
+    @Test("approval and failure are passed through unchanged")
+    func others() {
+        #expect(message(for: .waitsForApproval, otherCopies: []) == .waitsForApproval)
+        #expect(message(for: .couldNotAsk(reason: "nope"), otherCopies: []) == .couldNotAsk(reason: "nope"))
+    }
+}

@@ -14,6 +14,11 @@ public struct SettingsView: View {
     /// somebody assembled themselves. The Updates group is simply not drawn
     /// then, rather than drawn with a button that cannot do anything.
     var updater: (any UpdateChecking)?
+
+    /// Absent in a build with nothing to ask — same reasoning as the updater. A
+    /// development binary has no bundle to register, and a card whose switch cannot do
+    /// anything is worse than no card.
+    var loginItem: (any LoginItemControlling)?
     /// Opens on the first pane rather than on the one that was most useful to
     /// me while building it. Somebody who has landed in a language they cannot
     /// read needs the language control before anything else, and it is here.
@@ -50,9 +55,14 @@ public struct SettingsView: View {
         }
     }
 
-    public init(model: DeckModel, updater: (any UpdateChecking)? = nil) {
+    public init(
+        model: DeckModel,
+        updater: (any UpdateChecking)? = nil,
+        loginItem: (any LoginItemControlling)? = nil
+    ) {
         self.model = model
         self.updater = updater
+        self.loginItem = loginItem
     }
 
     public var body: some View {
@@ -86,7 +96,7 @@ public struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     switch section {
-                    case .general: GeneralSettings(model: model)
+                    case .general: GeneralSettings(model: model, loginItem: loginItem)
                     case .opening: OpeningSettings(model: model)
                     case .look: LookSettings(model: model)
                     case .plugins: PluginSettingsSection(model: model, selected: $selectedPlugin)
@@ -128,9 +138,18 @@ public struct SettingsView: View {
 /// filed under whichever pane has room.
 private struct GeneralSettings: View {
     @Bindable var model: DeckModel
+    var loginItem: (any LoginItemControlling)?
     @Environment(\.strings) private var strings
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if let loginItem { LoginCard(loginItem: loginItem) }
+            languageRow
+        }
+        .frame(maxWidth: 560, alignment: .leading)
+    }
+
+    private var languageRow: some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
             GridRow {
                 Text(strings(.lookLanguage))
@@ -159,7 +178,108 @@ private struct GeneralSettings: View {
                 .frame(width: 260)
             }
         }
-        .frame(maxWidth: 560, alignment: .leading)
+    }
+}
+
+/// Opening at login, as one statement rather than a switch on its own.
+///
+/// The card says three things and only three: whether uDeck opens at login, *which copy*
+/// would open, and — only when there is something to say — what the system says instead.
+/// The middle one is the reason the group is drawn at all: the failure this setting
+/// actually suffers is a second copy of uDeck taking the record, and on the day that
+/// happens the operator needs to know which copy they are looking at.
+///
+/// The switch is read from the system each time the window appears and each time uDeck is
+/// activated again, because `ServiceManagement` publishes no notification and the operator
+/// may have been in System Settings in between.
+private struct LoginCard: View {
+    let loginItem: any LoginItemControlling
+    @Environment(\.strings) private var strings
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(strings(.generalStartup))
+                .font(.callout.weight(.semibold))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle(strings(.generalOpenAtLogin), isOn: Binding(
+                    get: { loginItem.status.opensAtLogin },
+                    set: { loginItem.set(opensAtLogin: $0) }
+                ))
+                .accessibilityIdentifier("general.openAtLogin")
+
+                Text(strings(.generalOpensWhich(shown(loginItem.thisCopy))))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("general.opensWhich")
+
+                if let message = loginItem.status.message {
+                    trouble(message)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
+        }
+        .onAppear { loginItem.refresh() }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification
+        )) { _ in loginItem.refresh() }
+    }
+
+    @ViewBuilder private func trouble(_ message: LoginItemMessage) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(headline(for: message))
+                .font(.caption).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("general.loginTrouble")
+
+            if let other = otherCopy(in: message) {
+                Text(strings(.generalAnotherCopy(shown(other))))
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("general.anotherCopy")
+            }
+
+            if needsSystemSettings(message) {
+                Button(strings(.generalOpenLoginItems)) { loginItem.openSystemSettings() }
+                    .accessibilityIdentifier("general.openLoginItems")
+            }
+        }
+        .padding(.top, 2)
+    }
+
+    private func headline(for message: LoginItemMessage) -> String {
+        switch message {
+        case .waitsForApproval: strings(.generalWaitsForApproval)
+        case .vanished: strings(.generalRecordVanished)
+        case .didNotTake: strings(.generalDidNotTake)
+        case .couldNotAsk(let reason): strings(.generalLoginFailed(reason))
+        }
+    }
+
+    /// One copy, not a list: naming three paths makes the sentence a table and the
+    /// operator's problem is almost always the one other copy they forgot about.
+    private func otherCopy(in message: LoginItemMessage) -> URL? {
+        switch message {
+        case .vanished(let copies), .didNotTake(let copies): copies.first
+        case .waitsForApproval, .couldNotAsk: nil
+        }
+    }
+
+    /// The button is offered only where the system's own pane is where the answer is.
+    /// An error from the API is not fixed there, and a button that leads nowhere useful
+    /// is worse than none.
+    private func needsSystemSettings(_ message: LoginItemMessage) -> Bool {
+        switch message {
+        case .waitsForApproval, .vanished, .didNotTake: true
+        case .couldNotAsk: false
+        }
+    }
+
+    /// The home directory as a person writes it.
+    private func shown(_ url: URL) -> String {
+        (url.path as NSString).abbreviatingWithTildeInPath
     }
 }
 

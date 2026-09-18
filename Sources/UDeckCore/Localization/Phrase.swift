@@ -188,6 +188,34 @@ public enum Phrase: Sendable, Equatable {
     case aboutReadPermissions
     case aboutProblems
 
+    // MARK: - Opening at login
+
+    /// The system's own words, on purpose. macOS calls this "Open at Login" in the Dock's
+    /// menu and in Login Items & Extensions — «Открывать при входе» — and an application
+    /// that invents its own phrase for the same switch makes the operator match them up.
+    /// Almost nobody does this: of twelve applications measured in 2026, one.
+    case generalStartup
+    case generalOpenAtLogin
+
+    /// Which copy of uDeck the system would open. The card states it on every ordinary
+    /// day, because the day it matters is the day the operator has forgotten there is a
+    /// second copy.
+    case generalOpensWhich(String)
+
+    /// The record was there and is gone, with nobody having asked for that.
+    case generalRecordVanished
+
+    /// The operator asked, nothing failed, and the system still has no record — which is
+    /// what it looks like from a copy that is not the one the system has on file.
+    case generalDidNotTake
+
+    /// Another copy exists, and it is the likeliest explanation. Never stated as proof:
+    /// the system does not tell an application which copy holds the record.
+    case generalAnotherCopy(String)
+    case generalWaitsForApproval
+    case generalLoginFailed(String)
+    case generalOpenLoginItems
+
     // MARK: - Updates
 
     /// uDeck makes no network connection until this is switched on, which is

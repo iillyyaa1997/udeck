@@ -14,10 +14,16 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model: DeckModel
     private let updater: (any UpdateChecking)?
+    private let loginItem: (any LoginItemControlling)?
 
-    public init(model: DeckModel, updater: (any UpdateChecking)? = nil) {
+    public init(
+        model: DeckModel,
+        updater: (any UpdateChecking)? = nil,
+        loginItem: (any LoginItemControlling)? = nil
+    ) {
         self.model = model
         self.updater = updater
+        self.loginItem = loginItem
         super.init()
     }
 
@@ -33,7 +39,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
             window.isReleasedWhenClosed = false
             window.center()
             window.contentView = NSHostingView(
-                rootView: SettingsView(model: model, updater: updater)
+                rootView: SettingsView(model: model, updater: updater, loginItem: loginItem)
             )
             window.delegate = self
             self.window = window

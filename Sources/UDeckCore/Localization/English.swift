@@ -158,6 +158,17 @@ struct English: Vocabulary {
         case .aboutNotSandboxed: "Not sandboxed, and cannot be: plugins run commands."
         case .aboutReadPermissions:
             "Read the permissions section of the plugin documentation before installing a plugin somebody else wrote."
+        case .generalStartup: "Login"
+        case .generalOpenAtLogin: "Open at Login"
+        case .generalOpensWhich(let path): "Opens: \(path)"
+        case .generalRecordVanished: "macOS no longer has this record."
+        case .generalDidNotTake: "macOS did not keep this record."
+        case .generalAnotherCopy(let path):
+            "There is another copy of uDeck on this Mac: \(path) — the record may have gone to it."
+        case .generalWaitsForApproval: "macOS is waiting for you to allow it in System Settings."
+        case .generalLoginFailed(let reason): "It did not work: \(reason)"
+        case .generalOpenLoginItems: "Open Login Items & Extensions"
+
         case .updatesTitle: "Updates"
         case .updatesCheckNow: "Check now"
         case .updatesAutomatically: "Check for updates automatically"

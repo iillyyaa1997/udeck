@@ -167,6 +167,17 @@ struct Russian: Vocabulary {
         case .aboutNotSandboxed: "Без песочницы, и иначе нельзя: плагины запускают команды."
         case .aboutReadPermissions:
             "Прочитайте раздел о разрешениях в документации по плагинам, прежде чем ставить чужой плагин."
+        case .generalStartup: "Вход"
+        case .generalOpenAtLogin: "Открывать при входе"
+        case .generalOpensWhich(let path): "Откроется: \(path)"
+        case .generalRecordVanished: "macOS больше не хранит эту запись."
+        case .generalDidNotTake: "macOS не сохранила эту запись."
+        case .generalAnotherCopy(let path):
+            "На компьютере есть другая копия uDeck: \(path) — запись могла уйти к ней."
+        case .generalWaitsForApproval: "macOS ждёт, что вы разрешите это в Системных настройках."
+        case .generalLoginFailed(let reason): "Не получилось: \(reason)"
+        case .generalOpenLoginItems: "Открыть «Объекты входа и расширения»"
+
         case .updatesTitle: "Обновления"
         case .updatesCheckNow: "Проверить сейчас"
         case .updatesAutomatically: "Проверять обновления автоматически"

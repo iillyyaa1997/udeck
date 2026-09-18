@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import ServiceManagement
 import UDeckCore
@@ -16,16 +17,36 @@ import UDeckKit
 final class SystemLoginItem: LoginItemControlling {
     let status = LoginItemStatus()
 
+    let thisCopy: URL
+
     private let service: SMAppService
     private let now: () -> Date
+    private let copiesOnDisk: @MainActor () -> [URL]
 
-    init(service: SMAppService = .mainApp, now: @escaping () -> Date = Date.init) {
+    init(
+        service: SMAppService = .mainApp,
+        now: @escaping () -> Date = Date.init,
+        thisCopy: URL = Bundle.main.bundleURL,
+        copiesOnDisk: @escaping @MainActor () -> [URL] = SystemLoginItem.copiesOnDisk
+    ) {
         self.service = service
         self.now = now
+        self.thisCopy = thisCopy
+        self.copiesOnDisk = copiesOnDisk
     }
 
     func refresh() {
+        status.otherCopies = otherCopies(than: thisCopy, among: copiesOnDisk())
         status.read(LoginItemReading(state: Self.state(of: service.status), at: now()))
+    }
+
+    /// Every copy of uDeck this Mac knows about, from Launch Services.
+    ///
+    /// Public API, no permission asked for and none needed — which is the whole reason
+    /// this is worth doing: the record itself is out of reach, and the copies are not.
+    static func copiesOnDisk() -> [URL] {
+        guard let identifier = Bundle.main.bundleIdentifier else { return [] }
+        return NSWorkspace.shared.urlsForApplications(withBundleIdentifier: identifier)
     }
 
     func set(opensAtLogin: Bool) {
