@@ -162,10 +162,43 @@ FEED_UP_SECONDS = 30
 # bundle is replaced. It matters on a shared machine (--vm per-group, per-run),
 # where what is running is the previous check's copy.
 QUIT_SECONDS = 30
+# Until uDeck is running after `open -a`.
+LAUNCH_SECONDS = 30
 
 # One AppleScript against the guest's interface: a walk of the settings window
 # took ~2 s measured, and a slow machine may take longer.
 UI_SECONDS = 180
+
+# --- The panel's gesture --------------------------------------------------------
+#
+# uDeck's own numbers are in Sources/UDeckCore/Configuration/GestureTuning.swift:
+# the push needs 24 points of upward movement inside 0.25 s while the pointer is
+# pinned, and the dwell needs the pointer to rest in the strip for 0.06 s (0.18 s
+# when it arrived travelling sideways). What follows clears those with room, so
+# that a check failing means the gesture did not fire rather than that the lab
+# was a fraction too slow.
+
+# Until `log stream` in the guest says it has attached. Anything uDeck logs
+# before that is not in the file.
+LOG_STREAM_SECONDS = 30
+# The push: five events of twelve points each, five milliseconds apart — sixty
+# points inside a fortieth of a second. Both numbers are chosen against the
+# *dwell*, not only against the push threshold: the dwell fires 0.06 s after the
+# pointer stops in the strip, so the push has to be over its own threshold well
+# before then or the panel opens by the wrong path and the check proves nothing.
+PUSH_STEPS = 5
+# Negative is upward: AppKit reports a movement that raises the pointer as a
+# negative deltaY, and uDeck reads the field with that polarity until it has
+# measured otherwise.
+PUSH_DELTA = -12.0
+PUSH_PAUSE_SECONDS = 0.005
+# How long the pointer rests in the strip for the dwell, and how long the lab
+# then waits for uDeck to say something.
+DWELL_SECONDS = 2
+GESTURE_ANSWER_SECONDS = 10
+# How long the negative control watches nothing happen with the pointer in the
+# middle of the screen.
+NOTHING_HAPPENS_SECONDS = 10
 # Until a control appears after something was pressed.
 UI_APPEAR_SECONDS = 30
 

@@ -251,9 +251,10 @@ def test_the_lab_never_unpacks_a_build_on_this_mac():
     """A lab build may be read, never extracted, on this Mac (Q41).
 
     Every module, not only the one that builds: the guard is about the Mac, and
-    the code that unpacks has already moved once — `updates.install` unpacks in
-    the guest, where it belongs. So `ditto -x` is allowed in exactly one file,
-    which has to be named here, and a second one has to be argued for.
+    the code that unpacks has moved twice already — it is `app.install` now, and
+    it unpacks in the guest, where it belongs. So `ditto -x` is allowed in
+    exactly one file, which has to be named here, and a second one has to be
+    argued for.
     """
     package = Path(Builder.__module__.replace(".", "/")).parent
     here = Path(__file__).resolve().parents[1]
@@ -264,9 +265,9 @@ def test_the_lab_never_unpacks_a_build_on_this_mac():
         for unpacking in ("unzip", "extractall", "shutil.unpack", ".extract("):
             assert unpacking not in text, f"{source.name}: {unpacking}"
         if "ditto -x" in text:
-            assert source.name == "updates.py", f"{source.name} unpacks a build; only the guest may"
+            assert source.name == "app.py", f"{source.name} unpacks a build; only the guest may"
     # And there it is the guest that runs it, over SSH, never this Mac.
-    install = (here / package / "updates.py").read_text()
+    install = (here / package / "app.py").read_text()
     unpacks = install[install.index("def install("):]
     assert "machine.ssh.run(" in unpacks[: unpacks.rindex("ditto -x")]
 

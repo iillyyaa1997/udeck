@@ -178,15 +178,32 @@ def test_the_options_that_would_leave_a_lab_build_lying_about_are_refused(checko
     assert not (checkout / "dist").exists()
 
 
-def test_this_is_the_only_file_that_reaches_the_repository_itself():
+# The one other file allowed to reach the checkout, and what it may do there:
+# read uDeck's own gesture defaults, so the lab's push can be checked against
+# the numbers it has to clear. Reading a source file cannot build anything.
+MAY_READ_THE_CHECKOUT = {"test_panel.py"}
+
+
+def test_this_is_the_only_file_that_runs_anything_in_the_repository():
     """Running the real script from a test can build in the checkout and empty dist/.
 
     It happened: a mutation that disabled one of the script's refusals let a test
     in tests/test_builds.py build for real and take dist/uDeck.app with it
     (2026-09-17). Here the script only ever runs against a toy checkout in a
-    temporary directory, and no other test file may reach the repository at all —
-    `parents[2]` from tests/ is its root.
+    temporary directory.
+
+    So: no other test file may reach the repository — `parents[2]` from tests/ is
+    its root — except the few that only *read* a file there, and those may not
+    start a process at all. That is the line the incident drew; a test that both
+    knows where the checkout is and can run something in it is the thing to keep
+    from existing.
     """
     for path in sorted(Path(__file__).parent.glob("test_*.py")):
-        if path.name != Path(__file__).name:
-            assert "parents[2]" not in path.read_text(), path.name
+        if path.name == Path(__file__).name:
+            continue
+        text = path.read_text()
+        if "parents[2]" not in text:
+            continue
+        assert path.name in MAY_READ_THE_CHECKOUT, f"{path.name} reaches the checkout"
+        for running in ("subprocess", "Popen", "os.system", "pytester"):
+            assert running not in text, f"{path.name} reaches the checkout and can run {running}"

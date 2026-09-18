@@ -7,11 +7,12 @@ written here, and both the feed and the archive are served from inside the guest
 on its own loopback address — so nothing about the check depends on the network,
 and nothing the lab serves is reachable from outside the machine.
 
+Installing the application itself is not here — that is `app`, which both the
+update checks and the panel checks use. This module is the offer: signed,
+described in an appcast, and served.
+
 Measured in a guest (2026-09-17): `/usr/bin/python3` is 3.9.6 and works without
-the developer tools, so `python3 -m http.server` is enough to serve the feed;
-`ditto -x -k` unpacks a lab build into /Applications owned by the logged-in user
-with no quarantine attribute, and the build launches (ad-hoc signature, the
-release's bundle identifier).
+the developer tools, so `python3 -m http.server` is enough to serve the feed.
 """
 
 from __future__ import annotations
@@ -32,10 +33,8 @@ Note = Callable[[str], None]
 # Where SwiftPM leaves Sparkle's own tools once the package has been fetched.
 SIGN_UPDATE = Path(".build") / "artifacts" / "sparkle" / "Sparkle" / "bin" / "sign_update"
 
-# Where the guest keeps what is served, and the application it installs into.
+# Where the guest keeps what is served.
 GUEST_FEED_DIR = "/tmp/udeck-e2e-feed"
-GUEST_APPLICATIONS = "/Applications"
-APP = "uDeck.app"
 
 
 def find_sign_update(repo_root: Path) -> Path:
@@ -204,93 +203,3 @@ class Feed:
             self.serving = False
         except LabError as error:
             self.note(f"   the update feed in {self.machine.name} could not be stopped: {error}")
-
-
-def running_pids(machine, step: str = "looking for uDeck") -> set[str]:
-    """The pids uDeck has in the guest — empty when it is not running.
-
-    `ask`, never `run(..., check=False)`: a connection that dropped would
-    otherwise answer "nothing is running", and a check would pronounce that
-    about uDeck.
-    """
-    return set(machine.ssh.ask("pgrep -x uDeck || true", step).stdout.split())
-
-
-def quit_app(machine, step: str, seconds: float = config.QUIT_SECONDS) -> None:
-    """End any uDeck running in the guest, and prove it ended.
-
-    A running copy is replaced by `ditto` underneath itself: it keeps running
-    from the bundle that was deleted, so `open -a` afterwards only brings it
-    forward and the check drives the *old* application. On a shared machine
-    (--vm per-group, per-run) that copy belongs to the previous check, and the
-    negative control would then be offered nothing by an application that has
-    already updated itself — and pass having checked no signature at all.
-
-    Asked first, killed second. A copy that will not go is the lab failing to
-    prepare the machine, never a verdict about uDeck.
-    """
-    if not running_pids(machine, step):
-        return
-    machine.ssh.run(
-        # Guarded by System Events: a bare `tell application "uDeck" to quit`
-        # asks LaunchServices for the bundle, which is the one about to go.
-        'osascript -e \'tell application "System Events" to if exists process "uDeck" '
-        'then tell application "uDeck" to quit\' >/dev/null 2>&1; exit 0',
-        step,
-        check=False,
-    )
-    killed = False
-    deadline = machine.clock() + seconds
-    while True:
-        pids = running_pids(machine, step)
-        if not pids:
-            return
-        if machine.clock() >= deadline:
-            raise LabError(step, f"uDeck was still running in the guest as {sorted(pids)} after {seconds:.0f}s")
-        if not killed and machine.clock() >= deadline - seconds / 2:
-            machine.ssh.run("pkill -x uDeck 2>/dev/null; exit 0", step, check=False)
-            killed = True
-        machine.sleep(1)
-
-
-def install(machine, archive: Path, note: Note) -> None:
-    """Install a lab build inside the guest, the way a person installs one (Q47).
-
-    `ditto -x -k` into /Applications, owned by the logged-in user, and no
-    quarantine attribute: an ad-hoc signed build carrying one would need a person
-    to right-click it.
-
-    Whatever was running goes first: the bundle is about to be replaced.
-    """
-    step = f"installing {archive.name} in {machine.name}"
-    quit_app(machine, f"quitting the uDeck already running in {machine.name}")
-    remote = f"/tmp/{archive.name}"
-    machine.ssh.copy_in(archive, remote, step)
-    machine.ssh.run(
-        f"rm -rf {shlex.quote(GUEST_APPLICATIONS)}/{APP} && "
-        f"ditto -x -k {shlex.quote(remote)} {shlex.quote(GUEST_APPLICATIONS)}",
-        step,
-    )
-    app = f"{GUEST_APPLICATIONS}/{APP}"
-    owner = machine.ssh.run(f"stat -f %Su {shlex.quote(app)}", step).stdout.strip()
-    if owner != config.GUEST_USER:
-        raise LabError(step, f"{app} belongs to {owner}, not to {config.GUEST_USER}")
-    quarantined = machine.ssh.ask(f"xattr -p com.apple.quarantine {shlex.quote(app)}", step)
-    if quarantined.returncode == 0:
-        raise LabError(step, f"{app} carries a quarantine attribute: {quarantined.stdout.strip()}")
-    note(f"   installed {archive.name} in {machine.name}")
-
-
-def installed_version(machine) -> tuple[str, str]:
-    """What is on disk in the guest: the version people read, and the one Sparkle compares."""
-    step = f"reading the version installed in {machine.name}"
-    app = f"{GUEST_APPLICATIONS}/{APP}/Contents/Info"
-    done = machine.ssh.run(
-        f"defaults read {shlex.quote(app)} CFBundleShortVersionString; "
-        f"defaults read {shlex.quote(app)} CFBundleVersion",
-        step,
-    )
-    lines = done.stdout.split()
-    if len(lines) < 2:
-        raise LabError(step, f"unexpected answer {done.stdout.strip()!r}")
-    return lines[0], lines[1]

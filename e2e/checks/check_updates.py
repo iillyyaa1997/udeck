@@ -20,7 +20,7 @@ Two rules run through the whole file, both learned from this check:
   the failure the control exists to catch would be the first one lost (Q34).
 """
 
-from udeck_e2e import builds, ui, updates
+from udeck_e2e import app, builds, ui, updates
 from udeck_e2e.errors import LabError, NotThere, expect
 
 FIRST = ("0.4.1", "6")
@@ -59,7 +59,7 @@ def check_sparkle(machine, check_dir, lab):
             f"uDeck offered an update but does not name {offered.version}; it says: {said}",
         )
 
-        before = updates.running_pids(machine)
+        before = app.running_pids(machine)
         machine.click(*install.middle, "installing the update")
         deadline = machine.clock() + INSTALL_SECONDS
         version = _the_version_once_it_is(machine, SECOND, deadline)
@@ -130,9 +130,9 @@ def _prepare(machine, check_dir, lab, feed, signed_by):
     installed = builder.build(*FIRST)
     offered = builder.build(*SECOND)
 
-    updates.install(machine, installed.zip, lab.note)
+    app.install(machine, installed.zip, lab.note)
     step = "preparing the machine for the update check"
-    there = updates.installed_version(machine)
+    there = app.installed_version(machine)
     if there != FIRST:
         # The lab installed it a moment ago: this is the lab, not uDeck.
         raise LabError(step, f"the lab installed {FIRST}, but the machine has {there}")
@@ -143,10 +143,7 @@ def _prepare(machine, check_dir, lab, feed, signed_by):
     appcast.write_text(updates.appcast(updates.Offer(offered, signature, offered.zip.stat().st_size), feed.base_url))
     feed.serve(appcast, offered.zip)
 
-    machine.ssh.run("open -a /Applications/uDeck.app", "starting uDeck")
-    running = _wait_until_running(machine)
-    if len(running) != 1:
-        raise LabError(step, f"{len(running)} copies of uDeck are running in the guest: {sorted(running)}")
+    app.launch(machine)
     machine.screenshot(check_dir, "uDeck running")
     return offered
 
@@ -246,27 +243,6 @@ def _what_the_pane_says_or_why_not(machine):
         return f"(the settings window could not be read: {error.reason})"
 
 
-def _wait_until_running(machine, seconds=30):
-    """The pids uDeck has once it is running.
-
-    A failure while it is starting is "not yet" — `SSH.wait_up` and
-    `Machine.wait_for_desktop` treat theirs the same way — but one that lasts the
-    whole window belongs to the lab and comes out as the lab's.
-    """
-    deadline = machine.clock() + seconds
-    last = ""
-    while True:
-        try:
-            pids = updates.running_pids(machine)
-            if pids:
-                return pids
-        except LabError as error:
-            last = f"; last: {error.reason}"
-        if machine.clock() >= deadline:
-            raise LabError("starting uDeck", f"uDeck was not running within {seconds:.0f}s{last}")
-        machine.sleep(2)
-
-
 def _wait_for_the_relaunch(machine, before, deadline):
     """The pids uDeck has once one of them is new: Sparkle relaunches after the swap.
 
@@ -276,7 +252,7 @@ def _wait_for_the_relaunch(machine, before, deadline):
     what it gives the relaunch inside it, never a second budget on top.
     """
     while True:
-        now = updates.running_pids(machine)
+        now = app.running_pids(machine)
         if now - before or machine.clock() >= deadline:
             return now
         machine.sleep(2)
@@ -285,7 +261,7 @@ def _wait_for_the_relaunch(machine, before, deadline):
 def _the_version_once_it_is(machine, wanted, deadline):
     """The version on disk once it is `wanted`, or what it still is at the deadline."""
     while True:
-        version = updates.installed_version(machine)
+        version = app.installed_version(machine)
         if version == wanted or machine.clock() >= deadline:
             return version
         machine.sleep(5)
@@ -300,4 +276,4 @@ def _the_version_after(machine, seconds):
     deadline = machine.clock() + seconds
     while machine.clock() < deadline:
         machine.sleep(5)
-    return updates.installed_version(machine)
+    return app.installed_version(machine)
