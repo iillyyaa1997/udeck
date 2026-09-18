@@ -35,6 +35,22 @@ jobs:
       - name: Test
         run: swift test
 
+      # The lab in e2e/ drives real machines, and hosted runners have no nested
+      # virtualisation — but its own tests need neither Tart nor a machine, and
+      # they are the ones worth running everywhere: what they cover is the
+      # harness, where a mistake is invisible. A check that proves nothing looks
+      # exactly like a check that passed.
+      - name: Install uv, which the lab runs its Python through
+        run: brew install uv
+
+      - name: Test the lab's harness
+        run: |
+          # Absolute: uv reads a relative one from e2e/ and would quietly make a
+          # second environment there.
+          export UV_PROJECT_ENVIRONMENT="$PWD/.build/e2e/venv"
+          uv sync --frozen --project e2e
+          "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest e2e/tests -q -p no:cacheprovider
+
       # The examples are documentation and test fixtures at once, so they are
       # held to one shape: a manifest, at least one translation beside it, a
       # README saying what the example is for, and an executable producer.
