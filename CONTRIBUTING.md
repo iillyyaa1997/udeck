@@ -69,6 +69,42 @@ you build still runs on macOS 14, where it falls back to a blur.
 * **Errors that say what to do.** "Could not load plugin" is not good enough;
   "`run.sh` is not executable — try chmod +x" is.
 
+## Checking what a window server has to be there for
+
+`swift test` covers every decision uDeck makes without a screen. What it cannot
+cover is the part that only exists on a real Mac with a real login session: that
+an update actually installs and the application comes back as the new version,
+that the panel opens when the pointer reaches the top edge, that a login item
+survives a reboot. Those run in `e2e/` — the lab — inside throwaway macOS
+virtual machines, so that checking them does not take over the screen you are
+working on. It needs an Apple Silicon Mac, [Tart](https://tart.run) and
+[uv](https://docs.astral.sh/uv/); it does not run in CI, where there is no
+nested virtualisation.
+
+```sh
+e2e/run.sh bake                # once: the golden image the machines are cloned from
+e2e/run.sh                     # every check
+e2e/run.sh panel.push          # one of them
+```
+
+[`e2e/README.md`](e2e/README.md) is the whole thing; three of its rules are
+worth knowing before you write a check there:
+
+* **A check names what it measured, not what it saw.** The update check reads
+  the version of the bundle on disk, never the sentence on the pane; the panel
+  checks read which of the two gesture paths uDeck logged, because both of them
+  open the panel and only one of them is what the check is named after.
+* **Every feature gets a control that must fail.** An update signed with the
+  wrong key must not install, and a pointer in the middle of the screen must
+  open nothing — and the control has to show that it exercised the thing it is
+  controlling for, or a check that never ran passes as a check that found
+  nothing.
+* **A lab failure is not a verdict.** `expect(...)` says uDeck was wrong;
+  `LabError(step, reason)` says the lab could not tell, and the run keeps the
+  two apart and never reports the second as green. Between a measurement and the
+  sentence that judges it, nothing may raise — a screenshot that could not be
+  taken must not turn a failure into "could not check".
+
 ## What to avoid
 
 * Silent failure. No empty `catch`, no `try?` that discards something the

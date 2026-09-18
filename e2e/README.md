@@ -12,8 +12,10 @@ not offer nested virtualisation.
 
 > **Being built.** What exists today: the command, its pre-flight and report,
 > the machines and the golden image they are cloned from, their screen and
-> pointer over VNC, a self-check, and the builds an update check needs. The
-> first checks of uDeck itself follow.
+> pointer over VNC, a self-check, the builds a check needs, and the first checks
+> of uDeck itself — the update, with its wrong-key control, and the panel's
+> hover gesture, with its pointer-in-the-middle control. "Open at Login" and its
+> checks follow.
 
 ## Running it
 
@@ -118,10 +120,16 @@ Settings → Network → Firewall → Options; the lab reads that setting — fo
 against either — and stops saying it. The password stays out of the lab's console, ledger and command
 lines; it is in `tart-run.log` in the run's report, as Tart printed it.
 
-Once, in the lab's measurements, Tart itself crashed inside that VNC server
-(`_VZVNCServer`) and took the machine with it; it did not happen again in
-dozens of connections. If it does, the check that was running says the machine
-was killed by SIGTRAP and where macOS keeps the crash report.
+**A connection made after about a minute of silence crashes Tart's VNC server**
+and takes the machine with it — `_VZVNCServer` asserting while it sets its
+accessor up again. Measured on purpose, three times: a screenshot at 0 s of
+silence is fine, at 30 s fine, at 60 s fatal. It killed a check that waits
+ninety seconds to prove nothing installs, twice. So every machine takes a frame
+nobody asked for every twenty seconds while it lives, under the same lock as
+every other VNC action; a heartbeat that fails is said once and changes no
+verdict, and it stops with the machine. If the server does crash anyway, the
+check that was running says the machine was killed by SIGTRAP and where macOS
+keeps the crash report.
 
 ## Builds
 
@@ -130,9 +138,10 @@ be offered. The lab makes them from the checkout it is running in, through
 `Scripts/make-app.sh`, and they differ from a build you would make by hand in
 three ways — each of them something a check depends on:
 
-* they go to `.build/e2e/<run>/builds/<feed>/<version>-<build>/`, never `dist/` —
-  a directory per feed, so two checks serving their own appcast never overwrite
-  each other's builds;
+* they go to `.build/e2e/<run>/builds/<check>/<feed>/<version>-<build>/`, never
+  `dist/` — a directory per check and per feed, because two checks build the same
+  versions and the second must not write over the zips and the build log the
+  first one's report is made of;
 * they carry the version the lab asked for in both keys, including
   `CFBundleVersion`, which is the one Sparkle compares when it decides whether an
   update is newer;
@@ -152,6 +161,67 @@ own `generate_keys` would leave a private key in your login keychain; the lab
 generates the key itself and hands `sign_update` a file holding the base64 of the
 32-byte seed (measured: that is the form it reads, and its signatures verify
 against the public key baked into the bundle).
+
+## The checks
+
+### The update
+
+`updates.sparkle` builds two real copies of uDeck, installs the older one,
+serves the newer one from inside the machine, and drives uDeck's own settings
+window — the section is chosen and the buttons pressed with the machine's
+pointer, at the coordinates the accessibility API reports for them. What counts
+is the version of the bundle on disk afterwards and a new process: never what
+the pane says about itself.
+
+`updates.wrong-key` is the control, and it is the reason the first one is worth
+anything: the same offer, signed with a different key, must not install. But
+"nothing installed" is what a broken check looks like too, so the control also
+has to show that uDeck *tried*: either the guest's own access log names the
+archive — Sparkle checks the signature after downloading it — or uDeck says on
+its pane that its check did not finish. Neither, and the run says so rather than
+passing.
+
+### The panel
+
+`panel.dwell` puts the pointer in the strip at the top of the screen over VNC
+and leaves it there. `panel.push` is the other path: upward movement reported
+*after* the pointer can move no further. The lab copies a small script into the
+guest that posts the arrival and the push in one run, milliseconds apart — the
+dwell fires a fraction of a second after the pointer stops, so a pointer placed
+from outside and pushed over SSH would open the panel by the wrong path.
+
+**`panel.push` cannot pass inside a virtual machine, and says "could not check"
+rather than passing.** Measured on 2026-09-18, fifteen shapes of push on four
+machines: a delta posted on a mouse-moved event does not move the pointer (five
+events carrying ±30 points at y=400 left it at exactly (1280, 400)), so the
+position on the event is what moves it and what applications are told is the
+movement that actually happened — which against the top edge is nothing, and
+nothing is precisely the signal this path is made of. `IOHIDPostEvent`, which
+posts device movement below the window server, is refused even as root
+(`kIOReturnNotPrivileged`); unhooking the cursor from the device the way a game
+does changes nothing. The check still makes the attempt, because the day a
+machine reports real device movement it starts passing — and until then the run
+says the lab could not make a push, which is true, instead of passing on the
+dwell that opens the panel instead. The push is checked by hand, on a Mac with a
+mouse.
+
+`panel.middle-of-the-screen` is their control: the pointer held in the middle of
+the screen and pushed at there, where neither the passage of time nor an upward
+shove means anything. And because "nothing happened" is free when nothing is
+running, the control also requires uDeck to have been watching — its own log
+names the gate that stopped the gesture.
+
+What decides all three is uDeck's own record of which path fired — `fired by
+dwell on …`, `fired by push on …`. Those are debug messages, which the unified
+log keeps nowhere unless it is asked to, so the lab asks the guest to keep this
+one subsystem's (`log config`, root, and it dies with the machine) and reads them
+back with `log show` from a moment on the guest's own clock. It also checks that
+the asking worked: a log nobody is keeping answers every question with silence,
+and silence is what a check that proves nothing looks like. The measurement
+behind that: `log stream` into a file in the guest delivered the first gesture's
+lines and then nothing at all, four gestures in a row, while the kept log held
+every one. The same messages carry `idle: <reason>`, which is what makes a
+gesture that fired nothing worth reading.
 
 ## Reading the result
 

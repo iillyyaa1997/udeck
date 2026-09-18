@@ -42,6 +42,20 @@ for what that promises.
   absolute position can open the panel by dwelling alone, so "it opened" is not
   evidence that the push works.
 
+- **An end-to-end lab.** `e2e/run.sh` runs the checks that need a real login
+  session inside throwaway macOS virtual machines, so they no longer have to take
+  over the screen of whoever is working: a machine per check by default, cloned
+  from a golden image, driven over SSH and through its own screen and pointer,
+  and put back afterwards whatever happens — including on Ctrl-C. It reports
+  three outcomes, not two, because "the lab could not tell" is not "uDeck is
+  fine". The first checks are the update, with its wrong-key control, and the
+  panel's dwell, with the pointer-in-the-middle control. (The push, the gesture's
+  other path, cannot be produced inside a virtual machine — a posted delta is not
+  what applications are told, and against the edge the movement is nothing — so
+  that check reports "could not check" rather than passing on the dwell.) Not in CI:
+  hosted runners have no nested virtualisation. See
+  [`e2e/README.md`](e2e/README.md).
+
 ## [0.4.0] — 2026-09-13
 
 The island stops being one appearance. Every situation it can be in — away,
