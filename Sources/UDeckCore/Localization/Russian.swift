@@ -169,7 +169,8 @@ struct Russian: Vocabulary {
             "Прочитайте раздел о разрешениях в документации по плагинам, прежде чем ставить чужой плагин."
         case .generalStartup: "Вход"
         case .generalOpenAtLogin: "Открывать при входе"
-        case .generalOpensWhich(let path): "Откроется: \(path)"
+        case .generalOpensWhich(let path, let opens):
+            opens ? "Откроется: \(path)" : "Откроется при включении: \(path)"
         case .generalRecordVanished: "macOS больше не хранит эту запись."
         case .generalDidNotTake: "macOS не сохранила эту запись."
         case .generalAnotherCopy(let path):

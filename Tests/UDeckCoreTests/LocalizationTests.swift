@@ -36,7 +36,9 @@ struct LocalizationTests {
         .openingNeedsModifier, .openingAlso, .openingRetract, .openingFullscreen,
         .openingKeepPolling, .openingPermissions,
 
-        .generalStartup, .generalOpenAtLogin, .generalOpensWhich("/Applications/uDeck.app"),
+        .generalStartup, .generalOpenAtLogin,
+        .generalOpensWhich("/Applications/uDeck.app", opens: true),
+        .generalOpensWhich("/Applications/uDeck.app", opens: false),
         .generalRecordVanished, .generalDidNotTake, .generalAnotherCopy("/x/uDeck.app"),
         .generalWaitsForApproval, .generalLoginFailed("no"), .generalOpenLoginItems,
 
@@ -95,7 +97,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 159,
+        #expect(Self.all.count == 160,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
@@ -162,6 +164,24 @@ struct LocalizationTests {
         #expect(strings(.pluginLastFailure(reason: "exit 1")).contains("exit 1"))
         #expect(strings(.islandWorstState("warn")).contains("warn"))
         #expect(strings(.controlDensity(name: "Normal")).contains("Normal"))
+    }
+
+    /// The one sentence on the login card that can be false while everything around
+    /// it is true. The switch is off, the system has no record — every fresh install
+    /// spends its first day there — and a line reading "Opens: /Applications/uDeck.app"
+    /// contradicts the control directly above it. The tense has to follow the state,
+    /// which means the phrase has to be told the state.
+    @Test("the path line does not claim uDeck opens when it does not")
+    func pathLineFollowsTheState() {
+        let path = "/Applications/uDeck.app"
+        let english = Strings(.english)
+        let russian = Strings(.russian)
+
+        #expect(english(.generalOpensWhich(path, opens: true)) == "Opens: \(path)")
+        #expect(english(.generalOpensWhich(path, opens: false)) == "Would open: \(path)")
+        #expect(russian(.generalOpensWhich(path, opens: true)) == "Откроется: \(path)")
+        #expect(russian(.generalOpensWhich(path, opens: false))
+                == "Откроется при включении: \(path)")
     }
 
     /// A language list written in the language the reader is stuck in is no use

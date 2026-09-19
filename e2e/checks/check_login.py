@@ -23,6 +23,15 @@ VERSION = ("0.4.1", "6")
 # compares; the version people read only has to differ so a person can see it happened.
 NEWER = ("0.4.2", "7")
 
+# The copy the record should name, and the copy the card should name — the same one.
+THIS_COPY = f"{app.GUEST_APPLICATIONS}/{app.APP}"
+# What the card says under the switch, in each of its two tenses. Read rather than
+# assumed: the sentence is the only part of this feature the operator actually sees, and
+# a card that says "Opens:" on a machine with no login record is a lie the database check
+# above it cannot catch.
+OPENS = f"Opens: {THIS_COPY}"
+WOULD_OPEN = f"Would open: {THIS_COPY}"
+
 # After the desktop is up, how long the system is given to open what it was told to open.
 OPENS_WITHIN_SECONDS = 60
 # And how long a machine that must open nothing is watched before it is believed.
@@ -40,6 +49,12 @@ def check_registers(machine, check_dir, lab):
         f"{before.describe() if before else ''}",
     )
 
+    # Read once and judged once: both arguments to `expect` are evaluated whatever the
+    # verdict, so asking twice is a second trip to the guest and a second answer, which
+    # can be the one the message quotes while the first is the one that decided.
+    said = _what_the_card_says(machine)
+    expect(WOULD_OPEN in said, f"nothing opens at login, and the card does not say so; it says: {said}")
+
     ui.click(machine, "general.openAtLogin", "switching Open at Login on")
     machine.sleep(3)
     machine.screenshot(check_dir, "switched on")
@@ -51,6 +66,9 @@ def check_registers(machine, check_dir, lab):
         after.url == f"{app.GUEST_APPLICATIONS}/{app.APP}",
         f"the record points at {after.url or 'nothing'}, not at the copy that was switched on",
     )
+    said = _what_the_card_says(machine)
+    expect(OPENS in said,
+           f"the system opens this copy at login and the card does not say so; it says: {said}")
     lab.note(f"   the system now has: {after.describe()}")
 
 
@@ -230,6 +248,11 @@ def _wait_until_it_opens(machine, seconds):
         if machine.clock() >= deadline:
             return False
         machine.sleep(5)
+
+
+def _what_the_card_says(machine):
+    """Every sentence the login card shows — when a verdict turns on them."""
+    return " | ".join(ui.static_texts(machine, "reading what the login card says"))
 
 
 def _describe(record):

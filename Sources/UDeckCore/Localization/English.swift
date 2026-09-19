@@ -160,7 +160,8 @@ struct English: Vocabulary {
             "Read the permissions section of the plugin documentation before installing a plugin somebody else wrote."
         case .generalStartup: "Login"
         case .generalOpenAtLogin: "Open at Login"
-        case .generalOpensWhich(let path): "Opens: \(path)"
+        case .generalOpensWhich(let path, let opens):
+            opens ? "Opens: \(path)" : "Would open: \(path)"
         case .generalRecordVanished: "macOS no longer has this record."
         case .generalDidNotTake: "macOS did not keep this record."
         case .generalAnotherCopy(let path):

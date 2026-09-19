@@ -70,7 +70,22 @@ def nothing_real(monkeypatch):
     monkeypatch.setattr(app, "launch", lambda machine, step="starting uDeck": {"404"})
     monkeypatch.setattr(ui, "open_settings_and_wait", lambda *a, **k: None)
     monkeypatch.setattr(ui, "wait_for", lambda machine, identifier, step, **k: ui.Element(identifier, 1, 2, 3, 4))
-    monkeypatch.setattr(ui, "click", lambda machine, identifier, step, **k: ui.Element(identifier, 1, 2, 3, 4))
+
+    # A card whose sentence follows the switch, because the application's does: the tense
+    # is what the checks below read, so a fake that always said the same thing would let
+    # a card frozen in one tense pass.
+    card = {"opens": False}
+
+    def click(machine, identifier, step, **k):
+        if identifier == "general.openAtLogin":
+            card["opens"] = not card["opens"]
+        return ui.Element(identifier, 1, 2, 3, 4)
+
+    monkeypatch.setattr(ui, "click", click)
+    monkeypatch.setattr(ui, "static_texts", lambda machine, step, window=ui.SETTINGS_WINDOW: [
+        "Open at Login",
+        checks.OPENS if card["opens"] else checks.WOULD_OPEN,
+    ])
 
 
 # --- Switching it on ------------------------------------------------------------------
@@ -80,6 +95,20 @@ def test_switching_it_on_is_believed_only_when_the_system_says_so(lab, check_dir
     machine = a_machine([NOTHING, ON])
     checks.check_registers(machine, check_dir, lab)
     assert any("sfltool dumpbtm" in c for c in machine.ssh.commands)
+
+
+def test_a_card_that_claims_it_opens_before_anything_is_switched_on_fails(lab, check_dir, monkeypatch):
+    """The state every fresh install starts in, and the one the card used to lie about."""
+    monkeypatch.setattr(ui, "static_texts", lambda *a, **k: [checks.OPENS])
+    with pytest.raises(CheckFailed, match="the card does not say so"):
+        checks.check_registers(a_machine([NOTHING, ON]), check_dir, lab)
+
+
+def test_a_card_still_in_the_conditional_after_switching_on_fails(lab, check_dir, monkeypatch):
+    """The other half: a card frozen in one tense passes the first assertion by luck."""
+    monkeypatch.setattr(ui, "static_texts", lambda *a, **k: [checks.WOULD_OPEN])
+    with pytest.raises(CheckFailed, match="the card does not say so"):
+        checks.check_registers(a_machine([NOTHING, ON]), check_dir, lab)
 
 
 def test_a_switch_the_system_did_not_take_fails(lab, check_dir):

@@ -200,7 +200,12 @@ public enum Phrase: Sendable, Equatable {
     /// Which copy of uDeck the system would open. The card states it on every ordinary
     /// day, because the day it matters is the day the operator has forgotten there is a
     /// second copy.
-    case generalOpensWhich(String)
+    ///
+    /// The tense travels with it. On a Mac where nothing opens at login — every fresh
+    /// install, and every day the switch is off — "Opens: /Applications/uDeck.app" is
+    /// simply untrue, and the sentence has to say the same thing in the conditional
+    /// instead of quietly asserting the state the switch above it denies.
+    case generalOpensWhich(String, opens: Bool)
 
     /// The record was there and is gone, with nobody having asked for that.
     case generalRecordVanished

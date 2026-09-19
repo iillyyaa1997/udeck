@@ -208,7 +208,8 @@ private struct LoginCard: View {
                 ))
                 .accessibilityIdentifier("general.openAtLogin")
 
-                Text(strings(.generalOpensWhich(shown(loginItem.thisCopy))))
+                Text(strings(.generalOpensWhich(shown(loginItem.thisCopy),
+                                               opens: loginItem.status.opensAtLogin)))
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("general.opensWhich")
