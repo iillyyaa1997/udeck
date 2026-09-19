@@ -34,6 +34,10 @@ ATTACHED = "Timestamp               Ty Process[PID:TID]\n"
 IDLE = "18:20:00.001 Db uDeck[404] [place.unicorns.udeck:gesture] idle: outsideStrip\n"
 DWELL = "18:20:01.123 Db uDeck[404] [place.unicorns.udeck:gesture] fired by dwell on Built-in\n"
 PUSH = "18:20:01.456 Db uDeck[404] [place.unicorns.udeck:gesture] fired by push on Built-in\n"
+# What uDeck says when the panel actually opens — from inside the change, and
+# only when there was one. `fired by …` is written three lines earlier.
+REVEAL = "18:20:01.460 Db uDeck[404] [place.unicorns.udeck:panel] collapsed -> peek on revealRequested\n"
+IGNORED = "18:20:01.460 Db uDeck[404] [place.unicorns.udeck:panel] revealRequested ignored in peek\n"
 
 
 @pytest.fixture
@@ -89,7 +93,7 @@ def prepared(monkeypatch, log_says):
 
 
 def test_the_dwell_passes_when_uDeck_says_the_dwell_fired(monkeypatch, lab, check_dir):
-    machine = prepared(monkeypatch, ATTACHED + IDLE + DWELL)
+    machine = prepared(monkeypatch, ATTACHED + IDLE + DWELL + REVEAL)
     checks.check_dwell(machine, check_dir, lab)
     # Away from the strip first, then into it: the move is the whole gesture and
     # not the tail of wherever the pointer had been left.
@@ -129,7 +133,7 @@ def pushed_with(machine):
 
 def test_the_push_passes_when_uDeck_says_the_push_fired(monkeypatch, lab, check_dir):
     at_the_edge(monkeypatch)
-    machine = prepared(monkeypatch, ATTACHED + PUSH)
+    machine = prepared(monkeypatch, ATTACHED + PUSH + REVEAL)
     checks.check_push(machine, check_dir, lab)
     # Thrown at the edge by the same movement that then pushes there.
     assert pushed_with(machine)[0] == str(config.THROW_CAP)
@@ -154,7 +158,7 @@ def test_the_push_check_is_not_satisfied_by_a_dwell(monkeypatch, lab, check_dir)
     """The panel opened, but by the path that only needs the pointer to be
     somewhere — which is what this check exists to tell apart."""
     at_the_edge(monkeypatch)
-    machine = prepared(monkeypatch, ATTACHED + DWELL)
+    machine = prepared(monkeypatch, ATTACHED + DWELL + REVEAL)
     with pytest.raises(CheckFailed, match="opened by dwell first"):
         checks.check_push(machine, check_dir, lab)
 
@@ -164,6 +168,31 @@ def test_a_push_that_uDeck_never_answered_fails(monkeypatch, lab, check_dir):
     at_the_edge(monkeypatch)
     machine = prepared(monkeypatch, ATTACHED)
     with pytest.raises(CheckFailed, match="did not open the panel"):
+        checks.check_push(machine, check_dir, lab)
+
+
+def test_a_gesture_that_fired_and_opened_nothing_fails(monkeypatch, lab, check_dir):
+    """The reason this oracle exists. uDeck writes `fired by …` at
+    PanelController.swift:358 and asks the panel to appear on :361, so a panel
+    that never appears — for anyone — leaves that line exactly as it is, and the
+    check that rested on it alone stayed green."""
+    at_the_edge(monkeypatch)
+    machine = prepared(monkeypatch, ATTACHED + PUSH)
+    with pytest.raises(CheckFailed, match="the panel did not open"):
+        checks.check_push(machine, check_dir, lab)
+
+    dwelt = prepared(monkeypatch, ATTACHED + IDLE + DWELL)
+    with pytest.raises(CheckFailed, match="the panel did not open"):
+        checks.check_dwell(dwelt, check_dir, lab)
+
+
+def test_a_reveal_the_panel_refused_does_not_count_as_opening(monkeypatch, lab, check_dir):
+    """uDeck logs the refusal too — `revealRequested ignored in peek` — and that
+    line is not a phase changing. A parser matching "the words are there" would
+    take it for one."""
+    at_the_edge(monkeypatch)
+    machine = prepared(monkeypatch, ATTACHED + PUSH + IGNORED)
+    with pytest.raises(CheckFailed, match="the panel did not open"):
         checks.check_push(machine, check_dir, lab)
 
 
@@ -181,8 +210,17 @@ def test_nothing_opens_the_panel_in_the_middle_of_the_screen(monkeypatch, lab, c
 
 
 def test_a_panel_that_opens_in_the_middle_of_the_screen_fails(monkeypatch, lab, check_dir):
-    machine = prepared(monkeypatch, ATTACHED + IDLE + DWELL)
+    machine = prepared(monkeypatch, ATTACHED + IDLE + DWELL + REVEAL)
     with pytest.raises(CheckFailed, match="opened the panel with the pointer in the middle"):
+        checks.check_middle_of_the_screen(machine, check_dir, lab)
+
+
+def test_a_panel_shown_here_by_anything_at_all_fails_the_control(monkeypatch, lab, check_dir):
+    """No gesture was recognised and the panel is on screen anyway. The gesture
+    line would never mention it, and a control that only reads that line would
+    call this quiet."""
+    machine = prepared(monkeypatch, ATTACHED + IDLE + REVEAL)
+    with pytest.raises(CheckFailed, match="the panel was shown with the pointer in the middle"):
         checks.check_middle_of_the_screen(machine, check_dir, lab)
 
 

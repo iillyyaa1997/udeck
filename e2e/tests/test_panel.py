@@ -32,6 +32,33 @@ def test_the_path_that_fired_is_read_from_uDecks_own_words():
     assert panel.fired_by("the panel is visible") == []
 
 
+PHASE = "2026-09-18 18:20:01.460 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] collapsed -> peek on revealRequested\n"
+SHUT_AGAIN = "2026-09-18 18:20:09.100 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] peek -> collapsed on pointerLeft\n"
+REFUSED = "2026-09-18 18:20:01.460 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] revealRequested ignored in peek\n"
+
+
+def test_whether_the_panel_opened_is_a_different_question_from_which_path_fired():
+    """uDeck writes `fired by …` three lines before it asks the panel to appear,
+    so the two sentences can disagree — and a check resting on the first alone
+    would stay green for a panel that never opened for anybody."""
+    assert panel.revealed(ATTACHED + PUSHED) == [], "firing is not opening"
+    assert panel.revealed(ATTACHED + PUSHED + PHASE) == ["peek"]
+    # Shutting again is a phase too, and it is not the panel opening.
+    assert panel.revealed(PHASE + SHUT_AGAIN) == ["peek"]
+    assert panel.phases(PHASE + SHUT_AGAIN) == [
+        ("collapsed", "peek", "revealRequested"),
+        ("peek", "collapsed", "pointerLeft"),
+    ]
+
+
+def test_a_reveal_the_panel_refused_is_not_the_panel_opening():
+    """uDeck logs the refusal in the same category and with the same words in it.
+    It is not a phase changing, and reading it as one would put the oracle back
+    where it started."""
+    assert panel.revealed(REFUSED) == []
+    assert panel.phases(REFUSED) == []
+
+
 def test_the_gate_that_stopped_the_gesture_is_read_too():
     """A run that fires nothing is only worth reading if uDeck says why."""
     assert panel.idle_reasons(ATTACHED + IDLE) == ["outsideStrip"]
@@ -87,6 +114,8 @@ def test_the_window_starts_at_the_guests_own_clock():
     said = log.since(when, "reading")
     shown = [c for c in machine.ssh.commands if "log show" in c][0]
     assert f"--start '{when}'" in shown and "--debug" in shown
+    # Both categories: which path fired, and whether anything opened.
+    assert f'category == "{panel.GESTURE}"' in shown and f'category == "{panel.PANEL}"' in shown
     assert panel.fired_by(said) == ["dwell"]
 
 

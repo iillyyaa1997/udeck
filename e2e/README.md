@@ -247,8 +247,24 @@ shove means anything. And because "nothing happened" is free when nothing is
 running, the control also requires uDeck to have been watching — its own log
 names the gate that stopped the gesture.
 
-What decides all three is uDeck's own record of which path fired — `fired by
-dwell on …`, `fired by push on …`. Those are debug messages, which the unified
+What decides all three takes two sentences from uDeck, and the second was added
+on 2026-09-19 after an audit found the first insufficient on its own. Which path
+fired — `fired by dwell on …`, `fired by push on …` — and whether the panel then
+opened — `collapsed -> peek on revealRequested`. uDeck writes the first three
+lines *before* it asks the panel to appear (`PanelController.swift:358` against
+`:361`), so a panel that failed to open for everybody would leave every one of
+these checks green; the phase is written from inside the change and only when
+there was one. The control needs both too: a panel shown in the middle of the
+screen by anything at all is exactly as wrong, and the gesture line would never
+mention it.
+
+It is uDeck's own account and not a photograph, and that is measured rather than
+settled for: the window server cannot answer more strictly. uDeck keeps one
+window at the status-bar level from launch onwards, and after the first reveal
+its shape does not go back — open and shut-again look identical from outside
+(`CGWindowListCopyWindowInfo` in a guest, 2026-09-19: 820×128 at the top in both).
+
+Those are debug messages, which the unified
 log keeps nowhere unless it is asked to, so the lab asks the guest to keep this
 one subsystem's (`log config`, root, and it dies with the machine) and reads them
 back with `log show` from a moment on the guest's own clock. It also checks that

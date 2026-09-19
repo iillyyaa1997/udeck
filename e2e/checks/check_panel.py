@@ -14,9 +14,13 @@ goes, and the push is made from inside the guest as relative movement through
 the pointer itself and tells applications the movement, clamping the one and not
 the other (Q45).
 
-What decides each one is uDeck's own record of which path fired — `fired by
-dwell on …`, `fired by push on …` — kept in the guest's unified log and read
-back afterwards.
+What decides each one is two things uDeck says, and it takes both. Which path
+fired — `fired by dwell on …`, `fired by push on …` — and whether the panel then
+opened at all — `collapsed -> peek on revealRequested`. The first is written
+three lines before uDeck asks the panel to appear, so on its own it would stay
+exactly as it is for a panel that never appeared for anybody; the second is
+written from inside the change, and only when there was one. Both are kept in
+the guest's unified log and read back afterwards.
 Never a screenshot: the panel is translucent over whatever is behind it, and
 "something changed at the top of the screen" is exactly the evidence that would
 pass for the wrong reason. The screenshots are kept as evidence for a person
@@ -51,6 +55,7 @@ def check_dwell(machine, check_dir, lab):
             fired == ["dwell"],
             f"the panel opened by {fired}, not by the dwell — the pointer was only placed, never pushed",
         )
+        _expect_the_panel_opened(said)
     finally:
         log.collect(check_dir, since, "keeping what uDeck said")
 
@@ -102,6 +107,7 @@ def check_push(machine, check_dir, lab):
             f"the panel opened by {opened_by} first, not by the push — "
             "the movement at the edge was not reported, or the dwell beat it",
         )
+        _expect_the_panel_opened(said)
     finally:
         log.collect(check_dir, since, "keeping what uDeck said")
 
@@ -144,6 +150,14 @@ def check_middle_of_the_screen(machine, check_dir, lab):
             panel.fired_by(said) == [],
             f"uDeck opened the panel with the pointer in the middle of the screen: {_short(said)}",
         )
+        # And the other half of the same sentence: not only was no gesture
+        # recognised, nothing opened. A panel revealed by something else here
+        # would be exactly as wrong, and the gesture line would not mention it.
+        expect(
+            panel.revealed(said) == [],
+            f"the panel was shown with the pointer in the middle of the screen, "
+            f"going to {panel.revealed(said)}: {_short(said)}",
+        )
         _prove_uDeck_was_watching(machine, said)
     finally:
         log.collect(check_dir, since, "keeping what uDeck said")
@@ -177,6 +191,22 @@ def _prepare(machine, check_dir, lab, launch=True):
         app.launch(machine)
         machine.screenshot(check_dir, "uDeck running")
     return log
+
+
+def _expect_the_panel_opened(said):
+    """The gesture fired — now did anything happen?
+
+    `fired by <path>` is written at PanelController.swift:358 and the panel is
+    asked to appear on :361, so the line a check would otherwise rest on says
+    only that the recognizer was satisfied. The phase comes out of `apply`,
+    after the state changed and only if it did.
+    """
+    shown = panel.revealed(said)
+    expect(
+        shown != [],
+        "uDeck recognised the gesture and the panel did not open: it never left "
+        f"'{panel.SHUT}'. What it says of the panel: {_short(said)}",
+    )
 
 
 def _park_in_the_middle(machine):

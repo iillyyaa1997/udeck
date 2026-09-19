@@ -36,6 +36,12 @@ Note = Callable[[str], None]
 
 SUBSYSTEM = "place.unicorns.udeck"
 GESTURE = "gesture"
+# The panel's own category, where uDeck records every phase it moves through.
+PANEL = "panel"
+
+# The phases the panel can be in (PanelState.swift). `collapsed` is shut; the
+# rest are the panel being shown, in one size or another.
+SHUT = "collapsed"
 
 # Where the guest keeps what the lab put there for this check.
 GUEST_PUSH = "/tmp/udeck-e2e-push-pointer.py"
@@ -45,6 +51,8 @@ PUSH_SCRIPT = Path(__file__).resolve().parent.parent / "guest" / "push-pointer.p
 # Per line: a run holds every message uDeck wrote while the gesture was made.
 _FIRED = re.compile(r"fired by (push|dwell) on (.+?)\s*$", re.MULTILINE)
 _IDLE = re.compile(r"idle: ([a-zA-Z]+)")
+# `collapsed -> peek on revealRequested` (PanelController.swift, `apply`).
+_PHASE = re.compile(r"\b([a-z]+) -> ([a-z]+) on ([A-Za-z]+)")
 
 
 def top_of_the_strip() -> tuple[int, int]:
@@ -65,6 +73,31 @@ def fired_by(lines: str) -> list[str]:
 def idle_reasons(lines: str) -> list[str]:
     """The gates uDeck says stopped the gesture, in order — why nothing fired."""
     return [match.group(1) for match in _IDLE.finditer(lines)]
+
+
+def phases(lines: str) -> list[tuple[str, str, str]]:
+    """Every phase the panel moved through: `(from, to, because of)`, in order."""
+    return [match.groups() for match in _PHASE.finditer(lines)]
+
+
+def revealed(lines: str) -> list[str]:
+    """The phases the panel was shown in, from having been shut.
+
+    This is what "the panel opened" means, and it is a different sentence from
+    "the gesture fired". uDeck writes `fired by <path>` three lines before it
+    asks the panel to appear (`PanelController.apply(.revealRequested)`), so a
+    panel that never appears — for anyone — leaves that line exactly as it is.
+    The phase is written from inside `apply`, after the state has changed and
+    only when it changed, so it is the first thing uDeck says that could not be
+    true of a panel that stayed shut.
+
+    It is still uDeck's own account, not a photograph. What was measured against
+    the window server (2026-09-19) is that the window server cannot answer this
+    more strictly: uDeck keeps one window at the status-bar level the whole time,
+    and after the first reveal its shape does not go back — open and
+    shut-again look the same from outside.
+    """
+    return [to for was, to, _ in phases(lines) if was == SHUT and to != SHUT]
 
 
 class GestureLog:
@@ -122,7 +155,9 @@ class GestureLog:
         """
         if not self.kept:
             raise LabError(step, "nothing asked the guest to keep uDeck's messages, so its log proves nothing")
-        predicate = f'subsystem == "{SUBSYSTEM}" AND category == "{GESTURE}"'
+        # Both categories: the gesture says which path fired, the panel says
+        # whether anything opened, and a check needs the two together.
+        predicate = f'subsystem == "{SUBSYSTEM}" AND (category == "{GESTURE}" OR category == "{PANEL}")'
         try:
             return self.machine.ssh.ask(
                 f"/usr/bin/log show --start {shlex.quote(mark)} --predicate {shlex.quote(predicate)} "

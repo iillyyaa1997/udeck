@@ -39,6 +39,17 @@ for what that promises.
   after: twelve reports to reach the edge from the middle of the screen, nothing
   past it, and `fired by push`.
 
+- **The panel checks ask whether the panel opened.** All three judged by `fired
+  by <path>`, which uDeck writes three lines before it asks the panel to appear —
+  so a panel that failed to open for everybody left every one of them green. They
+  now also require the phase uDeck records from inside the change
+  (`collapsed -> peek on revealRequested`), and the control requires its absence:
+  a panel shown in the middle of the screen by anything at all is exactly as
+  wrong, and the gesture line would never have mentioned it. The window server
+  was measured as the stricter oracle and cannot be one: uDeck keeps a single
+  window at the status-bar level from launch, and after the first reveal its
+  shape does not go back.
+
 ## [0.5.0] — 2026-09-19
 
 uDeck opens when you log in, if you ask it to. The setting exists because of a
