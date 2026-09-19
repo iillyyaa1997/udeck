@@ -42,6 +42,17 @@ ELSEWHERE = ON.replace("/Applications/uDeck.app", "/Users/x/Applications/uDeck-d
 NOTHING = " Items:\n"
 # The same record, registered again rather than restored: a later generation.
 ON_AGAIN = ON.replace("Generation: 1", "Generation: 3")
+# What an update legitimately does to the row, measured in a guest on 2026-09-19:
+# macOS re-files it once because the bundle at the path was replaced.
+ON_REFILED = ON.replace("Generation: 1", "Generation: 2")
+
+# The row's own identity. Two dumps that agree on everything a path can show and
+# disagree on this are two different registrations, one of them wearing the other's
+# path — which is the failure uDeck's own source calls the main one.
+UUID_ONE = "E733CC95-57C0-4903-83CF-37EC936DDF13"
+UUID_TWO = "0CA3B98E-AF3F-4D60-B6BC-DE43F0A90D8D"
+WITH_UUID = ON.replace(" #1:\n", f" #1:\n                 UUID: {UUID_ONE}\n")
+ANOTHER_ROW = WITH_UUID.replace(UUID_ONE, UUID_TWO)
 
 
 @pytest.fixture
@@ -187,6 +198,45 @@ def test_the_restart_check_asks_the_guest_nothing_after_it_has_passed(lab, check
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     checks.check_survives_a_restart(machine, check_dir, lab)
     assert any("404" in note for note in lab.notes)
+
+
+def test_a_record_another_copy_has_taken_fails_the_restart(lab, check_dir, monkeypatch):
+    """uDeck came back, and what the system opens at login is a different copy of it.
+
+    This is the failure the feature exists to survive — `LoginItemCopies` in uDeck's own
+    source calls it the main one: a second copy with the same bundle identifier takes the
+    record simply by running. Until this, the check read "there is an enabled record"
+    and asked nothing about which copy it named.
+    """
+    machine = a_machine([ON, ELSEWHERE])
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(CheckFailed, match="another copy has taken it"):
+        checks.check_survives_a_restart(machine, check_dir, lab)
+
+
+def test_a_record_registered_again_across_a_restart_fails(lab, check_dir, monkeypatch):
+    """A restart rewrites nothing — measured in a guest, generation 1 before and 1 after.
+    A later one is something having registered, and uDeck registers only when asked."""
+    machine = a_machine([ON, ON_AGAIN])
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(CheckFailed, match="registered it again"):
+        checks.check_survives_a_restart(machine, check_dir, lab)
+
+
+def test_a_different_row_wearing_the_same_path_fails_the_restart(lab, check_dir, monkeypatch):
+    """Same path, same disposition, same generation — and not the same record."""
+    machine = a_machine([WITH_UUID, ANOTHER_ROW])
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(CheckFailed, match="a different row"):
+        checks.check_survives_a_restart(machine, check_dir, lab)
+
+
+def test_a_dump_without_the_row_identity_still_checks_everything_else(lab, check_dir, monkeypatch):
+    """The UUID is read out of a report meant for a person. A macOS that stops printing it
+    must cost the lab that one sentence, not every run."""
+    machine = a_machine([ON, ON])
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    checks.check_survives_a_restart(machine, check_dir, lab)
 
 
 def test_the_check_refuses_to_restart_a_machine_it_could_not_switch_on(lab, check_dir, monkeypatch):
@@ -337,6 +387,32 @@ def test_a_record_the_update_took_with_it_fails(lab, check_dir, update_flow, mon
     machine = a_machine([ON, NOTHING])
     versions(monkeypatch, checks.VERSION, checks.NEWER)
     with pytest.raises(CheckFailed, match="no login record at all"):
+        checks.check_survives_an_update(machine, check_dir, lab)
+
+
+def test_the_one_rewrite_an_update_makes_is_not_a_failure(lab, check_dir, update_flow, monkeypatch):
+    """Measured in a guest on 2026-09-19: an update moves the generation from 1 to 2 with
+    the row's UUID unchanged — macOS re-filing the record because the bundle at the path
+    was replaced. A check demanding the generation stand still would call that a bug."""
+    machine = a_machine([WITH_UUID, WITH_UUID.replace("Generation: 1", "Generation: 2")])
+    versions(monkeypatch, checks.VERSION, checks.NEWER)
+    checks.check_survives_an_update(machine, check_dir, lab)
+
+
+def test_a_record_the_update_racked_up_generations_on_fails(lab, check_dir, update_flow, monkeypatch):
+    """What the docstring has always promised and the code never did: an application that
+    registers itself again on top of the update, which is what makes macOS post "Login
+    Item Added" at every login."""
+    machine = a_machine([ON, ON_AGAIN])
+    versions(monkeypatch, checks.VERSION, checks.NEWER)
+    with pytest.raises(CheckFailed, match="registered itself"):
+        checks.check_survives_an_update(machine, check_dir, lab)
+
+
+def test_a_different_row_after_the_update_fails(lab, check_dir, update_flow, monkeypatch):
+    machine = a_machine([WITH_UUID, ANOTHER_ROW.replace("Generation: 1", "Generation: 2")])
+    versions(monkeypatch, checks.VERSION, checks.NEWER)
+    with pytest.raises(CheckFailed, match="a different row"):
         checks.check_survives_an_update(machine, check_dir, lab)
 
 

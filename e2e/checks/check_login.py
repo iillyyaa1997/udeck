@@ -75,7 +75,7 @@ def check_registers(machine, check_dir, lab):
 def check_survives_a_restart(machine, check_dir, lab):
     """A machine that restarts comes back with uDeck running, and nobody started it."""
     _prepare(machine, check_dir, lab)
-    _switch_on(machine, check_dir, lab)
+    switched_on = _switch_on(machine, check_dir, lab)
 
     machine.reboot()
     pids = _wait_until_it_opens(machine, OPENS_WITHIN_SECONDS)
@@ -97,6 +97,16 @@ def check_survives_a_restart(machine, check_dir, lab):
     # read is the lab failing, and says so.
     after = login.collect(machine, check_dir, name="login-records-after-the-restart.txt")
     expect(after is not None and after.enabled, f"uDeck is running but the record is {_describe(after)}")
+    _expect_the_same_record(after, switched_on, "the restart")
+    # A restart rewrites nothing: measured in a guest on 2026-09-19, the generation is 1
+    # before and 1 after. So a later one is something having registered again — which for
+    # uDeck is a bug of its own, because it registers only when asked.
+    expect(
+        after.generation == switched_on.generation,
+        f"uDeck came back, but its record is at generation {after.generation} and it was "
+        f"switched on at {switched_on.generation} — something registered it again, and "
+        f"uDeck registers only when asked: {after.describe()}",
+    )
     # The pids the wait already read, not a fresh look: an SSH hiccup in a note must not
     # turn a check that has passed both its verdicts into a lab error.
     lab.note(f"   uDeck came back on its own as {sorted(pids)}")
@@ -191,9 +201,18 @@ def check_survives_an_update(machine, check_dir, lab):
         # record and the three sentences that judge it.
         expect(after is not None, f"the update left uDeck with no login record at all; before it was {before.describe()}")
         expect(after.enabled, f"the record did not survive the update: {after.describe()}")
+        _expect_the_same_record(after, before, "the update")
+        # Unlike a restart, an update *does* move the generation, and by exactly one:
+        # measured in a guest on 2026-09-19, 1 before and 2 after, with the row's UUID
+        # unchanged — macOS re-filing the record because the bundle at the path was
+        # replaced. Anything beyond that is what the docstring above is about: an
+        # application registering itself again, which is what makes macOS post "Login Item
+        # Added" at every login.
         expect(
-            after.url == f"{app.GUEST_APPLICATIONS}/{app.APP}",
-            f"after the update the record points at {after.url or 'nothing'}",
+            after.generation <= before.generation + 1,
+            f"the update left the record at generation {after.generation}, up from "
+            f"{before.generation} — an update rewrites it once, so uDeck registered itself "
+            f"again on top of it: {after.describe()}",
         )
         lab.note(f"   the record came through as: {after.describe()}")
     finally:
@@ -321,6 +340,36 @@ def _record_or_why_not(machine, check_dir, name="login-records-after-the-restart
 def _what_the_card_says(machine):
     """Every sentence the login card shows — when a verdict turns on them."""
     return " | ".join(ui.static_texts(machine, "reading what the login card says"))
+
+
+def _expect_the_same_record(after, before, what: str) -> None:
+    """The record is the one that was switched on, not one that merely looks like it.
+
+    Two failures hide behind "there is an enabled record for uDeck", and both are what
+    this feature exists to survive. The path: another copy of uDeck with the same bundle
+    identifier takes the record simply by running, and the system then opens *it* —
+    uDeck's own source calls that the main one. And the identity: the row itself can be
+    replaced, which a path alone cannot see, because the replacement names the same path.
+
+    The UUID is the row. Measured in a guest on 2026-09-19: it is unchanged across a
+    restart and across uDeck updating itself, while the generation moves in one of those
+    and not the other — so the UUID is what says "the same record", and the generation
+    says what happened to it.
+
+    Guarded on both being there: the UUID is read out of a dump meant for a person, and a
+    macOS that stops printing it must cost the lab this sentence rather than every run.
+    """
+    expect(
+        after.url == THIS_COPY,
+        f"after {what} the record points at {after.url or 'nothing'}, not at the copy that was "
+        f"switched on ({THIS_COPY}) — another copy has taken it",
+    )
+    if before.uuid and after.uuid:
+        expect(
+            after.uuid == before.uuid,
+            f"after {what} the record is a different row: {after.uuid}, and it was {before.uuid}. "
+            f"The path is the same, so this is a new registration wearing it",
+        )
 
 
 def _describe(record):

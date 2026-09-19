@@ -39,6 +39,27 @@ for what that promises.
   after: twelve reports to reach the edge from the middle of the screen, nothing
   past it, and `fired by push`.
 
+- **The login checks read the record they were given, not one that looks like it.**
+  `login.survives-a-restart` asked only whether *an* enabled record for uDeck existed
+  afterwards — not whether it named the copy that had been switched on, and not whether it
+  was the same row. Both are what the feature exists to survive: another copy of uDeck with
+  the same bundle identifier takes the record simply by running, which uDeck's own source
+  calls the main failure, and a row can be replaced while naming the same path.
+  `login.survives-an-update` had promised in its own words to catch an application racking
+  up generations, and compared nothing.
+
+  Both now compare against the record `_switch_on` returned, and the two checks want
+  different things because the system does different things — measured in a guest rather
+  than assumed. A restart rewrites nothing: the generation is 1 before and 1 after, so a
+  later one is something having registered again. An update rewrites the record exactly
+  once, 1 to 2, with the row's UUID unchanged — macOS re-filing it because the bundle at
+  the path was replaced — so anything beyond that is uDeck registering itself on top.
+  Asserting equality in both, which is the obvious move, would have turned a passing check
+  red.
+
+  The row's UUID is parsed for the first time, and it is what "the same record" means. A
+  dump that stops printing it costs that one sentence rather than every run.
+
 - **The panel checks ask whether the panel opened.** All three judged by `fired
   by <path>`, which uDeck writes three lines before it asks the panel to appear —
   so a panel that failed to open for everybody left every one of them green. They

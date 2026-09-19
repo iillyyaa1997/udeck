@@ -51,6 +51,11 @@ class LoginRecord:
     url: str
     disposition: str
     generation: int
+    # The row's own identity, which is the only field that says "this is the same
+    # record" rather than "a record that looks like it". Measured in a guest on
+    # 2026-09-19: it survives both a restart and uDeck updating itself, while the
+    # generation moves in one of those and not the other.
+    uuid: str = ""
 
     @property
     def enabled(self) -> bool:
@@ -98,6 +103,7 @@ def _keep(found: list[LoginRecord], fields: dict[str, str]) -> None:
             url=fields.get("URL", "").replace("(null)", ""),
             disposition=fields.get("Disposition", ""),
             generation=int(generation) if generation.isdigit() else 0,
+            uuid=fields.get("UUID", ""),
         )
     )
 
