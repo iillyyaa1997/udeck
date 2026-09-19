@@ -108,9 +108,19 @@ def check_off_stays_off(machine, check_dir, lab):
     The control for the check above, and it is switched *on* first on purpose: a machine
     where nothing was ever registered would also come back without uDeck, and would prove
     only that the lab can watch a machine do nothing.
+
+    Two different things can make uDeck open here, and they are told apart by the
+    generation. Measured in a guest on 2026-09-19: unregistering does not remove the row
+    at once — the dump shows it `[disabled] generation 2` straight after the click and
+    stops showing it about half a minute later — while the database file on disk still
+    names uDeck throughout. One run in five then came back from the restart with the row
+    *enabled at generation 1*: the registration that was there before the switch, not a
+    new one. So a record back at the old generation is macOS returning to the state it
+    had on disk, and a record at a new generation would be something registering again —
+    which for uDeck would be a bug of its own, since it registers only when asked.
     """
     _prepare(machine, check_dir, lab)
-    _switch_on(machine, check_dir, lab)
+    switched_on = _switch_on(machine, check_dir, lab)
 
     ui.click(machine, "general.openAtLogin", "switching Open at Login off again")
     machine.sleep(3)
@@ -130,10 +140,17 @@ def check_off_stays_off(machine, check_dir, lab):
     # Same order, same reason: uDeck opening here is the failure this control exists to
     # catch, and neither the screenshot nor the database may be able to swallow it.
     _evidence(machine, check_dir, "after the restart", lab)
-    after = _record_or_why_not(machine, check_dir)
+    after, said = _collect_or_why_not(machine, check_dir)
+    if pids and after is not None and after.enabled and after.generation == switched_on.generation:
+        raise CheckFailed(
+            f"uDeck opened at login although it had been switched off, and the system's "
+            f"record is the one from before the switch, unchanged: {said}. The restart came "
+            f"back with the database as it stood before, not with the change — macOS's doing "
+            f"rather than uDeck registering again, which would carry a later generation."
+        )
     expect(
         not pids,
-        f"uDeck opened at login although it had been switched off; the record says {after}",
+        f"uDeck opened at login although it had been switched off; the record says {said}",
     )
 
 
@@ -283,17 +300,22 @@ def _evidence(machine, check_dir, step, lab):
         lab.note(f"   no screenshot '{step}': {error.reason}")
 
 
-def _record_or_why_not(machine, check_dir, name="login-records-after-the-restart.txt"):
-    """The record as a sentence, with the database kept beside it — and neither able to raise.
+def _collect_or_why_not(machine, check_dir, name="login-records-after-the-restart.txt"):
+    """The record and a sentence about it, with the database kept — and neither able to raise.
 
     For the readings that are evidence for a verdict already decided. `login.collect`
     already swallows a failed write, so the only thing left that can throw is the read
-    itself, and here it says so in the sentence instead.
+    itself, and here it says so in the sentence instead of throwing.
     """
     try:
-        return _describe(login.collect(machine, check_dir, name=name))
+        record = login.collect(machine, check_dir, name=name)
     except LabError as error:
-        return f"(the record could not be read: {error.reason})"
+        return None, f"(the record could not be read: {error.reason})"
+    return record, _describe(record)
+
+
+def _record_or_why_not(machine, check_dir, name="login-records-after-the-restart.txt"):
+    return _collect_or_why_not(machine, check_dir, name)[1]
 
 
 def _what_the_card_says(machine):

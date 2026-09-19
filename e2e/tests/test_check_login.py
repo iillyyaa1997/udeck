@@ -40,6 +40,8 @@ ON = """\
 OFF = ON.replace("[enabled, allowed, visible, notified] (0xb)", "[disabled, allowed, visible, notified] (0x2)")
 ELSEWHERE = ON.replace("/Applications/uDeck.app", "/Users/x/Applications/uDeck-debug.app")
 NOTHING = " Items:\n"
+# The same record, registered again rather than restored: a later generation.
+ON_AGAIN = ON.replace("Generation: 1", "Generation: 3")
 
 
 @pytest.fixture
@@ -244,9 +246,12 @@ def test_the_control_switches_it_on_first(lab, check_dir, monkeypatch):
 
 
 def test_a_control_where_uDeck_opens_anyway_fails(lab, check_dir, monkeypatch):
+    """The record after the restart is the switched-off one, so nothing about the system
+    explains uDeck running — the plain verdict, not the one about macOS returning to an
+    older database. Matched on the tail, because the other sentence begins the same way."""
     machine = a_machine([ON, OFF, OFF], running="909")
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
-    with pytest.raises(CheckFailed, match="opened at login although it had been switched off"):
+    with pytest.raises(CheckFailed, match="switched off; the record says"):
         checks.check_off_stays_off(machine, check_dir, lab)
 
 
@@ -264,6 +269,27 @@ def test_an_unreadable_database_does_not_hide_uDeck_opening_when_it_was_off(lab,
     machine = a_machine([ON, OFF, Dropped], running="909")
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     with pytest.raises(CheckFailed, match="opened at login although"):
+        checks.check_off_stays_off(machine, check_dir, lab)
+
+
+def test_a_record_back_at_the_old_generation_is_named_as_the_system_returning(lab, check_dir, monkeypatch):
+    """Measured once in five runs: the restart comes back with the row enabled at the
+    generation it had *before* the switch — the database as it stood on disk, not uDeck
+    registering again. Both make uDeck open; blaming uDeck for the first sends the next
+    person hunting a bug that is not there."""
+    machine = a_machine([ON, OFF, ON], running="909")
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(CheckFailed, match="the one from before the switch, unchanged"):
+        checks.check_off_stays_off(machine, check_dir, lab)
+
+
+def test_a_record_back_at_a_later_generation_is_still_uDeck_s_to_answer_for(lab, check_dir, monkeypatch):
+    """The other half: something registered again after the switch-off. uDeck registers
+    only when asked, so that would be a bug of its own and must not be explained away as
+    the system restoring an old state."""
+    machine = a_machine([ON, OFF, ON_AGAIN], running="909")
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(CheckFailed, match="opened at login although it had been switched off; the record says"):
         checks.check_off_stays_off(machine, check_dir, lab)
 
 
