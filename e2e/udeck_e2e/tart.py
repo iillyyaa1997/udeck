@@ -112,7 +112,22 @@ class Tart:
         return any(vm.name == name for vm in self.list())
 
     def running(self, name: str) -> bool:
-        return any(vm.name == name and vm.running for vm in self.list())
+        """Whether one machine is running — asked about that machine alone.
+
+        Not through `list`: `tart list` reads every machine's disk image to
+        report its size, and the image of a machine that is *running* cannot be
+        read. Measured with `--jobs 2`, where cleaning up each machine failed
+        because the next one was already up: `image info --plist …/disk.img
+        failed … Resource temporarily unavailable`. `tart get` answers about the
+        machine it was asked about, and one Tart has never heard of is not
+        running.
+        """
+        try:
+            return bool(self.get(name).get("Running"))
+        except LabError as error:
+            if "does not exist" in error.reason:
+                return False
+            raise
 
     def get(self, name: str) -> dict[str, Any]:
         done = self.call(["get", name, "--format", "json"], f"reading {name}'s settings", retry_if_hung=True)

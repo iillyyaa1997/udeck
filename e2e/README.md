@@ -83,15 +83,22 @@ assume it.
 
 `--jobs 2` means two machines alive, never two checks running. The checks stay
 in one serial loop — so the console, the ledger and Ctrl-C work exactly as they
-do at `--jobs 1` — and what overlaps is the next check's guest booting while the
-current one is still being used. Starting is what costs: a clone, a boot and a
-wait for the desktop, paid once per check today and hidden behind the previous
-check instead. It begins only once the current check has its machine, because
-two booting at the same time as one still shutting down would be three at once,
-one past what macOS allows. A machine that does not come up in the background is
-not a verdict: it is put back and the check boots its own, exactly as it would
-have. With `--vm per-run` there is no next machine, so `--jobs 2` is refused
-there rather than quietly doing nothing.
+do at `--jobs 1` — and what overlaps is the next check's guest cloning and
+booting while the current one is still being used. It begins only once the
+current check has its machine, because two booting at the same time as one still
+shutting down would be three at once, one past what macOS allows. A machine that
+does not come up in the background is not a verdict: it is put back and the check
+boots its own, exactly as it would have. With `--vm per-run` there is no next
+machine, so `--jobs 2` is refused there rather than quietly doing nothing.
+
+What it is worth, on the four login checks on one Mac (48 GB, macOS 27): 5m16s
+and 5m26s at one machine; 3m20s and 4m03s at two, with each background boot
+taking 26–29s and no check having to wait for its machine. A third run at two
+machines took 5m30s — slower than serial, unexplained, and the reason this is an
+option rather than the default. The saving is not the boot time: a guest booting
+beside a running check slows that check down, so the line each check prints says
+both how long its machine took to come up and how long the check still waited
+for it. Two numbers, because one of them alone flatters the option.
 
 If the Mac goes to sleep during a check, anything that went wrong in it becomes
 "could not check".

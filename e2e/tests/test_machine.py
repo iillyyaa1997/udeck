@@ -59,6 +59,41 @@ def test_a_failing_tart_call_names_the_step_and_what_tart_said():
     assert "does not exist" in raised.value.reason
 
 
+def test_asking_whether_one_machine_runs_does_not_read_every_machine():
+    """Measured with --jobs 2: `tart list` reads each machine's disk image for its
+    size, the image of a running machine cannot be read, and cleaning up one machine
+    failed in every check because the next one was already up."""
+    seen = []
+
+    def answer(args, **kwargs):
+        seen.append(args)
+        if args[1] == "list":
+            return done(args, 1, err=(
+                '"image info --plist /Users/x/.tart/vms/other/disk.img" failed with exit code 1: '
+                "Error: Failed to retrieve info for disk image: The operation couldn't be completed. "
+                "Resource temporarily unavailable"
+            ))
+        return done(args, out='{"Running": true, "State": "running"}')
+
+    tart = Tart(Path("/tart"), print, run=answer)
+    assert tart.running("mine") is True
+    assert [a[1] for a in seen] == ["get"], seen
+
+
+def test_a_machine_tart_has_never_heard_of_is_not_running():
+    tart = Tart(Path("/tart"), print,
+                run=lambda args, **k: done(args, 1, err='the specified VM "gone" does not exist'))
+    assert tart.running("gone") is False
+
+
+def test_a_tart_that_cannot_answer_at_all_is_not_read_as_stopped():
+    """"Not running" and "could not ask" are different, and a delete that follows a
+    wrong "not running" is the one that strands a machine."""
+    tart = Tart(Path("/tart"), print, run=lambda args, **k: done(args, 1, err="something else entirely"))
+    with pytest.raises(LabError):
+        tart.running("mine")
+
+
 def test_every_tart_call_has_a_deadline():
     seen = []
     tart = Tart(Path("/tart"), print, run=lambda args, **k: seen.append(k["timeout"]) or done(args, out="[]"))

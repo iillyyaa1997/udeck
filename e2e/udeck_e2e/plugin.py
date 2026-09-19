@@ -142,6 +142,11 @@ class LabPlugin:
         # every read and write of it goes through the lock.
         self._warm: dict[str, Any] = {}
         self._warm_failure: dict[str, str] = {}
+        # How long each machine took to come up in the background. Kept because
+        # the saving is not the boot time: a guest booting beside a check slows
+        # that check down, and only these two numbers together say whether
+        # anything was gained.
+        self._warm_seconds: dict[str, float] = {}
         self._warming: threading.Thread | None = None
         self._warming_label: str | None = None
         self._warm_lock = threading.Lock()
@@ -253,6 +258,7 @@ class LabPlugin:
         wanted — is closed by the main thread, either when the check takes it or
         when the run ends.
         """
+        started = self.clock()
         try:
             machine.create()
             machine.boot()
@@ -261,6 +267,7 @@ class LabPlugin:
                 self._warm_failure[label] = str(error)
         finally:
             with self._warm_lock:
+                self._warm_seconds[label] = self.clock() - started
                 self._warming_label = None
 
     def _take_the_warm_one(self, label: str) -> Any | None:
@@ -272,11 +279,15 @@ class LabPlugin:
         """
         with self._warm_lock:
             warming = self._warming if self._warming_label == label else None
+        waited = 0.0
         if warming is not None:
+            before = self.clock()
             warming.join()
+            waited = self.clock() - before
         with self._warm_lock:
             machine = self._warm.pop(label, None)
             failure = self._warm_failure.pop(label, None)
+            took = self._warm_seconds.pop(label, None)
         if machine is None:
             return None
         if failure is not None:
@@ -284,7 +295,12 @@ class LabPlugin:
             for problem in machine.close(keep=False):
                 self.note(f"   ⚠️ cleaning up after it: {problem}")
             return None
-        self.note(f"   {machine.name} was already up")
+        # Both numbers, because one without the other flatters the option: a
+        # machine that took 50s to come up beside a running check and was still
+        # waited 20s for has moved work, not removed it.
+        up_in = f" in {took:.0f}s" if took is not None else ""
+        still_waited = f", waited {waited:.0f}s for it" if waited >= 1 else ""
+        self.note(f"   {machine.name} was started ahead (up{up_in}{still_waited})")
         return machine
 
     def _close_the_warm_ones(self) -> None:
@@ -297,6 +313,7 @@ class LabPlugin:
             left = sorted(self._warm.items())
             self._warm.clear()
             self._warm_failure.clear()
+            self._warm_seconds.clear()
             self._warming = None
             self._warming_label = None
         for _, machine in left:

@@ -7,6 +7,8 @@ person would read: the console lines, the exit code, the ledger.
 
 import io
 import json
+import re
+import threading
 import os
 import time
 from datetime import datetime, timezone
@@ -47,6 +49,10 @@ class Lab:
         self.timeline: list[str] = []
         # Which label's boot should fail, for the machines started ahead.
         self.boot_fails_for: str | None = None
+        # And which label's boot is parked until `release` is set, so a test can
+        # make the next check arrive while the machine is still coming up.
+        self.hold_boot_for: str | None = None
+        self.release = threading.Event()
         self.slept = "{ sec = 0, usec = 0 }"
         self.mode = "checks"
 
@@ -143,6 +149,8 @@ class FakeMachine:
 
     def boot(self):
         self.events.append("boot")
+        if self.lab.hold_boot_for == self.label:
+            self.lab.release.wait(10)
         if self.lab.boot_fails_for == self.label:
             # Once: the point of the test that uses this is that the check's own
             # attempt afterwards is an ordinary one that works.
@@ -854,7 +862,7 @@ def test_the_machine_started_ahead_is_the_one_the_next_check_uses(lab):
     assert code == 0, out
     assert [m.label for m in lab.machines] == ["pair.alpha", "pair.beta"]
     assert lab.timeline.count("pair.beta create") == 1 and lab.timeline.count("pair.beta boot") == 1
-    assert "was already up" in out
+    assert "was started ahead" in out
 
 
 def test_the_last_check_starts_nothing_behind_it(lab):
@@ -911,3 +919,40 @@ def test_a_machine_that_comes_back_later_in_the_run_is_never_started_ahead(lab):
     items = [SimpleNamespace(nodeid=nodeid, path=Path("/checks/check_one.py")) for nodeid in plugin.names]
     plugin._plan_the_warming(items)
     assert plugin.next_label == {"one.x": "two.y"}
+
+
+def test_a_machine_that_was_ready_in_time_is_reported_without_a_wait(lab):
+    import itertools
+
+    lab.write("check_pair.py", TWO_CHECKS % "pair.beta boot")
+    code, out = lab.run(jobs=2, clock=itertools.count(0, 10).__next__)
+    assert code == 0, out
+    assert re.search(r"was started ahead \(up in \d+s\)", out), out
+
+
+def test_a_check_that_waited_for_its_machine_is_told_how_long(lab):
+    """One number flatters the option. A guest booting beside a running check slows
+    that check down, and a check that still had to wait for it gained less than the
+    boot time — so the line says how long it took *and* how long it was waited for.
+
+    The wait is made certain rather than hoped for: the background thread is still
+    working when the check reaches for its machine."""
+    import itertools
+
+    out = io.StringIO()
+    plugin = lab.plugin(jobs=2, out=out, clock=itertools.count(0, 10).__next__)
+    machine = FakeMachine(lab, name="udeck-e2e-probe", source="golden", display=None, label="pair.beta")
+
+    def still_coming_up():
+        time.sleep(0.05)
+        with plugin._warm_lock:
+            plugin._warm_seconds["pair.beta"] = 42.0
+            plugin._warming_label = None
+
+    plugin._warm["pair.beta"] = machine
+    plugin._warming_label = "pair.beta"
+    plugin._warming = threading.Thread(target=still_coming_up)
+    plugin._warming.start()
+
+    assert plugin._take_the_warm_one("pair.beta") is machine
+    assert re.search(r"was started ahead \(up in 42s, waited \d+s for it\)", out.getvalue()), out.getvalue()
