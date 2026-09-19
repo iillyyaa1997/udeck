@@ -255,10 +255,15 @@ private struct LoginCard: View {
                     .accessibilityIdentifier("general.anotherCopy")
             }
 
-            if needsSystemSettings(message) {
-                Button(strings(.generalOpenLoginItems)) { loginItem.openSystemSettings() }
-                    .accessibilityIdentifier("general.openLoginItems")
-            }
+            // Offered whenever there is anything to say, including when the asking itself
+            // failed. That case used to hide the button on the grounds that an error from
+            // the API is not fixed in the system's pane — but the pane has "+" and "−",
+            // so a person can put uDeck in the list by hand, which is exactly what uDeck
+            // could not do. It also used to disappear at the worst moment: a failed ask
+            // replaces "macOS is waiting for you to allow it" with the error, and took
+            // the way out with it.
+            Button(strings(.generalOpenLoginItems)) { loginItem.openSystemSettings() }
+                .accessibilityIdentifier("general.openLoginItems")
         }
         .padding(.top, 2)
     }
@@ -278,16 +283,6 @@ private struct LoginCard: View {
         switch message {
         case .vanished(let copies), .didNotTake(let copies): copies.first
         case .waitsForApproval, .couldNotAsk: nil
-        }
-    }
-
-    /// The button is offered only where the system's own pane is where the answer is.
-    /// An error from the API is not fixed there, and a button that leads nowhere useful
-    /// is worse than none.
-    private func needsSystemSettings(_ message: LoginItemMessage) -> Bool {
-        switch message {
-        case .waitsForApproval, .vanished, .didNotTake: true
-        case .couldNotAsk: false
         }
     }
 
