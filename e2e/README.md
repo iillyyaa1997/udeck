@@ -319,3 +319,28 @@ They need neither Tart nor a virtual machine, so they run in CI on every push �
 unlike the checks, which need a machine to drive. That is the part worth running
 everywhere: a mistake in the harness is invisible, because a check that proves
 nothing looks exactly like a check that passed.
+
+## Deliberately not here
+
+**Booting from a snapshot** (`--boot cold|snapshot`, planned as Q49). Tart can
+suspend a machine and start it again in about a third of the time, and that was
+worth having while a cold boot stood between every check and its work. It no
+longer does: `--jobs 2` boots the next check's guest behind the current check,
+and in the runs measured on 2026-09-19 no check waited for its machine at all —
+the 26–29s boot was entirely hidden. A snapshot would shorten something that is
+no longer on the critical path.
+
+What it would cost is not nothing, from reading Tart 2.37.0's own source and
+issues: `--suspendable` drops the USB screen-coordinate pointing device and
+leaves the trackpad (probably harmless — Apple's header says macOS 13+ guests
+use the trackpad anyway, so the lab's 26 and 27 guests already do — but
+unmeasured through Virtualization's VNC server); suspended clones share one
+machine identity, and `tart set --random-serial` against a suspended clone has
+undefined effect; and a VM-limit refusal on a snapshot start *consumes the
+snapshot*, because `tart run` deletes `state.vzvmsave` before starting, with an
+error whose wording the lab's limit detection does not match. Two machines at
+once is exactly when that refusal is most likely.
+
+If a future run finds checks waiting on boots again — many short checks, or a
+slower Mac — this is the thing to build, and the pointer question is the first
+measurement to take.
