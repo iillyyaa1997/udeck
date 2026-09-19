@@ -295,6 +295,28 @@ def test_a_record_left_pointing_elsewhere_after_the_update_fails(lab, check_dir,
         checks.check_survives_an_update(machine, check_dir, lab)
 
 
+def test_a_hiccup_reading_the_version_does_not_replace_the_verdict(lab, check_dir, update_flow, monkeypatch):
+    """The record did not come through, and that verdict must not turn into "could not
+    check" because a read nobody needed dropped its connection.
+
+    The version is proven by the time the update has installed — `_install_the_update`
+    returns on nothing else — so any read after it is redundant, and this machine answers
+    the two that are needed and refuses a third.
+    """
+    machine = a_machine([ON, NOTHING])
+    answers = iter([checks.VERSION, checks.NEWER])
+
+    def reads(machine_):
+        try:
+            return next(answers)
+        except StopIteration:
+            raise LabError("reading the version installed", "SSH to 192.168.64.2 failed") from None
+
+    monkeypatch.setattr(app, "installed_version", reads)
+    with pytest.raises(CheckFailed, match="no login record at all"):
+        checks.check_survives_an_update(machine, check_dir, lab)
+
+
 def test_an_update_that_did_not_happen_is_the_labs_problem(lab, check_dir, update_flow, monkeypatch):
     """Installing the update is a precondition here; `updates.sparkle` is the check that
     pronounces on whether uDeck can update itself at all."""

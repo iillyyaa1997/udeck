@@ -162,10 +162,12 @@ def check_survives_an_update(machine, check_dir, lab):
         after = login.collect(machine, check_dir, name="login-records-after-the-update.txt")
         machine.screenshot(check_dir, "after the update")
 
-        expect(
-            app.installed_version(machine) == NEWER,
-            f"the update did not happen: the version on disk is {app.installed_version(machine)}",
-        )
+        # No guard on the version here, on purpose. `_install_the_update` returns only
+        # once the newer version is the one on disk and otherwise raises, so a guard can
+        # fire for one reason alone — a flaky read — and would then report the lab's bad
+        # connection as a verdict about uDeck, which the docstring above forbids. It also
+        # read the version twice on every pass, either of which could raise between the
+        # record and the three sentences that judge it.
         expect(after is not None, f"the update left uDeck with no login record at all; before it was {before.describe()}")
         expect(after.enabled, f"the record did not survive the update: {after.describe()}")
         expect(
