@@ -72,7 +72,11 @@ def prepared(monkeypatch, log_says):
     """Skip the preparation — its own tests are at the end — and hand back the log."""
     machine = a_machine(log_says)
 
-    def prepare(machine_, check_dir, lab):
+    def prepare(machine_, check_dir, lab, launch=True):
+        # `launch` is real: the control starts uDeck itself, after its window on
+        # the log has opened, and a stub that swallowed the difference would let
+        # that ordering rot without a test noticing.
+        machine_.prepared_with_launch = launch
         kept = panel.GestureLog(machine_, lab.note)
         kept.kept = True
         return kept
@@ -213,3 +217,31 @@ def test_what_uDeck_said_is_kept_even_when_the_check_fails(monkeypatch, lab, che
     with pytest.raises(CheckFailed):
         checks.check_dwell(machine, check_dir, lab)
     assert (check_dir / "gesture.log").read_text() == ATTACHED + IDLE
+
+
+def test_the_control_starts_uDeck_inside_the_window_it_reads(monkeypatch, lab, check_dir):
+    """The gate uDeck reports is logged only when it changes, and this control is built
+    to change nothing: on 2026-09-19 it reported "could not check" twice in a row because
+    the only line uDeck ever wrote — the first gate it saw — fell before the window
+    began. The launch belongs after the mark, and the parking before it."""
+    machine = prepared(monkeypatch, ATTACHED + IDLE)
+    # One list, so the three are ordered against each other rather than each being
+    # merely present. The clock cannot do it: nothing sleeps between the mark and the
+    # launch, so both fall at the same second.
+    order = []
+    taking_the_mark = panel.GestureLog.mark
+    monkeypatch.setattr(app, "launch",
+                        lambda machine_, step="starting uDeck": order.append("launch") or {"404"})
+    monkeypatch.setattr(panel.GestureLog, "mark",
+                        lambda self, step: (order.append("mark"), taking_the_mark(self, step))[1])
+    moving = machine.move_pointer
+    machine.move_pointer = lambda x, y, step: order.append("park") or moving(x, y, step)
+
+    checks.check_middle_of_the_screen(machine, check_dir, lab)
+
+    assert machine.prepared_with_launch is False, "the preparation must not start uDeck for this control"
+    # Parked, then marked, then started: the first sample uDeck takes is the one it
+    # always logs, it has to fall inside the window, and it has to be taken with the
+    # pointer already in the middle.
+    assert order[:3] == ["park", "mark", "launch"], order
+    assert "middle of the screen" in machine.pointer[0][2]

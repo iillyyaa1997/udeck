@@ -114,11 +114,27 @@ def check_middle_of_the_screen(machine, check_dir, lab):
     Held there, then pushed at: neither the passage of time nor an upward shove
     means anything away from the edge, and a gesture that fired here would fire
     while the operator was working.
+
+    uDeck is started *inside* the window this reads, and the pointer is parked before
+    it starts. The gate uDeck reports is logged only when it *changes*
+    (`PanelController.swift`: `reason != lastIdleReason`), and this control is built to
+    change nothing — so on 2026-09-19 it reported "could not check" twice in a row,
+    including on a machine of its own with nothing else running: uDeck had written
+    `idle: outsideStrip` at launch, before the window began, and the pointer stayed in
+    the middle, so the line never came again. Starting uDeck after the mark puts its
+    first sample — the one that always logs — inside the window, and parking first
+    means that sample is taken with the pointer where this check wants it.
+
+    The other way round it would be worse: walking the pointer through the strip to
+    force a change is a dwell waiting to fire, which is the one thing this control must
+    not do.
     """
-    log = _prepare(machine, check_dir, lab)
+    log = _prepare(machine, check_dir, lab, launch=False)
+    _park_in_the_middle(machine)
     since = log.mark("noting when the control begins")
     try:
-        _park_in_the_middle(machine)
+        app.launch(machine)
+        machine.screenshot(check_dir, "uDeck running")
         machine.sleep(config.DWELL_SECONDS)
         pushed = panel.push_upward(machine, panel.middle_of_the_screen(), "pushing up in the middle of the screen")
         lab.note(f"   {pushed}")
@@ -138,7 +154,7 @@ def check_middle_of_the_screen(machine, check_dir, lab):
 # --- What all three do ------------------------------------------------------------
 
 
-def _prepare(machine, check_dir, lab):
+def _prepare(machine, check_dir, lab, launch=True):
     """A lab build of uDeck installed and running, and its own messages being kept.
 
     The build carries a feed nobody serves, on the guest's own loopback: a lab
@@ -157,8 +173,11 @@ def _prepare(machine, check_dir, lab):
 
     log = panel.GestureLog(machine, lab.note)
     log.keep("asking the guest to keep uDeck's own account of the gesture")
-    app.launch(machine)
-    machine.screenshot(check_dir, "uDeck running")
+    # The control starts uDeck itself, after its window on the log has opened, so that
+    # the one line uDeck always writes — the first gate it sees — is inside it.
+    if launch:
+        app.launch(machine)
+        machine.screenshot(check_dir, "uDeck running")
     return log
 
 
