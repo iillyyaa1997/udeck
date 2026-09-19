@@ -171,8 +171,8 @@ struct Russian: Vocabulary {
         case .generalOpenAtLogin: "Открывать при входе"
         case .generalOpensWhich(let path, let opens):
             opens ? "Откроется: \(path)" : "Откроется при включении: \(path)"
-        case .generalNotInstalled:
-            "Эта копия не установлена как приложение, поэтому открывать её при входе нельзя. Соберите приложение через Scripts/make-app.sh и запускайте его."
+        case .generalNotInstalled(let path):
+            "Эта копия не установлена как приложение, поэтому открывать её при входе нельзя: \(path). Соберите приложение через Scripts/make-app.sh и запускайте его."
         case .generalRecordVanished: "macOS больше не хранит эту запись."
         case .generalDidNotTake: "macOS не сохранила эту запись."
         case .generalAnotherCopy(let path):

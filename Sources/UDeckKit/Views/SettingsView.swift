@@ -212,17 +212,18 @@ private struct LoginCard: View {
                 .accessibilityIdentifier("general.openAtLogin")
                 .disabled(!installed)
 
-                Text(strings(.generalOpensWhich(shown(loginItem.thisCopy),
-                                               opens: loginItem.status.opensAtLogin)))
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("general.opensWhich")
-
-                // Said before the click rather than after it: whether this copy can be
+                // One statement about the path, whichever state this copy is in. Said
+                // before the click rather than after it: whether this copy can be
                 // registered at all is knowable by looking at it, and a switch that
                 // answers only once it has been pressed is a worse way to say so.
-                if !installed {
-                    Text(strings(.generalNotInstalled))
+                if installed {
+                    Text(strings(.generalOpensWhich(shown(loginItem.thisCopy),
+                                                   opens: loginItem.status.opensAtLogin)))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("general.opensWhich")
+                } else {
+                    Text(strings(.generalNotInstalled(shown(loginItem.thisCopy))))
                         .font(.caption).foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("general.notInstalled")

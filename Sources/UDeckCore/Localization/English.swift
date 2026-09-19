@@ -162,8 +162,8 @@ struct English: Vocabulary {
         case .generalOpenAtLogin: "Open at Login"
         case .generalOpensWhich(let path, let opens):
             opens ? "Opens: \(path)" : "Would open: \(path)"
-        case .generalNotInstalled:
-            "This copy is not installed as an application, so it cannot be opened at login. Build one with Scripts/make-app.sh and run that."
+        case .generalNotInstalled(let path):
+            "This copy is not installed as an application, so it cannot be opened at login: \(path). Build one with Scripts/make-app.sh and run that."
         case .generalRecordVanished: "macOS no longer has this record."
         case .generalDidNotTake: "macOS did not keep this record."
         case .generalAnotherCopy(let path):

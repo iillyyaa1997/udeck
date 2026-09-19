@@ -210,7 +210,12 @@ public enum Phrase: Sendable, Equatable {
     /// This copy is not an application, so nothing about it can be opened at login —
     /// the state a development build runs in, where the switch would otherwise ask the
     /// system for the release identifier from a path under `.build`.
-    case generalNotInstalled
+    ///
+    /// It carries the path because it replaces the line above rather than joining it:
+    /// "Would open: …/.build/debug" promises something that cannot happen at all for
+    /// this copy, and two sentences about one path, one of them untrue, is worse than
+    /// the longer sentence that is true.
+    case generalNotInstalled(String)
 
     /// The record was there and is gone, with nobody having asked for that.
     case generalRecordVanished

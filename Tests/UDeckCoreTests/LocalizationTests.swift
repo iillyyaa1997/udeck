@@ -39,7 +39,7 @@ struct LocalizationTests {
         .generalStartup, .generalOpenAtLogin,
         .generalOpensWhich("/Applications/uDeck.app", opens: true),
         .generalOpensWhich("/Applications/uDeck.app", opens: false),
-        .generalNotInstalled,
+        .generalNotInstalled("/Users/x/udeck/.build/debug"),
         .generalRecordVanished, .generalDidNotTake, .generalAnotherCopy("/x/uDeck.app"),
         .generalWaitsForApproval, .generalLoginFailed("no"), .generalOpenLoginItems,
 
@@ -164,6 +164,9 @@ struct LocalizationTests {
         #expect(strings(.cardUnsupportedRow(kind: "sankey")).contains("sankey"))
         #expect(strings(.pluginLastFailure(reason: "exit 1")).contains("exit 1"))
         #expect(strings(.islandWorstState("warn")).contains("warn"))
+        // The path is the actionable half of this one: "some copy of uDeck is not
+        // installed" leaves the reader to guess which window they are looking at.
+        #expect(strings(.generalNotInstalled("/x/.build/debug")).contains("/x/.build/debug"))
         #expect(strings(.controlDensity(name: "Normal")).contains("Normal"))
     }
 
