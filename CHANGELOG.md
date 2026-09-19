@@ -39,6 +39,20 @@ for what that promises.
   after: twelve reports to reach the edge from the middle of the screen, nothing
   past it, and `fired by push`.
 
+- **A control whose premise did not hold says so, instead of blaming uDeck.**
+  `login.off-stays-off` fails intermittently in one of two ways, and one of them is the
+  system rather than uDeck: the restart comes back with the record enabled at the
+  generation it had *before* the switch — the database as it stood on disk, not uDeck
+  registering again. The check already told them apart and already said which was which,
+  and then reported both as ❌, blaming uDeck in the same sentence that explained uDeck was
+  not the cause. That reading is now "could not check": the boot acted on a database that
+  predates the switching off, so the control never got to check anything. A record at a
+  later generation, or one that cannot be read, is still uDeck's to answer for.
+
+  Seen twice on 2026-09-19 in fifteen runs, with two different signatures — this one, and
+  another the check's own test does not cover, where the record after the restart is
+  correctly disabled and uDeck is running anyway. The second has no explanation yet.
+
 - **The login checks read the record they were given, not one that looks like it.**
   `login.survives-a-restart` asked only whether *an* enabled record for uDeck existed
   afterwards — not whether it named the copy that had been switched on, and not whether it

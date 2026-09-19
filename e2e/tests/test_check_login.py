@@ -322,15 +322,20 @@ def test_an_unreadable_database_does_not_hide_uDeck_opening_when_it_was_off(lab,
         checks.check_off_stays_off(machine, check_dir, lab)
 
 
-def test_a_record_back_at_the_old_generation_is_named_as_the_system_returning(lab, check_dir, monkeypatch):
-    """Measured once in five runs: the restart comes back with the row enabled at the
+def test_a_record_back_at_the_old_generation_is_not_a_verdict_about_uDeck(lab, check_dir, monkeypatch):
+    """Measured twice on 2026-09-19: the restart comes back with the row enabled at the
     generation it had *before* the switch — the database as it stood on disk, not uDeck
-    registering again. Both make uDeck open; blaming uDeck for the first sends the next
-    person hunting a bug that is not there."""
+    registering again. The control's premise did not hold, so it checked nothing: the boot
+    acted on a database that predates the switching off it is about.
+
+    It used to be ❌, which blamed uDeck in the same sentence that explained uDeck was not
+    the cause."""
     machine = a_machine([ON, OFF, ON], running="909")
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
-    with pytest.raises(CheckFailed, match="the one from before the switch, unchanged"):
+    with pytest.raises(LabError, match="the one from before the switch, unchanged") as raised:
         checks.check_off_stays_off(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed), "a lab failure, never a sentence about uDeck"
+    assert "never acted on the switching off" in raised.value.reason
 
 
 def test_a_record_back_at_a_later_generation_is_still_uDeck_s_to_answer_for(lab, check_dir, monkeypatch):

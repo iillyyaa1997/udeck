@@ -128,6 +128,11 @@ def check_off_stays_off(machine, check_dir, lab):
     new one. So a record back at the old generation is macOS returning to the state it
     had on disk, and a record at a new generation would be something registering again —
     which for uDeck would be a bug of its own, since it registers only when asked.
+
+    So the two readings get the two different outcomes. The old generation is the lab
+    saying it could not check: the boot acted on a database that predates the switch, so
+    the control's premise never held and nothing was decided about uDeck either way. A
+    later one, or an unreadable record, is uDeck's to answer for.
     """
     _prepare(machine, check_dir, lab)
     switched_on = _switch_on(machine, check_dir, lab)
@@ -152,11 +157,20 @@ def check_off_stays_off(machine, check_dir, lab):
     _evidence(machine, check_dir, "after the restart", lab)
     after, said = _collect_or_why_not(machine, check_dir)
     if pids and after is not None and after.enabled and after.generation == switched_on.generation:
-        raise CheckFailed(
-            f"uDeck opened at login although it had been switched off, and the system's "
-            f"record is the one from before the switch, unchanged: {said}. The restart came "
-            f"back with the database as it stood before, not with the change — macOS's doing "
-            f"rather than uDeck registering again, which would carry a later generation."
+        # Not a verdict, and the sentence itself is why: it says the database came back as
+        # it stood before the switch. A control whose premise did not hold has checked
+        # nothing — the boot never acted on the switching off this is about — and calling
+        # that ❌ blames uDeck in the same breath as explaining that uDeck is not the
+        # cause, which sends the next person hunting a bug that is not there. The other
+        # reading is still ❌ below: a record at a *later* generation is something having
+        # registered, and uDeck registers only when asked.
+        raise LabError(
+            "watching a machine that was switched off come back",
+            f"uDeck opened, and the system's record is the one from before the switch, "
+            f"unchanged: {said}. The restart came back with the database as it stood "
+            f"before, not with the change — macOS's doing rather than uDeck registering "
+            f"again, which would carry a later generation — so the machine never acted on "
+            f"the switching off this control is about",
         )
     expect(
         not pids,
