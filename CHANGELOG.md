@@ -8,7 +8,46 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.5.0] — 2026-09-19
+
+uDeck opens when you log in, if you ask it to. The setting exists because of a
+measured absence: it was installed on 13 September, launched once by hand, and
+after the Mac restarted nothing brought it back — for five days, until somebody
+noticed it was not running. Around it, an end-to-end lab that checks this sort
+of thing inside throwaway virtual machines instead of taking over the screen of
+whoever is working.
+
+- **"Open at Login".** A card in General with the switch, the path of the copy
+  that would open, and — only when the system disagrees — what it says instead,
+  naming the other copy of uDeck on the Mac when there is one. uDeck keeps **no
+  copy of the setting**: the switch is a reading taken from the system each time
+  there is a reason to take one (the pane appearing, uDeck being activated
+  again, the window coming forward), because an application that remembers "the
+  operator turned it on" shows a switch that is on while the system has nothing
+  recorded. It registers only when asked, never at launch — registering at
+  launch silently puts back a row the operator removed and makes macOS post
+  "Login Item Added" at every login.
+
+  What it says is kept honest about its own limits, measured in a machine: the
+  system will not tell an application which copy holds the record, so a copy
+  that exists is named as an explanation and never as proof; "the record went
+  away" can only be said by an application that watched it go, because a record
+  that was never there and one that was taken away arrive as the same answer;
+  and the sentence under the switch follows the state — "Opens:" when it does,
+  "Would open:" when it does not. A copy that is not an installed application —
+  the bare binary a development build leaves behind, which carries the release
+  bundle identifier — cannot register at all, and says so before it is clicked.
+
+- **Four checks in a virtual machine prove it**, against the system's own
+  Background Task Management database rather than uDeck's opinion of itself:
+  switching it on puts a record there pointing at this copy, a machine that
+  restarts comes back with uDeck running, a machine where it was switched off
+  again comes back without it — the control, switched *on* first on purpose —
+  and the record survives uDeck updating itself. Three oracles were wrong before
+  one was right: System Events' "login items" is a different list from the one
+  macOS acts on, `sfltool dumpbtm` answers without privileges only on a Mac
+  whose shell has Full Disk Access, and the database files an application under
+  `2.<bundle id>`.
 
 - **A debug build is its own application.** `Scripts/make-app.sh --debug` now
   gives the bundle the identifier `place.unicorns.udeck.debug` and no update
