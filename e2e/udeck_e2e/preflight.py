@@ -579,10 +579,11 @@ def firewall_lets_tart_in(tart: Path) -> tuple[bool | None, str]:
 FRAMEWORK_MACHINE = "/com.apple.Virtualization.VirtualMachine.xpc/"
 
 
-def run(guest: Guest, note: Callable[[str], None]) -> tuple[Assessment, HostFacts]:
+def run(guest: Guest, note: Callable[[str], None], jobs: int = 1) -> tuple[Assessment, HostFacts]:
     """The whole pre-flight: stop the lab's orphans, then look at the host.
 
-    Needs the run lock held.
+    Needs the run lock held. `jobs` is how many machines will be alive at once,
+    which is what the memory and disk the host needs is measured against.
     """
     processes, problem = process_table()
     stop_orphans(find_orphans(processes, os.getuid(), os.getpid()), note, identify)
@@ -594,4 +595,4 @@ def run(guest: Guest, note: Callable[[str], None]) -> tuple[Assessment, HostFact
         facts.vnc_reachable_from_network, facts.firewall_unreadable = firewall_lets_tart_in(facts.tart)
     if problem:
         facts.gathering.append(problem)
-    return assess(facts, guest), facts
+    return assess(facts, guest, jobs), facts

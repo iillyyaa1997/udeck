@@ -9,6 +9,7 @@ terminal output is switched off, so there is one voice in the console.
 from __future__ import annotations
 
 import shutil
+import threading
 import subprocess
 import sys
 import time
@@ -31,11 +32,11 @@ from udeck_e2e.ledger import Ledger, RunLock, host_lock_path, mark_started, new_
 from udeck_e2e.outcomes import EXIT_NOT_CHECKED, EXIT_PASSED, Outcome, duration, exit_code, summary
 
 Note = Callable[[str], None]
-Preflight = Callable[[Guest, Note], tuple[preflight.Assessment, dict[str, Any]]]
+Preflight = Callable[..., tuple[preflight.Assessment, dict[str, Any]]]
 
 
-def real_preflight(guest: Guest, note: Note) -> tuple[preflight.Assessment, dict[str, Any]]:
-    assessment, facts = preflight.run(guest, note)
+def real_preflight(guest: Guest, note: Note, jobs: int = 1) -> tuple[preflight.Assessment, dict[str, Any]]:
+    assessment, facts = preflight.run(guest, note, jobs)
     about = {
         "tart": str(facts.tart) if facts.tart else None,
         "tart_version": facts.tart_version,
@@ -94,6 +95,7 @@ class LabPlugin:
         guest: Guest,
         mode: str = "checks",
         vm_mode: str = "per-check",
+        jobs: int = 1,
         keep_on_failure: bool = False,
         machine_factory: MachineFactory | None = None,
         state_dir: Path = config.STATE_DIR,
@@ -112,6 +114,7 @@ class LabPlugin:
         self.guest = guest
         self.mode = mode
         self.vm_mode = vm_mode
+        self.jobs = jobs
         self.keep_on_failure = keep_on_failure
         self.machine_factory = machine_factory
         self.state_dir = state_dir
@@ -131,6 +134,19 @@ class LabPlugin:
         self.blocked = False
         self.started = clock()
         self.names: dict[str, str] = {}
+        # A machine booted ahead of the check that will use it, and the thread
+        # doing it. `--jobs 2` means two machines alive, not two checks running:
+        # the checks stay in pytest's own serial loop, and what overlaps is one
+        # guest booting while the previous one is still being used. Everything
+        # here is touched from the warming thread and from the main thread, so
+        # every read and write of it goes through the lock.
+        self._warm: dict[str, Any] = {}
+        self._warm_failure: dict[str, str] = {}
+        self._warming: threading.Thread | None = None
+        self._warming_label: str | None = None
+        self._warm_lock = threading.Lock()
+        # Which machine label follows which, in the order the checks will run.
+        self.next_label: dict[str, str] = {}
         self.records: dict[str, CheckRecord] = {}
         self.collection_errors: list[str] = []
         self.lab_problems: list[str] = []
@@ -197,6 +213,96 @@ class LabPlugin:
             note=self.note,
             display=display,
         )
+
+    # --- Warming the next machine -------------------------------------------
+
+    def _start_warming(self, after: str) -> None:
+        """Begin booting the machine the next check will want, in the background.
+
+        This is the whole of `--jobs 2`: two machines alive, never two checks
+        running. The checks stay in pytest's own serial loop, so the console,
+        the ledger and Ctrl-C keep working exactly as they did — what overlaps
+        is a guest booting while the previous guest is still being used.
+        """
+        if self.jobs < 2:
+            return
+        following = self.next_label.get(after)
+        if following is None:
+            return
+        with self._warm_lock:
+            if following in self._warm or self._warming_label is not None:
+                return
+            machine = self.new_machine(following)
+            machine.slept_at = self.slept_at()
+            self._warm[following] = machine
+            self._warming_label = following
+            self._warming = threading.Thread(
+                target=self._warm_one,
+                args=(following, machine),
+                name=f"warming-{following}",
+                daemon=True,
+            )
+            self._warming.start()
+
+    def _warm_one(self, label: str, machine: Any) -> None:
+        """Clone and boot, and clean nothing up.
+
+        `interrupts.deferred` is a no-op off the main thread, so a clone torn
+        down here would lose the protection that makes Ctrl-C safe mid-delete.
+        Whatever this leaves behind — a half-cloned machine, a booted one nobody
+        wanted — is closed by the main thread, either when the check takes it or
+        when the run ends.
+        """
+        try:
+            machine.create()
+            machine.boot()
+        except BaseException as error:  # noqa: BLE001 — reported where it is taken
+            with self._warm_lock:
+                self._warm_failure[label] = str(error)
+        finally:
+            with self._warm_lock:
+                self._warming_label = None
+
+    def _take_the_warm_one(self, label: str) -> Any | None:
+        """The machine booted ahead for this label, or nothing — never a failure.
+
+        A machine that did not come up in the background is not this check's
+        verdict: it is put back and the check boots its own, the way it would
+        have without `--jobs 2`.
+        """
+        with self._warm_lock:
+            warming = self._warming if self._warming_label == label else None
+        if warming is not None:
+            warming.join()
+        with self._warm_lock:
+            machine = self._warm.pop(label, None)
+            failure = self._warm_failure.pop(label, None)
+        if machine is None:
+            return None
+        if failure is not None:
+            self.note(f"   the machine started ahead of this check did not come up ({failure}); making another")
+            for problem in machine.close(keep=False):
+                self.note(f"   ⚠️ cleaning up after it: {problem}")
+            return None
+        self.note(f"   {machine.name} was already up")
+        return machine
+
+    def _close_the_warm_ones(self) -> None:
+        """Put back whatever was booted ahead and never used — on the main thread."""
+        with self._warm_lock:
+            warming = self._warming
+        if warming is not None:
+            warming.join()
+        with self._warm_lock:
+            left = sorted(self._warm.items())
+            self._warm.clear()
+            self._warm_failure.clear()
+            self._warming = None
+            self._warming_label = None
+        for _, machine in left:
+            self.note(f"   putting back {machine.name}, which was started ahead and not used")
+            for problem in machine.close(keep=False):
+                self.note(f"   ⚠️ cleaning up {machine.name}: {problem}")
 
     # --- Builds ------------------------------------------------------------
 
@@ -288,6 +394,37 @@ class LabPlugin:
             config.hook.pytest_deselected(items=dropped)
         items[:] = keep
         self.names = {by_name[name].nodeid: name for name in chosen}
+        self._plan_the_warming(keep)
+
+    def _plan_the_warming(self, items: list[pytest.Item]) -> None:
+        """Which machine label follows which, so one can be booted ahead of time.
+
+        Labels repeat while a group or the whole run shares a machine, so what
+        matters is the sequence of *distinct* machines. A label that comes back
+        after another one has been in between is dropped rather than warmed: the
+        name would be a machine that has already been deleted once, and a clone
+        warmed under it could collide with the one still shutting down.
+        """
+        order: list[str] = []
+        for item in items:
+            label = self._label_for(item)
+            if not order or order[-1] != label:
+                order.append(label)
+        seen_twice = {label for label in order if order.count(label) > 1}
+        self.next_label = {
+            before: after
+            for before, after in zip(order, order[1:])
+            if after not in seen_twice
+        }
+
+    def _label_for(self, node: Any) -> str:
+        """The machine a check shares — itself, its group, or the whole run."""
+        scope = VM_SCOPES[self.vm_mode]
+        if scope == "function":
+            return self.names[node.nodeid]
+        if scope == "module":
+            return names.group_of(names.check_name(Path(str(node.path)).stem, "check_x"))
+        return "run"
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
         if self.collection_errors:
@@ -347,7 +484,7 @@ class LabPlugin:
             self.record_event("host", text=text)
 
         try:
-            assessment, about = self.run_preflight(self.guest, note)
+            assessment, about = self.run_preflight(self.guest, note, self.jobs)
         except Exception as error:  # noqa: BLE001 — reported, never swallowed
             assessment = preflight.Assessment(
                 [preflight.Problem(f"The pre-flight itself failed: {error!r}.", "This is a bug in the lab.")],
@@ -434,21 +571,22 @@ class LabPlugin:
         machine is in, never assume it.
         """
         scope = VM_SCOPES[self.vm_mode]
-        if scope == "function":
-            label = self.names[request.node.nodeid]
-        elif scope == "module":
-            label = names.group_of(names.check_name(Path(str(request.node.path)).stem, "check_x"))
-        else:
-            label = "run"
-        machine = self.new_machine(label)
-        machine.slept_at = self.slept_at()
-        try:
-            machine.create()
-            machine.boot()
-        except BaseException:
-            for problem in machine.close(keep=False):
-                self.note(f"   ⚠️ cleaning up after a machine that did not start: {problem}")
-            raise
+        label = self._label_for(request.node)
+        machine = self._take_the_warm_one(label)
+        if machine is None:
+            machine = self.new_machine(label)
+            machine.slept_at = self.slept_at()
+            try:
+                machine.create()
+                machine.boot()
+            except BaseException:
+                for problem in machine.close(keep=False):
+                    self.note(f"   ⚠️ cleaning up after a machine that did not start: {problem}")
+                raise
+        # Only once this check has its machine: starting earlier would have two
+        # guests booting at once and, with the previous one not yet gone, three
+        # alive — one past what macOS allows.
+        self._start_warming(after=label)
         yield machine
         keep = self.keep_on_failure and self.failed_in(scope, request)
         problems = machine.close(keep=keep)
@@ -595,6 +733,9 @@ class LabPlugin:
 
     def _finish_run(self, teardown_error: BaseException | None) -> None:
         try:
+            # First, and whatever else went wrong: a machine booted ahead of a
+            # check that never ran is a clone nobody will ever look for again.
+            self._close_the_warm_ones()
             if self.run_dir is None:
                 return
             if teardown_error is not None:

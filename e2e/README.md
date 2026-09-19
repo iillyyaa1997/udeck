@@ -31,6 +31,7 @@ e2e/run.sh updates.wrong-key   # one check
 e2e/run.sh --guest 26          # on macOS 26 instead of 27 (bake it first)
 e2e/run.sh --vm per-group      # one machine per group instead of per check
 e2e/run.sh --keep-on-failure   # keep a failed check's machine to look at
+e2e/run.sh --jobs 2            # boot the next check's machine while this one runs
 e2e/run.sh cleanup --list      # what cleanup would remove, removing nothing
 e2e/run.sh cleanup             # remove kept or left-behind clones
 e2e/run.sh cleanup --golden --guest 26   # …and macOS 26's golden image
@@ -79,6 +80,18 @@ power-off, is used only after a minute of silence and is reported. With
 `--vm per-check` (the default) every check gets its own clone; `per-group` and
 `per-run` share one, so a check must find out the state it needs rather than
 assume it.
+
+`--jobs 2` means two machines alive, never two checks running. The checks stay
+in one serial loop — so the console, the ledger and Ctrl-C work exactly as they
+do at `--jobs 1` — and what overlaps is the next check's guest booting while the
+current one is still being used. Starting is what costs: a clone, a boot and a
+wait for the desktop, paid once per check today and hidden behind the previous
+check instead. It begins only once the current check has its machine, because
+two booting at the same time as one still shutting down would be three at once,
+one past what macOS allows. A machine that does not come up in the background is
+not a verdict: it is put back and the check boots its own, exactly as it would
+have. With `--vm per-run` there is no next machine, so `--jobs 2` is refused
+there rather than quietly doing nothing.
 
 If the Mac goes to sleep during a check, anything that went wrong in it becomes
 "could not check".

@@ -59,6 +59,14 @@ def parser() -> argparse.ArgumentParser:
         help="a fresh machine for every check (default), for every group, or one for the whole run",
     )
     p.add_argument(
+        "--jobs",
+        type=int,
+        choices=[1, 2],
+        default=None,
+        help="how many machines are alive at once (default 1); 2 boots the next check's machine "
+             "while the current one is still in use — the checks themselves still run one at a time",
+    )
+    p.add_argument(
         "--keep-on-failure",
         action="store_true",
         help="keep the machine of a check that did not pass, stopped and renamed udeck-e2e-kept-…",
@@ -97,8 +105,8 @@ def pytest_args(target_dir: Path, listing: bool) -> list[str]:
 # Which options each command takes. An option a command would ignore is refused:
 # `cleanup --list` once deleted the kept clones it was asked to list.
 ALLOWED = {
-    "checks": {"list", "guest", "vm", "keep_on_failure"},
-    "selfcheck": {"list", "guest", "vm", "keep_on_failure"},
+    "checks": {"list", "guest", "vm", "keep_on_failure", "jobs"},
+    "selfcheck": {"list", "guest", "vm", "keep_on_failure", "jobs"},
     "bake": {"list", "guest"},
     "cleanup": {"list", "guest", "golden"},
 }
@@ -116,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         for name, value in (
             ("list", args.list), ("guest", args.guest), ("vm", args.vm),
             ("keep_on_failure", args.keep_on_failure), ("golden", args.golden),
+            ("jobs", args.jobs),
         )
         if value not in (None, False)
     }  # fmt: skip
@@ -123,6 +132,13 @@ def main(argv: list[str] | None = None) -> int:
     if refused:
         flags = ", ".join("--" + name.replace("_", "-") for name in refused)
         print(f"{flags} does nothing with {'checks' if mode == 'checks' else repr(mode)}.", file=sys.stderr)
+        return EXIT_NOT_CHECKED
+
+    # `--jobs 2` boots the machine the *next* check will use. With one machine for the
+    # whole run there is no next machine, so the option would quietly do nothing — and an
+    # option that does nothing is refused here rather than ignored.
+    if args.jobs == 2 and args.vm == "per-run":
+        print("--jobs 2 does nothing with --vm per-run: there is only ever one machine.", file=sys.stderr)
         return EXIT_NOT_CHECKED
 
     # Closing the terminal or `kill` stops the lab the way Ctrl-C does, cleanup included.
@@ -139,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
         guest=config.GUESTS[args.guest or config.DEFAULT_GUEST],
         mode=mode,
         vm_mode=args.vm or "per-check",
+        jobs=args.jobs or 1,
         keep_on_failure=args.keep_on_failure,
         repo_root=REPO_ROOT,
         checks_dir=target,

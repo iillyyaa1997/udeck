@@ -87,6 +87,11 @@ def test_closing_the_terminal_during_a_cleanup_is_deferred_like_ctrl_c(sig):
         ["--golden"],
         ["panel", "--golden"],
         ["bake", "selfcheck"],
+        ["bake", "--jobs", "2"],
+        ["cleanup", "--jobs", "2"],
+        # Nothing follows the one machine of a whole run, so there is nothing to
+        # start ahead of it — and an option that would do nothing is refused.
+        ["--jobs", "2", "--vm", "per-run"],
     ],
 )
 def test_an_option_a_command_would_ignore_is_refused(argv, capsys, monkeypatch):
@@ -136,3 +141,18 @@ def test_the_command_line_makes_a_closed_terminal_stop_the_lab_like_ctrl_c(monke
     signal.signal(signal.SIGHUP, signal.SIG_DFL)
     cli.main(["cleanup", "--list"])
     assert callable(signal.getsignal(signal.SIGTERM)) and callable(signal.getsignal(signal.SIGHUP))
+
+
+def test_jobs_reaches_the_run_and_one_is_the_default(monkeypatch):
+    seen = {}
+
+    def fake_run_pytest(plugin, args):
+        seen["jobs"] = plugin.jobs
+        return 0
+
+    monkeypatch.setattr(cli, "run_pytest", fake_run_pytest)
+    monkeypatch.setattr(interrupts, "stop_on_hangup_and_terminate", lambda: None)
+    assert cli.main(["--jobs", "2"]) == 0
+    assert seen == {"jobs": 2}
+    assert cli.main([]) == 0
+    assert seen == {"jobs": 1}

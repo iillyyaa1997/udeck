@@ -8,8 +8,10 @@ person would read: the console lines, the exit code, the ledger.
 import io
 import json
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -33,10 +35,18 @@ class Lab:
         self.problems: list[preflight.Problem] = []
         self.host_notes: list[str] = []
         self.preflights = 0
+        # How many machines the pre-flight was told to size the host for.
+        self.preflight_jobs: list[int] = []
         self.state_dir = pytester.path / "state"
         self.vms = [config.GUESTS["27"].golden_vm]
         golden.write(config.GUESTS["27"], "26A5416b", self.state_dir)
         self.machines: list[FakeMachine] = []
+        # Everything every machine did, in one order, so a test can say what
+        # overlapped with what. The checks write into it too (they are handed a
+        # FakeMachine, which knows its lab).
+        self.timeline: list[str] = []
+        # Which label's boot should fail, for the machines started ahead.
+        self.boot_fails_for: str | None = None
         self.slept = "{ sec = 0, usec = 0 }"
         self.mode = "checks"
 
@@ -45,11 +55,22 @@ class Lab:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source)
 
-    def fake_preflight(self, guest, note):
+    def fake_preflight(self, guest, note, jobs=1):
         self.preflights += 1
+        self.preflight_jobs.append(jobs)
         for text in self.host_notes:
             note(text)
         return preflight.Assessment(list(self.problems), []), {"host_macos": "27.0", "vms": self.vms}
+
+    def wait_for(self, event, seconds=10):
+        """Block until `event` is in the timeline — the only honest way to assert
+        that something happened on another thread."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if event in self.timeline:
+                return True
+            time.sleep(0.01)
+        raise AssertionError(f"{event!r} never happened; timeline: {self.timeline}")
 
     def factory(self, **kwargs):
         machine = FakeMachine(self, **kwargs)
@@ -116,14 +137,23 @@ class FakeMachine:
 
     def create(self):
         self.events.append("create")
+        self.lab.timeline.append(f"{self.label} create")
         if "create" in getattr(self.lab, "break_machine", ()):
             raise LabError(f"cloning {self.name}", "disk full")
 
     def boot(self):
         self.events.append("boot")
+        if self.lab.boot_fails_for == self.label:
+            # Once: the point of the test that uses this is that the check's own
+            # attempt afterwards is an ordinary one that works.
+            self.lab.boot_fails_for = None
+            self.lab.timeline.append(f"{self.label} boot failed")
+            raise LabError(f"starting {self.name}", "the desktop never came up")
+        self.lab.timeline.append(f"{self.label} boot")
 
     def close(self, keep):
         self.events.append(f"close keep={keep}")
+        self.lab.timeline.append(f"{self.label} close")
         return list(getattr(self.lab, "close_problems", []))
 
     def screenshot(self, directory, step):
@@ -773,3 +803,111 @@ def test_every_check_builds_into_a_directory_of_its_own(lab, tmp_path):
     assert "updates.sparkle" in str(first.work_dir) and "updates.wrong-key" in str(second.work_dir)
     # One key for the run, not one per check: the builds of both are this run's.
     assert plugin.signing_key is not None
+
+
+# --- One machine ahead of the next check (--jobs 2) -----------------------------------
+
+
+TWO_CHECKS = (
+    "def check_alpha(machine):\n"
+    "    machine.lab.wait_for('%s')\n"
+    "    machine.lab.timeline.append('alpha ran')\n"
+    "\n"
+    "def check_beta(machine):\n"
+    "    machine.lab.timeline.append('beta ran')\n"
+)
+
+
+def test_with_one_machine_nothing_is_started_before_the_check_that_wants_it(lab):
+    """The default. A second machine appearing early would spend the host's other
+    guest slot on a check that has not started."""
+    lab.write("check_pair.py",
+              "def check_alpha(machine):\n"
+              "    assert len(machine.lab.machines) == 1, machine.lab.timeline\n"
+              "\n"
+              "def check_beta(machine): pass\n")
+    code, out = lab.run()
+    assert code == 0, out
+    assert lab.timeline == ["pair.alpha create", "pair.alpha boot", "pair.alpha close",
+                            "pair.beta create", "pair.beta boot", "pair.beta close"]
+
+
+def test_with_two_machines_the_next_one_boots_while_this_check_runs(lab):
+    """What --jobs 2 buys: the overlap itself, asserted rather than assumed — the
+    check blocks until the next machine is up, so a lab that warms nothing hangs
+    and then fails here."""
+    lab.write("check_pair.py", TWO_CHECKS % "pair.beta boot")
+    code, out = lab.run(jobs=2)
+    assert code == 0, out
+    assert lab.timeline.index("pair.beta boot") < lab.timeline.index("pair.alpha close"), lab.timeline
+    assert lab.timeline.index("alpha ran") < lab.timeline.index("beta ran")
+    # And not before this check's own machine is up: two booting at once, with the
+    # previous one not yet gone, is three alive — one past what macOS allows.
+    assert lab.timeline.index("pair.alpha boot") < lab.timeline.index("pair.beta create"), lab.timeline
+
+
+def test_the_machine_started_ahead_is_the_one_the_next_check_uses(lab):
+    """Warmed and then thrown away would be worse than not warming: two clones per
+    check, and the host's guest limit spent on a machine nobody used."""
+    lab.write("check_pair.py", TWO_CHECKS % "pair.beta boot")
+    code, out = lab.run(jobs=2)
+    assert code == 0, out
+    assert [m.label for m in lab.machines] == ["pair.alpha", "pair.beta"]
+    assert lab.timeline.count("pair.beta create") == 1 and lab.timeline.count("pair.beta boot") == 1
+    assert "was already up" in out
+
+
+def test_the_last_check_starts_nothing_behind_it(lab):
+    lab.write("check_pair.py", "def check_alpha(machine): pass\n")
+    code, out = lab.run(jobs=2)
+    assert code == 0, out
+    assert [m.label for m in lab.machines] == ["pair.alpha"]
+
+
+def test_a_machine_that_did_not_come_up_ahead_of_time_is_not_the_next_check_s_verdict(lab):
+    """A background boot that failed says so and is put back; the check then does
+    what it would have done without --jobs 2, and passes."""
+    lab.write("check_pair.py", TWO_CHECKS % "pair.beta boot failed")
+    lab.boot_fails_for = "pair.beta"
+    code, out = lab.run(jobs=2)
+    assert code == 0, out
+    assert "did not come up" in out
+    # Put back, and the check made its own — two machines under that one label.
+    assert [m.label for m in lab.machines] == ["pair.alpha", "pair.beta", "pair.beta"]
+    assert lab.machines[1].events == ["create", "boot", "close keep=False"]
+
+
+def test_a_machine_started_ahead_and_never_used_is_put_back(lab):
+    """Ctrl-C while the next machine is already up: nothing else will ever look for
+    that clone, and it is closed on the main thread, where the interrupt shield works."""
+    lab.write("check_pair.py",
+              "def check_alpha(machine):\n"
+              "    machine.lab.wait_for('pair.beta boot')\n"
+              "    raise KeyboardInterrupt\n"
+              "\n"
+              "def check_beta(machine): pass\n")
+    code, out = lab.run(jobs=2)
+    assert code != 0
+    assert "started ahead and not used" in out
+    assert lab.machines[1].label == "pair.beta"
+    assert "close keep=False" in lab.machines[1].events
+
+
+def test_the_host_is_sized_for_the_machines_that_will_be_alive_at_once(lab):
+    lab.write("check_pair.py", "def check_alpha(machine): pass\ndef check_beta(machine): pass\n")
+    lab.run(jobs=2)
+    assert lab.preflight_jobs == [2]
+    lab.preflight_jobs.clear()
+    lab.run()
+    assert lab.preflight_jobs == [1]
+
+
+def test_a_machine_that_comes_back_later_in_the_run_is_never_started_ahead(lab):
+    """Warming is planned from the order of distinct machines. A label that returns
+    after another one has been in between names a clone that has already been deleted
+    once, and a new one under that name could collide with the old one shutting down."""
+    plugin = lab.plugin()
+    plugin.names = {"a::x": "one.x", "b::y": "two.y", "c::z": "one.x"}
+    items = [SimpleNamespace(nodeid=nodeid, path=Path("/checks/check_one.py")) for nodeid in plugin.names]
+    plugin._plan_the_warming(items)
+    assert plugin.next_label == {"one.x": "two.y"}
