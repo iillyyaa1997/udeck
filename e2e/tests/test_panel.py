@@ -10,7 +10,7 @@ import re
 from pathlib import Path
 
 import pytest
-from fakes import Dropped, Machine
+from fakes import Dropped, Failed, Machine
 
 from udeck_e2e import config, panel
 from udeck_e2e.errors import LabError
@@ -137,6 +137,7 @@ def test_the_push_is_made_inside_the_guest_by_the_script_the_lab_ships():
         "0",
         str(config.THROW_DELTA),
         str(config.THROW_PAUSE_SECONDS),
+        str(config.PINNED_TOLERANCE_PIXELS),
         str(config.PUSH_STEPS),
         str(config.PUSH_DELTA),
         str(config.PUSH_PAUSE_SECONDS),
@@ -158,7 +159,24 @@ def test_only_the_push_at_the_edge_throws_the_pointer_there_first():
         return [c for c in machine.ssh.commands if panel.GUEST_PUSH in c][0].split()[2]
 
     assert steps(parked) == "0"
-    assert steps(thrown) == str(config.THROW_STEPS)
+    assert steps(thrown) == str(config.THROW_CAP)
+
+
+def test_a_kernel_that_refused_the_push_is_a_lab_failure_and_not_a_verdict():
+    """The guest's script exits non-zero when the kernel refuses a report, and the
+    lab runs it with `check=True`. That exit code is the whole distance between a
+    machine that would not take the movement and a sentence about uDeck.
+
+    The commonest way to earn the refusal is running it under `sudo`, which the
+    script also says out loud — the privilege is the console user's, and root
+    holds no console session."""
+    refused = Machine({"push-pointer": Failed(
+        code=1,
+        said='{"uid": 0, "euid": 0, "push": ["kIOReturnNotPrivileged"], '
+             '"warning": "running as root, which has no console session; the kernel refuses these"}',
+    )})
+    with pytest.raises(LabError, match="kIOReturnNotPrivileged"):
+        panel.push_upward(refused, "pushing")
 
 
 def test_the_push_and_the_throw_the_lab_sends_are_both_upward():
@@ -168,17 +186,44 @@ def test_the_push_and_the_throw_the_lab_sends_are_both_upward():
     assert config.THROW_DELTA < 0
 
 
-def test_the_throw_reaches_the_edge_and_the_push_alone_never_does():
+def test_the_throw_can_reach_the_edge_and_the_push_alone_never_does():
     """Two numbers that have to stay on opposite sides of the same distance.
 
-    The throw starts in the middle of the screen and has to pin the pointer
-    against the top — anything less and the check pushes in mid-air. The push on
-    its own must not come close, or the control in the middle of the screen would
-    carry itself into the strip and fire the dwell it exists to rule out.
+    The throw starts in the middle of the screen and has to be able to pin the
+    pointer against the top — anything less and the check pushes in mid-air. The
+    push on its own must not come close, or the control in the middle of the
+    screen would carry itself into the strip and fire the dwell it exists to rule
+    out.
     """
     to_the_edge = config.SCREEN_HEIGHT // 2
-    assert config.THROW_STEPS * abs(config.THROW_DELTA) > to_the_edge
+    assert config.THROW_CAP * abs(config.THROW_DELTA) > to_the_edge
     assert config.PUSH_STEPS * abs(config.PUSH_DELTA) < to_the_edge / 4
+
+
+def test_the_throw_is_a_cap_and_the_push_is_what_clears_uDecks_threshold():
+    """The failure this is here to prevent is a green check that tested nothing.
+
+    uDeck counts upward movement made while the pointer was *already* pinned. A
+    throw that keeps reporting once it has arrived is therefore a push, and at the
+    throw's own step size a single extra report clears the threshold twice over —
+    the run says `fired by push` and the push the check actually makes never
+    mattered. That is what the audit of 2026-09-19 found here.
+
+    So the throw is bounded by the pointer, not by a count: the script stops at
+    the edge. What this asserts is the part a count *could* still get wrong —
+    that one report of the throw is too big to be a safe overshoot, which is why
+    it must never be allowed to become one.
+    """
+    tuning_path = (
+        Path(panel.__file__).resolve().parents[2] / "Sources" / "UDeckCore" / "Configuration" / "GestureTuning.swift"
+    )
+    assert tuning_path.exists()
+    assert abs(config.THROW_DELTA) > _default("edgePushDistance"), (
+        "one throw report already clears uDeck's push threshold, so the throw must stop at the edge "
+        "rather than run to a count — see push-pointer.py"
+    )
+    # And the push, which is what the check is about, clears it on its own.
+    assert config.PUSH_STEPS * abs(config.PUSH_DELTA) >= _default("edgePushDistance") * 2
 
 
 def test_the_lab_is_not_stricter_about_being_pinned_than_uDeck_is():

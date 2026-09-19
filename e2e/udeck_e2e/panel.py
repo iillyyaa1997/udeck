@@ -157,21 +157,26 @@ def push_upward(
     names no place — which is the whole reason this is the path that works.
     Whoever calls this has put the pointer there.
 
-    `throw` first carries the pointer to the top edge and holds it: the check
+    `throw` first carries the pointer to the top edge and stops there: the check
     that pushes at the edge cannot be *placed* there, because a pointer resting
     in the strip opens the panel by the dwell within a fraction of a second, long
-    before an SSH command could push it. The control in the middle of the screen
-    takes no throw — it pushes where it was parked, and 60 points of movement
-    leave it 660 below the strip.
+    before an SSH command could push it. Stopping is as important as throwing —
+    uDeck counts upward movement made while the pointer was already pinned, so a
+    throw that overshoots is itself a push and the real one never matters. The
+    script watches the pointer and stops at the edge rather than counting reports.
+
+    The control in the middle of the screen takes no throw — it pushes where it
+    was parked, and 60 points of movement leave it 660 below the strip.
 
     `steps × |delta|` has to clear uDeck's threshold inside its window — both are
     in `GestureTuning`, and the lab's numbers are chosen with room.
     """
     machine.ssh.copy_in(PUSH_SCRIPT, GUEST_PUSH, step)
-    throw_steps = config.THROW_STEPS if throw else 0
+    throw_cap = config.THROW_CAP if throw else 0
     done = machine.ssh.run(
         f"/usr/bin/python3 {shlex.quote(GUEST_PUSH)} "
-        f"{throw_steps} {config.THROW_DELTA} {config.THROW_PAUSE_SECONDS} {steps} {delta} {pause}",
+        f"{throw_cap} {config.THROW_DELTA} {config.THROW_PAUSE_SECONDS} {config.PINNED_TOLERANCE_PIXELS} "
+        f"{steps} {delta} {pause}",
         step,
     )
     return done.stdout.strip()

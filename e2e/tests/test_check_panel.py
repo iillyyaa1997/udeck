@@ -132,7 +132,7 @@ def test_the_push_passes_when_uDeck_says_the_push_fired(monkeypatch, lab, check_
     machine = prepared(monkeypatch, ATTACHED + PUSH)
     checks.check_push(machine, check_dir, lab)
     # Thrown at the edge by the same movement that then pushes there.
-    assert pushed_with(machine)[0] == str(config.THROW_STEPS)
+    assert pushed_with(machine)[0] == str(config.THROW_CAP)
     # The pointer is never *placed* at the edge from this Mac: it would dwell
     # there long before a command could push it, and the panel would open by the
     # path this check is not about.

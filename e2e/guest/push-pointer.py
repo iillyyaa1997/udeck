@@ -45,11 +45,20 @@ would open the panel by the path this is not about.
 No PyObjC: the guest has the system's Python 3.9, which has none, so the calls
 are made through ctypes.
 
-    push-pointer.py <throw-steps> <throw-delta> <throw-pause> <steps> <delta> <pause>
+    push-pointer.py <throw-cap> <throw-delta> <throw-pause> <pinned> <steps> <delta> <pause>
 
-A negative delta is upward. `throw-steps` may be 0, which is what the control in
+A negative delta is upward. `throw-cap` may be 0, which is what the control in
 the middle of the screen uses: it pushes where the pointer already is, and a
 throw would carry it somewhere else.
+
+The throw stops the moment the pointer is within `pinned` pixels of the top,
+which is why `throw-cap` is a cap and not a count. That is not tidiness. uDeck
+counts upward movement made while the pointer was *already* pinned, so a throw
+that keeps going after it arrives is itself a push — and a large one: a throw
+overshooting the edge by its own step size clears the threshold several times
+over, and the run would say `fired by push` with the push that follows it never
+having mattered. Stopping at the edge leaves the threshold to be cleared by the
+push, which is the only way this check is about the push.
 """
 
 import ctypes
@@ -84,8 +93,18 @@ RETURNS = {
 }
 
 
+# CoreGraphics, for reading where the pointer is between reports. It comes through
+# ApplicationServices, which is in the shared cache and costs nothing to load.
+APPLICATION_SERVICES = "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+CORE_FOUNDATION = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
+
+
 class IOGPoint(ctypes.Structure):
     _fields_ = [("x", ctypes.c_int16), ("y", ctypes.c_int16)]
+
+
+class CGPoint(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
 
 
 def named(code):
@@ -126,6 +145,32 @@ def iokit():
     return library
 
 
+def pointer_reader():
+    """A function answering where the pointer is now, in pixels from the top-left.
+
+    An event made with no source carries the current pointer location, which is
+    the cheapest way to ask without AppKit — and AppKit is not available here.
+    The coordinates are the ones a screenshot uses, so `y == 0` is the top row.
+    """
+    services = ctypes.CDLL(APPLICATION_SERVICES)
+    core = ctypes.CDLL(CORE_FOUNDATION)
+    services.CGEventCreate.argtypes = [ctypes.c_void_p]
+    services.CGEventCreate.restype = ctypes.c_void_p
+    services.CGEventGetLocation.argtypes = [ctypes.c_void_p]
+    services.CGEventGetLocation.restype = CGPoint
+    core.CFRelease.argtypes = [ctypes.c_void_p]
+
+    def where():
+        event = services.CGEventCreate(None)
+        if not event:
+            return None
+        at = services.CGEventGetLocation(event)
+        core.CFRelease(event)
+        return (at.x, at.y)
+
+    return where
+
+
 def post(library, connect, delta):
     """One report of relative movement: nothing sideways, `delta` vertically.
 
@@ -151,15 +196,18 @@ def post(library, connect, delta):
 
 
 def main(argv):
-    if len(argv) != 7:
+    if len(argv) != 8:
         print(usage(), file=sys.stderr)
         return 2
-    throw_steps, throw_delta, throw_pause = int(argv[1]), whole(argv[2]), float(argv[3])
-    steps, delta, pause = int(argv[4]), whole(argv[5]), float(argv[6])
+    throw_cap, throw_delta, throw_pause = int(argv[1]), whole(argv[2]), float(argv[3])
+    pinned = float(argv[4])
+    steps, delta, pause = int(argv[5]), whole(argv[6]), float(argv[7])
 
     library = iokit()
     system = ctypes.CDLL(None)
-    said = {"uid": system.getuid(), "euid": system.geteuid(), "throw": [], "push": []}
+    where = pointer_reader()
+    said = {"uid": system.getuid(), "euid": system.geteuid(), "throw": [], "push": [],
+            "thrown": 0, "at": None, "pinned": None}  # fmt: skip
     if said["euid"] == 0:
         # Said rather than refused: the run is the measurement, and a refusal
         # here would hide the kernel's own answer from whoever reads the report.
@@ -181,13 +229,26 @@ def main(argv):
         return 1
 
     try:
-        # The throw: enough upward movement to cross the screen and be held at the
-        # top. uDeck does not count the movement that *arrives* at the edge — the
-        # throw is not a push, and counting it would fire the gesture on any fast
-        # flick at the menu bar — so the throw ends where the push begins.
-        for _ in range(throw_steps):
+        # The throw: upward movement until the pointer can go no higher, and then
+        # not one report more. uDeck does not count the movement that *arrives* at
+        # the edge — the throw is not a push — but it counts everything after, so a
+        # throw that overshoots would be the push this check is supposed to make.
+        for _ in range(throw_cap):
             said["throw"].append(named(post(library, connect.value, throw_delta)))
+            said["thrown"] += 1
             time.sleep(throw_pause)
+            at = where()
+            if at is not None and at[1] <= pinned:
+                said["at"] = [round(at[0], 1), round(at[1], 1)]
+                said["pinned"] = True
+                break
+        else:
+            if throw_cap:
+                # Said, not raised: where the pointer got to is the measurement, and
+                # the check reads it back itself before it says anything about uDeck.
+                at = where()
+                said["at"] = [round(at[0], 1), round(at[1], 1)] if at else None
+                said["pinned"] = False
         # The push: movement reported while the pointer can go no higher.
         for _ in range(steps):
             said["push"].append(named(post(library, connect.value, delta)))

@@ -196,15 +196,20 @@ PUSH_PAUSE_SECONDS = 0.005
 
 # The throw that puts the pointer against the top edge before the push, for the
 # check that pushes there. It starts in the middle of the screen, 720 pixels
-# below the edge; fifteen reports of sixty cross that with room and the last of
-# them arrive while the pointer is already pinned. The pause is short because
-# nothing here may rest: the dwell fires 0.06 s after the pointer stops, and
-# this whole movement has to be over before then.
+# below the edge, and stops the moment the pointer is pinned — so this is a cap,
+# not a count, and it only has to be generous enough to cross the screen even if
+# pointer acceleration works against it.
 #
-# The throw is not the push. uDeck does not count the movement that *arrives* at
-# the edge — counting it would fire the gesture on any fast flick at the menu
-# bar — so what the throw buys is only the pinning.
-THROW_STEPS = 15
+# **The throw must not overshoot**, and that is the whole reason it watches the
+# pointer instead of counting reports. uDeck does not count the movement that
+# *arrives* at the edge, but it counts everything after it — so a throw that
+# keeps going once it is there is itself a push, and a large one: at sixty points
+# a report it clears the 24-point threshold twice over. The run would still say
+# `fired by push`, with the push that follows having mattered to nothing, and the
+# check would be green while testing a gesture it never made. Measured in the
+# audit of 2026-09-19, before this: fifteen reports of sixty from the middle of a
+# 1440-pixel screen overshot by 180 points, and the panel opened on the throw.
+THROW_CAP = 30
 THROW_DELTA = -60.0
 THROW_PAUSE_SECONDS = 0.002
 

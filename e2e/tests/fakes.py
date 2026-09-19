@@ -26,6 +26,19 @@ class Dropped:
     """
 
 
+class Failed:
+    """An answer that is a non-zero exit code, with whatever the command printed.
+
+    `Dropped` is the connection going away; this is the guest answering "no". The
+    two used to be the same thing here, and a check that turns a refused command
+    into a lab error had no way to be tested at all.
+    """
+
+    def __init__(self, code=1, said=""):
+        self.code = code
+        self.said = said
+
+
 class Guest:
     """The SSH side: scripted answers by substring, and a record of what was asked.
 
@@ -58,6 +71,13 @@ class Guest:
             return done("", rc=255)
         if isinstance(answer, BaseException):
             raise answer
+        if isinstance(answer, Failed):
+            # A command that ran and said no. Distinct from Dropped, which is the
+            # connection going away: this guest answered, and the answer is an exit
+            # code — which is how the guest reports a kernel call it was refused.
+            if check:
+                raise LabError(step, answer.said or f"exit {answer.code}")
+            return done(answer.said, rc=answer.code)
         return done(answer or "")
 
     def ask(self, command, step, seconds=None):

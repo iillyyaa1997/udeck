@@ -28,6 +28,17 @@ for what that promises.
   This also measured something uDeck had only assumed: that at an edge the
   position stops changing while the delta keeps arriving. It does.
 
+  **The throw stops at the edge**, and that is the check rather than a detail.
+  uDeck counts upward movement made while the pointer was *already* pinned, so a
+  throw that runs to a count instead of to the edge is itself a push — at sixty
+  points a report it clears the twenty-four-point threshold twice over, the run
+  says `fired by push`, and the push the check makes never matters. An audit of
+  the lab on 2026-09-19 found exactly that: the first version overshot by 180
+  points and the panel opened on the throw. The script now watches the pointer
+  and stops when it arrives, so the threshold is left to the push. Measured
+  after: twelve reports to reach the edge from the middle of the screen, nothing
+  past it, and `fired by push`.
+
 ## [0.5.0] — 2026-09-19
 
 uDeck opens when you log in, if you ask it to. The setting exists because of a
