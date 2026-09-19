@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from fakes import Lab, Machine
+from fakes import Dropped, Lab, Machine
 
 from udeck_e2e import app, login, ui
 from udeck_e2e.errors import CheckFailed, LabError
@@ -156,6 +156,37 @@ def test_a_machine_that_comes_back_without_uDeck_fails(lab, check_dir, monkeypat
     assert machine.now >= checks.OPENS_WITHIN_SECONDS, "it is given the whole window first"
 
 
+def test_a_screenshot_that_fails_does_not_hide_uDeck_not_coming_back(lab, check_dir, monkeypatch):
+    """The verdict is about uDeck, and a camera that failed is not allowed to take it.
+
+    A machine that lost its login item across a restart is the same machine whose VNC and
+    sudo are suspect, so the two are likeliest to fail together — and "could not check"
+    on that run costs the whole run.
+    """
+    machine = a_machine([ON, ON], running="")
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    machine.screenshot_fails = LabError("taking a screenshot", "the machine is gone")
+    machine.screenshot_fails_at = "after the restart"
+    with pytest.raises(CheckFailed, match="did not open"):
+        checks.check_survives_a_restart(machine, check_dir, lab)
+
+
+def test_an_unreadable_database_does_not_hide_uDeck_not_coming_back(lab, check_dir, monkeypatch):
+    """The same for the record: it is quoted in the sentence, not consulted for it."""
+    machine = a_machine([ON, Dropped], running="")
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(CheckFailed, match="did not open"):
+        checks.check_survives_a_restart(machine, check_dir, lab)
+
+
+def test_the_restart_check_asks_the_guest_nothing_after_it_has_passed(lab, check_dir, monkeypatch):
+    """A note is not worth a lab error: the pids printed are the ones already read."""
+    machine = a_machine([ON, ON], running=["404", Dropped])
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    checks.check_survives_a_restart(machine, check_dir, lab)
+    assert any("404" in note for note in lab.notes)
+
+
 def test_the_check_refuses_to_restart_a_machine_it_could_not_switch_on(lab, check_dir, monkeypatch):
     """A restart proves nothing when the setting was never recorded, and saying "uDeck did
     not come back" there would be a verdict against the wrong thing."""
@@ -190,6 +221,23 @@ def test_a_control_where_uDeck_opens_anyway_fails(lab, check_dir, monkeypatch):
     machine = a_machine([ON, OFF, OFF], running="909")
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     with pytest.raises(CheckFailed, match="opened at login although it had been switched off"):
+        checks.check_off_stays_off(machine, check_dir, lab)
+
+
+def test_a_screenshot_that_fails_does_not_hide_uDeck_opening_when_it_was_off(lab, check_dir, monkeypatch):
+    """The control's own failure — uDeck opening anyway — must reach the report."""
+    machine = a_machine([ON, OFF, OFF], running="909")
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    machine.screenshot_fails = LabError("taking a screenshot", "the machine is gone")
+    machine.screenshot_fails_at = "after the restart"
+    with pytest.raises(CheckFailed, match="opened at login although"):
+        checks.check_off_stays_off(machine, check_dir, lab)
+
+
+def test_an_unreadable_database_does_not_hide_uDeck_opening_when_it_was_off(lab, check_dir, monkeypatch):
+    machine = a_machine([ON, OFF, Dropped], running="909")
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(CheckFailed, match="opened at login although"):
         checks.check_off_stays_off(machine, check_dir, lab)
 
 

@@ -16,7 +16,7 @@ database, which is what macOS acts on at login, read with `sfltool dumpbtm`.
 """
 
 from udeck_e2e import app, login, ui, updates
-from udeck_e2e.errors import LabError, expect
+from udeck_e2e.errors import CheckFailed, LabError, expect
 
 VERSION = ("0.4.1", "6")
 # What uDeck updates itself to in the fourth check. The build number is what Sparkle
@@ -78,17 +78,28 @@ def check_survives_a_restart(machine, check_dir, lab):
     _switch_on(machine, check_dir, lab)
 
     machine.reboot()
-    running = _wait_until_it_opens(machine, OPENS_WITHIN_SECONDS)
-    machine.screenshot(check_dir, "after the restart")
-    # Read once, and used by both sentences below: a message is built whether or not it is
-    # needed, so a record fetched inside one costs a trip to the guest on every pass.
-    after = login.record(machine)
+    pids = _wait_until_it_opens(machine, OPENS_WITHIN_SECONDS)
+    # Nothing that can raise may stand between that measurement and the sentence below
+    # that judges it. A machine which lost its login item across a restart is also a
+    # machine whose sudo, VNC and SSH are suspect, and a screenshot or a database read
+    # that fails here turns "uDeck did not come back" into "could not check" — on exactly
+    # the run that had something to say.
+    _evidence(machine, check_dir, "after the restart", lab)
+    if not pids:
+        raise CheckFailed(
+            f"the machine restarted and uDeck did not open; the system's record says "
+            f"{_record_or_why_not(machine, check_dir)}"
+        )
 
-    expect(running, f"the machine restarted and uDeck did not open; the system's record says {_describe(after)}")
     # Nothing in this check launches uDeck after the restart, so the process that is there
-    # is the system's doing — and the record is still the one that was switched on.
+    # is the system's doing — and the record is still the one that was switched on. This
+    # read is that verdict's oracle rather than its evidence, so a database that cannot be
+    # read is the lab failing, and says so.
+    after = login.record(machine)
     expect(after is not None and after.enabled, f"uDeck is running but the record is {_describe(after)}")
-    lab.note(f"   uDeck came back on its own as {sorted(app.running_pids(machine))}")
+    # The pids the wait already read, not a fresh look: an SSH hiccup in a note must not
+    # turn a check that has passed both its verdicts into a lab error.
+    lab.note(f"   uDeck came back on its own as {sorted(pids)}")
 
 
 def check_off_stays_off(machine, check_dir, lab):
@@ -111,13 +122,14 @@ def check_off_stays_off(machine, check_dir, lab):
     )
 
     machine.reboot()
-    running = _wait_until_it_opens(machine, NOTHING_OPENS_SECONDS)
-    machine.screenshot(check_dir, "after the restart")
-    after = login.record(machine)
-
+    pids = _wait_until_it_opens(machine, NOTHING_OPENS_SECONDS)
+    # Same order, same reason: uDeck opening here is the failure this control exists to
+    # catch, and neither the screenshot nor the database may be able to swallow it.
+    _evidence(machine, check_dir, "after the restart", lab)
+    after = _record_or_why_not(machine, check_dir)
     expect(
-        not running,
-        f"uDeck opened at login although it had been switched off; the record says {_describe(after)}",
+        not pids,
+        f"uDeck opened at login although it had been switched off; the record says {after}",
     )
 
 
@@ -236,18 +248,46 @@ def _install_the_update(machine, check_dir, lab, seconds=240):
 
 
 def _wait_until_it_opens(machine, seconds):
-    """Whether uDeck is running, given `seconds` for the system to get round to it.
+    """The pids uDeck is running as, given `seconds` for the system to get round to it.
 
     Waiting the whole time when nothing opens is the point in the control: "it did not
-    open" is worth something only after long enough for it to have opened.
+    open" is worth something only after long enough for it to have opened. The pids
+    themselves come back so that a caller wanting to name them does not have to ask the
+    guest a second time, after its verdicts have already passed.
     """
     deadline = machine.clock() + seconds
     while True:
-        if app.running_pids(machine, "looking for uDeck after the restart"):
-            return True
+        pids = app.running_pids(machine, "looking for uDeck after the restart")
+        if pids:
+            return pids
         if machine.clock() >= deadline:
-            return False
+            return set()
         machine.sleep(5)
+
+
+def _evidence(machine, check_dir, step, lab):
+    """A screenshot as evidence: collected, never raised.
+
+    The same helper the update checks keep, and here for the same reason (Q34, Q38): a
+    machine too far gone to photograph must not take the verdict down with it.
+    """
+    try:
+        machine.screenshot(check_dir, step)
+    except LabError as error:
+        lab.note(f"   no screenshot '{step}': {error.reason}")
+
+
+def _record_or_why_not(machine, check_dir, name="login-records-after-the-restart.txt"):
+    """The record as a sentence, with the database kept beside it — and neither able to raise.
+
+    For the readings that are evidence for a verdict already decided. `login.collect`
+    already swallows a failed write, so the only thing left that can throw is the read
+    itself, and here it says so in the sentence instead.
+    """
+    try:
+        return _describe(login.collect(machine, check_dir, name=name))
+    except LabError as error:
+        return f"(the record could not be read: {error.reason})"
 
 
 def _what_the_card_says(machine):
