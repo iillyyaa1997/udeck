@@ -65,3 +65,20 @@ public func message(for trouble: LoginItemTrouble?, otherCopies: [URL]) -> Login
     case .couldNotAsk(let reason): .couldNotAsk(reason: reason)
     }
 }
+
+/// Whether a copy of uDeck is one the system could be asked to open at login.
+///
+/// The bare binary a development build leaves behind is not. `swift build &&
+/// .build/debug/uDeck` runs a process whose Info.plist is embedded by the linker and
+/// carries the *release* bundle identifier, so a switch clicked there asks macOS, in the
+/// installed copy's name, to open a path under `.build`. The system would then hold one
+/// record for the identifier pointing at the wrong copy — which is the failure this whole
+/// card exists to warn the operator about, caused by the card.
+///
+/// The test is the bundle and not the folder, on purpose. A copy in `~/Applications` is a
+/// real install, and the one most likely to be in use while somebody is working on uDeck;
+/// refusing everything outside `/Applications` would take the setting away from exactly
+/// that copy. What is refused is the thing that is not an application at all.
+public func isAnInstalledCopy(_ copy: URL) -> Bool {
+    copy.pathExtension.lowercased() == "app"
+}

@@ -207,6 +207,11 @@ public enum Phrase: Sendable, Equatable {
     /// instead of quietly asserting the state the switch above it denies.
     case generalOpensWhich(String, opens: Bool)
 
+    /// This copy is not an application, so nothing about it can be opened at login —
+    /// the state a development build runs in, where the switch would otherwise ask the
+    /// system for the release identifier from a path under `.build`.
+    case generalNotInstalled
+
     /// The record was there and is gone, with nobody having asked for that.
     case generalRecordVanished
 

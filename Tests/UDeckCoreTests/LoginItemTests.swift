@@ -361,4 +361,38 @@ struct LoginItemPersistenceTests {
         judgement.read(reading(.systemHasNoRecord, 60))
         #expect(judgement.trouble == .recordVanished)
     }
+
+    // MARK: - Which copies may be registered at all
+
+    /// The foot-gun this answers: the linker embeds uDeck's Info.plist — release bundle
+    /// identifier and all — into the bare binary, so `swift build && .build/debug/uDeck`
+    /// draws a live switch that would ask macOS to open a path under `.build` in the
+    /// installed copy's name.
+    @Test("a development build is not a copy the system can be asked to open")
+    func bareBinaryIsNotInstalled() {
+        #expect(!isAnInstalledCopy(URL(fileURLWithPath: "/Users/x/udeck/.build/arm64-apple-macosx/debug")))
+        #expect(!isAnInstalledCopy(URL(fileURLWithPath: "/Users/x/udeck/.build/debug/uDeck")))
+    }
+
+    /// The test is the bundle, not the folder: the copy in `~/Applications` is a real
+    /// install and the likeliest one to be in use while somebody works on uDeck.
+    @Test("an application bundle is one, wherever it was put")
+    func bundlesAnywhereAreInstalled() {
+        #expect(isAnInstalledCopy(URL(fileURLWithPath: "/Applications/uDeck.app")))
+        #expect(isAnInstalledCopy(URL(fileURLWithPath: "/Users/x/Applications/uDeck-debug.app")))
+        #expect(isAnInstalledCopy(URL(fileURLWithPath: "/Volumes/uDeck/uDeck.app")))
+    }
+
+    /// Two ways to write the rule that look right and are not: matching the *end* of the
+    /// name rather than the extension, and comparing the extension case-sensitively on a
+    /// volume that does not.
+    @Test("the rule is the extension, and case is not part of it")
+    func neitherSuffixNorCase() {
+        // Both of these end in the three letters and have no extension at all — the
+        // first pair written here ended in "rap" and "tap", and let the suffix version
+        // of the rule through.
+        #expect(!isAnInstalledCopy(URL(fileURLWithPath: "/Users/x/Workspace/myapp")))
+        #expect(!isAnInstalledCopy(URL(fileURLWithPath: "/Users/x/bin/webapp")))
+        #expect(isAnInstalledCopy(URL(fileURLWithPath: "/Applications/uDeck.APP")))
+    }
 }

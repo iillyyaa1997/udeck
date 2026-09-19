@@ -39,6 +39,7 @@ struct LocalizationTests {
         .generalStartup, .generalOpenAtLogin,
         .generalOpensWhich("/Applications/uDeck.app", opens: true),
         .generalOpensWhich("/Applications/uDeck.app", opens: false),
+        .generalNotInstalled,
         .generalRecordVanished, .generalDidNotTake, .generalAnotherCopy("/x/uDeck.app"),
         .generalWaitsForApproval, .generalLoginFailed("no"), .generalOpenLoginItems,
 
@@ -97,7 +98,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 160,
+        #expect(Self.all.count == 161,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

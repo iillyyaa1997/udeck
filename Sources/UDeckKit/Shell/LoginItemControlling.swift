@@ -50,9 +50,13 @@ public final class LoginItemStatus {
 ///
 /// The implementation lives in the executable target, next to the Sparkle one and for the
 /// same reason: `UDeckKit` has no dependencies and a settings screen needs a switch, a
-/// sentence and a button — none of which says anything about `ServiceManagement`. It also
-/// means the screen renders in `swift build && .build/debug/uDeck`, where there is no
-/// bundle to register and nothing may be registered by accident.
+/// sentence and a button — none of which says anything about `ServiceManagement`.
+///
+/// That placement is not what keeps a development build from registering anything. The
+/// linker embeds the same Info.plist into the bare binary, release bundle identifier and
+/// all, so `swift build && .build/debug/uDeck` gets a real `SMAppService.mainApp` and
+/// could ask for a record pointing into `.build`. What prevents it is `isAnInstalledCopy`:
+/// the card draws the switch disabled, and the implementation refuses as well.
 @MainActor
 public protocol LoginItemControlling: AnyObject {
     /// Everything the screen draws.

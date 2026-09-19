@@ -196,6 +196,9 @@ private struct LoginCard: View {
     let loginItem: any LoginItemControlling
     @Environment(\.strings) private var strings
 
+    /// Whether the copy drawing this card is one the system could open at all.
+    private var installed: Bool { isAnInstalledCopy(loginItem.thisCopy) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(strings(.generalStartup))
@@ -207,12 +210,23 @@ private struct LoginCard: View {
                     set: { loginItem.set(opensAtLogin: $0) }
                 ))
                 .accessibilityIdentifier("general.openAtLogin")
+                .disabled(!installed)
 
                 Text(strings(.generalOpensWhich(shown(loginItem.thisCopy),
                                                opens: loginItem.status.opensAtLogin)))
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("general.opensWhich")
+
+                // Said before the click rather than after it: whether this copy can be
+                // registered at all is knowable by looking at it, and a switch that
+                // answers only once it has been pressed is a worse way to say so.
+                if !installed {
+                    Text(strings(.generalNotInstalled))
+                        .font(.caption).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("general.notInstalled")
+                }
 
                 if let message = loginItem.status.message {
                     trouble(message)

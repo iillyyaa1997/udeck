@@ -50,6 +50,18 @@ final class SystemLoginItem: LoginItemControlling {
     }
 
     func set(opensAtLogin: Bool) {
+        // The card draws the switch disabled for a copy like this, so nothing should ever
+        // arrive here — which is the reason to refuse it here too. This is the one place
+        // in uDeck that asks the system to change a login record, and a development build
+        // asking carries the release identifier to a path under `.build`.
+        guard isAnInstalledCopy(thisCopy) else {
+            status.read(LoginItemReading(
+                state: .couldNotAsk(reason: "this copy of uDeck is not an installed application"),
+                at: now()
+            ))
+            return
+        }
+
         status.operatorAsked(toOpen: opensAtLogin)
         do {
             if opensAtLogin {
