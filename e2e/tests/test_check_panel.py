@@ -115,34 +115,55 @@ def test_the_dwell_check_is_not_satisfied_by_a_push(monkeypatch, lab, check_dir)
 # --- The push -------------------------------------------------------------------------
 
 
-def test_the_push_passes_when_uDeck_says_the_push_fired(monkeypatch, lab, check_dir):
-    machine = prepared(monkeypatch, ATTACHED + PUSH)
-    checks.check_push(machine, check_dir, lab)
+def at_the_edge(monkeypatch, where=(1280, 0)):
+    """Where the guest says its pointer ended up after the throw."""
+    monkeypatch.setattr(checks.probes, "pointer", lambda machine: where)
+
+
+def pushed_with(machine):
+    """The arguments the guest's push script was run with."""
     ran = [c for c in machine.ssh.commands if panel.GUEST_PUSH in c]
     assert ran, "the push is made inside the guest"
-    x, y = panel.top_of_the_strip()
-    assert f" {x} {y} " in ran[0]
+    return ran[0].split()[2:]
+
+
+def test_the_push_passes_when_uDeck_says_the_push_fired(monkeypatch, lab, check_dir):
+    at_the_edge(monkeypatch)
+    machine = prepared(monkeypatch, ATTACHED + PUSH)
+    checks.check_push(machine, check_dir, lab)
+    # Thrown at the edge by the same movement that then pushes there.
+    assert pushed_with(machine)[0] == str(config.THROW_STEPS)
     # The pointer is never *placed* at the edge from this Mac: it would dwell
     # there long before a command could push it, and the panel would open by the
     # path this check is not about.
     assert [(px, py) for px, py, _ in machine.pointer] == [panel.middle_of_the_screen()]
 
 
-def test_a_push_the_lab_could_not_make_is_not_a_verdict_about_uDeck(monkeypatch, lab, check_dir):
-    """Measured: no software inside a machine produces the device movement this path
-    needs, so the panel opens by the dwell instead. That is the lab failing to make a
-    push, not uDeck failing to answer one — "could not check", never ❌, and never a
-    pass on the other path (Q45)."""
-    machine = prepared(monkeypatch, ATTACHED + DWELL)
-    with pytest.raises(LabError, match="could not make a push") as raised:
+def test_a_throw_that_left_the_pointer_short_of_the_edge_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """A push needs an edge to push against. Without one there is nothing to
+    report about uDeck — only about the lab, which is "could not check"."""
+    at_the_edge(monkeypatch, (1280, 313))
+    machine = prepared(monkeypatch, ATTACHED + PUSH)
+    with pytest.raises(LabError, match="not against the top edge") as raised:
         checks.check_push(machine, check_dir, lab)
-    assert "dwell" in raised.value.reason
+    assert "313" in raised.value.reason
     assert not isinstance(raised.value, CheckFailed)
 
 
-def test_a_push_that_uDeck_never_saw_is_also_could_not_check(monkeypatch, lab, check_dir):
+def test_the_push_check_is_not_satisfied_by_a_dwell(monkeypatch, lab, check_dir):
+    """The panel opened, but by the path that only needs the pointer to be
+    somewhere — which is what this check exists to tell apart."""
+    at_the_edge(monkeypatch)
+    machine = prepared(monkeypatch, ATTACHED + DWELL)
+    with pytest.raises(CheckFailed, match="opened by dwell first"):
+        checks.check_push(machine, check_dir, lab)
+
+
+def test_a_push_that_uDeck_never_answered_fails(monkeypatch, lab, check_dir):
+    """The movement was made and the pointer is pinned, so silence is uDeck's."""
+    at_the_edge(monkeypatch)
     machine = prepared(monkeypatch, ATTACHED)
-    with pytest.raises(LabError, match="said nothing of the gesture"):
+    with pytest.raises(CheckFailed, match="did not open the panel"):
         checks.check_push(machine, check_dir, lab)
 
 
@@ -152,9 +173,10 @@ def test_a_push_that_uDeck_never_saw_is_also_could_not_check(monkeypatch, lab, c
 def test_nothing_opens_the_panel_in_the_middle_of_the_screen(monkeypatch, lab, check_dir):
     machine = prepared(monkeypatch, ATTACHED + IDLE)
     checks.check_middle_of_the_screen(machine, check_dir, lab)
-    pushed = [c for c in machine.ssh.commands if panel.GUEST_PUSH in c]
-    x, y = panel.middle_of_the_screen()
-    assert pushed and f" {x} {y} " in pushed[0], "held there and pushed at, so neither path is untried"
+    # Held there and pushed at, so neither path is untried — and never thrown,
+    # which would carry the pointer out of the middle this control is about.
+    assert pushed_with(machine)[0] == "0"
+    assert [(px, py) for px, py, _ in machine.pointer] == [panel.middle_of_the_screen()]
     assert machine.now >= config.NOTHING_HAPPENS_SECONDS
 
 

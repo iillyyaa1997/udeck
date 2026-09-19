@@ -8,6 +8,26 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [Unreleased]
+
+- **The lab can check the push.** `panel.push` — the pointer pinned against the
+  top edge while the device keeps pushing — reported "could not check" since it
+  was written, because no software in a machine could produce the movement.
+  Posting a `CGEvent` delta never could: the window server tells applications the
+  movement that actually happened, which at the edge is nothing. `IOHIDPostEvent`
+  can, and the reason it was written off was the experiment, not the call — it
+  had been tried under `sudo`, and the privilege it asks for is
+  `kIOClientPrivilegeLocalUser`, which XNU answers with `CopyConsoleUser(euid)`:
+  root holds no console session, so `sudo` guaranteed the refusal. As the
+  logged-in user it succeeds. The check now throws the pointer at the edge and
+  pushes there in one run, reads back that the pointer really is against the
+  edge — a push with nothing to push against is "could not check", not a verdict
+  — and then asks uDeck which path fired. It needs no driver, no system
+  extension and nothing added to the golden image.
+
+  This also measured something uDeck had only assumed: that at an edge the
+  position stops changing while the delta keeps arriving. It does.
+
 ## [0.5.0] — 2026-09-19
 
 uDeck opens when you log in, if you ask it to. The setting exists because of a

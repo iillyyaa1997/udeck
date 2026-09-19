@@ -72,6 +72,11 @@ public struct PointerDeltaCalibration: Sendable, Equatable {
     /// The caller is responsible for only offering samples where the cursor was
     /// not against any screen edge — at an edge the position stops changing
     /// while the delta does not, and the two stop describing the same movement.
+    ///
+    /// That was an assumption until 2026-09-19, when the end-to-end lab measured
+    /// it: movement posted through `IOHIDSystem`, the path a mouse driver posts
+    /// through, left the pointer pinned at the top of the screen while uDeck
+    /// went on being told it was moving — and the panel opened by the push.
     public mutating func observe(positionChange: CGFloat, reportedDelta: CGFloat) {
         guard positionChange.isFinite, reportedDelta.isFinite,
               abs(positionChange) >= minimumMovement, abs(reportedDelta) >= minimumMovement

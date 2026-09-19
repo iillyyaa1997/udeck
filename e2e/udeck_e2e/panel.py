@@ -145,23 +145,33 @@ class GestureLog:
 
 def push_upward(
     machine,
-    at: tuple[int, int],
     step: str,
+    throw: bool = False,
     steps: int = config.PUSH_STEPS,
     delta: float = config.PUSH_DELTA,
     pause: float = config.PUSH_PAUSE_SECONDS,
 ) -> str:
-    """Push from inside the guest: mouse-moved events carrying an upward delta.
+    """Push from inside the guest: relative movement, reported as a device reports it.
 
-    The pointer is already where `at` says; what these events add is the
-    movement, which is the only thing left to say once the pointer cannot go any
-    higher. `steps × |delta|` has to clear uDeck's threshold inside its window —
-    both are in `GestureTuning`, and the lab's numbers are chosen with room.
+    The push happens where the pointer already is, because relative movement
+    names no place — which is the whole reason this is the path that works.
+    Whoever calls this has put the pointer there.
+
+    `throw` first carries the pointer to the top edge and holds it: the check
+    that pushes at the edge cannot be *placed* there, because a pointer resting
+    in the strip opens the panel by the dwell within a fraction of a second, long
+    before an SSH command could push it. The control in the middle of the screen
+    takes no throw — it pushes where it was parked, and 60 points of movement
+    leave it 660 below the strip.
+
+    `steps × |delta|` has to clear uDeck's threshold inside its window — both are
+    in `GestureTuning`, and the lab's numbers are chosen with room.
     """
-    x, y = at
     machine.ssh.copy_in(PUSH_SCRIPT, GUEST_PUSH, step)
+    throw_steps = config.THROW_STEPS if throw else 0
     done = machine.ssh.run(
-        f"/usr/bin/python3 {shlex.quote(GUEST_PUSH)} {x} {y} {steps} {delta} {pause}",
+        f"/usr/bin/python3 {shlex.quote(GUEST_PUSH)} "
+        f"{throw_steps} {config.THROW_DELTA} {config.THROW_PAUSE_SECONDS} {steps} {delta} {pause}",
         step,
     )
     return done.stdout.strip()

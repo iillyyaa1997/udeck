@@ -109,30 +109,83 @@ def test_what_uDeck_said_is_evidence_and_never_raises(tmp_path):
 # --- The push ------------------------------------------------------------------------
 
 
+def _default(name):
+    """One of uDeck's own gesture defaults, read from its source.
+
+    Read rather than copied: these are the only numbers the lab has to agree
+    with uDeck about, and a copy here would go stale silently — too small a push
+    and the panel never opens, too slow a push and it opens by the *dwell*, and
+    then the check passes while proving nothing about the path it is named after.
+    """
+    tuning = (
+        Path(panel.__file__).resolve().parents[2] / "Sources" / "UDeckCore" / "Configuration" / "GestureTuning.swift"
+    ).read_text()
+    found = re.search(rf"\b{name}: (?:CGFloat|TimeInterval) = ([0-9.]+)", tuning)
+    assert found, f"{name} is no longer a default in GestureTuning.swift"
+    return float(found.group(1))
+
+
 def test_the_push_is_made_inside_the_guest_by_the_script_the_lab_ships():
-    """From this Mac the pointer can only be *placed*; a push is movement, and at
-    the edge only an event still carries it."""
-    machine = Machine({"push-pointer": "arrived and pushed 5×-12.0 at (1280, 0)"})
-    said = panel.push_upward(machine, (1280, 0), "pushing")
+    """From this Mac the pointer can only be *placed*, and a place is what a push
+    at the edge has none of: it is movement, and only a device reports that."""
+    machine = Machine({"push-pointer": '{"push": ["KERN_SUCCESS"]}'})
+    said = panel.push_upward(machine, "pushing")
     assert machine.ssh.copied == [("push-pointer.py", panel.GUEST_PUSH)]
     ran = [c for c in machine.ssh.commands if panel.GUEST_PUSH in c][0]
     assert ran.split()[1:] == [
         panel.GUEST_PUSH,
-        "1280",
         "0",
+        str(config.THROW_DELTA),
+        str(config.THROW_PAUSE_SECONDS),
         str(config.PUSH_STEPS),
         str(config.PUSH_DELTA),
         str(config.PUSH_PAUSE_SECONDS),
     ]
     assert "/usr/bin/python3" in ran, "the guest has no other Python, and needs none"
-    assert said.startswith("arrived and pushed")
+    assert "KERN_SUCCESS" in said
 
 
-def test_the_push_the_lab_sends_is_upward():
-    """AppKit reports a movement that raises the pointer as a negative deltaY, and
-    uDeck reads the field with that polarity until it has measured otherwise. A
-    push sent the other way would be a downward jiggle, and nothing would fire."""
+def test_only_the_push_at_the_edge_throws_the_pointer_there_first():
+    """The control pushes where it was parked. A throw would carry it to the very
+    edge, which is the one place its verdict — that nothing fires away from the
+    strip — would stop being about anything."""
+    parked = Machine({"push-pointer": '{"push": ["KERN_SUCCESS"]}'})
+    panel.push_upward(parked, "pushing in the middle")
+    thrown = Machine({"push-pointer": '{"push": ["KERN_SUCCESS"]}'})
+    panel.push_upward(thrown, "pushing at the edge", throw=True)
+
+    def steps(machine):
+        return [c for c in machine.ssh.commands if panel.GUEST_PUSH in c][0].split()[2]
+
+    assert steps(parked) == "0"
+    assert steps(thrown) == str(config.THROW_STEPS)
+
+
+def test_the_push_and_the_throw_the_lab_sends_are_both_upward():
+    """A movement sent the other way is a downward jiggle: the pointer leaves the
+    strip, and uDeck logs nothing at all."""
     assert config.PUSH_DELTA < 0
+    assert config.THROW_DELTA < 0
+
+
+def test_the_throw_reaches_the_edge_and_the_push_alone_never_does():
+    """Two numbers that have to stay on opposite sides of the same distance.
+
+    The throw starts in the middle of the screen and has to pin the pointer
+    against the top — anything less and the check pushes in mid-air. The push on
+    its own must not come close, or the control in the middle of the screen would
+    carry itself into the strip and fire the dwell it exists to rule out.
+    """
+    to_the_edge = config.SCREEN_HEIGHT // 2
+    assert config.THROW_STEPS * abs(config.THROW_DELTA) > to_the_edge
+    assert config.PUSH_STEPS * abs(config.PUSH_DELTA) < to_the_edge / 4
+
+
+def test_the_lab_is_not_stricter_about_being_pinned_than_uDeck_is():
+    """Read back after the throw, "not at the edge" is the lab saying it could not
+    check. Demanding more than uDeck does would say that about a pointer uDeck
+    would happily have pushed from."""
+    assert config.PINNED_TOLERANCE_PIXELS >= _default("pinnedEpsilon")
 
 
 def test_the_labs_push_clears_uDecks_thresholds_and_beats_its_dwell():
@@ -143,17 +196,8 @@ def test_the_labs_push_clears_uDecks_thresholds_and_beats_its_dwell():
     opens, too slow a push and it opens by the *dwell* — and then the check
     passes while proving nothing about the path it is named after.
     """
-    tuning = (
-        Path(panel.__file__).resolve().parents[2] / "Sources" / "UDeckCore" / "Configuration" / "GestureTuning.swift"
-    ).read_text()
-
-    def default(name):
-        found = re.search(rf"\b{name}: (?:CGFloat|TimeInterval) = ([0-9.]+)", tuning)
-        assert found, f"{name} is no longer a default in GestureTuning.swift"
-        return float(found.group(1))
-
     push = config.PUSH_STEPS * abs(config.PUSH_DELTA)
     spent = config.PUSH_STEPS * config.PUSH_PAUSE_SECONDS
-    assert push >= default("edgePushDistance") * 2, "the push has to clear the threshold with room"
-    assert spent <= default("edgePushWindow") / 2, "and all of it has to land inside uDeck's window"
-    assert spent < default("dwellDuration"), "and be over before the dwell would fire instead"
+    assert push >= _default("edgePushDistance") * 2, "the push has to clear the threshold with room"
+    assert spent <= _default("edgePushWindow") / 2, "and all of it has to land inside uDeck's window"
+    assert spent < _default("dwellDuration"), "and be over before the dwell would fire instead"

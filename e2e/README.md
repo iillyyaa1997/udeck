@@ -207,24 +207,39 @@ passing.
 `panel.dwell` puts the pointer in the strip at the top of the screen over VNC
 and leaves it there. `panel.push` is the other path: upward movement reported
 *after* the pointer can move no further. The lab copies a small script into the
-guest that posts the arrival and the push in one run, milliseconds apart — the
-dwell fires a fraction of a second after the pointer stops, so a pointer placed
-from outside and pushed over SSH would open the panel by the wrong path.
+guest that throws the pointer at the edge and keeps pushing in one run,
+milliseconds apart — the dwell fires a fraction of a second after the pointer
+stops, so a pointer placed from outside and pushed over SSH would open the panel
+by the wrong path.
 
-**`panel.push` cannot pass inside a virtual machine, and says "could not check"
-rather than passing.** Measured on 2026-09-18, fifteen shapes of push on four
-machines: a delta posted on a mouse-moved event does not move the pointer (five
-events carrying ±30 points at y=400 left it at exactly (1280, 400)), so the
-position on the event is what moves it and what applications are told is the
-movement that actually happened — which against the top edge is nothing, and
-nothing is precisely the signal this path is made of. `IOHIDPostEvent`, which
-posts device movement below the window server, is refused even as root
-(`kIOReturnNotPrivileged`); unhooking the cursor from the device the way a game
-does changes nothing. The check still makes the attempt, because the day a
-machine reports real device movement it starts passing — and until then the run
-says the lab could not make a push, which is true, instead of passing on the
-dwell that opens the panel instead. The push is checked by hand, on a Mac with a
-mouse.
+**`panel.push` could not pass inside a virtual machine until 2026-09-19, and
+what changed was which call the lab makes.** Posting the movement as a `CGEvent`
+delta never worked and never could: measured on 2026-09-18, fifteen shapes of
+push on four machines, five events carrying ±30 points at y=400 left the pointer
+at exactly (1280, 400) — the position on the event is what moves it, and what
+applications are told is the movement that actually happened, which against the
+top edge is nothing.
+
+`IOHIDPostEvent` is the call that works, and the reason it was written off is
+worth keeping: it was tried under `sudo`. The privilege it asks for is
+`kIOClientPrivilegeLocalUser`, which XNU answers with `CopyConsoleUser(euid)`,
+and root holds no console session — so `sudo` *guarantees* the
+`kIOReturnNotPrivileged` that was recorded as "refused even as root". Run as the
+logged-in user, which is how the lab reaches the guest anyway, the same call
+returns `KERN_SUCCESS`, macOS moves the pointer itself, and the movement reaches
+applications the way a mouse's does: at the edge the position clamps and the
+delta keeps coming, which is the signal this path is made of. Measured in a
+clone on 2026-09-19, both halves — six reports of 40 moved the pointer exactly
+240 pixels down, and a throw-and-push at the top edge made uDeck log `fired by
+push`.
+
+This needs no driver, no system extension and nothing in the golden image. It
+does need the push to be run as the console user: `sudo` would break it, and the
+script says so rather than failing quietly.
+
+Before it asks uDeck anything, the check reads back where the pointer ended up.
+A push against an edge the pointer never reached would prove nothing, and that
+is a lab failure — "could not check" — not a verdict about uDeck.
 
 `panel.middle-of-the-screen` is their control: the pointer held in the middle of
 the screen and pushed at there, where neither the passage of time nor an upward
@@ -252,7 +267,7 @@ One line per check, then a summary:
 ✅ updates.sparkle  2m14s
 ❌ updates.wrong-key  1m02s — Sparkle installed an update signed with the wrong key
    evidence: .build/e2e/20260916-172233/updates.wrong-key/
-⚠️ panel.push  0m40s — could not check: waiting for SSH after the reboot: no answer in 240s
+⚠️ panel.dwell  0m40s — could not check: waiting for SSH after the reboot: no answer in 240s
 1 passed, 1 failed, 1 could not check in 3m56s
 ```
 

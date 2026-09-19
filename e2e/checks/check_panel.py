@@ -7,10 +7,12 @@ pointer in the middle of the screen — held, and pushed at — opens nothing (Q
 
 The two paths are not two ways of saying the same thing. A dwell only needs the
 pointer to be somewhere; a push needs movement *reported after the pointer can
-move no further*, which is a thing only an event can carry. So the dwell is made
-from this Mac over VNC, where the pointer is placed by naming where it goes, and
-the push is made from inside the guest, where an event can say how hard the
-device was shoved (Q45).
+move no further*, which nothing that names a position can say. So the dwell is
+made from this Mac over VNC, where the pointer is placed by naming where it
+goes, and the push is made from inside the guest as relative movement through
+`IOHIDSystem` — the entry point a mouse driver posts through, where macOS moves
+the pointer itself and tells applications the movement, clamping the one and not
+the other (Q45).
 
 What decides each one is uDeck's own record of which path fired — `fired by
 dwell on …`, `fired by push on …` — kept in the guest's unified log and read
@@ -21,14 +23,13 @@ pass for the wrong reason. The screenshots are kept as evidence for a person
 (Q38), and the log also carries `idle: <reason>` — the gate that stopped the
 gesture — which is what makes a run that fires nothing worth reading.
 
-The push is posted where the pointer is *and arrives there itself*, in one run
-of one script inside the guest. It has to: the dwell is a fraction of a second,
-so a pointer put at the edge from this Mac would have fired the dwell long
-before an SSH command could push it, and the check would pass by the path it is
-not about.
+The pointer is thrown at the edge *and* pushed there in one run of one script
+inside the guest. It has to be: the dwell is a fraction of a second, so a
+pointer put at the edge from this Mac would have fired the dwell long before an
+SSH command could push it, and the check would pass by the path it is not about.
 """
 
-from udeck_e2e import app, config, panel, updates
+from udeck_e2e import app, config, panel, probes, updates
 from udeck_e2e.errors import LabError, expect
 
 VERSION = ("0.4.1", "6")
@@ -57,52 +58,49 @@ def check_dwell(machine, check_dir, lab):
 def check_push(machine, check_dir, lab):
     """The pointer is pinned at the top edge and the device keeps pushing upward.
 
-    **This check cannot pass inside a virtual machine, and says so rather than
-    passing** — Q45's own rule: a path that will not rise reports "could not
-    check". Measured on 2026-09-18, fifteen shapes of push on four machines:
+    This could not be checked at all until 2026-09-19, and what changed was not
+    the machine but which call the lab makes. Posting the movement as a
+    `CGEvent` delta never worked and never could: the window server tells
+    applications the movement that actually happened, which against the edge is
+    nothing (measured 2026-09-18, fifteen shapes of push on four machines).
+    `IOHIDPostEvent` was tried then too and refused — but under `sudo`, and that
+    was the refusal: the privilege it asks for is `kIOClientPrivilegeLocalUser`,
+    which XNU answers with `CopyConsoleUser(euid)`, and root holds no console
+    session. As the logged-in user the same call succeeds, macOS moves the
+    pointer itself, and uDeck hears the movement the way it hears a mouse.
 
-    * A delta posted on a mouse-moved event does not move the pointer — five
-      events carrying ±30 points at y=400 left it at exactly (1280, 400) — so the
-      position on the event is what moves it, and what applications are told is
-      the movement that actually happened. Against the top edge that is nothing,
-      and nothing is precisely the signal this path is built on. (With a downward
-      delta the pointer leaves the strip and uDeck logs nothing at all, which is
-      the same fact from the other side.)
-    * `IOHIDPostEvent`, which posts *device* movement below the window server,
-      is refused even as root: `kIOReturnNotPrivileged`, every time.
-    * Unhooking the cursor from the device the way a game does
-      (`CGAssociateMouseAndMouseCursorPosition(false)`) changes nothing.
-
-    So the push is still attempted here, because the day a machine reports real
-    device movement this check starts passing — and until then the run says the
-    lab could not make one, which is the truth, rather than passing on the dwell
-    that opens the panel instead.
+    So the check does three things in order, and the middle one is what makes the
+    last one mean anything: it throws the pointer at the edge, reads back that
+    the pointer is *actually* against it — a push at an edge the pointer never
+    reached would prove nothing — and only then asks uDeck which path fired.
     """
     log = _prepare(machine, check_dir, lab)
     since = log.mark("noting when the gesture begins")
     try:
         _park_in_the_middle(machine)
-        # Both the arrival and the push come from inside the guest, in one run:
-        # the dwell would otherwise fire in the time it takes to send a command.
-        pushed = panel.push_upward(machine, panel.top_of_the_strip(), "pushing up against the top edge")
+        # Both the throw and the push come from inside the guest, in one run: the
+        # dwell would otherwise fire in the time it takes to send a command.
+        pushed = panel.push_upward(machine, "throwing the pointer at the top edge and pushing there", throw=True)
         lab.note(f"   {pushed}")
         said = _wait_for_uDecks_answer(machine, log, since, config.DWELL_SECONDS)
         machine.screenshot(check_dir, "after the push")
-        fired = panel.fired_by(said)
 
-        if fired[:1] == ["push"]:
-            return
-        why = (
-            f"uDeck opened the panel by {fired[0]} instead"
-            if fired
-            else f"uDeck said nothing of the gesture at all: {_short(said)}"
-        )
-        raise LabError(
-            "pushing against the top edge",
-            f"the lab could not make a push this machine would report — {why}. "
-            "A posted delta does not move the pointer and is not what applications are told: "
-            "at the edge the movement is nothing, and nothing is what this path is made of. "
-            "IOHIDPostEvent is refused even as root (kIOReturnNotPrivileged).",
+        at = probes.pointer(machine)
+        if at[1] > config.PINNED_TOLERANCE_PIXELS:
+            raise LabError(
+                "pushing against the top edge",
+                f"the throw left the pointer at {at}, not against the top edge, so nothing was pinned to push against",
+            )
+        fired = panel.fired_by(said)
+        expect(fired != [], f"uDeck did not open the panel; what it says of the gesture: {_short(said)}")
+        # Named before it is used: the message is built whether or not the check
+        # fails, and `fired[0]` on an empty list would raise inside the guard that
+        # exists to keep it from ever being empty here.
+        opened_by = fired[0] if fired else "nothing"
+        expect(
+            fired[:1] == ["push"],
+            f"the panel opened by {opened_by} first, not by the push — "
+            "the movement at the edge was not reported, or the dwell beat it",
         )
     finally:
         log.collect(check_dir, since, "keeping what uDeck said")
@@ -136,7 +134,7 @@ def check_middle_of_the_screen(machine, check_dir, lab):
         app.launch(machine)
         machine.screenshot(check_dir, "uDeck running")
         machine.sleep(config.DWELL_SECONDS)
-        pushed = panel.push_upward(machine, panel.middle_of_the_screen(), "pushing up in the middle of the screen")
+        pushed = panel.push_upward(machine, "pushing up in the middle of the screen")
         lab.note(f"   {pushed}")
         machine.sleep(config.NOTHING_HAPPENS_SECONDS)
         said = log.since(since, "reading what uDeck says of the gesture")

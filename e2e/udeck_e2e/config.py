@@ -187,11 +187,34 @@ LOG_STREAM_SECONDS = 30
 # pointer stops in the strip, so the push has to be over its own threshold well
 # before then or the panel opens by the wrong path and the check proves nothing.
 PUSH_STEPS = 5
-# Negative is upward: AppKit reports a movement that raises the pointer as a
-# negative deltaY, and uDeck reads the field with that polarity until it has
-# measured otherwise.
+# Negative is upward. The lab posts these as relative movement through
+# IOHIDSystem, where the sign is the HID convention — measured in a clone on
+# 2026-09-19: a positive delta moved the pointer down the screen, six reports of
+# 40 taking it exactly 240 pixels.
 PUSH_DELTA = -12.0
 PUSH_PAUSE_SECONDS = 0.005
+
+# The throw that puts the pointer against the top edge before the push, for the
+# check that pushes there. It starts in the middle of the screen, 720 pixels
+# below the edge; fifteen reports of sixty cross that with room and the last of
+# them arrive while the pointer is already pinned. The pause is short because
+# nothing here may rest: the dwell fires 0.06 s after the pointer stops, and
+# this whole movement has to be over before then.
+#
+# The throw is not the push. uDeck does not count the movement that *arrives* at
+# the edge — counting it would fire the gesture on any fast flick at the menu
+# bar — so what the throw buys is only the pinning.
+THROW_STEPS = 15
+THROW_DELTA = -60.0
+THROW_PAUSE_SECONDS = 0.002
+
+# How far from the top edge the pointer may be and still count as pinned, when
+# the push check reads back where its throw left it. uDeck's own `pinnedEpsilon`
+# is 2 points, and the lab must not be stricter than the thing it checks: a
+# pointer uDeck would push from, reported as short of the edge, would turn a
+# real pass into "could not check".
+PINNED_TOLERANCE_PIXELS = 2
+
 # How long the pointer rests in the strip for the dwell, and how long the lab
 # then waits for uDeck to say something.
 DWELL_SECONDS = 2
