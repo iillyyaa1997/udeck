@@ -208,6 +208,32 @@ def test_switched_off_and_restarted_it_stays_away(lab, check_dir, monkeypatch):
     assert machine.now >= checks.NOTHING_OPENS_SECONDS, "nothing happening is only worth something after a while"
 
 
+def test_the_control_keeps_the_reading_it_decided_on(lab, check_dir, monkeypatch):
+    """A pass has to leave behind the database it passed on.
+
+    The reading that decides this control is the one taken after switching off, and the
+    only dump it used to keep was the one from switching on — which shows the record
+    enabled, the opposite of the verdict.
+    """
+    machine = a_machine([ON, OFF, OFF], running="")
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    checks.check_off_stays_off(machine, check_dir, lab)
+    # Named, not "some file with the right word in it": the run keeps a post-restart dump
+    # as well, and an assertion satisfied by that one passes while the reading the verdict
+    # rests on is still thrown away (measured — it survived two mutations before this).
+    kept = check_dir / "login-records-after-switching-off.txt"
+    assert kept.exists(), sorted(path.name for path in check_dir.glob("*.txt"))
+    assert "disabled" in kept.read_text()
+
+
+def test_the_restart_check_keeps_the_database_it_came_back_with(lab, check_dir, monkeypatch):
+    machine = a_machine([ON, ON])
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    checks.check_survives_a_restart(machine, check_dir, lab)
+    kept = sorted(path.name for path in check_dir.glob("login-records-*.txt"))
+    assert "login-records-after-the-restart.txt" in kept, kept
+
+
 def test_the_control_switches_it_on_first(lab, check_dir, monkeypatch):
     """A machine where nothing was ever registered also comes back without uDeck, and
     proves only that the lab can watch a machine do nothing."""

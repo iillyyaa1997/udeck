@@ -95,7 +95,7 @@ def check_survives_a_restart(machine, check_dir, lab):
     # is the system's doing — and the record is still the one that was switched on. This
     # read is that verdict's oracle rather than its evidence, so a database that cannot be
     # read is the lab failing, and says so.
-    after = login.record(machine)
+    after = login.collect(machine, check_dir, name="login-records-after-the-restart.txt")
     expect(after is not None and after.enabled, f"uDeck is running but the record is {_describe(after)}")
     # The pids the wait already read, not a fresh look: an SSH hiccup in a note must not
     # turn a check that has passed both its verdicts into a lab error.
@@ -115,7 +115,11 @@ def check_off_stays_off(machine, check_dir, lab):
     ui.click(machine, "general.openAtLogin", "switching Open at Login off again")
     machine.sleep(3)
     machine.screenshot(check_dir, "switched off again")
-    off = login.record(machine)
+    # Collected, not merely read: this reading is what the control's whole verdict rests
+    # on, and a pass that kept nothing leaves the next person to rebuild the guest to
+    # find out what it saw. The only database on disk used to be the one from switching
+    # *on*, which shows the record enabled — the opposite of what the check concluded.
+    off = login.collect(machine, check_dir, name="login-records-after-switching-off.txt")
     expect(
         off is None or not off.enabled,
         f"it was switched off and the system still has {_describe(off)}",
