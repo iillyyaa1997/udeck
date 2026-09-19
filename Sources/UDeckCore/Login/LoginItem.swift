@@ -136,9 +136,47 @@ public struct LoginItemJudgement: Equatable, Sendable {
     public mutating func read(_ reading: LoginItemReading) {
         let asked = asked
         self.asked = nil
+        let previous = self.reading?.state
         self.reading = reading
         if reading.state == .opens { hadBeenOpening = true }
-        trouble = Self.trouble(for: reading.state, asked: asked, hadBeenOpening: hadBeenOpening)
+        // The system still has the record and its switch is off: nothing was lost, and a
+        // reading that says so settles the state — a later "no record" must not be read
+        // back against a moment that has already been accounted for.
+        if reading.state == .doesNot, asked == nil { hadBeenOpening = false }
+
+        let fresh = Self.trouble(for: reading.state, asked: asked, hadBeenOpening: hadBeenOpening)
+        trouble = Self.settle(fresh, keeping: trouble, was: previous, now: reading.state)
+    }
+
+    /// Whether a sentence already on screen survives a reading that says nothing new.
+    ///
+    /// The card re-reads whenever uDeck is activated or its window comes forward — and
+    /// its *own* button sends the operator to System Settings, which is exactly such a
+    /// trip. Without this, pressing "Open Login Items & Extensions" and coming back wiped
+    /// the headline, the named copy and the button itself, leaving an off switch with no
+    /// explanation although nothing about the system had changed.
+    ///
+    /// Only two verdicts are kept this way, and only while the answer stays the same:
+    /// "the system did not take it", which no later reading re-derives, and "the asking
+    /// failed", whose reason exists nowhere else on screen.
+    static func settle(
+        _ fresh: LoginItemTrouble?,
+        keeping old: LoginItemTrouble?,
+        was previous: LoginItemState?,
+        now: LoginItemState
+    ) -> LoginItemTrouble? {
+        if fresh != nil { return fresh }
+        switch old {
+        case .didNotTake:
+            // The same answer as the one that earned the sentence is not news.
+            return previous == now ? old : nil
+        case .couldNotAsk:
+            // The next reading brings a real state where there was none, so "the same
+            // answer" cannot be the test; it stands until something actually works.
+            return now == .opens ? nil : old
+        default:
+            return nil
+        }
     }
 
     public var opensAtLogin: Bool { reading?.opensAtLogin ?? false }
@@ -152,10 +190,18 @@ public struct LoginItemJudgement: Equatable, Sendable {
             return .waitsForApproval
         case .couldNotAsk(let reason):
             return .couldNotAsk(reason: reason)
-        case .doesNot, .systemHasNoRecord:
-            // Off is not trouble by itself. It is trouble in two shapes, and they are
-            // different sentences: the operator asked for it and the system did not take
-            // it, or nobody asked for anything and what was there is gone.
+        case .doesNot:
+            // The system has the record and will not act on it. That is what the operator
+            // switching it off in Login Items & Extensions looks like, and it is their own
+            // doing: the only thing to say about it is nothing. Saying "the record went
+            // away" here — and naming an innocent second copy as the likely thief — was
+            // the shape of an accusation this card used to make.
+            return asked == true ? .didNotTake : nil
+        case .systemHasNoRecord:
+            // No record at all. Asked for and not there means the system declined;
+            // unasked, after it had been opening, is the disappearance this card exists
+            // for — and the two are told apart by who asked, because the system's word
+            // for "never seen this" and for "it is gone" is the same one.
             if asked == true { return .didNotTake }
             if hadBeenOpening { return .recordVanished }
             return nil

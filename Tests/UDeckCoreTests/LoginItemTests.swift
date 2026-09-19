@@ -258,3 +258,107 @@ struct LoginItemCopiesTests {
         #expect(message(for: .couldNotAsk(reason: "nope"), otherCopies: []) == .couldNotAsk(reason: "nope"))
     }
 }
+
+/// What the review of stage 2 found: the card told the truth once and then lost it, and in
+/// one case told an untruth that pointed at an innocent second copy.
+@Suite("What the card keeps saying")
+struct LoginItemPersistenceTests {
+    let noon = Date(timeIntervalSince1970: 1_789_000_000)
+
+    func reading(_ state: LoginItemState, _ after: TimeInterval = 0) -> LoginItemReading {
+        LoginItemReading(state: state, at: noon + after)
+    }
+
+    /// The card's own button sends the operator to System Settings; coming back is a
+    /// reading. Before this, that reading wiped the headline, the named copy and the
+    /// button, leaving an off switch with no explanation.
+    @Test("an on the system did not take is still said after the card reads again")
+    func didNotTakeSurvives() {
+        var judgement = LoginItemJudgement()
+        judgement.read(reading(.systemHasNoRecord))
+        judgement.operatorAsked(toOpen: true)
+        judgement.read(reading(.systemHasNoRecord, 1))
+        #expect(judgement.trouble == .didNotTake)
+
+        judgement.read(reading(.systemHasNoRecord, 2))
+        #expect(judgement.trouble == .didNotTake, "the same answer is not news")
+    }
+
+    @Test("and it stops being said when the answer changes")
+    func didNotTakeEnds() {
+        var judgement = LoginItemJudgement()
+        judgement.operatorAsked(toOpen: true)
+        judgement.read(reading(.systemHasNoRecord, 1))
+        #expect(judgement.trouble == .didNotTake)
+
+        judgement.read(reading(.opens, 2))
+        #expect(judgement.trouble == nil)
+    }
+
+    /// The reason lives nowhere else on screen — the rest of it is in a debug log nobody
+    /// reads — so a reading that brings a real state must not take it away.
+    @Test("a failure to ask keeps its reason until something works")
+    func couldNotAskSurvives() {
+        var judgement = LoginItemJudgement()
+        judgement.operatorAsked(toOpen: true)
+        judgement.read(reading(.couldNotAsk(reason: "Operation not permitted"), 1))
+        judgement.read(reading(.systemHasNoRecord, 2))
+        #expect(judgement.trouble == .couldNotAsk(reason: "Operation not permitted"))
+
+        judgement.read(reading(.opens, 3))
+        #expect(judgement.trouble == nil)
+    }
+
+    /// Asking again is an answer of its own, and the answer decides: a retry that the
+    /// system declines is "it did not take it", not the old error text.
+    @Test("a fresh request replaces the sentence the old one earned")
+    func askingAgainReplacesIt() {
+        var judgement = LoginItemJudgement()
+        judgement.operatorAsked(toOpen: true)
+        judgement.read(reading(.couldNotAsk(reason: "Operation not permitted"), 1))
+        #expect(judgement.trouble != nil)
+
+        judgement.operatorAsked(toOpen: true)
+        judgement.read(reading(.doesNot, 2))
+        #expect(judgement.trouble == .didNotTake, "the retry's own answer, not the old error")
+    }
+
+    /// The rule on its own, without the reading that also happens to clear the latch: an
+    /// off the system is holding is silence even when uDeck watched it open earlier.
+    @Test("an off the system holds is silence even after it had been opening")
+    func offIsNeverADisappearance() {
+        #expect(LoginItemJudgement.trouble(for: .doesNot, asked: nil, hadBeenOpening: true) == nil)
+        #expect(LoginItemJudgement.trouble(for: .systemHasNoRecord, asked: nil, hadBeenOpening: true) == .recordVanished)
+    }
+
+    /// The untruth: the operator switches it off in Login Items & Extensions, and uDeck
+    /// reports a record that "went away" and names a second copy as the likely thief.
+    @Test("switching it off in System Settings is not a record that went away")
+    func offInSystemSettings() {
+        var judgement = LoginItemJudgement()
+        judgement.read(reading(.opens))
+        judgement.read(reading(.doesNot, 60))
+        #expect(judgement.trouble == nil)
+        #expect(!judgement.opensAtLogin)
+    }
+
+    /// And once the system has said so, a later "no record at all" is not retro-labelled
+    /// against a moment that was already accounted for.
+    @Test("a reconciled off does not become a disappearance later")
+    func reconciledStaysQuiet() {
+        var judgement = LoginItemJudgement()
+        judgement.read(reading(.opens))
+        judgement.read(reading(.doesNot, 60))
+        judgement.read(reading(.systemHasNoRecord, 120))
+        #expect(judgement.trouble == nil)
+    }
+
+    /// What must NOT be lost while fixing the above: the measured failure is still said.
+    @Test("the record vanishing outright is still said")
+    func vanishedStillSaid() {
+        var judgement = LoginItemJudgement()
+        judgement.read(reading(.opens))
+        judgement.read(reading(.systemHasNoRecord, 60))
+        #expect(judgement.trouble == .recordVanished)
+    }
+}
