@@ -45,6 +45,10 @@ ON_AGAIN = ON.replace("Generation: 1", "Generation: 3")
 # What an update legitimately does to the row, measured in a guest on 2026-09-19:
 # macOS re-files it once because the bundle at the path was replaced.
 ON_REFILED = ON.replace("Generation: 1", "Generation: 2")
+# And what opening it at login does, measured on 2026-09-21: six restarts in six with
+# uDeck quit first, each one rewriting the record exactly once. A record unchanged
+# across a restart was not what opened uDeck.
+ON_OPENED = ON.replace("Generation: 1", "Generation: 2")
 
 # The row's own identity. Two dumps that agree on everything a path can show and
 # disagree on this are two different registrations, one of them wearing the other's
@@ -161,7 +165,7 @@ def test_a_disabled_leftover_is_not_a_registration(lab, check_dir):
 
 
 def test_uDeck_coming_back_by_itself_passes(lab, check_dir, monkeypatch):
-    machine = a_machine([ON, ON])
+    machine = a_machine([ON, ON_OPENED])
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     checks.check_survives_a_restart(machine, check_dir, lab)
 
@@ -199,17 +203,23 @@ def test_an_unreadable_database_does_not_hide_uDeck_not_coming_back(lab, check_d
 
 def test_the_restart_check_asks_the_guest_nothing_after_it_has_passed(lab, check_dir, monkeypatch):
     """A note is not worth a lab error: the pids printed are the ones already read."""
-    machine = a_machine([ON, ON], running=["404", Dropped])
+    machine = a_machine([ON, ON_OPENED], running=["404", Dropped])
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     checks.check_survives_a_restart(machine, check_dir, lab)
     assert any("404" in note for note in lab.notes)
 
 
 def _watch_the_order(monkeypatch, machine):
-    """What the check does to the machine, in the order it does it."""
+    """What the check does to the machine, in the order it does it — and when.
+
+    The clock is the fake's, which moves only when something sleeps, so the gap
+    between two entries is exactly the waiting the check asked for.
+    """
     order = []
-    monkeypatch.setattr(app, "quit_app", lambda machine_, step, seconds=None: order.append("quit"))
-    monkeypatch.setattr(machine, "reboot", lambda: order.append("reboot"), raising=False)
+    monkeypatch.setattr(
+        app, "quit_app", lambda machine_, step, seconds=None: order.append(("quit", machine.now))
+    )
+    monkeypatch.setattr(machine, "reboot", lambda: order.append(("reboot", machine.now)), raising=False)
     return order
 
 
@@ -219,10 +229,10 @@ def test_the_restart_check_quits_uDeck_before_restarting(lab, check_dir, monkeyp
     in a guest on 2026-09-20 — `loginwindow … persistentAppPreLaunch …
     bundleID:place.unicorns.udeck` with the record reading `[disabled]` — which is
     a second reason for this check to be green that has nothing to do with it."""
-    machine = a_machine([ON, ON])
+    machine = a_machine([ON, ON_OPENED])
     order = _watch_the_order(monkeypatch, machine)
     checks.check_survives_a_restart(machine, check_dir, lab)
-    assert order == ["quit", "reboot"]
+    assert [what for what, _ in order] == ["quit", "reboot"]
 
 
 def test_the_control_quits_uDeck_before_restarting(lab, check_dir, monkeypatch):
@@ -231,7 +241,39 @@ def test_the_control_quits_uDeck_before_restarting(lab, check_dir, monkeypatch):
     machine = a_machine([ON, OFF, OFF], running="")
     order = _watch_the_order(monkeypatch, machine)
     checks.check_off_stays_off(machine, check_dir, lab)
-    assert order == ["quit", "reboot"]
+    assert [what for what, _ in order] == ["quit", "reboot"]
+
+
+def test_both_restart_checks_leave_the_machine_alone_before_restarting(lab, check_dir, monkeypatch):
+    """Quitting uDeck is not enough to stop macOS reopening it — measured, 3 reopens in
+    10 with no wait and none at all at twenty seconds or more. What the checks buy with
+    the wait is the difference between a verdict and a coin toss, so the wait is not a
+    tidy-up and has a test."""
+    for check, dumps, running in (
+        (checks.check_survives_a_restart, [ON, ON_OPENED], "404"),
+        (checks.check_off_stays_off, [ON, OFF, OFF], ""),
+    ):
+        machine = a_machine(dumps, running=running)
+        order = _watch_the_order(monkeypatch, machine)
+        check(machine, check_dir, lab)
+        (_, quit_at), (_, reboot_at) = order[0], order[1]
+        assert reboot_at - quit_at >= checks.SETTLE_BEFORE_RESTART_SECONDS, (
+            f"{check.__name__} restarted {reboot_at - quit_at}s after quitting uDeck"
+        )
+
+
+# Where the reopens stopped, measured on 2026-09-21 across forty runs of this flow:
+# three in ten with no wait at all, and none in ten at each of twenty, forty-five and
+# ninety seconds. Written here rather than read from the constant, because a test that
+# reads the number it is checking agrees with any number.
+MEASURED_CLEAN_AT_SECONDS = 20
+
+
+def test_the_wait_is_not_shorter_than_the_one_that_was_measured_clean():
+    """The constant may be raised for margin — it is, by half — and must never be lowered
+    past what was measured, which is the only thing standing behind it. The mechanism is
+    not known, so there is nothing else to reason from."""
+    assert checks.SETTLE_BEFORE_RESTART_SECONDS >= MEASURED_CLEAN_AT_SECONDS
 
 
 def test_a_restart_the_system_reopened_proves_nothing_either_way(lab, check_dir, monkeypatch):
@@ -265,12 +307,26 @@ def test_a_record_another_copy_has_taken_fails_the_restart(lab, check_dir, monke
         checks.check_survives_a_restart(machine, check_dir, lab)
 
 
+def test_a_restart_the_record_did_not_open_is_not_a_verdict(lab, check_dir, monkeypatch):
+    """uDeck came back and its record was not touched. Opening an application at login
+    rewrites the record once — measured six times in six — so an untouched one was not
+    what opened it, and nothing here is about whether it would have.
+
+    This is the case that used to *pass*: earlier runs left uDeck running across the
+    restart, came back with the generation unchanged, and were green."""
+    machine = a_machine([ON, ON])
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(LabError, match="not what opened it") as raised:
+        checks.check_survives_a_restart(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
 def test_a_record_registered_again_across_a_restart_fails(lab, check_dir, monkeypatch):
-    """A restart rewrites nothing — measured in a guest, generation 1 before and 1 after.
-    A later one is something having registered, and uDeck registers only when asked."""
+    """Opening it at login rewrites the record once; two rewrites is uDeck registering
+    itself again on top, and it registers only when asked."""
     machine = a_machine([ON, ON_AGAIN])
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
-    with pytest.raises(CheckFailed, match="registered it again"):
+    with pytest.raises(CheckFailed, match="registered itself again"):
         checks.check_survives_a_restart(machine, check_dir, lab)
 
 
@@ -285,7 +341,7 @@ def test_a_different_row_wearing_the_same_path_fails_the_restart(lab, check_dir,
 def test_a_dump_without_the_row_identity_still_checks_everything_else(lab, check_dir, monkeypatch):
     """The UUID is read out of a report meant for a person. A macOS that stops printing it
     must cost the lab that one sentence, not every run."""
-    machine = a_machine([ON, ON])
+    machine = a_machine([ON, ON_OPENED])
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     checks.check_survives_a_restart(machine, check_dir, lab)
 
@@ -330,7 +386,7 @@ def test_the_control_keeps_the_reading_it_decided_on(lab, check_dir, monkeypatch
 
 
 def test_the_restart_check_keeps_the_database_it_came_back_with(lab, check_dir, monkeypatch):
-    machine = a_machine([ON, ON])
+    machine = a_machine([ON, ON_OPENED])
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     checks.check_survives_a_restart(machine, check_dir, lab)
     kept = sorted(path.name for path in check_dir.glob("login-records-*.txt"))

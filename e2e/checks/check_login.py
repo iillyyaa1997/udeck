@@ -32,6 +32,29 @@ THIS_COPY = f"{app.GUEST_APPLICATIONS}/{app.APP}"
 OPENS = f"Opens: {THIS_COPY}"
 WOULD_OPEN = f"Would open: {THIS_COPY}"
 
+# How long a machine is left alone between uDeck quitting and the restart, in the two
+# checks that restart one.
+#
+# macOS reopens applications that were running when the session ended, and a uDeck
+# brought back that way is indistinguishable from one the login record opened — which is
+# what made an intermittent failure here take two days to name. Quitting uDeck first does
+# not stop it, and neither does turning "reopen windows when logging back in" off in any
+# of its four spellings. What stops it is time. Measured on 2026-09-21, every run with a
+# polite quit that took under a fifth of a second, against this same flow:
+#
+#     no wait   3 reopens in 10
+#     20 s      0 reopens in 10
+#     45 s      0 reopens in 10
+#     90 s      0 reopens in 10
+#
+# Twenty is where it already stops; thirty is that with half again on top, because the
+# mechanism is not known. It is *not* the database settling — the record usually never
+# leaves it at all, 8 times in 10 still there after 90 s — and the likeliest story, that
+# loginwindow needs a moment to notice the application went, is a story. The checks read
+# the guest's log afterwards either way, so a reopen that gets through this is reported
+# rather than believed.
+SETTLE_BEFORE_RESTART_SECONDS = 30
+
 # After the desktop is up, how long the system is given to open what it was told to open.
 OPENS_WITHIN_SECONDS = 60
 # And how long a machine that must open nothing is watched before it is believed.
@@ -86,6 +109,9 @@ def check_survives_a_restart(machine, check_dir, lab):
     # here would have given this check a second reason to be green that has
     # nothing to do with what it checks.
     app.quit_app(machine, "quitting uDeck so that only the login record can bring it back")
+    # And then left alone, because quitting on its own is not enough: see
+    # SETTLE_BEFORE_RESTART_SECONDS for what was measured.
+    machine.sleep(SETTLE_BEFORE_RESTART_SECONDS)
 
     machine.reboot()
     pids = _wait_until_it_opens(machine, OPENS_WITHIN_SECONDS)
@@ -109,14 +135,34 @@ def check_survives_a_restart(machine, check_dir, lab):
     after = login.collect(machine, check_dir, name="login-records-after-the-restart.txt")
     expect(after is not None and after.enabled, f"uDeck is running but the record is {_describe(after)}")
     _expect_the_same_record(after, switched_on, "the restart")
-    # A restart rewrites nothing: measured in a guest on 2026-09-19, the generation is 1
-    # before and 1 after. So a later one is something having registered again — which for
-    # uDeck is a bug of its own, because it registers only when asked.
+    # Opening an application at login rewrites its record exactly once. Measured on
+    # 2026-09-21, six restarts out of six with uDeck quit first and nothing reopened by
+    # macOS: generation 1 before, 2 after, the same row. That makes the generation the
+    # witness for *who* brought uDeck back, three ways:
+    #
+    # * unchanged — the record was not acted on, so whatever opened uDeck was not it, and
+    #   this run says nothing about whether it would have. The lab's failure, not uDeck's.
+    # * one more — the record opened it. What this check is for.
+    # * more than that — uDeck registered itself again on top, which it must not do: it
+    #   registers only when asked.
+    #
+    # A correction worth keeping: this used to demand the generation stand still, from a
+    # measurement on 2026-09-19 that said 1 before and 1 after. Every one of those runs had
+    # left uDeck running across the restart, so the record was never what opened it — the
+    # assertion had encoded the wrong reason for the check being green.
+    rewrites = after.generation - switched_on.generation
+    if rewrites == 0:
+        raise LabError(
+            "telling the login record's doing from anything else's across the restart",
+            f"uDeck came back, and its record was not touched — generation {after.generation} "
+            f"before and after — so the record is not what opened it, and this run says nothing "
+            f"about whether it would have: {after.describe()}",
+        )
     expect(
-        after.generation == switched_on.generation,
-        f"uDeck came back, but its record is at generation {after.generation} and it was "
-        f"switched on at {switched_on.generation} — something registered it again, and "
-        f"uDeck registers only when asked: {after.describe()}",
+        rewrites == 1,
+        f"the restart left the record at generation {after.generation}, up from "
+        f"{switched_on.generation} — opening it at login rewrites it once, so uDeck "
+        f"registered itself again on top, and it registers only when asked: {after.describe()}",
     )
     # The pids the wait already read, not a fresh look: an SSH hiccup in a note must not
     # turn a check that has passed both its verdicts into a lab error.
@@ -165,6 +211,7 @@ def check_off_stays_off(machine, check_dir, lab):
     # uDeck left running, macOS reopened it after two restarts in twelve that the
     # login record forbade, and the check called that uDeck's doing.
     app.quit_app(machine, "quitting uDeck so that nothing but the login record could bring it back")
+    machine.sleep(SETTLE_BEFORE_RESTART_SECONDS)
 
     machine.reboot()
     pids = _wait_until_it_opens(machine, NOTHING_OPENS_SECONDS)

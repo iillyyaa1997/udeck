@@ -39,6 +39,30 @@ for what that promises.
   after: twelve reports to reach the edge from the middle of the screen, nothing
   past it, and `fired by push`.
 
+- **`login.survives-a-restart` proves the record opened uDeck, and says when it did
+  not.** It demanded the generation stand still across the restart, from a measurement on
+  2026-09-19 — 1 before, 1 after. Every one of those runs had left uDeck running across
+  the restart, so the record was never what opened it, and the assertion had written the
+  wrong reason for the check being green into the check. With uDeck quit and the machine
+  left alone first, six restarts in six rewrote the record exactly once: 1 before, 2
+  after, the same row, nothing reopened by macOS.
+
+  So the generation is now the witness for who brought uDeck back. Unchanged: the record
+  was not acted on, whatever opened uDeck was not it, and the run is "could not check".
+  One more: the record opened it, which is what the check is for. More than that: uDeck
+  registered itself again, which it must not, and that is still a failure.
+
+- **And then leave the machine alone for half a minute, because quitting is not enough.**
+  Measured across forty runs of the control, every one with a polite quit that took under
+  a fifth of a second: three reopens in ten with no wait, and none in ten at each of
+  twenty, forty-five and ninety seconds. Two explanations were measured and are wrong —
+  the `pkill` fallback in `quit_app` never fires, and the record usually never leaves the
+  database at all (still there after ninety seconds, eight times in ten), so what the
+  ninety seconds first bought was the right answer for the wrong reason. What is left is
+  the time itself. The wait is thirty seconds, which is where it was measured clean plus
+  half again, and the checks still read the guest's log afterwards — a reopen that gets
+  through the wait is reported rather than believed.
+
 - **The restart checks quit uDeck first, so that only the login record can bring it
   back.** `login.off-stays-off` failed about one run in six with the record reading
   exactly what it should — `[disabled]`, the same row, the generation the switch-off
