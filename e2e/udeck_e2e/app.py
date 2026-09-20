@@ -152,3 +152,44 @@ def wait_until_running(machine, seconds: float = config.LAUNCH_SECONDS) -> set[s
         if machine.clock() >= deadline:
             raise LabError("starting uDeck", f"uDeck was not running within {seconds:.0f}s{last}")
         machine.sleep(2)
+
+
+# What macOS logs when it reopens an application because it was running when the
+# session ended — its Transparent App Lifecycle, the "reopen windows when logging
+# back in" setting. Measured in a guest on 2026-09-20, from a machine caught with
+# uDeck running after a restart its login record forbade:
+#
+#   loginwindow[167] [com.apple.loginwindow.logging:TAL]
+#     -[PersistentAppsSupport persistentAppPreLaunch] | --- Index:0,
+#     bundleID:place.unicorns.udeck
+#
+# This has nothing to do with the login record, which read `[disabled]` throughout.
+REOPENED = "persistentAppPreLaunch"
+BUNDLE_ID = "place.unicorns.udeck"
+
+
+def the_system_reopened_it(machine, step: str = "asking whether macOS reopened uDeck by itself") -> bool:
+    """Whether macOS reopened uDeck at this login because it had been running.
+
+    Asked of the boot the guest is in now, from its own clock. A check that
+    restarts a machine with uDeck running cannot otherwise tell the login record's
+    doing from this — and the two look identical from outside, which is what made
+    an intermittent failure take two days to name.
+
+    Evidence, not an oracle, on the reading side: a log that cannot be read says
+    "no" and leaves the caller's own verdict to stand, because a check must not
+    turn a bad connection into a sentence. What it *is* an oracle for is the
+    caller's isolation, and callers raise on a true.
+    """
+    try:
+        boot = machine.ssh.boot_time()
+        since = machine.ssh.run(f"/bin/date -r {boot} '+%Y-%m-%d %H:%M:%S'", step).stdout.strip()
+        said = machine.ssh.ask(
+            f"/usr/bin/log show --start {shlex.quote(since)} "
+            f"--predicate {shlex.quote(f'eventMessage CONTAINS \"{REOPENED}\"')} "
+            f"--debug --info --style compact",
+            step,
+        ).stdout
+    except LabError:
+        return False
+    return any(REOPENED in line and BUNDLE_ID in line for line in said.splitlines())

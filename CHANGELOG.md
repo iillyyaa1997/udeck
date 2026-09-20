@@ -39,6 +39,26 @@ for what that promises.
   after: twelve reports to reach the edge from the middle of the screen, nothing
   past it, and `fired by push`.
 
+- **The restart checks quit uDeck first, so that only the login record can bring it
+  back.** `login.off-stays-off` failed about one run in six with the record reading
+  exactly what it should — `[disabled]`, the same row, the generation the switch-off
+  left — and uDeck running anyway. Two days of it were spent on the database, and the
+  database was never the cause. A machine caught red on 2026-09-20 said so in one line:
+
+      loginwindow [com.apple.loginwindow.logging:TAL]
+        -[PersistentAppsSupport persistentAppPreLaunch] | bundleID:place.unicorns.udeck
+
+  macOS reopens what was running when the session ended, and both restart checks
+  restarted the guest with uDeck on screen. So the control was blaming uDeck for the
+  system putting back a window, and — the part that matters more —
+  `login.survives-a-restart` had a second reason to be green that has nothing to do
+  with the login record, on a feature whose whole point is the record.
+
+  Both now quit uDeck before the restart, which rules it out by construction, and then
+  read the guest's log to say so: a run macOS reopened into is "could not check", not a
+  verdict, because it isolated nothing. "It should not happen" is what let this stand
+  for two days, so it is asserted rather than assumed.
+
 - **A control whose premise did not hold says so, instead of blaming uDeck.**
   `login.off-stays-off` fails intermittently in one of two ways, and one of them is the
   system rather than uDeck: the restart comes back with the record enabled at the

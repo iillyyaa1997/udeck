@@ -81,6 +81,11 @@ def nothing_real(monkeypatch):
     monkeypatch.setattr(app, "installed_version", lambda machine: checks.VERSION)
     monkeypatch.setattr(app, "install", lambda machine, zip_, note: None)
     monkeypatch.setattr(app, "launch", lambda machine, step="starting uDeck": {"404"})
+    # Quitting and asking the guest's log are the two new trips to the machine that
+    # the restart checks make. Stubbed here so every other test keeps its shape; the
+    # tests that are *about* them replace these with their own.
+    monkeypatch.setattr(app, "quit_app", lambda machine, step, seconds=None: None)
+    monkeypatch.setattr(app, "the_system_reopened_it", lambda machine, step=None: False)
     monkeypatch.setattr(ui, "open_settings_and_wait", lambda *a, **k: None)
     monkeypatch.setattr(ui, "wait_for", lambda machine, identifier, step, **k: ui.Element(identifier, 1, 2, 3, 4))
 
@@ -198,6 +203,52 @@ def test_the_restart_check_asks_the_guest_nothing_after_it_has_passed(lab, check
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     checks.check_survives_a_restart(machine, check_dir, lab)
     assert any("404" in note for note in lab.notes)
+
+
+def _watch_the_order(monkeypatch, machine):
+    """What the check does to the machine, in the order it does it."""
+    order = []
+    monkeypatch.setattr(app, "quit_app", lambda machine_, step, seconds=None: order.append("quit"))
+    monkeypatch.setattr(machine, "reboot", lambda: order.append("reboot"), raising=False)
+    return order
+
+
+def test_the_restart_check_quits_uDeck_before_restarting(lab, check_dir, monkeypatch):
+    """macOS reopens what was running when the session ended, and a uDeck brought
+    back that way is indistinguishable from one the login record opened. Measured
+    in a guest on 2026-09-20 — `loginwindow … persistentAppPreLaunch …
+    bundleID:place.unicorns.udeck` with the record reading `[disabled]` — which is
+    a second reason for this check to be green that has nothing to do with it."""
+    machine = a_machine([ON, ON])
+    order = _watch_the_order(monkeypatch, machine)
+    checks.check_survives_a_restart(machine, check_dir, lab)
+    assert order == ["quit", "reboot"]
+
+
+def test_the_control_quits_uDeck_before_restarting(lab, check_dir, monkeypatch):
+    """Where it was caught: two restarts in twelve came back with uDeck running and
+    the record correctly disabled, and the control called that uDeck's doing."""
+    machine = a_machine([ON, OFF, OFF], running="")
+    order = _watch_the_order(monkeypatch, machine)
+    checks.check_off_stays_off(machine, check_dir, lab)
+    assert order == ["quit", "reboot"]
+
+
+def test_a_restart_the_system_reopened_proves_nothing_either_way(lab, check_dir, monkeypatch):
+    """Not uDeck's doing, so not uDeck's to answer for — in both checks, and whether
+    or not the record says what it should."""
+    monkeypatch.setattr(app, "the_system_reopened_it", lambda machine, step=None: True)
+
+    came_back = a_machine([ON, ON])
+    monkeypatch.setattr(came_back, "reboot", lambda: None, raising=False)
+    with pytest.raises(LabError, match="macOS reopened uDeck by itself") as raised:
+        checks.check_survives_a_restart(came_back, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+    stayed_off = a_machine([ON, OFF, OFF], running="909")
+    monkeypatch.setattr(stayed_off, "reboot", lambda: None, raising=False)
+    with pytest.raises(LabError, match="macOS reopened uDeck by itself"):
+        checks.check_off_stays_off(stayed_off, check_dir, lab)
 
 
 def test_a_record_another_copy_has_taken_fails_the_restart(lab, check_dir, monkeypatch):

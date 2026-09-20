@@ -77,8 +77,19 @@ def check_survives_a_restart(machine, check_dir, lab):
     _prepare(machine, check_dir, lab)
     switched_on = _switch_on(machine, check_dir, lab)
 
+    # Quit before restarting, and the reason is the whole verdict. macOS reopens
+    # applications that were running when the session ended — its Transparent App
+    # Lifecycle — and a uDeck brought back that way looks exactly like one the
+    # login record opened. Measured in a guest on 2026-09-20, in the control
+    # below: `loginwindow … persistentAppPreLaunch … bundleID:place.unicorns.udeck`
+    # with the record reading `[disabled]` the whole time. Leaving uDeck running
+    # here would have given this check a second reason to be green that has
+    # nothing to do with what it checks.
+    app.quit_app(machine, "quitting uDeck so that only the login record can bring it back")
+
     machine.reboot()
     pids = _wait_until_it_opens(machine, OPENS_WITHIN_SECONDS)
+    _refuse_if_the_system_reopened_it(machine, "the restart")
     # Nothing that can raise may stand between that measurement and the sentence below
     # that judges it. A machine which lost its login item across a restart is also a
     # machine whose sudo, VNC and SSH are suspect, and a screenshot or a database read
@@ -150,8 +161,14 @@ def check_off_stays_off(machine, check_dir, lab):
         f"it was switched off and the system still has {_describe(off)}",
     )
 
+    # The same reason as in the check above, and this is where it was caught: with
+    # uDeck left running, macOS reopened it after two restarts in twelve that the
+    # login record forbade, and the check called that uDeck's doing.
+    app.quit_app(machine, "quitting uDeck so that nothing but the login record could bring it back")
+
     machine.reboot()
     pids = _wait_until_it_opens(machine, NOTHING_OPENS_SECONDS)
+    _refuse_if_the_system_reopened_it(machine, "the restart")
     # Same order, same reason: uDeck opening here is the failure this control exists to
     # catch, and neither the screenshot nor the database may be able to swallow it.
     _evidence(machine, check_dir, "after the restart", lab)
@@ -354,6 +371,27 @@ def _record_or_why_not(machine, check_dir, name="login-records-after-the-restart
 def _what_the_card_says(machine):
     """Every sentence the login card shows — when a verdict turns on them."""
     return " | ".join(ui.static_texts(machine, "reading what the login card says"))
+
+
+def _refuse_if_the_system_reopened_it(machine, what: str) -> None:
+    """macOS reopening uDeck by itself makes this run prove nothing either way.
+
+    Both restart checks quit uDeck first so that it cannot happen. This is the
+    part that says it did not — because "it should not have" is exactly the
+    reasoning that let an intermittent reopen pass for the login record's work for
+    two days, and because a setting or a macOS release can put it back.
+
+    Not a verdict: nothing here is about uDeck. The run could not isolate what it
+    was isolating, which is the lab's failure to carry the check out.
+    """
+    if app.the_system_reopened_it(machine):
+        raise LabError(
+            f"telling the login record's doing from the system's across {what}",
+            "macOS reopened uDeck by itself — its log says `persistentAppPreLaunch` for "
+            "place.unicorns.udeck — so whatever uDeck did here cannot be told from the "
+            "system putting back what was running. uDeck was quit before the restart "
+            "precisely so this could not happen",
+        )
 
 
 def _expect_the_same_record(after, before, what: str) -> None:

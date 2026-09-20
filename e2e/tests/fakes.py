@@ -10,6 +10,7 @@ from pathlib import Path
 
 from udeck_e2e.builds import SigningKey
 from udeck_e2e.errors import LabError
+from udeck_e2e.guest import parse_boot_time
 
 
 def done(out="", rc=0):
@@ -91,6 +92,14 @@ class Guest:
         if answer is None:
             return done("", rc=1)
         return done(answer, rc=0 if answer else 1)
+
+    def boot_time(self):
+        """Through `run`, and through the real parser, like the guest's own.
+
+        A fake that answered a number of its own would hide both a machine that
+        cannot be asked and a `kern.boottime` whose shape changed.
+        """
+        return parse_boot_time(self.run("sysctl -n kern.boottime", "reading the guest's boot time").stdout)
 
     def copy_in(self, local, remote, step, seconds=None):
         self.copied.append((Path(local).name, remote))

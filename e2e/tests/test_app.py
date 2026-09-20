@@ -137,3 +137,56 @@ def test_a_uDeck_that_never_starts_is_a_lab_problem():
 def test_a_blip_while_it_starts_is_not_a_uDeck_that_never_started():
     machine = FakeMachine({"pgrep -x uDeck": ["", Dropped, "", "505"]})
     assert app.wait_until_running(machine) == {"505"}
+
+
+# --- Did macOS reopen it by itself? -------------------------------------------------
+
+
+TAL = (
+    "2026-09-20 00:10:32.941 Df loginwindow[167:34a] [com.apple.loginwindow.logging:TAL] "
+    "-[PersistentAppsSupport persistentAppPreLaunch] | --- Index:0, bundleID:place.unicorns.udeck\n"
+)
+SOMEONE_ELSE = TAL.replace("place.unicorns.udeck", "com.apple.Safari")
+BOOT = "{ sec = 1789863026, usec = 734599 } Sun Sep 20 00:10:26 2026"
+
+
+def a_guest(log, boot=BOOT, when="2026-09-20 00:10:26"):
+    return FakeMachine({"kern.boottime": boot, "/bin/date -r": when, "log show": log})
+
+
+def test_macOS_reopening_uDeck_is_read_out_of_its_own_log():
+    """The line that named the cause of a failure two days old: macOS reopens what
+    was running when the session ended, and a uDeck brought back that way is
+    indistinguishable from one the login record opened."""
+    assert app.the_system_reopened_it(a_guest(TAL))
+
+
+def test_another_application_being_reopened_is_not_uDeck_being_reopened():
+    """The log names one bundle per line, and the guest reopens its own things."""
+    assert not app.the_system_reopened_it(a_guest(SOMEONE_ELSE))
+    # Both parts are required on the *same* line, not merely somewhere in the log.
+    assert not app.the_system_reopened_it(
+        a_guest(SOMEONE_ELSE + "2026-09-20 00:10:33 Df lsd[349] place.unicorns.udeck: built bundle record\n")
+    )
+
+
+def test_a_quiet_log_means_macOS_reopened_nothing():
+    assert not app.the_system_reopened_it(a_guest(""))
+
+
+def test_the_window_starts_at_the_guests_own_boot():
+    """Not `--last`: the machine has booted more than once in a run, and the boot
+    before this one is where the lab put uDeck there in the first place."""
+    machine = a_guest(TAL)
+    app.the_system_reopened_it(machine)
+    shown = [c for c in machine.ssh.commands if "log show" in c][0]
+    assert "--start '2026-09-20 00:10:26'" in shown
+    assert "--debug" in shown and "--info" in shown
+    assert any("date -r 1789863026" in c for c in machine.ssh.commands)
+
+
+def test_a_log_that_cannot_be_read_does_not_invent_a_reopen():
+    """Evidence on the reading side: this decides whether a run could isolate what
+    it was isolating, and a dropped connection must not become that answer."""
+    assert not app.the_system_reopened_it(a_guest(Dropped))
+    assert not app.the_system_reopened_it(FakeMachine({"kern.boottime": Dropped}))
