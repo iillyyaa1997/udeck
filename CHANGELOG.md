@@ -39,6 +39,15 @@ for what that promises.
   after: twelve reports to reach the edge from the middle of the screen, nothing
   past it, and `fired by push`.
 
+- **`updates.sparkle` watches the uDeck that came back, instead of glancing at it.** It
+  waited for a new pid after the install and returned the moment one appeared — the right
+  thing for waiting, the wrong thing for judging, because an update that installed a uDeck
+  which crashes on launch shows a new pid for exactly as long as the crash takes. The new
+  process is now watched for ten seconds and has to be there every time it is asked, and
+  the old one has to be gone: Sparkle replaces the copy that is running, so an old
+  process still beside the new is an update that replaced nothing, whatever the version
+  on disk says.
+
 - **A lab that could not look stops counting as uDeck having done nothing.** Two places
   where the three outcomes broke in the direction nobody watches: an unreadable log and
   a dead feed came out as ❌ about uDeck.

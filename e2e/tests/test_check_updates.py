@@ -315,6 +315,47 @@ def test_a_slow_relaunch_is_not_a_failed_update(machine, lab, check_dir, monkeyp
     assert "after the update" in machine.shots
 
 
+def test_an_updated_uDeck_that_crashes_on_launch_is_not_one_that_came_back(machine, lab, check_dir, monkeypatch):
+    """One look after the relaunch catches the moment the new process is alive. An
+    update that installed a uDeck which falls over straight away shows a new pid for
+    exactly that long, and a check that stopped looking there would call it working."""
+    prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1", "Version 0.4.2 is available.")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.SECOND)
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "202", ""]
+
+    with pytest.raises(CheckFailed, match="was gone"):
+        checks.check_sparkle(machine, check_dir, lab)
+
+
+def test_an_old_uDeck_still_running_beside_the_new_one_is_not_an_update(machine, lab, check_dir, monkeypatch):
+    """Sparkle replaces the copy that is running. One still there beside the new is an
+    update that did not replace anything, whatever the version on disk says."""
+    prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1", "Version 0.4.2 is available.")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.SECOND)
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "101 202"]
+
+    with pytest.raises(CheckFailed, match="did not replace the copy that was running"):
+        checks.check_sparkle(machine, check_dir, lab)
+
+
+def test_the_uDeck_that_came_back_is_watched_for_the_whole_settle(machine, lab, check_dir, monkeypatch):
+    """Watched, not read once at the end: the sentence has to be able to say when it
+    went, and a crash in the middle of the window must not be missed by a read after."""
+    prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1", "Version 0.4.2 is available.")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.SECOND)
+    # Up, gone for one look, back again: a crash and a relaunch by something else.
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "202", "202", "", "202"]
+
+    with pytest.raises(CheckFailed, match="was gone"):
+        checks.check_sparkle(machine, check_dir, lab)
+
+
 def test_a_dropped_connection_never_reads_as_uDeck_is_not_running(machine, lab, check_dir, monkeypatch):
     """"uDeck did not come back" is a verdict; SSH failing is not evidence for it."""
     prepared(monkeypatch)

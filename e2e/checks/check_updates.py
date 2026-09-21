@@ -33,6 +33,14 @@ SECOND = ("0.4.2", "7")
 # inside this, not on top of it.
 INSTALL_SECONDS = 180
 
+# How long the uDeck that came back after an update has to stay before it counts as
+# having come back. An application that crashes on launch is running for a moment,
+# and one look catches exactly that moment: the pid is new, the check is green, and
+# uDeck is gone a second later. Watched throughout rather than read at the end, so
+# the sentence can say when it went. Long enough to outlast a crash on launch; paid
+# once a run.
+RELAUNCH_SETTLE_SECONDS = 10
+
 # How long the control waits for the button on an update it expects to be
 # refused only when it is installed, and how long it then watches nothing happen.
 OFFER_SECONDS = 60
@@ -74,9 +82,40 @@ def check_sparkle(machine, check_dir, lab):
             f"uDeck did not come back as a new process after the update: it was "
             f"{sorted(before) or 'not running'} before and is {sorted(after) or 'not running'} now",
         )
+        _expect_the_new_uDeck_stayed(machine, before, after)
     finally:
         feed.collect_log(check_dir)
         feed.stop()
+
+
+def _expect_the_new_uDeck_stayed(machine, before, after):
+    """The uDeck that came back is still there a moment later — and it is the only one.
+
+    `_wait_for_the_relaunch` returns the moment a new pid appears, which is the right
+    thing for waiting and the wrong thing for judging: an update that installed a
+    uDeck which crashes on launch shows a new pid for as long as the crash takes. So
+    the new one is watched for a while, and has to be there every time it is asked.
+
+    And the old one has to be gone. Sparkle replaces the running copy; an old process
+    still there beside the new is an update that did not replace what was running,
+    whatever the version on disk says.
+    """
+    fresh = after - before
+    now = after
+    began = machine.clock()
+    while machine.clock() - began < RELAUNCH_SETTLE_SECONDS:
+        machine.sleep(1)
+        now = app.running_pids(machine, "watching the uDeck that came back after the update")
+        expect(
+            fresh <= now,
+            f"uDeck came back after the update as {sorted(fresh)} and was gone "
+            f"{machine.clock() - began:.0f}s later; it is {sorted(now) or 'not running'} now",
+        )
+    expect(
+        not (before & now),
+        f"the uDeck that was running before the update is still there as {sorted(before & now)}, "
+        f"beside the new {sorted(fresh)} — the update did not replace the copy that was running",
+    )
 
 
 def check_wrong_key(machine, check_dir, lab):
