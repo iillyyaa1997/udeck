@@ -71,6 +71,67 @@ public enum PanelEvent: Sendable, Equatable {
     case screenLost
 }
 
+/// Reading "another application came forward" as what the operator actually did.
+///
+/// One click past the panel reaches uDeck by two roads, and they race. The
+/// global mouse monitor hears the click itself; the workspace says the clicked
+/// application has come forward. Whichever arrives first collapses the panel and
+/// the loser finds nothing left to do — so the same click closed the panel as a
+/// dismissal on some days and as an interruption on others, and the operator saw
+/// the *next* reveal come back as a peek or as the whole panel accordingly.
+///
+/// Which road wins is decided by something the operator cannot see: whether
+/// uDeck was the frontmost application at all. Measured in the lab on 2026-09-21
+/// (macOS 27 guest, eight clicks, four by each path): a panel promoted from a
+/// peek by a click *inside* it has made uDeck frontmost, so clicking away really
+/// does switch applications and the notification arrives 2.0–2.7 ms after the
+/// button went down — about 5 ms ahead of the monitor's own callback. A panel
+/// restored straight to `open` was never clicked, so uDeck never came forward,
+/// so clicking away switches nothing: no notification is posted at all and the
+/// monitor is the only messenger.
+///
+/// The operator's rule is that a click past the panel is him closing it, whoever
+/// brings the news. So the news is read rather than taken at face value: an
+/// application coming forward while the pointer sits past the panel, a moment
+/// after a click, *is* that click.
+public enum ApplicationSwitch {
+    /// How long after a mouse button went down another application coming
+    /// forward is still that button's doing.
+    ///
+    /// Not a preference: it is the delivery time of a system notification, and
+    /// nobody has a taste in those. Measured on 2026-09-21 by logging the age of
+    /// the last mouse-down at the top of the notification's handler, four clicks
+    /// past a held panel on an idle macOS 27 guest: 2.0, 2.4, 2.5 and 2.7 ms.
+    /// This is fifty times the slowest of them, so a machine an order of
+    /// magnitude busier is still read correctly. The other side of the line is a
+    /// human letting go of the mouse and reaching for ⌘-Tab, which no one does
+    /// inside a sixth of a second; that switch stays an interruption, which is
+    /// what brings unfinished work back.
+    public static let clickWindow: TimeInterval = 0.15
+
+    /// What to tell the panel when another application became frontmost.
+    ///
+    /// - Parameters:
+    ///   - secondsSinceLastClick: how long ago any mouse button last went down,
+    ///     anywhere on the machine. Asked of the system rather than remembered
+    ///     from uDeck's own click monitor, because that monitor is the messenger
+    ///     this exists to stop waiting for.
+    ///   - pointerIsPastThePanel: whether the pointer is outside the region that
+    ///     keeps the panel alive — the same test a click outside has to pass. A
+    ///     click *on* the panel that launches something is not the operator
+    ///     putting the panel away, so that stays an interruption.
+    public static func event(
+        secondsSinceLastClick: TimeInterval,
+        pointerIsPastThePanel: Bool,
+        within window: TimeInterval = clickWindow
+    ) -> PanelEvent {
+        guard pointerIsPastThePanel, secondsSinceLastClick >= 0, secondsSinceLastClick <= window else {
+            return .otherAppActivated
+        }
+        return .closeRequested
+    }
+}
+
 /// The panel's state, and the rules that move it between phases.
 ///
 /// The one rule this exists to guarantee: **once the panel is held, the cursor

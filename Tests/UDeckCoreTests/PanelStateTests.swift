@@ -196,3 +196,167 @@ struct PanelRestoreTests {
         }
     }
 }
+
+/// Telling the operator's click apart from a real application switch.
+///
+/// The numbers below are the lab's, not anybody's taste, and they are named so
+/// that the constant they bracket cannot be moved without one of these failing.
+@Suite("Panel states — a click past the panel, heard as an app switch")
+struct ApplicationSwitchTests {
+    /// The slowest click-caused activation measured in the guest on 2026-09-21:
+    /// four clicks past a held panel brought the notification 2.0, 2.4, 2.5 and
+    /// 2.7 ms after the button went down. Measured by logging the age of the
+    /// last mouse-down at the top of the notification's handler; the run is kept
+    /// as `race.race` under .build/e2e/ until the lab prunes it.
+    static let slowestClickCausedActivation: TimeInterval = 0.0027
+
+    /// A switch made with no click at all, measured in the same run: `open -a
+    /// Finder` from outside the session, with the last click seven and a half
+    /// seconds old.
+    static let switchWithNoClick: TimeInterval = 7.577
+
+    /// A click *inside* the panel, measured in the same run: the activation that
+    /// follows it arrives about 12 ms later. It is only ever uDeck's own, but a
+    /// card that launches something would put another application's name on it.
+    static let clickInsideThePanel: TimeInterval = 0.012
+
+    /// The fastest a hand could leave the mouse and reach ⌘-Tab. Not measured —
+    /// it is the far side of the line, and it only has to be an honest lower
+    /// bound on a deliberate second action.
+    static let handFromMouseToKey: TimeInterval = 0.2
+
+    @Test("an application coming forward a moment after a click past the panel is that click")
+    func aClickPastThePanelIsRead() {
+        #expect(
+            ApplicationSwitch.event(
+                secondsSinceLastClick: Self.slowestClickCausedActivation, pointerIsPastThePanel: true
+            ) == .closeRequested
+        )
+    }
+
+    @Test("⌘-Tab, and every switch made without a click, is still an interruption")
+    func aSwitchWithNoClickIsStillAnInterruption() {
+        #expect(
+            ApplicationSwitch.event(
+                secondsSinceLastClick: Self.switchWithNoClick, pointerIsPastThePanel: true
+            ) == .otherAppActivated
+        )
+    }
+
+    /// A card in the panel that launches an application: the click was on the
+    /// panel, so the operator did not put the panel away — he asked for the
+    /// thing that is now in front of it, and he is coming back.
+    @Test("a click inside the panel that brings something forward is not a dismissal")
+    func aClickInsideIsNotADismissal() {
+        #expect(
+            ApplicationSwitch.event(
+                secondsSinceLastClick: Self.clickInsideThePanel, pointerIsPastThePanel: false
+            ) == .otherAppActivated
+        )
+    }
+
+    @Test("the window is the measurement with room, and not a number someone liked")
+    func theWindowIsTiedToTheMeasurement() {
+        #expect(
+            ApplicationSwitch.clickWindow >= Self.slowestClickCausedActivation * 10,
+            "a window near the measured delivery time leaves a busy machine reading its own clicks as switches"
+        )
+        #expect(
+            ApplicationSwitch.clickWindow < Self.handFromMouseToKey,
+            "a window that long swallows a deliberate ⌘-Tab made just after a click, and with it the work it was protecting"
+        )
+    }
+
+    @Test("the edge of the window is the edge of the window")
+    func theWindowHasAnEdge() {
+        #expect(
+            ApplicationSwitch.event(
+                secondsSinceLastClick: ApplicationSwitch.clickWindow, pointerIsPastThePanel: true
+            ) == .closeRequested
+        )
+        #expect(
+            ApplicationSwitch.event(
+                secondsSinceLastClick: ApplicationSwitch.clickWindow + 0.001, pointerIsPastThePanel: true
+            ) == .otherAppActivated
+        )
+    }
+
+    /// `CGEventSource` answers with an interval, and a machine that has seen no
+    /// click at all is not obliged to answer with a sensible one. An answer that
+    /// cannot be true must not dismiss the panel.
+    @Test("an impossible answer about the last click is not a click")
+    func anImpossibleAnswerIsNotAClick() {
+        for nonsense in [-1.0, -0.0001, -TimeInterval.infinity] {
+            #expect(
+                ApplicationSwitch.event(secondsSinceLastClick: nonsense, pointerIsPastThePanel: true)
+                    == .otherAppActivated
+            )
+        }
+    }
+
+    @Test("a click past the panel leaves it dismissed, whichever message brought the news")
+    func theClickDismissesThroughEitherRoad() {
+        for secondsSinceLastClick in [0.0, Self.slowestClickCausedActivation] {
+            var state = PanelState()
+            state.apply(.revealRequested)
+            state.apply(.interacted)
+            state.apply(
+                ApplicationSwitch.event(
+                    secondsSinceLastClick: secondsSinceLastClick, pointerIsPastThePanel: true
+                )
+            )
+            #expect(state.phase == .collapsed)
+            #expect(state.collapseReason == .dismissed)
+            state.apply(.revealRequested)
+            #expect(state.phase == .peek, "the operator closed it, so the next reveal is a fresh glance")
+        }
+    }
+
+    /// "Retract when I switch applications" is a preference about switching
+    /// applications. Turning it off has never kept the panel up through a click
+    /// past it — the click monitor collapsed it a few milliseconds later anyway —
+    /// and reading the notification as that click must not quietly change that.
+    @Test("a click past the panel still closes it when collapsing on an app switch is off")
+    func theClickIsNotTheAppSwitchSetting() {
+        var state = PanelState()
+        state.apply(.revealRequested, collapseOnAppSwitch: false)
+        state.apply(.interacted, collapseOnAppSwitch: false)
+        state.apply(
+            ApplicationSwitch.event(
+                secondsSinceLastClick: Self.slowestClickCausedActivation, pointerIsPastThePanel: true
+            ),
+            collapseOnAppSwitch: false
+        )
+        #expect(state.phase == .collapsed)
+        #expect(state.collapseReason == .dismissed)
+
+        // And the switch it is not still obeys the setting.
+        state.apply(.revealRequested, collapseOnAppSwitch: false)
+        state.apply(.interacted, collapseOnAppSwitch: false)
+        state.apply(
+            ApplicationSwitch.event(
+                secondsSinceLastClick: Self.switchWithNoClick, pointerIsPastThePanel: true
+            ),
+            collapseOnAppSwitch: false
+        )
+        #expect(state.phase == .open)
+    }
+
+    @Test("a switch with no click still brings the work back whole")
+    func theSwitchStillRestores() {
+        for phase in [PanelPhase.open, .fullscreen] {
+            var state = PanelState()
+            state.apply(.revealRequested)
+            state.apply(.interacted)
+            if phase == .fullscreen { state.apply(.toggleFullscreen) }
+            state.apply(
+                ApplicationSwitch.event(
+                    secondsSinceLastClick: Self.switchWithNoClick, pointerIsPastThePanel: true
+                )
+            )
+            #expect(state.collapseReason == .interrupted)
+            state.apply(.revealRequested)
+            #expect(state.phase == phase, "unfinished work comes back; that is what an interruption is for")
+        }
+    }
+}

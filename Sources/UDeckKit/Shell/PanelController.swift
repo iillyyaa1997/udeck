@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import SwiftUI
 import OSLog
 import UDeckCore
@@ -573,15 +574,40 @@ public final class PanelController {
 
     private func handleClickOutside() {
         guard state.phase.isVisible else { return }
-        guard let geometry else { return }
-        // Tested against the keep-alive region, not the panel's own frame. The
-        // panel hangs below the top inset and so never contains the trigger
-        // strip — which meant a click in the menu bar, the very place the
-        // operator reaches to open the panel, dismissed it instead. The comment
-        // here claimed otherwise for several commits.
-        let location = NSEvent.mouseLocation
-        guard !geometry.containsPointer(location, in: geometry.keepAliveRegion(for: state.phase)) else { return }
+        guard pointerIsPastThePanel() else { return }
         apply(.closeRequested)
+    }
+
+    /// Whether the pointer is outside the region that keeps the panel alive.
+    ///
+    /// Tested against the keep-alive region, not the panel's own frame. The
+    /// panel hangs below the top inset and so never contains the trigger strip —
+    /// which meant a click in the menu bar, the very place the operator reaches
+    /// to open the panel, dismissed it instead. The comment here claimed
+    /// otherwise for several commits.
+    ///
+    /// Shared with `handleApplicationActivated`, so that one click cannot be
+    /// past the panel for the monitor that heard it and inside the panel for the
+    /// notification about it. Without geometry there is no region and therefore
+    /// nothing the pointer can be past; the panel then stays as it is, which is
+    /// what this did before it had a name.
+    private func pointerIsPastThePanel() -> Bool {
+        guard let geometry else { return false }
+        return !geometry.containsPointer(
+            NSEvent.mouseLocation, in: geometry.keepAliveRegion(for: state.phase)
+        )
+    }
+
+    /// How long ago any mouse button last went down, anywhere on the machine.
+    ///
+    /// Asked of the event source rather than remembered from uDeck's own click
+    /// monitor, and that is the whole point: the monitor's callback is the
+    /// message that arrives *second* (see `ApplicationSwitch`), so waiting for it
+    /// is what made the same click mean two different things.
+    private static func secondsSinceLastClick() -> TimeInterval {
+        [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown]
+            .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }
+            .min() ?? .infinity
     }
 
     private func handleApplicationActivated(pid: pid_t?) {
@@ -592,7 +618,27 @@ public final class PanelController {
         // the one behaviour that would make it useless to type in.
         guard pid != ProcessInfo.processInfo.processIdentifier else { return }
 
-        apply(.otherAppActivated)
+        // Telling the two apart is only worth doing while there is a panel on
+        // screen to collapse. Against the island the keep-alive region is the
+        // island's own, so the question would be about something nobody asked.
+        guard state.phase.isVisible else {
+            apply(.otherAppActivated)
+            return
+        }
+
+        // Whether this is a switch or the operator clicking past the panel is a
+        // decision, so it is made in `UDeckCore` and only its inputs are gathered
+        // here.
+        let since = Self.secondsSinceLastClick()
+        let event = ApplicationSwitch.event(
+            secondsSinceLastClick: since, pointerIsPastThePanel: pointerIsPastThePanel()
+        )
+        if event == .closeRequested {
+            DeckLog.panel.debug(
+                "another application came forward \(String(format: "%.0f", since * 1000), privacy: .public) ms after a click past the panel, so the panel counts it as closed"
+            )
+        }
+        apply(event)
     }
 
     /// The screen arrangement changed: a display was plugged in or unplugged,
