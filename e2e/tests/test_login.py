@@ -184,3 +184,52 @@ def test_a_refusal_is_a_lab_failure_and_not_an_empty_database():
 
     with pytest.raises(LabError, match="sfltool would not say"):
         login.record(Machine(None))
+
+
+# --- Which row a check is asking about ----------------------------------------------
+
+
+def _row(n, uuid, url, enabled, generation=1):
+    disposition = "[enabled, allowed, notified] (0xb)" if enabled else "[disabled, allowed, notified] (0xa)"
+    return (
+        f" #{n}:\n                 UUID: {uuid}\n                 Name: uDeck\n"
+        f"          Disposition: {disposition}\n           Identifier: 2.place.unicorns.udeck\n"
+        f"                  URL: {url}\n           Generation: {generation}\n"
+        f"    Bundle Identifier: place.unicorns.udeck\n"
+    )
+
+
+LIVE = "/Applications/uDeck.app"
+OTHER = "/Users/x/Applications/uDeck.app"
+
+
+def test_the_row_a_check_switched_on_is_found_by_its_identity_and_not_by_being_enabled():
+    """The failure this is here for: a check switched its own row off, and another copy's
+    row beside it was enabled. "Whichever uDeck row is enabled" read the other copy's and
+    pronounced that uDeck had not switched *its* row off, when it had."""
+    dump = _row(1, "A", LIVE, enabled=False) + _row(2, "B", OTHER, enabled=True)
+    mine = login.records_for(dump)
+
+    assert login.pick(mine).uuid == "B", "asked about nothing in particular, the enabled one decides"
+    picked = login.pick(mine, "A")
+    assert picked.uuid == "A" and not picked.enabled, "asked about row A, row A — disabled, as it is"
+    assert [r.uuid for r in login.enabled_elsewhere(mine, "A")] == ["B"]
+
+
+def test_a_row_that_is_gone_is_no_row_rather_than_the_next_one_along():
+    """Replaced, the switched-on row must not be answered for by whatever stands in its
+    place — that is how a new registration wearing the same path went unseen."""
+    mine = login.records_for(_row(1, "B", LIVE, enabled=True))
+    assert login.pick(mine, "A") is None
+
+
+def test_a_dump_that_prints_no_identity_still_answers_the_old_way():
+    """The UUID is read out of a report meant for a person. A macOS that stops printing it
+    must cost the lab the distinction, not every run — and no two rows can then be told
+    apart, so none is reported as enabled elsewhere."""
+    dump = (_row(1, "A", LIVE, enabled=False) + _row(2, "B", OTHER, enabled=True)).replace("UUID: A\n", "").replace("UUID: B\n", "")
+    dump = "\n".join(line for line in dump.splitlines() if "UUID:" not in line) + "\n"
+    mine = login.records_for(dump)
+    assert all(not r.uuid for r in mine)
+    assert login.pick(mine, "A").url == OTHER, "without identities, the enabled one decides"
+    assert login.enabled_elsewhere(mine, "A") == []

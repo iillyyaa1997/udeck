@@ -276,6 +276,57 @@ def test_the_wait_is_not_shorter_than_the_one_that_was_measured_clean():
     assert checks.SETTLE_BEFORE_RESTART_SECONDS >= MEASURED_CLEAN_AT_SECONDS
 
 
+def _two_copies(first, second):
+    """A dump holding this uDeck's row and another copy's, each given as (uuid, url, on)."""
+    def row(n, uuid, url, on, generation):
+        disposition = "[enabled, allowed, notified] (0xb)" if on else "[disabled, allowed, notified] (0xa)"
+        return (f" #{n}:\n                 UUID: {uuid}\n                 Name: uDeck\n"
+                f"          Disposition: {disposition}\n           Identifier: 2.place.unicorns.udeck\n"
+                f"                  URL: {url}\n           Generation: {generation}\n"
+                f"    Bundle Identifier: place.unicorns.udeck\n")
+    return row(1, *first) + row(2, *second)
+
+
+LIVE_ON = ("A", "/Applications/uDeck.app", True, 1)
+
+
+def test_another_copy_set_to_open_does_not_make_the_control_blame_uDeck(lab, check_dir, monkeypatch):
+    """uDeck switched its own row off; another copy's row beside it is enabled. The old
+    reading took that one and said uDeck had not switched off, when it had. A machine
+    where another copy opens at login cannot show this one's switch working either way."""
+    switched_off = _two_copies(("A", "/Applications/uDeck.app", False, 2), ("B", "/Users/x/Applications/uDeck.app", True, 1))
+    machine = a_machine([_two_copies(LIVE_ON, ("B", "/Users/x/Applications/uDeck.app", False, 1)), switched_off], running="")
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(LabError, match="another copy of uDeck is set to open at login") as raised:
+        checks.check_off_stays_off(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_the_control_passes_on_its_own_row_with_another_copy_switched_off_beside_it(lab, check_dir, monkeypatch):
+    """The other side: a second copy on the machine is not a reason to stop, only one
+    that is set to open."""
+    quiet_other = ("B", "/Users/x/Applications/uDeck.app", False, 1)
+    machine = a_machine([
+        _two_copies(LIVE_ON, quiet_other),
+        _two_copies(("A", "/Applications/uDeck.app", False, 2), quiet_other),
+        _two_copies(("A", "/Applications/uDeck.app", False, 2), quiet_other),
+    ], running="")
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    checks.check_off_stays_off(machine, check_dir, lab)
+
+
+def test_a_restart_that_opened_another_copy_says_so(lab, check_dir, monkeypatch):
+    """uDeck is running and the row that was switched on is disabled: what opened at login
+    was a different copy, and the sentence names it rather than calling the row replaced."""
+    machine = a_machine([
+        _two_copies(LIVE_ON, ("B", "/Users/x/Applications/uDeck.app", False, 1)),
+        _two_copies(("A", "/Applications/uDeck.app", False, 2), ("B", "/Users/x/Applications/uDeck.app", True, 2)),
+    ])
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(CheckFailed, match="what opened at login is another copy"):
+        checks.check_survives_a_restart(machine, check_dir, lab)
+
+
 def test_a_restart_the_system_reopened_proves_nothing_either_way(lab, check_dir, monkeypatch):
     """Not uDeck's doing, so not uDeck's to answer for — in both checks, and whether
     or not the record says what it should."""
@@ -334,7 +385,7 @@ def test_a_different_row_wearing_the_same_path_fails_the_restart(lab, check_dir,
     """Same path, same disposition, same generation — and not the same record."""
     machine = a_machine([WITH_UUID, ANOTHER_ROW])
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
-    with pytest.raises(CheckFailed, match="a different row"):
+    with pytest.raises(CheckFailed, match="the row that was switched on is gone"):
         checks.check_survives_a_restart(machine, check_dir, lab)
 
 
@@ -498,7 +549,7 @@ def test_a_record_the_update_took_with_it_fails(lab, check_dir, update_flow, mon
     at that path."""
     machine = a_machine([ON, NOTHING])
     versions(monkeypatch, checks.VERSION, checks.NEWER)
-    with pytest.raises(CheckFailed, match="no login record at all"):
+    with pytest.raises(CheckFailed, match="the row that was switched on is gone"):
         checks.check_survives_an_update(machine, check_dir, lab)
 
 
@@ -524,7 +575,7 @@ def test_a_record_the_update_racked_up_generations_on_fails(lab, check_dir, upda
 def test_a_different_row_after_the_update_fails(lab, check_dir, update_flow, monkeypatch):
     machine = a_machine([WITH_UUID, ANOTHER_ROW.replace("Generation: 1", "Generation: 2")])
     versions(monkeypatch, checks.VERSION, checks.NEWER)
-    with pytest.raises(CheckFailed, match="a different row"):
+    with pytest.raises(CheckFailed, match="the row that was switched on is gone"):
         checks.check_survives_an_update(machine, check_dir, lab)
 
 
@@ -553,7 +604,7 @@ def test_a_hiccup_reading_the_version_does_not_replace_the_verdict(lab, check_di
             raise LabError("reading the version installed", "SSH to 192.168.64.2 failed") from None
 
     monkeypatch.setattr(app, "installed_version", reads)
-    with pytest.raises(CheckFailed, match="no login record at all"):
+    with pytest.raises(CheckFailed, match="the row that was switched on is gone"):
         checks.check_survives_an_update(machine, check_dir, lab)
 
 

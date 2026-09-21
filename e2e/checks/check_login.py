@@ -132,8 +132,21 @@ def check_survives_a_restart(machine, check_dir, lab):
     # is the system's doing — and the record is still the one that was switched on. This
     # read is that verdict's oracle rather than its evidence, so a database that cannot be
     # read is the lab failing, and says so.
-    after = login.collect(machine, check_dir, name="login-records-after-the-restart.txt")
-    expect(after is not None and after.enabled, f"uDeck is running but the record is {_describe(after)}")
+    rows = login.collect_rows(machine, check_dir, name="login-records-after-the-restart.txt")
+    after = login.pick(rows, switched_on.uuid)
+    elsewhere = login.enabled_elsewhere(rows, switched_on.uuid)
+    expect(
+        after is not None,
+        "the row that was switched on is gone after the restart"
+        + (f", and another copy is set to open at login instead: "
+           f"{'; '.join(r.describe() for r in elsewhere)}" if elsewhere else ""),
+    )
+    expect(
+        after.enabled,
+        f"uDeck is running but the record that was switched on is {after.describe()}"
+        + (f" — what opened at login is another copy: {'; '.join(r.describe() for r in elsewhere)}"
+           if elsewhere else ""),
+    )
     _expect_the_same_record(after, switched_on, "the restart")
     # Opening an application at login rewrites its record exactly once. Measured on
     # 2026-09-21, six restarts out of six with uDeck quit first and nothing reopened by
@@ -201,7 +214,21 @@ def check_off_stays_off(machine, check_dir, lab):
     # on, and a pass that kept nothing leaves the next person to rebuild the guest to
     # find out what it saw. The only database on disk used to be the one from switching
     # *on*, which shows the record enabled — the opposite of what the check concluded.
-    off = login.collect(machine, check_dir, name="login-records-after-switching-off.txt")
+    rows = login.collect_rows(machine, check_dir, name="login-records-after-switching-off.txt")
+    # The row this check switched on, by its UUID — not "whichever uDeck row is
+    # enabled". With another copy's row enabled beside it, the old reading picked that
+    # one and pronounced that uDeck had failed to switch *its* row off, when it had.
+    off = login.pick(rows, switched_on.uuid)
+    elsewhere = login.enabled_elsewhere(rows, switched_on.uuid)
+    if elsewhere:
+        # Not a verdict either way: another copy is set to open at login, so a machine
+        # that comes back with uDeck running says nothing about this one's switch.
+        raise LabError(
+            "switching Open at Login off again",
+            f"another copy of uDeck is set to open at login — "
+            f"{'; '.join(r.describe() for r in elsewhere)} — so this machine cannot show "
+            f"that switching this one off works",
+        )
     expect(
         off is None or not off.enabled,
         f"it was switched off and the system still has {_describe(off)}",
@@ -219,7 +246,7 @@ def check_off_stays_off(machine, check_dir, lab):
     # Same order, same reason: uDeck opening here is the failure this control exists to
     # catch, and neither the screenshot nor the database may be able to swallow it.
     _evidence(machine, check_dir, "after the restart", lab)
-    after, said = _collect_or_why_not(machine, check_dir)
+    after, said = _collect_or_why_not(machine, check_dir, uuid=switched_on.uuid)
     if pids and after is not None and after.enabled and after.generation == switched_on.generation:
         # Not a verdict, and the sentence itself is why: it says the database came back as
         # it stood before the switch. A control whose premise did not hold has checked
@@ -268,7 +295,7 @@ def check_survives_an_update(machine, check_dir, lab):
         feed.serve(appcast, newer.zip)
         _install_the_update(machine, check_dir, lab)
 
-        after = login.collect(machine, check_dir, name="login-records-after-the-update.txt")
+        after = login.collect(machine, check_dir, name="login-records-after-the-update.txt", uuid=before.uuid)
         machine.screenshot(check_dir, "after the update")
 
         # No guard on the version here, on purpose. `_install_the_update` returns only
@@ -277,7 +304,10 @@ def check_survives_an_update(machine, check_dir, lab):
         # connection as a verdict about uDeck, which the docstring above forbids. It also
         # read the version twice on every pass, either of which could raise between the
         # record and the three sentences that judge it.
-        expect(after is not None, f"the update left uDeck with no login record at all; before it was {before.describe()}")
+        expect(
+            after is not None,
+            f"the row that was switched on is gone after the update; before it was {before.describe()}",
+        )
         expect(after.enabled, f"the record did not survive the update: {after.describe()}")
         _expect_the_same_record(after, before, "the update")
         # Unlike a restart, an update *does* move the generation, and by exactly one:
@@ -397,7 +427,7 @@ def _evidence(machine, check_dir, step, lab):
         lab.note(f"   no screenshot '{step}': {error.reason}")
 
 
-def _collect_or_why_not(machine, check_dir, name="login-records-after-the-restart.txt"):
+def _collect_or_why_not(machine, check_dir, name="login-records-after-the-restart.txt", uuid=""):
     """The record and a sentence about it, with the database kept — and neither able to raise.
 
     For the readings that are evidence for a verdict already decided. `login.collect`
@@ -405,7 +435,7 @@ def _collect_or_why_not(machine, check_dir, name="login-records-after-the-restar
     itself, and here it says so in the sentence instead of throwing.
     """
     try:
-        record = login.collect(machine, check_dir, name=name)
+        record = login.collect(machine, check_dir, name=name, uuid=uuid)
     except LabError as error:
         return None, f"(the record could not be read: {error.reason})"
     return record, _describe(record)
@@ -450,25 +480,17 @@ def _expect_the_same_record(after, before, what: str) -> None:
     uDeck's own source calls that the main one. And the identity: the row itself can be
     replaced, which a path alone cannot see, because the replacement names the same path.
 
-    The UUID is the row. Measured in a guest on 2026-09-19: it is unchanged across a
-    restart and across uDeck updating itself, while the generation moves in one of those
-    and not the other — so the UUID is what says "the same record", and the generation
-    says what happened to it.
-
-    Guarded on both being there: the UUID is read out of a dump meant for a person, and a
-    macOS that stops printing it must cost the lab this sentence rather than every run.
+    The identity is settled before this is called: the checks look the row up by the UUID
+    it had when it was switched on (`login.pick`), which is unchanged across a restart and
+    across uDeck updating itself — measured in a guest on 2026-09-19 — while the generation
+    moves in one of those and not the other. So a replaced row arrives here as no row at
+    all, and is reported where it is looked up. What is left to ask is the path.
     """
     expect(
         after.url == THIS_COPY,
         f"after {what} the record points at {after.url or 'nothing'}, not at the copy that was "
         f"switched on ({THIS_COPY}) — another copy has taken it",
     )
-    if before.uuid and after.uuid:
-        expect(
-            after.uuid == before.uuid,
-            f"after {what} the record is a different row: {after.uuid}, and it was {before.uuid}. "
-            f"The path is the same, so this is a new registration wearing it",
-        )
 
 
 def _describe(record):

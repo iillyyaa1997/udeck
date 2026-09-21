@@ -39,6 +39,23 @@ for what that promises.
   after: twelve reports to reach the edge from the middle of the screen, nothing
   past it, and `fired by push`.
 
+- **The login checks ask about the row they switched on, not whichever uDeck row is
+  enabled.** More than one record can carry uDeck's identifier — another copy, a leftover
+  — and `record_for` answered with whichever was enabled. Most of what that let through
+  had already been closed by comparing the path and the row's UUID, which is worth
+  saying: the audit's two named cases were red before this change. What was left was
+  worse for being quieter. With uDeck's own row correctly switched off and another copy's
+  row enabled beside it, the control read the other copy's and pronounced that uDeck had
+  not switched off, when it had.
+
+  After switching on, every check now looks its row up by that row's UUID. A replaced row
+  arrives as no row, and says so, rather than being answered for by whatever stands in
+  its place. Another copy set to open at login is named for what it is: in the control it
+  is "could not check", because a machine where another copy opens at login cannot show
+  this one's switch working either way, and after a restart it is named as what opened.
+  A dump that prints no UUIDs still answers the old way, since no two rows can then be
+  told apart.
+
 - **`updates.sparkle` watches the uDeck that came back, instead of glancing at it.** It
   waited for a new pid after the install and returned the moment one appeared — the right
   thing for waiting, the wrong thing for judging, because an update that installed a uDeck

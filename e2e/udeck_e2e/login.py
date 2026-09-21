@@ -121,17 +121,44 @@ def _is(record: LoginRecord, identifier: str) -> bool:
     return record.bundle_id == identifier or _TYPE_PREFIX.sub("", record.identifier) == identifier
 
 
-def record_for(dump: str, identifier: str = BUNDLE_ID) -> LoginRecord | None:
-    """The record for one application, or none.
+def records_for(dump: str, identifier: str = BUNDLE_ID) -> list[LoginRecord]:
+    """Every record that is this application's, in the order the dump printed them."""
+    return [record for record in records(dump) if _is(record, identifier)]
 
-    More than one record can carry the identifier — an embedded helper, a leftover from a
-    copy that is gone — so the one that decides what opens is the one the system is acting
-    on, and a disabled leftover is not it.
+
+def pick(mine: list[LoginRecord], uuid: str = "") -> LoginRecord | None:
+    """The record a check is asking about, out of this application's.
+
+    Given the UUID of the row a check switched on, that row and no other — which is the
+    point. More than one record can carry the identifier: an embedded helper, a leftover
+    from a copy that is gone, another copy entirely. Picking "whichever is enabled" let a
+    disabled live row hide behind an enabled one belonging to a different copy, and then a
+    check about uDeck switching *its* row off read the other copy's and pronounced on it.
+
+    Without a UUID — before anything was switched on, or from a dump that does not print
+    one — the one the system acts on is the enabled one, and a disabled leftover is not it.
     """
-    mine = [record for record in records(dump) if _is(record, identifier)]
+    if uuid and any(record.uuid for record in mine):
+        return next((record for record in mine if record.uuid == uuid), None)
     if not mine:
         return None
     return next((record for record in mine if record.enabled), mine[0])
+
+
+def record_for(dump: str, identifier: str = BUNDLE_ID, uuid: str = "") -> LoginRecord | None:
+    """The record for one application — the row with `uuid` when one is given — or none."""
+    return pick(records_for(dump, identifier), uuid)
+
+
+def enabled_elsewhere(mine: list[LoginRecord], uuid: str) -> list[LoginRecord]:
+    """This application's enabled records other than the row with `uuid`.
+
+    What decides whether *some* copy opens at login, as against the one a check switched.
+    Empty when the dump prints no UUIDs, because then no two rows can be told apart.
+    """
+    if not uuid or not any(record.uuid for record in mine):
+        return []
+    return [record for record in mine if record.enabled and record.uuid != uuid]
 
 
 def dump(machine, step: str = "reading the system's login records") -> str:
@@ -148,8 +175,9 @@ def record(machine, identifier: str = BUNDLE_ID, step: str = "reading the system
     return record_for(dump(machine, step), identifier)
 
 
-def collect(machine, directory, step: str = "reading the system's login records", name: str = "login-records.txt"):
-    """The record, with the whole database kept beside the check's other evidence (Q38).
+def collect_rows(machine, directory, step: str = "reading the system's login records", name: str = "login-records.txt"):
+    """Every record that is uDeck's, with the whole database kept beside the check's
+    other evidence (Q38).
 
     The database is the only place the truth about this feature lives, and a check that
     says "there is no record" without keeping what it read leaves the next person to
@@ -160,4 +188,10 @@ def collect(machine, directory, step: str = "reading the system's login records"
         (directory / name).write_text(text)
     except OSError:
         pass
-    return record_for(text)
+    return records_for(text)
+
+
+def collect(machine, directory, step: str = "reading the system's login records",
+            name: str = "login-records.txt", uuid: str = ""):
+    """The record — the row with `uuid` when one is given — kept as `collect_rows` keeps it."""
+    return pick(collect_rows(machine, directory, step, name), uuid)
