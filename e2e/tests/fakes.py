@@ -89,6 +89,11 @@ class Guest:
             raise LabError(step, "SSH to 192.168.64.2 failed")
         if isinstance(answer, BaseException):
             raise answer
+        if isinstance(answer, Failed):
+            # `ask` lets a command's own failure through — that is what it is for —
+            # so a caller that treats the exit code as an answer has to be able to
+            # be handed one that means "no", and one that means "I could not".
+            return done(answer.said, rc=answer.code)
         if answer is None:
             return done("", rc=1)
         return done(answer, rc=0 if answer else 1)

@@ -146,31 +146,54 @@ class GestureLog:
         """
         return self.machine.ssh.run("/bin/date '+%Y-%m-%d %H:%M:%S'", step).stdout.strip()
 
-    def since(self, mark: str, step: str) -> str:
-        """Everything uDeck said about the gesture since `mark`.
+    def read(self, mark: str, step: str) -> str:
+        """Everything uDeck said about the gesture since `mark`, as an oracle.
 
-        Evidence, so a read that fails says so rather than raising: a verdict
-        must not turn on whether the log could be read — except through
-        `keep`, which is what makes the reading mean anything at all.
+        This raises, and that is why it exists beside `collect`. Every verdict the
+        panel checks reach is a statement about what uDeck said: "it fired by the
+        push", "it opened nothing". An empty answer satisfies the second and
+        contradicts the first, so a log that could not be read *looks exactly like*
+        a panel that never opened — and a check that took it for one would be
+        pronouncing on uDeck because the lab's own connection wobbled.
+
+        `ask` already refuses to let a dropped connection pass for an answer. The
+        exit code is checked here too, because `log show` can fail on its own — a
+        predicate it will not parse, a log daemon that is not there — and hand back
+        nothing at all, with nothing said about why.
         """
         if not self.kept:
             raise LabError(step, "nothing asked the guest to keep uDeck's messages, so its log proves nothing")
         # Both categories: the gesture says which path fired, the panel says
         # whether anything opened, and a check needs the two together.
         predicate = f'subsystem == "{SUBSYSTEM}" AND (category == "{GESTURE}" OR category == "{PANEL}")'
-        try:
-            return self.machine.ssh.ask(
-                f"/usr/bin/log show --start {shlex.quote(mark)} --predicate {shlex.quote(predicate)} "
-                f"--debug --info --style compact",
+        done = self.machine.ssh.ask(
+            f"/usr/bin/log show --start {shlex.quote(mark)} --predicate {shlex.quote(predicate)} "
+            f"--debug --info --style compact",
+            step,
+        )
+        if done.returncode != 0:
+            said = (done.stderr or done.stdout).strip().splitlines()
+            raise LabError(
                 step,
-            ).stdout
+                f"the guest would not read uDeck's log: {said[-1] if said else f'exit {done.returncode}'}",
+            )
+        return done.stdout
+
+    def _read_or_say_why_not(self, mark: str, step: str) -> str:
+        """The same, as evidence: a read that fails says so and hands back nothing.
+
+        For the report, and for the sentence a failing check quotes. Nothing that
+        decides an outcome comes through here.
+        """
+        try:
+            return self.read(mark, step)
         except LabError as error:
             self.note(f"   uDeck's log could not be read: {error.reason}")
             return ""
 
     def collect(self, directory: Path, mark: str, step: str, name: str = "gesture.log") -> str:
         """What uDeck said, kept with the check's report (Q38), and returned."""
-        text = self.since(mark, step)
+        text = self._read_or_say_why_not(mark, step)
         try:
             (directory / name).write_text(text)
         except OSError as error:

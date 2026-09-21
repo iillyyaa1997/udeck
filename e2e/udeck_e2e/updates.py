@@ -167,6 +167,22 @@ class Feed:
                 raise LabError(step, f"the guest's own server did not answer within {config.FEED_UP_SECONDS:.0f}s: {said}")
             self.machine.sleep(1)
 
+    def answers_now(self, step: str) -> bool:
+        """Whether the feed is still there, asked once, for a check about to judge.
+
+        `serve` proves the feed answers before anything else happens; this is for
+        the moment a check is about to say uDeck did not find an update. A feed
+        that has since died gives uDeck nothing to find, and the sentence would be
+        about the lab wearing uDeck's name.
+        """
+        try:
+            done = self.machine.ssh.ask(
+                f"/usr/bin/curl -s -o /dev/null -w '%{{http_code}}' {shlex.quote(self.url)}", step, seconds=30
+            )
+        except LabError:
+            return False
+        return done.stdout.strip() == "200"
+
     def collect_log(self, directory: Path, name: str = "feed-server.log") -> str:
         """The guest's own access log, brought back as evidence (Q38), and returned.
 

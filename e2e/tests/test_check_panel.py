@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from fakes import Lab, Machine
+from fakes import Dropped, Lab, Machine
 
 from udeck_e2e import app, config, panel
 from udeck_e2e.errors import CheckFailed, LabError
@@ -194,6 +194,21 @@ def test_a_reveal_the_panel_refused_does_not_count_as_opening(monkeypatch, lab, 
     machine = prepared(monkeypatch, ATTACHED + PUSH + IGNORED)
     with pytest.raises(CheckFailed, match="the panel did not open"):
         checks.check_push(machine, check_dir, lab)
+
+
+def test_a_log_the_check_cannot_read_is_not_a_panel_that_did_not_open(monkeypatch, lab, check_dir):
+    """An empty answer and a panel that never opened are the same text. So the checks
+    read the log through the oracle, which raises, and not through what is kept for the
+    report — otherwise a connection that wobbled becomes a sentence about uDeck.
+
+    Both positive checks and the control, because "nothing fired" is exactly what
+    silence looks like to all three."""
+    at_the_edge(monkeypatch)
+    for check in (checks.check_push, checks.check_dwell, checks.check_middle_of_the_screen):
+        machine = prepared(monkeypatch, Dropped)
+        with pytest.raises(LabError, match="SSH") as raised:
+            check(machine, check_dir, lab)
+        assert not isinstance(raised.value, CheckFailed), check.__name__
 
 
 # --- The control ----------------------------------------------------------------------

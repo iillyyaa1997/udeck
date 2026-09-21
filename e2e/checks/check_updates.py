@@ -53,7 +53,7 @@ def check_sparkle(machine, check_dir, lab):
         _open_the_about_pane(machine, check_dir)
 
         ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
-        install = _wait_until_it_is_offered(machine, check_dir, lab, offered)
+        install = _wait_until_it_is_offered(machine, check_dir, lab, offered, feed)
         machine.screenshot(check_dir, "the update is offered")
         said = _what_the_pane_says(machine)
         expect(
@@ -166,25 +166,38 @@ def _open_the_about_pane(machine, check_dir):
     return element
 
 
-def _wait_until_it_is_offered(machine, check_dir, lab, offered):
+def _wait_until_it_is_offered(machine, check_dir, lab, offered, feed):
     """Until uDeck offers the update — or says something that means it will not.
 
     The button never appearing is not by itself uDeck being wrong: the press may
     not have landed, or uDeck may still be looking. What the pane says decides
     which it is. A finished answer — "up to date", "the check did not finish" —
-    against a feed that was proved to answer from inside the guest and an appcast
-    that declares a newer build is uDeck getting it wrong, and a failure. Anything
-    else is the lab's own, and stays "could not check".
+    against a feed that answers and an appcast that declares a newer build is
+    uDeck getting it wrong, and a failure. Anything else is the lab's own, and
+    stays "could not check".
+
+    "A feed that answers" is asked again here, and not taken from the fact that it
+    answered when it was started. The guest's server is a process the lab left
+    running in a machine it is also driving, and a feed that has since died gives
+    uDeck nothing whatever to find — so the sentence "uDeck did not offer the
+    update" would be about the lab, wearing uDeck's name.
     """
     try:
         return ui.wait_for(machine, "updates.install", "waiting for uDeck to offer the update")
     except NotThere:
         _evidence(machine, check_dir, "no update offered", lab)
         said = _what_the_pane_says_or_why_not(machine)
+        step = "asking whether the feed uDeck was given is still answering"
+        if not feed.answers_now(step):
+            raise LabError(
+                step,
+                "the guest's own server stopped answering, so there was nothing for uDeck to "
+                f"find and nothing to say about it; the pane says: {said}",
+            ) from None
         expect(
             UP_TO_DATE not in said and DID_NOT_FINISH not in said,
-            f"uDeck did not offer {offered.version}, although the feed it was given declares it; "
-            f"the pane says: {said}",
+            f"uDeck did not offer {offered.version}, although the feed it was given declares it "
+            f"and still answers; the pane says: {said}",
         )
         raise
 

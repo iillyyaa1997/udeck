@@ -143,7 +143,7 @@ def check_middle_of_the_screen(machine, check_dir, lab):
         pushed = panel.push_upward(machine, "pushing up in the middle of the screen")
         lab.note(f"   {pushed}")
         machine.sleep(config.NOTHING_HAPPENS_SECONDS)
-        said = log.since(since, "reading what uDeck says of the gesture")
+        said = log.read(since, "reading what uDeck says of the gesture")
         machine.screenshot(check_dir, "nothing happened")
 
         expect(
@@ -229,7 +229,7 @@ def _wait_for_uDecks_answer(machine, log, since, holding, seconds=config.GESTURE
     machine.sleep(holding)
     deadline = machine.clock() + seconds
     while True:
-        said = log.since(since, "reading what uDeck says of the gesture")
+        said = log.read(since, "reading what uDeck says of the gesture")
         if panel.fired_by(said) or machine.clock() >= deadline:
             return said
         machine.sleep(1)

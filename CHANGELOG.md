@@ -39,6 +39,23 @@ for what that promises.
   after: twelve reports to reach the edge from the middle of the screen, nothing
   past it, and `fired by push`.
 
+- **A lab that could not look stops counting as uDeck having done nothing.** Two places
+  where the three outcomes broke in the direction nobody watches: an unreadable log and
+  a dead feed came out as ❌ about uDeck.
+
+  `GestureLog` is now two calls with two jobs. `read` is the oracle and raises — every
+  panel verdict is a statement about what uDeck said, and an empty answer satisfies "it
+  opened nothing" exactly as a real silence would, so a log that could not be read looked
+  precisely like a panel that never opened. It also checks `log show`'s own exit code,
+  which `ask` lets through by design: a predicate it will not parse handed back nothing
+  at all, with nothing said about why. `collect` stays what it was — evidence for the
+  report, and for the sentence a failing check quotes, deciding nothing.
+
+  And `updates.sparkle` asks whether the feed still answers before it says uDeck did not
+  find an update. The guest's server is a process the lab left running in a machine it is
+  also driving; one that has since died gives uDeck nothing whatever to find, and the
+  pane then says the check did not finish — quite correctly, about the lab.
+
 - **`updates.wrong-key` has to see the archive served before it calls anything a
   refusal.** The control took two witnesses that uDeck had reached the signature, and
   the second was the pane saying "The check did not finish" — which uDeck prints for

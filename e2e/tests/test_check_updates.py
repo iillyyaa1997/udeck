@@ -38,7 +38,10 @@ checks = _load()
 
 @pytest.fixture
 def machine():
-    return Machine()
+    # The feed answering is the state every check starts from — `serve` proves it
+    # before anything else happens — so it is the fake's default, and the test
+    # about a feed that died says so for itself.
+    return Machine({"http_code": "200"})
 
 
 @pytest.fixture
@@ -346,6 +349,21 @@ def test_uDeck_saying_it_is_up_to_date_is_a_failure(machine, lab, check_dir, mon
 
     with pytest.raises(CheckFailed, match="did not offer 0.4.2"):
         checks.check_sparkle(machine, check_dir, lab)
+
+
+def test_a_feed_that_died_is_not_uDeck_failing_to_find_an_update(machine, lab, check_dir, monkeypatch):
+    """The guest's server is a process the lab left running in a machine it is also
+    driving. One that has since died gives uDeck nothing whatever to find, so
+    "uDeck did not offer the update" would be the lab's failure wearing uDeck's
+    name — and the pane, quite correctly, says the check did not finish."""
+    prepared(monkeypatch)
+    finds(monkeypatch, **{"updates.install": NotThere("waiting", "'updates.install' did not appear")})
+    says(monkeypatch, "Installed 0.4.1", "The check did not finish")
+    machine.ssh.answers["http_code"] = "000"
+
+    with pytest.raises(LabError, match="stopped answering") as raised:
+        checks.check_sparkle(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
 
 
 def test_uDeck_still_looking_is_a_lab_problem_and_not_a_failure(machine, lab, check_dir, monkeypatch):

@@ -100,7 +100,7 @@ def test_a_guest_that_did_not_start_keeping_them_is_a_lab_problem():
 def test_nothing_is_read_from_a_log_nobody_was_keeping():
     machine = Machine({"log show": "fired by dwell on Built-in"})
     with pytest.raises(LabError, match="proves nothing"):
-        panel.GestureLog(machine, note=lambda text: None).since("2026-09-18 18:20:00", "reading")
+        panel.GestureLog(machine, note=lambda text: None).read("2026-09-18 18:20:00", "reading")
 
 
 def test_the_window_starts_at_the_guests_own_clock():
@@ -111,7 +111,7 @@ def test_the_window_starts_at_the_guests_own_clock():
     log.kept = True
     when = log.mark("noting the time")
     assert when == "2026-09-18 18:20:00"
-    said = log.since(when, "reading")
+    said = log.read(when, "reading")
     shown = [c for c in machine.ssh.commands if "log show" in c][0]
     assert f"--start '{when}'" in shown and "--debug" in shown
     # Both categories: which path fired, and whether anything opened.
@@ -119,12 +119,33 @@ def test_the_window_starts_at_the_guests_own_clock():
     assert panel.fired_by(said) == ["dwell"]
 
 
-def test_what_uDeck_said_is_evidence_and_never_raises(tmp_path):
+def test_a_log_that_cannot_be_read_is_the_labs_failure_and_not_uDecks(tmp_path):
+    """The verdicts here are statements about what uDeck said, and an empty answer
+    satisfies "it opened nothing" exactly as a real silence would. So the oracle
+    raises rather than handing back nothing that a check would then pronounce on."""
+    dropped = Machine({"log show": Dropped})
+    log = panel.GestureLog(dropped, note=lambda text: None)
+    log.kept = True
+    with pytest.raises(LabError, match="SSH"):
+        log.read("2026-09-18 18:20:00", "reading")
+
+    # And the same for `log show` failing on its own, which `ask` lets through: it
+    # answers with an exit code rather than with a dropped connection.
+    refused = Machine({"log show": Failed(code=64, said="log: unrecognized predicate")})
+    refused_log = panel.GestureLog(refused, note=lambda text: None)
+    refused_log.kept = True
+    with pytest.raises(LabError, match="would not read uDeck's log"):
+        refused_log.read("2026-09-18 18:20:00", "reading")
+
+
+def test_what_is_kept_for_the_report_is_evidence_and_never_raises(tmp_path):
+    """The other half of the same split: what goes in the report, and into the
+    sentence a failing check quotes, must not be able to change the outcome."""
     machine = Machine({"log show": Dropped})
     said = []
     log = panel.GestureLog(machine, note=said.append)
     log.kept = True
-    assert log.since("2026-09-18 18:20:00", "reading") == ""
+    assert log.collect(tmp_path, "2026-09-18 18:20:00", "keeping") == ""
     assert any("could not be read" in note for note in said)
 
     kept = Machine({"log show": ATTACHED + FIRED})
