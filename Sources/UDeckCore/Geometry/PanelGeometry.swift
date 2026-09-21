@@ -297,6 +297,22 @@ public struct PanelGeometry: Equatable, Sendable {
         )
     }
 
+    /// Whether a point is past the panel in `phase`: outside the region that
+    /// keeps it alive, not merely outside the panel's own frame.
+    ///
+    /// The region is the frame with a margin all round, reaching the top of the
+    /// screen, and it is the one asked for two reasons. The margin that forgives
+    /// the cursor straying just off a peek forgives a click just off the edge of
+    /// the panel too. And the frame has not always reached the top: while the
+    /// panel hung below the menu bar, a click in the menu bar — the very place
+    /// the operator reaches to open the panel — read as past it and dismissed
+    /// it. Both messengers of a click past the panel ask this one question, so
+    /// that one click cannot be past the panel for the monitor that heard it
+    /// and on the panel for the notification about it.
+    public func isPastThePanel(_ point: CGPoint, in phase: PanelPhase) -> Bool {
+        !containsPointer(point, in: keepAliveRegion(for: phase))
+    }
+
     /// A panel of the given *content* size, hanging from the anchor, clamped so
     /// it never runs off the side of the screen.
     ///

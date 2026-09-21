@@ -399,6 +399,44 @@ struct PanelGeometryTests {
         #expect(!g.triggerStrip.contains(CGPoint(x: g.openFrame.midX, y: g.openFrame.midY)))
     }
 
+    /// The one question both messengers of a click past the panel ask — the
+    /// click monitor and the notification that another application came
+    /// forward. The first two places are the lab's own (`PAST_THE_PANEL` and
+    /// `INSIDE_THE_PEEK` in e2e/udeck_e2e/config.py) turned into this screen's
+    /// coordinates: the fixture is the guest's screen, 2560x1440 under a
+    /// 30-point menu bar.
+    @Test("past the panel is past the region that keeps it alive, in the phase it is in")
+    func pastThePanel() {
+        let screen = ScreenFixtures.externalMain
+        let g = geometry(screen)
+        let theDesktop = CGPoint(x: 200, y: screen.frame.maxY - 1100)
+        let onThePeek = CGPoint(x: screen.frame.midX, y: screen.frame.maxY - 70)
+        let theMenuBarAboveIt = CGPoint(x: g.openFrame.midX, y: screen.frame.maxY)
+        for phase in [PanelPhase.peek, .open] {
+            #expect(g.isPastThePanel(theDesktop, in: phase), "a click on the desktop must close a \(phase)")
+            #expect(!g.isPastThePanel(onThePeek, in: phase), "a click on the \(phase) is not a click past it")
+            #expect(
+                !g.isPastThePanel(theMenuBarAboveIt, in: phase),
+                "the menu bar above the \(phase) is where the operator reaches to open it, not past it"
+            )
+            // Half the margin off the panel's side: outside the frame, still on the panel.
+            let frame = g.frame(for: phase)
+            let justBeside = CGPoint(x: frame.maxX + tuning.peekKeepAliveInset / 2, y: frame.midY)
+            #expect(!frame.contains(justBeside))
+            #expect(
+                !g.isPastThePanel(justBeside, in: phase),
+                "a click just off the edge of the \(phase) is forgiven the way a cursor straying there is"
+            )
+        }
+
+        // Which region is the phase's business: low on the open panel is on it,
+        // and the same point is well past a peek.
+        let lowOnTheOpenPanel = CGPoint(x: g.openFrame.midX, y: g.peekFrame.minY - 100)
+        #expect(g.openFrame.contains(lowOnTheOpenPanel))
+        #expect(!g.isPastThePanel(lowOnTheOpenPanel, in: .open))
+        #expect(g.isPastThePanel(lowOnTheOpenPanel, in: .peek))
+    }
+
     /// Every test below pins the same rule from a different side: a cursor
     /// sitting on the screen's own top edge is *on* the screen. Measured, not
     /// assumed — `CGWarpMouseCursorPosition` to the top of the display leaves

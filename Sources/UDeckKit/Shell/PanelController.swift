@@ -451,8 +451,12 @@ public final class PanelController {
         let inside = geometry.containsPointer(
             sample.location, in: geometry.keepAliveRegion(for: state.phase)
         )
+        // The same property `PanelState` asks before it collapses on
+        // `pointerLeft`, so that the rule cannot be broken in one layer and kept
+        // in the other — which is exactly how the lab stayed green over half of
+        // it (see `PanelPhase.isDismissibleByPointer`).
         switch peekExit.update(
-            isPeeking: state.phase == .peek,
+            isPeeking: state.phase.isDismissibleByPointer,
             isInsideRegion: inside,
             now: sample.timestamp,
             grace: settings.gesture.peekExitGrace
@@ -498,10 +502,10 @@ public final class PanelController {
             every: settings.gesture.peekExitGrace, repeats: false
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.state.phase == .peek, self.peekExit.isTiming,
+                guard let self, self.state.phase.isDismissibleByPointer, self.peekExit.isTiming,
                       let geometry = self.geometry
                 else { return }
-                if !geometry.containsPointer(NSEvent.mouseLocation, in: geometry.keepAliveRegion(for: .peek)) {
+                if geometry.isPastThePanel(NSEvent.mouseLocation, in: self.state.phase) {
                     self.apply(.pointerLeft)
                 }
             }
@@ -578,36 +582,18 @@ public final class PanelController {
         apply(.closeRequested)
     }
 
-    /// Whether the pointer is outside the region that keeps the panel alive.
+    /// Whether the pointer is past the panel — the question itself is
+    /// `PanelGeometry.isPastThePanel`, and this only reads where the pointer is.
     ///
-    /// Tested against the keep-alive region, not the panel's own frame. The
-    /// panel hangs below the top inset and so never contains the trigger strip —
-    /// which meant a click in the menu bar, the very place the operator reaches
-    /// to open the panel, dismissed it instead. The comment here claimed
-    /// otherwise for several commits.
-    ///
-    /// Shared with `handleApplicationActivated`, so that one click cannot be
-    /// past the panel for the monitor that heard it and inside the panel for the
-    /// notification about it. Without geometry there is no region and therefore
-    /// nothing the pointer can be past; the panel then stays as it is, which is
-    /// what this did before it had a name.
+    /// Without geometry there is no region and therefore nothing the pointer
+    /// can be past, so this answers false, and the two messengers take that
+    /// differently. For the click monitor it means the panel stays as it is,
+    /// which is what the monitor did before this had a name. For the
+    /// notification it means the activation is *not* a click past the panel, so
+    /// it is read as a switch — `otherAppActivated` — and the panel collapses
+    /// as interrupted rather than staying put.
     private func pointerIsPastThePanel() -> Bool {
-        guard let geometry else { return false }
-        return !geometry.containsPointer(
-            NSEvent.mouseLocation, in: geometry.keepAliveRegion(for: state.phase)
-        )
-    }
-
-    /// How long ago any mouse button last went down, anywhere on the machine.
-    ///
-    /// Asked of the event source rather than remembered from uDeck's own click
-    /// monitor, and that is the whole point: the monitor's callback is the
-    /// message that arrives *second* (see `ApplicationSwitch`), so waiting for it
-    /// is what made the same click mean two different things.
-    private static func secondsSinceLastClick() -> TimeInterval {
-        [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown]
-            .map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }
-            .min() ?? .infinity
+        geometry?.isPastThePanel(NSEvent.mouseLocation, in: state.phase) ?? false
     }
 
     private func handleApplicationActivated(pid: pid_t?) {
@@ -618,27 +604,41 @@ public final class PanelController {
         // the one behaviour that would make it useless to type in.
         guard pid != ProcessInfo.processInfo.processIdentifier else { return }
 
-        // Telling the two apart is only worth doing while there is a panel on
-        // screen to collapse. Against the island the keep-alive region is the
-        // island's own, so the question would be about something nobody asked.
-        guard state.phase.isVisible else {
-            apply(.otherAppActivated)
-            return
-        }
-
         // Whether this is a switch or the operator clicking past the panel is a
-        // decision, so it is made in `UDeckCore` and only its inputs are gathered
-        // here.
-        let since = Self.secondsSinceLastClick()
-        let event = ApplicationSwitch.event(
-            secondsSinceLastClick: since, pointerIsPastThePanel: pointerIsPastThePanel()
+        // decision, so it is made in `UDeckCore`, and what is left here is
+        // reading the machine when it asks. How long ago a button went down is
+        // asked of the event source rather than remembered from uDeck's own
+        // click monitor, and that is the whole point: the monitor's callback is
+        // the message that arrives *second* (see `ApplicationSwitch`), so
+        // waiting for it is what made the same click mean two different things.
+        let verdict = ApplicationSwitch.verdict(
+            in: state.phase,
+            secondsSinceLastClick: {
+                ApplicationSwitch.secondsSinceLastClick {
+                    CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0)
+                }
+            },
+            pointerIsPastThePanel: { pointerIsPastThePanel() }
         )
-        if event == .closeRequested {
-            DeckLog.panel.debug(
-                "another application came forward \(String(format: "%.0f", since * 1000), privacy: .public) ms after a click past the panel, so the panel counts it as closed"
-            )
+
+        // Both outcomes are written down, with what they were read from. Only
+        // the dismissal used to be, so a click read as a switch — a main thread
+        // late past the window, a pointer back on the panel — left the log
+        // saying exactly what an honest ⌘-Tab says.
+        if let evidence = verdict.evidence {
+            let ms = String(format: "%.0f", evidence.secondsSinceLastClick * 1000)
+            if verdict.event == .closeRequested {
+                DeckLog.panel.debug(
+                    "another application came forward \(ms, privacy: .public) ms after a click past the panel, so the panel counts it as closed"
+                )
+            } else {
+                let pointer = evidence.pointerIsPastThePanel ? "past the panel" : "on the panel"
+                DeckLog.panel.debug(
+                    "another application came forward \(ms, privacy: .public) ms after the last click, with the pointer \(pointer, privacy: .public), so the panel counts it as a switch"
+                )
+            }
         }
-        apply(event)
+        apply(verdict.event)
     }
 
     /// The screen arrangement changed: a display was plugged in or unplugged,
@@ -685,7 +685,7 @@ public final class PanelController {
             recognizer.suppressUntilPointerLeaves()
             peekExit.reset()
             exitTimer?.invalidate()
-            releaseKeyboard(restoringPreviousApplication: state.collapseReason == .dismissed)
+            releaseKeyboard(after: state.collapseReason)
         }
 
         pointer.panelVisible = state.phase.isVisible
@@ -867,8 +867,11 @@ public final class PanelController {
     /// The second condition matters. Collapsing because another application was
     /// activated means the operator picked that application; pulling the one
     /// that was in front *before* uDeck back over it would be uDeck answering a
-    /// choice it was not asked about.
-    private func releaseKeyboard(restoringPreviousApplication shouldRestore: Bool) {
+    /// choice it was not asked about. The reason for the collapse does not say
+    /// that on its own: a click past the panel is a dismissal and a choice at
+    /// once, so whether uDeck is still in front is asked too — see
+    /// `KeyboardHandback`.
+    private func releaseKeyboard(after reason: CollapseReason) {
         // No `resignKey()` here: `NSWindow` documents it as something the
         // system calls, never the application. Ordering the panel out is what
         // actually gives up key status.
@@ -876,6 +879,16 @@ public final class PanelController {
         didActivateForKeyboard = false
         let previous = applicationToRestore
         applicationToRestore = nil
+
+        // Asked of the workspace, as `takeKeyboard` asks it and for the same
+        // reason, and asked before the deactivation below — after it uDeck is
+        // not in front by definition.
+        let front = NSWorkspace.shared.frontmostApplication
+        let uDeckIsInFront = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+        let shouldRestore = KeyboardHandback.restoresPreviousApplication(after: reason, uDeckIsInFront: uDeckIsInFront)
+        DeckLog.panel.debug(
+            "gave the keyboard back after \(reason.rawValue, privacy: .public) with \(front?.localizedName ?? "nothing", privacy: .public) in front, so \(shouldRestore ? "bringing back \(previous?.localizedName ?? "nothing")" : "leaving it there", privacy: .public)"
+        )
 
         // Let go of the keyboard before handing it anywhere.
         //
