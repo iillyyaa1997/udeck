@@ -39,6 +39,23 @@ for what that promises.
   after: twelve reports to reach the edge from the middle of the screen, nothing
   past it, and `fired by push`.
 
+- **`updates.wrong-key` has to see the archive served before it calls anything a
+  refusal.** The control took two witnesses that uDeck had reached the signature, and
+  the second was the pane saying "The check did not finish" — which uDeck prints for
+  any trouble its updater runs into, including never having got as far as the archive.
+  With that accepted, the control could pass having offered nothing, pressed nothing and
+  downloaded nothing: the exact shape of a control that proves nothing, in the check
+  written to be the one that proves something.
+
+  Now the guest's own access log answering 200 for the archive is the only witness —
+  Sparkle checks the signature after downloading, so an archive served is a signature
+  that was checked and rejected. The pane's words stay in the report and decide nothing.
+  An update uDeck was never offered is "could not check", because the appcast is served
+  unsigned and the key is checked on download, so a missing offer is about the feed, the
+  window or the click. And the control now asks whether uDeck is still there: refusing
+  an update is something an application does while carrying on being itself, and "the
+  version on disk did not change" is equally true of one that fell over on the press.
+
 - **`login.survives-a-restart` proves the record opened uDeck, and says when it did
   not.** It demanded the generation stand still across the restart, from a measurement on
   2026-09-19 — 1 before, 1 after. Every one of those runs had left uDeck running across

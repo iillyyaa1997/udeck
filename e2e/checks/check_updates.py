@@ -20,6 +20,8 @@ Two rules run through the whole file, both learned from this check:
   the failure the control exists to catch would be the first one lost (Q34).
 """
 
+import re
+
 from udeck_e2e import app, builds, ui, updates
 from udeck_e2e.errors import LabError, NotThere, expect
 
@@ -86,19 +88,25 @@ def check_wrong_key(machine, check_dir, lab):
 
         ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
         # The signature is checked when the update is installed, not when it is
-        # offered, so the control presses Install. Only the control never
-        # appearing is caught here: every other lab failure — System Events
-        # refusing, a click that did not go through, a machine that went away —
-        # must come out as "could not check" and never as "uDeck did not offer
-        # it", which is how this check used to pass without pressing anything.
+        # offered, so the control has to press Install — and an update it was
+        # never offered is one whose signature was never reached. That is the lab
+        # failing to set the question up, not uDeck answering it.
         step = "waiting for what uDeck does with an update signed by another key"
         try:
             install = ui.wait_for(machine, "updates.install", step, seconds=OFFER_SECONDS)
         except NotThere:
-            install = None
-            lab.note("   uDeck did not even offer it")
-        if install is not None:
-            machine.click(*install.middle, "pressing Install on an update signed with another key")
+            raise LabError(
+                step,
+                "uDeck never offered the update, so nothing ever reached its signature. The "
+                "appcast is served unsigned and Sparkle checks the key when it downloads, so "
+                "the offer not appearing is about the feed, the window or the click — never "
+                "about the key this control is named after",
+            ) from None
+        # The pids before the press. uDeck refusing an update carries on running as
+        # itself; a uDeck that installed one comes back as a new process, and a
+        # uDeck that died leaves none.
+        before = app.running_pids(machine, "reading uDeck's pids before Install is pressed")
+        machine.click(*install.middle, "pressing Install on an update signed with another key")
 
         version = _the_version_after(machine, REFUSAL_SECONDS)
         _evidence(machine, check_dir, "after the refusal", lab)
@@ -110,7 +118,8 @@ def check_wrong_key(machine, check_dir, lab):
             f"uDeck installed {version}, which was signed with a key it does not trust; the pane says: {said}",
         )
         _nothing_is_still_installing(machine)
-        _prove_it_tried_and_refused(offered, log, said)
+        _expect_it_is_the_same_uDeck(machine, before, said)
+        _prove_it_fetched_and_refused(offered, log, said)
     finally:
         feed.collect_log(check_dir)
         feed.stop()
@@ -180,23 +189,55 @@ def _wait_until_it_is_offered(machine, check_dir, lab, offered):
         raise
 
 
-def _prove_it_tried_and_refused(offered, log, said):
-    """The control has to show uDeck tried the update, not merely that nothing happened.
+def _expect_it_is_the_same_uDeck(machine, before, said):
+    """The application that refused the update is the one that was asked to install it.
 
-    Two witnesses, either of which is enough. The guest's own access log naming
-    the archive is the language-independent one: Sparkle checks the signature
-    after downloading, so a fetched archive is a signature that was checked and
-    rejected. The pane saying the check did not finish is the one a person reads.
-
-    Neither means nothing exercised the signature — the check watched an
-    application that never did anything — and that is not a pass (Q34, Q37).
+    "The version on disk did not change" is also true of a uDeck that died on the
+    press, and of one that was never running to begin with. Refusing is something
+    an application does while carrying on being itself.
     """
-    if f"/{offered.zip.name}" in log or DID_NOT_FINISH in said:
+    step = "looking for uDeck after the refusal"
+    after = app.running_pids(machine, step)
+    expect(
+        after == before,
+        f"uDeck was running as {sorted(before)} when Install was pressed and is "
+        f"{('running as ' + str(sorted(after))) if after else 'not running'} now — it did not "
+        f"refuse the update and carry on; the pane says: {said}",
+    )
+
+
+# The guest's server is `python3 -m http.server`, whose log line reads
+# `"GET /uDeck-0.4.2.zip HTTP/1.1" 200 -`. The status is there; the byte count is
+# not — that trailing `-` is what it always writes — so what can be required is
+# that the archive was asked for and answered, never how much of it arrived. The
+# protocol version sits inside the quoted request and is not part of the question.
+def _served(log, name):
+    """The lines where the guest's server answered 200 for `name`."""
+    asked_for = re.compile(rf'"[^"]*/{re.escape(name)}[^"]*"\s+200\b')
+    return [line for line in log.splitlines() if asked_for.search(line)]
+
+
+def _prove_it_fetched_and_refused(offered, log, said):
+    """The control has to show uDeck reached the signature, not merely that nothing happened.
+
+    One witness, and it is the guest's own access log answering for the archive:
+    Sparkle checks the signature *after* downloading, so an archive served is a
+    signature that was checked and rejected. It is language-independent, and it is
+    about the update rather than about uDeck's mood.
+
+    What used to be accepted beside it was the pane saying "The check did not
+    finish" — which uDeck prints for any trouble the updater runs into, including
+    never having got as far as the archive. With that as a witness the control
+    could pass having pressed nothing and downloaded nothing, which is the shape
+    of a control that proves nothing (Q34, Q37). The pane's words stay in the
+    report, as evidence for a person, and decide nothing.
+    """
+    if _served(log, offered.zip.name):
         return
     raise LabError(
         "proving the update was refused",
-        "uDeck neither fetched the archive nor said its check did not finish, so nothing "
-        f"exercised the signature; the guest's server saw: {log.strip()[-300:] or 'nothing'}; "
+        f"the guest's server never answered for {offered.zip.name}, so nothing reached the "
+        f"signature this control is about; it saw: {log.strip()[-300:] or 'nothing'}; "
         f"the pane says: {said}",
     )
 

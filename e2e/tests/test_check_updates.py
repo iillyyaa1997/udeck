@@ -143,16 +143,20 @@ def test_system_events_refusing_is_not_uDeck_declining_to_offer(machine, lab, ch
 
 
 def test_an_update_that_was_never_offered_does_not_pass_as_a_refusal(machine, lab, check_dir, monkeypatch):
-    """Nothing offered, nothing fetched, nothing said: the signature was never reached."""
+    """An update uDeck was never offered is one whose signature was never reached.
+
+    The appcast is served unsigned and Sparkle checks the key when it downloads, so
+    the offer not appearing is about the feed, the window or the click — never about
+    the key this control is named after. It is the lab failing to ask the question."""
     prepared(monkeypatch)
     finds(monkeypatch, **{"updates.install": NotThere("waiting", "'updates.install' did not appear")})
     says(monkeypatch, "Installed 0.4.1", "Latest 0.4.1")
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
     monkeypatch.setattr(updates.Feed, "collect_log", feed_log('"GET /appcast.xml HTTP/1.1" 200 -'))
 
-    with pytest.raises(LabError, match="nothing exercised the signature"):
+    with pytest.raises(LabError, match="never offered the update") as raised:
         checks.check_wrong_key(machine, check_dir, lab)
-    assert "   uDeck did not even offer it" in lab.notes
+    assert not isinstance(raised.value, CheckFailed)
 
 
 def test_the_control_passes_when_the_guest_saw_uDeck_fetch_the_archive(machine, lab, check_dir, monkeypatch):
@@ -168,15 +172,19 @@ def test_the_control_passes_when_the_guest_saw_uDeck_fetch_the_archive(machine, 
     assert machine.now >= checks.REFUSAL_SECONDS
 
 
-def test_the_control_passes_when_uDeck_says_its_check_did_not_finish(machine, lab, check_dir, monkeypatch):
-    """The other witness: uDeck's own sentence about a refusal, for a person to read."""
+def test_uDeck_saying_its_check_did_not_finish_is_not_a_refusal(machine, lab, check_dir, monkeypatch):
+    """uDeck prints that sentence for any trouble its updater runs into, including
+    never having got as far as the archive. It used to be accepted as proof that the
+    signature had been reached, which let this control pass having downloaded nothing
+    — a control that proves nothing. The words stay in the report and decide nothing."""
     prepared(monkeypatch)
     finds(monkeypatch)
     says(monkeypatch, "Installed 0.4.1", "The check did not finish: The update is improperly signed")
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
     monkeypatch.setattr(updates.Feed, "collect_log", feed_log(""))
 
-    checks.check_wrong_key(machine, check_dir, lab)
+    with pytest.raises(LabError, match="never answered for"):
+        checks.check_wrong_key(machine, check_dir, lab)
 
 
 def test_a_window_that_cannot_be_read_does_not_hide_an_update_that_installed(machine, lab, check_dir, monkeypatch):
@@ -214,11 +222,66 @@ def test_an_install_still_in_flight_is_not_nothing_installed(machine, lab, check
     finds(monkeypatch)
     says(monkeypatch, "Installed 0.4.1")
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
-    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name}" 200 -'))
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 200 -'))
     machine.ssh.answers["pgrep -fl"] = "941 /Applications/uDeck.app/Contents/Frameworks/Autoupdate"
 
     with pytest.raises(LabError, match="still installing"):
         checks.check_wrong_key(machine, check_dir, lab)
+
+
+def test_a_uDeck_that_died_on_the_press_is_not_a_refusal(machine, lab, check_dir, monkeypatch):
+    """"The version on disk did not change" is also true of an application that fell
+    over when Install was pressed. Refusing is something uDeck does while carrying on
+    being itself."""
+    offer = prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 200 -'))
+    machine.ssh.answers["pgrep -x uDeck"] = ["404", ""]
+
+    with pytest.raises(CheckFailed, match="did not refuse the update and carry on"):
+        checks.check_wrong_key(machine, check_dir, lab)
+
+
+def test_a_uDeck_that_came_back_as_another_process_is_not_a_refusal(machine, lab, check_dir, monkeypatch):
+    """A new pid after the press is an application that was replaced and relaunched,
+    which is what installing looks like from outside — and the version on disk is read
+    once, at one moment."""
+    offer = prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 200 -'))
+    machine.ssh.answers["pgrep -x uDeck"] = ["404", "909"]
+
+    with pytest.raises(CheckFailed, match="did not refuse the update and carry on"):
+        checks.check_wrong_key(machine, check_dir, lab)
+
+
+def test_an_archive_the_server_refused_is_not_an_archive_it_served(machine, lab, check_dir, monkeypatch):
+    """The witness is the guest's server *answering* for the archive. A request it
+    turned away means Sparkle never had the bytes whose signature this is about."""
+    offer = prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 404 -'))
+
+    with pytest.raises(LabError, match="never answered for"):
+        checks.check_wrong_key(machine, check_dir, lab)
+
+
+def test_the_archive_is_recognised_whatever_protocol_the_server_logs(machine, lab, check_dir, monkeypatch):
+    """The protocol version sits inside the quoted request and is not part of the
+    question. Pinning it would make the witness a fact about `http.server`."""
+    offer = prepared(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.0" 200 -'))
+
+    checks.check_wrong_key(machine, check_dir, lab)
 
 
 def test_the_running_installer_is_looked_for_in_a_way_that_cannot_match_the_question(machine, lab, check_dir, monkeypatch):
@@ -227,7 +290,7 @@ def test_the_running_installer_is_looked_for_in_a_way_that_cannot_match_the_ques
     finds(monkeypatch)
     says(monkeypatch, "Installed 0.4.1")
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
-    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name}" 200 -'))
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 200 -'))
 
     checks.check_wrong_key(machine, check_dir, lab)
     asked = [c for c in machine.ssh.commands if "pgrep -fl" in c]
