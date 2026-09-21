@@ -291,6 +291,9 @@ class FakeScreen:
     def click(self, x, y, step):
         self.calls.append(("click", x, y))
 
+    def key(self, name, step):
+        self.calls.append(("key", name))
+
 
 class Host:
     def __init__(self, tmp_path):
@@ -791,6 +794,21 @@ def test_a_click_off_the_screen_is_refused_and_one_on_it_goes_through(host):
         host.machine.click(2560, 10, "nowhere")
     host.machine.click(2559, 1439, "the corner")
     assert ("click", 2559, 1439) in host.screens[0].calls
+
+
+def test_a_key_goes_to_the_machine_and_names_no_place_to_refuse(host):
+    """The one action with no coordinates. There is nothing to check it against —
+    a keystroke lands wherever macOS is sending keystrokes — so what a machine can
+    do about it is pass it on and say, in the step it names, what it was for."""
+    host.machine.create()
+    host.machine.boot()
+    host.machine.key("esc", "on the machine's keyboard")
+    assert ("key", "esc") in host.screens[0].calls
+
+
+def test_a_key_pressed_before_the_machine_booted_is_a_lab_failure(host):
+    with pytest.raises(LabError, match="has not booted"):
+        host.machine.key("esc", "on the machine's keyboard")
 
 
 # --- Keeping Tart's VNC server in use ---------------------------------------------------

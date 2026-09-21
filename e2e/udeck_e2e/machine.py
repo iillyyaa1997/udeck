@@ -338,6 +338,19 @@ class Machine:
         self._refuse_off_screen(x, y, what)
         self._on_screen(what, lambda: screen.click(x, y, what))
 
+    def key(self, name: str, step: str) -> None:
+        """Press a key on the machine's keyboard, named as vncdotool names it (`esc`).
+
+        Unlike a click, a keystroke names no place: it arrives at the machine's
+        keyboard and macOS delivers it wherever it is delivering keystrokes. So a
+        check that presses one has to have put the keyboard where it wants it —
+        and then say what proves it landed there, because a key that went
+        somewhere else looks exactly like a key nothing responded to.
+        """
+        what = f"pressing {name} {step}"
+        screen = self._screen_for(what)
+        self._on_screen(what, lambda: screen.key(name, what))
+
     def _refuse_off_screen(self, x: int, y: int, what: str) -> None:
         if not (0 <= x < config.SCREEN_WIDTH and 0 <= y < config.SCREEN_HEIGHT):
             raise LabError(what, f"({x}, {y}) is off the {config.SCREEN_WIDTH}×{config.SCREEN_HEIGHT} screen")

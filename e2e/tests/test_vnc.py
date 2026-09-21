@@ -278,6 +278,11 @@ class FakeApi:
         if self.fails:
             raise self.fails
 
+    def keyPress(self, name):  # noqa: N802 — vncdotool's name
+        self.events.append(("key", name))
+        if self.fails:
+            raise self.fails
+
     def disconnect(self):
         self.events.append(("disconnect", self.timeout))
 
@@ -325,3 +330,27 @@ def test_a_click_goes_through_the_machines_own_pointing_device():
     assert args[-3:] == ["click", "1280", "720"]
     assert vnc_client.parse_action(["click", "10", "20"]) == ("click", ["10", "20"])
     assert vnc_client.parse_action(["click", "-1", "20"]) is None
+
+
+def test_a_key_goes_to_the_machines_own_keyboard_by_the_name_vncdotool_uses():
+    """The only action that carries no coordinates: where it lands is the guest's
+    business. The name travels as it is — `esc`, `a`, `super-space` — because it
+    is vncdotool's vocabulary and not the lab's, and a name nothing recognises
+    has to reach the client to be refused there."""
+    client = Client((0, "", ""))
+    screen(client).key("esc", "on the machine's keyboard")
+    args, _ = client.calls[0]
+    assert args[-2:] == ["key", "esc"]
+    assert vnc_client.parse_action(["key", "esc"]) == ("key", ["esc"])
+    assert vnc_client.parse_action(["key", "super-space"]) == ("key", ["super-space"])
+    for wrong in (["key"], ["key", ""], ["key", "esc", "a"]):
+        assert vnc_client.parse_action(wrong) is None
+
+
+def test_the_key_is_pressed_and_released_on_one_connection_of_its_own(monkeypatch, capsys):
+    """`keyPress` is down-and-up, like `mousePress`: a key held down would be a
+    different thing entirely, and the connection ends either way."""
+    code, api, _ = run_client(monkeypatch, capsys, ["key", "esc"])
+    assert code == 0
+    assert [event[0] for event in api.events] == ["connect", "key", "disconnect", "shutdown"]
+    assert ("key", "esc") in api.events

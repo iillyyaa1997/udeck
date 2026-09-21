@@ -136,6 +136,14 @@ class Screen:
         """Click where a person would, through the machine's own pointing device."""
         self._act(["click", str(x), str(y)], step)
 
+    def key(self, name: str, step: str) -> None:
+        """Press a key on the machine's keyboard, named as vncdotool names it (`esc`).
+
+        Where it lands is the guest's business: the keystroke arrives at the
+        machine's keyboard, and macOS sends it wherever it is sending keystrokes.
+        """
+        self._act(["key", name], step)
+
     def capture(self, path: Path, step: str) -> Frame:
         """Save the screen as a PNG at `path`. A capture cut short leaves no file there."""
         partial = path.with_name(f".{path.stem}.partial.png")

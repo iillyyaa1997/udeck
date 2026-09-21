@@ -119,6 +119,7 @@ class Machine:
         self.now = 0.0
         self.shots = []
         self.clicks = []
+        self.keys = []
         self.pointer = []
         self.screenshot_fails = None
         # Which step's screenshot fails; None means every one of them.
@@ -141,6 +142,11 @@ class Machine:
         if self.click_fails is not None:
             raise self.click_fails
         self.clicks.append((x, y, step))
+
+    def key(self, name, step):
+        # The name as vncdotool takes it, and the step, because a keystroke names
+        # no place: which key was pressed is all a test can read back about it.
+        self.keys.append((name, step))
 
     def move_pointer(self, x, y, step):
         self.pointer.append((x, y, step))

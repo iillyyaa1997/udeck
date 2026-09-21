@@ -1,4 +1,4 @@
-"""The panel's hover gesture: where to put the pointer, how to push, and what uDeck said.
+"""The panel: where to put the pointer, how to push, and what uDeck said about it.
 
 The panel opening is not the check. Two different paths open it — the pointer
 resting in the strip at the top of the screen, and the pointer already pinned
@@ -14,12 +14,22 @@ subsystem's and reads them back afterwards. The same messages carry `idle:
 <reason>` — the gate that stopped the gesture — which is what makes a check that
 fires nothing worth reading.
 
+The same log answers the other half of the panel's life, which is how it goes
+away again. uDeck writes the phase it left and the event that took it —
+`peek -> collapsed on pointerLeft` — and both halves are read, because the panel
+has four ways of closing, it remembers which one it was, and the operator sees
+the difference at the next reveal.
+
 Geometry: the strip is a few points tall along the very top of the screen,
 centred horizontally, and the pointer counts as pinned within a point or two of
 the edge (`GestureTuning` in Sources/UDeckCore). The middle of the top row is
 inside it under every setting; the middle of the screen is outside it under
-every setting. The lab uses only those two places, so it depends on the shape of
-the gesture and not on its numbers.
+every setting. Those two places are all the opening checks need, and they depend
+on the shape of the gesture rather than on its numbers. The closing checks need
+two more, which cannot be quite so free of them: a place *on* the panel and a
+place past it both have to know roughly how big the panel is, so both are
+measurements kept in `config` with their reasons, and the lab's own tests read
+them back against uDeck's.
 """
 
 from __future__ import annotations
@@ -65,6 +75,33 @@ def middle_of_the_screen() -> tuple[int, int]:
     return config.SCREEN_WIDTH // 2, config.SCREEN_HEIGHT // 2
 
 
+def past_the_panel() -> tuple[int, int]:
+    """Outside the region that keeps the panel alive, whatever phase it is in.
+
+    A third place, and it exists because the second one is not one. The middle of
+    the screen is far from the *strip*, which is all the opening checks ever
+    needed — but the open panel reaches 760 points down from the top, so the
+    middle of a 1440-pixel screen is *inside* it. A check that took the pointer
+    there and called it "away" would be clicking on the panel and asking why the
+    panel did not treat it as a click outside.
+
+    This is left of the panel and below it at once (`config.PAST_THE_PANEL`), so
+    neither measurement alone has to be right for it to be past.
+    """
+    return config.PAST_THE_PANEL
+
+
+def inside_the_peek() -> tuple[int, int]:
+    """On the panel, and on nothing in it — where a click holds a peek open.
+
+    A click anywhere on the panel promotes a peek to a held panel, and a peek
+    draws no controls, so half way down it is a click that can only mean that
+    (`config.INSIDE_THE_PEEK`). Below the trigger strip, too: a click at the very
+    top would be the gesture again rather than an interaction.
+    """
+    return config.INSIDE_THE_PEEK
+
+
 def fired_by(lines: str) -> list[str]:
     """Which paths uDeck says fired, in order: `push`, `dwell`."""
     return [match.group(1) for match in _FIRED.finditer(lines)]
@@ -98,6 +135,26 @@ def revealed(lines: str) -> list[str]:
     shut-again look the same from outside.
     """
     return [to for was, to, _ in phases(lines) if was == SHUT and to != SHUT]
+
+
+def closed_on(lines: str) -> list[str]:
+    """What shut the panel, in order — the events it went back to `collapsed` on.
+
+    The mirror of `revealed`, and the oracle for every check about the panel
+    closing. It is the event and not merely the fact, because the panel has four
+    ways to close and they are not interchangeable: `pointerLeft` and
+    `closeRequested` and `escape(…)` are the operator putting it away, and
+    `otherAppActivated` is something interrupting him. uDeck remembers which,
+    and the operator sees the difference at the *next* reveal — a dismissed panel
+    comes back as a peek, an interrupted one comes back whole.
+
+    So a check that only asked "is it shut" would pass on the wrong reason, in
+    the exact way the panel checks were already careful about at the other end
+    (Q45): the panel opening is not the check either, and which path opened it
+    is. `escape(isEditingText: false)` is read as `escape` — the phase line's
+    event is matched by its name, and what it carries is not part of it.
+    """
+    return [because for _, to, because in phases(lines) if to == SHUT]
 
 
 class GestureLog:

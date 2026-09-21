@@ -1,9 +1,13 @@
 """The gesture's machinery: where the pointer goes, how the push is made, what uDeck said.
 
 The numbers here are the only place the lab has to agree with uDeck about
-something it cannot see — how hard a push has to be, and how long a dwell takes.
-The last test in this file is that agreement, checked against uDeck's own
-defaults rather than against a comment.
+something it cannot see — how hard a push has to be, how long a dwell takes, and
+where the panel ends so that "past it" means past it. The last two sections are
+that agreement, read out of uDeck's own defaults rather than described in a
+comment, because every way of getting it wrong is silent: too small a push and
+the panel never opens, too slow a push and it opens by the *dwell*, and a place
+that drifted inside the panel would make "the pointer left" a pointer that never
+left.
 """
 
 import re
@@ -68,11 +72,54 @@ def test_the_gate_that_stopped_the_gesture_is_read_too():
     ]
 
 
-def test_the_two_places_the_pointer_goes_are_the_two_the_gesture_is_about():
+CLOSED_BY_THE_POINTER = (
+    "2026-09-18 18:20:09.100 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] peek -> collapsed on pointerLeft\n"
+)
+CLOSED_BY_A_CLICK = (
+    "2026-09-18 18:20:09.100 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] open -> collapsed on closeRequested\n"
+)
+INTERRUPTED = (
+    "2026-09-18 18:20:09.100 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] open -> collapsed on otherAppActivated\n"
+)
+ESCAPED = (
+    "2026-09-18 18:20:09.100 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] "
+    "peek -> collapsed on escape(isEditingText: false)\n"
+)
+
+
+def test_what_closed_the_panel_is_read_the_way_what_opened_it_is():
+    """The mirror of `revealed`, and it has to name the event and not only the fact.
+
+    The panel has four ways of closing and the operator can tell them apart: it
+    remembers which one it was, and gives him back a peek or the whole panel
+    accordingly. So "it is shut" is the answer to a question no check is asking.
+    """
+    assert panel.closed_on(PHASE) == [], "opening is not closing"
+    assert panel.closed_on(CLOSED_BY_THE_POINTER) == ["pointerLeft"]
+    assert panel.closed_on(CLOSED_BY_A_CLICK) == ["closeRequested"]
+    assert panel.closed_on(INTERRUPTED) == ["otherAppActivated"]
+    # The event carries whether a field was being edited; the event is `escape`.
+    assert panel.closed_on(ESCAPED) == ["escape"]
+    assert panel.closed_on(PHASE + CLOSED_BY_THE_POINTER + PHASE) == ["pointerLeft"]
+    # And a refusal is not a phase changing, here as everywhere else.
+    assert panel.closed_on(REFUSED) == []
+
+
+def test_the_phase_the_panel_left_is_readable_beside_what_closed_it():
+    """Which phase heard the event is half of every closing check: a peek closing
+    when the pointer leaves is the panel working, and a held panel doing the same
+    is the one failure the whole design exists to prevent."""
+    assert panel.phases(CLOSED_BY_THE_POINTER) == [("peek", "collapsed", "pointerLeft")]
+    assert panel.phases(ESCAPED) == [("peek", "collapsed", "escape")]
+
+
+def test_the_places_the_pointer_goes_are_the_ones_the_panel_is_about():
     assert panel.top_of_the_strip() == (config.SCREEN_WIDTH // 2, 0)
     assert panel.middle_of_the_screen() == (config.SCREEN_WIDTH // 2, config.SCREEN_HEIGHT // 2)
     # Far enough from the top that no setting of the strip's height reaches it.
     assert panel.middle_of_the_screen()[1] > 100
+    for place in (panel.past_the_panel(), panel.inside_the_peek()):
+        assert 0 <= place[0] < config.SCREEN_WIDTH and 0 <= place[1] < config.SCREEN_HEIGHT
 
 
 # --- The oracle ------------------------------------------------------------------------
@@ -296,3 +343,73 @@ def test_the_labs_push_clears_uDecks_thresholds_and_beats_its_dwell():
     assert push >= _default("edgePushDistance") * 2, "the push has to clear the threshold with room"
     assert spent <= _default("edgePushWindow") / 2, "and all of it has to land inside uDeck's window"
     assert spent < _default("dwellDuration"), "and be over before the dwell would fire instead"
+
+
+# --- The two places the closing checks need -------------------------------------------
+#
+# Both are read against uDeck's own metrics rather than described in a comment,
+# for the reason the push's numbers are: the failure is silent. A point that
+# drifted inside the panel would make "the pointer left" a pointer that never
+# left, and the check would go red about uDeck for something the lab did.
+
+
+def _metric(name):
+    """One of uDeck's own panel measurements, read from its source."""
+    metrics = (
+        Path(panel.__file__).resolve().parents[2] / "Sources" / "UDeckCore" / "Configuration" / "PanelMetrics.swift"
+    ).read_text()
+    found = re.search(rf"\b{name}: CGFloat = ([0-9.]+)", metrics)
+    assert found, f"{name} is no longer a default in PanelMetrics.swift"
+    return float(found.group(1))
+
+
+def _biggest_panel():
+    """How wide and how tall the open panel can be on the lab's screen."""
+    return (
+        min(config.SCREEN_WIDTH * _metric("openWidthFraction"), _metric("openMaxWidth")),
+        min(config.SCREEN_HEIGHT * _metric("openHeightFraction"), _metric("openMaxHeight")),
+    )
+
+
+# The menu bar the panel hangs below is not measured anywhere in this repository,
+# and every vertical edge here moves with it. So the numbers below allow it a
+# tenth of the screen — four times what macOS has ever drawn — rather than
+# pretending to know it.
+GENEROUS_MENU_BAR = config.SCREEN_HEIGHT / 10
+
+
+def test_the_place_past_the_panel_is_outside_the_biggest_panel_uDeck_can_draw():
+    """Outside on both axes at once, which is the point of it.
+
+    The keep-alive region is the panel's frame grown by `peekKeepAliveInset` on
+    every side, and it is what uDeck measures a click and a departure against —
+    not the panel's own edges. Left of it *and* below it, so that a change to the
+    width or to the height alone cannot quietly bring this point back inside.
+    """
+    x, y = panel.past_the_panel()
+    inset = _default("peekKeepAliveInset")
+    width, height = _biggest_panel()
+    # The panel is centred on the anchor, which is the middle of the screen's top edge.
+    assert x < config.SCREEN_WIDTH / 2 - width / 2 - inset, "not clear of the panel to the left"
+    assert y > GENEROUS_MENU_BAR + height + inset, "not clear of the panel below"
+
+
+def test_the_middle_of_the_screen_is_inside_the_open_panel_which_is_why_there_is_a_third_place():
+    """The trap this helper exists for. The middle of the screen is the lab's
+    "away from the strip", and the opening checks need nothing more — but the open
+    panel reaches most of the way down the screen, so a closing check that took
+    the pointer there would be leaving it *on* the panel and asking why the panel
+    did not notice it leave."""
+    _, height = _biggest_panel()
+    assert panel.middle_of_the_screen()[1] < height
+    assert panel.past_the_panel() != panel.middle_of_the_screen()
+
+
+def test_the_click_that_holds_the_panel_open_lands_on_the_peek_and_below_the_strip():
+    """A peek draws no controls, so anywhere on it means the same thing — but it
+    has to be *on* it, and below the strip: a click at the very top of the screen
+    is another go at the gesture, not an interaction with the panel."""
+    x, y = panel.inside_the_peek()
+    peek_width = min(config.SCREEN_WIDTH * _metric("peekWidthFraction"), _metric("peekMaxWidth"))
+    assert abs(x - config.SCREEN_WIDTH / 2) < peek_width / 2
+    assert _default("stripHeight") < y < _metric("peekHeight")

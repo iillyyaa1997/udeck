@@ -220,6 +220,40 @@ THROW_PAUSE_SECONDS = 0.002
 # real pass into "could not check".
 PINNED_TOLERANCE_PIXELS = 2
 
+# --- The panel closing ----------------------------------------------------------
+#
+# Where the pointer goes, and where a click lands, when a check needs to be past
+# the panel altogether — outside the region that keeps it alive, so that leaving
+# is really leaving and a click there is really a click outside.
+#
+# It has to be a third place, because the two the opening checks use are not
+# outside anything: the top of the strip is the panel, and the middle of the
+# screen is *inside* the open one. The open panel is the largest — at most 1100
+# wide and 760 tall, hanging from the top of the screen and centred on the
+# anchor (`PanelMetrics.swift`) — and what keeps it alive is that frame grown by
+# 24 points on every side (`GestureTuning.peekKeepAliveInset`), which on this
+# screen is the band between x 706 and x 1854, from the top of the screen down
+# to y ≈ 814.
+#
+# This point is left of that region *and* below it, so neither of the two
+# measurements alone has to stay where it is for the point to stay outside. It is
+# also well clear of the Dock along the bottom edge, so a click here lands on the
+# desktop rather than launching something. Measured in a guest on 2026-09-21: the
+# pointer held here left a held panel alone eleven times out of eleven, and a
+# click here closed it eight times out of eight.
+PAST_THE_PANEL = (200, 1100)
+
+# And where a check clicks to hold the panel open: half way down the peek, which
+# is the one place a click is sure to land on the panel and on nothing in it.
+# The peek is 96 points of content hanging from the top of the screen, at most
+# 820 wide and centred on the anchor (`PanelMetrics.swift`) — measured in a guest
+# on 2026-09-21 as the rectangle x 870…1690, y 0…126 — and it draws no controls
+# at all (`PeekView` in DeckRootView.swift is two pieces of text). Half way down
+# is also well below the 6-point trigger strip along the very top, so this is a
+# click on the panel and not another go at the gesture. Measured: it produced
+# `peek -> open on interacted` and nothing else, six times in four runs.
+INSIDE_THE_PEEK = (SCREEN_WIDTH // 2, 70)
+
 # How long the pointer rests in the strip for the dwell, and how long the lab
 # then waits for uDeck to say something.
 DWELL_SECONDS = 2
@@ -227,6 +261,17 @@ GESTURE_ANSWER_SECONDS = 10
 # How long the negative control watches nothing happen with the pointer in the
 # middle of the screen.
 NOTHING_HAPPENS_SECONDS = 10
+# How long a check watches a panel that has just been dismissed, to see whether
+# it comes back by itself. Escape is pressed with the pointer wherever the
+# gesture left it, which for a peek is inside the strip that opens the panel, so
+# the recognizer is free to open it again the moment uDeck's own
+# `reopenCooldown` (0.15 s) is up — and a check that read only the closing line
+# would stay green while the panel bounced straight back. Measured on 2026-09-21
+# (.build/e2e/20260921-133502Z), three panels that did come back: 158, 208 and
+# 228 ms after the line that closed them. This is thirteen times the slowest of
+# them, which is room for a loaded machine without making every escape check
+# wait for nothing.
+STAYS_SHUT_SECONDS = 3
 # Until a control appears after something was pressed.
 UI_APPEAR_SECONDS = 30
 
