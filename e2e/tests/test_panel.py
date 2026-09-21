@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from fakes import Dropped, Failed, Machine
 
-from udeck_e2e import config, panel
+from udeck_e2e import config, panel, probes
 from udeck_e2e.errors import LabError
 
 ATTACHED = "Timestamp               Ty Process[PID:TID]\n"
@@ -114,12 +114,51 @@ def test_the_phase_the_panel_left_is_readable_beside_what_closed_it():
 
 
 def test_the_places_the_pointer_goes_are_the_ones_the_panel_is_about():
-    assert panel.top_of_the_strip() == (config.SCREEN_WIDTH // 2, 0)
+    assert panel.top_of_the_strip() == (config.SCREEN_WIDTH // 2, config.INSIDE_THE_STRIP_Y)
     assert panel.middle_of_the_screen() == (config.SCREEN_WIDTH // 2, config.SCREEN_HEIGHT // 2)
     # Far enough from the top that no setting of the strip's height reaches it.
     assert panel.middle_of_the_screen()[1] > 100
-    for place in (panel.past_the_panel(), panel.inside_the_peek()):
-        assert 0 <= place[0] < config.SCREEN_WIDTH and 0 <= place[1] < config.SCREEN_HEIGHT
+
+
+def test_what_uDeck_said_after_the_panel_closed_starts_at_the_closing_line():
+    """A stretch that has to stay quiet starts where the panel closed, and the read
+    that heard it close may hold lines from before it too."""
+    gate_before = IDLE.replace("outsideStrip", "alreadyVisible")
+    gate_after = IDLE.replace("outsideStrip", "alreadyFiredThisVisit")
+    assert panel.after_it_closed(gate_before + ESCAPED + gate_after).strip() == gate_after.strip()
+    assert panel.idle_reasons(panel.after_it_closed(gate_before + ESCAPED)) == []
+    # Never closed: nothing after it.
+    assert panel.after_it_closed(gate_before + PHASE) == ""
+    # From the first closing on, the later ones included.
+    assert panel.closed_on(panel.after_it_closed(ESCAPED + PHASE + SHUT_AGAIN)) == ["pointerLeft"]
+
+
+def test_what_uDeck_said_is_told_apart_from_what_log_show_prints_around_it():
+    """`log show` prints its header whatever it finds, so a window holding nothing of
+    uDeck's is not an empty string — and must not count as uDeck having spoken."""
+    assert panel.said_by_uDeck(ATTACHED) == []
+    assert panel.said_by_uDeck(ATTACHED + IDLE) == [IDLE.strip()]
+
+
+NOTIFIED = (
+    "2026-09-18 18:20:09.090 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] another application came forward "
+    "6 ms after a click past the panel, so the panel counts it as closed\n"
+)
+SWITCH_NOTED = (
+    "2026-09-18 18:20:09.090 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] another application came forward "
+    "1212 ms after the last click, with the pointer past the panel, so the panel counts it as a switch\n"
+)
+LATE = "2026-09-18 18:20:09.110 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] otherAppActivated ignored in collapsed\n"
+
+
+def test_news_of_another_application_is_every_line_the_workspace_brought():
+    """The click monitor writes nothing of its own, so a click past the panel was
+    heard by the monitor alone exactly when none of these is there: the news read
+    as a click, read as a switch, arriving too late to matter, or closing the panel."""
+    assert panel.news_of_another_application(CLOSED_BY_A_CLICK) == []
+    assert panel.news_of_another_application(IDLE + PHASE + CLOSED_BY_THE_POINTER) == []
+    for line in (NOTIFIED, SWITCH_NOTED, LATE, INTERRUPTED):
+        assert panel.news_of_another_application(CLOSED_BY_A_CLICK + line) == [line.strip()], line
 
 
 # --- The oracle ------------------------------------------------------------------------
@@ -330,6 +369,22 @@ def test_the_lab_is_not_stricter_about_being_pinned_than_uDeck_is():
     assert config.PINNED_TOLERANCE_PIXELS >= _default("pinnedEpsilon")
 
 
+def test_the_dwell_is_made_inside_the_strip_and_short_of_pinned():
+    """Where `panel.top_of_the_strip()` puts the pointer, read against uDeck's own numbers.
+
+    Rows from the top of the 1× screen. uDeck's strip is closed at the top and
+    `stripHeight` tall, so rows 0 to `stripHeight` are in it, the last one on its
+    lower edge; the pointer is pinned within `pinnedEpsilon` of the row macOS
+    clamps it to, one below the top, so rows 0 to `pinnedEpsilon + 1` are pinned.
+    Strictly between the two, a pointer is in the strip and cannot push — and the
+    VNC jump to a pinned row was sometimes read as a push, which is why the dwell
+    stopped going to the top row (2026-09-21).
+    """
+    y = panel.top_of_the_strip()[1]
+    assert y > _default("pinnedEpsilon") + 1, "pinned: the jump there can be read as a push"
+    assert y < _default("stripHeight"), "on or past the strip's lower edge: the dwell may never start"
+
+
 def test_the_labs_push_clears_uDecks_thresholds_and_beats_its_dwell():
     """The one place the lab has to agree with uDeck about a number it cannot see.
 
@@ -371,10 +426,11 @@ def _biggest_panel():
     )
 
 
-# The menu bar the panel hangs below is not measured anywhere in this repository,
-# and every vertical edge here moves with it. So the numbers below allow it a
-# tenth of the screen — four times what macOS has ever drawn — rather than
-# pretending to know it.
+# The menu bar the panel hangs below was measured once, 30 points in the macOS 27
+# guest (the two panels measured there agree on it, see `config.PAST_THE_PANEL`),
+# but not on every guest, and every vertical edge here moves with it. So the
+# numbers below allow it a tenth of the screen — four times what macOS has ever
+# drawn — rather than pretending to know it everywhere.
 GENEROUS_MENU_BAR = config.SCREEN_HEIGHT / 10
 
 
@@ -402,7 +458,6 @@ def test_the_middle_of_the_screen_is_inside_the_open_panel_which_is_why_there_is
     did not notice it leave."""
     _, height = _biggest_panel()
     assert panel.middle_of_the_screen()[1] < height
-    assert panel.past_the_panel() != panel.middle_of_the_screen()
 
 
 def test_the_click_that_holds_the_panel_open_lands_on_the_peek_and_below_the_strip():
@@ -413,3 +468,37 @@ def test_the_click_that_holds_the_panel_open_lands_on_the_peek_and_below_the_str
     peek_width = min(config.SCREEN_WIDTH * _metric("peekWidthFraction"), _metric("peekMaxWidth"))
     assert abs(x - config.SCREEN_WIDTH / 2) < peek_width / 2
     assert _default("stripHeight") < y < _metric("peekHeight")
+
+
+# --- Which application is in front ----------------------------------------------------
+
+
+def test_which_application_is_in_front_is_asked_of_system_events_inside_the_guest():
+    """Over SSH, inside the guest, and with a deadline inside the script as well: an
+    AppleEvent nobody answers would otherwise sit out the whole SSH deadline."""
+    machine = Machine({"frontmost": "Finder\n"})
+    assert probes.frontmost(machine, "asking") == "Finder"
+    asked = machine.ssh.commands[0]
+    assert asked.startswith("osascript -e ") and '"System Events"' in asked
+    assert f"with timeout of {config.SYSTEM_EVENTS_SECONDS} seconds" in asked
+
+
+def test_a_system_events_that_would_not_say_is_the_labs_failure():
+    """Refused, or answering with nobody: either way the lab has no answer, and a
+    check must not read "nobody" as an application uDeck left in front."""
+    refused = Machine({"frontmost": Failed(code=1, said="execution error: Not authorized to send Apple events")})
+    with pytest.raises(LabError, match="Not authorized"):
+        probes.frontmost(refused, "asking")
+    silent = Machine({"frontmost": "\n"})
+    with pytest.raises(LabError, match="named no application"):
+        probes.frontmost(silent, "asking")
+
+
+def test_a_window_is_moved_by_its_process_and_to_the_place_named():
+    machine = Machine({})
+    probes.move_window(machine, "TextEdit", (1900, 900), "moving")
+    moved = machine.ssh.commands[0]
+    assert 'tell process "TextEdit" to set position of window 1 to {1900, 900}' in moved
+    refused = Machine({"set position": Failed(code=1, said="Invalid index")})
+    with pytest.raises(LabError, match="Invalid index"):
+        probes.move_window(refused, "TextEdit", (1900, 900), "moving")

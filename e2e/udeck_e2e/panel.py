@@ -22,14 +22,15 @@ the difference at the next reveal.
 
 Geometry: the strip is a few points tall along the very top of the screen,
 centred horizontally, and the pointer counts as pinned within a point or two of
-the edge (`GestureTuning` in Sources/UDeckCore). The middle of the top row is
-inside it under every setting; the middle of the screen is outside it under
-every setting. Those two places are all the opening checks need, and they depend
-on the shape of the gesture rather than on its numbers. The closing checks need
-two more, which cannot be quite so free of them: a place *on* the panel and a
-place past it both have to know roughly how big the panel is, so both are
-measurements kept in `config` with their reasons, and the lab's own tests read
-them back against uDeck's.
+the edge (`GestureTuning` in Sources/UDeckCore). The dwell is made a few rows
+down the middle of the strip — inside it and short of pinned, so that nothing
+the lab does there can be taken for a push — and the middle of the screen is
+outside the strip under every setting. The first of those depends on two of
+uDeck's numbers, so it is kept in `config` with its reasons and the lab's own
+tests read it back against uDeck's defaults. The closing checks need two more
+places, a place *on* the panel and a place past it, and both have to know
+roughly how big the panel is: measurements kept in `config` the same way, and
+read back the same way.
 """
 
 from __future__ import annotations
@@ -66,8 +67,13 @@ _PHASE = re.compile(r"\b([a-z]+) -> ([a-z]+) on ([A-Za-z]+)")
 
 
 def top_of_the_strip() -> tuple[int, int]:
-    """The middle of the screen's top row: inside the trigger strip on any setting."""
-    return config.SCREEN_WIDTH // 2, 0
+    """Where the dwell is made: the middle of the strip across, and a few rows down it.
+
+    Inside the trigger strip and not pinned against the edge
+    (`config.INSIDE_THE_STRIP_Y`). The top row itself is pinned, and a pinned
+    pointer the VNC jump arrived at was sometimes read as a push.
+    """
+    return config.SCREEN_WIDTH // 2, config.INSIDE_THE_STRIP_Y
 
 
 def middle_of_the_screen() -> tuple[int, int]:
@@ -76,17 +82,20 @@ def middle_of_the_screen() -> tuple[int, int]:
 
 
 def past_the_panel() -> tuple[int, int]:
-    """Outside the region that keeps the panel alive, whatever phase it is in.
+    """Outside the region that keeps a peek or a held panel alive.
 
     A third place, and it exists because the second one is not one. The middle of
     the screen is far from the *strip*, which is all the opening checks ever
-    needed — but the open panel reaches 760 points down from the top, so the
-    middle of a 1440-pixel screen is *inside* it. A check that took the pointer
-    there and called it "away" would be clicking on the panel and asking why the
-    panel did not treat it as a click outside.
+    needed — but the open panel reaches 790 points down from the top, 760 of
+    content below a 30-point menu bar, so the middle of a 1440-pixel screen is
+    *inside* it. A check that took the pointer there and called it "away" would
+    be clicking on the panel and asking why the panel did not treat it as a click
+    outside.
 
     This is left of the panel and below it at once (`config.PAST_THE_PANEL`), so
-    neither measurement alone has to be right for it to be past.
+    neither measurement alone has to be right for it to be past. Not past a
+    panel in fullscreen, whose keep-alive region is the whole visible screen and
+    has no outside to speak of; no check takes it there.
     """
     return config.PAST_THE_PANEL
 
@@ -95,7 +104,7 @@ def inside_the_peek() -> tuple[int, int]:
     """On the panel, and on nothing in it — where a click holds a peek open.
 
     A click anywhere on the panel promotes a peek to a held panel, and a peek
-    draws no controls, so half way down it is a click that can only mean that
+    draws no controls, so a click well inside its content can only mean that
     (`config.INSIDE_THE_PEEK`). Below the trigger strip, too: a click at the very
     top would be the gesture again rather than an interaction.
     """
@@ -155,6 +164,48 @@ def closed_on(lines: str) -> list[str]:
     event is matched by its name, and what it carries is not part of it.
     """
     return [because for _, to, because in phases(lines) if to == SHUT]
+
+
+def after_it_closed(lines: str) -> str:
+    """What uDeck said after the first line in which the panel closed — nothing, if it never did.
+
+    A check that watches a panel stay shut has to watch from the closing line
+    on, and the closing line does not start a read of its own: the read that
+    heard the panel close can already hold what came after it.
+    """
+    split = lines.splitlines()
+    for index, line in enumerate(split):
+        if closed_on(line):
+            return "\n".join(split[index + 1 :])
+    return ""
+
+
+def said_by_uDeck(lines: str) -> list[str]:
+    """The lines uDeck itself wrote, as against what `log show` puts around them.
+
+    `log show` prints its column header whether or not anything matched, so a
+    window that holds nothing uDeck said is not an empty string.
+    """
+    return [line for line in lines.splitlines() if f"[{SUBSYSTEM}:" in line]
+
+
+# How uDeck starts the line it writes when the workspace tells it another
+# application came forward while the panel was on screen — whether it then reads
+# that as a click past the panel or as a switch (`handleApplicationActivated`).
+CAME_FORWARD = "another application came forward"
+# And the event the same news becomes when it is read as a switch, or when it
+# arrives with nothing on screen: `otherAppActivated ignored in collapsed`.
+OTHER_APP = "otherAppActivated"
+
+
+def news_of_another_application(lines: str) -> list[str]:
+    """Every line in which uDeck says the workspace told it another application came forward.
+
+    There are two messengers of a click past the panel, uDeck's own click monitor
+    and this one, and the monitor writes no line of its own — so a click this
+    says nothing about was brought by the monitor alone.
+    """
+    return [line for line in lines.splitlines() if CAME_FORWARD in line or OTHER_APP in line]
 
 
 class GestureLog:

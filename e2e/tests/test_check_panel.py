@@ -13,6 +13,11 @@ peek or the whole panel at the next reveal — so a check that accepted "it is
 shut" would be green for a panel that closed because something interrupted him.
 And each one is asked the question the panel exists to answer: would it still
 be green if a *held* panel closed when the cursor left it.
+
+And from the lab's side: would a closing check pronounce on uDeck when the lab
+could not have heard it — uDeck gone, the log's window empty or shrunk, the
+guest's clock behind it — or stay green on a uDeck that died, as the escape
+check did.
 """
 
 import importlib.util
@@ -58,6 +63,16 @@ ESCAPED = (
 # A panel restored whole, which is what an interrupted one comes back as.
 RESTORED = "18:20:20.100 Db uDeck[404] [place.unicorns.udeck:panel] collapsed -> open on revealRequested\n"
 NOTHING = ""
+# The gate a living uDeck names after every collapse, and the one it names while a
+# panel is on screen with the pointer in the strip.
+GATED = "18:20:12.540 Db uDeck[404] [place.unicorns.udeck:gesture] idle: alreadyFiredThisVisit\n"
+VISIBLE = "18:20:01.520 Db uDeck[404] [place.unicorns.udeck:gesture] idle: alreadyVisible\n"
+# The workspace's news of a click past the panel, which the click monitor does not write.
+NOTIFIED = (
+    "18:20:12.300 Db uDeck[404] [place.unicorns.udeck:panel] another application came forward 6 ms after "
+    "a click past the panel, so the panel counts it as closed\n"
+)
+LATE_NEWS = "18:20:12.310 Db uDeck[404] [place.unicorns.udeck:panel] otherAppActivated ignored in collapsed\n"
 
 
 def growing(*steps):
@@ -91,14 +106,20 @@ def check_dir(tmp_path):
 KEEPING = "Mode for 'place.unicorns.udeck'  DEBUG PERSIST_DEBUG"
 
 
-def a_machine(log_says, running="404"):
-    """A guest whose log says `log_says` and whose uDeck is running."""
+def a_machine(log_says, running="404", in_front=None):
+    """A guest whose log says `log_says` and whose uDeck is running.
+
+    `in_front` is what System Events names as the application in front, one
+    answer per question. By default: the application a check brought forward
+    before the panel, and then the Finder a click on the desktop brought forward.
+    """
     return Machine({
         "log show": log_says,
         "log config": KEEPING,
         "date ": "2026-09-18 18:20:00",
         "pgrep -x uDeck": running,
         "stat -f %Su": config.GUEST_USER,
+        "frontmost": in_front if in_front is not None else [config.IN_FRONT_BEFORE_THE_PANEL, config.THE_DESKTOP],
     })  # fmt: skip
 
 
@@ -108,9 +129,9 @@ def nothing_real(monkeypatch):
     monkeypatch.setattr(app, "installed_version", lambda machine: checks.VERSION)
 
 
-def prepared(monkeypatch, log_says):
+def prepared(monkeypatch, log_says, in_front=None):
     """Skip the preparation — its own tests are at the end — and hand back the log."""
-    machine = a_machine(log_says)
+    machine = a_machine(log_says, in_front=in_front)
 
     def prepare(machine_, check_dir, lab, launch=True):
         # `launch` is real: the control starts uDeck itself, after its window on
@@ -209,7 +230,7 @@ def test_a_push_that_uDeck_never_answered_fails(monkeypatch, lab, check_dir):
 
 def test_a_gesture_that_fired_and_opened_nothing_fails(monkeypatch, lab, check_dir):
     """The reason this oracle exists. uDeck writes `fired by …` at
-    PanelController.swift:358 and asks the panel to appear on :361, so a panel
+    PanelController.swift:359 and asks the panel to appear on :362, so a panel
     that never appears — for anyone — leaves that line exactly as it is, and the
     check that rested on it alone stayed green."""
     at_the_edge(monkeypatch)
@@ -246,6 +267,8 @@ def test_a_log_the_check_cannot_read_is_not_a_panel_that_did_not_open(monkeypatc
         checks.check_middle_of_the_screen,
         checks.check_the_pointer_leaves,
         checks.check_a_click_past_the_panel,
+        checks.check_a_switch_with_no_click,
+        checks.check_a_click_past_a_restored_panel,
         checks.check_escape,
     ):
         machine = prepared(monkeypatch, Dropped)
@@ -414,7 +437,7 @@ def test_a_click_that_did_not_hold_the_panel_open_is_caught_before_anything_else
 
 
 def test_escape_closes_the_panel_and_it_stays_closed(monkeypatch, lab, check_dir):
-    machine = prepared(monkeypatch, growing(REVEAL, ESCAPED, NOTHING))
+    machine = prepared(monkeypatch, growing(REVEAL, ESCAPED + GATED, NOTHING))
     checks.check_escape(machine, check_dir, lab)
     assert machine.keys == [("esc", "on the machine's keyboard")]
     # Out of a peek, which is what nothing having been clicked says: a peek never
@@ -447,6 +470,286 @@ def test_escape_that_closed_the_wrong_phase_is_not_this_check(monkeypatch, lab, 
     with pytest.raises(CheckFailed) as raised:
         checks.check_escape(machine, check_dir, lab)
     assert "('peek', 'collapsed', 'escape')" in str(raised.value)
+
+
+def test_a_uDeck_that_died_on_escape_fails(monkeypatch, lab, check_dir):
+    """Measured on 2026-09-21: a build that exits the moment it has handled Escape
+    passed this check. The closing line outlives the process in the unified log,
+    and the silence after it is exactly what a panel staying shut looks like. A
+    uDeck that dies on Escape is uDeck failing, not the lab."""
+    machine = prepared(monkeypatch, growing(REVEAL, ESCAPED + GATED, NOTHING))
+    machine.ssh.answers["pgrep -x uDeck"] = ""
+    with pytest.raises(CheckFailed, match="uDeck was not running") as raised:
+        checks.check_escape(machine, check_dir, lab)
+    assert f"{config.STAYS_SHUT_SECONDS}s after Escape" in str(raised.value)
+
+
+def test_a_uDeck_that_stopped_watching_the_pointer_after_escape_fails(monkeypatch, lab, check_dir):
+    """Running is not enough: a living uDeck names the gate that holds the panel
+    shut after every collapse. The gate it named *before* Escape closed the panel
+    — here in the same read — says nothing about after."""
+    machine = prepared(monkeypatch, growing(REVEAL, VISIBLE + ESCAPED, NOTHING))
+    with pytest.raises(CheckFailed, match="said nothing about the pointer after Escape"):
+        checks.check_escape(machine, check_dir, lab)
+
+
+def test_the_gate_uDeck_names_after_escape_counts_wherever_the_read_was_cut(monkeypatch, lab, check_dir):
+    """The read that heard Escape can already hold the gate, and the pause after
+    it can hold nothing more: the proof of life is everything after the closing
+    line, not only what the pause added."""
+    in_the_same_read = prepared(monkeypatch, growing(REVEAL, ESCAPED + GATED, NOTHING))
+    checks.check_escape(in_the_same_read, check_dir, lab)
+    after_the_pause = prepared(monkeypatch, growing(REVEAL, ESCAPED, GATED))
+    checks.check_escape(after_the_pause, check_dir, lab)
+
+
+def test_a_panel_back_in_the_read_that_saw_escape_close_it_fails(monkeypatch, lab, check_dir):
+    """The race the first version of this check lost. `log show` takes long enough
+    that the read which hears Escape can already hold the panel coming back, and
+    the read after the pause is then empty — green over a panel that bounced."""
+    machine = prepared(monkeypatch, growing(REVEAL, ESCAPED + GATED + REVEAL, NOTHING))
+    with pytest.raises(CheckFailed, match="came back as"):
+        checks.check_escape(machine, check_dir, lab)
+
+
+# --- What every closing check asks of the read that heard it close -----------------------
+
+
+def test_a_panel_back_in_the_same_read_as_its_closing_fails_every_closing_check(monkeypatch, lab, check_dir):
+    """Not only Escape: the closing line has to be the end of that read's story."""
+    machine = prepared(monkeypatch, growing(REVEAL, POINTER_LEFT + REVEAL))
+    with pytest.raises(CheckFailed, match="in the same read"):
+        checks.check_the_pointer_leaves(machine, check_dir, lab)
+
+
+def test_the_expected_closing_has_to_be_the_only_one_in_its_read(monkeypatch, lab, check_dir):
+    """"It closed on this, somewhere in there" is satisfied by a read that also
+    holds the panel closing on something else."""
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, NOTHING, INTERRUPTED + DISMISSED, REVEAL))
+    with pytest.raises(CheckFailed, match="not once as"):
+        checks.check_a_click_past_the_panel(machine, check_dir, lab)
+
+
+def test_an_answer_that_never_came_from_a_uDeck_that_is_gone_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """A uDeck that is no longer running answers nothing, and why it is gone is
+    not the closing check's question. Could not check — with what it said before
+    kept in story.log."""
+    machine = prepared(monkeypatch, growing(REVEAL))
+    machine.ssh.answers["pgrep -x uDeck"] = ""
+    with pytest.raises(LabError, match="uDeck was not running") as raised:
+        checks.check_the_pointer_leaves(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+    assert machine.now >= config.GESTURE_ANSWER_SECONDS, "and only once the wait is over"
+
+
+def test_a_window_with_nothing_uDeck_said_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """`log show` prints its header whatever it finds. A window with nothing of
+    uDeck's in it never started receiving, and that is the lab's to answer for."""
+    machine = prepared(monkeypatch, ATTACHED)
+    with pytest.raises(LabError, match="holds nothing uDeck said") as raised:
+        checks.check_the_pointer_leaves(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_guest_clock_that_went_back_past_the_window_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """The window is `log show --start <mark>` on the guest's clock. A clock stepped
+    back behind the mark files everything uDeck says next before the window, and
+    the closing it was waiting for never appears — through no fault of uDeck's."""
+    machine = prepared(monkeypatch, growing(REVEAL))
+    machine.ssh.answers["date "] = ["2026-09-18 18:20:00", "2026-09-18 18:19:50"]
+    with pytest.raises(LabError, match="behind the start of the window") as raised:
+        checks.check_the_pointer_leaves(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_uDeck_that_was_there_and_heard_and_said_something_else_fails(monkeypatch, lab, check_dir):
+    """The other side of the same question. Running, talking, the clock where it
+    was — and still no closing: that silence is uDeck's, and it is red."""
+    machine = prepared(monkeypatch, growing(REVEAL, VISIBLE))
+    with pytest.raises(CheckFailed, match="did not close the panel"):
+        checks.check_the_pointer_leaves(machine, check_dir, lab)
+
+
+# --- Which application a click past the panel leaves in front ----------------------------
+
+
+def test_the_application_from_before_the_panel_is_in_front_first_and_out_of_the_way(monkeypatch, lab, check_dir):
+    """Without another application in front first, "the Finder is in front after
+    the click" is also true of a uDeck that brought back whatever it had —
+    because what it had was the Finder."""
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, NOTHING, DISMISSED, REVEAL))
+    checks.check_a_click_past_the_panel(machine, check_dir, lab)
+    commands = machine.ssh.commands
+    opened = next(i for i, c in enumerate(commands) if f"open -a {config.IN_FRONT_BEFORE_THE_PANEL}" in c)
+    moved = next(i for i, c in enumerate(commands) if "set position" in c)
+    first_read = next(i for i, c in enumerate(commands) if "log show" in c)
+    assert opened < moved < first_read, "the scene is set before the panel is shown"
+    x, y = config.OUT_OF_THE_WAY
+    assert f"{{{x}, {y}}}" in commands[moved] and config.IN_FRONT_BEFORE_THE_PANEL in commands[moved]
+
+
+def test_a_click_past_the_panel_that_gave_the_keyboard_back_to_the_application_from_before_fails(
+    monkeypatch, lab, check_dir
+):
+    """Measured on 2026-09-21 before the fix: TextEdit in front before the panel,
+    a click past it onto the desktop — and two seconds later TextEdit was in front
+    again, pulled back over the Finder the operator had just clicked."""
+    machine = prepared(
+        monkeypatch,
+        growing(REVEAL, PROMOTED, NOTHING, DISMISSED, REVEAL),
+        in_front=[config.IN_FRONT_BEFORE_THE_PANEL, config.IN_FRONT_BEFORE_THE_PANEL],
+    )
+    with pytest.raises(CheckFailed, match=f"{config.IN_FRONT_BEFORE_THE_PANEL} is in front") as raised:
+        checks.check_a_click_past_the_panel(machine, check_dir, lab)
+    assert f"not the {config.THE_DESKTOP}" in str(raised.value)
+
+
+def test_who_is_in_front_is_asked_only_once_the_handback_has_had_time(monkeypatch, lab, check_dir):
+    """The application from before comes back a moment after the collapse, not in
+    it. Asked straight away, the question would find the Finder in front of a
+    uDeck about to pull the other one over it."""
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, NOTHING, DISMISSED, REVEAL))
+    order = []
+    sleeping = machine.sleep
+    machine.sleep = lambda seconds: order.append(("sleep", seconds)) or sleeping(seconds)
+    clicking = machine.click
+    machine.click = lambda x, y, step: order.append(("click", (x, y))) or clicking(x, y, step)
+    asking = checks.probes.frontmost
+    monkeypatch.setattr(checks.probes, "frontmost", lambda machine_, step: order.append(("front",)) or asking(machine_, step))
+
+    checks.check_a_click_past_the_panel(machine, check_dir, lab)
+
+    after_the_click = order[order.index(("click", panel.past_the_panel())) :]
+    asked = after_the_click.index(("front",))
+    assert ("sleep", config.SETTLE_SECONDS) in after_the_click[:asked]
+
+
+def test_an_application_that_would_not_come_forward_is_the_labs_failure(monkeypatch, lab, check_dir):
+    """Setting the scene is the lab's job. If the application never comes forward,
+    the question about which one the click leaves in front is not asked of uDeck
+    at all."""
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, NOTHING, DISMISSED, REVEAL), in_front=[config.THE_DESKTOP])
+    with pytest.raises(LabError, match=f"not {config.IN_FRONT_BEFORE_THE_PANEL}") as raised:
+        checks.check_a_click_past_the_panel(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+    assert machine.now >= config.FORWARD_SECONDS
+    assert machine.pointer == [] and machine.clicks == [], "and before the panel was ever shown"
+
+
+# --- A switch with no click ----------------------------------------------------------------
+
+
+def test_a_held_panel_interrupted_with_no_click_comes_back_whole(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, INTERRUPTED, RESTORED))
+    checks.check_a_switch_with_no_click(machine, check_dir, lab)
+    # One click, and it was on the panel: the switch itself was made with none.
+    assert [(x, y) for x, y, _ in machine.clicks] == [panel.inside_the_peek()]
+    switched = [c for c in machine.ssh.commands if f"open -a {config.THE_DESKTOP}" in c]
+    assert switched, "the Finder is brought forward over SSH, not by a click"
+    # And the pointer was past the panel when it happened — where a click that
+    # dismissed it would have been — so only the age of the last click tells them apart.
+    assert [(x, y) for x, y, _ in machine.pointer][:3] == [
+        panel.middle_of_the_screen(),
+        panel.top_of_the_strip(),
+        panel.past_the_panel(),
+    ]
+
+
+def test_a_switch_read_as_a_click_fails(monkeypatch, lab, check_dir):
+    """A uDeck that took every application coming forward for a click past the
+    panel: the operator's unfinished work, thrown away on ⌘-Tab."""
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, DISMISSED, REVEAL))
+    with pytest.raises(CheckFailed) as raised:
+        checks.check_a_switch_with_no_click(machine, check_dir, lab)
+    assert "('open', 'collapsed', 'otherAppActivated')" in str(raised.value)
+    assert "closeRequested" in str(raised.value)
+
+
+def test_an_interrupted_panel_that_comes_back_as_a_peek_fails(monkeypatch, lab, check_dir):
+    """The right words at the collapse, and the wrong panel at the next reveal."""
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, INTERRUPTED, REVEAL))
+    with pytest.raises(CheckFailed, match="not whole"):
+        checks.check_a_switch_with_no_click(machine, check_dir, lab)
+
+
+def test_a_switch_that_never_closed_the_held_panel_fails(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, VISIBLE))
+    with pytest.raises(CheckFailed, match="the switch with no click did not close the panel"):
+        checks.check_a_switch_with_no_click(machine, check_dir, lab)
+
+
+# --- A click past a restored panel -------------------------------------------------------
+
+
+RESTORED_THEN_DISMISSED = (REVEAL, PROMOTED, INTERRUPTED, RESTORED, DISMISSED, NOTHING, REVEAL)
+
+
+def test_a_click_past_a_restored_panel_closes_it_by_the_monitor_alone(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(*RESTORED_THEN_DISMISSED), in_front=[config.THE_DESKTOP])
+    checks.check_a_click_past_a_restored_panel(machine, check_dir, lab)
+    # Clicked into once, to hold it before the switch — and never again until the
+    # click past it: the restored panel is one nobody clicked into.
+    assert [(x, y) for x, y, _ in machine.clicks] == [panel.inside_the_peek(), panel.past_the_panel()]
+
+
+def test_a_uDeck_without_its_click_monitor_fails_rather_than_could_not_check(monkeypatch, lab, check_dir):
+    """The click lands on the application already in front, so nothing else tells
+    uDeck about it. A uDeck that lost its click monitor never closes the panel —
+    running, talking, and silent about the click, which is uDeck's failure. The
+    only check in the lab that sees it."""
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, INTERRUPTED, RESTORED), in_front=[config.THE_DESKTOP])
+    with pytest.raises(CheckFailed, match="the click past the restored panel did not close the panel"):
+        checks.check_a_click_past_a_restored_panel(machine, check_dir, lab)
+
+
+def test_a_click_the_workspace_also_reported_did_not_test_the_monitor(monkeypatch, lab, check_dir):
+    """If an application came forward, the workspace's news could have closed the
+    panel with the monitor gone — so the check could not isolate the monitor,
+    and says so instead of passing."""
+    steps = list(RESTORED_THEN_DISMISSED)
+    steps[4] = NOTIFIED + DISMISSED
+    machine = prepared(monkeypatch, growing(*steps), in_front=[config.THE_DESKTOP])
+    with pytest.raises(LabError, match="monitor alone") as raised:
+        checks.check_a_click_past_a_restored_panel(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_news_that_arrives_after_the_monitor_won_also_means_it_was_not_alone(monkeypatch, lab, check_dir):
+    """The monitor can win the race and the workspace's news still come: then a
+    uDeck without its monitor would have been closed by the news, and the check
+    would have been green over it."""
+    steps = list(RESTORED_THEN_DISMISSED)
+    steps[5] = LATE_NEWS
+    machine = prepared(monkeypatch, growing(*steps), in_front=[config.THE_DESKTOP])
+    with pytest.raises(LabError, match="monitor alone"):
+        checks.check_a_click_past_a_restored_panel(machine, check_dir, lab)
+
+
+def test_the_finder_not_in_front_of_the_restored_panel_is_the_labs_failure(monkeypatch, lab, check_dir):
+    """A click on the desktop with another application in front brings the Finder
+    forward, and the workspace announces it: the scene the check is about is gone."""
+    machine = prepared(
+        monkeypatch, growing(*RESTORED_THEN_DISMISSED), in_front=[config.IN_FRONT_BEFORE_THE_PANEL]
+    )
+    with pytest.raises(LabError, match=f"{config.IN_FRONT_BEFORE_THE_PANEL} is in front"):
+        checks.check_a_click_past_a_restored_panel(machine, check_dir, lab)
+    assert [(x, y) for x, y, _ in machine.clicks] == [panel.inside_the_peek()], "and nothing was clicked past it"
+
+
+def test_an_interrupted_panel_that_did_not_come_back_whole_is_no_restored_panel(monkeypatch, lab, check_dir):
+    machine = prepared(
+        monkeypatch, growing(REVEAL, PROMOTED, INTERRUPTED, REVEAL, POINTER_LEFT), in_front=[config.THE_DESKTOP]
+    )
+    with pytest.raises(CheckFailed, match="no restored panel to click past"):
+        checks.check_a_click_past_a_restored_panel(machine, check_dir, lab)
+
+
+def test_a_restored_panel_clicked_past_that_comes_back_whole_fails(monkeypatch, lab, check_dir):
+    steps = list(RESTORED_THEN_DISMISSED)
+    steps[6] = RESTORED
+    machine = prepared(monkeypatch, growing(*steps), in_front=[config.THE_DESKTOP])
+    with pytest.raises(CheckFailed, match="not as a peek"):
+        checks.check_a_click_past_a_restored_panel(machine, check_dir, lab)
 
 
 # --- Reading the log in steps -----------------------------------------------------------
@@ -495,6 +798,31 @@ def test_the_story_gives_up_waiting_rather_than_deciding_anything(lab, check_dir
     story.take("the reveal")
     assert story.wait_for("the closing", panel.closed_on) == ""
     assert machine.now >= config.GESTURE_ANSWER_SECONDS
+
+
+def test_a_log_that_got_shorter_is_the_labs_failure_and_not_a_quiet_step(lab, check_dir):
+    """Counting lines is exact only while the window grows. A read shorter than
+    what was already read would hand every later step an empty slice — and an
+    empty slice is what "the held panel stayed open" and "the panel stayed shut"
+    look like."""
+    whole = growing(REVEAL, PROMOTED)[-1]
+    machine = a_machine([whole, ATTACHED + IDLE])
+    story = a_story(machine, check_dir, lab)
+    story.take("the reveal and the click")
+    with pytest.raises(LabError, match="got shorter") as raised:
+        story.take("the pointer away")
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_log_that_got_shorter_while_a_step_was_waiting_stops_the_wait(lab, check_dir):
+    """Not ten seconds later, as a slice that never became ready: at once."""
+    whole = growing(REVEAL, PROMOTED)[-1]
+    machine = a_machine([whole, ATTACHED])
+    story = a_story(machine, check_dir, lab)
+    story.take("the reveal and the click")
+    with pytest.raises(LabError, match="got shorter"):
+        story.wait_for("the closing", panel.closed_on)
+    assert machine.now < config.GESTURE_ANSWER_SECONDS
 
 
 # --- Preparing, and what is kept ---------------------------------------------------------

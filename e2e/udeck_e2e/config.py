@@ -220,6 +220,35 @@ THROW_PAUSE_SECONDS = 0.002
 # real pass into "could not check".
 PINNED_TOLERANCE_PIXELS = 2
 
+# How far down the screen the pointer is put to open the panel by the dwell:
+# inside the trigger strip, and *not* pinned against the top edge.
+#
+# Not the top row, which is where it used to go. A pointer on the top row is
+# pinned, and uDeck counts upward movement made while pinned as a push — and the
+# jump there over VNC was sometimes reported as exactly that. Counted over the
+# lab's own logs on 2026-09-21: 7 of 45 reveals that were meant to be dwells
+# fired by push (the review of that day, flakiness-7), and 2 of the 20 kept after
+# it, one of them a machine's very first reveal (.build/e2e/20260921-213422Z,
+# panel.a-click-past-the-panel). A pointer that is not pinned cannot push.
+#
+# uDeck's numbers, in rows from the top of this 1× screen (`GestureTuning`,
+# `PanelGeometry`): the strip is `stripHeight` = 6 points tall and closed at the
+# top, so rows 0 to 6 are in it, row 6 on its lower edge; and the pointer is
+# pinned within `pinnedEpsilon` = 2 points of the row macOS clamps it to, which
+# is one below the top — rows 0 to 3. That leaves rows 4, 5 and 6 in the strip
+# and short of pinned, and 5 is the one with a row to spare on either side. (The
+# push check's own PINNED_TOLERANCE_PIXELS counts one row fewer as pinned than
+# uDeck does, so 5 is clear of it as well.) The lab's tests read the two numbers
+# out of uDeck and hold this between them.
+#
+# Measured in the guest on 2026-09-21, with a probe that opens a peek eight times
+# on each of two fresh machines and puts it away in between: on row 5, 16 of 16
+# by the dwell (.build/e2e/20260921-220254Z), and 10 of 10 in each of the two
+# panel group runs around it (-215814Z, -221300Z); the same probe on the top
+# row, 2 of 16 by push, the second reveal of a fresh machine among them
+# (-220939Z).
+INSIDE_THE_STRIP_Y = 5
+
 # --- The panel closing ----------------------------------------------------------
 #
 # Where the pointer goes, and where a click lands, when a check needs to be past
@@ -227,13 +256,18 @@ PINNED_TOLERANCE_PIXELS = 2
 # is really leaving and a click there is really a click outside.
 #
 # It has to be a third place, because the two the opening checks use are not
-# outside anything: the top of the strip is the panel, and the middle of the
-# screen is *inside* the open one. The open panel is the largest — at most 1100
-# wide and 760 tall, hanging from the top of the screen and centred on the
-# anchor (`PanelMetrics.swift`) — and what keeps it alive is that frame grown by
-# 24 points on every side (`GestureTuning.peekKeepAliveInset`), which on this
+# outside anything: the strip is where the panel hangs from, and the middle of
+# the screen is *inside* the open one. The open panel is the largest a check
+# makes — at most 1100 wide and 760 points of content, centred on the anchor
+# (`PanelMetrics.swift`) — and the content hangs *below* the menu bar, with the
+# panel's frame reaching up over the menu bar to the top of the screen
+# (`PanelGeometry.topOverhang`). The menu bar in the guest is 30 points: the two
+# panels measured there on 2026-09-21 agree on it, the peek as x 870…1690,
+# y 0…126 (96 of content) and the open panel as x 730…1830, y 0…790 (760 of
+# content). What keeps a panel alive is its frame grown by 24 points on every
+# side (`GestureTuning.peekKeepAliveInset`), which for the open panel on this
 # screen is the band between x 706 and x 1854, from the top of the screen down
-# to y ≈ 814.
+# to y 814 — 30 + 760 + 24.
 #
 # This point is left of that region *and* below it, so neither of the two
 # measurements alone has to stay where it is for the point to stay outside. It is
@@ -241,18 +275,46 @@ PINNED_TOLERANCE_PIXELS = 2
 # desktop rather than launching something. Measured in a guest on 2026-09-21: the
 # pointer held here left a held panel alone eleven times out of eleven, and a
 # click here closed it eight times out of eight.
+#
+# Past a peek and a held panel, and not past a panel in fullscreen: that one's
+# keep-alive region is the whole visible screen grown by the same 24 points, and
+# this point is inside it. No check takes the panel to fullscreen.
 PAST_THE_PANEL = (200, 1100)
 
-# And where a check clicks to hold the panel open: half way down the peek, which
-# is the one place a click is sure to land on the panel and on nothing in it.
-# The peek is 96 points of content hanging from the top of the screen, at most
-# 820 wide and centred on the anchor (`PanelMetrics.swift`) — measured in a guest
-# on 2026-09-21 as the rectangle x 870…1690, y 0…126 — and it draws no controls
-# at all (`PeekView` in DeckRootView.swift is two pieces of text). Half way down
-# is also well below the 6-point trigger strip along the very top, so this is a
-# click on the panel and not another go at the gesture. Measured: it produced
+# And where a check clicks to hold the panel open: on the peek's content, which is
+# the one place a click is sure to land on the panel and on nothing in it. The
+# peek is 96 points of content below the 30-point menu bar, at most 820 wide and
+# centred on the anchor (`PanelMetrics.swift`) — measured, as above, as the
+# rectangle x 870…1690, y 0…126, of which the content is y 30…126 — and it draws
+# no controls at all (`PeekView` in DeckRootView.swift is two pieces of text).
+# y 70 is 40 points into that content and 56 short of its lower edge, and far
+# below the 6-point trigger strip along the very top, so this is a click on the
+# panel and not another go at the gesture. Measured: it produced
 # `peek -> open on interacted` and nothing else, six times in four runs.
 INSIDE_THE_PEEK = (SCREEN_WIDTH // 2, 70)
+
+# The application a check brings forward before the panel is shown, when what it
+# asks is which application the panel leaves in front once it is gone: any
+# ordinary application with a window, as long as it is not the one a click on the
+# desktop brings forward. TextEdit is on every Mac. It is what the measurement of
+# 2026-09-21 used, and on the build that handed the keyboard back to it
+# unconditionally it was in front again after every click past the panel it was
+# asked about.
+IN_FRONT_BEFORE_THE_PANEL = "TextEdit"
+# What a click on the bare desktop brings forward, which PAST_THE_PANEL is.
+THE_DESKTOP = "Finder"
+# Where that application's window is put, so that nothing a check clicks or
+# points at lands on it: right of the open panel, which ends at x 1830, below it,
+# which ends at y 790, and far from PAST_THE_PANEL. The same place the
+# measurement used, where every click past the panel landed on the desktop.
+OUT_OF_THE_WAY = (1900, 900)
+# Until an application started with `open -a` is the one in front. The
+# measurement waited three seconds and found TextEdit there every time; this is
+# a slow machine's allowance on top.
+FORWARD_SECONDS = 30
+# One question to System Events about which application is in front. The bake
+# allows the same when it asks whether SSH may drive the interface at all.
+SYSTEM_EVENTS_SECONDS = 20
 
 # How long the pointer rests in the strip for the dwell, and how long the lab
 # then waits for uDeck to say something.
@@ -261,17 +323,41 @@ GESTURE_ANSWER_SECONDS = 10
 # How long the negative control watches nothing happen with the pointer in the
 # middle of the screen.
 NOTHING_HAPPENS_SECONDS = 10
-# How long a check watches a panel that has just been dismissed, to see whether
-# it comes back by itself. Escape is pressed with the pointer wherever the
-# gesture left it, which for a peek is inside the strip that opens the panel, so
-# the recognizer is free to open it again the moment uDeck's own
-# `reopenCooldown` (0.15 s) is up — and a check that read only the closing line
-# would stay green while the panel bounced straight back. Measured on 2026-09-21
-# (.build/e2e/20260921-133502Z), three panels that did come back: 158, 208 and
-# 228 ms after the line that closed them. This is thirteen times the slowest of
-# them, which is room for a loaded machine without making every escape check
-# wait for nothing.
+# How long panel.escape watches a panel it has just put away, to see whether it
+# comes back by itself — and to see uDeck still alive and watching the pointer
+# at the end of it.
+#
+# What keeps that panel shut is not the cooldown. Escape is pressed at a peek
+# with the pointer still in the strip where the gesture left it, and every
+# collapse tells the gesture not to fire again until the pointer has left the
+# strip (`suppressUntilPointerLeaves`, which uDeck reports as `idle:
+# alreadyFiredThisVisit`). The pointer never leaves it here, so a correct uDeck
+# cannot reopen the panel in this check however long it waits. uDeck's own
+# `reopenCooldown` (0.15 s) guards a different case — the pointer leaving the
+# strip and coming straight back — which this check never makes. Measured on
+# 2026-09-21: a build with `reopenCooldown = 0` passed panel.escape, its log going
+# from the escape straight to `idle: alreadyFiredThisVisit`
+# (.build/e2e/20260921-202329Z); on an unbroken build `idle: reopenCooldown` holds
+# the first 0.2 s or so and the other gate the rest. So a broken cooldown is not
+# caught here, and no check in the lab catches it yet.
+#
+# What the watch does catch is the panel coming back at all, which it has been
+# seen to do: three panels escaped out of `open` in an earlier measurement came
+# back 158, 208 and 228 ms after the line that closed them
+# (.build/e2e/20260921-133502Z; why, is not established). This is thirteen times
+# the slowest of them, which is room for a loaded machine without making every
+# escape check wait for nothing.
 STAYS_SHUT_SECONDS = 3
+# How long after the panel closed a check waits before asking what else came of
+# it: which application is in front, and whether a second messenger followed the
+# first. uDeck gives the keyboard back in the same millisecond it logs the
+# collapse (every `gave the keyboard back` line of 2026-09-21), and the
+# workspace's news of a click arrives 2 to 32 ms after the click
+# (`ApplicationSwitch.clickWindow`). On the build that brought the application
+# from before the panel back unconditionally, that application was in front
+# after this long in every run that asked (.build/e2e/20260921-201212Z,
+# -210835Z, -211147Z).
+SETTLE_SECONDS = 2
 # Until a control appears after something was pressed.
 UI_APPEAR_SECONDS = 30
 

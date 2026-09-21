@@ -16,7 +16,7 @@ see the last section.
 > pointer over VNC, a self-check, the builds a check needs, and the first checks
 > of uDeck itself — the update, with its wrong-key control, and the panel: the
 > hover gesture that opens it, with its pointer-in-the-middle control, and the
-> three ways of putting it away again. "Open at Login" and its checks follow.
+> ways of putting it away again. "Open at Login" and its checks follow.
 
 ## Running it
 
@@ -212,12 +212,18 @@ passing.
 ### The panel
 
 `panel.dwell` puts the pointer in the strip at the top of the screen over VNC
-and leaves it there. `panel.push` is the other path: upward movement reported
-*after* the pointer can move no further. The lab copies a small script into the
-guest that throws the pointer at the edge and keeps pushing in one run,
-milliseconds apart — the dwell fires a fraction of a second after the pointer
-stops, so a pointer placed from outside and pushed over SSH would open the panel
-by the wrong path.
+and leaves it there — five rows down, not on the top row. A pointer on the top
+row is pinned against the edge, and the VNC jump there was sometimes reported as
+upward movement *at* the edge, which is a push: on 2026-09-21, 7 of 45 reveals
+meant as dwells fired by push. Row 5 is inside uDeck's 6-point strip and short
+of the rows it counts as pinned (`config.INSIDE_THE_STRIP_Y`, held against
+uDeck's own defaults by the lab's tests); measured the same day, 36 reveals
+there all fired by the dwell, where the same probe on the top row saw 2 pushes
+in 16. `panel.push` is the other path: upward movement reported *after* the
+pointer can move no further. The lab copies a small script into the guest that
+throws the pointer at the edge and keeps pushing in one run, milliseconds apart
+— the dwell fires a fraction of a second after the pointer stops, so a pointer
+placed from outside and pushed over SSH would open the panel by the wrong path.
 
 **`panel.push` could not pass inside a virtual machine until 2026-09-19, and
 what changed was which call the lab makes.** Posting the movement as a `CGEvent`
@@ -258,8 +264,8 @@ What decides all three takes two sentences from uDeck, and the second was added
 on 2026-09-19 after an audit found the first insufficient on its own. Which path
 fired — `fired by dwell on …`, `fired by push on …` — and whether the panel then
 opened — `collapsed -> peek on revealRequested`. uDeck writes the first three
-lines *before* it asks the panel to appear (`PanelController.swift:358` against
-`:361`), so a panel that failed to open for everybody would leave every one of
+lines *before* it asks the panel to appear (`PanelController.swift:359` against
+`:362`), so a panel that failed to open for everybody would leave every one of
 these checks green; the phase is written from inside the change and only when
 there was one. The control needs both too: a panel shown in the middle of the
 screen by anything at all is exactly as wrong, and the gesture line would never
@@ -284,17 +290,20 @@ gesture that fired nothing worth reading.
 
 ### The panel closing
 
-Three more, reading the same log from the other end. The line they take as the
+Five more, reading the same log from the other end. The line they take as the
 verdict is the phase and the event together — `peek -> collapsed on
-pointerLeft`, `open -> collapsed on closeRequested`, `peek -> collapsed on
-escape` — and both halves of it are the check. The event, because the panel has
-four ways of going away and they are not interchangeable: it remembers which
-one it was, and the operator sees the difference at the *next* reveal, where a
-panel he put away comes back as a peek and a panel something interrupted comes
-back whole. The phase, because **once the panel is held, the cursor leaving must
-never close it** — a peek closing when the pointer leaves is the panel working,
-and a held panel doing the same is the one failure this design exists to
-prevent.
+pointerLeft`, `open -> collapsed on closeRequested`, `open -> collapsed on
+otherAppActivated`, `peek -> collapsed on escape` — and both halves of it are
+the check. The event, because the panel has four ways of going away and they are
+not interchangeable: it remembers which one it was, and the operator sees the
+difference at the *next* reveal, where a panel he put away comes back as a peek
+and a panel something interrupted comes back whole. The phase, because **once
+the panel is held, the cursor leaving must never close it** — a peek closing
+when the pointer leaves is the panel working, and a held panel doing the same is
+the one failure this design exists to prevent. And that line has to be the only
+closing in the read that heard it, with nothing reopening there: `log show`
+takes long enough that the read which hears the panel close can already hold
+what came next.
 
 `panel.the-pointer-leaves` opens a peek and takes the pointer past the panel.
 Past it, not merely out of the strip: what uDeck measures a departure against is
@@ -316,31 +325,87 @@ log of the quiet stretch is empty by design (measured, four times out of four).
 The witness instead is the click that ends it: uDeck answers with `open ->
 collapsed`, naming the phase the panel left, and only a uDeck that was running,
 that still had the panel open, and that was watching the pointer closely enough
-to hear a click can write that line. Then the last question, which is the one
-the operator actually asks: the next gesture has to bring back a peek.
+to hear a click can write that line.
 
-**That check exists because the same click meant two different things on
-different days.** One click past the panel reaches uDeck by two roads that race
-— its own global mouse monitor, and the workspace saying another application
-came forward — and which one wins is decided by whether uDeck happened to be
-frontmost, which depends on how the panel got to be open. Measured on
-2026-09-21: a panel promoted by a click inside it had made uDeck frontmost, so
-the notification arrived 2.0–2.7 ms after the button went down, about 5 ms ahead
-of the monitor; a panel restored straight to `open` had never been clicked, so
-no notification was posted at all. `ApplicationSwitch` in `UDeckCore` now reads
-the news rather than taking it at face value — eight clicks past the panel in
-the measurement that followed, both ways in, all `closeRequested`, and a switch
-made with no click at all still an interruption — and this check is what holds
-that down from the outside on every run.
+What the quiet stretch holds is the rule as the operator meets it, not each of
+the two places uDeck keeps it. uDeck states the rule twice — the state machine
+refuses `pointerLeft` in a held panel, and the controller does not even time a
+departure from one — and on 2026-09-21 breaking either one alone left this check
+green, because the other still refused. Both now read one property,
+`PanelPhase.isDismissibleByPointer`, so the edit that lets a held panel go
+breaks both, and this check goes red on it (`open -> collapsed on pointerLeft`,
+.build/e2e/20260921-213029Z). The state machine's own half is held by the Swift
+test "once held, the pointer leaving never closes the panel", in
+`Tests/UDeckCoreTests/PanelStateTests.swift`.
+
+It also asks which application the click leaves in front. The click lands on
+the desktop, which is the Finder's, so the Finder is what the operator chose —
+and until 2026-09-21 uDeck pulled the application from before the panel back
+over it. So TextEdit is brought forward before the panel is shown, its window
+put out of the way, and after the click System Events *inside the guest* is
+asked who is in front: the Finder, or the check is red. Without TextEdit there
+first, a uDeck that brought back whatever it had would pass, because what it had
+was the Finder. The last question is the next gesture, which has to bring back a
+peek — on its own only what `PanelState` does after `closeRequested`, and worth
+asking beside the next check, where the same held panel interrupted instead has
+to come back whole.
+
+`panel.a-switch-with-no-click` is that check. The panel is held, the pointer is
+left past it — exactly where a click that dismissed it would have been — and the
+Finder is brought forward over SSH with `open -a` and no click at all. The
+panel has to close on `otherAppActivated` and come back `open` at the next
+gesture. uDeck tells a switch from a click by one reading, how long ago a mouse
+button last went down, because the workspace's news of both is the same
+notification; a uDeck that read every activation as a click would throw the
+operator's unfinished work away on ⌘-Tab, and this is the lab's only check that
+sees it. The switch is `open -a` and not an AppleScript activation from inside
+the guest, which was measured posting no notification at all.
+
+`panel.a-click-past-a-restored-panel` is the other road a click takes. One click
+past the panel reaches uDeck by two roads that race — the workspace saying
+another application came forward, and uDeck's own global click monitor — and the
+first exists only when the click brings an application forward. So this check
+interrupts a held panel the same way, which leaves the Finder in front, shows
+the panel again — restored straight to `open`, never clicked — and clicks past
+it onto the desktop, the Finder's, already in front. Nothing comes forward, the
+monitor is the only messenger, and a uDeck that had lost it never closes the
+panel: `panel.a-click-past-the-panel` cannot see that, because there the
+workspace's news wins the race. That the monitor really was alone is checked
+rather than assumed — if uDeck says the workspace told it anything in the two
+seconds after the click, the check says it could not isolate the monitor instead
+of passing.
+
+**Both of those came out of the same click meaning two different things on
+different days.** Which road wins is decided by whether the click brings an
+application forward: measured on 2026-09-21, a click on the desktop brought the
+notification 2–32 ms after the button went down, ahead of the monitor, whenever
+the Finder was not already in front — after a peek had been clicked into, and
+after a panel restored over TextEdit alike — and none at all when it was.
+`ApplicationSwitch` in `UDeckCore` now reads the news rather than taking it at
+face value, so both roads mean the same dismissal, and these two checks hold
+each road down from the outside.
 
 `panel.escape` presses a key, which is the lab's only action with no
-coordinates, and asks two things of it: `-> collapsed on escape`, and that the
-panel is still away three seconds later. The second half is not a formality. The
-gesture keeps watching the pointer, Escape is pressed with the pointer wherever
-the thing that opened the panel left it, and uDeck's `reopenCooldown` is 0.15 s
-— measured on 2026-09-21, three panels escaped out of `open` came back 158, 208
-and 228 ms later, and a check reading only the closing line would have been
-green for all three.
+coordinates, and asks three things of it: `peek -> collapsed on escape`, that
+the panel is still away three seconds later, and that uDeck is alive at the end
+of it. What keeps the panel away there is **not** uDeck's `reopenCooldown`.
+Escape is pressed with the pointer still in the strip, every collapse tells the
+gesture not to fire again until the pointer has left the strip (`idle:
+alreadyFiredThisVisit`), and the pointer never leaves it — a build with the
+cooldown at zero passed this check (.build/e2e/20260921-202329Z). The cooldown
+guards the pointer leaving and coming straight back, which no check in the lab
+makes yet. What the watch does catch is the panel coming back at all, which it
+has been seen to do: three panels escaped out of `open` came back 158, 208 and
+228 ms later (.build/e2e/20260921-133502Z). It counts from the closing line on,
+the rest of the read that heard it included.
+
+"It stayed away" is free when nothing is running, and a build that exits the
+moment it has handled Escape passed the first version of this check
+(.build/e2e/20260921-202146Z): the closing line outlives the process in the
+unified log, and the silence after it is exactly what a panel staying shut looks
+like. So after the pause uDeck has to still be running and still watching the
+pointer — naming the gate that holds the panel shut, which every living uDeck
+this check has seen did after the escape. A uDeck that died on Escape fails.
 
 It is pressed at a **peek** rather than at a held panel, and that was measured
 rather than assumed: four escapes out of a peek and eight out of a held panel —
@@ -348,20 +413,30 @@ with the pointer left at the click, and with it put back in the strip — and al
 twelve closed on `escape` and stayed shut, so the choice is not about which one
 works. It is about what else is in the log. Every escape out of `open` is
 followed by `otherAppActivated ignored in collapsed`, eight times out of eight:
-closing a panel that had been clicked into gives up the keyboard, something else
-comes forward, and a second messenger arrives with news of the same event,
-ignored only because Escape got there first. That is the same race as above, and
-a check that has to win a race goes red on a busy machine for a reason that is
-not uDeck's. Out of a peek there is no competitor at all: uDeck was never
-frontmost, so nothing is deactivated when the peek goes.
+the click that held the panel made uDeck the frontmost application, closing it
+gives that up, something else comes forward, and a second messenger arrives with
+news of the same event, ignored only because Escape got there first. A check
+that has to win a race goes red on a busy machine for a reason that is not
+uDeck's. A peek takes the keyboard too, but it never becomes the workspace's
+frontmost application — uDeck's own log names another application as in front
+when Escape closes it — so nothing changes hands and nothing is announced.
 
-All three act several times with reads in between, so they read the log in steps
+All five act several times with reads in between, so they read the log in steps
 (`_Story` in `check_panel.py`): one window opened at the start and never moved —
 the guest's clock answers to the second, and a fresh mark between two actions
 would sometimes begin inside the answer to the one before — cut by how much has
-already been read, which is exact. Every step is written to `story.log` beside
-the report, labelled, including the steps where uDeck said nothing, which for a
-check about a panel that must *not* close is the part a person needs to see.
+already been read, which is exact only while the window grows, so a read that
+comes back shorter is the lab's failure on the spot. Every step is written to
+`story.log` beside the report, labelled, including the steps where uDeck said
+nothing, which for a check about a panel that must *not* close is the part a
+person needs to see.
+
+An answer that never came is not yet a verdict. When a closing check stops
+waiting, it first asks whether uDeck could have answered: still running, its
+log holding anything it said since the check began, and the guest's clock not
+gone back behind the start of the window, which would file everything said since
+outside it. Any of those missing is "could not check"; only a uDeck that was
+there and talking, and said something else, fails.
 
 ## Reading the result
 

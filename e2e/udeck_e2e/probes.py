@@ -90,6 +90,45 @@ def system_events_allowed(machine: Machine) -> tuple[bool, str]:
     return done.returncode == 0, said
 
 
+def _ask_system_events(machine: Machine, command: str, step: str) -> str:
+    """One AppleScript command to System Events, with a deadline of its own, and its answer.
+
+    The deadline is inside the script as well as around the SSH call: an
+    AppleEvent nobody answers otherwise waits out the whole SSH deadline first.
+    """
+    script = (
+        f"with timeout of {config.SYSTEM_EVENTS_SECONDS} seconds\n"
+        f'tell application "System Events" to {command}\n'
+        "end timeout"
+    )
+    # `run`, which raises on any exit but 0: a refusal is the lab failing to ask.
+    return machine.ssh.run(f"osascript -e {shlex.quote(script)}", step).stdout.strip()
+
+
+def frontmost(machine: Machine, step: str) -> str:
+    """The name of the application in front, as System Events inside the guest sees it.
+
+    The one a click or `open -a` last brought forward — and never uDeck. With
+    the panel held open and uDeck holding the keyboard, System Events still named
+    the application from before it, TextEdit, while uDeck's own log named uDeck
+    as the workspace's frontmost (2026-09-21, .build/e2e/20260921-212357Z). That
+    is the question the panel checks ask of it anyway: which *other* application
+    the operator is left in.
+    """
+    name = _ask_system_events(machine, "get name of first application process whose frontmost is true", step)
+    if not name:
+        raise LabError(step, "System Events named no application in front")
+    return name
+
+
+def move_window(machine: Machine, process: str, to: tuple[int, int], step: str) -> None:
+    """Put the top-left corner of `process`'s front window at `to`, in screen points."""
+    x, y = to
+    _ask_system_events(
+        machine, f'tell process "{process}" to set position of window 1 to {{{x}, {y}}}', step
+    )
+
+
 def guest_build(machine: Machine) -> str:
     return machine.ssh.run("sw_vers -buildVersion", f"reading {machine.name}'s macOS build").stdout.strip()
 
