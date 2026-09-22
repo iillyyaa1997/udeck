@@ -290,17 +290,19 @@ gesture that fired nothing worth reading.
 
 ### The panel closing
 
-Five more, reading the same log from the other end. The line they take as the
-verdict is the phase and the event together — `peek -> collapsed on
-pointerLeft`, `open -> collapsed on closeRequested`, `open -> collapsed on
-otherAppActivated`, `peek -> collapsed on escape` — and both halves of it are
-the check. The event, because the panel has four ways of going away and they are
-not interchangeable: it remembers which one it was, and the operator sees the
-difference at the *next* reveal, where a panel he put away comes back as a peek
-and a panel something interrupted comes back whole. The phase, because **once
-the panel is held, the cursor leaving must never close it** — a peek closing
-when the pointer leaves is the panel working, and a held panel doing the same is
-the one failure this design exists to prevent. And that line has to be the only
+Six more. Five of them read the same log from the other end; the sixth asks the
+question that follows all of them and that the log cannot answer, which is where
+the keyboard went. The line the five take as the verdict is the phase and the
+event together — `peek -> collapsed on pointerLeft`, `open -> collapsed on
+closeRequested`, `open -> collapsed on otherAppActivated`, `peek -> collapsed on
+escape` — and both halves of it are the check. The event, because the panel has
+four ways of going away and they are not interchangeable: it remembers which one
+it was, and the operator sees the difference at the *next* reveal, where a panel
+he put away comes back as a peek and a panel something interrupted comes back
+whole. The phase, because **once the panel is held, the cursor leaving must
+never close it** — a peek closing when the pointer leaves is the panel working,
+and a held panel doing the same is the one failure this design exists to
+prevent. And that line has to be the only
 closing in the read that heard it, with nothing reopening there: `log show`
 takes long enough that the read which hears the panel close can already hold
 what came next.
@@ -421,7 +423,29 @@ uDeck's. A peek takes the keyboard too, but it never becomes the workspace's
 frontmost application — uDeck's own log names another application as in front
 when Escape closes it — so nothing changes hands and nothing is announced.
 
-All five act several times with reads in between, so they read the log in steps
+`panel.the-key-after-escape` is the sixth, and it types. A panel that is gone
+from the log and from the screen can still be holding the keyboard, and the next
+thing the operator does after putting it away is type — so this one opens
+TextEdit on an empty document, presses one key into it before anything else
+(the control: a keystroke the lab failed to deliver leaves the document exactly
+as a uDeck holding on to the keyboard leaves it), opens a peek, presses Escape,
+and presses one more key. Then it reads the document. Which application is in
+front cannot answer this: with the panel on screen System Events names the
+application from before it whatever uDeck has done.
+
+It is a **peek** for the same reason `panel.escape` is, and here it also decides
+what is being checked. A peek takes the keyboard without making uDeck the
+frontmost application, so since ca3374e the handback restores nothing after one
+— and the commit said Escape was unaffected "because uDeck is in front for
+those", which is true of a panel that was clicked into and false of a peek.
+Measured on 2026-09-22 on both builds: TextEdit held both keys either way, so
+the behaviour never changed and only the sentence about it was wrong. There is
+nothing to bring back at a peek, because the application that would be brought
+back never lost the front. ⌘W was measured the same way, and the same twice
+over — through System Events, because a Command chord made over VNC arrives in
+this guest as a plain letter, which promotes the peek instead of closing it.
+
+All six act several times with reads in between, so they read the log in steps
 (`_Story` in `check_panel.py`): one window opened at the start and never moved —
 the guest's clock answers to the second, and a fresh mark between two actions
 would sometimes begin inside the answer to the one before — cut by how much has
@@ -431,12 +455,18 @@ comes back shorter is the lab's failure on the spot. Every step is written to
 nothing, which for a check about a panel that must *not* close is the part a
 person needs to see.
 
-An answer that never came is not yet a verdict. When a closing check stops
-waiting, it first asks whether uDeck could have answered: still running, its
-log holding anything it said since the check began, and the guest's clock not
-gone back behind the start of the window, which would file everything said since
-outside it. Any of those missing is "could not check"; only a uDeck that was
-there and talking, and said something else, fails.
+An answer that never came is not yet a verdict, and which kind of verdict it
+becomes is one rule. **A uDeck that was running and is gone is uDeck failing.**
+Every check starts one and waits for it, so a missing process is not an absence
+but a uDeck that died in the middle of what was being watched, and the guest
+answering the question at all is what makes that safe to read — a machine that
+is gone raises before the answer can be mistaken for "nothing is running". That
+death was already red on `panel.escape` and "could not check" everywhere else,
+so a build that fell over on a click past the panel was reported as the lab
+having had a bad day. What stays the lab's: its log holding nothing uDeck said
+since the check began, which is a window that never started, and the guest's
+clock gone back behind the start of that window, which files everything said
+since outside it.
 
 ## Reading the result
 

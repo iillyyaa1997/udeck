@@ -1,7 +1,7 @@
 """Does the panel open when it should, and close when it should?
 
-Eight checks in two halves. The first three are about the panel appearing and by
-which path; the last five are about it going away again, and they are where
+Nine checks in two halves. The first three are about the panel appearing and by
+which path; the last six are about it going away again, and they are where
 the promise the panel is built on lives — **once the panel is held, the cursor
 leaving never closes it**, and everything that does close it is the operator
 saying so.
@@ -48,8 +48,8 @@ inside the guest. It has to be: the dwell is a fraction of a second, so a
 pointer put at the edge from this Mac would have fired the dwell long before an
 SSH command could push it, and the check would pass by the path it is not about.
 
-**Closing.** The last five take a panel that is up and put it away, and each
-asks which event uDeck says did it: `peek -> collapsed on pointerLeft`,
+**Closing.** The last six take a panel that is up and put it away. Five ask
+which event uDeck says did it: `peek -> collapsed on pointerLeft`,
 `open -> collapsed on closeRequested` — by either of the two messengers a click
 past the panel has — `open -> collapsed on otherAppActivated`, and
 `peek -> collapsed on escape`. The phase they name on the left is as much of the
@@ -58,17 +58,24 @@ the panel working, and a *held* panel doing the same is the one failure this
 whole design exists to prevent. And the closing line has to be the only one in
 the read that heard it, with nothing reopening there either.
 
+The sixth asks the question that follows all of them and that none of them can:
+where the keyboard went. A panel that is gone from the log and from the screen
+can still be holding it, and the next thing the operator does after putting the
+panel away is type. So `panel.the-key-after-escape` types, into a document, and
+reads the document back.
+
 They go through more steps than the opening checks, so they read the log in
 steps too (`_Story`): one window opened at the start, sliced by what each action
 added to it, and the whole of it kept beside the report as `story.log`. A check
 that read only the end could not tell "nothing happened while the pointer was
 away" from "it happened and something undid it".
 
-An answer that never came is not yet a verdict. When a closing check stops
-waiting, it first asks whether uDeck could have answered at all — still running,
-its log holding anything it said, the guest's clock not gone back past the start
-of the window (`_prove_uDeck_could_have_answered`) — and only a uDeck that was
-there, and heard, and said something else, fails.
+An answer that never came is not yet a verdict, and one rule says which verdict
+it becomes (`_prove_uDeck_could_have_answered`). A uDeck that was running and is
+gone is uDeck failing: every check starts one and waits for it, so a missing
+process is a uDeck that died in the middle of what was being watched. A window
+on the log holding nothing uDeck said, or a guest clock gone back behind the
+start of it, is the lab's, and those are "could not check".
 """
 
 import shlex
@@ -400,6 +407,24 @@ def check_a_click_past_a_restored_panel(machine, check_dir, lab):
     That the monitor really was alone is checked, not assumed: if uDeck says the
     workspace told it anything in the moments after the click, the check could
     not isolate the monitor, and says so rather than passing.
+
+    **Where the operator is left is asked here too**, because that is what the
+    closing work is about — not "did the panel go" but "is he where he clicked"
+    — and nothing asked it on this road at all. What it cannot catch here is an
+    unconditional handback, and that is the scene rather than the check: the
+    Finder has to be in front *before* the click, or the click brings it forward
+    and the workspace carries the news and the monitor is no longer alone. So
+    the application uDeck would hand back to is the Finder, and handing it back
+    cannot be told from leaving it. Measured on 2026-09-22 with the rule from
+    before ca3374e (`reason == .dismissed` alone): uDeck wrote `gave the
+    keyboard back after dismissed with Finder in front, so bringing back Finder`
+    and this check stayed green, while `panel.a-click-past-the-panel`, where the
+    application from before the panel is TextEdit, goes red on the same build.
+    The scene cannot be arranged the other way either: for uDeck to be holding
+    TextEdit while the Finder is in front, the switch to the Finder must not
+    collapse the panel — and it is that collapse that makes the panel a restored
+    one. So this assertion holds the promise on this road, and the handback is
+    held by the check next door.
     """
     log = _prepare(machine, check_dir, lab)
     story = _Story(machine, log, check_dir, lab.note)
@@ -435,6 +460,15 @@ def check_a_click_past_a_restored_panel(machine, check_dir, lab):
                 "the workspace also told uDeck another application came forward, so this click did not rest on "
                 f"the monitor alone: {_short(chr(10).join(news))}",
             )
+
+        in_front = probes.frontmost(machine, "asking which application the click past the restored panel left in front")
+        lab.note(f"   in front after the click past the restored panel: {in_front}")
+        expect(
+            in_front == config.THE_DESKTOP,
+            f"{in_front} is in front {config.SETTLE_SECONDS}s after a click past the restored panel onto the "
+            f"desktop, not the {config.THE_DESKTOP} whose desktop it is — uDeck moved the operator somewhere "
+            f"he did not click, on the road where its own monitor is the only messenger: {_short(said)}",
+        )
 
         said = _reveal(machine, story, "the gesture after the click past the restored panel")
         came_back = panel.revealed(said)
@@ -499,6 +533,14 @@ def check_escape(machine, check_dir, lab):
     Accessibility in front`, .build/e2e/20260921-213422Z), so nothing changes
     hands and nothing is announced: four escapes out of four brought no news of
     another application at all (.build/e2e/20260921-153502Z).
+
+    **Where the keyboard went is not asked here**, and cannot be: everything
+    above is satisfied by a uDeck that closed the panel and kept the keyboard,
+    which is what `panel.the-key-after-escape` next door is for. Measured on
+    2026-09-22: a build with `NSApp.deactivate()` taken out of `releaseKeyboard`
+    passes this check — the panel closes on `escape`, stays shut for three
+    seconds, and uDeck is alive and naming its gates at the end of it — and
+    fails that one.
     """
     log = _prepare(machine, check_dir, lab)
     story = _Story(machine, log, check_dir, lab.note)
@@ -524,7 +566,79 @@ def check_escape(machine, check_dir, lab):
         story.keep()
 
 
-# --- What all eight do ------------------------------------------------------------
+def check_the_key_after_escape(machine, check_dir, lab):
+    """Escape at a peek leaves the keyboard with the application that had it.
+
+    The question `panel.escape` cannot ask. It watches the panel go away and
+    stay away, which a uDeck holding on to the keyboard does just as well — and
+    holding on to it is the failure that matters here, because the next thing
+    the operator does after putting the panel away is type. Which application is
+    in front cannot answer it either: with the panel on screen System Events
+    names the application from before it whatever uDeck has done
+    (`probes.frontmost`). So this check types, and reads the document.
+
+    **A peek, and that is the whole point.** uDeck takes the keyboard for a peek
+    and says so (`took the keyboard: … activated=true`), but it does not become
+    the workspace's frontmost application: its own account of giving the keyboard
+    back names the other application as in front, in every run the lab has kept.
+    Since ca3374e the handback therefore restores nothing after a peek —
+    `KeyboardHandback` asks whether uDeck is in front, and it is not — and the
+    prose of that commit said Escape was unaffected because "uDeck is in front
+    for those", which is true of a panel that was clicked into and false of a
+    peek.
+
+    Measured on 2026-09-22 rather than argued, TextEdit in front on a document,
+    a peek opened by the gesture and Escape pressed at it, then one key:
+    TextEdit held both keys — on this build (`… so leaving it there`) and on one
+    carrying the rule from before ca3374e (`… so bringing back TextEdit`). The
+    behaviour is the same because at a peek there is nothing to bring back: the
+    application uDeck would restore is the one already in front. ⌘W, the other
+    key that dismisses a peek, was measured the same way and the same twice
+    over. So ca3374e changed nothing here, and what was wrong was the sentence
+    about it. This check is what keeps that from having to be argued again.
+
+    A uDeck that keeps the keyboard is what it is red for, and that was measured
+    too, on 2026-09-22: with `NSApp.deactivate()` taken out of `releaseKeyboard`,
+    the panel still closes on Escape and stays shut — `panel.escape` passes on
+    that build — and the document is left holding one key instead of two. It is
+    the failure that method's own comment already records from the field, where
+    after a hover the frontmost application was one thing and the system's
+    focused application was nobody.
+    """
+    log = _prepare(machine, check_dir, lab)
+    story = _Story(machine, log, check_dir, lab.note)
+    try:
+        application = _a_document_in_front(machine, lab)
+        _reveal_a_peek(machine, story, "the reveal")
+        machine.screenshot(check_dir, "the peek")
+        machine.key("esc", "on the machine's keyboard")
+        said = _wait_for_it_to_close(machine, story, "Escape")
+        machine.screenshot(check_dir, "after Escape")
+        _expect_it_closed(said, "peek", "escape", "Escape")
+
+        # The handback happens in the millisecond the collapse is logged, but
+        # the application it hands to is brought forward by the system, which
+        # takes its own moment — the same one `panel.a-click-past-the-panel`
+        # waits out before asking who is in front.
+        machine.sleep(config.SETTLE_SECONDS)
+        machine.key(config.AFTER_IT_CLOSED_KEY, "after Escape closed the peek")
+        machine.sleep(config.SETTLE_SECONDS)
+        story.take(f"the key pressed {config.SETTLE_SECONDS}s after Escape")
+        holds = probes.typed_into(machine, application, f"reading what {application} holds after Escape")
+        lab.note(f"   {application} holds after Escape: {holds!r}")
+        machine.screenshot(check_dir, "after the key that followed Escape")
+        wanted = config.BEFORE_THE_PANEL_KEY + config.AFTER_IT_CLOSED_KEY
+        expect(
+            holds == wanted,
+            f"{application} holds {holds!r} and not {wanted!r} after a key pressed once Escape had closed the "
+            f"peek: the key the operator typed next did not reach the application he was in, and uDeck's own "
+            f"account of giving the keyboard back is in {_short(said)}",
+        )
+    finally:
+        story.keep()
+
+
+# --- What all nine do -------------------------------------------------------------
 
 
 def _prepare(machine, check_dir, lab, launch=True):
@@ -602,10 +716,20 @@ def _prove_uDeck_was_watching(machine, said):
     "Nothing fired" is the answer to a question nobody asked unless uDeck was
     running and seeing the pointer. Its own log says it saw one — it names the
     gate that stopped the gesture — and its process is still there.
+
+    The same rule as `_prove_uDeck_could_have_answered`: this control starts
+    uDeck itself and then watches it do nothing, so a uDeck that is gone by the
+    end is one that died while being watched, and that is uDeck failing. Asked
+    before the log, because a uDeck that died at once would leave the log empty
+    too, and "the window never started" would then be the lab blaming itself for
+    a uDeck that fell over.
     """
     step = "proving uDeck was watching the pointer"
-    if not app.running_pids(machine, step):
-        raise LabError(step, "uDeck was not running, so nothing could have opened the panel either way")
+    expect(
+        bool(app.running_pids(machine, step)),
+        "uDeck was not running at the end of the control: it was started by this check and died while it "
+        "was being watched, so nothing could have opened the panel either way",
+    )
     if not panel.idle_reasons(said):
         raise LabError(
             step,
@@ -701,24 +825,32 @@ def _answer(machine, story, label, ready):
 
 
 def _prove_uDeck_could_have_answered(machine, story, label):
-    """Three things the lab has to have had for a missing answer to be uDeck's.
+    """Why the answer never came: uDeck's doing, or the lab's.
 
-    uDeck running: a uDeck that is gone answers nothing, and whether it died or
-    something took it away is not this check's question — what it said before is
-    kept in `story.log`. Its log holding anything uDeck said since the check
-    began: a window with none of its lines in it is a window that never started,
-    not a uDeck that went quiet. And the guest's clock not behind the start of
-    that window: the window is `log show --start <mark>` on the guest's clock, so
-    a clock stepped back past the mark files everything uDeck says afterwards
-    before it, where no read will look.
+    One rule, and it is the same one `_prove_uDeck_was_watching` and
+    `_expect_uDeck_lived_through_it` keep. **A uDeck that was running and is
+    gone is uDeck failing.** Every closing check starts one and waits for it, so
+    a missing process is not an absence — it is a uDeck that died in the middle
+    of the thing the check was watching, and it was "could not check" here while
+    the same death on Escape was already red. The guest answering the question
+    at all is what makes that reading safe: `running_pids` is a command over
+    SSH, and a machine that is gone raises before it can be read as an empty
+    answer.
+
+    What stays the lab's: its log holding nothing uDeck said since the check
+    began, which is a window that never started rather than a uDeck that went
+    quiet; and the guest's clock behind the start of that window, because the
+    window is `log show --start <mark>` on the guest's clock, so a clock stepped
+    back past the mark files everything uDeck says afterwards before it, where
+    no read will look. Both are asked *after* uDeck's own life, because a uDeck
+    that died would explain either one and neither would explain it.
     """
     step = f"making sure uDeck could have answered {label}"
-    if not app.running_pids(machine, step):
-        raise LabError(
-            step,
-            "uDeck was not running when its answer did not come, so there was nothing left to answer; "
-            "what it said before is in story.log",
-        )
+    expect(
+        bool(app.running_pids(machine, step)),
+        f"uDeck was not running when its answer to {label} did not come: it was started by this check and "
+        "died in the middle of it, so there was nothing left to answer; what it said before is in story.log",
+    )
     if not story.heard_from_uDeck():
         raise LabError(
             step,
@@ -773,38 +905,87 @@ def _interrupt_a_held_panel(machine, story, check_dir):
     left to tell uDeck this was not one. The Finder comes forward by `open -a`
     over SSH, which posted the workspace's notification every time it was
     measured; an AppleScript activation from inside the guest posted none.
+
+    And the lab waits for it to be there before it waits for uDeck to answer,
+    which is the difference between the two failures. A `open -a` that started
+    nothing leaves no application coming forward, no notification, and therefore
+    no collapse — and this read exactly as uDeck having ignored a switch it was
+    never told about. That is the scene failing, so it is a `LabError` here,
+    the way it already is in `_bring_forward_before_the_panel`.
     """
     _reveal_a_peek(machine, story, "the reveal")
     _hold_it_open(machine, story, check_dir)
     machine.move_pointer(*panel.past_the_panel(), f"past the panel, to {panel.past_the_panel()}")
-    machine.ssh.run(
-        f"/usr/bin/open -a {shlex.quote(config.THE_DESKTOP)}",
-        f"bringing the {config.THE_DESKTOP} forward with no click",
-    )
+    _bring_forward(machine, config.THE_DESKTOP, f"bringing the {config.THE_DESKTOP} forward with no click")
     said = _wait_for_it_to_close(machine, story, "the switch with no click")
     machine.screenshot(check_dir, "after the switch with no click")
     _expect_it_closed(said, "open", "otherAppActivated", "the switch with no click")
 
 
-def _bring_forward_before_the_panel(machine, lab):
+def _bring_forward(machine, application, step, document=None):
+    """`open -a`, and the lab waits until that application really is in front.
+
+    Setting the scene, never a verdict: an application that would not come
+    forward is the lab failing to arrange what the check is about, and every
+    question after it would be asked of a machine that is not in the state the
+    check describes.
+
+    `document` is opened in it, for the one check that reads what the keyboard
+    reached rather than which application is in front. It is named so that the
+    window read afterwards is the one this check made, and not whatever untitled
+    thing the application would otherwise have offered.
+    """
+    opening = f"/usr/bin/open -a {shlex.quote(application)}"
+    if document is not None:
+        opening += f" {shlex.quote(document)}"
+    machine.ssh.run(opening, step)
+    deadline = machine.clock() + config.FORWARD_SECONDS
+    while True:
+        in_front = probes.frontmost(machine, step)
+        if in_front == application:
+            return in_front
+        if machine.clock() >= deadline:
+            raise LabError(step, f"{in_front} is in front after {config.FORWARD_SECONDS}s, not {application}")
+        machine.sleep(1)
+
+
+def _bring_forward_before_the_panel(machine, lab, document=None):
     """Another application in front before the panel is shown, with its window out of the way.
 
     The scene, not the check: an application that would not come forward is the
     lab failing to set it, never a verdict about uDeck.
     """
     application = config.IN_FRONT_BEFORE_THE_PANEL
-    step = f"bringing {application} forward before the panel"
-    machine.ssh.run(f"/usr/bin/open -a {shlex.quote(application)}", step)
-    deadline = machine.clock() + config.FORWARD_SECONDS
-    while True:
-        in_front = probes.frontmost(machine, step)
-        if in_front == application:
-            break
-        if machine.clock() >= deadline:
-            raise LabError(step, f"{in_front} is in front after {config.FORWARD_SECONDS}s, not {application}")
-        machine.sleep(1)
+    _bring_forward(machine, application, f"bringing {application} forward before the panel", document=document)
     probes.move_window(machine, application, config.OUT_OF_THE_WAY, f"putting {application}'s window out of the way")
     lab.note(f"   in front before the panel: {application}")
+    return application
+
+
+def _a_document_in_front(machine, lab):
+    """The application from before the panel, open on an empty document it can be typed into.
+
+    And one key into it before anything else happens, which is the control. A
+    key that does not arrive looks exactly like a keyboard uDeck kept; without
+    this the check would say uDeck kept the keyboard whenever the lab's own
+    keystroke went nowhere — a VNC connection that dropped the press, a window
+    that never took focus. Here that is the scene failing, and it says so.
+    """
+    application = config.IN_FRONT_BEFORE_THE_PANEL
+    step = f"giving {application} a document to be typed into"
+    machine.ssh.run(f": > {shlex.quote(config.THE_DOCUMENT)}", step)
+    _bring_forward_before_the_panel(machine, lab, document=config.THE_DOCUMENT)
+
+    machine.key(config.BEFORE_THE_PANEL_KEY, f"into {application}, before the panel was ever shown")
+    machine.sleep(config.SETTLE_SECONDS)
+    holds = probes.typed_into(machine, application, f"reading what {application} holds before the panel")
+    lab.note(f"   {application} holds before the panel: {holds!r}")
+    if holds != config.BEFORE_THE_PANEL_KEY:
+        raise LabError(
+            step,
+            f"a key pressed before the panel was shown did not reach {application}, which holds {holds!r}: "
+            "the lab cannot tell where the keyboard went afterwards either",
+        )
     return application
 
 

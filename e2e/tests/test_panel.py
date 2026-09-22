@@ -450,6 +450,23 @@ def test_the_place_past_the_panel_is_outside_the_biggest_panel_uDeck_can_draw():
     assert y > GENEROUS_MENU_BAR + height + inset, "not clear of the panel below"
 
 
+def test_both_places_the_closing_checks_use_are_on_the_screen():
+    """The other bound on them, and the one the tests around it do not give.
+
+    Each point is held against uDeck's own panel above and below — past it, on
+    it — and both of those are satisfied by a point far off the right-hand edge
+    of the screen, which is nowhere at all. `Machine._refuse_off_screen` catches
+    that, but only at the moment a check moves the pointer there: inside a
+    booted guest, minutes into a run, as "could not check" — the outcome that
+    says nothing happened and nothing was learnt. Here it is one line and a
+    second of pytest, before a machine is ever started.
+    """
+    for place in (panel.past_the_panel(), panel.inside_the_peek()):
+        x, y = place
+        assert 0 <= x < config.SCREEN_WIDTH, f"{place} is off the side of the screen"
+        assert 0 <= y < config.SCREEN_HEIGHT, f"{place} is off the bottom of the screen"
+
+
 def test_the_middle_of_the_screen_is_inside_the_open_panel_which_is_why_there_is_a_third_place():
     """The trap this helper exists for. The middle of the screen is the lab's
     "away from the strip", and the opening checks need nothing more — but the open

@@ -230,12 +230,30 @@ public enum ApplicationSwitch {
 /// it before uDeck took it.
 ///
 /// Only when the operator closed the panel *and uDeck is still in front* at the
-/// moment it lets go. Escape and ⌘W reach uDeck only while it holds the
-/// keyboard, so for them it is in front and the application from before comes
-/// back, which is what closing a panel you were typing into should do. Measured
-/// for Escape on 2026-09-21, TextEdit in front before the panel: the workspace
-/// named uDeck as in front when Escape closed it, and a key typed next reached
-/// TextEdit. With nothing brought back, the same key reached nobody at all.
+/// moment it lets go.
+///
+/// A panel that was clicked into has made uDeck the frontmost application, so
+/// Escape and ⌘W pressed at one find it in front and the application from
+/// before comes back, which is what closing a panel you were typing into should
+/// do. Measured for Escape on 2026-09-21 at a held panel, TextEdit in front
+/// before it: the workspace named uDeck as in front when Escape closed it, and
+/// a key typed next reached TextEdit. With nothing brought back, the same key
+/// reached nobody at all.
+///
+/// At a **peek** it is not in front, and the two keys therefore restore nothing
+/// there. Holding the keyboard is not being in front: a peek takes the keyboard
+/// and says so (`took the keyboard: … activated=true`), and the handback names
+/// the *other* application as frontmost every time the lab has kept a run of it.
+/// So this rule did change what happens after a peek — and it changed nothing
+/// the operator can see, which was measured on 2026-09-22 rather than argued:
+/// TextEdit in front on a document, a peek opened by the gesture, Escape, and
+/// then one key — TextEdit held it, on this rule (`so leaving it there`) and on
+/// the rule before it (`so bringing back TextEdit`) alike; ⌘W, twice over, the
+/// same. There is nothing to bring back at a peek, because the application that
+/// would be brought back never lost the front. What holds that is
+/// `panel.the-key-after-escape` in the lab, which types and reads the document:
+/// the panel being gone from the log is what `panel.escape` watches, and a uDeck
+/// still holding the keyboard passes that.
 ///
 /// A click past the panel is also a dismissal, but it is a click on something:
 /// the system has already brought that something forward, or is about to.

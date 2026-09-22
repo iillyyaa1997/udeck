@@ -308,6 +308,21 @@ THE_DESKTOP = "Finder"
 # which ends at y 790, and far from PAST_THE_PANEL. The same place the
 # measurement used, where every click past the panel landed on the desktop.
 OUT_OF_THE_WAY = (1900, 900)
+# The document IN_FRONT_BEFORE_THE_PANEL is opened on when a check asks where the
+# keyboard went rather than which application is in front. It has to be a
+# document, because a key is the only question that tells the two apart: with
+# the panel on screen System Events names the application from before it either
+# way (`probes.frontmost`), so only what the window holds can say whether the
+# keystroke reached it. Emptied by the check before it is opened, so that what
+# is in it is what this run typed.
+THE_DOCUMENT = "/tmp/udeck-e2e-where-the-keyboard-went.txt"
+# The two keys it presses, and they are two: the first is the control — a key
+# that reaches the document before the panel has ever been shown, which is what
+# makes "the second one did not" a sentence about uDeck rather than about a
+# keystroke the lab never delivered. Letters, because what is read back is the
+# text of the window; `esc` and the rest leave nothing to read.
+BEFORE_THE_PANEL_KEY = "a"
+AFTER_IT_CLOSED_KEY = "x"
 # Until an application started with `open -a` is the one in front. The
 # measurement waited three seconds and found TextEdit there every time; this is
 # a slow machine's allowance on top.
@@ -352,11 +367,15 @@ STAYS_SHUT_SECONDS = 3
 # it: which application is in front, and whether a second messenger followed the
 # first. uDeck gives the keyboard back in the same millisecond it logs the
 # collapse (every `gave the keyboard back` line of 2026-09-21), and the
-# workspace's news of a click arrives 2 to 32 ms after the click
-# (`ApplicationSwitch.clickWindow`). On the build that brought the application
-# from before the panel back unconditionally, that application was in front
-# after this long in every run that asked (.build/e2e/20260921-201212Z,
-# -210835Z, -211147Z).
+# workspace's news of a click arrives 2 to 32 ms after the click — the
+# measurements are in `ApplicationSwitchTests.slowestClickCausedActivation`
+# (Tests/UDeckCoreTests/PanelStateTests.swift), which is where the slowest of
+# them is written down. Not `ApplicationSwitch.clickWindow`, which this comment
+# used to name for them: that is 0.15 s, the line uDeck draws from those
+# measurements, and it would still be 0.15 s if every one of them changed. On
+# the build that brought the application from before the panel back
+# unconditionally, that application was in front after this long in every run
+# that asked (.build/e2e/20260921-201212Z, -210835Z, -211147Z).
 SETTLE_SECONDS = 2
 # Until a control appears after something was pressed.
 UI_APPEAR_SECONDS = 30

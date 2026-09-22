@@ -121,6 +121,26 @@ def frontmost(machine: Machine, step: str) -> str:
     return name
 
 
+def typed_into(machine: Machine, process: str, step: str) -> str:
+    """What the text in `process`'s front window says, as System Events reads it.
+
+    The one question that can tell where a keystroke landed. Which application
+    is in front cannot: with the panel on screen and uDeck holding the keyboard,
+    System Events still names the application from before it (see `frontmost`),
+    so a key that went to uDeck and a key that went to that application look the
+    same from outside. The document does not look the same.
+
+    A window this cannot be read out of is the lab's failure — `_ask_system_events`
+    raises — because a check reading "" would take a key that never arrived and a
+    key that arrived somewhere unreadable for the same thing.
+    """
+    return _ask_system_events(
+        machine,
+        f'tell process "{process}" to get value of text area 1 of scroll area 1 of window 1',
+        step,
+    )
+
+
 def move_window(machine: Machine, process: str, to: tuple[int, int], step: str) -> None:
     """Put the top-left corner of `process`'s front window at `to`, in screen points."""
     x, y = to

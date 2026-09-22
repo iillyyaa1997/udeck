@@ -850,6 +850,15 @@ public final class PanelController {
         }
         panel.makeKeyAndOrderFront(nil)
 
+        // `didActivateForKeyboard` records that uDeck *asked* for the front, not
+        // that it got it, and the two differ for a peek: `NSApp.activate()`
+        // returns nothing to check, and the workspace goes on naming the other
+        // application as frontmost — measured every time the lab has kept a run,
+        // in uDeck's own handback line. So this must not be read as "uDeck is in
+        // front"; `releaseKeyboard` asks the workspace for that, freshly, and
+        // gets a different answer at a peek on purpose. What this does mean is
+        // the narrow thing `releaseKeyboard` guards on: uDeck took the keyboard
+        // away from somebody, so it has something to give back.
         if !alreadyInFront {
             NSApp.activate()
             panel.makeKeyAndOrderFront(nil)
