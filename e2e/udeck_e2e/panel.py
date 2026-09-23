@@ -20,6 +20,13 @@ away again. uDeck writes the phase it left and the event that took it —
 has four ways of closing, it remembers which one it was, and the operator sees
 the difference at the next reveal.
 
+And the other way in, which needs no pointer at all: the global shortcut. uDeck
+says which one it holds (`hotkey ⌃⌥U registered`) and answers it with two phases
+rather than one, because a shortcut opens the panel ready to be typed into. The
+lab presses it from inside the guest and not over VNC, and the measurement that
+settles that is in `press_the_chord` — a chord sent over VNC reaches nobody and
+leaves the guest's keyboard wedged behind it.
+
 Geometry: the strip is a few points tall along the very top of the screen,
 centred horizontally, and the pointer counts as pinned within a point or two of
 the edge (`GestureTuning` in Sources/UDeckCore). The dwell is made a few rows
@@ -40,7 +47,7 @@ import shlex
 from collections.abc import Callable
 from pathlib import Path
 
-from udeck_e2e import config
+from udeck_e2e import config, probes
 from udeck_e2e.errors import LabError
 
 Note = Callable[[str], None]
@@ -64,6 +71,17 @@ _FIRED = re.compile(r"fired by (push|dwell) on (.+?)\s*$", re.MULTILINE)
 _IDLE = re.compile(r"idle: ([a-zA-Z]+)")
 # `collapsed -> peek on revealRequested` (PanelController.swift, `apply`).
 _PHASE = re.compile(r"\b([a-z]+) -> ([a-z]+) on ([A-Za-z]+)")
+# `hotkey ⌃⌥U registered` (HotKeyMonitor.apply), written only once the window
+# server has actually handed the combination over. The same method says
+# `hotkey disabled`, `hotkey ⌃⌥U cannot be registered` and `… refused by the
+# system` in the cases where it did not, and none of those match this.
+_REGISTERED = re.compile(r"hotkey (\S+) registered")
+
+# What uDeck does when the shortcut is pressed at a shut panel, in order
+# (`PanelController.toggleFromKeyboard`): it shows the panel *and* promotes it
+# to one that is being worked in, in the same breath. That second line is the
+# whole difference from the pointer gesture, which leaves a peek.
+OPENED_READY_TO_TYPE = [(SHUT, "peek", "revealRequested"), ("peek", "open", "interacted")]
 
 
 def top_of_the_strip() -> tuple[int, int]:
@@ -144,6 +162,31 @@ def revealed(lines: str) -> list[str]:
     shut-again look the same from outside.
     """
     return [to for was, to, _ in phases(lines) if was == SHUT and to != SHUT]
+
+
+def registered_hotkeys(lines: str) -> list[str]:
+    """The shortcuts uDeck says it holds, spelled as it spells them (`⌃⌥U`).
+
+    The premise of every check about the shortcut, and the one uDeck writes down
+    for itself: `RegisterEventHotKey` can be refused — another application may
+    already hold the combination, and the window server gives it to whoever
+    asked first — so a uDeck that is running is not yet a uDeck that would hear
+    the key. It is written once, at launch, and the check that reads it starts
+    uDeck inside the window on its log for that reason.
+    """
+    return [match.group(1) for match in _REGISTERED.finditer(lines)]
+
+
+def opened_ready_to_type(lines: str) -> bool:
+    """Whether the panel was both shown and promoted, and nothing else moved it.
+
+    `revealed` is not enough here, and that is the point of the shortcut: the
+    operator who reached for the keys is not going to reach for the mouse to
+    promote a peek, so `toggleFromKeyboard` does it for him. A check that
+    accepted "the panel appeared" would be green for a shortcut that left him a
+    glance he then had to click into.
+    """
+    return phases(lines) == OPENED_READY_TO_TYPE
 
 
 def closed_on(lines: str) -> list[str]:
@@ -346,3 +389,32 @@ def push_upward(
         step,
     )
     return done.stdout.strip()
+
+
+def press_the_chord(machine, key_code: int, step: str) -> None:
+    """Press uDeck's modifiers and one key, from inside the guest over SSH.
+
+    Every other key the lab presses goes over VNC (`Machine.key`), where it
+    arrives at the machine's keyboard the way a key on a real one does. **The
+    chord cannot be made that way in this guest, and trying it is worse than
+    useless.** Measured on 2026-09-23 (.build/e2e/20260923-212036Z,
+    hotkey.vnc-chord): twelve `ctrl-alt-u` presses over VNC, with uDeck running
+    and saying it held the shortcut, produced not one line — and three
+    screenshots identical to the byte. On a machine of its own the same chord
+    then *wedged the keyboard*: after it, neither a plain letter over VNC, nor
+    one through System Events, nor one after the lone modifiers had been pressed
+    and released reached the document that had taken a letter moments before
+    (run-3 of the measurement). It reads exactly like a modifier left stuck
+    down, and the lab must never send one.
+
+    So the chord is made inside the guest instead, as a virtual key code with
+    the modifiers named — the same call the lab already uses to drive the
+    interface (`probes`). Measured the same day: 9 opens and 9 closes out of 9,
+    on three fresh machines, and uDeck's line 0.9 to 1.4 s after the command,
+    round trip included — well inside `config.GESTURE_ANSWER_SECONDS`.
+
+    Which key is the caller's business: the shortcut uDeck registered, and the
+    chord that is not it, are both pressed through here so that the control
+    differs from the check in the key alone.
+    """
+    probes.press_chord(machine, key_code, config.HOTKEY_MODIFIERS, step)

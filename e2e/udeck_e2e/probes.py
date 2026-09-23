@@ -141,6 +141,22 @@ def typed_into(machine: Machine, process: str, step: str) -> str:
     )
 
 
+def press_chord(machine: Machine, key_code: int, modifiers: tuple[str, ...], step: str) -> None:
+    """Hold `modifiers` and press the key with `key_code`, from inside the guest.
+
+    A virtual key code and not a character: it is the key in a position on the
+    keyboard, which is what a global shortcut is registered for, and it says the
+    same thing on both sides of the check (`HotKeyBinding.keyCodes`).
+
+    The lab's other keystrokes are made over VNC, where they arrive at the
+    machine's keyboard the way a key on a real one does. A chord cannot be made
+    that way in this guest, and `panel.press_the_chord` is where that is
+    written down.
+    """
+    held = ", ".join(f"{modifier} down" for modifier in modifiers)
+    _ask_system_events(machine, f"key code {key_code} using {{{held}}}", step)
+
+
 def move_window(machine: Machine, process: str, to: tuple[int, int], step: str) -> None:
     """Put the top-left corner of `process`'s front window at `to`, in screen points."""
     x, y = to

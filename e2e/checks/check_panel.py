@@ -1,10 +1,11 @@
 """Does the panel open when it should, and close when it should?
 
-Nine checks in two halves. The first three are about the panel appearing and by
-which path; the last six are about it going away again, and they are where
+Twelve checks in three parts. The first three are about the panel appearing and
+by which path; the next six are about it going away again, and they are where
 the promise the panel is built on lives — **once the panel is held, the cursor
 leaving never closes it**, and everything that does close it is the operator
-saying so.
+saying so. The last three are the other way in, which needs no pointer at all:
+the keyboard shortcut, which opens the panel and puts it away again.
 
 Both halves read the same oracle, uDeck's own log, and both ask the same kind
 of question of it: not "did the panel move" but "which thing moved it". Opening
@@ -64,8 +65,28 @@ can still be holding it, and the next thing the operator does after putting the
 panel away is type. So `panel.the-key-after-escape` types, into a document, and
 reads the document back.
 
-They go through more steps than the opening checks, so they read the log in
-steps too (`_Story`): one window opened at the start, sliced by what each action
+**The shortcut.** The last three are ⌃⌥U, and what makes them a part of their
+own rather than a fourth opening path is that the panel it leaves is a
+different panel: the gesture gives a peek, the shortcut gives one already
+promoted to be typed into, because the hand that pressed it is on the keys
+(`panel.OPENED_READY_TO_TYPE`). So it is the only way in whose check reads two
+phases, and the only one whose second press is a closing check. Where the
+keyboard went is asked of a document rather than of the log, twice — with the
+panel open, where a key must not reach it, and after, where it must — because
+uDeck names its first responder once per process and a document can be read as
+often as one likes.
+
+What none of them can take for granted is that uDeck was listening at all.
+`RegisterEventHotKey` can be refused, and then a uDeck that is running, healthy
+and watching the pointer hears no chord whatever. Two answers, and the checks
+use both: uDeck says which shortcut it holds at launch, which is why the first
+of the three starts uDeck inside the window on its log; and the control for the
+wrong chord presses the real one straight after its silence, on the same
+machine, so that "nothing happened" is a sentence about the combination rather
+than about a deaf uDeck.
+
+Those nine go through more steps than the three opening checks, so they read the
+log in steps too (`_Story`): one window opened at the start, sliced by what each action
 added to it, and the whole of it kept beside the report as `story.log`. A check
 that read only the end could not tell "nothing happened while the pointer was
 away" from "it happened and something undid it".
@@ -638,7 +659,191 @@ def check_the_key_after_escape(machine, check_dir, lab):
         story.keep()
 
 
-# --- What all nine do -------------------------------------------------------------
+# --- The keyboard shortcut ------------------------------------------------------------
+
+
+def check_the_hotkey(machine, check_dir, lab):
+    """⌃⌥U opens the panel, and opens it ready to be typed into.
+
+    The other way in, and the one that works with the cursor nowhere near the
+    top of the screen. What makes it a check of its own rather than a third
+    opening path is what uDeck does *after* showing the panel: someone who
+    reached for a shortcut has his hands on the keys and is not going to move
+    the mouse over to promote a peek, so `toggleFromKeyboard` promotes it for
+    him — `collapsed -> peek on revealRequested`, then `peek -> open on
+    interacted`. Both lines, in that order and with nothing else between them,
+    are the verdict (`panel.OPENED_READY_TO_TYPE`). A check that accepted the
+    first alone would be green for a shortcut that left him a glance.
+
+    **uDeck is started inside the window on its own log**, for a reason the
+    control in the middle of the screen already has: the line this check rests
+    its premise on is written once, at launch. `RegisterEventHotKey` can be
+    refused — another application may hold the same combination, and the window
+    server gives it to whoever asked first — so a running uDeck is not yet one
+    that would hear the key, and `hotkey ⌃⌥U registered` is uDeck saying it
+    would. Measured on 2026-09-23: that line arrived on each of six fresh
+    machines, in the panel category, which is the same window the phases come
+    in (.build/e2e/20260923-212036Z and -212549Z).
+
+    The pointer is parked in the middle of the screen before any of it, and
+    before the window opens. Not only because a pointer left in the strip by
+    whatever ran before would open the panel by the gesture and leave this check
+    pressing a shortcut at a panel that was already up — but because with the
+    panel open the pointer is *inside* it, which is where a pointer that changes
+    nothing belongs.
+
+    How the chord is pressed, and why not over VNC like every other key the lab
+    sends, is in `panel.press_the_chord`: measured the same day, twelve presses
+    over VNC reached uDeck not once and left the guest's keyboard wedged.
+    """
+    log = _prepare(machine, check_dir, lab, launch=False)
+    _park_in_the_middle(machine)
+    story = _Story(machine, log, check_dir, lab.note)
+    try:
+        _a_uDeck_holding_the_hotkey(machine, story, check_dir)
+        said = _press_the_hotkey(machine, story, "to open the panel", panel.opened_ready_to_type)
+        machine.screenshot(check_dir, "after the hotkey")
+        _expect_it_opened_ready_to_type(said, config.THE_HOTKEY)
+    finally:
+        story.keep()
+
+
+def check_the_hotkey_again(machine, check_dir, lab):
+    """A second press puts the panel away, and hands the keyboard back with it.
+
+    The shortcut is a toggle, and the half that is easy to get wrong is this
+    one: `toggleFromKeyboard` asks the panel to close only when it is not
+    already shut, so a build that lost that branch leaves the operator with a
+    panel he cannot put away by the key he opened it with. The verdict is the
+    phase and the event together, as everywhere else the panel closes — `open ->
+    collapsed on closeRequested`, once, with nothing reopening in the same read.
+
+    **And two keystrokes, which are stronger than the log.** The panel the
+    shortcut opens is one to type into, so the question that follows it is where
+    the keyboard is, and the log cannot answer that twice: uDeck says `first
+    responder while typing` once per process (`loggedResponderTypes.insert`), so
+    it is an oracle a check can read only on the first machine it ever runs on.
+    A document can be read as often as one likes. One key is pressed with the
+    panel open and must *not* reach it — measured on 2026-09-23, three cycles
+    out of three — and one after the panel is away, which must. Together they
+    say the shortcut took the keyboard and gave it back, which is what the
+    operator feels.
+
+    **Not by comparing the whole text**, because TextEdit rewrites it: measured
+    in the same run, a document holding "ay" was read back as "Ay" with no key
+    pressed in between. So each key is a letter of its own
+    (`config.WHILE_THE_PANEL_IS_OPEN_KEY`), the one pressed at the open panel is
+    looked for rather than the text compared, and what is read at the end is
+    compared without regard to case.
+
+    Where the operator is left is not asked here, and can be: uDeck's own
+    account says it hands the keyboard back to the application from before —
+    `gave the keyboard back after dismissed with uDeck in front, so bringing
+    back TextEdit`, nine times out of nine. That the key then arrives in that
+    application's document is the stronger form of the same question, and it is
+    the one this check asks.
+    """
+    log = _prepare(machine, check_dir, lab)
+    story = _Story(machine, log, check_dir, lab.note)
+    try:
+        _park_in_the_middle(machine)
+        application = _a_document_in_front(machine, lab)
+        said = _press_the_hotkey(machine, story, "to open the panel", panel.opened_ready_to_type)
+        machine.screenshot(check_dir, "the panel the hotkey opened")
+        _expect_it_opened_ready_to_type(said, config.THE_HOTKEY)
+
+        machine.key(config.WHILE_THE_PANEL_IS_OPEN_KEY, "with the panel the shortcut opened on screen")
+        machine.sleep(config.SETTLE_SECONDS)
+        story.take("the key pressed with the panel open")
+        while_open = probes.typed_into(machine, application, f"reading what {application} holds with the panel open")
+        lab.note(f"   {application} holds with the panel open: {while_open!r}")
+        expect(
+            config.WHILE_THE_PANEL_IS_OPEN_KEY not in while_open.lower(),
+            f"a key pressed with the panel open reached {application}, which holds {while_open!r}: the panel "
+            f"{config.THE_HOTKEY} opened does not have the keyboard, so it is not the panel ready to be typed "
+            "into that the shortcut promises",
+        )
+
+        said = _press_the_hotkey(machine, story, "a second time", panel.closed_on)
+        machine.screenshot(check_dir, "after the second press")
+        _expect_it_closed(said, "open", "closeRequested", f"{config.THE_HOTKEY} a second time")
+
+        # The handback happens in the millisecond the collapse is logged, and the
+        # application it hands to is brought forward by the system, which takes
+        # its own moment — the same one every other closing check waits out.
+        machine.sleep(config.SETTLE_SECONDS)
+        machine.key(config.AFTER_IT_CLOSED_KEY, "after the shortcut put the panel away")
+        machine.sleep(config.SETTLE_SECONDS)
+        story.take("the key pressed after the panel was put away")
+        holds = probes.typed_into(machine, application, f"reading what {application} holds afterwards")
+        lab.note(f"   {application} holds after the panel was put away: {holds!r}")
+        machine.screenshot(check_dir, "after the key that followed")
+        wanted = config.BEFORE_THE_PANEL_KEY + config.AFTER_IT_CLOSED_KEY
+        expect(
+            holds.lower() == wanted.lower(),
+            f"{application} holds {holds!r} and not {wanted!r} after a key pressed once {config.THE_HOTKEY} had "
+            f"put the panel away: the key the operator typed next did not reach the application he was in, and "
+            f"uDeck's own account of giving the keyboard back is in {_short(said)}",
+        )
+    finally:
+        story.keep()
+
+
+def check_a_chord_that_is_not_the_hotkey(machine, check_dir, lab):
+    """⌃⌥J does nothing — to a uDeck that answers ⌃⌥U a moment later.
+
+    The control for both shortcut checks, and on its own it would be the
+    emptiest kind of green. "Nothing happened" is free when nothing was
+    listening: a uDeck that registered no shortcut at all, or registered one and
+    lost it to another application, is silent for *every* chord, and this check
+    would be exactly as green over it.
+
+    So the witness is in the same check, on the same machine, moments later: the
+    real shortcut is pressed after the silence, and has to open the panel ready
+    to be typed into. That is a uDeck that was running, holding the combination
+    and hearing chords made this way — all three, at the end of the stretch it
+    was supposed to have ignored. If it fails, the silence before it proved
+    nothing, and the check says so rather than passing.
+
+    The two chords differ in the key alone — the same ⌃ and ⌥ held over "J"
+    instead of "U" (`config.NOT_THE_HOTKEY_KEY_CODE`) — so what is controlled
+    for is the combination and not the way the lab presses it. Measured on 2026-09-23: ⌃⌥J
+    left uDeck's log empty for ten seconds, made both ways it can be made
+    (.build/e2e/20260923-212036Z, hotkey.wrong-chord).
+
+    Every phase is read and not only the reveals, because the sentence is that a
+    chord uDeck never registered does not move the panel *at all*.
+    """
+    log = _prepare(machine, check_dir, lab)
+    story = _Story(machine, log, check_dir, lab.note)
+    try:
+        _park_in_the_middle(machine)
+        panel.press_the_chord(
+            machine, config.NOT_THE_HOTKEY_KEY_CODE, f"{config.NOT_THE_HOTKEY}, which uDeck never registered"
+        )
+        machine.sleep(config.NOTHING_HAPPENS_SECONDS)
+        said = story.take(f"{config.NOT_THE_HOTKEY}, and the {config.NOTHING_HAPPENS_SECONDS}s after it")
+        machine.screenshot(check_dir, "after the chord that is not the hotkey")
+        moved = panel.phases(said)
+        expect(
+            moved == [],
+            f"{config.NOT_THE_HOTKEY} moved the panel {moved} — a chord uDeck never registered reached it and "
+            f"was acted on, so the operator's own shortcuts are not his: {_short(said)}",
+        )
+
+        heard = _press_the_hotkey(
+            machine, story, "pressed to show uDeck was listening all along", panel.opened_ready_to_type
+        )
+        machine.screenshot(check_dir, "after the shortcut itself")
+        _expect_it_opened_ready_to_type(
+            heard, f"{config.THE_HOTKEY}, pressed to show uDeck was listening all along and so that the silence "
+            f"after {config.NOT_THE_HOTKEY} means something,"
+        )
+    finally:
+        story.keep()
+
+
+# --- What all twelve do -------------------------------------------------------------
 
 
 def _prepare(machine, check_dir, lab, launch=True):
@@ -681,6 +886,61 @@ def _expect_the_panel_opened(said):
         shown != [],
         "uDeck recognised the gesture and the panel did not open: it never left "
         f"'{panel.SHUT}'. What it says of the panel: {_short(said)}",
+    )
+
+
+def _a_uDeck_holding_the_hotkey(machine, story, check_dir):
+    """uDeck started inside the window on its log, and saying which shortcut it holds.
+
+    The premise every shortcut check rests on, and it is not free: the window
+    server hands a combination to whoever asked for it first, so
+    `RegisterEventHotKey` can be refused and uDeck says so instead
+    (`HotKeyMonitor.apply`). A uDeck that never got the key is silent for the
+    chord in exactly the way a uDeck that ignores it is.
+
+    Started here rather than in `_prepare` because that line is written once, at
+    launch: a window opened afterwards begins after the only chance to read it.
+    The same ordering, and the same reason, as the control in the middle of the
+    screen.
+    """
+    app.launch(machine)
+    machine.screenshot(check_dir, "uDeck running")
+    said = _answer(machine, story, "uDeck starting", panel.registered_hotkeys)
+    holds = panel.registered_hotkeys(said)
+    expect(
+        holds == [config.THE_HOTKEY],
+        f"uDeck says it holds {holds}, not ['{config.THE_HOTKEY}'] — the shortcut the operator is given is "
+        f"not the one the lab is about to press, or the system refused it to uDeck: {_short(said)}",
+    )
+    return said
+
+
+def _press_the_hotkey(machine, story, label, ready):
+    """uDeck's own shortcut, pressed inside the guest, and what uDeck said of it.
+
+    `label` is what the story calls this press, because a check presses it more
+    than once and the two mean different things.
+    """
+    what = f"{config.THE_HOTKEY} {label}"
+    panel.press_the_chord(machine, config.HOTKEY_KEY_CODE, what)
+    return _answer(machine, story, what, ready)
+
+
+def _expect_it_opened_ready_to_type(said, what):
+    """The panel was shown *and* promoted, in that order, and nothing else moved it.
+
+    Two sentences, because the second is what tells the shortcut from the
+    gesture and the first is what tells either from nothing at all. A panel that
+    never appeared and a panel that appeared as a glance are different failures,
+    and a person reading the report needs to be told which one he has.
+    """
+    moved = panel.phases(said)
+    expect(moved != [], f"{what} did not open the panel; what uDeck says: {_short(said)}")
+    expect(
+        moved == panel.OPENED_READY_TO_TYPE,
+        f"{what} moved the panel {moved}, not {panel.OPENED_READY_TO_TYPE}: the shortcut has to leave a panel "
+        f"ready to be typed into, and a peek is a glance the operator would have to reach for the mouse to "
+        f"promote: {_short(said)}",
     )
 
 

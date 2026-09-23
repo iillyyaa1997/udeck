@@ -15,8 +15,9 @@ see the last section.
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, a self-check, the builds a check needs, and the first checks
 > of uDeck itself — the update, with its wrong-key control, and the panel: the
-> hover gesture that opens it, with its pointer-in-the-middle control, and the
-> ways of putting it away again. "Open at Login" and its checks follow.
+> hover gesture that opens it, with its pointer-in-the-middle control, the ways
+> of putting it away again, and the keyboard shortcut that does both, with its
+> wrong-chord control. "Open at Login" and its checks follow.
 
 ## Running it
 
@@ -135,6 +136,13 @@ machine's keyboard and macOS delivers it wherever it is delivering keystrokes.
 So a check that presses one has to have put the keyboard where it wants it, and
 to say what proves the key landed there — a keystroke that went somewhere else
 looks exactly like a keystroke nothing responded to.
+
+**A chord is the one keystroke the lab does not send this way.** Held modifiers
+do not survive the trip in this guest: measured on 2026-09-23, ⌃⌥U over VNC
+reached uDeck not once in twelve presses and left the guest's keyboard taking
+nothing at all afterwards, and ⌘W had already been seen arriving as a plain
+letter. Chords are made inside the guest instead — see the panel's keyboard
+shortcut below.
 
 **While a machine runs, its screen can be reached from your local network**, not
 only from this Mac. Tart prints the address as `127.0.0.1`, but the server
@@ -467,6 +475,82 @@ having had a bad day. What stays the lab's: its log holding nothing uDeck said
 since the check began, which is a window that never started, and the guest's
 clock gone back behind the start of that window, which files everything said
 since outside it.
+
+### The panel's keyboard shortcut
+
+Three more, and they are about the other way in: ⌃⌥U, which works with the
+cursor nowhere near the top of the screen. It is not a third opening path,
+because the panel it leaves is a different panel. The gesture gives a peek — the
+glance the cursor being right there has earned — and the shortcut gives one
+already promoted to be worked in, because the hand that pressed it is on the
+keys and is not going to reach for the mouse to promote a glance
+(`PanelController.toggleFromKeyboard`). So uDeck answers it with two lines and
+not one, `collapsed -> peek on revealRequested` then `peek -> open on
+interacted`, and both of them in that order with nothing else between them are
+the verdict (`panel.OPENED_READY_TO_TYPE`). A check that took the first alone
+would be green for a shortcut that left the operator a glance.
+
+`panel.the-hotkey` is that check, and it starts uDeck **inside** the window on
+its own log — the ordering `panel.middle-of-the-screen` already uses, for a
+reason of its own here. What no shortcut check may take for granted is that
+uDeck was listening at all: `RegisterEventHotKey` hands a combination to
+whoever asked for it first, so it can be refused, and a uDeck that never got the
+key is silent for the chord in exactly the way a uDeck that ignores it is. uDeck
+says which one it holds — `hotkey ⌃⌥U registered` — and it says it once, at
+launch, so a window opened afterwards begins after the only chance to read it.
+Measured on 2026-09-23: that line arrived on each of six fresh machines, in the
+`panel` category, which is the window the phases come in too.
+
+**How the lab presses it, and why not the way it presses every other key.**
+Everything else goes over VNC, where a keystroke arrives at the machine's
+keyboard the way one on a real keyboard does. The chord cannot be made that way
+in this guest, and trying it is worse than useless: measured on 2026-09-23,
+twelve `ctrl-alt-u` presses over VNC produced not one line from a uDeck that was
+running and said it held the shortcut, and three screenshots identical to the
+byte. On a machine of its own the same chord then *wedged the keyboard* — after
+it, neither a plain letter over VNC, nor one through System Events, nor one
+after the lone modifiers had been pressed and released reached a document that
+had taken a letter moments before. It reads like a modifier left stuck down. It
+is the same thing the ⌘W measurement had already seen from the other side, where
+a Command chord over VNC arrived as a plain letter.
+
+So the chord is made inside the guest, as a virtual key code with the modifiers
+named, through the System Events channel the lab already drives the interface
+with (`panel.press_the_chord`). Measured the same day: 9 opens and 9 closes out
+of 9 on three fresh machines, with uDeck's line 0.9 to 1.4 s after the command,
+the SSH round trip and the `log show` included. The key code is uDeck's own:
+32 is "U" in `HotKeyBinding.keyCodes`, an ANSI table that is a fixed
+hardware-layout ABI rather than anything derived from the keyboard layout, and
+the lab's tests read it back out of that file rather than trusting a number
+written down twice.
+
+`panel.the-hotkey-again` presses it a second time, which has to put the panel
+away — `open -> collapsed on closeRequested`, once, with nothing reopening in
+the same read. And it types, twice, because the panel a shortcut opens is one to
+type into and the log cannot answer that twice: uDeck names its first responder
+once per process (`loggedResponderTypes.insert`), so that line is an oracle only
+on the first machine a check ever runs on. A document can be read as often as
+one likes. One key is pressed with the panel open and must **not** reach it —
+measured three cycles out of three — and one after the panel is away, which
+must. Together they say the shortcut took the keyboard and gave it back.
+
+Not by comparing the whole text, though, and that is a trap the measurement
+walked into first: **TextEdit rewrites what is in it.** A document holding "ay"
+was read back as "Ay" with no key pressed in between. So each of the three keys
+is a letter of its own (`config.WHILE_THE_PANEL_IS_OPEN_KEY`), the one pressed
+at the open panel is looked for rather than the text compared, and what is read
+at the end is compared without regard to case.
+
+`panel.a-chord-that-is-not-the-hotkey` is the control, and on its own it would
+be the emptiest kind of green: a uDeck that registered nothing is silent for
+every chord, and the check would be exactly as green over it. So the witness is
+in the same check — the real shortcut is pressed after the silence, on the same
+machine, and has to open the panel ready to be typed into. That is a uDeck that
+was running, holding the combination, and hearing chords made this way, all
+three, at the end of the stretch it was supposed to have ignored. The two chords
+differ in the key alone, so what is being controlled for is the combination and
+not the way the lab presses it. Measured: ⌃⌥J left uDeck's log empty for ten
+seconds, made both ways it can be made.
 
 ## Reading the result
 

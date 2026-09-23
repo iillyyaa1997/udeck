@@ -519,3 +519,137 @@ def test_a_window_is_moved_by_its_process_and_to_the_place_named():
     refused = Machine({"set position": Failed(code=1, said="Invalid index")})
     with pytest.raises(LabError, match="Invalid index"):
         probes.move_window(refused, "TextEdit", (1900, 900), "moving")
+
+
+# --- The keyboard shortcut ------------------------------------------------------------
+
+
+HOTKEY_REGISTERED = (
+    "2026-09-18 18:20:00.500 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] hotkey ⌃⌥U registered\n"
+)
+HOTKEY_DISABLED = "2026-09-18 18:20:00.500 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] hotkey disabled\n"
+HOTKEY_UNREGISTERABLE = (
+    "2026-09-18 18:20:00.500 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] hotkey ⌃⌥U cannot be registered\n"
+)
+HOTKEY_TAKEN = (
+    "2026-09-18 18:20:00.500 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] hotkey ⌃⌥U refused by the system "
+    "(status -9878) — most likely already taken by another application\n"
+)
+PROMOTED = "2026-09-18 18:20:01.470 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] peek -> open on interacted\n"
+
+
+def test_the_shortcut_uDeck_says_it_holds_is_read_from_its_own_words():
+    """The premise of every shortcut check, and it is not free.
+
+    `RegisterEventHotKey` can be refused — the window server gives a combination
+    to whoever asked first — and uDeck says so in the same category, with the
+    same words around it. A uDeck that never got the key is silent for the chord
+    in exactly the way a uDeck that ignores it is, so the three ways of *not*
+    holding it must not read as holding it.
+    """
+    assert panel.registered_hotkeys(ATTACHED + HOTKEY_REGISTERED) == ["⌃⌥U"]
+    assert panel.registered_hotkeys(ATTACHED + IDLE) == []
+    for said in (HOTKEY_DISABLED, HOTKEY_UNREGISTERABLE, HOTKEY_TAKEN):
+        assert panel.registered_hotkeys(said) == [], said
+
+
+def test_the_panel_the_shortcut_leaves_is_promoted_and_not_a_glance():
+    """What tells the shortcut from the gesture, and the whole of this oracle.
+
+    `toggleFromKeyboard` shows the panel and promotes it in the same breath,
+    because the hand that pressed the key is on the keys. A check that read only
+    the reveal would be green for a shortcut that left a peek — the glance the
+    operator would have to reach for the mouse to promote.
+    """
+    assert panel.opened_ready_to_type(PHASE + PROMOTED)
+    assert not panel.opened_ready_to_type(PHASE), "a peek is not a panel ready to type into"
+    assert not panel.opened_ready_to_type(PROMOTED), "promoted from nothing is not the panel opening"
+    assert not panel.opened_ready_to_type(PROMOTED + PHASE), "and the order is the sentence"
+    # And nothing else moved it in the same read: a panel that opened and went
+    # away again is not a panel the operator was left with.
+    assert not panel.opened_ready_to_type(PHASE + PROMOTED + CLOSED_BY_A_CLICK)
+
+
+def test_the_chord_is_pressed_inside_the_guest_and_never_over_vnc():
+    """Measured on 2026-09-23: over VNC the chord reached uDeck not once in twelve
+    presses, and then wedged the guest's keyboard — after it no key at all
+    reached a document that had taken one moments before. So it is made inside
+    the guest, as a virtual key code with uDeck's own modifiers held."""
+    machine = Machine({})
+    panel.press_the_chord(machine, config.HOTKEY_KEY_CODE, "pressing the shortcut")
+    asked = machine.ssh.commands[0]
+    assert asked.startswith("osascript -e ") and '"System Events"' in asked
+    assert f"key code {config.HOTKEY_KEY_CODE} using {{control down, option down}}" in asked
+    assert f"with timeout of {config.SYSTEM_EVENTS_SECONDS} seconds" in asked
+    assert machine.keys == [], "the lab's one keystroke that does not go over VNC"
+
+
+def test_a_system_events_that_would_not_press_the_chord_is_the_labs_failure():
+    """A chord nobody pressed and a chord uDeck ignored leave the same empty log,
+    and only one of them is about uDeck."""
+    refused = Machine({"key code": Failed(code=1, said="execution error: Not authorized to send Apple events")})
+    with pytest.raises(LabError, match="Not authorized"):
+        panel.press_the_chord(refused, config.HOTKEY_KEY_CODE, "pressing the shortcut")
+
+
+# --- The shortcut the lab presses, against the one uDeck registers ---------------------
+#
+# Read out of uDeck's source rather than described here, for the reason the
+# gesture's numbers are: every way of getting it wrong is silent. A chord uDeck
+# never registered opens nothing, and the check would be red about uDeck for a
+# number the lab got wrong.
+
+
+def _hotkey_source():
+    return (
+        Path(panel.__file__).resolve().parents[2] / "Sources" / "UDeckCore" / "Configuration" / "HotKeyBinding.swift"
+    ).read_text()
+
+
+def _key_code(name):
+    """The virtual key code uDeck binds `name` to, out of `HotKeyBinding.keyCodes`."""
+    found = re.search(rf'"{name}": (\d+)', _hotkey_source())
+    assert found, f"{name} is no longer a bindable key in HotKeyBinding.swift"
+    return int(found.group(1))
+
+
+def test_the_lab_presses_the_shortcut_uDeck_actually_registers():
+    """The key, the modifiers and the name uDeck writes in its log — all three.
+
+    The name matters as much as the code: the check reads `hotkey ⌃⌥U
+    registered` back and requires it to be *this* shortcut, so a lab spelling it
+    any other way would call a healthy uDeck a failure.
+    """
+    source = _hotkey_source()
+    key = re.search(r'key: String = "(\w+)"', source)
+    modifiers = re.search(r"modifiers: Set<HotKeyModifier> = \[([^\]]*)\]", source)
+    assert key and modifiers, "HotKeyBinding no longer has a default key and modifiers"
+    wanted = tuple(name.strip().removeprefix(".") for name in modifiers.group(1).split(","))
+    assert config.HOTKEY_MODIFIERS == wanted
+    assert config.HOTKEY_KEY_CODE == _key_code(key.group(1))
+    symbols = "".join(
+        re.search(rf'case \.{modifier}: "(.+)"', source).group(1) for modifier in config.HOTKEY_MODIFIERS
+    )
+    assert config.THE_HOTKEY == symbols + key.group(1), "not how uDeck spells it in the line the check reads"
+
+
+def test_the_chord_that_is_not_the_shortcut_differs_in_the_key_alone():
+    """The control has to be a chord uDeck could have registered and did not.
+
+    Both are pressed through the same call with the same modifiers held, so what
+    the silence is about is the combination and not the way the lab makes it.
+    """
+    assert config.NOT_THE_HOTKEY_KEY_CODE != config.HOTKEY_KEY_CODE
+    assert config.NOT_THE_HOTKEY_KEY_CODE == _key_code("J"), "not a key uDeck can bind at all"
+    assert config.NOT_THE_HOTKEY == config.THE_HOTKEY.replace("U", "J"), "the same chord, another key"
+
+
+def test_the_three_keys_typed_into_the_document_are_told_apart():
+    """One letter per question, because the text as a whole answers none of them:
+    TextEdit rewrites it by itself (measured 2026-09-23, "ay" read back as "Ay").
+    So each key is looked for on its own, and two of them being the same letter
+    would make "it arrived" and "it did not" the same reading."""
+    keys = (config.BEFORE_THE_PANEL_KEY, config.WHILE_THE_PANEL_IS_OPEN_KEY, config.AFTER_IT_CLOSED_KEY)
+    assert len(set(keys)) == len(keys)
+    for key in keys:
+        assert key.isalpha() and key == key.lower() and len(key) == 1, f"{key!r} is not one plain letter"

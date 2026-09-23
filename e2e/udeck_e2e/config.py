@@ -323,6 +323,16 @@ THE_DOCUMENT = "/tmp/udeck-e2e-where-the-keyboard-went.txt"
 # text of the window; `esc` and the rest leave nothing to read.
 BEFORE_THE_PANEL_KEY = "a"
 AFTER_IT_CLOSED_KEY = "x"
+# And a third, for the check that asks the same question while the panel is
+# *open*: a key pressed then must reach uDeck and not the document behind it,
+# which is what "ready to be typed into" means. A letter of its own, so that
+# "did this key arrive" is a question about this key rather than about the whole
+# text — TextEdit rewrites that by itself, and this is the trap the check would
+# otherwise fall into: measured on 2026-09-23, a document holding "ay" became
+# "Ay" between two reads with no key pressed in between (run-2 of the
+# measurement, .build/e2e/20260923-212549Z). So the three letters are distinct
+# and what is read back is compared without regard to case.
+WHILE_THE_PANEL_IS_OPEN_KEY = "z"
 # Until an application started with `open -a` is the one in front. The
 # measurement waited three seconds and found TextEdit there every time; this is
 # a slow machine's allowance on top.
@@ -335,8 +345,10 @@ SYSTEM_EVENTS_SECONDS = 20
 # then waits for uDeck to say something.
 DWELL_SECONDS = 2
 GESTURE_ANSWER_SECONDS = 10
-# How long the negative control watches nothing happen with the pointer in the
-# middle of the screen.
+# How long a negative control watches nothing happen: the pointer held in the
+# middle of the screen, and a chord that is not the shortcut. Ten seconds is the
+# same allowance `GESTURE_ANSWER_SECONDS` gives an answer that does come, so
+# nothing is called silent sooner than an answer would be called late.
 NOTHING_HAPPENS_SECONDS = 10
 # How long panel.escape watches a panel it has just put away, to see whether it
 # comes back by itself — and to see uDeck still alive and watching the pointer
@@ -379,6 +391,37 @@ STAYS_SHUT_SECONDS = 3
 SETTLE_SECONDS = 2
 # Until a control appears after something was pressed.
 UI_APPEAR_SECONDS = 30
+
+# --- The panel's keyboard shortcut ------------------------------------------------
+#
+# uDeck registers one global shortcut and opens the panel on it, ready to be
+# typed into (`HotKeyBinding`, `PanelController.toggleFromKeyboard`). Everything
+# here is uDeck's own default, written down so the lab can press exactly what
+# uDeck registered — and read back against uDeck's source by the lab's tests,
+# the way the gesture's numbers are, because every way of getting it wrong is
+# silent: a chord uDeck never registered opens nothing, and a check that pressed
+# it would be red about uDeck for the lab's mistake.
+
+# How uDeck spells the shortcut when it says it has taken it from the window
+# server: `hotkey ⌃⌥U registered` (`HotKeyBinding.displayName`, modifiers in
+# macOS's order, then the key).
+THE_HOTKEY = "⌃⌥U"
+# The modifiers held down, by the names System Events takes in `key code … using
+# {control down, option down}` — and the modifiers of uDeck's default binding.
+HOTKEY_MODIFIERS = ("control", "option")
+# The key itself, as a virtual key code, because that is what a key press made
+# inside the guest names. 32 is "U" in `HotKeyBinding.keyCodes`: ANSI codes, a
+# fixed hardware-layout ABI rather than anything derived from the keyboard
+# layout, which is why the same number means the same key in both places.
+HOTKEY_KEY_CODE = 32
+
+# The control: the same two modifiers and a key uDeck never registered. 38 is
+# "J" in the same table — next to "U" on the keyboard and nowhere near it in the
+# codes, so a lab that muddled the two would not land on this by accident.
+# Measured on 2026-09-23: ⌃⌥J made this way left uDeck's log empty for ten
+# seconds, twice over (.build/e2e/20260923-212036Z, hotkey.wrong-chord).
+NOT_THE_HOTKEY = "⌃⌥J"
+NOT_THE_HOTKEY_KEY_CODE = 38
 
 # The port the appcast and its archive are served on, inside the guest. It is
 # baked into every lab build (SUFeedURL), so a check and its builds agree on it.
