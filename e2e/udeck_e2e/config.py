@@ -423,6 +423,26 @@ HOTKEY_KEY_CODE = 32
 NOT_THE_HOTKEY = "⌃⌥J"
 NOT_THE_HOTKEY_KEY_CODE = 38
 
+# What the shortcut leaves in a document when *nobody* holds the combination.
+#
+# `RegisterEventHotKey` takes a combination out of the keyboard: while the
+# registration stands the window server delivers it to that process and to no
+# other, so the application in front never sees the keystroke at all. Once the
+# registration is gone the same keystroke goes where every other one goes — to
+# whatever is in front — and the text system inserts what the layout gives for
+# Control held over "U", which is 0x15, NAK, that letter's ASCII control code.
+# The guest is pinned to en / en_US by the bake and `probes.verify_golden` reads
+# that back, so the layout is not something a run can drift into.
+#
+# So this is the difference `panel.the-hotkey-dies-with-udeck` reads, and it is
+# a presence rather than an absence: with uDeck holding the shortcut the
+# document behind the panel gains nothing from a press, and with uDeck gone it
+# gains exactly this. A combination that outlived uDeck would leave the document
+# as empty of it as a living uDeck does. Measured in the guest on 2026-09-24,
+# with uDeck ended and then one ordinary letter pressed after the chord: the
+# document read back 'a\x15x' (.build/e2e/20260924-230410Z).
+THE_CHORD_IN_A_DOCUMENT = "\x15"
+
 # The port the appcast and its archive are served on, inside the guest. It is
 # baked into every lab build (SUFeedURL), so a check and its builds agree on it.
 FEED_PORT = 8765

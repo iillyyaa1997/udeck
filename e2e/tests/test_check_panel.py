@@ -139,9 +139,9 @@ def nothing_real(monkeypatch):
     monkeypatch.setattr(app, "installed_version", lambda machine: checks.VERSION)
 
 
-def prepared(monkeypatch, log_says, in_front=None, holds=None):
+def prepared(monkeypatch, log_says, in_front=None, holds=None, running="404"):
     """Skip the preparation — its own tests are at the end — and hand back the log."""
-    machine = a_machine(log_says, in_front=in_front, holds=holds)
+    machine = a_machine(log_says, running=running, in_front=in_front, holds=holds)
 
     def prepare(machine_, check_dir, lab, launch=True):
         # `launch` is real: the control starts uDeck itself, after its window on
@@ -1073,11 +1073,16 @@ def test_a_panel_that_moved_again_in_the_same_read_fails(monkeypatch, lab, check
         checks.check_the_hotkey(machine, check_dir, lab)
 
 
-def test_uDeck_is_started_inside_the_window_that_reads_the_shortcut_it_holds(monkeypatch, lab, check_dir):
-    """`hotkey ⌃⌥U registered` is written once, at launch. A window opened
-    afterwards begins after the only chance to read it — the same ordering, and
-    the same reason, as the control in the middle of the screen."""
-    machine = prepared(monkeypatch, growing(REGISTERED, OPENED_BY_THE_HOTKEY))
+def how_it_started(monkeypatch, machine, run):
+    """Whether the pointer was parked, the window opened and uDeck started — in that order.
+
+    Every shortcut check does those three and in that order, for two reasons
+    that meet here: `hotkey ⌃⌥U registered` is written once at launch, so a
+    window opened afterwards begins after the only chance to read it; and a
+    pointer left in the strip by whatever ran before opens the panel by the
+    gesture, which between the launch and the mark is a reveal no check asked
+    for and none of them would see.
+    """
     order = []
     taking_the_mark = panel.GestureLog.mark
     monkeypatch.setattr(app, "launch",
@@ -1086,8 +1091,16 @@ def test_uDeck_is_started_inside_the_window_that_reads_the_shortcut_it_holds(mon
                         lambda self, step: (order.append("mark"), taking_the_mark(self, step))[1])
     moving = machine.move_pointer
     machine.move_pointer = lambda x, y, step: order.append("park") or moving(x, y, step)
+    run()
+    return order
 
-    checks.check_the_hotkey(machine, check_dir, lab)
+
+def test_uDeck_is_started_inside_the_window_that_reads_the_shortcut_it_holds(monkeypatch, lab, check_dir):
+    """`hotkey ⌃⌥U registered` is written once, at launch. A window opened
+    afterwards begins after the only chance to read it — the same ordering, and
+    the same reason, as the control in the middle of the screen."""
+    machine = prepared(monkeypatch, growing(REGISTERED, OPENED_BY_THE_HOTKEY))
+    order = how_it_started(monkeypatch, machine, lambda: checks.check_the_hotkey(machine, check_dir, lab))
 
     assert machine.prepared_with_launch is False, "the preparation must not start uDeck for this check"
     assert order[:3] == ["park", "mark", "launch"], order
@@ -1098,7 +1111,7 @@ def test_uDeck_is_started_inside_the_window_that_reads_the_shortcut_it_holds(mon
 
 def test_a_second_press_puts_the_panel_away_and_gives_the_keyboard_back(monkeypatch, lab, check_dir):
     machine = prepared(
-        monkeypatch, growing(OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING), holds=through_the_shortcut()
+        monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING), holds=through_the_shortcut()
     )
     checks.check_the_hotkey_again(machine, check_dir, lab)
     # The same shortcut twice, and the two keys the document answers for: one
@@ -1117,7 +1130,7 @@ def test_a_panel_the_second_press_left_open_fails(monkeypatch, lab, check_dir):
     panel to close only when it is not already shut. Without that branch the
     operator cannot put away by the key what he opened with it."""
     machine = prepared(
-        monkeypatch, growing(OPENED_BY_THE_HOTKEY, NOTHING, NOTHING, NOTHING), holds=through_the_shortcut()
+        monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY, NOTHING, NOTHING, NOTHING), holds=through_the_shortcut()
     )
     with pytest.raises(CheckFailed, match="did not close the panel"):
         checks.check_the_hotkey_again(machine, check_dir, lab)
@@ -1127,7 +1140,7 @@ def test_a_second_press_that_closed_it_for_another_reason_fails(monkeypatch, lab
     """`-> collapsed` alone is satisfied by all four ways the panel goes away, and
     the operator sees the difference at the next reveal."""
     machine = prepared(
-        monkeypatch, growing(OPENED_BY_THE_HOTKEY, NOTHING, INTERRUPTED, NOTHING), holds=through_the_shortcut()
+        monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY, NOTHING, INTERRUPTED, NOTHING), holds=through_the_shortcut()
     )
     with pytest.raises(CheckFailed) as raised:
         checks.check_the_hotkey_again(machine, check_dir, lab)
@@ -1141,7 +1154,7 @@ def test_a_key_that_reached_the_document_while_the_panel_was_open_fails(monkeypa
     likes."""
     reached = [BEFORE_THE_PANEL, BEFORE_THE_PANEL + config.WHILE_THE_PANEL_IS_OPEN_KEY, AND_AFTER_IT_CLOSED]
     machine = prepared(
-        monkeypatch, growing(OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING), holds=reached
+        monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING), holds=reached
     )
     with pytest.raises(CheckFailed, match="reached TextEdit") as raised:
         checks.check_the_hotkey_again(machine, check_dir, lab)
@@ -1153,7 +1166,7 @@ def test_a_key_after_the_panel_was_put_away_that_reached_nobody_fails(monkeypatc
     is gone from the log and from the screen, and the next thing he types reaches
     nobody because uDeck kept the keyboard."""
     kept = [BEFORE_THE_PANEL, BEFORE_THE_PANEL, BEFORE_THE_PANEL]
-    machine = prepared(monkeypatch, growing(OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING), holds=kept)
+    machine = prepared(monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING), holds=kept)
     with pytest.raises(CheckFailed, match="did not reach the application he was in") as raised:
         checks.check_the_hotkey_again(machine, check_dir, lab)
     assert repr(AND_AFTER_IT_CLOSED) in str(raised.value)
@@ -1166,7 +1179,7 @@ def test_a_document_TextEdit_recapitalised_is_still_the_keys_arriving(monkeypatc
     what is read at the end is compared without regard to case."""
     rewritten = [BEFORE_THE_PANEL, BEFORE_THE_PANEL.upper(), AND_AFTER_IT_CLOSED.capitalize()]
     machine = prepared(
-        monkeypatch, growing(OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING), holds=rewritten
+        monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING), holds=rewritten
     )
     checks.check_the_hotkey_again(machine, check_dir, lab)
 
@@ -1176,7 +1189,7 @@ def test_the_key_after_the_panel_is_pressed_only_once_the_handback_has_had_time(
     the application it hands to is brought forward by the system, which takes its
     own moment. A key pressed into that moment would be a check about timing."""
     machine = prepared(
-        monkeypatch, growing(OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING), holds=through_the_shortcut()
+        monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING), holds=through_the_shortcut()
     )
     order = []
     sleeping = machine.sleep
@@ -1201,13 +1214,112 @@ def test_the_key_after_the_panel_is_pressed_only_once_the_handback_has_had_time(
     assert ("sleep", config.SETTLE_SECONDS) in after_it_closed[:pressed]
 
 
+def test_a_document_that_came_back_empty_with_the_panel_open_proves_nothing(monkeypatch, lab, check_dir):
+    """The positive control inside a negative reading. "The key I pressed is not
+    in this text" is true of every empty string there is, and System Events hands
+    an empty window back the same way it hands back a full one — `probes.typed_into`
+    raises only when the question is refused. So the letter that reached the
+    document before the panel was ever shown has to still be in the same read."""
+    empty = [BEFORE_THE_PANEL, "", AND_AFTER_IT_CLOSED]
+    machine = prepared(
+        monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING), holds=empty
+    )
+    with pytest.raises(CheckFailed, match="without the") as raised:
+        checks.check_the_hotkey_again(machine, check_dir, lab)
+    assert repr(config.BEFORE_THE_PANEL_KEY) in str(raised.value)
+    assert "says nothing about where the next key went" in str(raised.value)
+
+
+def test_the_second_press_parks_the_pointer_before_uDeck_starts(monkeypatch, lab, check_dir):
+    """The ordering `panel.the-hotkey` has, and this check used to have the other
+    way round: on a machine shared between checks (`--vm per-group`, `per-run`) a
+    pointer left in the strip fires the gesture between the launch and the mark."""
+    machine = prepared(
+        monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY, NOTHING, DISMISSED, NOTHING),
+        holds=through_the_shortcut(),
+    )
+    order = how_it_started(monkeypatch, machine, lambda: checks.check_the_hotkey_again(machine, check_dir, lab))
+
+    assert machine.prepared_with_launch is False
+    assert order[:3] == ["park", "mark", "launch"], order
+
+
+# --- The shortcut at a panel it did not open -----------------------------------------------
+
+# The gesture's peek, and then the chord: the third face of a toggle written as
+# "shut, or else close", and the only one either of the two checks above can be
+# green without.
+CLOSED_BY_THE_HOTKEY = PEEK_DISMISSED
+
+
+def test_the_hotkey_closes_a_peek_the_gesture_opened(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(REGISTERED, REVEAL, CLOSED_BY_THE_HOTKEY))
+    checks.check_the_hotkey_closes_what_the_gesture_opened(machine, check_dir, lab)
+    # One chord, and the panel it was pressed at was opened by the pointer: the
+    # move into the strip is the only other thing this check does to the machine.
+    assert chords(machine) == [config.HOTKEY_KEY_CODE]
+    assert machine.keys == [], "nothing is typed here, and nothing is pressed over VNC"
+    assert [(x, y) for x, y, _ in machine.pointer] == [
+        panel.middle_of_the_screen(), panel.middle_of_the_screen(), panel.top_of_the_strip(),
+    ]
+
+
+def test_a_hotkey_that_promoted_the_peek_instead_of_closing_it_fails(monkeypatch, lab, check_dir):
+    """The mutation both of the other shortcut checks stay green over. Narrow
+    `toggleFromKeyboard`'s guard to the phase the shortcut itself leaves behind
+    and a peek takes the other branch: `revealRequested` is ignored at a panel
+    already showing, `interacted` is not, and the key the operator reached for to
+    put the panel away promotes it into a working one instead."""
+    machine = prepared(monkeypatch, growing(REGISTERED, REVEAL, PROMOTED))
+    with pytest.raises(CheckFailed, match="did not close the panel") as raised:
+        checks.check_the_hotkey_closes_what_the_gesture_opened(machine, check_dir, lab)
+    assert config.THE_HOTKEY in str(raised.value)
+    assert machine.now >= config.GESTURE_ANSWER_SECONDS, "and it waited for an answer before saying so"
+
+
+def test_a_peek_the_hotkey_closed_for_another_reason_is_not_this_check(monkeypatch, lab, check_dir):
+    """`-> collapsed` alone is satisfied by all four ways the panel goes away, and
+    the pointer leaving is the one a peek does by itself."""
+    machine = prepared(monkeypatch, growing(REGISTERED, REVEAL, POINTER_LEFT))
+    with pytest.raises(CheckFailed) as raised:
+        checks.check_the_hotkey_closes_what_the_gesture_opened(machine, check_dir, lab)
+    assert "('peek', 'collapsed', 'closeRequested')" in str(raised.value)
+
+
+def test_the_hotkey_at_a_gesture_panel_needs_a_peek_before_it_presses_anything(monkeypatch, lab, check_dir):
+    """A peek and a held panel are closed by different things, so a check that
+    took whichever panel it happened to get would be a different check on
+    different days."""
+    machine = prepared(monkeypatch, growing(REGISTERED, RESTORED, CLOSED_BY_THE_HOTKEY))
+    with pytest.raises(CheckFailed, match="not as a peek"):
+        checks.check_the_hotkey_closes_what_the_gesture_opened(machine, check_dir, lab)
+    assert chords(machine) == [], "and nothing was pressed at a panel this check is not about"
+
+
+def test_the_hotkey_at_a_gesture_panel_reads_the_shortcut_uDeck_holds_first(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(NOTHING, REVEAL, CLOSED_BY_THE_HOTKEY))
+    with pytest.raises(CheckFailed, match="uDeck says it holds"):
+        checks.check_the_hotkey_closes_what_the_gesture_opened(machine, check_dir, lab)
+    assert chords(machine) == []
+
+
+def test_the_hotkey_at_a_gesture_panel_parks_the_pointer_before_uDeck_starts(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(REGISTERED, REVEAL, CLOSED_BY_THE_HOTKEY))
+    order = how_it_started(
+        monkeypatch, machine, lambda: checks.check_the_hotkey_closes_what_the_gesture_opened(machine, check_dir, lab)
+    )
+
+    assert machine.prepared_with_launch is False
+    assert order[:3] == ["park", "mark", "launch"], order
+
+
 # --- A chord that is not the shortcut ------------------------------------------------------
 
 
 def test_a_chord_that_is_not_the_shortcut_moves_nothing_and_the_shortcut_still_answers(
     monkeypatch, lab, check_dir
 ):
-    machine = prepared(monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY))
+    machine = prepared(monkeypatch, growing(NOTHING, NOTHING, OPENED_BY_THE_HOTKEY))
     checks.check_a_chord_that_is_not_the_hotkey(machine, check_dir, lab)
     # The control first and the witness after it, both made the same way, so what
     # the silence is about is the combination and not how the lab pressed it.
@@ -1219,7 +1331,7 @@ def test_a_chord_that_is_not_the_shortcut_moves_nothing_and_the_shortcut_still_a
 def test_a_panel_that_moved_on_a_chord_uDeck_never_registered_fails(monkeypatch, lab, check_dir):
     """Every phase and not only the reveals: a chord uDeck never took must not
     open the panel, and must not close one either."""
-    machine = prepared(monkeypatch, growing(OPENED_BY_THE_HOTKEY, OPENED_BY_THE_HOTKEY))
+    machine = prepared(monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY, OPENED_BY_THE_HOTKEY))
     with pytest.raises(CheckFailed, match=f"{config.NOT_THE_HOTKEY} moved the panel") as raised:
         checks.check_a_chord_that_is_not_the_hotkey(machine, check_dir, lab)
     assert "never registered" in str(raised.value)
@@ -1230,10 +1342,184 @@ def test_a_control_whose_uDeck_is_deaf_to_the_real_shortcut_proves_nothing(monke
     that registered nothing, or lost the combination to another application, is
     silent for *every* chord. So the real one is pressed after the silence, on the
     same machine, and has to open the panel."""
-    machine = prepared(monkeypatch, growing(NOTHING, NOTHING))
+    machine = prepared(monkeypatch, growing(NOTHING, NOTHING, NOTHING))
     with pytest.raises(CheckFailed, match="did not open the panel") as raised:
         checks.check_a_chord_that_is_not_the_hotkey(machine, check_dir, lab)
     assert "listening all along" in str(raised.value)
+
+
+def test_the_wrong_chord_parks_the_pointer_before_uDeck_starts(monkeypatch, lab, check_dir):
+    """The stretch this control calls silent has to begin before uDeck does. A
+    pointer left in the strip opens the panel by the gesture in a fraction of a
+    second, and a reveal between the launch and the mark is one no read here
+    would ever see."""
+    machine = prepared(monkeypatch, growing(NOTHING, NOTHING, OPENED_BY_THE_HOTKEY))
+    order = how_it_started(
+        monkeypatch, machine, lambda: checks.check_a_chord_that_is_not_the_hotkey(machine, check_dir, lab)
+    )
+
+    assert machine.prepared_with_launch is False
+    assert order[:3] == ["park", "mark", "launch"], order
+
+
+# --- The combination after uDeck has gone --------------------------------------------------
+
+# uDeck alive for the witness press and the press that puts the panel away, and
+# gone by the time the chord is pressed at nobody.
+GONE_AFTER_THE_PANEL_WAS_PUT_AWAY = ["404", "404", ""]
+
+
+def ended_uDeck(machine):
+    """Whether the lab asked the uDeck in the guest to quit."""
+    return [command for command in machine.ssh.commands if 'to quit' in command]
+
+
+THE_CHORD_AND_THE_LETTER_AFTER_IT = (
+    BEFORE_THE_PANEL + config.THE_CHORD_IN_A_DOCUMENT + config.AFTER_IT_CLOSED_KEY
+)
+
+
+def through_the_combination():
+    """What the document holds through panel.the-hotkey-dies-with-udeck, read by read.
+
+    The control letter before the panel; the same again after two presses that
+    uDeck took out of the keyboard, which is what holding a combination means;
+    and then the chord itself and the letter after it, once nobody holds it. A
+    fresh list each time, because the fake guest takes its answers off the one
+    it is given.
+    """
+    return [BEFORE_THE_PANEL, BEFORE_THE_PANEL, THE_CHORD_AND_THE_LETTER_AFTER_IT]
+
+
+def test_the_combination_dies_with_uDeck(monkeypatch, lab, check_dir):
+    machine = prepared(
+        monkeypatch, growing(REGISTERED, OPENED_BY_THE_HOTKEY, DISMISSED, NOTHING),
+        running=list(GONE_AFTER_THE_PANEL_WAS_PUT_AWAY), holds=through_the_combination(),
+    )
+    checks.check_the_hotkey_dies_with_udeck(machine, check_dir, lab)
+    # Three presses of the same chord: one to show it works, one to put the panel
+    # away while uDeck can still hear it, and one at a machine uDeck has left.
+    assert chords(machine) == [config.HOTKEY_KEY_CODE] * 3
+    assert ended_uDeck(machine)
+    # And the two keys the document answers for: the control before the panel,
+    # and the ordinary letter after the chord nobody was there to hear — the
+    # chord itself is in that document too, which is the verdict.
+    assert [name for name, _ in machine.keys] == [config.BEFORE_THE_PANEL_KEY, config.AFTER_IT_CLOSED_KEY]
+
+
+def test_the_shortcut_is_shown_to_work_before_uDeck_is_ended(monkeypatch, lab, check_dir):
+    """"Nothing happened" is free on a lab that cannot press chords at all. The
+    witness is the same chord, on the same machine, minutes earlier — so it has
+    to be pressed, and answered, while uDeck is still there."""
+    machine = prepared(
+        monkeypatch, growing(REGISTERED, OPENED_BY_THE_HOTKEY, DISMISSED, NOTHING),
+        running=list(GONE_AFTER_THE_PANEL_WAS_PUT_AWAY), holds=through_the_combination(),
+    )
+    checks.check_the_hotkey_dies_with_udeck(machine, check_dir, lab)
+
+    commands = machine.ssh.commands
+    quit_at = next(i for i, command in enumerate(commands) if 'to quit' in command)
+    pressed = [i for i, command in enumerate(commands) if f"key code {config.HOTKEY_KEY_CODE} using" in command]
+    assert len(pressed) == 3, commands
+    assert pressed[1] < quit_at < pressed[2], commands
+
+
+def test_a_shortcut_that_opened_nothing_while_uDeck_lived_stops_the_check(monkeypatch, lab, check_dir):
+    """If the witness press proves nothing, what follows it proves nothing either,
+    and uDeck is never ended: this check would otherwise read its own inability
+    to press a chord as a combination that died politely."""
+    machine = prepared(
+        monkeypatch, growing(REGISTERED, NOTHING, NOTHING, NOTHING),
+        running=list(GONE_AFTER_THE_PANEL_WAS_PUT_AWAY),
+    )
+    with pytest.raises(CheckFailed, match="did not open the panel"):
+        checks.check_the_hotkey_dies_with_udeck(machine, check_dir, lab)
+    assert ended_uDeck(machine) == [], "and uDeck was left alone, because the witness never happened"
+
+
+def test_a_panel_that_moved_on_the_chord_after_uDeck_had_gone_fails(monkeypatch, lab, check_dir):
+    """A phase written after the process ended is the one thing uDeck's own log
+    can still say here, and it would say that something is holding the
+    combination on uDeck's behalf."""
+    machine = prepared(
+        monkeypatch, growing(REGISTERED, OPENED_BY_THE_HOTKEY, DISMISSED, OPENED_BY_THE_HOTKEY),
+        running=list(GONE_AFTER_THE_PANEL_WAS_PUT_AWAY), holds=through_the_combination(),
+    )
+    with pytest.raises(CheckFailed, match="the panel moved"):
+        checks.check_the_hotkey_dies_with_udeck(machine, check_dir, lab)
+
+
+def test_a_combination_that_outlived_uDeck_fails(monkeypatch, lab, check_dir):
+    """The reading that carries this check, and it is a presence and not an
+    absence. `RegisterEventHotKey` takes the combination out of the keyboard, so
+    while it stands the application in front never sees the keystroke; once it is
+    gone the same keystroke lands in the document. A leak leaves that document
+    exactly as empty of the chord as a living uDeck leaves it."""
+    still_held = [BEFORE_THE_PANEL, BEFORE_THE_PANEL, AND_AFTER_IT_CLOSED]
+    machine = prepared(
+        monkeypatch, growing(REGISTERED, OPENED_BY_THE_HOTKEY, DISMISSED, NOTHING),
+        running=list(GONE_AFTER_THE_PANEL_WAS_PUT_AWAY), holds=still_held,
+    )
+    with pytest.raises(CheckFailed, match="did not go back to the keyboard") as raised:
+        checks.check_the_hotkey_dies_with_udeck(machine, check_dir, lab)
+    assert repr(THE_CHORD_AND_THE_LETTER_AFTER_IT) in str(raised.value)
+
+
+def test_a_chord_that_ate_the_key_after_it_fails(monkeypatch, lab, check_dir):
+    """The other half of the same reading. A combination that outlived uDeck is
+    not only a key that opens nothing — it is a key nobody receives, and a
+    modifier left down behind one takes the rest of the keyboard with it, which
+    is exactly what one ⌃⌥U over VNC did to this guest (2026-09-23)."""
+    ate_it = [BEFORE_THE_PANEL, BEFORE_THE_PANEL, BEFORE_THE_PANEL + config.THE_CHORD_IN_A_DOCUMENT]
+    machine = prepared(
+        monkeypatch, growing(REGISTERED, OPENED_BY_THE_HOTKEY, DISMISSED, NOTHING),
+        running=list(GONE_AFTER_THE_PANEL_WAS_PUT_AWAY), holds=ate_it,
+    )
+    with pytest.raises(CheckFailed, match="did not go back to the keyboard"):
+        checks.check_the_hotkey_dies_with_udeck(machine, check_dir, lab)
+
+
+def test_a_chord_that_reached_the_document_while_uDeck_held_it_fails(monkeypatch, lab, check_dir):
+    """The half read while uDeck is still there, and without it the other half
+    says nothing: a machine where the chord reaches the document either way
+    cannot tell a combination uDeck has from one nobody has."""
+    leaked_through = [
+        BEFORE_THE_PANEL,
+        BEFORE_THE_PANEL + config.THE_CHORD_IN_A_DOCUMENT,
+        THE_CHORD_AND_THE_LETTER_AFTER_IT,
+    ]
+    machine = prepared(
+        monkeypatch, growing(REGISTERED, OPENED_BY_THE_HOTKEY, DISMISSED, NOTHING),
+        running=list(GONE_AFTER_THE_PANEL_WAS_PUT_AWAY), holds=leaked_through,
+    )
+    with pytest.raises(CheckFailed, match="cannot tell a combination uDeck has"):
+        checks.check_the_hotkey_dies_with_udeck(machine, check_dir, lab)
+    assert ended_uDeck(machine) == [], "and uDeck was left alone, because the scene was already wrong"
+
+
+def test_a_uDeck_that_would_not_end_is_the_scene_failing(monkeypatch, lab, check_dir):
+    """A uDeck still running is not a combination outliving it — there is nothing
+    to ask this question of yet — so it is the lab failing to set the scene and
+    not a verdict."""
+    machine = prepared(
+        monkeypatch, growing(REGISTERED, OPENED_BY_THE_HOTKEY, DISMISSED, NOTHING),
+        running="404", holds=through_the_combination(),
+    )
+    with pytest.raises(LabError, match="still running"):
+        checks.check_the_hotkey_dies_with_udeck(machine, check_dir, lab)
+
+
+def test_the_combination_check_parks_the_pointer_before_uDeck_starts(monkeypatch, lab, check_dir):
+    machine = prepared(
+        monkeypatch, growing(REGISTERED, OPENED_BY_THE_HOTKEY, DISMISSED, NOTHING),
+        running=list(GONE_AFTER_THE_PANEL_WAS_PUT_AWAY), holds=through_the_combination(),
+    )
+    order = how_it_started(
+        monkeypatch, machine, lambda: checks.check_the_hotkey_dies_with_udeck(machine, check_dir, lab)
+    )
+
+    assert machine.prepared_with_launch is False
+    assert order[:3] == ["park", "mark", "launch"], order
 
 
 # --- Reading the log in steps -----------------------------------------------------------

@@ -1,11 +1,11 @@
 """Does the panel open when it should, and close when it should?
 
-Twelve checks in three parts. The first three are about the panel appearing and
-by which path; the next six are about it going away again, and they are where
-the promise the panel is built on lives — **once the panel is held, the cursor
-leaving never closes it**, and everything that does close it is the operator
-saying so. The last three are the other way in, which needs no pointer at all:
-the keyboard shortcut, which opens the panel and puts it away again.
+Fourteen checks in three parts. The first three are about the panel appearing
+and by which path; the next six are about it going away again, and they are
+where the promise the panel is built on lives — **once the panel is held, the
+cursor leaving never closes it**, and everything that does close it is the
+operator saying so. The last five are the other way in, which needs no pointer
+at all: the keyboard shortcut, which opens the panel and puts it away again.
 
 Both halves read the same oracle, uDeck's own log, and both ask the same kind
 of question of it: not "did the panel move" but "which thing moved it". Opening
@@ -65,31 +65,77 @@ can still be holding it, and the next thing the operator does after putting the
 panel away is type. So `panel.the-key-after-escape` types, into a document, and
 reads the document back.
 
-**The shortcut.** The last three are ⌃⌥U, and what makes them a part of their
+**The shortcut.** The last five are ⌃⌥U, and what makes them a part of their
 own rather than a fourth opening path is that the panel it leaves is a
 different panel: the gesture gives a peek, the shortcut gives one already
 promoted to be typed into, because the hand that pressed it is on the keys
-(`panel.OPENED_READY_TO_TYPE`). So it is the only way in whose check reads two
-phases, and the only one whose second press is a closing check. Where the
-keyboard went is asked of a document rather than of the log, twice — with the
-panel open, where a key must not reach it, and after, where it must — because
-uDeck names its first responder once per process and a document can be read as
-often as one likes.
+(`panel.OPENED_READY_TO_TYPE`). So it is the only way in whose checks read two
+phases, and the only one that also puts the panel away again.
+
+Three of the five are the toggle. `panel.the-hotkey` opens the panel;
+`panel.the-hotkey-again` presses it a second time and puts it away; and
+`panel.the-hotkey-closes-what-the-gesture-opened` presses it at a panel it did
+not open at all. That third one is not a repetition of the second: uDeck's
+toggle is written as "shut, or else close" (`PanelController.toggleFromKeyboard`),
+and a guard narrowed to the phase the shortcut itself leaves behind would
+promote a peek instead of closing it — which both of the other two stay green
+over, because one of them starts from a shut panel and the other from a panel
+the shortcut had already promoted.
+
+Where the keyboard went is asked of a document rather than of the log, and it is
+`panel.the-hotkey-again` alone that asks it — twice, with the panel open where a
+key must not reach the document, and after it, where it must — because uDeck
+names its first responder once per process and a document can be read as often
+as one likes.
+
+The other two are controls, and both are about the combination rather than
+about the panel. `panel.a-chord-that-is-not-the-hotkey` presses one uDeck never
+registered; `panel.the-hotkey-dies-with-udeck` presses the real one at a machine
+uDeck has left, because a global combination that outlived the application would
+take that key away from every other application on the Mac and nothing else here
+would notice.
 
 What none of them can take for granted is that uDeck was listening at all.
 `RegisterEventHotKey` can be refused, and then a uDeck that is running, healthy
 and watching the pointer hears no chord whatever. Two answers, and the checks
-use both: uDeck says which shortcut it holds at launch, which is why the first
-of the three starts uDeck inside the window on its log; and the control for the
-wrong chord presses the real one straight after its silence, on the same
-machine, so that "nothing happened" is a sentence about the combination rather
-than about a deaf uDeck.
+use both: uDeck says which shortcut it holds at launch, which is why three of
+the five start uDeck inside the window on its log and read that line before
+they press anything; and the control for the wrong chord presses the real one
+straight after its silence, on the same machine, so that "nothing happened" is a
+sentence about the combination rather than about a deaf uDeck.
 
-Those nine go through more steps than the three opening checks, so they read the
-log in steps too (`_Story`): one window opened at the start, sliced by what each action
-added to it, and the whole of it kept beside the report as `story.log`. A check
-that read only the end could not tell "nothing happened while the pointer was
-away" from "it happened and something undid it".
+**The pointer is parked before uDeck starts, in all five**, and that is an
+ordering and not a detail. A pointer left in the strip by whatever ran before
+opens the panel by the gesture, and on a machine shared between checks
+(`--vm per-group`, `per-run`) it would fire in the moment between the launch and
+the mark — leaving a shortcut check pressing a chord at a panel that was already
+up, or reading a reveal nobody asked for. So every one of them does the same
+three things in the same order: park, mark, launch.
+
+**What is known about the shortcut and is not checked here.** Two things, both
+in UDeckKit, which has no test target — the package has one, `UDeckCoreTests`
+(Package.swift) — and neither of them reachable from the lab as it stands.
+
+The first is uDeck recognising its own hot key in the Carbon callback
+(`HotKeyMonitor.swift:130`, the signature and id guard). uDeck registers exactly
+one combination, so every hot key event this process can receive is that one: a
+build that answered any hot key at all would behave exactly like this one under
+every check here, and under every chord the lab can make.
+
+The second is the shortcut being registered again when the operator changes it
+(`PanelController.settingsChanged`, which calls `HotKeyMonitor.apply`). No check
+here changes a setting in a running uDeck, so that path is never taken. It
+belongs with saving settings and goes there — and it is also the only thing that
+would make `HotKeyMonitor.unregister` observable, since macOS reclaims a
+process's hot keys when the process exits and
+`panel.the-hotkey-dies-with-udeck` is therefore green over a build that never
+unregisters anything. That is written down where it was measured, in that check.
+
+Those eleven go through more steps than the three opening checks, so they read
+the log in steps too (`_Story`): one window opened at the start, sliced by what
+each action added to it, and the whole of it kept beside the report as
+`story.log`. A check that read only the end could not tell "nothing happened
+while the pointer was away" from "it happened and something undid it".
 
 An answer that never came is not yet a verdict, and one rule says which verdict
 it becomes (`_prove_uDeck_could_have_answered`). A uDeck that was running and is
@@ -681,9 +727,9 @@ def check_the_hotkey(machine, check_dir, lab):
     refused — another application may hold the same combination, and the window
     server gives it to whoever asked first — so a running uDeck is not yet one
     that would hear the key, and `hotkey ⌃⌥U registered` is uDeck saying it
-    would. Measured on 2026-09-23: that line arrived on each of six fresh
+    would. Measured on 2026-09-23: that line arrived on each of five fresh
     machines, in the panel category, which is the same window the phases come
-    in (.build/e2e/20260923-212036Z and -212549Z).
+    in (.build/e2e/20260923-212036Z, three machines, and -212549Z, two).
 
     The pointer is parked in the middle of the screen before any of it, and
     before the window opens. Not only because a pointer left in the strip by
@@ -695,6 +741,15 @@ def check_the_hotkey(machine, check_dir, lab):
     How the chord is pressed, and why not over VNC like every other key the lab
     sends, is in `panel.press_the_chord`: measured the same day, twelve presses
     over VNC reached uDeck not once and left the guest's keyboard wedged.
+
+    **Where the keyboard went is not asked here.** This check presses the chord
+    and reads two phases out of uDeck's log; it types nothing and reads no
+    document, so a uDeck that showed the panel and left the keyboard where it
+    was would pass it. `panel.the-hotkey-again` is the one that types, and the
+    one sentence about the keyboard the shortcut checks make is its. What this
+    check does hold about keys is narrower and is in its test: it presses no key
+    over VNC at all, so the only keystroke in it is the chord made inside the
+    guest.
     """
     log = _prepare(machine, check_dir, lab, launch=False)
     _park_in_the_middle(machine)
@@ -729,6 +784,17 @@ def check_the_hotkey_again(machine, check_dir, lab):
     say the shortcut took the keyboard and gave it back, which is what the
     operator feels.
 
+    **A key that did not arrive and a document that cannot be read look the
+    same**, and only one of them is about uDeck. `probes.typed_into` raises when
+    System Events refuses the question, but an answer of `""` is not a refusal —
+    it is the window read as empty — and "the key I pressed is not in this text"
+    is satisfied by every empty string there is. So the same reading is asked
+    both ways: the letter that reached the document before the panel was ever
+    shown must still be there, *and* the letter pressed at the open panel must
+    not be. A document that comes back empty then goes red on the first of those
+    — naming a read that proves nothing — instead of passing the second by
+    holding nothing at all.
+
     **Not by comparing the whole text**, because TextEdit rewrites it: measured
     in the same run, a document holding "ay" was read back as "Ay" with no key
     pressed in between. So each key is a letter of its own
@@ -739,14 +805,23 @@ def check_the_hotkey_again(machine, check_dir, lab):
     Where the operator is left is not asked here, and can be: uDeck's own
     account says it hands the keyboard back to the application from before —
     `gave the keyboard back after dismissed with uDeck in front, so bringing
-    back TextEdit`, nine times out of nine. That the key then arrives in that
-    application's document is the stronger form of the same question, and it is
-    the one this check asks.
+    back TextEdit`, three times out of three in the run that measured the cycles
+    (.build/e2e/20260923-212549Z), and once in every run of this check the lab
+    has kept. That the key then arrives in that application's document is the
+    stronger form of the same question, and it is the one this check asks.
+
+    **The pointer is parked before uDeck starts**, for the reason
+    `panel.the-hotkey` has it: a pointer left in the strip by whatever ran
+    before opens the panel by the gesture, and between the launch and the mark
+    that reveal would be outside the window this check reads.
     """
-    log = _prepare(machine, check_dir, lab)
+    log = _prepare(machine, check_dir, lab, launch=False)
+    _park_in_the_middle(machine)
     story = _Story(machine, log, check_dir, lab.note)
     try:
-        _park_in_the_middle(machine)
+        app.launch(machine)
+        machine.screenshot(check_dir, "uDeck running")
+        story.take("uDeck starting")
         application = _a_document_in_front(machine, lab)
         said = _press_the_hotkey(machine, story, "to open the panel", panel.opened_ready_to_type)
         machine.screenshot(check_dir, "the panel the hotkey opened")
@@ -757,6 +832,16 @@ def check_the_hotkey_again(machine, check_dir, lab):
         story.take("the key pressed with the panel open")
         while_open = probes.typed_into(machine, application, f"reading what {application} holds with the panel open")
         lab.note(f"   {application} holds with the panel open: {while_open!r}")
+        # The positive half of this one reading, and it is what makes the other
+        # half mean anything: "the key is not in the text" is true of every
+        # empty answer, and System Events hands back an empty window as readily
+        # as it hands back a full one.
+        expect(
+            config.BEFORE_THE_PANEL_KEY in while_open.lower(),
+            f"{application} holds {while_open!r} with the panel open, without the "
+            f"{config.BEFORE_THE_PANEL_KEY!r} that reached it before the panel was ever shown: this read says "
+            "nothing about where the next key went, because a document that holds nothing holds no key either",
+        )
         expect(
             config.WHILE_THE_PANEL_IS_OPEN_KEY not in while_open.lower(),
             f"a key pressed with the panel open reached {application}, which holds {while_open!r}: the panel "
@@ -789,10 +874,58 @@ def check_the_hotkey_again(machine, check_dir, lab):
         story.keep()
 
 
+def check_the_hotkey_closes_what_the_gesture_opened(machine, check_dir, lab):
+    """The shortcut puts away a panel it did not open: a peek the pointer earned.
+
+    The third face of the toggle, and the one neither of the other two can see.
+    uDeck's rule is "shut, or else close" — `toggleFromKeyboard` guards on
+    `state.phase == .collapsed` and everything else goes to `closeRequested`
+    (`PanelController.swift`) — so the shortcut is the operator's way out of
+    *any* panel on screen, not only out of the one he opened with it. That is
+    the part the operator meets first: he brushes the top of the screen by
+    accident, a panel appears, and the key he knows is the key he reaches for.
+
+    **What goes wrong if the guard is narrowed to the phase the shortcut leaves
+    behind.** `panel.the-hotkey` starts from a shut panel and `panel.the-hotkey-again`
+    from one the shortcut had already promoted, so a build that closed on `.open`
+    alone answers both of them exactly as an unbroken one does. At a peek it takes
+    the other branch instead: `revealRequested` at a panel already showing is
+    ignored, `interacted` is not, and the shortcut would *promote* the glance
+    into a working panel — the opposite of what was asked of it, and green
+    everywhere else in the lab. So the verdict here is the pair, as at every
+    other closing: `peek -> collapsed on closeRequested`, once, with nothing
+    reopening in the same read.
+
+    The panel is opened by the gesture and not by the shortcut, which is the
+    whole point, so it is a peek — `_reveal_a_peek` refuses anything else before
+    the chord is pressed, because a check that took whatever panel it happened
+    to get would be a different check on different days.
+
+    The pointer is left where the gesture put it, in the strip. Nothing reopens
+    the panel there: every collapse tells the gesture not to fire again until
+    the pointer has left the strip (`idle: alreadyFiredThisVisit`), which is
+    what `panel.escape` rests on next door.
+    """
+    log = _prepare(machine, check_dir, lab, launch=False)
+    _park_in_the_middle(machine)
+    story = _Story(machine, log, check_dir, lab.note)
+    try:
+        _a_uDeck_holding_the_hotkey(machine, story, check_dir)
+        _reveal_a_peek(machine, story, "the gesture")
+        machine.screenshot(check_dir, "the peek the gesture opened")
+        said = _press_the_hotkey(machine, story, "at the peek the gesture opened", panel.closed_on)
+        machine.screenshot(check_dir, "after the hotkey")
+        _expect_it_closed(
+            said, "peek", "closeRequested", f"{config.THE_HOTKEY} at a peek the gesture had opened"
+        )
+    finally:
+        story.keep()
+
+
 def check_a_chord_that_is_not_the_hotkey(machine, check_dir, lab):
     """⌃⌥J does nothing — to a uDeck that answers ⌃⌥U a moment later.
 
-    The control for both shortcut checks, and on its own it would be the
+    The control for every shortcut check, and on its own it would be the
     emptiest kind of green. "Nothing happened" is free when nothing was
     listening: a uDeck that registered no shortcut at all, or registered one and
     lost it to another application, is silent for *every* chord, and this check
@@ -813,11 +946,21 @@ def check_a_chord_that_is_not_the_hotkey(machine, check_dir, lab):
 
     Every phase is read and not only the reveals, because the sentence is that a
     chord uDeck never registered does not move the panel *at all*.
+
+    **The pointer is parked before uDeck starts**, the same order as every other
+    shortcut check. A pointer left in the strip by whatever ran before opens the
+    panel by the gesture in a fraction of a second, and a reveal that landed
+    between the launch and the mark would leave this control reading a stretch
+    that was never silent — or, worse, reading it as silent while a panel it
+    never saw open sat on the screen.
     """
-    log = _prepare(machine, check_dir, lab)
+    log = _prepare(machine, check_dir, lab, launch=False)
+    _park_in_the_middle(machine)
     story = _Story(machine, log, check_dir, lab.note)
     try:
-        _park_in_the_middle(machine)
+        app.launch(machine)
+        machine.screenshot(check_dir, "uDeck running")
+        story.take("uDeck starting")
         panel.press_the_chord(
             machine, config.NOT_THE_HOTKEY_KEY_CODE, f"{config.NOT_THE_HOTKEY}, which uDeck never registered"
         )
@@ -843,7 +986,149 @@ def check_a_chord_that_is_not_the_hotkey(machine, check_dir, lab):
         story.keep()
 
 
-# --- What all twelve do -------------------------------------------------------------
+def check_the_hotkey_dies_with_udeck(machine, check_dir, lab):
+    """The combination goes back to the Mac when uDeck does.
+
+    A global shortcut is not uDeck's to keep. `RegisterEventHotKey` asks the
+    window server to deliver one combination to one process, and for as long as
+    that registration stands **no other application on the Mac sees that key**.
+    So a uDeck that is gone and still holds ⌃⌥U is not a uDeck bug the operator
+    could shrug at: it is a key taken out of his keyboard, in every application,
+    until he logs out. Nothing in the lab looked at that, and nothing in uDeck's
+    own tests can — the registration lives in the window server and not in
+    uDeck.
+
+    **The shape is: it worked, then uDeck left, then the same press lands in a
+    document instead.** The first press is the witness. It has to open the panel
+    ready to be typed into, on this machine, in this run, with this uDeck — so
+    that what the press does afterwards is a sentence about a combination that
+    was demonstrably live a moment before, and not about a lab that cannot press
+    chords. A second press puts the panel away before uDeck goes, so that the
+    keyboard is back where the operator left it and the reading at the end is
+    about the chord rather than about a uDeck that died holding the keys.
+
+    **And then "nothing happened" would be worth nothing.** A machine with
+    nothing running on it is silent in exactly the way this check would want the
+    chord to be silent. uDeck's log says no more after uDeck has ended, of
+    course it does; and the panel is never read off a screenshot here, because it
+    is translucent over whatever is behind it (see the opening checks). So the
+    verdict is not an absence at all. It is a **presence**, and it is in the
+    document:
+
+    `RegisterEventHotKey` takes the combination out of the keyboard. While the
+    registration stands the window server delivers ⌃⌥U to uDeck and to nobody
+    else, so the application behind the panel never sees the keystroke — and
+    once the registration is gone the same keystroke goes where every other one
+    goes. Both halves are read here, of the same document, minutes apart:
+
+    - while uDeck holds it, two presses leave the document exactly as it was,
+      holding the one letter that reached it before the panel was ever shown;
+    - once uDeck has ended, one press puts `0x15` into it — the control
+      character the layout gives for Control over "U"
+      (`config.THE_CHORD_IN_A_DOCUMENT`) — and an ordinary letter after that
+      arrives too.
+
+    Measured in the guest on 2026-09-24, at the first run of this check: with
+    uDeck gone the document read back `'a\\x15x'`, the chord and then the letter
+    (.build/e2e/20260924-230410Z). A combination that outlived uDeck would leave
+    that document holding `'ax'`, as empty of the chord as a living uDeck leaves
+    it — which is what this check goes red on, and it is the only reading in the
+    lab that could tell the two apart.
+
+    The letter after the chord is in the same sentence for a reason of its own.
+    A leaked registration is not only a key that opens nothing: it is a key
+    nobody receives, and a modifier left down behind one takes the rest of the
+    keyboard with it. That is not hypothetical in this guest — measured on
+    2026-09-23, one ⌃⌥U sent over VNC wedged its keyboard, and afterwards no key
+    at all reached a document that had taken one moments before
+    (.build/e2e/20260923-212833Z).
+
+    **What this is red for, and what it is not.** It is red for a uDeck that
+    holds the combination somewhere its own process does not end: a helper, a
+    login item, an input tap installed for it. It is *not* red for
+    `HotKeyMonitor.unregister` and `stop()` being emptied out — macOS reclaims a
+    process's hot keys when the process exits, so a build that never unregisters
+    anything gives the combination back exactly as this one does. That was
+    measured and not argued: with both of those methods emptied, this check
+    passed and the document read back the same `0x15` and the letter after it
+    (2026-09-24, .build/e2e/20260924-233513Z). The tidying in `stop()` is
+    therefore held by no check here, and
+    cannot be until something asks uDeck to give the key up while it is still
+    running — the settings screen changing the shortcut, which is the other
+    thing this file lists as known and unchecked.
+    """
+    log = _prepare(machine, check_dir, lab, launch=False)
+    _park_in_the_middle(machine)
+    story = _Story(machine, log, check_dir, lab.note)
+    try:
+        _a_uDeck_holding_the_hotkey(machine, story, check_dir)
+        application = _a_document_in_front(machine, lab)
+
+        said = _press_the_hotkey(machine, story, "while uDeck is there to hear it", panel.opened_ready_to_type)
+        machine.screenshot(check_dir, "the panel the hotkey opened")
+        _expect_it_opened_ready_to_type(said, config.THE_HOTKEY)
+
+        said = _press_the_hotkey(machine, story, "to put the panel away before uDeck goes", panel.closed_on)
+        machine.screenshot(check_dir, "the panel put away before uDeck goes")
+        _expect_it_closed(said, "open", "closeRequested", f"{config.THE_HOTKEY} a second time")
+
+        # Half of the sentence, and the half that is read while uDeck is still
+        # there: a combination uDeck holds is one the application behind it
+        # never sees.
+        machine.sleep(config.SETTLE_SECONDS)
+        while_held = probes.typed_into(
+            machine, application, f"reading what {application} holds while uDeck has the shortcut"
+        )
+        lab.note(f"   {application} holds while uDeck has the shortcut: {while_held!r}")
+        expect(
+            while_held.lower() == config.BEFORE_THE_PANEL_KEY,
+            f"{application} holds {while_held!r} and not {config.BEFORE_THE_PANEL_KEY!r} after two presses of "
+            f"{config.THE_HOTKEY} at a uDeck that holds it: the keystroke reached the application behind the "
+            "panel, so this machine cannot tell a combination uDeck has from one nobody has",
+        )
+
+        # Setting the scene and not a verdict: a uDeck that would not end leaves
+        # nothing to ask this check's question of.
+        app.quit_app(machine, "ending the uDeck that holds the shortcut")
+        lab.note("   uDeck has ended, and the shortcut is pressed again")
+        machine.screenshot(check_dir, "uDeck gone")
+
+        panel.press_the_chord(
+            machine, config.HOTKEY_KEY_CODE, f"{config.THE_HOTKEY}, with uDeck no longer there"
+        )
+        machine.sleep(config.NOTHING_HAPPENS_SECONDS)
+        after = story.take(
+            f"{config.THE_HOTKEY} with uDeck gone, and the {config.NOTHING_HAPPENS_SECONDS}s after it"
+        )
+        machine.screenshot(check_dir, "after the chord with uDeck gone")
+        moved = panel.phases(after)
+        expect(
+            moved == [],
+            f"the panel moved {moved} on {config.THE_HOTKEY} after uDeck had ended: {_short(after)}",
+        )
+
+        machine.key(config.AFTER_IT_CLOSED_KEY, f"after {config.THE_HOTKEY} at a machine uDeck has left")
+        machine.sleep(config.SETTLE_SECONDS)
+        holds = probes.typed_into(
+            machine, application, f"reading what {application} holds after the chord uDeck did not hear"
+        )
+        lab.note(f"   {application} holds after the chord uDeck did not hear: {holds!r}")
+        machine.screenshot(check_dir, "after the key that followed the chord")
+        wanted = (
+            config.BEFORE_THE_PANEL_KEY + config.THE_CHORD_IN_A_DOCUMENT + config.AFTER_IT_CLOSED_KEY
+        )
+        expect(
+            holds.lower() == wanted.lower(),
+            f"{application} holds {holds!r} and not {wanted!r} after {config.THE_HOTKEY} was pressed at a "
+            f"machine uDeck has left and an ordinary key after it: the combination did not go back to the "
+            f"keyboard when uDeck did — something is still holding it, and the operator has lost that key "
+            "in every application he has",
+        )
+    finally:
+        story.keep()
+
+
+# --- What all fourteen do -----------------------------------------------------------
 
 
 def _prepare(machine, check_dir, lab, launch=True):

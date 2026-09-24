@@ -16,8 +16,10 @@ see the last section.
 > pointer over VNC, a self-check, the builds a check needs, and the first checks
 > of uDeck itself — the update, with its wrong-key control, and the panel: the
 > hover gesture that opens it, with its pointer-in-the-middle control, the ways
-> of putting it away again, and the keyboard shortcut that does both, with its
-> wrong-chord control. "Open at Login" and its checks follow.
+> of putting it away again, and the keyboard shortcut that opens the panel and
+> puts it away — whichever way it was opened — with its wrong-chord control and
+> a check that the combination dies with uDeck. "Open at Login" and its checks
+> follow.
 
 ## Running it
 
@@ -478,7 +480,7 @@ since outside it.
 
 ### The panel's keyboard shortcut
 
-Three more, and they are about the other way in: ⌃⌥U, which works with the
+Five more, and they are about the other way in: ⌃⌥U, which works with the
 cursor nowhere near the top of the screen. It is not a third opening path,
 because the panel it leaves is a different panel. The gesture gives a peek — the
 glance the cursor being right there has earned — and the shortcut gives one
@@ -498,8 +500,21 @@ whoever asked for it first, so it can be refused, and a uDeck that never got the
 key is silent for the chord in exactly the way a uDeck that ignores it is. uDeck
 says which one it holds — `hotkey ⌃⌥U registered` — and it says it once, at
 launch, so a window opened afterwards begins after the only chance to read it.
-Measured on 2026-09-23: that line arrived on each of six fresh machines, in the
-`panel` category, which is the window the phases come in too.
+Measured on 2026-09-23: that line arrived on each of five fresh machines, in the
+`panel` category, which is the window the phases come in too — three machines in
+`.build/e2e/20260923-212036Z` and two in `-212549Z`.
+
+It also **parks the pointer before uDeck starts**, and so do the other four. A
+pointer left in the strip by whatever ran before opens the panel by the gesture
+in a fraction of a second, and on a machine shared between checks (`--vm
+per-group`, `per-run`) that reveal lands between the launch and the mark, where
+no read here would ever see it — leaving a shortcut check pressing a chord at a
+panel that was already up. Park, mark, launch, in all five.
+
+What `panel.the-hotkey` does **not** ask is where the keyboard went: it presses
+the chord and reads two phases, types nothing and reads no document, so a uDeck
+that showed the panel and kept the keys would pass it. That question belongs to
+`panel.the-hotkey-again` alone.
 
 **How the lab presses it, and why not the way it presses every other key.**
 Everything else goes over VNC, where a keystroke arrives at the machine's
@@ -517,12 +532,20 @@ a Command chord over VNC arrived as a plain letter.
 So the chord is made inside the guest, as a virtual key code with the modifiers
 named, through the System Events channel the lab already drives the interface
 with (`panel.press_the_chord`). Measured the same day: 9 opens and 9 closes out
-of 9 on three fresh machines, with uDeck's line 0.9 to 1.4 s after the command,
-the SSH round trip and the `log show` included. The key code is uDeck's own:
-32 is "U" in `HotKeyBinding.keyCodes`, an ANSI table that is a fixed
-hardware-layout ABI rather than anything derived from the keyboard layout, and
-the lab's tests read it back out of that file rather than trusting a number
-written down twice.
+of 9 on two fresh machines — six cycles on one and three on the other — with
+uDeck's line 0.9 to 1.4 s after the command, the SSH round trip and the `log
+show` included. The key code is uDeck's own: 32 is "U" in
+`HotKeyBinding.keyCodes`, an ANSI table that is a fixed hardware-layout ABI
+rather than anything derived from the keyboard layout, and the lab's tests read
+it back out of that file rather than trusting a number written down twice.
+
+**"Never over VNC" is a rule about that one helper**, and a test of it holds it:
+what `press_the_chord` does is a command over SSH and never a key over VNC. It
+is not a rule about the checks that call it. `panel.the-hotkey` and
+`panel.the-hotkey-closes-what-the-gesture-opened` send no VNC key at all and
+each says so in its own test; `panel.the-hotkey-again` and
+`panel.the-hotkey-dies-with-udeck` press plain letters over VNC on purpose,
+because a letter is how they ask where the keyboard went.
 
 `panel.the-hotkey-again` presses it a second time, which has to put the panel
 away — `open -> collapsed on closeRequested`, once, with nothing reopening in
@@ -541,6 +564,28 @@ is a letter of its own (`config.WHILE_THE_PANEL_IS_OPEN_KEY`), the one pressed
 at the open panel is looked for rather than the text compared, and what is read
 at the end is compared without regard to case.
 
+And the reading at the open panel is asked **both ways in the same breath**,
+because "the key I pressed is not in this text" is true of every empty string
+there is. `probes.typed_into` raises when System Events refuses the question,
+but an empty answer is not a refusal — it is a window read as holding nothing —
+so the letter that reached the document before the panel was ever shown has to
+still be there. A document that comes back empty goes red on that instead of
+passing by holding nothing at all.
+
+`panel.the-hotkey-closes-what-the-gesture-opened` presses the shortcut at a
+panel it did not open: the peek the pointer earned. uDeck's toggle is written as
+"shut, or else close" (`PanelController.toggleFromKeyboard`), so the shortcut is
+the way out of *any* panel on screen — which is the part the operator meets
+first, brushing the top of the screen by accident and reaching for the key he
+knows. Neither of the two checks above can see it. `panel.the-hotkey` starts
+from a shut panel and `panel.the-hotkey-again` from one the shortcut had already
+promoted, so a build whose guard was narrowed to that promoted phase answers
+both of them exactly as a correct one does — and at a peek it would take the
+other branch, where `revealRequested` is ignored and `interacted` is not, and
+*promote* the glance instead of closing it. The verdict here is the pair, as at
+every other closing: `peek -> collapsed on closeRequested`, once, with nothing
+reopening in the same read.
+
 `panel.a-chord-that-is-not-the-hotkey` is the control, and on its own it would
 be the emptiest kind of green: a uDeck that registered nothing is silent for
 every chord, and the check would be exactly as green over it. So the witness is
@@ -551,6 +596,59 @@ three, at the end of the stretch it was supposed to have ignored. The two chords
 differ in the key alone, so what is being controlled for is the combination and
 not the way the lab presses it. Measured: ⌃⌥J left uDeck's log empty for ten
 seconds, made both ways it can be made.
+
+`panel.the-hotkey-dies-with-udeck` is the other control, and it is about the
+Mac rather than about the panel. `RegisterEventHotKey` asks the window server to
+deliver one combination to one process, and while that registration stands **no
+other application sees that key** — so a uDeck that is gone and still holds ⌃⌥U
+has taken a key out of the operator's keyboard, everywhere, until he logs out.
+The shape is: it worked, then uDeck left, then the same press lands in a
+document instead. The first press has to open the panel ready to be typed into,
+on this machine, in this run, so that what the press does afterwards is about a
+combination that was demonstrably live and not about a lab that cannot press
+chords; a second press puts the panel away before uDeck goes, so the keyboard is
+back where the operator left it.
+
+And then the verdict is **not an absence at all**. uDeck's log saying nothing
+once uDeck has ended is free, and the panel is never read off a screenshot here,
+so what the check reads is a *presence*, in the document. While the registration
+stands the window server delivers ⌃⌥U to uDeck and to nobody else, so the
+application behind the panel never sees the keystroke; once it is gone the same
+keystroke goes where every other one goes. Both halves are read, of the same
+document: while uDeck holds the shortcut two presses leave the document exactly
+as it was, and once uDeck has ended one press puts `0x15` into it — the control
+character the layout gives for Control over "U" — with an ordinary letter after
+it arriving too. Measured on 2026-09-24, at this check's first run: the document
+read back `'a\x15x'`. A combination that outlived uDeck would leave it holding
+`'ax'`, as empty of the chord as a living uDeck leaves it, and that is what the
+check goes red on.
+
+The letter after the chord is in the same sentence for a reason of its own: a
+leaked registration is not only a key that opens nothing — it is a key nobody
+receives, and a modifier left down behind one takes the rest of the keyboard
+with it, which is exactly what one ⌃⌥U over VNC did to this guest on 2026-09-23.
+
+It is red for a uDeck that holds the combination somewhere its own process does
+not end — a helper, a login item, an input tap installed for it. It is **not**
+red for `HotKeyMonitor.unregister` and `stop()` being emptied out: macOS
+reclaims a process's hot keys when the process exits, so a build that never
+unregisters anything gives the combination back exactly as this one does. That
+was measured rather than argued — with both methods emptied the check passed and
+the document read back the same control character and the letter after it
+(2026-09-24). The tidying in `HotKeyMonitor.stop()` is therefore held by no
+check in the lab, and cannot be until something asks uDeck to give the key up
+while it is still running.
+
+**Two more things about the shortcut are known and checked nowhere**, both in
+UDeckKit, which has no test target — the package has one, `UDeckCoreTests`. uDeck
+recognises its own hot key in the Carbon callback before it acts on it
+(`HotKeyMonitor.swift`, the signature and id guard), and uDeck registers exactly
+one combination, so every hot key event this process can receive is that one: a
+build that answered any hot key at all behaves here exactly like this one. And
+the shortcut is registered again when the operator changes it
+(`PanelController.settingsChanged`), which no check reaches, because none of
+them changes a setting in a running uDeck — that belongs with saving settings
+and goes there.
 
 ## Reading the result
 

@@ -653,3 +653,18 @@ def test_the_three_keys_typed_into_the_document_are_told_apart():
     assert len(set(keys)) == len(keys)
     for key in keys:
         assert key.isalpha() and key == key.lower() and len(key) == 1, f"{key!r} is not one plain letter"
+
+
+def test_the_chord_leaves_a_mark_of_its_own_in_a_document():
+    """The shortcut is the fourth thing that can land in that document, and
+    `panel.the-hotkey-dies-with-udeck` reads it as the combination having gone
+    back to the keyboard. It has to be one character, and not one of the three
+    letters, or "the chord arrived" and "a letter arrived" would be the same
+    reading — and it has to survive the lowercasing the reads are compared
+    under, because TextEdit rewrites what it holds."""
+    mark = config.THE_CHORD_IN_A_DOCUMENT
+    assert len(mark) == 1 and not mark.isprintable(), f"{mark!r} is not one control character"
+    assert mark == mark.lower()
+    assert mark not in (
+        config.BEFORE_THE_PANEL_KEY, config.WHILE_THE_PANEL_IS_OPEN_KEY, config.AFTER_IT_CLOSED_KEY
+    )

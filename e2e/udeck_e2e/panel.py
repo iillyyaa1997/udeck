@@ -410,8 +410,20 @@ def press_the_chord(machine, key_code: int, step: str) -> None:
     So the chord is made inside the guest instead, as a virtual key code with
     the modifiers named — the same call the lab already uses to drive the
     interface (`probes`). Measured the same day: 9 opens and 9 closes out of 9,
-    on three fresh machines, and uDeck's line 0.9 to 1.4 s after the command,
-    round trip included — well inside `config.GESTURE_ANSWER_SECONDS`.
+    on two fresh machines — six cycles on one (.build/e2e/20260923-212036Z,
+    hotkey.osascript-chord) and three on the other (-212549Z,
+    hotkey.the-key-after-the-hotkey) — with uDeck's line 0.9 to 1.4 s after the
+    command, round trip included, well inside `config.GESTURE_ANSWER_SECONDS`.
+
+    **What "the lab must never send one" is held by, and what it is not.** The
+    rule lives here and a test of this function holds it: what `press_the_chord`
+    does is a command over SSH and never a key over VNC. It is not a rule about
+    the checks that use it — `panel.the-hotkey-again` and
+    `panel.the-hotkey-dies-with-udeck` press plain letters over VNC on purpose,
+    because a letter is how they ask where the keyboard went. Two checks send no
+    VNC key at all, `panel.the-hotkey` and
+    `panel.the-hotkey-closes-what-the-gesture-opened`, and each says so in its
+    own test rather than here.
 
     Which key is the caller's business: the shortcut uDeck registered, and the
     chord that is not it, are both pressed through here so that the control
