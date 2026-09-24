@@ -21,6 +21,13 @@ REPO = Path(__file__).resolve().parents[2]
 FEED = "http://127.0.0.1:8765/appcast.xml"
 KEY = "WdWK0Ud4EIQS36TpiZy9POU3i8IY3R7vpo0qwkGEKa4="
 
+# How long a build gets to go after it is signalled. Not a guess about the
+# machine: the wait exists so that a build which refuses to stop is a failure
+# rather than a hang, and the signal deliberately lands in whatever step the
+# script is in — including codesign, which on a busy runner is not quick. Two
+# minutes is long enough that only a build genuinely refusing to die reaches it.
+STOPPING_SECONDS = 120
+
 
 @pytest.fixture
 def checkout(tmp_path):
@@ -130,6 +137,32 @@ def start_a_build_that_waits(checkout, seconds=60):
     return process
 
 
+def stop(process, seconds=STOPPING_SECONDS):
+    """Wait for a signalled build to go, and say what held it if it does not.
+
+    The wait used to be thirty seconds and that is what failed in CI once
+    (2026-09-23, run 35926979701, green on a re-run): the signal lands wherever
+    the script happens to be, which is the point of the test, and on a loaded
+    runner one of those places took longer to leave than the wait allowed. A
+    longer wait is not a weaker assertion — the build still has to stop — but an
+    expiry now says which processes were still there, because "timed out after 30
+    seconds" on its own said nothing about what to fix.
+    """
+    try:
+        process.wait(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        group = subprocess.run(
+            ["ps", "-o", "pid=,stat=,etime=,command=", "-g", str(os.getpgid(process.pid))],
+            capture_output=True, text=True,
+        )  # fmt: skip
+        process.kill()
+        process.wait(timeout=seconds)
+        raise AssertionError(
+            f"the build did not stop within {seconds}s of SIGTERM; its process group held:\n"
+            f"{group.stdout.strip() or 'nothing ps could see'}"
+        ) from None
+
+
 def test_a_build_stopped_by_a_signal_leaves_no_bundle_behind(checkout):
     """How the lab ends a build that overran: SIGTERM to the whole process group.
 
@@ -140,7 +173,7 @@ def test_a_build_stopped_by_a_signal_leaves_no_bundle_behind(checkout):
     for _ in range(10):
         process = start_a_build_that_waits(checkout)
         os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-        process.wait(timeout=30)
+        stop(process)
         assert not (checkout / "lab-builds" / "uDeck.app").exists()
 
 
