@@ -19,7 +19,8 @@ see the last section.
 > of putting it away again, and the keyboard shortcut that opens the panel and
 > puts it away — whichever way it was opened — with its wrong-chord control and
 > a check that the combination dies with uDeck. "Open at Login" and its checks
-> follow.
+> follow, and so do the two that change a setting in uDeck's own window and ask
+> whether it holds.
 
 ## Running it
 
@@ -456,7 +457,7 @@ over — through System Events, because a Command chord made over VNC arrives in
 this guest as a plain letter, which promotes the peek instead of closing it.
 
 All six act several times with reads in between, so they read the log in steps
-(`_Story` in `check_panel.py`): one window opened at the start and never moved —
+(`panel.Story`): one window opened at the start and never moved —
 the guest's clock answers to the second, and a fresh mark between two actions
 would sometimes begin inside the answer to the one before — cut by how much has
 already been read, which is exact only while the window grows, so a read that
@@ -639,16 +640,112 @@ the document read back the same control character and the letter after it
 check in the lab, and cannot be until something asks uDeck to give the key up
 while it is still running.
 
-**Two more things about the shortcut are known and checked nowhere**, both in
-UDeckKit, which has no test target — the package has one, `UDeckCoreTests`. uDeck
+**One more thing about the shortcut is known and checked nowhere**, in UDeckKit,
+which has no test target — the package has one, `UDeckCoreTests`. uDeck
 recognises its own hot key in the Carbon callback before it acts on it
 (`HotKeyMonitor.swift`, the signature and id guard), and uDeck registers exactly
 one combination, so every hot key event this process can receive is that one: a
-build that answered any hot key at all behaves here exactly like this one. And
-the shortcut is registered again when the operator changes it
-(`PanelController.settingsChanged`), which no check reaches, because none of
-them changes a setting in a running uDeck — that belongs with saving settings
-and goes there.
+build that answered any hot key at all behaves here exactly like this one. What
+used to be listed beside it — the shortcut being registered again when the
+operator changes it (`PanelController.settingsChanged`) — is now
+`settings.the-shortcut-changes-at-once-and-survives`, below.
+
+### The settings the operator changed
+
+Two, and they are about the one path through uDeck every other group of checks
+leaves alone. The panel checks install a build and use it as it ships; the login
+checks flip one switch and then ask the *system's* database about it, never
+uDeck's own file. So a uDeck that wrote nothing to disk, or wrote it and never
+read it back, or read it back and never told the running application, is green
+everywhere else — and the operator finds his shortcut back to ⌃⌥U every morning.
+
+**The change is made in the window, with the pointer, and never in the file.** A
+check that wrote `~/.udeck/settings.json` itself and restarted uDeck would be a
+check about `JSONFileStore` and about nothing a person does: it would stay green
+over a settings screen whose controls were wired to nothing at all, which is the
+half of this feature the operator actually touches. The file is what the check
+*reads* afterwards — one of the two halves of every verdict here, never the way
+in. Both halves, because neither is the promise on its own: the file is what
+survives uDeck, the behaviour is what was asked for, and a uDeck that saved
+perfectly and ignored what it loaded satisfies the first while losing the
+setting at every launch.
+
+**Which settings, and why only these two.** Most of the Opening screen can only
+be photographed — a dwell of 60 ms rather than 80, a panel a little wider — and
+a photograph is exactly the evidence that passes for the wrong reason here,
+because the panel is translucent over whatever is behind it. Two settings uDeck
+answers out loud, and those are the two. Density, the obvious third, has an
+`AXDescription` of its own and would otherwise be the easiest of the lot — and
+it sits at y 948 with the window's lower edge at 846, so it has to be scrolled
+to before it can be clicked (measured 2026-09-25).
+
+`settings.a-switch-survives-a-restart` turns off "retract when you switch
+applications" (`collapseOnAppSwitch`) and makes the same scene twice over with
+the switch as the only difference: a held panel, the pointer taken past it,
+another application brought forward with no click. With the switch on — before
+anything is changed, which is the control — uDeck writes `open -> collapsed on
+otherAppActivated`; with it off, after uDeck has been restarted, it writes
+`otherAppActivated ignored in open` and the panel stays. Without the control
+first, "the panel stayed" would be an empty green: a scene that never worked
+leaves the same silence as a setting that was obeyed. And uDeck has to have been
+*told* both times — `another application came forward …` — or nothing was asked
+of the setting at all, which is the lab's failure and not a verdict.
+
+`settings.the-shortcut-changes-at-once-and-survives` adds ⇧ to ⌃⌥U and asks
+three things of that one press. That the running uDeck took the new combination
+from the window server, which is its own line (`hotkey ⌃⌥⇧U registered`) and the
+only thing that tells a uDeck which never re-registered from one which did and
+cannot hear. That the old combination is dead and the new one opens the panel
+ready to be typed into — both halves, because while a registration stands the
+window server delivers that key to that process and to nobody else, so a uDeck
+still holding ⌃⌥U has taken it out of every other application on the Mac. And
+that a uDeck started again afterwards holds the new one, which is the file's
+half. "Nothing happened" is free, so the old combination's silence is witnessed
+by the new one straight after it, on the same machine — the same shape as
+`panel.a-chord-that-is-not-the-hotkey`, and both chords are made the same way,
+inside the guest, so what is controlled for is the combination and not how the
+lab presses it.
+
+**A restart here is uDeck's, not the machine's.** What is asked is whether the
+file uDeck wrote is the file uDeck reads — `DeckModel.init` loads it once, at
+launch — and quitting uDeck and starting it again is exactly that question at a
+tenth of the cost. A machine restarting is the login checks' subject, where it
+is the system's own memory of uDeck that has to come through a boot.
+
+**Nothing on the Opening screen has a name.** Not one control there carries an
+`AXIdentifier`, an `AXTitle` or an `AXDescription` — SwiftUI gives a `Toggle` no
+accessible name and the label beside it in the `Grid` is a separate element — so
+the identifiers on that screen belong to the sidebar and to nothing else. The
+lab finds those controls by where they sit among their own kind (the four
+`AXToggle` checkboxes are the shortcut's modifiers, left to right; the four
+plain ones are the switches, top to bottom) and then *checks the finding*: the
+row has to read what uDeck's shipped defaults read — on, on, off, off and on,
+on, on, on — or it refuses to click anything. A row reading something else is
+either not the row or a machine that is not at rest, and clicking anyway would
+be a sentence about uDeck written from a random pixel. The two orders and the
+two readings are in `config` with their reasons, and the lab's own tests read
+them back out of `OpeningSettings`, `HotKeyModifier` and the defaults of
+`AppSettings`, `GestureTuning` and `HotKeyBinding` — the way the gesture's
+numbers and the shortcut's are held.
+
+And then the control is pressed **with the machine's pointer**, at the
+coordinates the accessibility API reports, like every other control the lab
+drives (`ui.press`). An `AXPress` needs no coordinates and no screen, so it is
+the obvious shortcut — and it does not select anything (measured 2026-09-17,
+which is why `ui`'s whole docstring exists). It is also not what the operator
+has: a click through the virtual pointing device is the same device the gesture
+checks push the panel open with, so a setting changed this way is a setting
+changed the way he changes it.
+
+Where the file comes in is afterwards. uDeck writes no settings file at all
+until something is changed — measured 2026-09-25: missing before the install,
+after the first launch, and after all five sections of the settings window had
+been opened and walked — so the file these checks read holds the operator's own
+change and nothing else, and both of them refuse to start on a machine that
+already has one. It is written inside the click, all thirteen keys of it, 1935
+bytes, 0.26–0.29 s from the click being issued; nothing is flushed on the way
+out, and the file's time across a quit was identical to the fraction of a
+second.
 
 ## Reading the result
 

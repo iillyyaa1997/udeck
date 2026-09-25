@@ -38,6 +38,17 @@ tests read it back against uDeck's defaults. The closing checks need two more
 places, a place *on* the panel and a place past it, and both have to know
 roughly how big the panel is: measurements kept in `config` the same way, and
 read back the same way.
+
+And then the panel as a scene, because more than one group of checks needs to
+make it. Showing a peek, holding it open with a click, taking the pointer past
+it, interrupting it with another application, reading uDeck's log in steps while
+all that happens, and the two sentences every one of those rests on — the panel
+closed out of *this* phase on *that* event, and uDeck was still there to have
+done it. The panel checks made all of it first; the settings checks need the
+same scene to ask whether a setting the operator changed in uDeck's own window
+still holds, so it lives here rather than in either check file. One property,
+several readers: an edit to what "the panel was interrupted" means reaches every
+check that says it.
 """
 
 from __future__ import annotations
@@ -47,8 +58,8 @@ import shlex
 from collections.abc import Callable
 from pathlib import Path
 
-from udeck_e2e import config, probes
-from udeck_e2e.errors import LabError
+from udeck_e2e import app, config, probes
+from udeck_e2e.errors import LabError, expect
 
 Note = Callable[[str], None]
 
@@ -391,7 +402,7 @@ def push_upward(
     return done.stdout.strip()
 
 
-def press_the_chord(machine, key_code: int, step: str) -> None:
+def press_the_chord(machine, key_code: int, step: str, modifiers: tuple[str, ...] = config.HOTKEY_MODIFIERS) -> None:
     """Press uDeck's modifiers and one key, from inside the guest over SSH.
 
     Every other key the lab presses goes over VNC (`Machine.key`), where it
@@ -425,8 +436,386 @@ def press_the_chord(machine, key_code: int, step: str) -> None:
     `panel.the-hotkey-closes-what-the-gesture-opened`, and each says so in its
     own test rather than here.
 
-    Which key is the caller's business: the shortcut uDeck registered, and the
-    chord that is not it, are both pressed through here so that the control
-    differs from the check in the key alone.
+    Which combination is the caller's business, and the default is uDeck's own:
+    the shortcut it registered, the chord that is not it, and the one the
+    operator changed it to are all pressed through here, so that a control
+    differs from the check it controls in the combination alone and in nothing
+    about how the lab presses it.
     """
-    probes.press_chord(machine, key_code, config.HOTKEY_MODIFIERS, step)
+    probes.press_chord(machine, key_code, modifiers, step)
+
+
+# --- The panel as a scene ---------------------------------------------------------
+
+
+def park_in_the_middle(machine) -> None:
+    """The pointer starts wherever the last thing left it — ten pixels from the corner
+    after a boot, which is neither in the strip nor usefully out of it.
+
+    Every check begins from the same place, far from the edge, so that the move
+    that follows is the whole gesture and not the tail of another one.
+    """
+    machine.move_pointer(*middle_of_the_screen(), "to the middle of the screen, away from the strip")
+    machine.sleep(1)
+
+
+def reveal(machine, story, label):
+    """The gesture, and a panel at the end of it, from wherever the pointer was.
+
+    `park_in_the_middle` first, for the reason every check does it: the move
+    into the strip has to be the whole gesture and not the tail of another one.
+    Which path fired is not a closing check's business — a dwell and a push leave
+    the same panel — so this asks only that something opened.
+    """
+    park_in_the_middle(machine)
+    machine.move_pointer(*top_of_the_strip(), "into the strip at the top of the screen")
+    machine.sleep(config.DWELL_SECONDS)
+    said = answer(machine, story, label, revealed)
+    expect(
+        revealed(said) != [],
+        f"the panel did not open for '{label}'; what uDeck says: {short(said)}",
+    )
+    return said
+
+
+def reveal_a_peek(machine, story, label):
+    """The same, and a peek specifically — which is where each closing check starts.
+
+    A peek and a held panel are closed by different things, so a closing check
+    that began from whichever one it happened to get would be a different check
+    on different days. It is a peek whenever uDeck was installed and started
+    afresh: a panel that has never been put away has nothing to restore.
+    """
+    said = reveal(machine, story, label)
+    shown = revealed(said)
+    expect(
+        shown == ["peek"],
+        f"'{label}' brought the panel back as {shown}, not as a peek, so the check that follows "
+        f"would be about a phase it was not written for: {short(said)}",
+    )
+    return said
+
+
+def hold_it_open(machine, story, check_dir):
+    """A click on the peek, and a held panel — which everything after it is about."""
+    machine.click(*inside_the_peek(), f"inside the panel at {inside_the_peek()}")
+    said = answer(machine, story, "the click inside the peek", phases)
+    expect(
+        ("peek", "open", "interacted") in phases(said),
+        f"the click inside did not hold the panel open; uDeck says: {short(said)}",
+    )
+    machine.screenshot(check_dir, "the panel held open")
+
+
+def interrupt_a_held_panel(machine, story, check_dir, label=""):
+    """A held panel, and another application brought forward over it with no click.
+
+    The pointer is taken past the panel first — exactly where a click that
+    dismissed it would have been — so that only the age of the last click is
+    left to tell uDeck this was not one. The Finder comes forward by `open -a`
+    over SSH, which posted the workspace's notification every time it was
+    measured; an AppleScript activation from inside the guest posted none.
+
+    And the lab waits for it to be there before it waits for uDeck to answer,
+    which is the difference between the two failures. A `open -a` that started
+    nothing leaves no application coming forward, no notification, and therefore
+    no collapse — and this read exactly as uDeck having ignored a switch it was
+    never told about. That is the scene failing, so it is a `LabError` here,
+    the way it already is in `bring_forward_before_the_panel`.
+
+    What it does *not* say is what the interruption should do to the panel: that
+    depends on `collapseOnAppSwitch`, which is a setting the operator can turn
+    off, so the sentence belongs to the check that made this scene.
+
+    And when it must do nothing, the wait at the end is where that is made safe:
+    `wait_for_it_to_close` gives uDeck the same ten seconds an answer would have
+    had and then, having heard none, asks whether uDeck could have given one —
+    still running, its log still receiving, the guest's clock still ahead of the
+    mark. A check that reads the silence afterwards is reading uDeck's silence.
+
+    `label` is what the story calls this scene, because a check that makes it
+    twice means two different things by it.
+    """
+    reveal_a_peek(machine, story, f"the reveal{label}")
+    hold_it_open(machine, story, check_dir)
+    machine.move_pointer(*past_the_panel(), f"past the panel, to {past_the_panel()}")
+    bring_forward(machine, config.THE_DESKTOP, f"bringing the {config.THE_DESKTOP} forward with no click")
+    said = wait_for_it_to_close(machine, story, f"the switch with no click{label}")
+    machine.screenshot(check_dir, f"after the switch with no click{label}")
+    return said
+
+
+def bring_forward(machine, application, step, document=None):
+    """`open -a`, and the lab waits until that application really is in front.
+
+    Setting the scene, never a verdict: an application that would not come
+    forward is the lab failing to arrange what the check is about, and every
+    question after it would be asked of a machine that is not in the state the
+    check describes.
+
+    `document` is opened in it, for the checks that read what the keyboard
+    reached rather than which application is in front. It is named so that the
+    window read afterwards is the one this check made, and not whatever untitled
+    thing the application would otherwise have offered.
+    """
+    opening = f"/usr/bin/open -a {shlex.quote(application)}"
+    if document is not None:
+        opening += f" {shlex.quote(document)}"
+    machine.ssh.run(opening, step)
+    deadline = machine.clock() + config.FORWARD_SECONDS
+    while True:
+        in_front = probes.frontmost(machine, step)
+        if in_front == application:
+            return in_front
+        if machine.clock() >= deadline:
+            raise LabError(step, f"{in_front} is in front after {config.FORWARD_SECONDS}s, not {application}")
+        machine.sleep(1)
+
+
+def bring_forward_before_the_panel(machine, note, document=None):
+    """Another application in front before the panel is shown, with its window out of the way.
+
+    The scene, not the check: an application that would not come forward is the
+    lab failing to set it, never a verdict about uDeck.
+    """
+    application = config.IN_FRONT_BEFORE_THE_PANEL
+    bring_forward(machine, application, f"bringing {application} forward before the panel", document=document)
+    probes.move_window(machine, application, config.OUT_OF_THE_WAY, f"putting {application}'s window out of the way")
+    note(f"   in front before the panel: {application}")
+    return application
+
+
+# --- What uDeck said about it, and whether it could have said anything ------------
+
+
+def expect_it_closed(said, was, because, what):
+    """The panel went away, out of the phase named and on the event named — and only that.
+
+    Both halves of the arrow, because either on its own passes for the wrong
+    reason. `-> collapsed` alone is satisfied by any of the four ways the panel
+    closes, and the operator can tell them apart at the next reveal; the event
+    alone says nothing about which phase heard it, and "a peek closes when the
+    pointer leaves" and "a held panel does" are the difference between the design
+    working and the one failure it exists to prevent.
+
+    And the only closing in the read, with nothing reopened in it. The read that
+    hears the panel close is whatever the log held by the time it was asked, and
+    `log show` takes long enough that it can already hold what came next — the
+    panel coming straight back, or closing a second time for another reason. A
+    check that asked only whether the expected line was somewhere in it would be
+    green over both.
+    """
+    closings = [phase for phase in phases(said) if phase[1] == SHUT]
+    expect(closings != [], f"{what} did not close the panel; what uDeck says: {short(said)}")
+    expect(
+        closings == [(was, SHUT, because)],
+        f"{what} closed the panel as {closings}, not once as ('{was}', '{SHUT}', '{because}'): "
+        f"{short(said)}",
+    )
+    expect(
+        revealed(said) == [],
+        f"the panel came back as {revealed(said)} in the same read that saw {what} close it: "
+        f"{short(said)}",
+    )
+
+
+def expect_it_holds(said, wanted):
+    """uDeck says which shortcut it took from the window server, and it is this one.
+
+    The premise every check about the shortcut rests on, and it is not free:
+    `RegisterEventHotKey` hands a combination to whoever asked for it first, so
+    it can be refused, and a uDeck that never got the key is silent for the
+    chord in exactly the way a uDeck that ignores it is (`HotKeyMonitor.apply`).
+
+    uDeck writes this line at launch, and again whenever the operator changes the
+    shortcut and `PanelController.settingsChanged` hands the new binding over —
+    which is why both the panel checks and the settings checks read it.
+    """
+    holds = registered_hotkeys(said)
+    expect(
+        holds == [wanted],
+        f"uDeck says it holds {holds}, not ['{wanted}'] — the shortcut the operator is given is "
+        f"not the one the lab is about to press, or the system refused it to uDeck: {short(said)}",
+    )
+
+
+def expect_it_opened_ready_to_type(said, what):
+    """The panel was shown *and* promoted, in that order, and nothing else moved it.
+
+    Two sentences, because the second is what tells the shortcut from the
+    gesture and the first is what tells either from nothing at all. A panel that
+    never appeared and a panel that appeared as a glance are different failures,
+    and a person reading the report needs to be told which one he has.
+    """
+    moved = phases(said)
+    expect(moved != [], f"{what} did not open the panel; what uDeck says: {short(said)}")
+    expect(
+        moved == OPENED_READY_TO_TYPE,
+        f"{what} moved the panel {moved}, not {OPENED_READY_TO_TYPE}: the shortcut has to leave a panel "
+        f"ready to be typed into, and a peek is a glance the operator would have to reach for the mouse to "
+        f"promote: {short(said)}",
+    )
+
+def wait_for_it_to_close(machine, story, label):
+    """What uDeck said once the panel closed, or once the time is up and uDeck is shown to have been able to say it."""
+    return answer(machine, story, label, closed_on)
+
+
+def answer(machine, story, label, ready):
+    """`story.wait_for`, and a wait that ran out is not a verdict until uDeck could have answered.
+
+    A slow machine, a uDeck that is no longer there, a log whose window has
+    stopped receiving: each leaves exactly the silence a panel that did nothing
+    leaves, and only one of them is about the panel.
+    """
+    said = story.wait_for(label, ready)
+    if not ready(said):
+        prove_uDeck_could_have_answered(machine, story, label)
+    return said
+
+
+def prove_uDeck_could_have_answered(machine, story, label):
+    """Why the answer never came: uDeck's doing, or the lab's.
+
+    One rule, and every check about a stretch that was supposed to change
+    nothing keeps it. **A uDeck that was running and is gone is uDeck failing.**
+    Every check starts one and waits for it, so a missing process is not an
+    absence — it is a uDeck that died in the middle of the thing the check was
+    watching, and it was "could not check" here while the same death on Escape
+    was already red. The guest answering the question at all is what makes that
+    reading safe: `running_pids` is a command over SSH, and a machine that is
+    gone raises before it can be read as an empty answer.
+
+    What stays the lab's: its log holding nothing uDeck said since the check
+    began, which is a window that never started rather than a uDeck that went
+    quiet; and the guest's clock behind the start of that window, because the
+    window is `log show --start <mark>` on the guest's clock, so a clock stepped
+    back past the mark files everything uDeck says afterwards before it, where
+    no read will look. Both are asked *after* uDeck's own life, because a uDeck
+    that died would explain either one and neither would explain it.
+    """
+    step = f"making sure uDeck could have answered {label}"
+    expect_it_was_still_there(
+        machine,
+        step,
+        f"uDeck was not running when its answer to {label} did not come: it was started by this check and "
+        "died in the middle of it, so there was nothing left to answer; what it said before is in story.log",
+    )
+    if not story.heard_from_uDeck():
+        raise LabError(
+            step,
+            "uDeck's log holds nothing uDeck said since the check began, so it is the window on the log "
+            f"that is silent and not uDeck: {short(chr(10).join(story.window))}",
+        )
+    now = story.log.mark(step)
+    if now < story.since:
+        raise LabError(
+            step,
+            f"the guest's clock is at {now}, behind the start of the window on uDeck's log at {story.since}, "
+            "so what uDeck said since the clock went back is outside the window",
+        )
+
+
+def expect_it_was_still_there(machine, step, message):
+    """**A uDeck that was running and is gone is uDeck failing.**
+
+    The one place that rule is written, so that every check which watches a
+    stretch of quiet reads the same property. Each of them starts uDeck and
+    waits for it, so a missing process at the end is not an absence but a uDeck
+    that died in the middle of what was being watched — and "nothing happened"
+    is free once nothing is running.
+
+    Asked through `app.running_pids`, which is a command over SSH: a guest that
+    has gone raises rather than answering "nothing is running", so the reading
+    cannot turn a dead machine into a verdict about uDeck.
+    """
+    expect(bool(app.running_pids(machine, step)), message)
+
+
+def short(said):
+    """The tail of what uDeck said, for a reason a person reads in one line."""
+    return said.strip().replace("\n", " / ")[-400:] or "nothing"
+
+
+class Story:
+    """uDeck's log read in steps: what each action added, and all of it kept.
+
+    One window, opened once and never moved, because the guest's clock has a
+    second's resolution and a check that took a fresh mark between two actions
+    would sometimes start the next window inside the answer to the last one.
+    What separates the steps instead is how much has already been read, which is
+    exact.
+
+    Everything goes into `story.log` beside the report, step by step and labelled
+    — including the steps where uDeck said nothing, which for a check about a
+    panel that must *not* close is the part a person needs to see.
+
+    Counting lines is exact only while the window only grows, and nothing else
+    would make it grow: a read that comes back shorter than what has already been
+    read is the lab's failure, raised on the spot. Taken quietly, it would leave
+    every later step an empty slice — and an empty slice is exactly what "the
+    held panel did not close" and "the panel stayed shut" look like.
+    """
+
+    def __init__(self, machine, log, check_dir: Path, note) -> None:
+        self.machine = machine
+        self.log = log
+        self.check_dir = check_dir
+        self.note = note
+        self.since = log.mark("noting when the panel check begins")
+        self.read_so_far = 0
+        self.told: list[str] = []
+        # The whole window as the last read saw it, for the question of whether
+        # uDeck has said anything in it at all.
+        self.window: list[str] = []
+
+    def take(self, label: str) -> str:
+        """What uDeck has added since the last step, and now it is read."""
+        return self._cut(self._lines(label), label)
+
+    def wait_for(self, label: str, ready, seconds: float = config.GESTURE_ANSWER_SECONDS) -> str:
+        """The same, once `ready` is satisfied by it — or once the time is up.
+
+        Giving up quietly is the point: the check, not this, decides what an
+        answer that never came means, and it has the words for it — after asking
+        whether uDeck could have given one (`answer`). Nothing here is ever the
+        verdict.
+        """
+        deadline = self.machine.clock() + seconds
+        while True:
+            lines = self._lines(label)
+            if ready("\n".join(lines[self.read_so_far :])) or self.machine.clock() >= deadline:
+                return self._cut(lines, label)
+            self.machine.sleep(1)
+
+    def keep(self) -> None:
+        """Both files: the whole log as every other check keeps it, and the story."""
+        self.log.collect(self.check_dir, self.since, "keeping what uDeck said")
+        try:
+            (self.check_dir / "story.log").write_text("\n\n".join(self.told))
+        except OSError as error:
+            self.note(f"   what uDeck said could not be written to {self.check_dir / 'story.log'}: {error}")
+
+    def heard_from_uDeck(self) -> bool:
+        """Whether the window, as last read, holds anything uDeck itself said."""
+        return said_by_uDeck("\n".join(self.window)) != []
+
+    def _lines(self, label: str) -> list[str]:
+        # The oracle, not the evidence: a log that cannot be read has to raise
+        # here, because silence is exactly what "nothing happened" looks like.
+        step = f"reading what uDeck says about {label}"
+        lines = self.log.read(self.since, step).splitlines()
+        if len(lines) < self.read_so_far:
+            raise LabError(
+                step,
+                f"uDeck's log got shorter — {len(lines)} lines where {self.read_so_far} had already been read — "
+                "so what is missing could no longer be told from what never happened",
+            )
+        self.window = lines
+        return lines
+
+    def _cut(self, lines: list[str], label: str) -> str:
+        said = "\n".join(lines[self.read_so_far :])
+        self.read_so_far = len(lines)
+        self.told.append(f"=== {label} ===\n{said or '(nothing)'}")
+        return said

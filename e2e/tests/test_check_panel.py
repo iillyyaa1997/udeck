@@ -1528,7 +1528,7 @@ def test_the_combination_check_parks_the_pointer_before_uDeck_starts(monkeypatch
 def a_story(machine, check_dir, lab):
     log = panel.GestureLog(machine, lab.note)
     log.kept = True
-    return checks._Story(machine, log, check_dir, lab.note)
+    return panel.Story(machine, log, check_dir, lab.note)
 
 
 def test_the_story_opens_one_window_and_cuts_it_by_how_much_has_been_read(lab, check_dir):

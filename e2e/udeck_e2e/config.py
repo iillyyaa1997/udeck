@@ -452,3 +452,72 @@ FEED_PORT = 8765
 # refusing a machine because it believes two are already running.
 KNOWN_FAILURE_RETRIES = 2
 VM_LIMIT_RETRY_WAIT_SECONDS = 15
+
+# --- The settings window ----------------------------------------------------------
+#
+# What the operator changes, changed the way he changes it. Nothing here is a
+# coordinate: the controls on the Opening screen carry no accessibility
+# identifier, no title and no description (measured 2026-09-25,
+# .build/e2e/20260925-005230Z), so the lab finds them by where they sit among
+# their own kind and identifies the row by what it reads — which is what these
+# two orders and the two readings beside them are for. `ui.opening` holds them
+# against the screen and refuses to click anything if they do not match.
+
+# The shortcut's four modifier buttons, left to right, by the names uDeck's
+# settings file spells them with. The order is `HotKeyModifier.allCases.sorted()`
+# — `HotKeyModifier.order`, which is macOS's own order for the symbols ⌃⌥⇧⌘ —
+# laid out by `ForEach` in `OpeningSettings` (SettingsView.swift).
+HOTKEY_MODIFIER_ROW = ("control", "option", "shift", "command")
+# What that row reads on a machine nothing has changed, and the reason finding
+# four unnamed toggles in a row is an identification rather than a guess:
+# uDeck's default binding is {control, option} (`HotKeyBinding.init`), so the
+# row reads on, on, off, off.
+HOTKEY_MODIFIER_ROW_AT_REST = ("1", "1", "0", "0")
+
+# The Opening screen's four plain checkboxes, top to bottom, by the setting each
+# one writes: the gesture, the shortcut, "retract when you switch applications"
+# and "while another application is full screen" (`OpeningSettings`).
+OPENING_SWITCHES = ("gesture.enabled", "hotkey.enabled", "collapseOnAppSwitch", "gesture.enabledInFullscreen")
+# And what they read on a machine at rest: every one of the four is true by
+# default (`AppSettings.init`, `GestureTuning.init`).
+OPENING_SWITCHES_AT_REST = ("1", "1", "1", "1")
+
+# The switch a check changes when it asks whether a setting survives uDeck being
+# restarted, and the key it writes in the settings file.
+#
+# It is this one of the four because it is one of the two settings uDeck answers
+# *with something the lab can read*, and the only one of those that is not the
+# shortcut. A setting whose effect can only be photographed is no use here: the
+# panel is translucent over whatever is behind it, and "something changed at the
+# top of the screen" is exactly the evidence that passes for the wrong reason.
+# This one changes what a held panel does when another application comes
+# forward, and uDeck writes the answer either way — `open -> collapsed on
+# otherAppActivated` with it on, `otherAppActivated ignored in open` with it off
+# (measured 2026-09-25, .build/e2e/20260925-004441Z).
+THE_SWITCH = "collapseOnAppSwitch"
+
+# The modifier a check adds to the shortcut, and what the shortcut becomes.
+#
+# Shift because it is the one modifier the default binding does not use and the
+# one macOS spells third, so the new combination differs from the old by exactly
+# one press and neither contains the other as a prefix the window server could
+# confuse. uDeck spells the result `⌃⌥⇧U` (`HotKeyBinding.displayName`:
+# modifiers in macOS's order, then the key), which is how it says it has taken
+# it — measured 2026-09-25, `hotkey ⌃⌥⇧U registered`
+# (.build/e2e/20260925-003726Z).
+THE_ADDED_MODIFIER = "shift"
+THE_NEW_HOTKEY = "⌃⌥⇧U"
+# The modifiers the lab holds down to press it, by the names System Events takes.
+NEW_HOTKEY_MODIFIERS = ("control", "option", "shift")
+
+# How long the lab waits for uDeck to write its settings file after a control on
+# that screen was clicked.
+#
+# Measured on 2026-09-25: the file is written *inside the click*. The click was
+# issued between 1790296693.217 and 1790296693.597 on the guest's clock and the
+# file's mtime is 1790296693.503, and the first `stat` after the click returned
+# already found it — four runs, 0.258 to 0.292 s from the click being issued,
+# the SSH round trip included (.build/e2e/20260925-003726Z and the runs beside
+# it). So anything this waits for beyond a moment is the machine being slow, and
+# a file that is still not there at the end of it is uDeck not having saved.
+SETTINGS_SAVE_SECONDS = 20

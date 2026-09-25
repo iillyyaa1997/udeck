@@ -24,15 +24,24 @@ class Clock:
 
 
 class FakeGuest:
-    """Answers the walk in order; a listing of what is there answers separately."""
+    """Answers the walk in order; a listing and a tree answer separately.
 
-    def __init__(self, answers, listing=""):
+    The tree is told from the listing by `on attr(`, which only the walk asks
+    for: both scripts define a handler called `describe`, so the listing's own
+    discriminator would catch the walk as well and hand it the wrong answer.
+    """
+
+    def __init__(self, answers, listing="", tree=""):
         self.answers = list(answers)
         self.listing = listing
+        self.tree = tree
         self.scripts = []
 
     def run(self, command, step, seconds=None, check=True):
         self.scripts.append(command)
+        if "on attr(" in command:
+            tree = self.tree.pop(0) if isinstance(self.tree, list) and len(self.tree) > 1 else self.tree
+            return done([], 0, tree[0] if isinstance(tree, list) else tree)
         if "on describe(" in command:
             return done([], 0, self.listing)
         answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
@@ -42,9 +51,9 @@ class FakeGuest:
 
 
 class FakeMachine:
-    def __init__(self, *answers, listing=""):
+    def __init__(self, *answers, listing="", tree=""):
         self.name = "udeck-e2e-probe"
-        self.ssh = FakeGuest(answers, listing)
+        self.ssh = FakeGuest(answers, listing, tree)
         self.clicks = []
         self._clock = Clock()
 
@@ -156,3 +165,140 @@ def test_a_settings_window_that_never_opens_is_a_lab_problem():
     with pytest.raises(LabError, match="did not open within"):
         ui.open_settings_and_wait(machine, "opening uDeck's settings", seconds=5)
     assert machine._clock.now >= 5
+
+
+# --- Controls that have no name -----------------------------------------------------
+#
+# The Opening screen carries no accessibility identifier on any control, so the
+# lab finds them by where they sit and checks that finding against what they
+# read. Every test here asks the same question: would this still pick the right
+# control if the screen changed under it — and the answer has to be no, loudly.
+
+# The screen as the walk read it in the guest (2026-09-25,
+# .build/e2e/20260925-005230Z). Deliberately not in the order the controls are
+# laid out in: the walk prints them in tree order, and what puts them in the
+# operator's order is `x` and `y`.
+OPENING = "\n".join([
+    "0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;",
+    "8|AXStaticText||section.opening||Opening||807;269;|77;18;",
+    "5|AXCheckBox||||1||1124;470;|221;16;",
+    "5|AXCheckBox|AXToggle|||0||1234;403;|28;20;",
+    "5|AXCheckBox||||1||1124;246;|328;16;",
+    "5|AXCheckBox|AXToggle|||1||1124;403;|28;20;",
+    "5|AXSlider||||0.08||1124;272;|230;20;",
+    "5|AXCheckBox|AXToggle|||0||1197;403;|29;20;",
+    "5|AXCheckBox||||1||1124;448;|303;16;",
+    "5|AXPopUpButton||||U||1270;403;|110;20;",
+    "5|AXCheckBox|AXToggle|||1||1160;403;|29;20;",
+    "5|AXCheckBox||||1||1124;377;|205;16;",
+])  # fmt: skip
+
+# What the sidebar's own identifier answers, so that choosing the section is a
+# click at coordinates like every other one.
+THE_SIDEBAR_ROW = "935,226,144,28"
+
+
+def opened_on_opening(tree=OPENING):
+    """A guest with the settings window open and the walk answering."""
+    return FakeMachine("opened", ui.SETTINGS_WINDOW, THE_SIDEBAR_ROW, tree=tree)
+
+
+def test_the_walk_reads_every_attribute_a_click_at_an_unnamed_control_needs():
+    controls = ui.controls(OPENING)
+    window = controls[0]
+    assert (window.role, window.title) == ("AXWindow", "uDeck Settings")
+    assert (window.x, window.y, window.width, window.height) == (790, 198, 980, 648)
+    # The identifiers that do exist are read too, so the sidebar can be told
+    # from the pane it opens.
+    assert [c.identifier for c in controls if c.identifier] == ["section.opening"]
+    # And a line the guest could not answer for is dropped rather than guessed at.
+    assert ui.controls("nonsense\n||||\n" + OPENING) == controls
+
+
+def test_the_shortcuts_modifier_buttons_come_back_in_the_order_they_are_laid_out():
+    """Left to right, which is `HotKeyModifier.allCases.sorted()` — ⌃⌥⇧⌘."""
+    buttons = ui.modifier_buttons(OPENING)
+    assert [b.x for b in buttons] == [1124, 1160, 1197, 1234]
+    assert [b.value for b in buttons] == list(config.HOTKEY_MODIFIER_ROW_AT_REST)
+    # The plain checkboxes and the key's popup are not modifier buttons.
+    assert all(b.subrole == "AXToggle" for b in buttons)
+
+
+def test_the_plain_switches_come_back_top_to_bottom_and_without_the_toggles():
+    switches = ui.opening_switches(OPENING)
+    assert [s.y for s in switches] == [246, 377, 448, 470]
+    assert [s.value for s in switches] == list(config.OPENING_SWITCHES_AT_REST)
+    assert all(not s.subrole for s in switches)
+    # A control that *has* a name is not one of these: the General screen's login
+    # switch is an AXCheckBox with an identifier, and it must never be picked up.
+    named = OPENING + "\n5|AXCheckBox||general.openAtLogin||0||967;281;|104;16;"
+    assert ui.opening_switches(named) == switches
+
+
+def test_the_screen_names_each_control_by_the_setting_it_writes():
+    screen = ui.opening(opened_on_opening(), "opening the settings")
+    assert screen.modifier(config.THE_ADDED_MODIFIER).x == 1197
+    assert screen.switch(config.THE_SWITCH).y == 448
+    # The first of each row, so the order is the one the config states and not
+    # whatever the walk happened to print.
+    assert screen.modifier(config.HOTKEY_MODIFIER_ROW[0]).x == 1124
+    assert screen.switch(config.OPENING_SWITCHES[0]).y == 246
+    assert screen.dump == OPENING
+
+
+def test_a_row_that_does_not_read_uDecks_defaults_is_not_the_row():
+    """The whole identification: eight unnamed controls become *these* controls
+    only because they read what a machine at rest reads. A screen where they do
+    not is either not this screen or not at rest, and clicking on it would be a
+    sentence about uDeck written from a random pixel."""
+    moved = OPENING.replace("5|AXCheckBox|AXToggle|||0||1197;403;|29;20;",
+                            "5|AXCheckBox|AXToggle|||1||1197;403;|29;20;")
+    with pytest.raises(LabError, match="not the row, or the machine is not at rest") as raised:
+        ui.opening(opened_on_opening(moved), "opening the settings")
+    assert "modifier buttons" in raised.value.reason
+
+    switched = OPENING.replace("5|AXCheckBox||||1||1124;448;|303;16;",
+                               "5|AXCheckBox||||0||1124;448;|303;16;")
+    with pytest.raises(LabError, match="switches read"):
+        ui.opening(opened_on_opening(switched), "opening the settings")
+
+
+def test_a_screen_whose_row_has_already_been_changed_is_taken_on_its_shape_alone():
+    """A caller that has already moved one of them says so, because the row no
+    longer reads what a default one does."""
+    moved = OPENING.replace("5|AXCheckBox|AXToggle|||0||1197;403;|29;20;",
+                            "5|AXCheckBox|AXToggle|||1||1197;403;|29;20;")
+    screen = ui.opening(opened_on_opening(moved), "opening the settings", at_rest=False)
+    assert screen.modifier(config.THE_ADDED_MODIFIER).value == "1"
+
+
+def test_a_screen_the_controls_never_appeared_on_is_the_labs_failure():
+    """A pane still being built answers with a tree that has neither row in it,
+    and a check that clicked anyway would be clicking on the section before it."""
+    machine = opened_on_opening("0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;")
+    with pytest.raises(LabError, match="did not appear within") as raised:
+        ui.opening(machine, "opening the settings", seconds=5)
+    assert "0 modifier buttons" in raised.value.reason
+    assert machine._clock.now >= 5
+    assert not isinstance(raised.value, NotThere)
+
+
+def test_the_screen_is_waited_for_rather_than_slept_at():
+    """One walk when the pane is there, more when it is not — and never a fixed
+    pause, which would be a number nothing measured."""
+    machine = FakeMachine("opened", ui.SETTINGS_WINDOW, THE_SIDEBAR_ROW,
+                          tree=["0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;", OPENING])
+    ui.opening(machine, "opening the settings")
+    assert len([s for s in machine.ssh.scripts if "on attr(" in s]) == 2
+    assert machine._clock.now == 1
+
+
+def test_an_unnamed_control_is_pressed_with_the_pointer_and_never_through_the_api():
+    """The rule for every control on these screens. `AXPress` needs no
+    coordinates and would look simpler; it also does not select anything
+    (2026-09-17), and it is not what the operator has."""
+    machine = opened_on_opening()
+    screen = ui.opening(machine, "opening the settings")
+    ui.press(machine, screen.switch(config.THE_SWITCH), "turning the switch off")
+    assert machine.clicks[-1] == (1124 + 303 // 2, 448 + 16 // 2)
+    assert not any("AXPress" in script for script in machine.ssh.scripts)

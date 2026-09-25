@@ -14,6 +14,7 @@ over SSH (Q41).
 
 from __future__ import annotations
 
+import json
 import shlex
 from collections.abc import Callable
 from pathlib import Path
@@ -26,6 +27,12 @@ Note = Callable[[str], None]
 # Where the guest keeps the application, and where a build is put before it.
 GUEST_APPLICATIONS = "/Applications"
 APP = "uDeck.app"
+
+# And where uDeck keeps the operator's own settings, as `UDeckPaths` resolves it
+# (Sources/UDeckCore/Paths.swift): `~/.udeck/settings.json`, unless `UDECK_HOME`
+# says otherwise, which nothing in the lab sets — the guest runs the released
+# application exactly as a person's Mac does.
+SETTINGS_FILE = "~/.udeck/settings.json"
 
 
 def running_pids(machine, step: str = "looking for uDeck") -> set[str]:
@@ -193,3 +200,74 @@ def the_system_reopened_it(machine, step: str = "asking whether macOS reopened u
     except LabError:
         return False
     return any(REOPENED in line and BUNDLE_ID in line for line in said.splitlines())
+
+
+# --- What uDeck wrote down ------------------------------------------------------
+
+
+def settings(machine, step: str):
+    """What uDeck's settings file in the guest says, or None when there is no file.
+
+    None is a real answer rather than an absence to be papered over. **uDeck
+    writes no settings file at all until something is changed** — measured on
+    2026-09-25: missing before the install, missing after the first launch, and
+    still missing after every one of the five sections of the settings window
+    had been opened and walked (.build/e2e/20260925-005230Z). So "there is no
+    file" is exactly what a machine nobody has touched looks like, which is what
+    makes a value read out of it a value the operator put there.
+
+    `ask` and never `run(check=False)`, for the reason `running_pids` has: a
+    connection that dropped would otherwise come back as an empty file, and a
+    check would read that as uDeck having saved nothing.
+
+    A file that is there and is not JSON is the lab unable to answer, not an
+    answer: no check here pronounces on what uDeck writes when it cannot write
+    properly, and one that did would need to say so in its own words.
+    """
+    return read_settings(settings_text(machine, step), step)
+
+
+def settings_text(machine, step: str) -> str:
+    """The settings file exactly as it stands in the guest, or "" when there is none.
+
+    Apart from `settings` because a check keeps what it read beside its report,
+    and what it keeps has to be what it judged: two reads of the same file are
+    two answers, and the one quoted in the report would not be the one the
+    verdict was reached on.
+    """
+    return machine.ssh.ask(f"cat {SETTINGS_FILE} 2>/dev/null || true", step).stdout
+
+
+def read_settings(text: str, step: str):
+    """That text as what it says, or None when there is no file at all."""
+    if not text.strip():
+        return None
+    try:
+        return json.loads(text)
+    except ValueError as error:
+        raise LabError(
+            step, f"uDeck's settings file is not JSON ({error}): {text.strip()[:200]!r}"
+        ) from None
+
+
+def wait_for_settings(machine, step: str, until, seconds: float = config.SETTINGS_SAVE_SECONDS):
+    """The settings file once `until` is satisfied by it — or as it stands when the time is up.
+
+    Giving up quietly, the way `Story.wait_for` does and for the same reason:
+    what a file that never said the right thing means is the check's to say, and
+    the check has the words for it. A wait that decided anything here would
+    turn "uDeck did not save the operator's change" into a lab failure, which is
+    the one reading it must not have.
+
+    It does not need to be long. Measured on 2026-09-25, the file is written
+    inside the click that changes a setting — `DeckModel.update` saves from the
+    control's own setter — and was there in the first `stat` after the click
+    returned, 0.26 to 0.29 s after it was issued. `config.SETTINGS_SAVE_SECONDS`
+    is that with room for a slow machine.
+    """
+    deadline = machine.clock() + seconds
+    while True:
+        said = settings(machine, step)
+        if until(said) or machine.clock() >= deadline:
+            return said
+        machine.sleep(1)

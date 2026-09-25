@@ -668,3 +668,125 @@ def test_the_chord_leaves_a_mark_of_its_own_in_a_document():
     assert mark not in (
         config.BEFORE_THE_PANEL_KEY, config.WHILE_THE_PANEL_IS_OPEN_KEY, config.AFTER_IT_CLOSED_KEY
     )
+
+
+def test_a_chord_the_operator_chose_is_pressed_the_same_way_uDecks_own_is():
+    """The combination is the caller's business and nothing else changes with it.
+
+    A control that differed from the check in *how* the lab pressed it would
+    control for nothing, and a shortcut the operator has just changed to is
+    exactly that case: it has to be pressed by the one path that works in this
+    guest, over SSH and never over VNC.
+    """
+    machine = Machine({})
+    panel.press_the_chord(
+        machine, config.HOTKEY_KEY_CODE, "pressing the new shortcut", config.NEW_HOTKEY_MODIFIERS
+    )
+    asked = machine.ssh.commands[0]
+    assert asked.startswith("osascript -e ") and '"System Events"' in asked
+    assert f"key code {config.HOTKEY_KEY_CODE} using {{control down, option down, shift down}}" in asked
+    assert machine.keys == []
+    # And the default is still uDeck's own, so nothing that does not ask changes.
+    plain = Machine({})
+    panel.press_the_chord(plain, config.HOTKEY_KEY_CODE, "pressing the shortcut")
+    assert "{control down, option down}" in plain.ssh.commands[0]
+
+
+# --- The settings window, against the screen uDeck actually draws ----------------------
+#
+# The same rule as the gesture's numbers and the shortcut's, and here it is
+# sharper: not one control on the Opening screen has a name, so the lab clicks
+# by position in a row and identifies the row by what it reads. Every way of
+# getting that wrong is a click somewhere else on the screen — which is a
+# sentence about uDeck written from a random pixel.
+
+
+def _settings_view():
+    return (
+        Path(panel.__file__).resolve().parents[2] / "Sources" / "UDeckKit" / "Views" / "SettingsView.swift"
+    ).read_text()
+
+
+def _defaults(swift_file, type_name):
+    """The default arguments of `type_name`'s `init`, as `name: value` pairs."""
+    source = (Path(panel.__file__).resolve().parents[2] / "Sources" / "UDeckCore" / "Configuration" / swift_file).read_text()
+    body = source[source.index(f"public struct {type_name}"):]
+    body = body[body.index("public init("):]
+    body = body[: body.index("\n    ) {")]
+    return dict(re.findall(r"(\w+): [\w<>\[\]. ]+ = ([\w.\[\]\"', ]+?),?\n", body))
+
+
+def test_the_modifier_row_is_in_the_order_uDeck_lays_it_out():
+    """`ForEach(HotKeyModifier.allCases.sorted())`, and `sorted` is
+    `HotKeyModifier.order` — which is macOS's own order for ⌃⌥⇧⌘."""
+    source = _hotkey_source()
+    cases = re.findall(r"^    case (\w+)$", source, re.MULTILINE)
+    order = {name: int(n) for name, n in re.findall(r"case \.(\w+): (\d+)", source)}
+    assert set(cases) >= set(order), "HotKeyModifier no longer orders its own cases"
+    assert config.HOTKEY_MODIFIER_ROW == tuple(sorted(order, key=order.get))
+    assert "HotKeyModifier.allCases.sorted()" in _settings_view(), "the row is no longer laid out in that order"
+
+
+def test_the_modifier_row_reads_uDecks_default_binding_at_rest():
+    """What turns four unnamed toggles in a row into *the* row: on, on, off, off."""
+    at_rest = tuple("1" if name in config.HOTKEY_MODIFIERS else "0" for name in config.HOTKEY_MODIFIER_ROW)
+    assert config.HOTKEY_MODIFIER_ROW_AT_REST == at_rest
+
+
+def test_the_modifier_the_lab_adds_is_one_uDeck_does_not_already_hold():
+    """A press that turned a modifier *off* would leave a combination uDeck might
+    still register, and the two chords would no longer differ by one press."""
+    assert config.THE_ADDED_MODIFIER in config.HOTKEY_MODIFIER_ROW
+    assert config.THE_ADDED_MODIFIER not in config.HOTKEY_MODIFIERS
+    assert config.NEW_HOTKEY_MODIFIERS == tuple(
+        name for name in config.HOTKEY_MODIFIER_ROW
+        if name in (*config.HOTKEY_MODIFIERS, config.THE_ADDED_MODIFIER)
+    )
+
+
+def test_the_new_shortcut_is_spelled_the_way_uDeck_will_write_it():
+    """The check reads `hotkey ⌃⌥⇧U registered` back and requires it to be this
+    combination, so a lab spelling it any other way calls a healthy uDeck a
+    failure. `HotKeyBinding.displayName`: modifiers in macOS's order, then the key."""
+    source = _hotkey_source()
+    symbols = "".join(
+        re.search(rf'case \.{modifier}: "(.+)"', source).group(1) for modifier in config.NEW_HOTKEY_MODIFIERS
+    )
+    assert config.THE_NEW_HOTKEY == symbols + config.THE_HOTKEY[-1]
+    assert config.THE_NEW_HOTKEY != config.THE_HOTKEY
+
+
+def test_the_plain_switches_are_in_the_order_uDeck_lays_them_out():
+    """Top to bottom on the Opening screen: the gesture, the shortcut, and the
+    two under "Also". The lab clicks the third of them by counting, so the order
+    is held against the file that draws them."""
+    view = _settings_view()
+    opening = view[view.index("private struct OpeningSettings"):]
+    opening = opening[: opening.index("\n    private func label(")]
+    drawn = re.findall(r"isOn: (?:binding\(\\\.([\w.]+)\)|Binding\()", opening)
+    assert tuple(name for name in drawn if name) == config.OPENING_SWITCHES
+
+
+def test_the_plain_switches_all_read_on_at_rest():
+    """Every one of the four is true by default, which is what says the walk found
+    this row and not another — and that a machine reading otherwise is not at rest."""
+    # Each switch is named by the setting it writes, and each setting's default
+    # lives with the type that owns it.
+    owners = {
+        "gesture.": _defaults("GestureTuning.swift", "GestureTuning"),
+        "hotkey.": _defaults("HotKeyBinding.swift", "HotKeyBinding"),
+        "": _defaults("AppSettings.swift", "AppSettings"),
+    }
+    for name, reads in zip(config.OPENING_SWITCHES, config.OPENING_SWITCHES_AT_REST):
+        prefix = next(p for p in owners if name.startswith(p))
+        default = owners[prefix][name.removeprefix(prefix)]
+        assert default == ("true" if reads == "1" else "false"), f"{name} no longer ships {reads}"
+
+
+def test_the_switch_the_lab_changes_is_one_of_them_and_is_uDecks_own_key():
+    """And the key it is named by is the key uDeck writes in the settings file,
+    so what the check reads out of that file is the setting it clicked."""
+    assert config.THE_SWITCH in config.OPENING_SWITCHES
+    assert f"public var {config.THE_SWITCH}: Bool" in (
+        Path(panel.__file__).resolve().parents[2] / "Sources" / "UDeckCore" / "Configuration" / "AppSettings.swift"
+    ).read_text()
