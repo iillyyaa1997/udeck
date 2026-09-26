@@ -289,3 +289,63 @@ def wait_for_settings(machine, step: str, until, seconds: float = config.SETTING
         if until(said) or machine.clock() >= deadline:
             return said
         machine.sleep(1)
+
+
+# --- What Sparkle remembers -------------------------------------------------------
+
+
+def preferences(machine, step: str) -> str | None:
+    """What macOS keeps for uDeck's bundle identifier in the guest, or None when it keeps nothing.
+
+    uDeck itself writes nothing there — its own settings are `SETTINGS_FILE` — so
+    what this holds is Sparkle's memory and AppKit's: whether automatic checks are
+    on (`SUEnableAutomaticChecks`, which the operator's switch writes), when the
+    last check was (`SULastCheckTime`, which every check writes, the operator's
+    included), and how often to look (`SUScheduledCheckInterval`). Each of those
+    overrides what the bundle's Info.plist says, which is why a check about what
+    uDeck *ships* has to start from none of them. Measured on 2026-09-26, after
+    the switch was turned on and one check made, the domain held
+    `SUEnableAutomaticChecks`, `SUHasLaunchedBefore`, `SULastCheckTime` and
+    `SUUpdateGroupIdentifier`, all Sparkle's, and nothing else.
+
+    **"Nothing" has two spellings**, and both are None here. On a machine where
+    uDeck has never run, `defaults read` says the domain was not found and exits
+    1. On one where the domain was deleted — which is what `forget_preferences`
+    does — it exits 0 and prints an empty dictionary, `{ }`: measured on
+    2026-09-26 with `--vm per-group`, where the update checks before had left
+    `SULastCheckTime` behind (.build/e2e/20260926-223522Z). Read as "something
+    is kept", that empty dictionary made the lab refuse a machine it had just
+    cleaned.
+
+    `ask`, for the reason `running_pids` has: a dropped connection is the lab's,
+    and must never read as "nothing is kept".
+    """
+    done = machine.ssh.ask(f"defaults read {BUNDLE_ID}", step)
+    if done.returncode != 0 or "".join(done.stdout.split()) == "{}":
+        return None
+    return done.stdout
+
+
+def forget_preferences(machine, step: str) -> None:
+    """Take away what macOS keeps for uDeck, so the next uDeck starts as a new one would.
+
+    **Sparkle decides whether and when to look for an update out of this**, not
+    out of the bundle alone: a check the operator ran — or a neighbouring check
+    ran, on a machine shared with `--vm per-group` — leaves `SULastCheckTime`
+    behind, and Sparkle then waits a day from it before it looks by itself; a
+    switch turned on leaves `SUEnableAutomaticChecks` behind, and that wins over
+    the plist. Either one would make a check about what uDeck ships into a check
+    about what the machine remembers.
+
+    Only with uDeck not running, as `forget_settings`: callers quit it first. And
+    read back, because a machine that keeps them is one the next sentence cannot
+    be about.
+    """
+    machine.ssh.run(f"defaults delete {BUNDLE_ID} >/dev/null 2>&1; exit 0", step)
+    left = preferences(machine, step)
+    if left is not None:
+        raise LabError(
+            step,
+            f"macOS still keeps preferences for {BUNDLE_ID} after the lab deleted them: "
+            f"{' '.join(left.split())[:300]}",
+        )

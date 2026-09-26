@@ -17,6 +17,7 @@ the developer tools, so `python3 -m http.server` is enough to serve the feed.
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 from collections.abc import Callable
@@ -35,6 +36,27 @@ SIGN_UPDATE = Path(".build") / "artifacts" / "sparkle" / "Sparkle" / "bin" / "si
 
 # Where the guest keeps what is served.
 GUEST_FEED_DIR = "/tmp/udeck-e2e-feed"
+
+# The appcast's name on the feed — and so in every lab build's `SUFeedURL`, which
+# is `Feed.url`.
+APPCAST = "appcast.xml"
+
+# What the lab adds to its own requests for the appcast, so that the guest's
+# access log can tell them apart from uDeck's. Two checks turn on nothing but that
+# log — did uDeck ask its feed by itself, or not — and the lab asks the same
+# server for the same file to learn whether it is up, so without a mark the lab's
+# own asking would be read as uDeck's. `http.server` drops the query when it
+# picks the file (`SimpleHTTPRequestHandler.translate_path`), so a request
+# carrying it gets the appcast like any other, and the probe still asks what it
+# always asked.
+LAB_PROBE = "asked-by=the-lab"
+
+# One line of the guest's access log, as `http.server` writes it:
+# `127.0.0.1 - - [26/Sep/2026 20:41:07] "GET /appcast.xml HTTP/1.1" 200 -`.
+# The method, the query and the protocol are read and not pinned: Sparkle may add
+# parameters of its own, and what is being asked is whether the appcast was asked
+# for and by whom — never how.
+_APPCAST_REQUEST = re.compile(rf'"[A-Z]+ /{re.escape(APPCAST)}(?:\?(?P<query>[^" ]*))? HTTP/[^"]*"')
 
 
 def find_sign_update(repo_root: Path) -> Path:
@@ -88,6 +110,39 @@ class Offer:
     length: int
 
 
+def empty_appcast() -> str:
+    """A feed that offers nothing.
+
+    For the checks whose question is whether uDeck *asks*, not what it does with
+    the answer: a feed with an item in it would need a second build, signed, for
+    a question that ends at the request.
+    """
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">\n'
+        "  <channel>\n"
+        "    <title>uDeck</title>\n"
+        "  </channel>\n"
+        "</rss>\n"
+    )
+
+
+def asked_for_the_appcast(log: str) -> list[str]:
+    """The lines of the guest's access log where the appcast was asked for by anyone but the lab.
+
+    Inside the guest, with the server bound to its loopback and the address baked
+    into the one application installed there, that is uDeck: nothing else on the
+    machine knows the feed exists. The lab's own requests carry `LAB_PROBE` and
+    are left out, whatever else their query says.
+    """
+    found = []
+    for line in log.splitlines():
+        match = _APPCAST_REQUEST.search(line)
+        if match and LAB_PROBE not in (match.group("query") or "").split("&"):
+            found.append(line)
+    return found
+
+
 def appcast(offer: Offer, base_url: str, published: str = "Wed, 17 Sep 2026 10:00:00 +0000") -> str:
     """The feed Sparkle reads, with one item in it.
 
@@ -136,7 +191,12 @@ class Feed:
 
     @property
     def url(self) -> str:
-        return f"{self.base_url}/appcast.xml"
+        return f"{self.base_url}/{APPCAST}"
+
+    @property
+    def probe_url(self) -> str:
+        """The appcast as the lab asks for it: the same file, marked as the lab's in the log."""
+        return f"{self.url}?{LAB_PROBE}"
 
     def serve(self, appcast_file: Path, *archives: Path) -> None:
         """Put the feed and its archives in the guest and start serving them."""
@@ -158,7 +218,7 @@ class Feed:
         deadline = self.machine.clock() + config.FEED_UP_SECONDS
         while True:
             done = self.machine.ssh.ask(
-                f"/usr/bin/curl -s -o /dev/null -w '%{{http_code}}' {shlex.quote(self.url)}", step, seconds=30
+                f"/usr/bin/curl -s -o /dev/null -w '%{{http_code}}' {shlex.quote(self.probe_url)}", step, seconds=30
             )
             if done.stdout.strip() == "200":
                 return
@@ -177,11 +237,25 @@ class Feed:
         """
         try:
             done = self.machine.ssh.ask(
-                f"/usr/bin/curl -s -o /dev/null -w '%{{http_code}}' {shlex.quote(self.url)}", step, seconds=30
+                f"/usr/bin/curl -s -o /dev/null -w '%{{http_code}}' {shlex.quote(self.probe_url)}", step, seconds=30
             )
         except LabError:
             return False
         return done.stdout.strip() == "200"
+
+    def read_log(self, step: str) -> str:
+        """The guest's access log as it stands, for a check whose verdict turns on it.
+
+        `collect_log` never raises, because there the log is evidence. Here it is
+        the oracle, and "nobody asked for the appcast" read out of a log that could
+        not be read would be a verdict about uDeck made of a dropped connection or
+        a server that never wrote one. So both are the lab's, and say so.
+        """
+        done = self.machine.ssh.ask(f"cat {shlex.quote(GUEST_FEED_DIR)}/server.log", step)
+        if done.returncode != 0:
+            said = (done.stderr or done.stdout or "").strip()
+            raise LabError(step, f"the guest's server log could not be read: {said or f'exit {done.returncode}'}")
+        return done.stdout
 
     def collect_log(self, directory: Path, name: str = "feed-server.log") -> str:
         """The guest's own access log, brought back as evidence (Q38), and returned.

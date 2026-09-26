@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from fakes import Dropped, Machine as FakeMachine
+from fakes import Dropped, Failed, Machine as FakeMachine
 
 from udeck_e2e import config, updates
 from udeck_e2e.builds import Build, make_key
@@ -151,3 +151,60 @@ def test_a_log_that_cannot_be_collected_is_said_and_not_raised(tmp_path):
     said = []
     assert updates.Feed(machine=unwritable, note=said.append).collect_log(tmp_path / "nowhere") == "a line"
     assert any("could not be written" in note for note in said)
+
+
+# --- Who asked the feed ---------------------------------------------------------------
+
+UDECK_ASKED = '127.0.0.1 - - [26/Sep/2026 20:45:31] "GET /appcast.xml HTTP/1.1" 200 -'
+LAB_ASKED = f'127.0.0.1 - - [26/Sep/2026 20:40:18] "GET /appcast.xml?{updates.LAB_PROBE} HTTP/1.1" 200 -'
+
+
+def test_the_lab_marks_its_own_requests_for_the_appcast(tmp_path):
+    """Two checks turn on "did uDeck ask its feed"; the lab asking must never be read as uDeck asking."""
+    machine = FakeMachine({"curl": "200"})
+    feed = updates.Feed(machine, note=lambda text: None)
+    appcast_file = tmp_path / updates.APPCAST
+    appcast_file.write_text("<rss/>")
+    feed.serve(appcast_file)
+    assert feed.answers_now("asking")
+    asked = [c for c in machine.ssh.commands if "curl" in c]
+    assert len(asked) == 2 and all(feed.probe_url in c for c in asked)
+    assert feed.probe_url == f"{feed.url}?{updates.LAB_PROBE}"
+    # The address every lab build carries is still the plain one: only the lab's own asking is marked.
+    assert feed.url == f"http://127.0.0.1:{config.FEED_PORT}/{updates.APPCAST}"
+
+
+def test_what_the_lab_asked_for_is_not_what_uDeck_asked_for():
+    log = "\n".join([
+        "Serving HTTP on 127.0.0.1 port 8765 (http://127.0.0.1:8765/) ...",
+        LAB_ASKED,
+        UDECK_ASKED,
+        '127.0.0.1 - - [26/Sep/2026 20:45:40] "GET /uDeck-0.4.2.zip HTTP/1.1" 200 -',
+        f'127.0.0.1 - - [26/Sep/2026 20:45:50] "GET /appcast.xml?x=1&{updates.LAB_PROBE} HTTP/1.1" 200 -',
+    ])
+    assert updates.asked_for_the_appcast(log) == [UDECK_ASKED]
+
+
+def test_uDeck_asking_with_parameters_of_its_own_is_still_uDeck_asking():
+    """Sparkle may add a query to the feed's address; what is asked is who asked, not how."""
+    with_query = '127.0.0.1 - - [26/Sep/2026 20:45:31] "GET /appcast.xml?appVersion=6 HTTP/1.0" 404 -'
+    assert updates.asked_for_the_appcast(with_query) == [with_query]
+
+
+def test_a_log_that_is_the_oracle_is_never_read_as_empty_when_it_could_not_be_read(tmp_path):
+    """"Nobody asked" out of a log nobody could read would be a verdict made of a dropped connection."""
+    with pytest.raises(LabError, match="SSH"):
+        updates.Feed(FakeMachine({"server.log": Dropped}), note=lambda t: None).read_log("reading")
+    with pytest.raises(LabError, match="No such file"):
+        updates.Feed(
+            FakeMachine({"server.log": Failed(1, "cat: server.log: No such file or directory")}), note=lambda t: None
+        ).read_log("reading")
+    assert updates.Feed(FakeMachine({"server.log": UDECK_ASKED}), note=lambda t: None).read_log("reading") == UDECK_ASKED
+
+
+def test_an_empty_appcast_is_a_feed_that_offers_nothing():
+    from xml.etree import ElementTree
+
+    root = ElementTree.fromstring(updates.empty_appcast())
+    assert root.tag == "rss" and root.find("channel") is not None
+    assert list(root.iter("item")) == []

@@ -15,8 +15,8 @@ see the last section.
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, a self-check, the builds a check needs, and the first checks
 > of uDeck itself — the update, with its wrong-key control, and the panel: the
-> hover gesture that opens it, with its pointer-in-the-middle control, the ways
-> of putting it away again, and the keyboard shortcut that opens the panel and
+> hover gesture that opens it, with its pointer-in-the-middle control and the
+> line between its two paths, the ways of putting it away again, and the keyboard shortcut that opens the panel and
 > puts it away — whichever way it was opened — with its wrong-chord control and
 > a check that the combination dies with uDeck. "Open at Login" and its checks
 > follow, and so do the two that change a setting in uDeck's own window and ask
@@ -215,10 +215,103 @@ the pane says about itself.
 `updates.wrong-key` is the control, and it is the reason the first one is worth
 anything: the same offer, signed with a different key, must not install. But
 "nothing installed" is what a broken check looks like too, so the control also
-has to show that uDeck *tried*: either the guest's own access log names the
-archive — Sparkle checks the signature after downloading it — or uDeck says on
-its pane that its check did not finish. Neither, and the run says so rather than
-passing.
+has to show that uDeck *tried*: the guest's own access log has to name the
+archive — Sparkle checks the signature after downloading it. What the pane says
+("The check did not finish") is kept as evidence and decides nothing: uDeck
+prints it for any trouble its updater runs into, including never reaching the
+archive. No archive in the log, and the run says so rather than passing.
+
+### Looking for an update by itself
+
+uDeck ships with automatic checks **off** — `SUEnableAutomaticChecks` is false
+in `Sources/uDeck/Support/Info.plist` — because it otherwise makes no network
+connection at all, and the first one it ever makes should be one the operator
+chose (commit `e00a79a`; the same reason is on `SparkleUpdater` and
+`UpdateChecking.checksAutomatically`). The About pane has the switch that turns
+them on (`updates.automatic`), so both checks here go through it or leave it
+alone, and neither writes a preference to get what it wants — the one thing
+done to the preferences from outside is taking them away (below).
+
+`updates.it-does-not-look-by-itself` starts uDeck as it ships and listens to
+the feed for 20 s: the feed must hear nothing from it. Then it presses "Check
+now" and the feed must hear that, within 20 s — because a uDeck that cannot
+reach its feed is exactly as quiet as one that chose not to ask, and a quiet
+that proves nothing is "could not check".
+`updates.switched-on-it-looks-by-itself` turns the switch on with the pointer
+and presses nothing else: the feed must hear uDeck within 15 s. When it does
+not, the switch is read back — still off is a click that missed and the lab's;
+on is uDeck's.
+
+**What each is red for**, each measured on 2026-09-26 by breaking uDeck and
+running the check. `SUEnableAutomaticChecks` switched to true in the plist:
+`it-does-not-look-by-itself` failed — the feed heard uDeck at 21:06:01, and the
+check said so within 10 s of starting it — and `switched-on-it-looks-by-itself`
+could not check, because the switch already read on
+(`.build/e2e/20260926-210440Z`). `checksAutomatically`'s setter emptied in
+`SparkleUpdater`, and separately the About pane's toggle no longer passing its
+value to the updater: `switched-on-it-looks-by-itself` failed both times, with
+the switch reading on and the feed hearing nothing (`20260926-210840Z`,
+`20260926-211106Z`). And "Check now" no longer calling Sparkle: the quiet check
+said *could not check*, because a uDeck that asks nothing when asked makes the
+quiet before it worthless (`20260926-211336Z`).
+
+**The oracle is the feed's log, not uDeck's.** The guest's `http.server` writes
+one line per request, and nothing else on the machine knows the feed's address.
+The lab asks the same server whether it is up, so its own requests carry
+`?asked-by=the-lab` (`http.server` drops the query when it picks the file) and
+are left out. uDeck's own log is no witness: measured, the 400 lines around
+the switch's request hold nothing from Sparkle — only CFNetwork and the network
+stack opening a connection to port 8765 over `lo0`, and an ATS warning about
+plain HTTP — so a check reading it would be reading the network stack's diary.
+
+**Why seconds are enough**, measured on 2026-09-26 with a throwaway check file
+that is not kept (`.build/e2e/20260926-203904Z`), and read against the source of
+Sparkle 2.9.6, the version `Package.resolved` pins:
+
+* With automatic checks off, Sparkle schedules nothing at all
+  (`scheduleNextUpdateCheckFiringImmediately:` returns). uDeck as it ships was
+  started and listened to for 255 s, and the feed heard nothing.
+* With them on, a uDeck that has never looked is overdue: with no
+  `SULastCheckTime`, Sparkle counts from `distantPast` and looks at once. Forced
+  on in the guest's preferences, six launches asked the feed between 1.3 and
+  2.9 s after `open -a` — which is what a build shipping with the switch on
+  does, and why 20 s of listening is enough to catch it.
+* Turning the switch on posts a settings change, and Sparkle resets its cycle
+  after one second (`resetUpdateCycleAfterDelay`). The guest's clock read
+  20:45:30.09 just before the click, and the feed logged uDeck at 20:45:31.
+* "Check now" reached the feed 3.3–4.3 s after the lab started looking for the
+  button, the walk that finds it included.
+
+**Both checks start from a machine that remembers nothing**
+(`app.forget_preferences`). Sparkle reads `SUEnableAutomaticChecks`,
+`SULastCheckTime` and `SUScheduledCheckInterval` from the preferences before the
+plist, and the remembered date matters most: measured, the switch turned off and
+on again three minutes after a check caused no request in the minute after the
+click, because the next check was then a day away. So on a shared machine
+(`--vm per-group`, `per-run`) the check before would have silenced this one —
+and it does leave that date behind: with `--vm per-group`, both checks found
+`SULastCheckTime` from the check before them and took it away, and both passed
+(`.build/e2e/20260926-224017Z`). Right after the delete, `defaults read` answers
+with an empty dictionary rather than "not found", and the lab reads both as
+nothing kept.
+
+**What cannot be checked in a lab run is the next check a day later.** It is
+`SUScheduledCheckInterval` — 86400 s in the plist — after the last one, and
+Sparkle will not go below an hour: `minimumUpdateCheckInterval` returns 3600 in
+a release build (the one-minute interval exists only in Sparkle's own debug
+builds, behind `_SUEnableDebugUpdateCheckIntervals`). Measured, not only read:
+with `SUScheduledCheckInterval` set to 60 in the guest's preferences, a uDeck
+whose last check was at 20:49:14 said nothing to the feed up to 20:53:47, and
+one whose last check was at 19:53:58 asked at 20:53:59 — an hour, not a minute.
+So a scheduled check cannot be had in less than an hour of waiting, and the lab
+does not wait an hour.
+
+The honest way to check it would be to move `SULastCheckTime` back rather than
+wait: Sparkle counts from that date, and its own timer does the rest. Measured
+the same way, a last check written as 2026-09-25 20:54:09 and uDeck started at
+20:54:01 the next day made the feed hear it at 20:54:09 — exactly the plist's
+day after, 8 s after launch. It changes a date and not a setting, but it does
+write into Sparkle's memory, and no check does it today.
 
 ### The panel
 
@@ -298,6 +391,92 @@ behind that: `log stream` into a file in the guest delivered the first gesture's
 lines and then nothing at all, four gestures in a row, while the kept log held
 every one. The same messages carry `idle: <reason>`, which is what makes a
 gesture that fired nothing worth reading.
+
+### Upward movement short of the edge
+
+Two more, and they are about the line between the dwell and the push, which
+none of the three above draws. uDeck counts upward movement as a push only while
+the pointer is pinned, and was pinned before it
+(`HoverGestureRecognizer.updatePushWindow`) — and the strip is taller than the
+pinned rows. Rows 0 to 6 are in it and rows 0 to 3 are pinned, so a pointer on
+rows 4, 5 or 6 can move up inside the strip and still not be against anything.
+`panel.dwell` moves nothing once it has placed the pointer, `panel.push` moves up
+only against the edge, and the control moves up far from the strip.
+
+**The first attempt placed the pointer on row 5 and moved it up from there, and
+it measured nothing.** A pointer placed in the strip over VNC opens the panel by
+the dwell before any command reaches the guest: 14 placements out of 14 on
+2026-09-26, the dwell 24 to 127 ms before push-pointer.py had even started —
+eight with a nudge of one row after it, six with a throw to the edge and a push
+there (.build/e2e/20260926-185410Z). Whatever the movement then was, it met a
+panel that was already open. And a pointer that only goes up from row 5 is
+pinned after two rows, so upward travel short of pinned that adds up to anything
+has to come back down between the ups.
+
+So `panel.a-wobble-short-of-the-edge` slides the pointer along the strip from
+left of it, rocking between rows 4 and 6 — up two rows, down two, two pixels to
+the right each time, a hundred reports with a 2 ms pause after each (3.1 to
+3.6 ms apart, measured, with the pointer read back after every one), all of it
+one run of push-pointer.py inside the guest. The slide is what keeps the dwell away while it
+happens: uDeck restarts the dwell whenever the pointer slides, so the push path
+gets the whole wobble to be wrong about. When the pointer stops, at rest in the
+strip, the dwell fires, and that is the verdict *and* the witness: `fired by
+dwell` is uDeck saying it saw the pointer in the strip, saw it stop, and never
+took the rocking for a push — which the control in the middle of the screen has
+to go looking for separately. `panel.the-same-wobble-at-the-edge` is its pair:
+the same rocking four rows higher, between rows 0 and 2, every row of it pinned,
+and there it has to be the push. One movement in two places, and the only thing
+that differs is the one the guard is about. Without the pair, "not a push" would
+be as true of a rocking whose ups never reached uDeck.
+
+The lab reads back where the pointer went after every report, and three things
+about that path decide whether there is a verdict at all (`panel.Wobble`). It
+stayed between its two rows; it came to rest inside the strip; and, before "not
+a push" may count, it made enough upward travel inside the strip within one of
+uDeck's push windows that a uDeck counting it would have had to fire — twice
+uDeck's 24 points, because uDeck may read this movement at half a point per
+unit. That last one is **why the pace is what it is.** uDeck reads upward
+movement as `NSEvent.deltaY` times a scale it learns from free movement
+(`PointerDeltaCalibration`), and in this guest the lab's own moves teach it
+anything from one point per unit down to half: a VNC jump of 718 rows came back
+as a deltaY of 717 once and 1434 or 1436 another time, and every 60-pixel report
+of the throw as 120, while the rocking's 2-pixel reports come back as 2. At the
+first pace tried, 3 pixels sideways every 5 ms, the rocking at the edge opened
+the panel by the push six times of six on one machine and then 2 times of 6,
+twice, on others (.build/e2e/20260926-185410Z, -191139Z, -191601Z); a build that
+logged every movement it heard is where the numbers above come from
+(-192056Z, -192517Z, never committed). At the throw's own pace, six times in
+each place on a machine of its own: the dwell six times of six between rows 4
+and 6, with 82 to 88 points of upward travel inside the strip within one window,
+and the push six times of six between rows 0 and 2 (-192908Z).
+
+The travel is asked only of a wobble that was not taken for a push. Once the
+push opens the panel the pointer does not always keep following the reports — in
+three of six trials uDeck heard nothing for 0.12 to 0.22 s after the panel
+opened while the script was still posting (-192517Z) — so at the edge the track
+read back holds less, 44 to 54 points against 82 to 88 short of it (-192908Z),
+and a check that asked first would call a working push "could not check". A push
+short of the edge is wrong however little the track says it carried.
+
+Measured against broken builds of uDeck on 2026-09-26, one run each, the two
+checks and the three opening checks:
+
+| uDeck built with | wobble short of the edge | wobble at the edge | `panel.dwell` | `panel.push` | middle |
+|---|---|---|---|---|---|
+| any upward movement in the strip a push | ❌ push | ✅ | ❌ push | ✅ | ✅ |
+| `pinnedEpsilon` 6, as tall as the strip | ❌ push | ✅ | ❌ push | ✅ | ✅ |
+| no push ever counted | ✅ | ❌ dwell | | | |
+| no dwell ever firing | ❌ nothing opened | ✅ | | | |
+
+(.build/e2e/20260926-193702Z, -193959Z, -194444Z, -194748Z; the unbroken build,
+both green, -193525Z.) `panel.dwell` went red on the first two as well, once
+each, and why is known only in part. Its log says `fired by push` for a pointer
+that was only placed, and the build that logged every movement showed a VNC
+jump into the strip arriving with a deltaY of 717 or 1434, sometimes as two
+events — upward movement the first mutant counts on arrival, and the second can
+count from its second event. That is the same accident that used to make the
+top row read as a push, and how often it would catch either mutant is not
+measured. The wobble goes red on them by construction.
 
 ### The panel closing
 

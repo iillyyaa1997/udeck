@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from fakes import Dropped, Failed, Lab, Machine
+from fakes import Dropped, Failed, Lab, Machine, wobble_output
 
 from udeck_e2e import app, config, panel
 from udeck_e2e.errors import CheckFailed, LabError
@@ -349,6 +349,158 @@ def test_a_control_whose_log_says_nothing_at_all_proves_nothing(monkeypatch, lab
     machine = prepared(monkeypatch, ATTACHED)
     with pytest.raises(LabError, match="says nothing at all about the pointer"):
         checks.check_middle_of_the_screen(machine, check_dir, lab)
+
+
+# --- Upward movement short of the edge, and the same at it ---------------------------
+
+SHORT = config.SHORT_OF_THE_EDGE_ROWS
+EDGE = config.AT_THE_EDGE_ROWS
+
+
+def wobbled(monkeypatch, log_says, rows, track=None):
+    """A prepared machine whose guest wobbled the pointer between `rows`, as asked."""
+    machine = prepared(monkeypatch, log_says)
+    machine.ssh.answers["push-pointer"] = track if track is not None else wobble_output(rows)
+    return machine
+
+
+def test_a_wobble_short_of_the_edge_opens_the_panel_by_the_dwell(monkeypatch, lab, check_dir):
+    machine = wobbled(monkeypatch, ATTACHED + IDLE + DWELL + REVEAL, SHORT)
+    checks.check_a_wobble_short_of_the_edge(machine, check_dir, lab)
+    # Parked, and then placed *left of* the strip on the lower row of the band —
+    # never in it, where the dwell would fire before the guest could move anything.
+    assert [(x, y) for x, y, _ in machine.pointer] == [
+        panel.middle_of_the_screen(),
+        (config.WOBBLE_START_X, SHORT[1]),
+    ]
+    # The rocking slide, from inside the guest, with no throw.
+    assert pushed_with(machine)[0] == "0"
+    assert pushed_with(machine)[-2:] == [str(config.WOBBLE_SIDEWAYS), "1"]
+    assert any("rocked between rows [4, 6]" in note for note in lab.notes)
+
+
+def test_a_wobble_short_of_the_edge_taken_for_a_push_fails(monkeypatch, lab, check_dir):
+    """The guard this check exists for: movement up inside the strip, never pinned."""
+    machine = wobbled(monkeypatch, ATTACHED + IDLE + PUSH + REVEAL, SHORT)
+    with pytest.raises(CheckFailed, match="taken for a push"):
+        checks.check_a_wobble_short_of_the_edge(machine, check_dir, lab)
+
+
+def test_a_wobble_short_of_the_edge_that_opened_nothing_fails(monkeypatch, lab, check_dir):
+    """The pointer came to rest in the strip, so the dwell is owed — and it is the
+    witness that uDeck saw the pointer at all. Nothing is not a pass here."""
+    machine = wobbled(monkeypatch, ATTACHED + IDLE, SHORT)
+    with pytest.raises(CheckFailed, match="came to rest in the strip"):
+        checks.check_a_wobble_short_of_the_edge(machine, check_dir, lab)
+    assert machine.now >= config.GESTURE_ANSWER_SECONDS
+
+
+def test_a_wobble_short_of_the_edge_whose_dwell_opened_nothing_fails(monkeypatch, lab, check_dir):
+    """`fired by dwell` is written before the panel is asked to appear."""
+    machine = wobbled(monkeypatch, ATTACHED + IDLE + DWELL, SHORT)
+    with pytest.raises(CheckFailed, match="the panel did not open"):
+        checks.check_a_wobble_short_of_the_edge(machine, check_dir, lab)
+
+
+def test_a_wobble_that_strayed_into_the_pinned_rows_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """Rocking on a pinned row is a real push, so "it was a push" would be uDeck
+    being right. The lab says it could not check, whatever uDeck said."""
+    strayed = wobble_output(SHORT).replace(", 4, ", ", 3, ", 1)
+    machine = wobbled(monkeypatch, ATTACHED + IDLE + PUSH + REVEAL, SHORT, strayed)
+    with pytest.raises(LabError, match="reached rows") as raised:
+        checks.check_a_wobble_short_of_the_edge(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_wobble_too_slow_to_be_a_push_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """Not being counted proves nothing about a movement that could not have been."""
+    slow = wobble_output(SHORT, pace=config.WOBBLE_PAUSE_SECONDS * 10)
+    machine = wobbled(monkeypatch, ATTACHED + IDLE + DWELL + REVEAL, SHORT, slow)
+    with pytest.raises(LabError, match="could not have been a push") as raised:
+        checks.check_a_wobble_short_of_the_edge(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_wobble_taken_for_a_push_is_red_however_little_it_carried(monkeypatch, lab, check_dir):
+    """How much the wobble carried is asked only before a *pass*. A push from rows
+    that are not pinned is wrong whatever the track says, and once the panel opens
+    the pointer does not always keep following the reports — so the track of a
+    wobble that was taken for a push can be short, and a check that asked about
+    it first would call the one failure it exists for "could not check"."""
+    short = wobble_output(SHORT, pace=config.WOBBLE_PAUSE_SECONDS * 10)
+    machine = wobbled(monkeypatch, ATTACHED + IDLE + PUSH + REVEAL, SHORT, short)
+    with pytest.raises(CheckFailed, match="taken for a push"):
+        checks.check_a_wobble_short_of_the_edge(machine, check_dir, lab)
+
+
+def test_the_same_wobble_at_the_edge_opens_the_panel_by_the_push(monkeypatch, lab, check_dir):
+    machine = wobbled(monkeypatch, ATTACHED + IDLE + PUSH + REVEAL, EDGE)
+    checks.check_the_same_wobble_at_the_edge(machine, check_dir, lab)
+    # The same movement from the same column, on the lower row of the pinned band.
+    assert [(x, y) for x, y, _ in machine.pointer] == [
+        panel.middle_of_the_screen(),
+        (config.WOBBLE_START_X, EDGE[1]),
+    ]
+    assert pushed_with(machine)[-2:] == [str(config.WOBBLE_SIDEWAYS), "1"]
+
+
+def test_the_same_wobble_at_the_edge_opened_by_the_dwell_fails(monkeypatch, lab, check_dir):
+    """The half that makes the other half mean anything: a rocking whose ups were
+    never counted anywhere is "not a push" short of the edge for no reason at all."""
+    machine = wobbled(monkeypatch, ATTACHED + IDLE + DWELL + REVEAL, EDGE)
+    with pytest.raises(CheckFailed, match="opened by dwell first, not by the push"):
+        checks.check_the_same_wobble_at_the_edge(machine, check_dir, lab)
+
+
+def test_the_same_wobble_at_the_edge_that_opened_nothing_fails(monkeypatch, lab, check_dir):
+    machine = wobbled(monkeypatch, ATTACHED + IDLE, EDGE)
+    with pytest.raises(CheckFailed, match="did not open the panel"):
+        checks.check_the_same_wobble_at_the_edge(machine, check_dir, lab)
+
+    fired_only = wobbled(monkeypatch, ATTACHED + IDLE + PUSH, EDGE)
+    with pytest.raises(CheckFailed, match="the panel did not open"):
+        checks.check_the_same_wobble_at_the_edge(fired_only, check_dir, lab)
+
+
+def test_a_push_at_the_edge_passes_however_short_the_track_after_it(monkeypatch, lab, check_dir):
+    """Measured: at the edge the travel the script read back was 44 to 54 points,
+    against 82 to 88 short of it, because the panel the push opened stops the
+    pointer following. The push is its own proof that the movement sufficed."""
+    short = wobble_output(EDGE, pace=config.WOBBLE_PAUSE_SECONDS * 10)
+    machine = wobbled(monkeypatch, ATTACHED + IDLE + PUSH + REVEAL, EDGE, short)
+    checks.check_the_same_wobble_at_the_edge(machine, check_dir, lab)
+
+
+def test_no_push_at_the_edge_from_a_wobble_too_small_to_be_one_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """The other half asks the same question of its own failure: a uDeck that did
+    not take for a push a movement no build could have is not wrong."""
+    short = wobble_output(EDGE, pace=config.WOBBLE_PAUSE_SECONDS * 10)
+    machine = wobbled(monkeypatch, ATTACHED + IDLE + DWELL + REVEAL, EDGE, short)
+    with pytest.raises(LabError, match="could not have been a push") as raised:
+        checks.check_the_same_wobble_at_the_edge(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_the_same_wobble_short_of_pinned_is_not_a_verdict_at_the_edge(monkeypatch, lab, check_dir):
+    """A wobble that did not reach the pinned rows it was sent to cannot be asked
+    for a push."""
+    machine = wobbled(monkeypatch, ATTACHED + IDLE + DWELL + REVEAL, EDGE, wobble_output(SHORT))
+    with pytest.raises(LabError, match="reached rows") as raised:
+        checks.check_the_same_wobble_at_the_edge(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_wobble_check_whose_log_cannot_be_read_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """The same as every other panel check: silence from a dropped connection is not
+    uDeck saying nothing."""
+    for check, rows in (
+        (checks.check_a_wobble_short_of_the_edge, SHORT),
+        (checks.check_the_same_wobble_at_the_edge, EDGE),
+    ):
+        machine = wobbled(monkeypatch, Dropped, rows)
+        with pytest.raises(LabError, match="SSH") as raised:
+            check(machine, check_dir, lab)
+        assert not isinstance(raised.value, CheckFailed), check.__name__
 
 
 # --- The pointer leaving a peek -------------------------------------------------------

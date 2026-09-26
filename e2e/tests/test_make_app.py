@@ -86,6 +86,25 @@ def test_a_lab_build_lands_where_it_was_told_carries_both_versions_and_leaves_on
     assert plist["CFBundleIdentifier"] == "place.unicorns.udeck"
 
 
+def test_a_lab_build_looks_for_updates_by_itself_exactly_as_the_release_does(checkout):
+    """`updates.it-does-not-look-by-itself` judges what uDeck *ships* on a lab build.
+
+    That is only true while the build pointed at a test feed carries the release's
+    own answer to "may Sparkle look by itself, and how often" — so a script that
+    switched automatic checks on for the lab, to make a check quicker, would turn
+    that check into one about the lab's build and leave the release unchecked.
+    """
+    done = make_app(
+        checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99",
+        "--zip", "--test-feed", FEED, "--test-key", KEY,
+    )  # fmt: skip
+    assert done.returncode == 0, done.stdout + done.stderr
+    plist = plist_in(checkout / "lab-builds" / "uDeck-9.9.9.zip")
+    original = plistlib.loads((checkout / "Sources/uDeck/Support/Info.plist").read_bytes())
+    for key in ("SUEnableAutomaticChecks", "SUScheduledCheckInterval", "SUAutomaticallyUpdate"):
+        assert plist.get(key) == original.get(key), key
+
+
 def test_a_build_with_no_options_still_goes_to_dist_and_keeps_the_plists_versions(checkout):
     done = make_app(checkout)
     assert done.returncode == 0, done.stdout + done.stderr
@@ -211,10 +230,12 @@ def test_the_options_that_would_leave_a_lab_build_lying_about_are_refused(checko
     assert not (checkout / "dist").exists()
 
 
-# The one other file allowed to reach the checkout, and what it may do there:
+# The other files allowed to reach the checkout, and what they may do there:
 # read uDeck's own gesture defaults, so the lab's push can be checked against
-# the numbers it has to clear. Reading a source file cannot build anything.
-MAY_READ_THE_CHECKOUT = {"test_panel.py"}
+# the numbers it has to clear (test_panel.py), and read the settings view, so the
+# identifier the update checks click is the one uDeck gives the switch
+# (test_check_updates.py). Reading a source file cannot build anything.
+MAY_READ_THE_CHECKOUT = {"test_panel.py", "test_check_updates.py"}
 
 
 def test_this_is_the_only_file_that_runs_anything_in_the_repository():

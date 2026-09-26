@@ -1,6 +1,6 @@
 """Does the panel open when it should, and close when it should?
 
-Fourteen checks in three parts. The first three are about the panel appearing
+Sixteen checks in three parts. The first five are about the panel appearing
 and by which path; the next six are about it going away again, and they are
 where the promise the panel is built on lives — **once the panel is held, the
 cursor leaving never closes it**, and everything that does close it is the
@@ -20,6 +20,15 @@ anything: the pointer resting in the strip at the top of the screen opens the
 panel, the pointer already pinned there while the device keeps pushing opens it,
 and the pointer in the middle of the screen — held, and pushed at — opens
 nothing (Q37).
+
+The next two are the line between the paths, which none of those three draws.
+A push is upward movement made *while the pointer is pinned*, and the strip is
+taller than the pinned rows: a pointer can move up inside it and still not be
+against anything. So the pointer slides along the strip rocking up and down
+between two rows short of pinned — and the panel has to open by the dwell once
+it stops, never by the push — and then makes the same rocking four rows higher,
+where it is pinned, and the panel has to open by the push. One movement in two
+places, and the only difference between them is the one the guard is about.
 
 The two paths are not two ways of saying the same thing. A dwell only needs the
 pointer to be somewhere; a push needs movement *reported after the pointer can
@@ -132,7 +141,7 @@ process's hot keys when the process exits, so `panel.the-hotkey-dies-with-udeck`
 is green over a build that never unregisters anything. That is written down
 where it was measured, in that check.
 
-Those eleven go through more steps than the three opening checks, so they read
+Those eleven go through more steps than the five opening checks, so they read
 the log in steps too (`panel.Story`): one window opened at the start, sliced by what
 each action added to it, and the whole of it kept beside the report as
 `story.log`. A check that read only the end could not tell "nothing happened
@@ -274,6 +283,104 @@ def check_middle_of_the_screen(machine, check_dir, lab):
             f"going to {panel.revealed(said)}: {panel.short(said)}",
         )
         _prove_uDeck_was_watching(machine, said)
+    finally:
+        log.collect(check_dir, since, "keeping what uDeck said")
+
+
+def check_a_wobble_short_of_the_edge(machine, check_dir, lab):
+    """Upward movement inside the strip that never reaches the pinned rows is not a push.
+
+    uDeck counts upward movement as a push only while the pointer is pinned, and
+    was pinned before it (`HoverGestureRecognizer.updatePushWindow`). None of the
+    three checks above asks about that guard: the dwell moves nothing, the push
+    moves up only against the edge, and the control moves up far from the strip.
+    A uDeck that took any upward movement in the strip for a push — a hand
+    sweeping along the menu bar that is not quite level — was green on all three.
+
+    So the pointer slides along the strip rocking between the two rows either side
+    of `config.INSIDE_THE_STRIP_Y`: inside the strip and short of pinned, with
+    upward travel in them that would clear uDeck's threshold if it counted. The
+    slide is what keeps the dwell from firing while it happens; when it stops,
+    with the pointer at rest in the strip, the dwell fires — and that is the
+    verdict *and* the witness, which the control in the middle of the screen has
+    to go looking for separately. `fired by dwell` is uDeck saying it saw the
+    pointer in the strip, saw it stop, and never took the rocking for a push.
+
+    What is read back from the guest decides whether any of that is a verdict
+    (`panel.Wobble`): the rocking stayed in its two rows, came to rest in the
+    strip, and — before a dwell may count as a pass — carried enough upward
+    travel that a uDeck counting it would have had to fire the push. Measured on
+    2026-09-26, six times on one machine (.build/e2e/20260926-192908Z): the dwell
+    six times of six, with 82 to 88 points of upward travel inside the strip
+    within one push window.
+    """
+    log = _prepare(machine, check_dir, lab)
+    since = log.mark("noting when the wobble begins")
+    try:
+        panel.park_in_the_middle(machine)
+        wobble = panel.wobble_along_the_strip(
+            machine, "sliding along the strip, rocking short of the edge", config.SHORT_OF_THE_EDGE_ROWS
+        )
+        lab.note(f"   {wobble.summary()}")
+        said = _wait_for_uDecks_answer(machine, log, since, config.DWELL_SECONDS)
+        machine.screenshot(check_dir, "after the wobble")
+        fired = panel.fired_by(said)
+
+        expect(
+            fired != [],
+            "uDeck did not open the panel for a pointer that came to rest in the strip after the wobble, "
+            f"where the dwell should have: what it says of the gesture: {panel.short(said)}",
+        )
+        if "push" not in fired:
+            # Not a push is a pass only for a movement that could have been one.
+            wobble.expect_it_could_have_been_a_push()
+        expect(
+            fired == ["dwell"],
+            f"the panel opened by {fired}, not by the dwell — upward movement that never reached the rows "
+            "uDeck counts as pinned was taken for a push",
+        )
+        _expect_the_panel_opened(said)
+    finally:
+        log.collect(check_dir, since, "keeping what uDeck said")
+
+
+def check_the_same_wobble_at_the_edge(machine, check_dir, lab):
+    """The same movement, four rows higher where every row of it is pinned: a push.
+
+    The other half of the pair, and what makes the first half mean anything. "It
+    was not a push" is also what a movement uDeck could never have counted says —
+    a rocking whose ups were lost on the way, or a push path that is broken for
+    everyone. Here the rocking is the same, report for report, and the only thing
+    that changed is that the pointer is pinned while it makes it; uDeck has to
+    open the panel by the push. Measured on 2026-09-26, six times on one machine
+    (.build/e2e/20260926-192908Z): the push six times of six.
+
+    A wobble that was not taken for a push is asked, before that becomes a
+    verdict, whether it could have been one — the same question the first half
+    asks of every pass.
+    """
+    log = _prepare(machine, check_dir, lab)
+    since = log.mark("noting when the wobble begins")
+    try:
+        panel.park_in_the_middle(machine)
+        wobble = panel.wobble_along_the_strip(
+            machine, "sliding along the strip, rocking against the edge", config.AT_THE_EDGE_ROWS
+        )
+        lab.note(f"   {wobble.summary()}")
+        said = _wait_for_uDecks_answer(machine, log, since, config.DWELL_SECONDS)
+        machine.screenshot(check_dir, "after the wobble")
+        fired = panel.fired_by(said)
+
+        if fired[:1] != ["push"]:
+            wobble.expect_it_could_have_been_a_push()
+        expect(fired != [], f"uDeck did not open the panel; what it says of the gesture: {panel.short(said)}")
+        opened_by = fired[0] if fired else "nothing"
+        expect(
+            fired[:1] == ["push"],
+            f"the panel opened by {opened_by} first, not by the push — upward movement made while the pointer "
+            "was pinned was not counted",
+        )
+        _expect_the_panel_opened(said)
     finally:
         log.collect(check_dir, since, "keeping what uDeck said")
 
@@ -1130,7 +1237,7 @@ def check_the_hotkey_dies_with_udeck(machine, check_dir, lab):
         story.keep()
 
 
-# --- What all fourteen do -----------------------------------------------------------
+# --- What all sixteen do ------------------------------------------------------------
 
 
 def _prepare(machine, check_dir, lab, launch=True):

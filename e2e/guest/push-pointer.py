@@ -45,11 +45,30 @@ would open the panel by the path this is not about.
 No PyObjC: the guest has the system's Python 3.9, which has none, so the calls
 are made through ctypes.
 
-    push-pointer.py <throw-cap> <throw-delta> <throw-pause> <pinned> <steps> <delta> <pause>
+    push-pointer.py <throw-cap> <throw-delta> <throw-pause> <pinned> <steps> <delta> <pause> <sideways> <wobble>
 
 A negative delta is upward. `throw-cap` may be 0, which is what the control in
 the middle of the screen uses: it pushes where the pointer already is, and a
 throw would carry it somewhere else.
+
+`sideways` is how far each report of the push also carries the pointer to the
+right, in pixels, and `wobble` is 1 to send every other report back *down* by
+as much as the one before took it up. Together they are a hand sweeping along
+the strip that is not quite level: the pointer rocks between two rows while it
+slides. That is the only way to make upward movement inside the strip that
+never reaches the edge and still adds up to anything. From the strip's lower
+edge to the rows uDeck counts as pinned there are two rows of room, so a pointer
+that only went up would be pinned before it had gone three; twenty-four points
+of upward travel in that room have to come back down between the ups. The
+sideways part is what keeps the dwell from firing while it happens — uDeck
+restarts the dwell whenever the pointer slides — so the push path is given the
+whole of the wobble to be wrong about. Both are 0 for the push at the edge and
+for the control in the middle of the screen, which move straight up.
+
+Where the pointer is after every report of the push is read back and printed as
+`track`, with the time since the push began, because for the wobble the path is
+the measurement: which rows it rocked between, and how much upward travel it
+made inside the strip in how long.
 
 The throw stops the moment the pointer is within `pinned` pixels of the top,
 which is why `throw-cap` is a cap and not a count. That is not tidiness. uDeck
@@ -171,8 +190,8 @@ def pointer_reader():
     return where
 
 
-def post(library, connect, delta):
-    """One report of relative movement: nothing sideways, `delta` vertically.
+def post(library, connect, delta, sideways=0):
+    """One report of relative movement: `sideways` horizontally, `delta` vertically.
 
     The location is not used by this path — the movement is what is being
     reported, and macOS decides where that leaves the pointer, including
@@ -182,7 +201,7 @@ def post(library, connect, delta):
     data = (ctypes.c_uint8 * NX_EVENT_DATA_BYTES)()
     ctypes.memset(data, 0, NX_EVENT_DATA_BYTES)
     movement = ctypes.cast(data, ctypes.POINTER(ctypes.c_int32))
-    movement[0] = 0
+    movement[0] = sideways
     movement[1] = delta
     return library.IOHIDPostEvent(
         connect,
@@ -196,18 +215,19 @@ def post(library, connect, delta):
 
 
 def main(argv):
-    if len(argv) != 8:
+    if len(argv) != 10:
         print(usage(), file=sys.stderr)
         return 2
     throw_cap, throw_delta, throw_pause = int(argv[1]), whole(argv[2]), float(argv[3])
     pinned = float(argv[4])
     steps, delta, pause = int(argv[5]), whole(argv[6]), float(argv[7])
+    sideways, wobble = whole(argv[8]), int(argv[9]) == 1
 
     library = iokit()
     system = ctypes.CDLL(None)
     where = pointer_reader()
     said = {"uid": system.getuid(), "euid": system.geteuid(), "throw": [], "push": [],
-            "thrown": 0, "at": None, "pinned": None}  # fmt: skip
+            "thrown": 0, "at": None, "pinned": None, "track": []}  # fmt: skip
     if said["euid"] == 0:
         # Said rather than refused: the run is the measurement, and a refusal
         # here would hide the kernel's own answer from whoever reads the report.
@@ -249,10 +269,16 @@ def main(argv):
                 at = where()
                 said["at"] = [round(at[0], 1), round(at[1], 1)] if at else None
                 said["pinned"] = False
-        # The push: movement reported while the pointer can go no higher.
-        for _ in range(steps):
-            said["push"].append(named(post(library, connect.value, delta)))
+        # The push: movement reported while the pointer can go no higher — or,
+        # with `wobble`, rocking between two rows while it slides along.
+        began = time.monotonic()
+        for step in range(steps):
+            upward = delta if not wobble or step % 2 == 0 else -delta
+            said["push"].append(named(post(library, connect.value, upward, sideways)))
             time.sleep(pause)
+            at = where()
+            if at is not None:
+                said["track"].append([round(at[0], 1), round(at[1], 1), round(time.monotonic() - began, 3)])
     finally:
         library.IOServiceClose(connect.value)
 

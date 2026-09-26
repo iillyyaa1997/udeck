@@ -10,11 +10,13 @@ that drifted inside the panel would make "the pointer left" a pointer that never
 left.
 """
 
+import json
+import math
 import re
 from pathlib import Path
 
 import pytest
-from fakes import Dropped, Failed, Machine
+from fakes import Dropped, Failed, Machine, wobble_output
 
 from udeck_e2e import config, panel, probes
 from udeck_e2e.errors import LabError
@@ -308,6 +310,10 @@ def test_the_push_is_made_inside_the_guest_by_the_script_the_lab_ships():
         str(config.PUSH_STEPS),
         str(config.PUSH_DELTA),
         str(config.PUSH_PAUSE_SECONDS),
+        # Nothing sideways and no wobble: the push goes straight up, as it did
+        # before the wobble existed.
+        "0",
+        "0",
     ]
     assert "/usr/bin/python3" in ran, "the guest has no other Python, and needs none"
     assert "KERN_SUCCESS" in said
@@ -429,6 +435,232 @@ def test_the_labs_push_clears_uDecks_thresholds_and_beats_its_dwell():
     assert push >= _default("edgePushDistance") * 2, "the push has to clear the threshold with room"
     assert spent <= _default("edgePushWindow") / 2, "and all of it has to land inside uDeck's window"
     assert spent < _default("dwellDuration"), "and be over before the dwell would fire instead"
+
+
+# --- Upward movement that never reaches the edge ---------------------------------------
+#
+# The wobble is the one movement the lab makes inside the strip that is not a
+# place: rocking between two rows while sliding along it. Every number it rests
+# on is one of uDeck's, and each way of getting one wrong is silent in the same
+# way the push's are — a band that strayed into the pinned rows makes a push of
+# what was meant not to be one, and a wobble too slow or too small makes "not a
+# push" of a movement no build would ever have counted.
+
+
+def _strip_edges():
+    """uDeck's strip across the lab's screen, from its own defaults: [left, right)."""
+    half = _default("virtualAnchorWidth") / 2 + _default("stripSideMargin")
+    return config.SCREEN_WIDTH / 2 - half, config.SCREEN_WIDTH / 2 + half
+
+
+def test_the_strip_the_lab_reads_the_wobble_against_is_uDecks():
+    """Whole columns inside uDeck's strip, which is closed on the left and open on
+    the right (`PanelGeometry.containsPointer`)."""
+    left, right = _strip_edges()
+    first, last = config.STRIP_COLUMNS
+    assert first == math.ceil(left) and first - 1 < left
+    assert last < right <= last + 1
+
+
+def test_the_push_threshold_the_lab_reads_the_wobble_against_is_uDecks():
+    assert config.EDGE_PUSH_DISTANCE == _default("edgePushDistance")
+    assert config.EDGE_PUSH_WINDOW_SECONDS == _default("edgePushWindow")
+
+
+def test_the_wobble_short_of_the_edge_rocks_inside_the_strip_and_never_pinned():
+    """Rows from the top, as for `INSIDE_THE_STRIP_Y`: rows 0 to `stripHeight` are in
+    the strip, rows 0 to `pinnedEpsilon + 1` are pinned. Both rows of the band are
+    strictly between — otherwise the check is about a pointer that was pinned, or
+    one that had left the strip."""
+    upper, lower = config.SHORT_OF_THE_EDGE_ROWS
+    assert upper > _default("pinnedEpsilon") + 1, "the upper row is pinned: the rocking there is a real push"
+    assert lower <= _default("stripHeight"), "the lower row is out of the strip: every rock ends the visit"
+    assert upper < lower
+
+
+def test_the_same_wobble_at_the_edge_is_pinned_in_every_row():
+    """Pinned by uDeck's measure and by the lab's own, which is the stricter one."""
+    upper, lower = config.AT_THE_EDGE_ROWS
+    assert upper == 0
+    assert lower <= _default("pinnedEpsilon") + 1
+    assert lower <= config.PINNED_TOLERANCE_PIXELS
+
+
+def test_the_two_wobbles_are_one_movement_in_two_places():
+    """The pair means something only if the rows are the one thing that differs."""
+    short = config.SHORT_OF_THE_EDGE_ROWS[1] - config.SHORT_OF_THE_EDGE_ROWS[0]
+    edge = config.AT_THE_EDGE_ROWS[1] - config.AT_THE_EDGE_ROWS[0]
+    assert short == edge
+    assert config.WOBBLE_DELTA == -short, "each report goes up, or back down, by the whole band"
+
+
+def test_the_wobble_starts_outside_the_strip_and_comes_to_rest_inside_it():
+    """Outside, because a pointer placed in the strip from this Mac opens the panel
+    by the dwell before any command reaches the guest; inside at the end, because
+    that is where the dwell that is the verdict has to fire."""
+    first, last = config.STRIP_COLUMNS
+    assert config.WOBBLE_START_X < first
+    assert first <= config.WOBBLE_START_X + config.WOBBLE_STEPS * config.WOBBLE_SIDEWAYS <= last
+
+
+def test_the_wobble_slides_fast_enough_to_hold_the_dwell_off():
+    """uDeck restarts the dwell when the pointer slides at `dwellHorizontalSpeedLimit`
+    or has slid `dwellHorizontalTolerance` since the last restart. The first, at the
+    nominal pace, with room; and the second even at twice the nominal pace, which is
+    slower than the wobble was measured at — so the dwell cannot fire mid-wobble on
+    either rule."""
+    speed = config.WOBBLE_SIDEWAYS / config.WOBBLE_PAUSE_SECONDS
+    assert speed >= 2 * _default("dwellHorizontalSpeedLimit")
+    reports_per_restart = math.ceil(_default("dwellHorizontalTolerance") / config.WOBBLE_SIDEWAYS)
+    assert reports_per_restart * 2 * config.WOBBLE_PAUSE_SECONDS < _default("dwellDuration")
+
+
+def test_the_wobble_carries_what_the_check_demands_of_it_at_its_own_pace():
+    """Read with the lab's own reading of a track, on the track the lab's numbers
+    make at their nominal pace: a wobble the lab sends must not be one its own
+    check then refuses as too small to have been a push."""
+    wobble = panel.Wobble(wobble_output(config.SHORT_OF_THE_EDGE_ROWS), config.SHORT_OF_THE_EDGE_ROWS, "reading")
+    assert wobble.upward_in_the_strip() >= config.WOBBLE_MARGIN * _default("edgePushDistance")
+    wobble.expect_it_could_have_been_a_push()
+
+
+def test_the_wobble_is_sent_as_a_rocking_slide_from_left_of_the_strip():
+    machine = Machine({"push-pointer": wobble_output(config.SHORT_OF_THE_EDGE_ROWS)})
+    panel.wobble_along_the_strip(machine, "wobbling", config.SHORT_OF_THE_EDGE_ROWS)
+    # Placed on the lower row of the band, left of the strip.
+    assert [(x, y) for x, y, _ in machine.pointer] == [(config.WOBBLE_START_X, config.SHORT_OF_THE_EDGE_ROWS[1])]
+    ran = [c for c in machine.ssh.commands if panel.GUEST_PUSH in c][0]
+    assert ran.split()[2:] == [
+        "0",
+        str(config.THROW_DELTA),
+        str(config.THROW_PAUSE_SECONDS),
+        str(config.PINNED_TOLERANCE_PIXELS),
+        str(config.WOBBLE_STEPS),
+        str(config.WOBBLE_DELTA),
+        str(config.WOBBLE_PAUSE_SECONDS),
+        str(config.WOBBLE_SIDEWAYS),
+        "1",
+    ]
+
+
+def _track(*points):
+    """A track by hand: `(x, row, seconds)` per report."""
+    return json.dumps({"track": [list(point) for point in points]})
+
+
+IN = config.STRIP_COLUMNS[0]
+OUT = config.STRIP_COLUMNS[0] - 1
+
+
+def test_upward_travel_is_counted_only_between_two_readings_inside_the_strip():
+    """The report that carries the pointer in from outside is not counted: uDeck's
+    visit begins there, and what it summed before is forgotten when the pointer
+    leaves."""
+    rows = config.SHORT_OF_THE_EDGE_ROWS
+    wobble = panel.Wobble(_track((OUT, 6, 0.0), (IN, 4, 0.01), (IN + 1, 6, 0.02), (IN + 2, 4, 0.03)), rows, "r")
+    assert wobble.upward_in_the_strip() == 2
+    # Down is not up.
+    assert panel.Wobble(_track((IN, 4, 0.0), (IN + 1, 6, 0.01)), rows, "r").upward_in_the_strip() == 0
+
+
+def test_upward_travel_is_counted_within_one_of_uDecks_push_windows():
+    """The window slides the way uDeck's does: an entry exactly one window old is in it."""
+    rows = config.SHORT_OF_THE_EDGE_ROWS
+    window = config.EDGE_PUSH_WINDOW_SECONDS
+    # Times a binary fraction can hold exactly: with 0.1 and 0.35 the difference
+    # comes out a hair under the window, and the boundary is never tested at all.
+    first, later = 0.25, 1 / 64
+    exactly = panel.Wobble(_track((IN, 6, 0.0), (IN, 4, first), (IN, 6, 0.375), (IN, 4, first + window)), rows, "r")
+    assert exactly.upward_in_the_strip() == 4
+    beyond = panel.Wobble(
+        _track((IN, 6, 0.0), (IN, 4, first), (IN, 6, 0.375), (IN, 4, first + window + later)), rows, "r"
+    )
+    assert beyond.upward_in_the_strip() == 2
+
+
+def test_a_wobble_that_left_its_rows_is_the_labs_failure():
+    """Above the band short of the edge is a pinned row, and rocking there is a real
+    push; the verdict would then be about something else."""
+    track = wobble_output(config.SHORT_OF_THE_EDGE_ROWS).replace(", 4, ", ", 3, ", 1)
+    wobble = panel.Wobble(track, config.SHORT_OF_THE_EDGE_ROWS, "wobbling")
+    with pytest.raises(LabError, match=r"reached rows \[3\]"):
+        wobble.expect_it_stayed_in_its_rows()
+    # And below the band at the edge is past what the lab itself calls pinned.
+    below = wobble_output(config.AT_THE_EDGE_ROWS).replace(", 2, ", ", 3, ", 1)
+    with pytest.raises(LabError, match=r"reached rows \[3\]"):
+        panel.Wobble(below, config.AT_THE_EDGE_ROWS, "wobbling").expect_it_stayed_in_its_rows()
+
+
+def test_a_wobble_that_stopped_outside_the_strip_is_the_labs_failure():
+    """The reveal is owed only where the pointer comes to rest in the strip."""
+    track = wobble_output(config.SHORT_OF_THE_EDGE_ROWS, start_x=config.STRIP_COLUMNS[1])
+    wobble = panel.Wobble(track, config.SHORT_OF_THE_EDGE_ROWS, "wobbling")
+    with pytest.raises(LabError, match="outside the strip"):
+        wobble.expect_it_came_to_rest_in_the_strip()
+
+
+def test_a_wobble_too_slow_to_have_been_a_push_is_the_labs_failure():
+    """Not being counted proves nothing about a movement that could not have been.
+    The same wobble at a tenth of the pace carries too little inside one window."""
+    slow = panel.Wobble(
+        wobble_output(config.SHORT_OF_THE_EDGE_ROWS, pace=config.WOBBLE_PAUSE_SECONDS * 10),
+        config.SHORT_OF_THE_EDGE_ROWS,
+        "wobbling",
+    )
+    with pytest.raises(LabError, match="could not have been a push"):
+        slow.expect_it_could_have_been_a_push()
+    # And the same for a pointer that never moved up at all — what a machine that
+    # ate every report would leave.
+    still = panel.Wobble(
+        _track(*[(IN + n, 6, n * 0.002) for n in range(100)]), config.SHORT_OF_THE_EDGE_ROWS, "wobbling"
+    )
+    with pytest.raises(LabError, match="could not have been a push"):
+        still.expect_it_could_have_been_a_push()
+
+
+def test_the_margin_is_the_threshold_times_what_uDeck_may_discount():
+    """Exactly `WOBBLE_MARGIN` times uDeck's threshold is enough, and a point less is
+    not: the lab asks for the margin and nothing more."""
+    rows = config.SHORT_OF_THE_EDGE_ROWS
+    needed = int(config.WOBBLE_MARGIN * config.EDGE_PUSH_DISTANCE)
+    rises = needed // 2
+    enough = [(IN, 6, 0.0)] + [(IN, 4 if n % 2 == 0 else 6, 0.001 * (n + 1)) for n in range(2 * rises)]
+    panel.Wobble(_track(*enough), rows, "r").expect_it_could_have_been_a_push()
+    short = enough[:-2]
+    with pytest.raises(LabError, match="could not have been a push"):
+        panel.Wobble(_track(*short), rows, "r").expect_it_could_have_been_a_push()
+
+
+def test_the_wobble_the_lab_asks_for_is_the_movement_asked_for():
+    """The other side of the refusals: the track the lab's own numbers make passes
+    all three questions, in both places."""
+    for rows in (config.SHORT_OF_THE_EDGE_ROWS, config.AT_THE_EDGE_ROWS):
+        wobble = panel.Wobble(wobble_output(rows), rows, "wobbling")
+        wobble.expect_it_stayed_in_its_rows()
+        wobble.expect_it_came_to_rest_in_the_strip()
+        wobble.expect_it_could_have_been_a_push()
+
+
+def test_the_wobble_is_asked_where_it_went_before_anyone_asks_uDeck():
+    """Rows and rest are the lab's questions about its own movement, and they are
+    answered where the movement is made — a check cannot forget them."""
+    strayed = Machine({"push-pointer": wobble_output(config.SHORT_OF_THE_EDGE_ROWS).replace(", 4, ", ", 3, ", 1)})
+    with pytest.raises(LabError, match="reached rows"):
+        panel.wobble_along_the_strip(strayed, "wobbling", config.SHORT_OF_THE_EDGE_ROWS)
+    away = Machine({"push-pointer": wobble_output(config.SHORT_OF_THE_EDGE_ROWS, start_x=config.STRIP_COLUMNS[1])})
+    with pytest.raises(LabError, match="outside the strip"):
+        panel.wobble_along_the_strip(away, "wobbling", config.SHORT_OF_THE_EDGE_ROWS)
+
+
+def test_what_the_guest_printed_is_read_or_refused():
+    """A script that printed nothing readable leaves the path unknown, and the path
+    is the measurement."""
+    for said in ("", "Traceback (most recent call last):", '{"push": ["KERN_SUCCESS"]}'):
+        with pytest.raises(LabError, match="cannot read"):
+            panel.Wobble(said, config.SHORT_OF_THE_EDGE_ROWS, "wobbling")
+    empty = panel.Wobble('{"track": []}', config.SHORT_OF_THE_EDGE_ROWS, "wobbling")
+    with pytest.raises(LabError, match="no position"):
+        empty.expect_it_stayed_in_its_rows()
 
 
 # --- The two places the closing checks need -------------------------------------------

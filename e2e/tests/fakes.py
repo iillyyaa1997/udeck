@@ -5,9 +5,11 @@ failing is not the same as a command answering "no" — and a second copy of thi
 is how that difference gets lost in one place and never tested there.
 """
 
+import json
 import subprocess
 from pathlib import Path
 
+from udeck_e2e import config
 from udeck_e2e.builds import SigningKey
 from udeck_e2e.errors import LabError
 from udeck_e2e.guest import parse_boot_time
@@ -189,3 +191,24 @@ class Lab:
         directory = self._tmp / "builds" / for_check
         directory.mkdir(parents=True, exist_ok=True)
         return Builder(directory)
+
+
+def wobble_output(rows, steps=None, pace=None, start_x=None, sideways=None):
+    """What the guest's push script prints after a wobble that went where it was sent.
+
+    Up to the upper row on every even report and back to the lower one on every
+    odd one, sliding right by the lab's step, one reading per report and the time
+    since the push began — the shape `push-pointer.py` prints, so the lab's own
+    reading of it (`panel.Wobble`) is what the tests go through. Each argument
+    left out is the lab's own number.
+    """
+    upper, lower = rows
+    steps = config.WOBBLE_STEPS if steps is None else steps
+    pace = config.WOBBLE_PAUSE_SECONDS if pace is None else pace
+    start_x = config.WOBBLE_START_X if start_x is None else start_x
+    sideways = config.WOBBLE_SIDEWAYS if sideways is None else sideways
+    track = [
+        [start_x + (n + 1) * sideways, upper if n % 2 == 0 else lower, round((n + 1) * pace, 3)]
+        for n in range(steps)
+    ]
+    return json.dumps({"uid": 501, "euid": 501, "push": ["KERN_SUCCESS"], "track": track})

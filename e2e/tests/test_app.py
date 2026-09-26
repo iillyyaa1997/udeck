@@ -8,7 +8,7 @@ difference has to be in the fake, or nothing tests it.
 """
 
 import pytest
-from fakes import Dropped, Machine as FakeMachine
+from fakes import Dropped, Failed, Machine as FakeMachine
 
 from udeck_e2e import app, config
 from udeck_e2e.builds import Build
@@ -256,3 +256,45 @@ def test_waiting_for_a_setting_gives_up_quietly_rather_than_deciding_anything():
     assert saved["collapseOnAppSwitch"] is False
     # And it stops the moment the file says it, rather than waiting the window out.
     assert late.now < config.SETTINGS_SAVE_SECONDS
+
+
+# --- What Sparkle remembers ------------------------------------------------------------
+
+KEPT = "{\n    SUEnableAutomaticChecks = 1;\n    SULastCheckTime = \"2026-09-26 20:40:33 +0000\";\n}"
+
+
+def test_a_machine_that_keeps_nothing_for_uDeck_says_none():
+    """`defaults read` of a domain that is not there exits 1: that is an answer, and it is "nothing"."""
+    machine = FakeMachine({f"defaults read {app.BUNDLE_ID}": Failed(1, "Domain place.unicorns.udeck does not exist")})
+    assert app.preferences(machine, "reading") is None
+    assert app.preferences(FakeMachine({f"defaults read {app.BUNDLE_ID}": KEPT}), "reading") == KEPT
+
+
+def test_a_domain_that_was_deleted_reads_as_an_empty_dictionary_and_that_is_nothing_kept():
+    """What `defaults read` prints right after `defaults delete`, measured on a shared machine:
+    exit 0 and `{ }`. The lab refused a machine it had just cleaned while it read that as "kept"."""
+    machine = FakeMachine({f"defaults read {app.BUNDLE_ID}": "{\n}\n"})
+    assert app.preferences(machine, "reading") is None
+    app.forget_preferences(machine, "forgetting")
+
+
+def test_a_connection_that_dropped_is_never_nothing_kept():
+    """"Nothing kept" is what makes a check about the shipped plist mean anything; SSH failing is not it."""
+    with pytest.raises(LabError, match="SSH"):
+        app.preferences(FakeMachine({f"defaults read {app.BUNDLE_ID}": Dropped}), "reading")
+
+
+def test_forgetting_deletes_the_whole_domain_and_reads_it_back():
+    machine = FakeMachine({f"defaults read {app.BUNDLE_ID}": Failed(1, "Domain place.unicorns.udeck does not exist")})
+    app.forget_preferences(machine, "forgetting")
+    deleted = [i for i, c in enumerate(machine.ssh.commands) if f"defaults delete {app.BUNDLE_ID}" in c]
+    read = [i for i, c in enumerate(machine.ssh.commands) if f"defaults read {app.BUNDLE_ID}" in c]
+    assert deleted and read and deleted[0] < read[-1]
+
+
+def test_a_machine_that_keeps_them_after_the_delete_is_the_lab_unable_to_start_clean():
+    """Sparkle reads these before the plist, so a check that went on would be about this machine."""
+    machine = FakeMachine({f"defaults read {app.BUNDLE_ID}": KEPT})
+    with pytest.raises(LabError, match="still keeps preferences") as raised:
+        app.forget_preferences(machine, "forgetting")
+    assert "SULastCheckTime" in raised.value.reason

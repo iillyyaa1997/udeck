@@ -249,6 +249,130 @@ PINNED_TOLERANCE_PIXELS = 2
 # (-220939Z).
 INSIDE_THE_STRIP_Y = 5
 
+# --- Upward movement that never reaches the edge -------------------------------
+#
+# The push is movement made *while the pointer is pinned*, and the guard that
+# says so is two conditions in uDeck (`HoverGestureRecognizer.updatePushWindow`):
+# the pointer is pinned now, and it was pinned before this movement. Nothing the
+# lab did before asked about them. `panel.dwell` places the pointer and moves it no
+# further, `panel.push` moves it up only once it is against the edge, and the
+# control in the middle of the screen moves it up nowhere near the strip. A uDeck
+# that took *any* upward movement in the strip for a push was green on all three.
+#
+# So two more checks move the pointer up inside the strip, once where it cannot be
+# pinned and once where it is. The rows in between are few: rows 0 to 6 are in the
+# strip and rows 0 to 3 are pinned (see `INSIDE_THE_STRIP_Y`), which leaves rows
+# 4, 5 and 6. A pointer that only went up would be pinned within two rows, so
+# the movement rocks: up two rows, down two rows, up again — the two rows
+# either side of `INSIDE_THE_STRIP_Y`, which is why that row was the one with a
+# row to spare on each side. And it slides to the right while it rocks, because
+# uDeck restarts the dwell whenever the pointer slides: without that the dwell
+# would fire 0.06 s into the strip and the push path would never be asked. It is
+# a hand sweeping along the menu bar that is not quite level.
+#
+# **Why the pointer is not placed in the strip first**, which is what the first
+# attempt at this did: a pointer placed there from this Mac opens the panel by the
+# dwell before any command reaches the guest. Measured on 2026-09-26: placed over
+# VNC on row 5 and then moved up by push-pointer.py — one row, or to the edge and
+# pushing — 14 of 14 fired the dwell, 24 to 127 ms before the command that moves
+# it had even started (.build/e2e/20260926-185410Z, probe.literal-short and
+# probe.literal-to-the-edge). Whatever the movement then was, it met a panel that
+# was already open. So the wobble starts left of the strip and slides into it.
+#
+# The same run measured the rocking itself, six times in each place, with 50
+# reports of 3 pixels sideways and 5 ms apart: between rows 4 and 6 the dwell six
+# times of six, 177 to 196 ms after the last report (probe.sweep-short) —
+# `lateralApproachDwellDuration`, 0.18 s, which a slide asks for — and between
+# rows 0 and 2 the push six times of six (probe.sweep-at-the-edge). That pace did
+# not hold up. Repeated on one machine, the rocking at the edge opened the panel
+# by the push 2 times of 6, twice (.build/e2e/20260926-191139Z, -191601Z), and a
+# build of uDeck that logged every movement it heard said why
+# (.build/e2e/20260926-192056Z, -192517Z; the logging was never committed).
+# uDeck reads upward movement as `NSEvent.deltaY` times a scale it learns from
+# movements that are free to happen (`PointerDeltaCalibration`), and in this
+# guest the lab's own moves teach it anything from one point per unit down to
+# half: a VNC jump of 718 rows came back as a deltaY of 717 one time and 1434 or
+# 1436 another, and each of the throw's 60-pixel reports as 120. The rocking's
+# 2-pixel reports come back as 2, or as two events of 1. So the same rocking
+# counts for anything from its whole height down to half of it: after the throw
+# the scale was 0.53 and each upward report counted 1.07 points, and at 7 ms a
+# report that fell short of the threshold inside the window — the push fired 2
+# times of 6 in that run (-192056Z, probe.edge-thrown).
+#
+# Hence the numbers below: twice the pace, the throw's own, with a smaller step
+# sideways so the wobble still ends inside the strip. Measured on a build as it
+# ships, six times in each place, each on a machine of its own
+# (.build/e2e/20260926-192908Z):
+# between rows 4 and 6 the dwell six times of six, with 82 to 88 points of upward
+# travel inside the strip within one push window; between rows 0 and 2 the push
+# six times of six. 100 reports took 0.31 to 0.36 s.
+#
+# **At the edge the track is short, and that is not the wobble failing.** Once
+# the push opens the panel the pointer does not always keep following the
+# reports: in three of the six trials of the build that logged every movement,
+# uDeck heard nothing for 0.12 to 0.22 s after the panel opened while the script
+# was still posting (-192517Z), and the travel the script read back at the edge
+# was 44 to 54 points (-192908Z) where short of it, with no panel in the way, it
+# was 82 to 88. So how much the wobble carried is asked only of a wobble that
+# was *not* taken for a push — which is the one case where it matters.
+
+# uDeck's own push threshold and the window it has to be reached in
+# (`edgePushDistance`, `edgePushWindow`). The lab reads its own wobble against
+# them: upward movement that could not have reached the threshold even if uDeck
+# had counted it proves nothing by not being counted. The lab's tests hold both
+# against GestureTuning.swift.
+EDGE_PUSH_DISTANCE = 24.0
+EDGE_PUSH_WINDOW_SECONDS = 0.25
+
+# How many times `EDGE_PUSH_DISTANCE` the wobble's upward travel inside the strip
+# has to reach within one window before "it was not a push" means anything. Two,
+# because uDeck may read the lab's movement at half a point per unit (above): the
+# least it can make of twice the threshold is the threshold.
+WOBBLE_MARGIN = 2
+
+# The strip across, in whole columns of this 1× screen. uDeck centres an anchor
+# `virtualAnchorWidth` (185) wide on a screen with no notch and grows it by
+# `stripSideMargin` (24) on each side (`PanelGeometry.triggerStrip`): x 1163.5 up
+# to, not including, 1396.5, and closed on the left (`containsPointer`). Held
+# against both numbers by the lab's tests.
+STRIP_COLUMNS = (1164, 1396)
+
+# The two rows the wobble rocks between, as (upper, lower). Short of the edge:
+# either side of `INSIDE_THE_STRIP_Y`, inside the strip and short of pinned. At the
+# edge: the top row and the lowest row the push check already calls pinned
+# (`PINNED_TOLERANCE_PIXELS`), both inside what uDeck counts as pinned. The same
+# height, so that the two checks make one movement in two places.
+SHORT_OF_THE_EDGE_ROWS = (INSIDE_THE_STRIP_Y - 1, INSIDE_THE_STRIP_Y + 1)
+AT_THE_EDGE_ROWS = (0, PINNED_TOLERANCE_PIXELS)
+
+# Up by the height of the band, then back down by it. Negative is upward, as for
+# the push.
+WOBBLE_DELTA = -float(SHORT_OF_THE_EDGE_ROWS[1] - SHORT_OF_THE_EDGE_ROWS[0])
+
+# Pixels to the right on every report. uDeck restarts the dwell when the pointer
+# slides at `dwellHorizontalSpeedLimit` (250 points a second) or has slid
+# `dwellHorizontalTolerance` (12 points) since the last restart. Two pixels every
+# 2 ms is a thousand a second, and even at a pace too slow for that it is twelve
+# points every six reports — about 20 ms at the 3.1 to 3.6 ms a report took in
+# the measurement, well inside the 0.06 s dwell. Small enough that a hundred of
+# them stay inside the strip.
+WOBBLE_SIDEWAYS = 2
+
+# Reports in the wobble, and the pause after each: the throw's own pace, the
+# fastest the lab already posts at. At that pace the reports inside the strip
+# would carry `EDGE_PUSH_DISTANCE` well past `WOBBLE_MARGIN` times over within one
+# window if every one of them took 2 ms; they take longer, and the check counts
+# the travel the wobble actually made rather than trusting this.
+WOBBLE_STEPS = 100
+WOBBLE_PAUSE_SECONDS = THROW_PAUSE_SECONDS
+
+# Where the wobble starts across: twelve of its reports left of the strip,
+# x 1140. Outside it, for the reason above. Twelve is not a threshold of
+# anything — any start left of the strip would do — it is the column every
+# measurement here started from, it leaves room for a VNC placement a pixel
+# off, and it leaves 89 of the 100 reports inside the strip.
+WOBBLE_START_X = STRIP_COLUMNS[0] - 12 * WOBBLE_SIDEWAYS
+
 # --- The panel closing ----------------------------------------------------------
 #
 # Where the pointer goes, and where a click lands, when a check needs to be past

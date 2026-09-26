@@ -1,7 +1,18 @@
-"""Does uDeck update itself?
+"""Does uDeck update itself — and does it look for an update only when it may?
 
 Two checks, and the second is what makes the first worth trusting: an update
 signed with the run's key installs, and one signed with another key does not.
+
+And two more about the question that comes before any of that, which is when
+uDeck asks its feed at all. **uDeck ships with automatic checks off**
+(`SUEnableAutomaticChecks` is false in Sources/uDeck/Support/Info.plist): it
+otherwise makes no network connection of any kind, so the first one it ever
+makes should be one the operator chose (commit e00a79a, and the reason is
+written again on `SparkleUpdater` and `UpdateChecking.checksAutomatically`).
+One check holds uDeck to that, and the other holds the switch in the About pane
+to what it says — once the operator turns it on, uDeck looks by itself. Both
+are judged on the guest's own access log, which is the traffic and not a
+sentence uDeck writes about itself.
 
 Everything is real — a release build of this checkout, Sparkle, an appcast served
 inside the machine — and nothing is asked of uDeck that a person could not do:
@@ -51,6 +62,41 @@ REFUSAL_SECONDS = 90
 # `updatesFailed` in Sources/UDeckCore/Localization/English.swift.
 UP_TO_DATE = "is up to date"
 DID_NOT_FINISH = "The check did not finish"
+
+# The About pane's switch for automatic checks, by the identifier `AboutSection`
+# gives it (Sources/UDeckKit/Views/SettingsView.swift, held against that file by
+# the lab's own tests), and what it reads off: the accessibility API gives a
+# checkbox's value as "0" or "1" — measured on this switch on 2026-09-26, an
+# `AXCheckBox` reading "0" on a machine nobody had configured.
+AUTOMATIC = "updates.automatic"
+SWITCH_OFF = "0"
+
+# How long the shipped uDeck is listened to after it starts. It is how long a
+# uDeck that *does* look takes to ask, with room: with automatic checks forced on
+# in the guest's preferences, six launches asked the feed 1.3 to 2.9 s after
+# `open -a` was issued (measured 2026-09-26, .build/e2e/20260926-203904Z). Twenty
+# seconds is about seven times the slowest — room for a guest sharing the Mac
+# with the next check's machine under --jobs 2 — and the whole cost of the check
+# is still the build. Listening longer would not reach anything Sparkle does:
+# with automatic checks off it schedules nothing at all.
+QUIET_SECONDS = 20
+
+# From the click on the switch to the feed hearing uDeck. Sparkle resets its cycle
+# one second after the setting changes (`resetUpdateCycleAfterDelay`, SPUUpdaterCycle.m),
+# and measured, the guest's clock read 20:45:30.09 just before the click and the
+# feed logged uDeck at 20:45:31 (same run). Fifteen seconds is that, several
+# times over, with the same room for a busy guest.
+SWITCHED_ON_SECONDS = 15
+
+# From "Check now" to the feed hearing uDeck — the witness that a quiet uDeck
+# could have asked. Measured 3.3 to 4.3 s from the lab starting to look for the
+# button, the walk that finds it included (same run); here it is counted from the
+# click, so it is shorter, and twenty seconds is room and nothing else.
+ASKED_SECONDS = 20
+
+# How often the feed's log is read while listening: the log's own clock counts
+# in whole seconds, so reading it more often than that would learn nothing more.
+LISTEN_EVERY_SECONDS = 1
 
 
 def check_sparkle(machine, check_dir, lab):
@@ -164,7 +210,264 @@ def check_wrong_key(machine, check_dir, lab):
         feed.stop()
 
 
-# --- What both checks do ----------------------------------------------------------
+def check_it_does_not_look_by_itself(machine, check_dir, lab):
+    """uDeck as it ships does not ask its feed for anything until somebody asks it to.
+
+    **The oracle is the feed, not uDeck.** The guest's own server writes a line
+    for every request it answers, and the lab marks its own (`updates.LAB_PROBE`),
+    so a request for the appcast that is not the lab's is uDeck's — the address is
+    baked into the one application on the machine and served on the guest's
+    loopback. What uDeck says on its pane is a sentence about itself; this is the
+    traffic.
+
+    **How long it watches is how long uDeck takes when it does look**, and not a
+    round number. Sparkle schedules nothing at all while automatic checks are off
+    (`scheduleNextUpdateCheck…` returns at once — SPUUpdater.m at the revision in
+    Package.resolved), and while they are on, a uDeck that has never looked is
+    overdue and looks straight after launch. `QUIET_SECONDS` is that delay, as
+    measured with automatic checks forced on in the guest's preferences, with
+    room for a slow machine — so the failure this check exists for, a build that
+    ships with automatic checks on, shows up well inside it. What it does not
+    reach is a check something else in uDeck might start later than that; today
+    the only caller of `checkForUpdates` is the "Check now" button
+    (`SparkleUpdater.checkNow`, called from `AboutSection` alone).
+
+    **Nothing heard is worth something only from a uDeck that asks when asked.**
+    A uDeck that cannot reach its feed — a wrong address, a transport it may not
+    use, an updater that failed to start — is exactly as quiet as one that
+    chose not to ask. So the check ends by pressing "Check now" and requiring the
+    feed to hear it; without that the silence is the lab's to explain, and says
+    "could not check" (the same rule `_prove_it_fetched_and_refused` keeps, Q37).
+
+    **What it is red for**, measured on 2026-09-26 with `SUEnableAutomaticChecks`
+    set to true in the plist: red within 10 s of starting uDeck, the feed having
+    heard it at 21:06:01 (.build/e2e/20260926-210440Z). And with "Check now"
+    no longer calling Sparkle, "could not check" rather than green
+    (.build/e2e/20260926-211336Z) — the witness doing its job.
+
+    **The machine forgets what it remembered first** (`app.forget_preferences`):
+    Sparkle reads whether to look, and when it last did, out of the preferences
+    before it reads the plist, so a check a neighbouring check left a switch or a
+    date behind for would be about that machine and not about what uDeck ships.
+    """
+    feed = updates.Feed(machine, lab.note)
+    try:
+        _a_uDeck_that_never_looked(machine, check_dir, lab, feed)
+        began = machine.clock()
+        app.launch(machine)
+        machine.screenshot(check_dir, "uDeck running")
+        asked = _uDeck_asks(machine, feed, [], QUIET_SECONDS, "listening to the feed while uDeck runs as it ships")
+        expect(
+            not asked,
+            f"uDeck asked its feed for an update by itself within {machine.clock() - began:.0f}s of starting, with "
+            f"automatic checks as it ships them — off, until the operator turns them on: {asked[:1]}",
+        )
+        lab.note(f"   uDeck ran {machine.clock() - began:.0f}s and its feed heard nothing from it")
+        _prove_it_asks_when_asked(machine, check_dir, feed, lab)
+    finally:
+        feed.collect_log(check_dir)
+        feed.stop()
+
+
+def check_switched_on_it_looks_by_itself(machine, check_dir, lab):
+    """Once the operator turns automatic checks on, uDeck asks its feed without being asked again.
+
+    The switch is the one on the About pane (`AUTOMATIC`), turned on with the
+    machine's pointer, and nothing else is pressed afterwards: "Check now" is
+    exactly what this check must not touch, because a request it caused would be
+    indistinguishable in the log.
+
+    **The feed is listened to first and the switch read back after**, the other
+    way round from `ui.press`. Reading a control back is a walk of the whole
+    window: measured on 2026-09-26 (.build/e2e/20260926-203904Z), `ui.press` on
+    this switch returned 38 s after the guest's clock read 20:45:30.09 just before
+    the click, and the guest's server had logged the request at 20:45:31 — so a
+    wait counted from the read-back would be counting the walk. The walk is made
+    only when the feed heard nothing, and then it decides whose that silence is:
+    a switch still reading off is a click that did not land, which is the lab's;
+    a switch reading on is uDeck's.
+
+    **Why it answers in seconds and not in a day.** Sparkle looks by itself when
+    `SUScheduledCheckInterval` (86400 in the plist; never less than an hour, which
+    is Sparkle's own floor) has passed since `SULastCheckTime` — and a uDeck that
+    has never looked has no such date, so the moment it may look it is overdue,
+    and Sparkle looks at once (`scheduleNextUpdateCheckFiringImmediately:` with no
+    last check falls back to `distantPast`). Turning the switch on is that moment:
+    the setter posts `SUUpdateAutomaticCheckSettingChangedNotification`, and the
+    updater resets its cycle one second later (`resetUpdateCycleAfterDelay`). So
+    the check starts from a machine that has forgotten any previous check
+    (`app.forget_preferences`), and `SWITCHED_ON_SECONDS` is the measured delay
+    with room for a slow machine.
+
+    **What it is red for**: a switch that is not wired to the updater — a toggle
+    that moves and tells Sparkle nothing, or a `checksAutomatically` that does not
+    set `automaticallyChecksForUpdates`. Both measured red on 2026-09-26, with the
+    switch reading on and the feed silent for the whole wait
+    (.build/e2e/20260926-211106Z and 20260926-210840Z). What it does not reach is
+    the next check a day later; that is Sparkle's own timer and not something a
+    lab can wait for (README, "Looking for an update by itself").
+
+    **A request before the switch is touched** leaves this check nothing to ask:
+    it is `updates.it-does-not-look-by-itself`'s failure, and here it would have
+    set the last-check date that stops the switch from causing another. So it is
+    "could not check", with the line.
+    """
+    feed = updates.Feed(machine, lab.note)
+    try:
+        _a_uDeck_that_never_looked(machine, check_dir, lab, feed)
+        app.launch(machine)
+        _open_the_about_pane(machine, check_dir)
+        switch = _the_switch_as_it_ships(machine, check_dir, lab)
+
+        step = "reading the feed's log before the switch is turned on"
+        before = updates.asked_for_the_appcast(feed.read_log(step))
+        if before:
+            raise LabError(
+                step,
+                f"uDeck had asked its feed before automatic checks were turned on, so there is nothing "
+                f"left for the switch to start — that is updates.it-does-not-look-by-itself's to judge: "
+                f"{before[:1]}",
+            )
+        began = machine.clock()
+        machine.click(*switch.middle, f"turning automatic checks on: {switch}")
+        asked = _uDeck_asks(machine, feed, before, SWITCHED_ON_SECONDS, "listening to the feed after the switch")
+        took = machine.clock() - began
+        _evidence(machine, check_dir, "automatic checks turned on", lab)
+        said = _what_the_pane_says_or_why_not(machine)
+        if not asked:
+            _expect_the_click_landed(machine, switch)
+
+        expect(
+            bool(asked),
+            f"automatic checks were turned on in uDeck's own window and its feed heard nothing from uDeck "
+            f"in {SWITCHED_ON_SECONDS:.0f}s. A uDeck that has never looked is overdue the moment it may "
+            f"look, so the switch did not reach the updater; the pane says: {said}",
+        )
+        lab.note(f"   uDeck asked its feed {took:.0f}s after automatic checks were turned on: {asked[0].strip()}")
+    finally:
+        feed.collect_log(check_dir)
+        feed.stop()
+
+
+# --- What the two about looking by itself do ---------------------------------------
+
+
+def _a_uDeck_that_never_looked(machine, check_dir, lab, feed):
+    """One lab build installed, nothing remembered about updates, and a feed that offers nothing.
+
+    One build and not two: both checks end at the request, and what the feed
+    would have offered is not part of either question (`updates.empty_appcast`).
+
+    The preferences are read before they are forgotten, and said when there were
+    any — a machine another check used is not a fault, but what it remembered is
+    worth a line in the report.
+    """
+    builder = lab.builder(feed.url, check_dir.name)
+    installed = builder.build(*FIRST)
+    app.install(machine, installed.zip, lab.note)
+    step = "preparing the machine for a check about looking by itself"
+    there = app.installed_version(machine)
+    if there != FIRST:
+        raise LabError(step, f"the lab installed {FIRST}, but the machine has {there}")
+
+    kept = app.preferences(machine, step)
+    if kept is not None:
+        lab.note(
+            f"   macOS kept preferences for uDeck from before this check, taking them away: "
+            f"{' '.join(kept.split())[:200]}"
+        )
+        app.forget_preferences(machine, step)
+
+    appcast = check_dir / updates.APPCAST
+    appcast.write_text(updates.empty_appcast())
+    feed.serve(appcast)
+
+
+def _uDeck_asks(machine, feed, before, seconds, step):
+    """uDeck's requests for the appcast beyond `before` — as soon as there is one, or none after `seconds`.
+
+    Read as it goes rather than once at the end: the check that expects silence
+    can say when the silence broke, and the one that expects a request stops
+    waiting when it comes. The log only grows, so what is new is what follows the
+    requests already seen.
+    """
+    deadline = machine.clock() + seconds
+    while True:
+        asked = updates.asked_for_the_appcast(feed.read_log(step))[len(before):]
+        if asked or machine.clock() >= deadline:
+            return asked
+        machine.sleep(LISTEN_EVERY_SECONDS)
+
+
+def _prove_it_asks_when_asked(machine, check_dir, feed, lab):
+    """The witness for the silence: "Check now" pressed, and the feed hearing it.
+
+    Raised as the lab's when it does not: a uDeck that cannot reach its feed is
+    quiet whatever it ships, so the silence before it proves nothing — and whether
+    "Check now" works at all is `updates.sparkle`'s to judge, not this check's.
+    """
+    step = "asking uDeck to look, to show the quiet was its own"
+    before = updates.asked_for_the_appcast(feed.read_log(step))
+    _open_the_about_pane(machine, check_dir)
+    ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
+    asked = _uDeck_asks(machine, feed, before, ASKED_SECONDS, step)
+    if not asked:
+        raise LabError(
+            step,
+            f"uDeck was asked to look for an update and its feed heard nothing from it in "
+            f"{ASKED_SECONDS:.0f}s, so the quiet before proves nothing — a uDeck that cannot reach its "
+            f"feed is quiet whatever it ships; the pane says: {_what_the_pane_says_or_why_not(machine)}",
+        )
+    lab.note(f"   and asked when it was asked to: {asked[0].strip()}")
+
+
+def _the_switch_as_it_ships(machine, check_dir, lab):
+    """The About pane's switch for automatic checks, reading off — or the lab says why not.
+
+    Found by its identifier in a walk of the window, because `ui.find` answers
+    where a control is and not what it reads, and what it reads is the precondition:
+    a switch already on would be turned *off* by the press. That is a machine or
+    a build this check cannot ask its question of — and whether uDeck ships it on
+    is `updates.it-does-not-look-by-itself`'s to say — so it is the lab's.
+    """
+    step = "finding the switch for automatic checks"
+    dump = ui.tree(machine, step)
+    try:
+        (check_dir / "about-before-the-switch.txt").write_text(dump)
+    except OSError as error:
+        lab.note(f"   the About pane's walk could not be kept: {error}")
+    found = [control for control in ui.controls(dump, step) if control.identifier == AUTOMATIC]
+    if len(found) != 1:
+        raise LabError(step, f"{len(found)} controls on the About pane carry '{AUTOMATIC}', where there is one")
+    switch = found[0]
+    if switch.value != SWITCH_OFF:
+        raise LabError(
+            step,
+            f"the switch reads {switch.value!r} before the lab touched it, where a uDeck that has never been "
+            f"configured reads {SWITCH_OFF!r}: pressing it would turn automatic checks off, not on",
+        )
+    return switch
+
+
+def _expect_the_click_landed(machine, switch):
+    """The switch reads on after the click — or the silence that followed is the lab's.
+
+    Asked only when the feed heard nothing, because only then does it decide
+    anything: a click that missed leaves the switch off and uDeck with nothing to
+    do, and "uDeck did not look" would be a sentence about a pointer.
+    """
+    step = "reading the switch back after the click"
+    after = ui.where_it_was(ui.tree(machine, step), switch, step)
+    if after is None or after.value == switch.value:
+        raise LabError(
+            step,
+            f"the lab clicked {switch.middle} for {switch} and it "
+            + (f"still reads {after.value!r}: the click did not land on it" if after is not None
+               else "is no longer there: the pane moved under the click"),
+        )
+
+
+# --- What the update and its control do --------------------------------------------
 
 
 def _prepare(machine, check_dir, lab, feed, signed_by):

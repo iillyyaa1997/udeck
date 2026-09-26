@@ -39,6 +39,14 @@ places, a place *on* the panel and a place past it, and both have to know
 roughly how big the panel is: measurements kept in `config` the same way, and
 read back the same way.
 
+One movement is neither a place nor a push: the wobble, which slides the pointer
+along the strip rocking between two rows, once short of the rows uDeck counts as
+pinned and once on them (`wobble_along_the_strip`). It is how the lab asks about
+the line between the two paths — upward movement that never reaches the edge is
+not a push — and its path is read back report by report, because a verdict about
+it means something only if the rocking went where it was sent and carried enough
+to have been a push (`Wobble`).
+
 And then the panel as a scene, because more than one group of checks needs to
 make it. Showing a peek, holding it open with a click, taking the pointer past
 it, interrupting it with another application, reading uDeck's log in steps while
@@ -53,6 +61,7 @@ check that says it.
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 from collections.abc import Callable
@@ -410,6 +419,8 @@ def push_upward(
     steps: int = config.PUSH_STEPS,
     delta: float = config.PUSH_DELTA,
     pause: float = config.PUSH_PAUSE_SECONDS,
+    sideways: int = 0,
+    wobble: bool = False,
 ) -> str:
     """Push from inside the guest: relative movement, reported as a device reports it.
 
@@ -430,16 +441,169 @@ def push_upward(
 
     `steps × |delta|` has to clear uDeck's threshold inside its window — both are
     in `GestureTuning`, and the lab's numbers are chosen with room.
+
+    `sideways` and `wobble` are for the one movement that is not straight up:
+    the pointer rocking between two rows while it slides along the strip
+    (`wobble_along_the_strip`). Both off, this is the push as it always was.
     """
     machine.ssh.copy_in(PUSH_SCRIPT, GUEST_PUSH, step)
     throw_cap = config.THROW_CAP if throw else 0
     done = machine.ssh.run(
         f"/usr/bin/python3 {shlex.quote(GUEST_PUSH)} "
         f"{throw_cap} {config.THROW_DELTA} {config.THROW_PAUSE_SECONDS} {config.PINNED_TOLERANCE_PIXELS} "
-        f"{steps} {delta} {pause}",
+        f"{steps} {delta} {pause} {sideways} {int(wobble)}",
         step,
     )
     return done.stdout.strip()
+
+
+class Wobble:
+    """Where the wobble took the pointer, read back from the guest, and what that is worth.
+
+    The path is the measurement here, not a detail of it. A check that says "this
+    was not a push" is only saying something if the movement was one uDeck would
+    have counted as a push had the pointer been pinned — so the lab reads back,
+    report by report, which rows the pointer rocked between and how much upward
+    travel it made inside the strip, and refuses to call anything a verdict when
+    either is wrong. That is the same rule as the push at the edge, which reads
+    back that the pointer really was against the edge before it asks uDeck
+    anything.
+
+    Two questions are asked of every wobble, before uDeck is: whether it stayed in
+    its rows, and whether it came to rest in the strip. The third — whether it
+    carried enough to have been a push — is asked by the checks, and only of a
+    wobble that was not taken for one: once the push opens the panel the pointer
+    does not always keep following the reports (`config.WOBBLE_MARGIN`'s
+    measurement), so the track of a wobble that *was* taken for a push can be
+    short without that meaning anything.
+    """
+
+    def __init__(self, said: str, rows: tuple[int, int], step: str) -> None:
+        try:
+            track = json.loads(said)["track"]
+            self.track = [(round(float(x)), round(float(y)), float(t)) for x, y, t in track]
+        except (ValueError, KeyError, TypeError):
+            raise LabError(step, f"the guest's push script said something the lab cannot read: {said!r}") from None
+        self.rows = rows
+        self.step = step
+
+    @staticmethod
+    def in_the_strip(x: int) -> bool:
+        """Across, which is the only way the wobble can leave the strip: its rows are chosen inside it."""
+        return config.STRIP_COLUMNS[0] <= x <= config.STRIP_COLUMNS[1]
+
+    def rows_visited(self) -> list[int]:
+        return sorted({y for _, y, _ in self.track})
+
+    def reports_in_the_strip(self) -> int:
+        return sum(1 for x, _, _ in self.track if self.in_the_strip(x))
+
+    def upward_in_the_strip(self) -> float:
+        """The most upward travel made inside the strip within one of uDeck's push windows.
+
+        What uDeck would have summed if it had counted every upward report, in
+        points on the screen: a report counts only when the pointer was inside the
+        strip both before and after it — leaving the strip ends uDeck's visit and
+        forgets what was summed — and the window slides the way uDeck's does
+        (`trimPushWindow`: an entry exactly one window old is still in it).
+        """
+        rises = [
+            (t, before - after)
+            for (x0, before, _), (x1, after, t) in zip(self.track, self.track[1:])
+            if self.in_the_strip(x0) and self.in_the_strip(x1) and after < before
+        ]
+        best = total = 0.0
+        start = 0
+        for t, rise in rises:
+            total += rise
+            while t - rises[start][0] > config.EDGE_PUSH_WINDOW_SECONDS:
+                total -= rises[start][1]
+                start += 1
+            best = max(best, total)
+        return best
+
+    def expect_it_stayed_in_its_rows(self) -> None:
+        """Short of the edge, a row above the band is pinned and a row below it is
+        out of the strip; at the edge, a row below it is past what the lab itself
+        calls pinned. Either way the verdict would be about another movement."""
+        upper, lower = self.rows
+        if not self.track:
+            raise LabError(self.step, "the guest's push script read no position back, so where the wobble went is unknown")
+        strays = [y for y in self.rows_visited() if not upper <= y <= lower]
+        if strays:
+            raise LabError(
+                self.step,
+                f"the wobble reached rows {strays}, outside rows {upper} to {lower} it is meant to rock between: "
+                f"{self.rows_visited()}",
+            )
+
+    def expect_it_came_to_rest_in_the_strip(self) -> None:
+        """Where the panel is owed a reveal, one way or the other, once the pointer stops."""
+        last_x = self.track[-1][0]
+        if not self.in_the_strip(last_x):
+            raise LabError(
+                self.step,
+                f"the wobble stopped at x {last_x}, outside the strip's columns {config.STRIP_COLUMNS}, "
+                "so it did not come to rest where the panel opens",
+            )
+
+    def expect_it_could_have_been_a_push(self) -> None:
+        """Raise, as the lab's failure, when the wobble carried too little to have been a push.
+
+        `config.WOBBLE_MARGIN` times uDeck's threshold, within its window, because
+        uDeck may read this movement at half a point per unit. A movement that
+        could not have been a push proves nothing by not being one — and at the
+        edge, a movement that could not have been one is no verdict about a uDeck
+        that did not take it for one.
+        """
+        upward = self.upward_in_the_strip()
+        needed = config.WOBBLE_MARGIN * config.EDGE_PUSH_DISTANCE
+        if upward < needed:
+            raise LabError(
+                self.step,
+                f"the wobble made {upward:g} points of upward travel inside the strip within "
+                f"{config.EDGE_PUSH_WINDOW_SECONDS}s, short of the {needed:g} it needs to be sure of uDeck's "
+                f"{config.EDGE_PUSH_DISTANCE:g} — a movement that could not have been a push proves nothing by "
+                "not being one",
+            )
+
+    def summary(self) -> str:
+        return (
+            f"the wobble rocked between rows {self.rows_visited()}, {self.reports_in_the_strip()} of its "
+            f"{len(self.track)} reports inside the strip, with {self.upward_in_the_strip():g} points of upward "
+            f"travel there within {config.EDGE_PUSH_WINDOW_SECONDS}s"
+        )
+
+
+def wobble_along_the_strip(machine, step: str, rows: tuple[int, int]) -> Wobble:
+    """Slide along the strip rocking between `rows`, from inside the guest, and read back where it went.
+
+    Placed left of the strip first, from this Mac, on the lower of the two rows:
+    a pointer placed *in* the strip opens the panel by the dwell before any
+    command reaches the guest (`config`, measured 14 times out of 14), so the
+    wobble has to carry it in. Then one run of the script: up by the band, down
+    by it, two pixels to the right each time.
+
+    Whether it stayed in its rows and came to rest in the strip is the lab's to
+    answer, and it is answered here, before anyone reads what uDeck said about
+    it. Whether it carried enough to have been a push is the check's question
+    (`Wobble.expect_it_could_have_been_a_push`).
+    """
+    upper, lower = rows
+    machine.move_pointer(config.WOBBLE_START_X, lower, f"left of the strip, on row {lower}")
+    said = push_upward(
+        machine,
+        step,
+        steps=config.WOBBLE_STEPS,
+        delta=config.WOBBLE_DELTA,
+        pause=config.WOBBLE_PAUSE_SECONDS,
+        sideways=config.WOBBLE_SIDEWAYS,
+        wobble=True,
+    )
+    wobble = Wobble(said, rows, step)
+    wobble.expect_it_stayed_in_its_rows()
+    wobble.expect_it_came_to_rest_in_the_strip()
+    return wobble
 
 
 def press_the_chord(machine, key_code: int, step: str, modifiers: tuple[str, ...] = config.HOTKEY_MODIFIERS) -> None:

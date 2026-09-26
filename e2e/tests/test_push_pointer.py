@@ -61,6 +61,7 @@ class FakeKernel:
 
     def __init__(self, answers=None):
         self.posted = []
+        self.sideways = []
         self.answers = list(answers) if answers else None
         self.closed = False
 
@@ -89,8 +90,9 @@ def run(monkeypatch, capsys, argv, positions, answers=None):
     seen = iter(positions)
     last = [positions[-1] if positions else None]
 
-    def post(library, connect, delta):
+    def post(library, connect, delta, sideways=0):
         kernel.posted.append(delta)
+        kernel.sideways.append(sideways)
         return kernel.answers.pop(0) if kernel.answers else 0
 
     def where():
@@ -116,7 +118,7 @@ DESCENT = [(1280.0, y) for y in (660, 600, 540, 480, 420, 360, 300, 240, 180, 12
 def test_the_throw_stops_the_moment_the_pointer_is_pinned(monkeypatch, capsys):
     """The whole point. One report past the edge is already twice uDeck's push
     threshold, so a throw that overshoots fires the gesture it came to set up."""
-    code, said, kernel = run(monkeypatch, capsys, [30, -60, 0, 2, 5, -12, 0], DESCENT)
+    code, said, kernel = run(monkeypatch, capsys, [30, -60, 0, 2, 5, -12, 0, 0, 0], DESCENT)
     assert code == 0
     assert said["thrown"] == 12, "twelve reports of sixty reach the edge from the middle"
     assert said["pinned"] is True and said["at"] == [1280.0, 0.0]
@@ -127,7 +129,7 @@ def test_the_throw_stops_the_moment_the_pointer_is_pinned(monkeypatch, capsys):
 def test_the_cap_is_a_cap_and_running_out_of_it_is_said_rather_than_raised(monkeypatch, capsys):
     """Where the pointer got to is the measurement. The check reads the position
     back itself before it says anything about uDeck, so this only has to be honest."""
-    code, said, kernel = run(monkeypatch, capsys, [3, -60, 0, 2, 5, -12, 0], DESCENT)
+    code, said, kernel = run(monkeypatch, capsys, [3, -60, 0, 2, 5, -12, 0, 0, 0], DESCENT)
     assert code == 0
     assert said["thrown"] == 3
     assert said["pinned"] is False
@@ -139,7 +141,7 @@ def test_the_cap_is_a_cap_and_running_out_of_it_is_said_rather_than_raised(monke
 def test_the_control_takes_no_throw_at_all(monkeypatch, capsys):
     """A throw would carry the pointer in the middle of the screen to the very
     edge — the one place its verdict would stop being about anything."""
-    code, said, kernel = run(monkeypatch, capsys, [0, -60, 0, 2, 5, -12, 0], [(1280.0, 720.0)])
+    code, said, kernel = run(monkeypatch, capsys, [0, -60, 0, 2, 5, -12, 0, 0, 0], [(1280.0, 720.0)])
     assert code == 0
     assert said["thrown"] == 0 and said["throw"] == [] and said["pinned"] is None
     assert kernel.posted == [-12] * 5
@@ -150,7 +152,7 @@ def test_a_refused_report_comes_back_as_a_non_zero_exit(monkeypatch, capsys):
     standing between a kernel that refused and a check that reports about uDeck."""
     refusal = -536870207  # kIOReturnNotPrivileged
     answers = [0] * 12 + [refusal] * 5
-    code, said, _ = run(monkeypatch, capsys, [30, -60, 0, 2, 5, -12, 0], DESCENT, answers)
+    code, said, _ = run(monkeypatch, capsys, [30, -60, 0, 2, 5, -12, 0, 0, 0], DESCENT, answers)
     assert code == 1
     assert said["push"] == ["kIOReturnNotPrivileged"]
     assert said["throw"] == ["KERN_SUCCESS"]
@@ -163,7 +165,7 @@ def test_running_as_root_is_said_out_loud(monkeypatch, capsys):
         pass
 
     monkeypatch.setattr(push_pointer.ctypes, "CDLL", _system_faking_root(push_pointer))
-    code, said, _ = run(monkeypatch, capsys, [0, -60, 0, 2, 1, -12, 0], [(1280.0, 720.0)])
+    code, said, _ = run(monkeypatch, capsys, [0, -60, 0, 2, 1, -12, 0, 0, 0], [(1280.0, 720.0)])
     assert said["euid"] == 0
     assert "console session" in said["warning"]
 
@@ -190,8 +192,8 @@ def _system_faking_root(module):
 def test_the_arguments_are_counted_and_the_usage_line_is_the_real_one():
     assert push_pointer.main(["push-pointer.py", "1", "2", "3"]) == 2
     assert push_pointer.usage().startswith("push-pointer.py <throw-cap>")
-    # Seven arguments after the name, in the order the lab sends them.
-    assert push_pointer.usage().count("<") == 7
+    # Nine arguments after the name, in the order the lab sends them.
+    assert push_pointer.usage().count("<") == 9
 
 
 def test_a_delta_is_a_whole_number_of_points():
@@ -209,9 +211,59 @@ def test_the_kernels_answers_are_named_where_there_is_a_name():
     assert push_pointer.named(0xE0000999) == "0xe0000999"
 
 
-@pytest.mark.parametrize("count", [0, 1, 4, 6, 8, 9])
+@pytest.mark.parametrize("count", [0, 1, 4, 6, 7, 8, 10, 11])
 def test_the_wrong_number_of_arguments_never_posts_anything(count):
-    """Seven arguments after the name is the only count that runs. Everything else
+    """Nine arguments after the name is the only count that runs. Everything else
     must stop before the kernel — and the guard above proves it stopped, because a
-    call that got that far would raise instead of posting."""
+    call that got that far would raise instead of posting. Seven is in the list
+    on purpose: it is what the lab sent before the wobble, and a copy of the lab
+    that old must be told so rather than push with the two new ones missing."""
     assert push_pointer.main(["push-pointer.py", *["1"] * count]) == 2
+
+
+# --- The wobble ---------------------------------------------------------------------
+
+ROCKING = [(1140.0 + 3 * (n + 1), 4.0 if n % 2 == 0 else 6.0) for n in range(6)]
+
+
+def test_the_wobble_sends_every_other_report_back_down_and_slides_on_every_one(monkeypatch, capsys):
+    """Up by two rows, down by two, and three pixels to the right each time.
+
+    The pointer has two rows between the strip's lower edge and the rows uDeck
+    counts as pinned, so upward travel that adds up to anything inside them has to
+    come back down between the ups — and it has to slide while it does, or the
+    dwell fires in the middle of it and the push path is never asked.
+    """
+    code, said, kernel = run(monkeypatch, capsys, [0, -60, 0, 2, 6, -2, 0, 3, 1], ROCKING)
+    assert code == 0
+    assert kernel.posted == [-2, 2, -2, 2, -2, 2]
+    assert kernel.sideways == [3] * 6
+    assert said["thrown"] == 0, "the wobble is placed from outside and needs no throw"
+
+
+def test_without_the_wobble_every_report_goes_the_same_way_and_nothing_slides(monkeypatch, capsys):
+    """What the push at the edge and the control in the middle of the screen send,
+    which is what they sent before the wobble existed."""
+    code, said, kernel = run(monkeypatch, capsys, [0, -60, 0, 2, 5, -12, 0, 0, 0], [(1280.0, 720.0)])
+    assert code == 0
+    assert kernel.posted == [-12] * 5
+    assert kernel.sideways == [0] * 5
+
+
+def test_where_the_pointer_went_after_every_report_of_the_push_is_printed(monkeypatch, capsys):
+    """For the wobble the path is the measurement: which rows it rocked between,
+    and how much upward travel it made inside the strip in how long. So every
+    report of the push is followed by a reading of the pointer and the time since
+    the push began, and the throw before it is not in the track."""
+    # A clock that does not start at zero, so a time since anything other than the
+    # start of the push shows up as a different number.
+    ticks = iter(1 + float(n) / 100 for n in range(100))
+    monkeypatch.setattr(push_pointer.time, "monotonic", lambda: next(ticks))
+    code, said, _ = run(monkeypatch, capsys, [0, -60, 0, 2, 6, -2, 0, 3, 1], ROCKING)
+    assert code == 0
+    assert [entry[:2] for entry in said["track"]] == [list(at) for at in ROCKING]
+    # One clock reading when the push begins, then one per report.
+    assert [entry[2] for entry in said["track"]] == [0.01, 0.02, 0.03, 0.04, 0.05, 0.06]
+
+    thrown = run(monkeypatch, capsys, [30, -60, 0, 2, 5, -12, 0, 0, 0], DESCENT)[1]
+    assert len(thrown["track"]) == 5, "the throw is not part of the track, only the push after it"
