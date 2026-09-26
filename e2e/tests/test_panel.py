@@ -205,6 +205,37 @@ def test_the_window_starts_at_the_guests_own_clock():
     assert panel.fired_by(said) == ["dwell"]
 
 
+def test_the_window_holds_the_category_uDeck_says_it_could_not_save_in():
+    """`could not save the settings: …` is written through `DeckLog.plugins`, not
+    the panel's own logger, so a window on two categories cannot see it — and a
+    check reading that window cannot tell a uDeck that could not save the
+    operator's change from one that never tried."""
+    machine = Machine({"date ": "2026-09-18 18:20:00", "log show": ATTACHED})
+    log = panel.GestureLog(machine, note=lambda text: None)
+    log.kept = True
+    log.read(log.mark("noting the time"), "reading")
+    shown = [c for c in machine.ssh.commands if "log show" in c][0]
+    for name in panel.CATEGORIES:
+        assert f'category == "{name}"' in shown
+    assert panel.PLUGINS in panel.CATEGORIES
+
+
+def test_what_uDeck_says_when_the_store_refuses_it_is_read_out_of_that_window():
+    """The line itself, as `DeckModel.save` writes it. Its absence is an answer
+    too: a check that read it as "uDeck could not save" from silence would be
+    blaming a full disk for a control wired to nothing."""
+    refused = (
+        "18:20:00.001 Db uDeck[404] [place.unicorns.udeck:plugins] could not save the settings: "
+        'Error Domain=NSCocoaErrorDomain Code=513 "You don’t have permission"'
+    )
+    assert panel.could_not_save(ATTACHED + refused + "\n") == [refused]
+    assert panel.could_not_save(ATTACHED + FIRED) == []
+    # The same sentence is written about the layout and the plugin settings, and
+    # neither is the operator's settings file.
+    layout = refused.replace("could not save the settings", "could not save the layout")
+    assert panel.could_not_save(ATTACHED + layout) == []
+
+
 def test_a_log_that_cannot_be_read_is_the_labs_failure_and_not_uDecks(tmp_path):
     """The verdicts here are statements about what uDeck said, and an empty answer
     satisfies "it opened nothing" exactly as a real silence would. So the oracle
@@ -758,12 +789,27 @@ def test_the_new_shortcut_is_spelled_the_way_uDeck_will_write_it():
 
 def test_the_plain_switches_are_in_the_order_uDeck_lays_them_out():
     """Top to bottom on the Opening screen: the gesture, the shortcut, and the
-    two under "Also". The lab clicks the third of them by counting, so the order
-    is held against the file that draws them."""
+    two under "Also". The lab clicks the third of them by counting, and the row
+    it counts in reads the same in any order — all four are on — so *this* is
+    where the order is held, against the file that draws them.
+
+    Which makes what the regex does not read a hole rather than a detail: a
+    `Toggle` written some other way would be drawn on the screen, counted by the
+    lab and missed here, and the assertion below would still pass over a row
+    whose third switch is no longer this one. So every `Toggle` on the screen
+    has to be one this reads.
+    """
     view = _settings_view()
     opening = view[view.index("private struct OpeningSettings"):]
     opening = opening[: opening.index("\n    private func label(")]
     drawn = re.findall(r"isOn: (?:binding\(\\\.([\w.]+)\)|Binding\()", opening)
+    assert len(drawn) == opening.count("Toggle("), (
+        "a Toggle on the Opening screen is declared in a form this test does not read, "
+        "so the order of the row the lab counts in is no longer held by anything"
+    )
+    # One of them is the modifier row's, inside a `ForEach` over a binding of
+    # its own; the rest are the plain switches, in the order they are drawn.
+    assert [name for name in drawn if not name] == [""]
     assert tuple(name for name in drawn if name) == config.OPENING_SWITCHES
 
 
@@ -781,6 +827,44 @@ def test_the_plain_switches_all_read_on_at_rest():
         prefix = next(p for p in owners if name.startswith(p))
         default = owners[prefix][name.removeprefix(prefix)]
         assert default == ("true" if reads == "1" else "false"), f"{name} no longer ships {reads}"
+
+
+def _app_settings_source():
+    return (
+        Path(panel.__file__).resolve().parents[2] / "Sources" / "UDeckCore" / "Configuration" / "AppSettings.swift"
+    ).read_text()
+
+
+def test_the_settings_file_carries_every_key_uDeck_encodes():
+    """What the checks require to still be in the file after one control was clicked.
+
+    `AppSettings` has a hand-written decoder and a synthesised encoder, so what
+    it writes is exactly its stored properties — every one of them, every time.
+    The two optional ones say nothing until the operator chooses, so they are
+    the two a file may honestly be without.
+    """
+    stored = re.findall(r"^    public var (\w+): ([^\n{]+)$", _app_settings_source(), re.MULTILINE)
+    assert stored, "AppSettings no longer declares its properties this way"
+    written = tuple(name for name, kind in stored if not kind.strip().endswith("?"))
+    optional = [name for name, kind in stored if kind.strip().endswith("?")]
+    assert config.SETTINGS_KEYS == written
+    assert optional == ["textSize", "language"]
+
+
+def test_the_defaults_the_file_has_to_still_carry_are_uDecks_own():
+    """And a few of them read back, because a key holding something else is the
+    same loss as a key that is gone. None of them is a setting either check
+    changes, or the check would be requiring the file not to hold its own
+    change."""
+    defaults = _defaults("AppSettings.swift", "AppSettings")
+    for key, value in config.SETTINGS_AT_REST.items():
+        assert key in config.SETTINGS_KEYS
+        written = "true" if value is True else "false" if value is False else (
+            f".{value}" if isinstance(value, str) else str(value)
+        )
+        assert defaults[key] == written, f"{key} no longer ships {value!r}"
+    assert config.THE_SWITCH not in config.SETTINGS_AT_REST
+    assert "hotkey" not in config.SETTINGS_AT_REST
 
 
 def test_the_switch_the_lab_changes_is_one_of_them_and_is_uDecks_own_key():

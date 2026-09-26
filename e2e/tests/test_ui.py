@@ -29,12 +29,19 @@ class FakeGuest:
     The tree is told from the listing by `on attr(`, which only the walk asks
     for: both scripts define a handler called `describe`, so the listing's own
     discriminator would catch the walk as well and hand it the wrong answer.
+
+    The menu's titles and the guest's own language answer by what was asked
+    rather than by their turn in the queue: both are read only when the lab has
+    already failed, after any number of attempts, so a queued answer would
+    belong to whichever attempt happened to be last.
     """
 
-    def __init__(self, answers, listing="", tree=""):
+    def __init__(self, answers, listing="", tree="", menu="", language=""):
         self.answers = list(answers)
         self.listing = listing
         self.tree = tree
+        self.menu = menu
+        self.language = language
         self.scripts = []
 
     def run(self, command, step, seconds=None, check=True):
@@ -44,6 +51,10 @@ class FakeGuest:
             return done([], 0, tree[0] if isinstance(tree, list) else tree)
         if "on describe(" in command:
             return done([], 0, self.listing)
+        if "name of every menu item" in command:
+            return done([], 0, self.menu)
+        if "AppleLanguages" in command:
+            return done([], 0, self.language)
         answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
         if isinstance(answer, tuple):
             return done([], answer[0], answer[1], answer[2] if len(answer) > 2 else "")
@@ -51,9 +62,9 @@ class FakeGuest:
 
 
 class FakeMachine:
-    def __init__(self, *answers, listing="", tree=""):
+    def __init__(self, *answers, listing="", tree="", menu="", language=""):
         self.name = "udeck-e2e-probe"
-        self.ssh = FakeGuest(answers, listing, tree)
+        self.ssh = FakeGuest(answers, listing, tree, menu, language)
         self.clicks = []
         self._clock = Clock()
 
@@ -167,6 +178,37 @@ def test_a_settings_window_that_never_opens_is_a_lab_problem():
     assert machine._clock.now >= 5
 
 
+def test_a_guest_with_no_such_menu_item_says_which_language_it_is_in():
+    """The one way into these screens is a *translated* title.
+
+    Everything else in `ui` is built on not trusting a translated name, and this
+    is the exception that has no alternative: the menu item carries no
+    identifier. So on a guest that is not in English both settings checks end
+    here, and what a person reads has to be that rather than a shrug — the
+    language the guest answers with, and the titles it does offer.
+    """
+    machine = FakeMachine(
+        (1, "", "execution error: System Events got an error: Can't get menu item \"Settings…\". (-1719)"),
+        menu="О приложении uDeck, Настройки…, Завершить uDeck",
+        language="(ru,en)",
+    )
+    with pytest.raises(LabError) as raised:
+        ui.open_settings_and_wait(machine, "opening uDeck's settings", seconds=5)
+    reason = raised.value.reason
+    assert "'Settings…'" in reason and "translated" in reason
+    assert "(ru,en)" in reason and "Настройки…" in reason
+
+
+def test_a_guest_that_will_not_say_which_language_it_is_in_still_gives_a_reason():
+    """Both of those are evidence, and evidence may not raise over a reason."""
+    machine = FakeMachine("opened", "Something Else")
+    machine.ssh.menu = ""
+    with pytest.raises(LabError) as raised:
+        ui.open_settings_and_wait(machine, "opening uDeck's settings", seconds=5)
+    assert "the guest said nothing" in raised.value.reason
+    assert "offers nothing" in raised.value.reason
+
+
 # --- Controls that have no name -----------------------------------------------------
 #
 # The Opening screen carries no accessibility identifier on any control, so the
@@ -211,8 +253,30 @@ def test_the_walk_reads_every_attribute_a_click_at_an_unnamed_control_needs():
     # The identifiers that do exist are read too, so the sidebar can be told
     # from the pane it opens.
     assert [c.identifier for c in controls if c.identifier] == ["section.opening"]
-    # And a line the guest could not answer for is dropped rather than guessed at.
-    assert ui.controls("nonsense\n||||\n" + OPENING) == controls
+    # Blank lines are not controls and are not pretending to be.
+    assert ui.controls("\n" + OPENING + "\n") == controls
+
+
+def test_a_control_the_walk_could_not_print_is_a_lab_error_with_the_line_in_it():
+    """A control whose text holds a `|` prints as ten fields, not nine.
+
+    Dropped quietly it is a control missing from the screen, and the caller then
+    says the only thing a missing control can mean there — "the Opening screen
+    did not appear", which sends the reader to SwiftUI for a pipe in a label. So
+    the line comes out whole, as the lab's own failure.
+    """
+    piped = OPENING + "\n5|AXCheckBox||||1|on | off|1124;500;|100;16;"
+    with pytest.raises(LabError, match="not a control") as raised:
+        ui.controls(piped, "walking the Opening screen")
+    assert "on | off" in raised.value.reason and "10 fields" in raised.value.reason
+    # And the halves a line break leaves behind, neither of which is a control.
+    with pytest.raises(LabError, match="not a control"):
+        ui.controls(OPENING + "\n5|AXStaticText||||two\n lines||1124;520;|100;16;")
+    # The rows are read through the same parse, so nothing is lost behind them.
+    with pytest.raises(LabError, match="not a control"):
+        ui.opening_switches(piped)
+    with pytest.raises(LabError, match="not a control"):
+        ui.modifier_buttons(piped)
 
 
 def test_the_shortcuts_modifier_buttons_come_back_in_the_order_they_are_laid_out():
@@ -293,12 +357,45 @@ def test_the_screen_is_waited_for_rather_than_slept_at():
     assert machine._clock.now == 1
 
 
+# The same screen with the retract switch off, which is what the walk reads
+# after the click on it has landed.
+THE_SWITCH_PRESSED = OPENING.replace("5|AXCheckBox||||1||1124;448;|303;16;",
+                                     "5|AXCheckBox||||0||1124;448;|303;16;")
+
+
 def test_an_unnamed_control_is_pressed_with_the_pointer_and_never_through_the_api():
     """The rule for every control on these screens. `AXPress` needs no
     coordinates and would look simpler; it also does not select anything
     (2026-09-17), and it is not what the operator has."""
-    machine = opened_on_opening()
+    machine = opened_on_opening([OPENING, THE_SWITCH_PRESSED])
     screen = ui.opening(machine, "opening the settings")
-    ui.press(machine, screen.switch(config.THE_SWITCH), "turning the switch off")
+    after = ui.press(machine, screen.switch(config.THE_SWITCH), "turning the switch off")
     assert machine.clicks[-1] == (1124 + 303 // 2, 448 + 16 // 2)
     assert not any("AXPress" in script for script in machine.ssh.scripts)
+    # And what the control reads now, which is what says the click landed.
+    assert (after.x, after.y, after.value) == (1124, 448, "0")
+    assert machine._clock.now == 0, "the control answered on the first walk after the click"
+
+
+def test_a_click_that_left_the_control_as_it_was_is_the_labs_failure():
+    """A click at coordinates can miss — a window that moved, a pane still being
+    laid out, a pointer that did not arrive — and a miss nobody read back
+    becomes a verdict several steps later: the settings file holds nothing, and
+    the check says the operator's change is nowhere about a uDeck that was never
+    asked for one."""
+    machine = opened_on_opening()
+    screen = ui.opening(machine, "opening the settings")
+    with pytest.raises(LabError, match="the click did not land on it") as raised:
+        ui.press(machine, screen.switch(config.THE_SWITCH), "turning the switch off", seconds=5)
+    assert not isinstance(raised.value, NotThere)
+    # Where the click went and what was found there, both in the reason.
+    assert "1275,456" in raised.value.reason and "value='1'" in raised.value.reason
+    assert machine._clock.now >= 5
+
+
+def test_a_control_that_is_no_longer_on_the_screen_after_the_click_says_so():
+    """The other way a click lands nowhere: the screen moved out from under it."""
+    machine = opened_on_opening([OPENING, "0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;"])
+    screen = ui.opening(machine, "opening the settings")
+    with pytest.raises(LabError, match="no control there at all"):
+        ui.press(machine, screen.switch(config.THE_SWITCH), "turning the switch off", seconds=5)

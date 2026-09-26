@@ -391,6 +391,16 @@ STAYS_SHUT_SECONDS = 3
 SETTLE_SECONDS = 2
 # Until a control appears after something was pressed.
 UI_APPEAR_SECONDS = 30
+# Until a control the lab clicked reads back as changed (`ui.press`).
+#
+# A click at coordinates can miss — the window moved, the pane was still being
+# built, the pointer was not where the accessibility API said the control was —
+# and a miss that nobody read back becomes a verdict about uDeck further down
+# the check. So the control is walked again until it says the click landed. One
+# walk of the Opening screen took roughly two seconds measured (`ui`'s own
+# docstring), so this is room for several of them on a machine that is busy
+# drawing, and it is spent only when the click did *not* land.
+UI_CHANGE_SECONDS = 10
 
 # --- The panel's keyboard shortcut ------------------------------------------------
 #
@@ -459,19 +469,31 @@ VM_LIMIT_RETRY_WAIT_SECONDS = 15
 # coordinate: the controls on the Opening screen carry no accessibility
 # identifier, no title and no description (measured 2026-09-25,
 # .build/e2e/20260925-005230Z), so the lab finds them by where they sit among
-# their own kind and identifies the row by what it reads — which is what these
-# two orders and the two readings beside them are for. `ui.opening` holds them
-# against the screen and refuses to click anything if they do not match.
+# their own kind — which is what the two orders below are for — and reads the
+# row back before it clicks anything (`ui.opening`).
+#
+# The two readings beside them are a *guard*, and it is worth being exact about
+# what they can catch. They say that the row found is a row of uDeck's own
+# controls on a machine nobody has touched: a screen still being built, a pane
+# that is not this one, or a machine some earlier check left changed all read
+# something else and the lab refuses to click. They cannot say which control in
+# the row is which — four switches that all read on read the same in any order,
+# and on, on, off, off survives swapping the two ons — so the order itself is
+# not observed here at all. It comes from the source that draws the row
+# (`OpeningSettings` in SettingsView.swift), and what holds it is the lab's own
+# tests reading that file back: `test_the_plain_switches_are_in_the_order_uDeck_lays_them_out`
+# and `test_the_modifier_row_is_in_the_order_uDeck_lays_it_out`.
 
 # The shortcut's four modifier buttons, left to right, by the names uDeck's
 # settings file spells them with. The order is `HotKeyModifier.allCases.sorted()`
 # — `HotKeyModifier.order`, which is macOS's own order for the symbols ⌃⌥⇧⌘ —
 # laid out by `ForEach` in `OpeningSettings` (SettingsView.swift).
 HOTKEY_MODIFIER_ROW = ("control", "option", "shift", "command")
-# What that row reads on a machine nothing has changed, and the reason finding
-# four unnamed toggles in a row is an identification rather than a guess:
-# uDeck's default binding is {control, option} (`HotKeyBinding.init`), so the
-# row reads on, on, off, off.
+# What that row reads on a machine nothing has changed: uDeck's default binding
+# is {control, option} (`HotKeyBinding.init`), so the row reads on, on, off,
+# off. It is a guard against a screen that is not at rest and not a way of
+# telling the four apart — the same four values in the other order read the
+# same.
 HOTKEY_MODIFIER_ROW_AT_REST = ("1", "1", "0", "0")
 
 # The Opening screen's four plain checkboxes, top to bottom, by the setting each
@@ -479,7 +501,9 @@ HOTKEY_MODIFIER_ROW_AT_REST = ("1", "1", "0", "0")
 # and "while another application is full screen" (`OpeningSettings`).
 OPENING_SWITCHES = ("gesture.enabled", "hotkey.enabled", "collapseOnAppSwitch", "gesture.enabledInFullscreen")
 # And what they read on a machine at rest: every one of the four is true by
-# default (`AppSettings.init`, `GestureTuning.init`).
+# default (`AppSettings.init`, `GestureTuning.init`). All four alike, so this
+# reading says the row is untouched and says nothing whatever about which of
+# them is which.
 OPENING_SWITCHES_AT_REST = ("1", "1", "1", "1")
 
 # The switch a check changes when it asks whether a setting survives uDeck being
@@ -521,3 +545,46 @@ NEW_HOTKEY_MODIFIERS = ("control", "option", "shift")
 # it). So anything this waits for beyond a moment is the machine being slow, and
 # a file that is still not there at the end of it is uDeck not having saved.
 SETTINGS_SAVE_SECONDS = 20
+
+# Everything the operator did *not* touch, which the file has to carry too.
+#
+# A check that reads back the one key it changed is green over a uDeck that
+# saves that key and drops the rest — and dropping the rest is not a small
+# failure: what a settings file does not say is read back as the shipped
+# default (`AppSettings.init(from:)` decodes every key with `decodeIfPresent`),
+# so a lost key is a setting silently reset on the next launch with nothing
+# anywhere to say it happened.
+#
+# Every non-optional stored property of `AppSettings`, which is exactly what the
+# synthesised encoder writes; the two optional ones (`textSize`, `language`) say
+# nothing until the operator chooses, so they are not required to be there.
+# Thirteen keys after one click, in every file these checks have left: 1921
+# bytes for the switch and 1935 for the shortcut on 2026-09-25 and again on
+# 2026-09-26 (.build/e2e/20260926-142454Z). `test_the_settings_file_carries_every_key_uDeck_encodes`
+# holds this list against AppSettings.swift.
+SETTINGS_KEYS = (
+    "version",
+    "density",
+    "gesture",
+    "panel",
+    "hotkey",
+    "theme",
+    "look",
+    "resolvedIsDark",
+    "collapseOnAppSwitch",
+    "defaultCardTTL",
+    "silentTTLMultiplier",
+    "pluginExecutableSearchPath",
+    "pollWhileCollapsed",
+)
+# And a few of them read back, because a key that is there holding something
+# else is the same loss as a key that is gone. These are uDeck's own defaults
+# (`AppSettings.init`) and none of them is a setting either check changes, so
+# every one of them still reads its default after the operator's one click.
+SETTINGS_AT_REST = {
+    "version": 1,
+    "density": "normal",
+    "defaultCardTTL": 60,
+    "silentTTLMultiplier": 3,
+    "pollWhileCollapsed": False,
+}

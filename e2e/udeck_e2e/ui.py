@@ -30,11 +30,24 @@ one control carries an `AXIdentifier`, an `AXTitle` or an `AXDescription`
 gives a `Toggle` no accessible name of its own, and the label beside it in the
 `Grid` is a separate element. The identifiers on that screen belong to the
 sidebar and to nothing else. So those controls are found by *where they sit*
-among their own kind, and the finding is checked rather than assumed: the row is
-read back and has to say what uDeck's shipped defaults say, or the lab refuses
-to click anything. A row that reads something else is either not the row or a
-machine that is not at rest, and both are the lab failing to find the control —
-never a verdict about uDeck.
+among their own kind, in the order `OpeningSettings` draws them, and the order
+itself is held against that file by the lab's own tests rather than observed
+here. What *is* observed before anything is clicked is that the row is at rest:
+it has to read what uDeck's shipped defaults read, or the lab refuses to click.
+That catches a pane still being built, a pane that is not this one and a machine
+an earlier check left changed — all of them the lab failing to find the control,
+never a verdict about uDeck. It does not catch a row laid out in another order,
+and it cannot: four switches that all read on read the same however they are
+arranged (`config.OPENING_SWITCHES_AT_REST` says so in its own words).
+
+**A click at coordinates can miss, so it is read back.** Everything above
+answers *where* a control is at the moment it was asked; the click lands a
+moment later, and a window that moved, a pane that was still being built or a
+pointer that did not arrive leaves the control exactly as it was. That is the
+lab failing to press the control — so `press` walks the screen again and refuses
+to return until the control says the click landed. Without it the miss travels:
+the check goes on to read a settings file nothing changed and pronounces on
+uDeck for a pointer that missed by a few points.
 """
 
 from __future__ import annotations
@@ -222,6 +235,21 @@ _WINDOWS = """
 tell application "System Events" to tell process %(process)s to get name of every window
 """
 
+_MENU_ITEMS = """
+tell application "System Events" to tell process %(process)s
+  set titles to name of every menu item of menu 1 of menu bar item 1 of menu bar 1
+end tell
+set text item delimiters to ", "
+return titles as text
+"""
+
+# What the lab asks the guest — inside the guest — when the way into the
+# settings window is not there. `AppleLanguages` is the list macOS resolves an
+# application's language from, and it is the answer to the likeliest reason:
+# the menu item is found by its *title*, and every title uDeck draws is
+# translated.
+_GUEST_LANGUAGE = "defaults read -g AppleLanguages 2>/dev/null | tr -d ' \\n' || true"
+
 
 def _applescript(script: str, **values: str) -> str:
     """The script with its strings quoted as AppleScript literals."""
@@ -340,8 +368,42 @@ def click(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDO
 
 
 def open_settings(machine: Any, step: str, item: str = "Settings…") -> None:
-    """uDeck's settings window, opened from its own menu."""
+    """uDeck's settings window, opened from its own menu.
+
+    By the item's *title*, which is the one place in this module that depends on
+    a translated name — the menu item is what uDeck's status menu offers and it
+    carries no identifier to find it by. So a guest that is not in English has
+    no way in at all, and `open_settings_and_wait` says exactly that rather than
+    timing out with a shrug.
+    """
     ask(machine, _applescript(_OPEN_SETTINGS, process=PROCESS, item=item), step)
+
+
+def menu_items(machine: Any, step: str) -> str:
+    """The titles in uDeck's own menu, for a reason — never for a verdict.
+
+    Evidence, so it answers with what went wrong instead of raising: it is read
+    only when the lab has already failed to open the settings window, and a
+    second failure on top of the first would replace the reason with itself.
+    """
+    try:
+        return ask(machine, _applescript(_MENU_ITEMS, process=PROCESS), step) or "nothing"
+    except LabError as error:
+        return f"(the menu could not be read: {error.reason})"
+
+
+def guest_language(machine: Any, step: str) -> str:
+    """Which languages the guest is in, asked inside the guest.
+
+    Evidence like `menu_items`, and for the same reason. Asked of the guest and
+    never of this Mac: what the lab's own host is set to says nothing about the
+    machine the check is running on.
+    """
+    try:
+        said = machine.ssh.run(_GUEST_LANGUAGE, step, check=False).stdout.strip()
+    except LabError as error:
+        return f"(the guest would not say: {error.reason})"
+    return said or "(the guest said nothing)"
 
 
 def open_settings_and_wait(machine: Any, step: str, item: str = "Settings…",
@@ -354,6 +416,16 @@ def open_settings_and_wait(machine: Any, step: str, item: str = "Settings…",
     at all. Both are the lab being early rather than uDeck being wrong, so the
     press is repeated until the window is there — and pressing it again while it
     is open only brings it forward.
+
+    **And the third reason it can fail is the guest's language**, which is worth
+    naming because everything else in this module is built on not trusting
+    translated names — and this one way in is a translated name. `item` is the
+    title of uDeck's menu item, so on a guest that is not in English there is no
+    such item, every press refuses, and both settings checks end here with
+    nothing to say about uDeck. The reason carries the language the guest
+    answers with and the titles its menu does offer, so that what a person reads
+    is a lab that cannot reach the screen rather than a uDeck that would not
+    open it.
     """
     deadline = machine.clock() + seconds
     last = ""
@@ -366,7 +438,13 @@ def open_settings_and_wait(machine: Any, step: str, item: str = "Settings…",
         except LabError as error:
             last = error.reason
         if machine.clock() >= deadline:
-            raise LabError(step, f"uDeck's settings window did not open within {seconds:.0f}s; last: {last}")
+            raise LabError(
+                step,
+                f"uDeck's settings window did not open within {seconds:.0f}s. The only way in is the menu "
+                f"item titled '{item}', and that title is translated: the guest answers "
+                f"{guest_language(machine, step)} and uDeck's own menu offers {menu_items(machine, step)}. "
+                f"Last: {last}",
+            )
         machine.sleep(1)
 
 
@@ -389,18 +467,34 @@ def _pair(text: str) -> tuple[int, int]:
     return (int(float(parts[0])), int(float(parts[1]))) if len(parts) >= 2 else (0, 0)
 
 
-def controls(dump: str) -> list[Element]:
-    """The walk's lines as elements, skipping any line it could not read.
+def controls(dump: str, step: str = "reading uDeck's settings window") -> list[Element]:
+    """The walk's lines as elements — and a line that will not read is an error.
 
-    A line the guest could not answer for is dropped rather than guessed at: the
-    rows that matter are recognised by what they read, and a row read as
-    something it is not would be clicked in the wrong place.
+    The walk prints nine fields separated by `|`, so a control whose text holds
+    a `|` or a line break prints as something else: more fields than nine, or
+    two lines neither of which is a control. Dropped quietly, such a line is a
+    control missing from the screen — and the caller then says the only thing a
+    missing control can mean there, which is "the Opening screen did not
+    appear". That sentence is about SwiftUI, so the reader goes looking at
+    uDeck's views, and the truth was a pipe in a label.
+
+    So a line that cannot be read comes out as the lab's failure with the line
+    in it. Nothing here guesses at a broken line either: the rows are recognised
+    by what they read, and a row read as something it is not would be clicked in
+    the wrong place.
     """
     found = []
     for line in dump.splitlines():
+        if not line.strip():
+            continue
         parts = line.split("|")
         if len(parts) != 9 or not parts[0].strip().isdigit():
-            continue
+            raise LabError(
+                step,
+                f"the walk printed a line that is not a control — {len(parts)} fields where every control "
+                f"has nine, so a control whose title or value holds a '|' or a line break would be lost "
+                f"and the screen would come back one row short: {line!r}",
+            )
         x, y = _pair(parts[7])
         width, height = _pair(parts[8])
         found.append(
@@ -412,7 +506,7 @@ def controls(dump: str) -> list[Element]:
     return found
 
 
-def modifier_buttons(dump: str) -> list[Element]:
+def modifier_buttons(dump: str, step: str = "reading the shortcut's modifiers") -> list[Element]:
     """The shortcut's four modifier buttons, left to right.
 
     They are the only `AXCheckBox` with the `AXToggle` subrole anywhere on the
@@ -420,11 +514,11 @@ def modifier_buttons(dump: str) -> list[Element]:
     else on that screen is drawn that way — so the role pair finds the row and
     `x` puts them in the order `HotKeyModifier.allCases.sorted()` laid them out.
     """
-    buttons = [row for row in controls(dump) if row.role == "AXCheckBox" and row.subrole == "AXToggle"]
+    buttons = [row for row in controls(dump, step) if row.role == "AXCheckBox" and row.subrole == "AXToggle"]
     return sorted(buttons, key=lambda row: row.x)
 
 
-def opening_switches(dump: str) -> list[Element]:
+def opening_switches(dump: str, step: str = "reading the Opening screen's switches") -> list[Element]:
     """The Opening screen's four plain checkboxes, top to bottom.
 
     Plain: an `AXCheckBox` with no subrole and no identifier, which on this
@@ -432,7 +526,7 @@ def opening_switches(dump: str) -> list[Element]:
     puts them in the order `OpeningSettings` lays them out.
     """
     found = [
-        row for row in controls(dump)
+        row for row in controls(dump, step)
         if row.role == "AXCheckBox" and not row.subrole and not row.identifier
     ]  # fmt: skip
     return sorted(found, key=lambda row: row.y)
@@ -473,12 +567,20 @@ def opening(machine: Any, step: str, at_rest: bool = True,
     building the pane. So the walk is repeated until both rows are there, which
     on a machine that is answering is the first walk.
 
-    `at_rest` is the caller saying it expects uDeck's shipped defaults, which is
-    what turns "eight unnamed controls in two rows" into an identification: the
+    `at_rest` is the caller saying it expects uDeck's shipped defaults: the
     modifier row reads on, on, off, off for the default `{control, option}`
     binding, and all four switches read on. A caller that has already changed
     one of them passes False, because the row no longer reads what a default one
     does — and then the shape alone is what names it.
+
+    **What that reading proves, exactly.** That these eight controls are uDeck's
+    own and that nothing has moved them yet: a pane still being built, a
+    different pane, or a machine a neighbouring check left changed all read
+    something else, and then nothing here is clicked. It does *not* prove the
+    order within either row, and cannot — all four switches read alike, and the
+    modifier row survives swapping its two ons — so `switch` and `modifier`
+    below take the order from `config`, which holds it against the source that
+    draws the row (`test_the_plain_switches_are_in_the_order_uDeck_lays_them_out`).
 
     Anything that goes wrong here is the lab's: a screen it could not find the
     controls on is a screen it must not click on, and a check that clicked
@@ -490,8 +592,8 @@ def opening(machine: Any, step: str, at_rest: bool = True,
     deadline = machine.clock() + seconds
     while True:
         dump = tree(machine, step)
-        modifiers = modifier_buttons(dump)
-        switches = opening_switches(dump)
+        modifiers = modifier_buttons(dump, step)
+        switches = opening_switches(dump, step)
         if len(modifiers) == len(config.HOTKEY_MODIFIER_ROW) and len(switches) == len(config.OPENING_SWITCHES):
             break
         if machine.clock() >= deadline:
@@ -518,12 +620,58 @@ def opening(machine: Any, step: str, at_rest: bool = True,
     return OpeningScreen(dump, tuple(modifiers), tuple(switches))
 
 
-def press(machine: Any, control: Element, step: str) -> None:
-    """Click a control the walk found, with the machine's pointer, where a person would.
+def where_it_was(dump: str, control: Element, step: str) -> Element | None:
+    """The control standing where this one stood, as the walk reads it now.
 
-    The same pressing `click` does, for the controls `find` cannot reach because
-    they carry no identifier. Why the pointer and not `AXPress` is the module's
-    own docstring, and it is the whole reason this is a click at coordinates and
-    not an accessibility action.
+    By place and kind rather than by anything it says: what the caller wants to
+    know is whether *that* control changed, and the one thing it must not use to
+    recognise it is the value it is asking about.
+    """
+    for row in controls(dump, step):
+        if (row.role, row.subrole, row.x, row.y) == (control.role, control.subrole, control.x, control.y):
+            return row
+    return None
+
+
+def press(machine: Any, control: Element, step: str, window: str = SETTINGS_WINDOW,
+          seconds: float = config.UI_CHANGE_SECONDS) -> Element:
+    """Click a control the walk found, and read it back until it says the click landed.
+
+    The pressing is the same `click` does, for the controls `find` cannot reach
+    because they carry no identifier. Why the pointer and not `AXPress` is the
+    module's own docstring, and it is the whole reason this is a click at
+    coordinates and not an accessibility action.
+
+    **And it is the reason the control is read back.** A click at coordinates is
+    aimed at where the accessibility API said the control was a moment earlier,
+    and a window that moved, a pane still being laid out or a pointer that did
+    not arrive leaves the screen exactly as it was. Nothing about that is uDeck:
+    it is the lab failing to press the control, the same failure as not finding
+    it. Unread, it becomes a verdict several steps later — the settings file
+    holds nothing, and the check says the operator's change is nowhere, about a
+    uDeck that was never asked for one.
+
+    So the screen is walked again until the control at that place reads
+    something other than what it read, and a control that does not is a
+    `LabError` naming where the click went and what it found there. It is *not*
+    a statement that uDeck saved anything: what the control reads is the
+    control, and what uDeck did about it is the check's own question.
     """
     machine.click(*control.middle, f"{step}: {control}")
+    deadline = machine.clock() + seconds
+    while True:
+        after = where_it_was(tree(machine, step, window), control, step)
+        if after is not None and after.value != control.value:
+            return after
+        if machine.clock() >= deadline:
+            x, y = control.middle
+            raise LabError(
+                step,
+                f"the lab clicked {x},{y} for {control} and {seconds:.0f}s later "
+                + (
+                    f"it still reads {after.value!r}: the click did not land on it"
+                    if after is not None
+                    else "there is no control there at all: the screen moved under the click"
+                ),
+            )
+        machine.sleep(1)

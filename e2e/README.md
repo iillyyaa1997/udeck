@@ -706,6 +706,14 @@ by the new one straight after it, on the same machine — the same shape as
 inside the guest, so what is controlled for is the combination and not how the
 lab presses it.
 
+After the restart it asks two of those three, and the old combination is not
+pressed again. It is pressed once, in the uDeck that was told, which is the only
+uDeck that had a registration to give back. The restarted one never held it:
+`HotKeyMonitor.apply` takes one combination, from the file, and says which at
+launch — and the check reads the file and that line before it presses anything.
+A second silence would cost ten seconds of deliberate waiting plus a chord and a
+read of the log, every run, to witness what those two have already said.
+
 **A restart here is uDeck's, not the machine's.** What is asked is whether the
 file uDeck wrote is the file uDeck reads — `DeckModel.init` loads it once, at
 launch — and quitting uDeck and starting it again is exactly that question at a
@@ -718,15 +726,27 @@ accessible name and the label beside it in the `Grid` is a separate element — 
 the identifiers on that screen belong to the sidebar and to nothing else. The
 lab finds those controls by where they sit among their own kind (the four
 `AXToggle` checkboxes are the shortcut's modifiers, left to right; the four
-plain ones are the switches, top to bottom) and then *checks the finding*: the
-row has to read what uDeck's shipped defaults read — on, on, off, off and on,
-on, on, on — or it refuses to click anything. A row reading something else is
-either not the row or a machine that is not at rest, and clicking anyway would
-be a sentence about uDeck written from a random pixel. The two orders and the
-two readings are in `config` with their reasons, and the lab's own tests read
-them back out of `OpeningSettings`, `HotKeyModifier` and the defaults of
-`AppSettings`, `GestureTuning` and `HotKeyBinding` — the way the gesture's
-numbers and the shortcut's are held.
+plain ones are the switches, top to bottom) and then reads the row back before
+it clicks: it has to read what uDeck's shipped defaults read — on, on, off, off
+and on, on, on, on — or nothing is clicked at all. That guard catches a pane
+still being built, a pane that is not this one, and a machine an earlier check
+left changed; it does not catch a row laid out in another order, and cannot,
+because all four switches read alike and the modifier row survives swapping its
+two ons. So the order is not observed on the screen at all: it comes from
+`OpeningSettings`, and what holds it is the lab's own tests reading that file
+back — including a count of every `Toggle` on the screen, so that one declared
+in some other form fails the test rather than slipping past it. The two orders
+and the two readings are in `config` with their reasons, read back out of
+`OpeningSettings`, `HotKeyModifier` and the defaults of `AppSettings`,
+`GestureTuning` and `HotKeyBinding` — the way the gesture's numbers and the
+shortcut's are held.
+
+**The one thing the lab trusts a translated name for is the way in.** uDeck's
+menu item is found by its title (`Settings…`), because it carries no identifier
+— so on a guest that is not in English there is no way into these screens at
+all. That is a lab that cannot reach the window rather than a uDeck that would
+not open it, and the failure says so in those words, with the language the guest
+answers with and the titles its own menu offers.
 
 And then the control is pressed **with the machine's pointer**, at the
 coordinates the accessibility API reports, like every other control the lab
@@ -737,15 +757,43 @@ has: a click through the virtual pointing device is the same device the gesture
 checks push the panel open with, so a setting changed this way is a setting
 changed the way he changes it.
 
+And the click is read back before anything is made of it. A click goes to where
+the accessibility API said the control was a moment earlier, so a window that
+moved or a pane still being laid out leaves the screen exactly as it was — and a
+miss nobody read would travel: the file would hold nothing, and the check would
+say the operator's change is nowhere about a uDeck that was never asked for one.
+So `ui.press` walks the screen again until the control says the click landed,
+and a control that does not is the lab failing to press it, with the place it
+clicked and what it found there in the reason.
+
 Where the file comes in is afterwards. uDeck writes no settings file at all
 until something is changed — measured 2026-09-25: missing before the install,
 after the first launch, and after all five sections of the settings window had
 been opened and walked — so the file these checks read holds the operator's own
-change and nothing else, and both of them refuse to start on a machine that
-already has one. It is written inside the click, all thirteen keys of it, 1935
-bytes, 0.26–0.29 s from the click being issued; nothing is flushed on the way
-out, and the file's time across a quit was identical to the fraction of a
-second.
+change and nothing else. A file a neighbouring check left behind (which is what
+`--vm per-group` and `per-run` make possible, and what the first of these two
+checks leaves) is **removed** before uDeck is started, with the install having
+quit the uDeck that was running: refusing the machine instead would have made
+the second check of the group impossible in exactly the two modes a group is
+meant to be run in. Removing it is the only thing the lab does to that file from
+outside — the change itself is still a click in uDeck's own window.
+
+It is written inside the click, all thirteen keys of it — 1921 bytes for the
+switch and 1935 for the shortcut, measured again on 2026-09-26 — 0.26–0.29 s
+from the click being issued; nothing is flushed on the way out, and the file's
+time across a quit was identical to the fraction of a second. Both checks read back all thirteen: what a settings
+file does not say is read back as the shipped default
+(`AppSettings.init(from:)`), so a save that keeps the operator's one change and
+drops the twelve keys around it resets his density, his theme and his panel
+sizes at the next launch with nothing anywhere to say it happened — and a check
+that read back only what it clicked would be green over exactly that. When the
+file is not there at all, uDeck is asked why: it writes `could not save the
+settings: <error>` when the store refuses it (`DeckModel.save`, in the `plugins`
+category, which is why the window these checks read keeps three categories and
+not two), and the verdict names that line when it is there and says it was
+absent when it is not — a home directory that cannot be written and a control
+wired to nothing leave the same empty place, and they are two different people's
+problem.
 
 ## Reading the result
 

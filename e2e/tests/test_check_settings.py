@@ -12,7 +12,14 @@ And from the lab's side: the change has to be made *in the window*. A test that
 let a check write the file itself would be testing `JSONFileStore` against a
 settings screen wired to nothing, which is the half of this feature a person
 actually touches — so the first test of each check asserts that nothing here
-ever wrote to `~/.udeck/settings.json`.
+ever wrote a value into `~/.udeck/settings.json`. Taking away the file a
+neighbouring check left behind is the one exception, it happens before uDeck is
+started, and it has a test of its own (`wrote_the_file`).
+
+And the click has to have *landed*: a test where the screen reads the same
+after the press as before it asks for the lab's failure, not a verdict, because
+a miss that nobody read comes back as "the operator's change is nowhere" about
+a uDeck nothing was ever asked of.
 """
 
 import importlib.util
@@ -87,17 +94,40 @@ def growing(*steps):
 def saved(**over):
     """uDeck's settings file as it writes it: every key, every time.
 
-    Measured 2026-09-25: one click on one control wrote all thirteen top-level
-    keys, 1935 bytes (.build/e2e/20260925-003726Z). So a file holding one key is
-    not a file uDeck wrote, and the fake says all of the ones these checks read.
+    All thirteen top-level keys, which is what one click on one control wrote in
+    every file these checks have left — 1921 bytes for the switch and 1935 for
+    the shortcut, on 2026-09-25 and again on 2026-09-26
+    (.build/e2e/20260926-142454Z). A file holding only the key that was clicked
+    is *not* a file uDeck wrote, and one of the checks' verdicts is about
+    exactly that, so the fake has to be able to be both.
+
+    The nested values are sketches of the real ones: nothing here reads inside
+    `theme`, `look`, `gesture` or `panel`, and the last two are `{}` in the real
+    file anyway when nothing in them has been changed.
     """
     settings = {
         "version": 1,
-        "collapseOnAppSwitch": True,
-        "hotkey": {"enabled": True, "key": "U", "modifiers": ["option", "control"]},
         "density": "normal",
+        "gesture": {},
+        "panel": {},
+        "hotkey": {"enabled": True, "key": "U", "modifiers": ["option", "control"]},
+        "theme": {"source": "system", "manualIsDark": False},
+        "look": {"ink": "dark", "presence": 1},
+        "resolvedIsDark": False,
+        "collapseOnAppSwitch": True,
+        "defaultCardTTL": 60,
+        "silentTTLMultiplier": 3,
+        "pluginExecutableSearchPath": ["/usr/local/bin", "/opt/homebrew/bin"],
+        "pollWhileCollapsed": False,
     }
     settings.update(over)
+    return json.dumps(settings)
+
+
+def saved_without(key, **over):
+    """The same file with one key gone — a uDeck whose encoder dropped it."""
+    settings = json.loads(saved(**over))
+    del settings[key]
     return json.dumps(settings)
 
 
@@ -134,8 +164,17 @@ OPENING_TREE = "\n".join([
 THE_RETRACT_SWITCH = (1124 + 303 // 2, 448 + 16 // 2)
 THE_SHIFT_BUTTON = (1197 + 29 // 2, 403 + 20 // 2)
 
+# And the same screen after each of those clicks has landed, which is what the
+# lab walks the screen again to see (`ui.press`): a click that changed nothing
+# is the lab having missed the control, and must not travel into a verdict
+# about what uDeck saved.
+THE_SWITCH_PRESSED = OPENING_TREE.replace("5|AXCheckBox||||1||1124;448;|303;16;",
+                                          "5|AXCheckBox||||0||1124;448;|303;16;")
+THE_SHIFT_PRESSED = OPENING_TREE.replace("5|AXCheckBox|AXToggle|||0||1197;403;|29;20;",
+                                         "5|AXCheckBox|AXToggle|||1||1197;403;|29;20;")
 
-def a_machine(log_says, settings_says, running="404", in_front=None):
+
+def a_machine(log_says, settings_says, running="404", in_front=None, pressed=THE_SWITCH_PRESSED):
     return Machine({
         "log show": log_says,
         "log config": KEEPING,
@@ -143,7 +182,7 @@ def a_machine(log_says, settings_says, running="404", in_front=None):
         "pgrep -x uDeck": running,
         "stat -f %Su": config.GUEST_USER,
         "cat ~/.udeck": settings_says,
-        "on attr(": OPENING_TREE,
+        "on attr(": [OPENING_TREE, pressed],
         "on findIt(": "935,226,144,28",
         "click menu item": "opened",
         "get name of every window": ui.SETTINGS_WINDOW,
@@ -199,8 +238,18 @@ def prepared(monkeypatch, machine):
 
 
 def wrote_the_file(machine):
-    """Whether anything in the check put the settings file there itself."""
-    return [c for c in machine.ssh.commands if app.SETTINGS_FILE in c and "cat " not in c]
+    """Whether anything in the check put a value into the settings file itself.
+
+    Two things may touch that path and neither of them chooses a setting:
+    reading it, which is half of every verdict here, and taking away the one a
+    neighbouring check left behind, which `_prepare` does before uDeck starts
+    (`app.forget_settings`). Anything else is the lab writing the operator's
+    change instead of clicking it.
+    """
+    return [
+        c for c in machine.ssh.commands
+        if app.SETTINGS_FILE in c and "cat " not in c and "rm -f " not in c
+    ]  # fmt: skip
 
 
 # --- The switch -------------------------------------------------------------------------
@@ -246,6 +295,91 @@ def test_a_switch_the_operator_turned_off_and_uDeck_never_saved_fails(monkeypatc
     with pytest.raises(CheckFailed, match="is still not there") as raised:
         checks.check_a_switch_survives_a_restart(machine, check_dir, lab)
     assert machine.now >= config.SETTINGS_SAVE_SECONDS
+    # And uDeck kept quiet about it, which is half of what the verdict says.
+    assert "never said it could not save" in str(raised.value)
+
+
+# What uDeck writes when the store refuses it: `DeckModel.save` → `record` →
+# `DeckLog.plugins.error`. The `plugins` category, which is why the window both
+# checks read keeps more than the panel's and the gesture's.
+COULD_NOT_SAVE = _said(
+    "plugins",
+    'could not save the settings: Error Domain=NSCocoaErrorDomain Code=513 "You don’t have permission"',
+)
+
+
+def test_a_uDeck_that_says_it_could_not_save_is_not_a_uDeck_that_did_not_try(monkeypatch, lab, check_dir):
+    """Both leave the same empty place where the file should be, and they are two
+    different people's problem: a home directory that cannot be written is the
+    machine's, a control that asks nothing to be saved is uDeck's. uDeck says
+    which, and the verdict repeats what it said."""
+    # The scene, the window, and then the line uDeck writes instead of the file.
+    said = growing(REVEAL, PROMOTED, RETRACTED, NOTHING, COULD_NOT_SAVE)
+    machine = prepared(monkeypatch, a_machine(said, ""))
+    with pytest.raises(CheckFailed, match="is still not there") as raised:
+        checks.check_a_switch_survives_a_restart(machine, check_dir, lab)
+    assert "uDeck said it could not" in str(raised.value)
+    assert "NSCocoaErrorDomain Code=513" in str(raised.value)
+
+
+def test_the_shortcut_check_says_it_too(monkeypatch, lab, check_dir):
+    """The same sentence about the same absence, from the other check."""
+    said = growing(REGISTERED, NOTHING, REGISTERED_NEW, COULD_NOT_SAVE)
+    machine = prepared(monkeypatch, a_shortcut_machine(said, ""))
+    with pytest.raises(CheckFailed, match="is still not there") as raised:
+        checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
+    assert "uDeck said it could not" in str(raised.value)
+
+
+def test_a_click_that_landed_on_nothing_is_the_labs_failure_and_not_a_verdict(monkeypatch, lab, check_dir):
+    """The screen after the click reads exactly what it read before it.
+
+    That is the lab having missed the control — a window that moved, a pane
+    still being laid out, a pointer that did not arrive — and unread it travels:
+    the settings file holds nothing, and the check pronounces "the operator's
+    change is nowhere" about a uDeck that was never asked for one.
+    """
+    for check, machine in (
+        (checks.check_a_switch_survives_a_restart,
+         a_machine(a_switch_that_held(), ["", THE_SWITCH_OFF], pressed=OPENING_TREE)),
+        (checks.check_the_shortcut_changes_at_once_and_survives,
+         a_machine(a_shortcut_that_held(), ["", THE_NEW_SHORTCUT], pressed=OPENING_TREE)),
+    ):
+        with pytest.raises(LabError, match="the click did not land on it") as raised:
+            check(prepared(monkeypatch, machine), check_dir, lab)
+        assert not isinstance(raised.value, CheckFailed), check.__name__
+
+
+def test_a_file_that_lost_the_keys_the_operator_never_touched_fails(monkeypatch, lab, check_dir):
+    """uDeck saved what was clicked and dropped the rest.
+
+    The quietest failure this file has: what a settings file does not say is
+    read back as the shipped default (`AppSettings.init(from:)`), so the
+    operator's theme comes back as uDeck's own at the next launch with nothing
+    anywhere saying it had gone. A check that read back only the key it clicked
+    is green over exactly that.
+    """
+    lost = saved_without("theme", collapseOnAppSwitch=False)
+    machine = prepared(monkeypatch, a_machine(a_switch_that_held(), ["", lost]))
+    with pytest.raises(CheckFailed, match="has no theme in it") as raised:
+        checks.check_a_switch_survives_a_restart(machine, check_dir, lab)
+    assert "silently reset" in str(raised.value)
+
+    forgot = saved_without("panel", hotkey={"enabled": True, "key": "U",
+                                            "modifiers": ["shift", "option", "control"]})
+    machine = prepared(monkeypatch, a_shortcut_machine(a_shortcut_that_held(), ["", forgot]))
+    with pytest.raises(CheckFailed, match="has no panel in it"):
+        checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
+
+
+def test_a_file_where_a_setting_nobody_touched_moved_fails(monkeypatch, lab, check_dir):
+    """A key that is there holding something else is the same loss as a key that
+    is gone, and one press of one control may not move a second setting."""
+    moved = saved(collapseOnAppSwitch=False, density="cozy")
+    machine = prepared(monkeypatch, a_machine(a_switch_that_held(), ["", moved]))
+    with pytest.raises(CheckFailed, match="a setting nobody touched moved with it") as raised:
+        checks.check_a_switch_survives_a_restart(machine, check_dir, lab)
+    assert "'density': 'cozy'" in str(raised.value)
 
 
 def test_a_file_that_says_the_switch_is_still_on_fails(monkeypatch, lab, check_dir):
@@ -306,6 +440,12 @@ def test_a_uDeck_that_died_while_the_panel_was_watched_is_uDecks_failure(monkeyp
 
 # --- The shortcut -----------------------------------------------------------------------
 
+
+def a_shortcut_machine(log_says, settings_says, **rest):
+    """The same guest, walking back a screen where the *shift* button was pressed."""
+    return a_machine(log_says, settings_says, pressed=THE_SHIFT_PRESSED, **rest)
+
+
 # Launch, the window, the change, the old chord's silence, the new chord, the
 # restart, and the new chord again.
 def a_shortcut_that_held():
@@ -318,7 +458,7 @@ def a_shortcut_that_held():
 def test_a_shortcut_changed_in_the_window_works_at_once_and_after_a_restart(
     monkeypatch, lab, check_dir, nothing_real
 ):
-    machine = prepared(monkeypatch, a_machine(a_shortcut_that_held(), ["", THE_NEW_SHORTCUT]))
+    machine = prepared(monkeypatch, a_shortcut_machine(a_shortcut_that_held(), ["", THE_NEW_SHORTCUT]))
     checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
 
     assert THE_SHIFT_BUTTON in [(x, y) for x, y, _ in machine.clicks]
@@ -351,21 +491,21 @@ def test_a_running_uDeck_that_never_took_the_new_combination_fails(monkeypatch, 
     # entry sees the same window, which is what a uDeck with nothing to add
     # looks like.
     never = growing(REGISTERED, NOTHING, NOTHING)
-    machine = prepared(monkeypatch, a_machine(never, ["", THE_NEW_SHORTCUT]))
+    machine = prepared(monkeypatch, a_shortcut_machine(never, ["", THE_NEW_SHORTCUT]))
     with pytest.raises(CheckFailed, match="uDeck says it holds") as raised:
         checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
     assert config.THE_NEW_HOTKEY in str(raised.value)
 
 
 def test_a_shortcut_the_operator_chose_and_uDeck_never_saved_fails(monkeypatch, lab, check_dir):
-    machine = prepared(monkeypatch, a_machine(a_shortcut_that_held(), ""))
+    machine = prepared(monkeypatch, a_shortcut_machine(a_shortcut_that_held(), ""))
     with pytest.raises(CheckFailed, match="is still not there"):
         checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
 
 
 def test_a_file_that_says_the_old_combination_fails(monkeypatch, lab, check_dir):
     """uDeck took the new one and wrote down the old one, so tomorrow it is gone."""
-    machine = prepared(monkeypatch, a_machine(a_shortcut_that_held(), ["", saved()]))
+    machine = prepared(monkeypatch, a_shortcut_machine(a_shortcut_that_held(), ["", saved()]))
     with pytest.raises(CheckFailed, match="is not what the operator chose") as raised:
         checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
     assert config.THE_HOTKEY in str(raised.value)
@@ -379,7 +519,7 @@ def test_an_old_combination_that_still_opens_the_panel_fails(monkeypatch, lab, c
     the lab that can see `HotKeyMonitor.unregister` do its work.
     """
     still_live = growing(REGISTERED, NOTHING, REGISTERED_NEW, OPENED_BY_THE_CHORD)
-    machine = prepared(monkeypatch, a_machine(still_live, ["", THE_NEW_SHORTCUT]))
+    machine = prepared(monkeypatch, a_shortcut_machine(still_live, ["", THE_NEW_SHORTCUT]))
     with pytest.raises(CheckFailed, match="still moved the panel"):
         checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
 
@@ -388,7 +528,7 @@ def test_a_new_combination_that_opens_nothing_fails(monkeypatch, lab, check_dir)
     """And that is what makes the old one's silence worth reading: a uDeck that
     hears no chord at all is silent for both."""
     deaf = growing(REGISTERED, NOTHING, REGISTERED_NEW, NOTHING, NOTHING)
-    machine = prepared(monkeypatch, a_machine(deaf, ["", THE_NEW_SHORTCUT]))
+    machine = prepared(monkeypatch, a_shortcut_machine(deaf, ["", THE_NEW_SHORTCUT]))
     with pytest.raises(CheckFailed, match="did not open the panel"):
         checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
 
@@ -396,7 +536,7 @@ def test_a_new_combination_that_opens_nothing_fails(monkeypatch, lab, check_dir)
 def test_a_new_combination_that_leaves_only_a_glance_fails(monkeypatch, lab, check_dir):
     """A shortcut has to leave a panel ready to be typed into, here as everywhere."""
     a_glance = growing(REGISTERED, NOTHING, REGISTERED_NEW, NOTHING, REVEAL)
-    machine = prepared(monkeypatch, a_machine(a_glance, ["", THE_NEW_SHORTCUT]))
+    machine = prepared(monkeypatch, a_shortcut_machine(a_glance, ["", THE_NEW_SHORTCUT]))
     with pytest.raises(CheckFailed, match="moved the panel"):
         checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
 
@@ -406,7 +546,7 @@ def test_a_restarted_uDeck_that_holds_the_combination_it_replaced_fails(monkeypa
     choice every time he closes his laptop, and the file says he never should."""
     forgot = growing(REGISTERED, NOTHING, REGISTERED_NEW, NOTHING, OPENED_BY_THE_CHORD,
                      NOTHING, REGISTERED)
-    machine = prepared(monkeypatch, a_machine(forgot, ["", THE_NEW_SHORTCUT]))
+    machine = prepared(monkeypatch, a_shortcut_machine(forgot, ["", THE_NEW_SHORTCUT]))
     with pytest.raises(CheckFailed, match="uDeck says it holds") as raised:
         checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
     assert config.THE_HOTKEY in str(raised.value)
@@ -417,7 +557,7 @@ def test_a_restarted_uDeck_whose_combination_opens_nothing_fails(monkeypatch, la
     launch is the premise, not the verdict."""
     silent = growing(REGISTERED, NOTHING, REGISTERED_NEW, NOTHING, OPENED_BY_THE_CHORD,
                      NOTHING, REGISTERED_NEW, NOTHING)
-    machine = prepared(monkeypatch, a_machine(silent, ["", THE_NEW_SHORTCUT]))
+    machine = prepared(monkeypatch, a_shortcut_machine(silent, ["", THE_NEW_SHORTCUT]))
     with pytest.raises(CheckFailed, match="did not open the panel"):
         checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
 
@@ -459,13 +599,36 @@ def a_fresh_machine(settings_says=""):
     })  # fmt: skip
 
 
-def test_a_machine_that_was_already_configured_cannot_answer_either_check(lab, check_dir, monkeypatch):
+def test_a_settings_file_the_check_before_left_behind_is_taken_away_first(lab, check_dir, monkeypatch):
     """On a shared machine (--vm per-group, per-run) the check before this one
-    may have left a settings file, and then what is read out of it afterwards is
-    not this check's own change. That is the lab's, not uDeck's."""
+    leaves a settings file, and what is read out of it afterwards would not be
+    this check's own change.
+
+    Refusing the machine made the second check of the group impossible in the
+    two modes the README recommends for a group, so it is removed instead —
+    before uDeck starts, and with the install above having quit the uDeck that
+    was running. Removing is the one thing the lab does to that file: the change
+    itself is still a click in uDeck's own window.
+    """
+    monkeypatch.setattr(app, "installed_version", lambda machine: checks.VERSION)
+    machine = a_fresh_machine([saved(), ""])
+    checks._prepare(machine, check_dir, lab)
+
+    touched = [c for c in machine.ssh.commands if app.SETTINGS_FILE in c]
+    assert [c for c in touched if "rm -f" in c] != [], "the file a neighbour left has to go"
+    assert all("cat " in c or "rm -f" in c for c in touched), "nothing may write a value into it"
+    removed = next(i for i, c in enumerate(machine.ssh.commands) if "rm -f" in c)
+    launched = next(i for i, c in enumerate(machine.ssh.commands) if "open -a" in c)
+    assert removed < launched, "a live uDeck would write the file back from memory"
+    assert any("taking it away" in note for note in lab.notes)
+
+
+def test_a_settings_file_that_will_not_go_away_is_the_labs_failure(lab, check_dir, monkeypatch):
+    """And the machine still cannot answer, which is the lab's to say — the check
+    would otherwise read the neighbour's file as the operator's own change."""
     monkeypatch.setattr(app, "installed_version", lambda machine: checks.VERSION)
     machine = a_fresh_machine(saved())
-    with pytest.raises(LabError, match="already there") as raised:
+    with pytest.raises(LabError, match="still there after the lab removed it") as raised:
         checks._prepare(machine, check_dir, lab)
     assert not isinstance(raised.value, CheckFailed)
 
@@ -485,7 +648,7 @@ def test_the_shortcut_check_reads_the_launch_line_because_it_starts_uDeck_itself
 ):
     """`_prepare(launch=False)`, then park, then launch: the window on the log has
     to be open before the only line that says which shortcut uDeck holds."""
-    machine = prepared(monkeypatch, a_machine(a_shortcut_that_held(), ["", THE_NEW_SHORTCUT]))
+    machine = prepared(monkeypatch, a_shortcut_machine(a_shortcut_that_held(), ["", THE_NEW_SHORTCUT]))
     checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
     assert machine.prepared_with_launch is False
     assert machine.pointer[0][:2] == panel.middle_of_the_screen()

@@ -238,6 +238,24 @@ def settings_text(machine, step: str) -> str:
     return machine.ssh.ask(f"cat {SETTINGS_FILE} 2>/dev/null || true", step).stdout
 
 
+def forget_settings(machine, step: str) -> None:
+    """Take uDeck's settings file away, so the next uDeck starts as a new one would.
+
+    The lab's only hand on that file, and it is worth saying what it is not: a
+    check *reads* this file to reach half of its verdict and never writes a
+    value into it, because a check that wrote the file and restarted uDeck would
+    be a check about `JSONFileStore` and about nothing the operator does. Taking
+    away what a neighbouring check left behind is the opposite of that — it puts
+    the machine back to the one state every sentence about this file rests on,
+    which is a machine nobody has configured.
+
+    Only with uDeck not running: a live one holds its settings in memory and
+    writes the whole file on the next change, so a file removed underneath it
+    comes back saying what that process believes. Callers quit it first.
+    """
+    machine.ssh.run(f"rm -f {SETTINGS_FILE}", step)
+
+
 def read_settings(text: str, step: str):
     """That text as what it says, or None when there is no file at all."""
     if not text.strip():

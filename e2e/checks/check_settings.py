@@ -32,6 +32,23 @@ and the second half is read out of uDeck's own log rather than off the screen �
 the panel is translucent over whatever is behind it, and "something changed at
 the top of the screen" is the evidence that passes for the wrong reason.
 
+**And the file is read whole, not one key deep.** What a settings file does not
+say is read back as the shipped default (`AppSettings.init(from:)` decodes every
+key with `decodeIfPresent`), so a save that writes the operator's one change and
+drops the twelve keys around it resets his density, his theme and his panel
+sizes at the next launch and says nothing anywhere. A check that read back only
+what it clicked would be green over exactly that, so both of them require the
+keys the operator never touched to still be there and still to read what uDeck
+ships (`_expect_the_rest_is_still_there`).
+
+**When the file is not there at all, uDeck is asked why.** It answers when the
+store refuses it — `could not save the settings: <error>` from `DeckModel.save`
+— and that is a different failure from a control that never asked anything to be
+saved: one is the machine's, the other is uDeck's. That line is written in the
+`plugins` category, so the window these checks read keeps it along with the
+panel's and the gesture's (`panel.CATEGORIES`), and the verdict names it when it
+is there and says it was not when it is not.
+
 **Which settings, and why only these two.** Most of what the Opening screen
 offers can only be photographed: a dwell that is 60 ms rather than 80, a panel a
 little wider. Two of them uDeck answers out loud, and those are the two here.
@@ -74,7 +91,7 @@ says so.
 """
 
 from udeck_e2e import app, config, panel, ui, updates
-from udeck_e2e.errors import LabError, expect
+from udeck_e2e.errors import CheckFailed, LabError, expect
 
 VERSION = ("0.4.1", "6")
 
@@ -140,19 +157,24 @@ def check_a_switch_survives_a_restart(machine, check_dir, lab):
 
         # The first half: what uDeck wrote down.
         wrote = _what_uDeck_saved(machine, check_dir, lab, lambda saved: _says(saved) is SWITCHED_OFF)
-        expect(
-            wrote is not None,
-            f"one control was clicked in uDeck's own settings window and {app.SETTINGS_FILE} is still not "
-            f"there {config.SETTINGS_SAVE_SECONDS:.0f}s later: the operator's change is nowhere, and the "
-            "next uDeck he starts has never heard of it",
-        )
+        if wrote is None:
+            _nothing_reached_the_file(
+                story,
+                f"one control was clicked in uDeck's own settings window and {app.SETTINGS_FILE} is still not "
+                f"there {config.SETTINGS_SAVE_SECONDS:.0f}s later: the operator's change is nowhere, and the "
+                "next uDeck he starts has never heard of it",
+            )
         expect(
             _says(wrote) is SWITCHED_OFF,
             f"{app.SETTINGS_FILE} says '{config.THE_SWITCH}' is {_says(wrote)!r} and not {SWITCHED_OFF!r} "
             f"after the switch was turned off in uDeck's own window: what uDeck saved is not what the "
             f"operator chose",
         )
-        lab.note(f"   uDeck saved '{config.THE_SWITCH}' = {_says(wrote)!r}")
+        _expect_the_rest_is_still_there(wrote, f"'{config.THE_SWITCH}' was turned off")
+        lab.note(
+            f"   uDeck saved '{config.THE_SWITCH}' = {_says(wrote)!r}, and the "
+            f"{len(config.SETTINGS_KEYS) - 1} keys the operator never touched with it"
+        )
 
         # And the second: what the uDeck that reads that file does about it.
         _end_uDeck(machine, story, lab)
@@ -214,6 +236,17 @@ def check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab):
     everything above and loses the operator's choice every time he closes his
     laptop.
 
+    **Two of the three, after the restart, and the old combination is not
+    pressed again.** It is pressed once, in the uDeck that was told — where
+    there *is* a registration to give back, and where leaving it standing is the
+    failure this check exists to catch. The restarted uDeck never held it:
+    `HotKeyMonitor.apply` takes one combination, from the file, and says which
+    at launch — and both of those are read here before any chord is pressed. So
+    a second silence would cost `config.NOTHING_HAPPENS_SECONDS` of deliberate
+    waiting plus a chord and a read of the log, on every run, to witness what
+    the file and that line have already said. That is the trade, and it is
+    written down here rather than left for a reader to infer from the code.
+
     **uDeck is started inside the window on its own log, and the pointer is
     parked first**, for the reasons all five shortcut checks have them: the line
     that says which combination uDeck holds is written once, at launch, so a
@@ -248,18 +281,23 @@ def check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab):
 
         # What uDeck wrote down, which is what the restart below will read.
         wrote = _what_uDeck_saved(machine, check_dir, lab, lambda saved: _hotkey_in(saved) == config.THE_NEW_HOTKEY)
-        expect(
-            wrote is not None,
-            f"the shortcut was changed in uDeck's own settings window and {app.SETTINGS_FILE} is still not "
-            f"there {config.SETTINGS_SAVE_SECONDS:.0f}s later: the combination the operator chose is nowhere, "
-            "and the next uDeck he starts will hold the one he replaced",
-        )
+        if wrote is None:
+            _nothing_reached_the_file(
+                story,
+                f"the shortcut was changed in uDeck's own settings window and {app.SETTINGS_FILE} is still not "
+                f"there {config.SETTINGS_SAVE_SECONDS:.0f}s later: the combination the operator chose is nowhere, "
+                "and the next uDeck he starts will hold the one he replaced",
+            )
         expect(
             _hotkey_in(wrote) == config.THE_NEW_HOTKEY,
             f"{app.SETTINGS_FILE} says the shortcut is {_hotkey_in(wrote)} and not {config.THE_NEW_HOTKEY} "
             f"after it was changed in uDeck's own window: what uDeck saved is not what the operator chose",
         )
-        lab.note(f"   uDeck saved the shortcut as {_hotkey_in(wrote)}")
+        _expect_the_rest_is_still_there(wrote, "the shortcut was changed")
+        lab.note(
+            f"   uDeck saved the shortcut as {_hotkey_in(wrote)}, and the "
+            f"{len(config.SETTINGS_KEYS) - 1} keys the operator never touched with it"
+        )
 
         # The old combination, first: a panel the new one had opened would be in
         # the way of asking anything about the old.
@@ -302,9 +340,18 @@ def _prepare(machine, check_dir, lab, launch=True):
     changed — measured 2026-09-25, missing after the install, after the first
     launch and after all five sections of the settings window had been walked —
     so the file these checks read afterwards holds the operator's own change and
-    nothing else. `--vm per-group` and `per-run` share a machine between checks,
-    though, and the check before this one may have left a file behind, so it is
-    refused rather than assumed.
+    nothing else.
+
+    **A file a neighbouring check left behind is taken away, not refused.**
+    `--vm per-group` and `per-run` share a machine between checks, and the first
+    of these two checks leaves a settings file on it, so refusing the machine
+    made the second check of the group impossible in the two modes the README
+    recommends for a group. It is removed instead, with uDeck already quit by
+    the install above, and then read back to be sure it is gone: a machine that
+    keeps the file is a machine that cannot answer, and that is still the lab's
+    failure. **The lab never writes a value into that file** — the change is
+    made by clicking the control in uDeck's own window, and this is the one
+    thing done to the file from outside (`app.forget_settings`).
     """
     feed = updates.Feed(machine, lab.note)
     builder = lab.builder(feed.url, check_dir.name)
@@ -321,11 +368,18 @@ def _prepare(machine, check_dir, lab, launch=True):
     step = "making sure nothing has configured this machine before"
     already = app.settings(machine, step)
     if already is not None:
-        raise LabError(
-            step,
-            f"{app.SETTINGS_FILE} is already there before anything was changed, holding "
-            f"{sorted(already)} — what this check reads out of it afterwards would not be its own change",
+        lab.note(
+            f"   {app.SETTINGS_FILE} was there before this check, holding {sorted(already)}; "
+            "taking it away, so that what is read afterwards is this check's own change"
         )
+        app.forget_settings(machine, step)
+        left = app.settings(machine, step)
+        if left is not None:
+            raise LabError(
+                step,
+                f"{app.SETTINGS_FILE} is still there after the lab removed it, holding {sorted(left)} — "
+                "what this check reads out of it afterwards would not be its own change",
+            )
 
     log = panel.GestureLog(machine, lab.note)
     log.keep("asking the guest to keep uDeck's own account of the panel")
@@ -428,6 +482,62 @@ def _what_uDeck_saved(machine, check_dir, lab, until):
     text = app.settings_text(machine, step)
     _keep(check_dir, "settings.json", text, lab)
     return app.read_settings(text, step)
+
+
+def _nothing_reached_the_file(story, what):
+    """Fail on a change that never reached the file, saying whether uDeck could not.
+
+    Always raises. The absence of the file is the verdict — the operator's
+    change is gone either way — but "uDeck did not save it" and "uDeck could not
+    save it" send a person to two different places, and uDeck itself says which
+    one it was: `could not save the settings: <error>` from `DeckModel.save`,
+    written through `DeckLog.plugins` (`panel.could_not_save`). A home directory
+    that is not writable and a control wired to nothing leave the same empty
+    place where the file should be, so the line is quoted when it is there and
+    its absence is said out loud when it is not.
+
+    That line is in the `plugins` category rather than the panel's, which is why
+    the window both checks read keeps all three (`panel.CATEGORIES`).
+    """
+    refused = "\n".join(panel.could_not_save(story.take("what uDeck said while it was supposed to be saving")))
+    said = (
+        f" — and uDeck said it could not: {panel.short(refused)}"
+        if refused
+        else " — and uDeck never said it could not save, so nothing even tried to write it"
+    )
+    raise CheckFailed(what + said)
+
+
+def _expect_the_rest_is_still_there(wrote, after):
+    """Everything the operator did not touch, still in the file he changed one thing in.
+
+    A check that read back only the key it changed is green over a uDeck that
+    saves that key and drops the rest, and dropping the rest is the quietest
+    failure this file has: what a settings file does not say is read back as the
+    shipped default (`AppSettings.init(from:)` decodes every key with
+    `decodeIfPresent`), so the operator's density, his theme and his panel sizes
+    would come back as uDeck's own at the next launch with nothing anywhere
+    saying they had gone. `config.SETTINGS_KEYS` is every key uDeck's encoder
+    writes and `config.SETTINGS_AT_REST` a few of them read back, because a key
+    that is there holding something else is the same loss as a key that is gone.
+    """
+    missing = [key for key in config.SETTINGS_KEYS if key not in wrote]
+    expect(
+        not missing,
+        f"{app.SETTINGS_FILE} has no {', '.join(missing)} in it after {after} in uDeck's own window: "
+        f"uDeck wrote the one setting the operator changed and lost {len(missing)} of the keys he never "
+        "touched — and a key this file does not hold is read back at the next launch as whatever uDeck "
+        f"ships, so each one is a setting silently reset. What it does hold: {sorted(wrote)}",
+    )
+    changed = {
+        key: wrote.get(key) for key, value in config.SETTINGS_AT_REST.items() if wrote.get(key) != value
+    }
+    expect(
+        not changed,
+        f"{app.SETTINGS_FILE} says {changed} after {after} in uDeck's own window, where uDeck ships "
+        f"{ {key: config.SETTINGS_AT_REST[key] for key in changed} }: one control was clicked and a "
+        "setting nobody touched moved with it",
+    )
 
 
 def _says(saved):

@@ -67,6 +67,25 @@ SUBSYSTEM = "place.unicorns.udeck"
 GESTURE = "gesture"
 # The panel's own category, where uDeck records every phase it moves through.
 PANEL = "panel"
+# And the category uDeck writes its own failures in (`DeckLog.plugins`). Not the
+# panel's, and it is read for one line: `could not save the settings: …`, which
+# `DeckModel.save` writes when the store refuses. A check that read only the two
+# categories above could not tell a uDeck that *could* not save the operator's
+# change from one that never tried — a full disk from a control wired to
+# nothing — and would say the same sentence about both.
+PLUGINS = "plugins"
+# What the lab's window on the log holds. `log config` keeps the whole
+# subsystem's debug messages — it is asked per subsystem, never per category —
+# so this list has only ever been what is read back out of it.
+#
+# The plugins category brings a little else with it: `read the plugins folder:
+# 0 found`, two or three times per check on a machine with no plugins installed
+# (measured 2026-09-26, .build/e2e/20260926-142454Z). Nothing reads it — none of
+# the patterns in this module can match that line — and where it does count is
+# `heard_from_uDeck`, which asks whether the window holds anything uDeck said at
+# all. A uDeck writing those lines is a uDeck whose log is being received, which
+# is exactly what that question is for.
+CATEGORIES = (GESTURE, PANEL, PLUGINS)
 
 # The phases the panel can be in (PanelState.swift). `collapsed` is shut; the
 # rest are the panel being shown, in one size or another.
@@ -252,6 +271,25 @@ CAME_FORWARD = "another application came forward"
 OTHER_APP = "otherAppActivated"
 
 
+# What uDeck writes when the store refused the settings it was handed:
+# `could not save the settings: <error>`, from `DeckModel.save` through
+# `record` into `DeckLog.plugins.error` (Sources/UDeckKit/Plugins/DeckModel.swift).
+# The same sentence covers the layout and the plugin settings, so the noun is
+# part of what is looked for.
+COULD_NOT_SAVE = "could not save the settings"
+
+
+def could_not_save(lines: str) -> list[str]:
+    """Every line in which uDeck says it could not save the operator's settings.
+
+    The difference between "uDeck did not write the change" and "uDeck could not
+    write the change", which the file alone cannot tell: a home directory that
+    is not writable and a control wired to nothing leave exactly the same
+    absence behind, and they are two different people's problem.
+    """
+    return [line for line in lines.splitlines() if COULD_NOT_SAVE in line]
+
+
 def news_of_another_application(lines: str) -> list[str]:
     """Every line in which uDeck says the workspace told it another application came forward.
 
@@ -325,9 +363,11 @@ class GestureLog:
         """
         if not self.kept:
             raise LabError(step, "nothing asked the guest to keep uDeck's messages, so its log proves nothing")
-        # Both categories: the gesture says which path fired, the panel says
-        # whether anything opened, and a check needs the two together.
-        predicate = f'subsystem == "{SUBSYSTEM}" AND (category == "{GESTURE}" OR category == "{PANEL}")'
+        # All three: the gesture says which path fired, the panel says whether
+        # anything opened, and the plugins category is where uDeck says it could
+        # not save what the operator changed (`CATEGORIES`).
+        categories = " OR ".join(f'category == "{name}"' for name in CATEGORIES)
+        predicate = f'subsystem == "{SUBSYSTEM}" AND ({categories})'
         done = self.machine.ssh.ask(
             f"/usr/bin/log show --start {shlex.quote(mark)} --predicate {shlex.quote(predicate)} "
             f"--debug --info --style compact",

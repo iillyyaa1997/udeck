@@ -10,6 +10,55 @@ for what that promises.
 
 ## [Unreleased]
 
+- **The settings checks stop turning the lab's own misses into verdicts about
+  uDeck.** A click at coordinates is aimed at where the accessibility API said
+  the control was a moment earlier, so a window that moved or a pane still being
+  laid out left the screen exactly as it was — and nothing read it back. The
+  miss travelled: the settings file held nothing, and the check said "the
+  operator's change is nowhere" about a uDeck that had never been asked for one.
+  `ui.press` now walks the screen again until the control at that place says the
+  click landed, and a control that does not is the lab failing to press it, with
+  where the click went and what was found there in the reason.
+
+  **A group of them works on a shared machine again.** The preparation refused a
+  machine that already had `~/.udeck/settings.json`, and the first of these two
+  checks leaves one — so the second could not run under `--vm per-group` or
+  `per-run`, which is what a group is meant to be run under. A file a
+  neighbouring check left behind is now taken away before uDeck is started, with
+  the install having quit the uDeck that was running, and read back to be sure
+  it is gone. That is the only thing the lab does to that file: the change
+  itself is still a click in uDeck's own window.
+
+  **The file is read whole, not one key deep.** Both checks read back the one
+  key they had changed, so a save that kept the operator's change and dropped
+  the twelve keys around it was green — and a key a settings file does not hold
+  is read back at the next launch as whatever uDeck ships, which is a setting
+  silently reset. They now require every key the encoder writes to still be
+  there, and a few of them to still read the shipped default.
+
+  **And when the file is not there at all, uDeck is asked why.** It says so when
+  the store refuses it — `could not save the settings: …`, written through
+  `DeckLog.plugins` — and the window these checks read kept two categories and
+  not three, so "could not save" and "did not save" came out as the same
+  sentence about two different people's problem. The window keeps that category
+  now, and the verdict quotes the line when it is there.
+
+  Four smaller ones with them. A control the walk could not print — a `|` or a
+  line break in its text — was dropped silently and came back as "the Opening
+  screen did not appear", which sends the reader to SwiftUI for a pipe in a
+  label; it is now the lab's failure with the line in it. The only way into
+  these screens is a translated menu title, so a guest that is not in English
+  now fails saying which language it answers with and which titles its menu
+  offers, instead of timing out with a shrug. The row's readings say the row is
+  uDeck's and the machine is at rest and can say nothing about the order within
+  it — four switches that all read on read the same in any order — so the prose
+  that claimed otherwise is corrected, and the unit test that does hold the
+  order now counts every `Toggle` on the screen rather than only the ones its
+  regex happens to read. And the shortcut check says out loud that it asks two
+  of its three sentences after the restart, and why pressing the replaced
+  combination a second time would cost ten seconds to witness what the file and
+  the line at launch have already said.
+
 - **The lab can check the push.** `panel.push` — the pointer pinned against the
   top edge while the device keeps pushing — reported "could not check" since it
   was written, because no software in a machine could produce the movement.
