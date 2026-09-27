@@ -148,7 +148,9 @@ the build logged the name — so the panel closes as
 dismissed before the menu has opened, 2 times of 2 on 2026-09-27
 (.build/e2e/kept/20260927-193950Z and -194310Z, probe.status-menu-1 and -2). The
 operator reaching for uDeck's own menu may not mean "put it away".
-*To settle:* ask him.
+*Settled 2026-09-28, by the operator:* yes, it should. The menu holds actions on
+the application — settings, quitting — and there is no reason to keep the panel
+up under it; the rule stays as written and the item gets no exception.
 
 **Does a picker in the settings window let go the way a context menu does?**
 uDeck counts a click inside any of its menus as heard when the menu lets go on
