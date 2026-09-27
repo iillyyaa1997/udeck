@@ -121,6 +121,7 @@ class Machine:
         self.now = 0.0
         self.shots = []
         self.clicks = []
+        self.right_clicks = []
         self.keys = []
         self.pointer = []
         self.screenshot_fails = None
@@ -144,6 +145,11 @@ class Machine:
         if self.click_fails is not None:
             raise self.click_fails
         self.clicks.append((x, y, step))
+
+    def right_click(self, x, y, step):
+        if self.click_fails is not None:
+            raise self.click_fails
+        self.right_clicks.append((x, y, step))
 
     def key(self, name, step):
         # The name as vncdotool takes it, and the step, because a keystroke names

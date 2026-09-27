@@ -13,7 +13,7 @@ see the last section.
 
 > **Being built.** What exists today: the command, its pre-flight and report,
 > the machines and the golden image they are cloned from, their screen and
-> pointer over VNC, a self-check, the builds a check needs, and twenty-seven
+> pointer over VNC, a self-check, the builds a check needs, and twenty-nine
 > checks of uDeck itself in four groups (`e2e/run.sh --list`). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — never
 > by itself as it ships, and by itself once the operator switches that on.
@@ -135,6 +135,10 @@ something on the screen repaints — so the lab never asks twice. Coordinates ar
 pixels from the top-left corner, as in a screenshot. After a restart macOS puts
 the pointer near the top-left corner, 10 pixels below the top edge, so a check
 that cares where the pointer is puts it there first.
+
+A right click is a click with the other button (`machine.right_click`), which is
+how a check opens a context menu; measured on 2026-09-27 it reached uDeck as a
+right mouse-down and opened the menu of the tab under it 5 times of 5.
 
 A key can be pressed the same way (`machine.key("esc", …)`, named as vncdotool
 names them), and it is the one action with no coordinates: it arrives at the
@@ -601,9 +605,9 @@ are kept in `.build/e2e/kept/`.
 
 ### The panel closing
 
-Six more. Five of them read the same log from the other end; the sixth asks the
-question that follows all of them and that the log cannot answer, which is where
-the keyboard went. The line the five take as the verdict is the phase and the
+Eight more. Seven of them read the same log from the other end; the eighth asks
+the question that follows all of them and that the log cannot answer, which is
+where the keyboard went. The line the seven take as the verdict is the phase and the
 event together — `peek -> collapsed on pointerLeft`, `open -> collapsed on
 closeRequested`, `open -> collapsed on otherAppActivated`, `peek -> collapsed on
 escape` — and both halves of it are the check. The event, because the panel has
@@ -674,12 +678,48 @@ be one reading, how long ago a mouse button last went down, against 0.15 s; the
 news of a click past the panel came 232 ms after it once, in a whole lab run
 (`.build/e2e/kept/20260926-211629Z`), and there is no time in the rule since. A
 uDeck that read every activation as a click would throw the operator's
-unfinished work away on ⌘-Tab, and this is the lab's only check that sees it —
-as it sees a uDeck that took any click since the panel showed for a click past
-it, or whose own click monitor noted nothing: the click that held the panel
-open is after it showed, and it is uDeck's own. Both measured red, 2 times of 2
-each (`.build/e2e/kept/20260927-182236Z`, `-184219Z`). The switch is `open -a` and not an AppleScript activation from inside
-the guest, which was measured posting no notification at all.
+unfinished work away on ⌘-Tab, and this check and the two after it are the
+only ones in the lab that see it — as this one sees a uDeck that took any click
+since the panel showed for a click past it, or whose own click monitor noted
+nothing: the click that held the panel open is after it showed, and it is
+uDeck's own. Both measured red, 2 times of 2 each
+(`.build/e2e/kept/20260927-182236Z`, `-184219Z`). The switch is `open -a` and
+not an AppleScript activation from inside the guest, which was measured posting
+no notification at all.
+
+uDeck hears its own clicks by three roads, and the two after it are the other
+two. `panel.a-switch-after-a-choice-in-a-menu` holds the panel open, then
+right-clicks its first tab and chooses "Rename" in the menu that opens
+(`config.THE_FIRST_TAB`, `config.RENAME_IN_THE_TABS_MENU`), then makes the
+same switch. A menu tracks the pointer in a loop of its own, so a choice in it
+reaches neither of uDeck's click monitors while the system counts it like any
+other click: on a uDeck that heard only its monitors, the choice was taken for a
+click past the panel and the held panel came back as a peek, 3 times of 3
+(`.build/e2e/kept/20260927-193950Z`, `-194310Z`, probe.tab-menu-1 to -3). uDeck
+now counts a click as heard when one of its menus lets go on it, and says so —
+and that line is the check's witness that there was a menu to let go at all,
+because a right click that opened nothing would leave "Rename" clicked on the
+panel itself, which uDeck hears anyway. It is asked after the verdict, so that a
+uDeck that never hears its menus is red rather than "could not check" — as it
+was, 2 times of 2 (`.build/e2e/kept/20260927-202433Z`). Not the
+status-bar menu: with the panel held, a click on uDeck's item in the menu bar is
+a click past the panel by both roads — the global monitor hears it and another
+application comes forward, the Finder where the build named it — and the panel
+was put away before the menu opened, 2 times of 2 (probe.status-menu-1 and -2 in
+the same runs).
+
+`panel.a-switch-after-a-click-in-the-margin` is the third road: a click
+outside uDeck that is not past the panel, in the 24-point margin below it
+(`config.IN_THE_MARGIN`), which the global monitor hears and forgives. It makes
+`panel.a-click-past-a-restored-panel`'s scene — a restored panel with the
+Finder in front, so a click on the desktop brings nothing forward — clicks in
+the margin, requires uDeck to say it heard a click outside it that was not past
+the panel and to close nothing, then takes the pointer past the panel and
+brings TextEdit forward with no click. A monitor that forgave the margin click
+without counting it as heard took it for a click past the panel when the switch
+came, 2 times of 2 (`.build/e2e/kept/20260927-183705Z`), and this check goes
+red on that build 2 times of 2 (`-202433Z`); until it, nothing in the
+repository held that line.
 
 `panel.a-click-past-a-restored-panel` is the other road a click takes. One click
 past the panel reaches uDeck by two roads that race — the workspace saying
@@ -763,7 +803,7 @@ back never lost the front. ⌘W was measured the same way, and the same twice
 over — through System Events, because a Command chord made over VNC arrives in
 this guest as a plain letter, which promotes the peek instead of closing it.
 
-All six act several times with reads in between, so they read the log in steps
+All eight act several times with reads in between, so they read the log in steps
 (`panel.Story`): one window opened at the start and never moved —
 the guest's clock answers to the second, and a fresh mark between two actions
 would sometimes begin inside the answer to the one before — cut by how much has

@@ -798,10 +798,32 @@ def test_both_places_the_closing_checks_use_are_on_the_screen():
     says nothing happened and nothing was learnt. Here it is one line and a
     second of pytest, before a machine is ever started.
     """
-    for place in (panel.past_the_panel(), panel.inside_the_peek()):
+    for place in (
+        panel.past_the_panel(), panel.inside_the_peek(), config.IN_THE_MARGIN,
+        config.THE_FIRST_TAB, config.RENAME_IN_THE_TABS_MENU,
+    ):
         x, y = place
         assert 0 <= x < config.SCREEN_WIDTH, f"{place} is off the side of the screen"
         assert 0 <= y < config.SCREEN_HEIGHT, f"{place} is off the bottom of the screen"
+
+
+# The menu bar the open panel's content hangs below, as measured in the macOS 27
+# guest (see `config.PAST_THE_PANEL`). The margin below the panel is only 24 points
+# deep, so this one test cannot afford `GENEROUS_MENU_BAR`: it is held to the guest
+# the lab runs, and says so.
+MEASURED_MENU_BAR = 30
+
+
+def test_the_click_in_the_margin_is_below_the_open_panel_and_inside_what_keeps_it():
+    """Not on the panel — a click there is uDeck's own and reaches the other
+    monitor — and not past the region either, where a click closes the panel.
+    The one place a click is outside uDeck and forgiven."""
+    x, y = config.IN_THE_MARGIN
+    inset = _default("peekKeepAliveInset")
+    width, height = _biggest_panel()
+    assert abs(x - config.SCREEN_WIDTH / 2) < width / 2, "not under the panel across"
+    assert MEASURED_MENU_BAR + height < y, "on the panel, not below it"
+    assert y < MEASURED_MENU_BAR + height + inset, "past the region that keeps the panel, not in its margin"
 
 
 def test_the_middle_of_the_screen_is_inside_the_open_panel_which_is_why_there_is_a_third_place():

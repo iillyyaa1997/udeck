@@ -2,6 +2,7 @@
 
     python -m udeck_e2e.vnc_client move X Y
     python -m udeck_e2e.vnc_client click X Y
+    python -m udeck_e2e.vnc_client rightclick X Y
     python -m udeck_e2e.vnc_client key NAME
     python -m udeck_e2e.vnc_client capture PATH
 
@@ -22,7 +23,10 @@ from pathlib import Path
 
 from udeck_e2e.vnc import PASSWORD_VARIABLE, SECONDS_VARIABLE, SERVER_VARIABLE
 
-USAGE = "usage: python -m udeck_e2e.vnc_client move X Y | click X Y | key NAME | capture PATH (run by the lab)"
+USAGE = (
+    "usage: python -m udeck_e2e.vnc_client move X Y | click X Y | rightclick X Y | key NAME | capture PATH "
+    "(run by the lab)"
+)
 
 # A frame is measured on a small copy of itself: the question is only whether
 # anything is drawn, and 640×360 answers it in milliseconds.
@@ -47,7 +51,7 @@ def frame_of(path: Path) -> dict[str, object]:
 
 
 def parse_action(args: list[str]) -> tuple[str, list[str]] | None:
-    if len(args) == 3 and args[0] in ("move", "click") and all(a.isdigit() for a in args[1:]):
+    if len(args) == 3 and args[0] in ("move", "click", "rightclick") and all(a.isdigit() for a in args[1:]):
         return args[0], args[1:]
     if len(args) == 2 and args[0] == "key" and args[1]:
         return "key", args[1:]
@@ -85,6 +89,14 @@ def main(argv: list[str] | None = None) -> int:
             # goes down and up through the machine's own pointing device.
             client.mouseMove(int(values[0]), int(values[1]))
             client.mousePress(1)
+        elif kind == "rightclick":
+            # The same with the other button: vncdotool counts buttons from 1,
+            # and 3 is the right one. Measured in the guest on 2026-09-27: it
+            # reached uDeck as a right mouse-down and opened the context menu
+            # of the tab under it, 5 times of 5
+            # (.build/e2e/kept/20260927-193950Z and -194310Z).
+            client.mouseMove(int(values[0]), int(values[1]))
+            client.mousePress(3)
         elif kind == "key":
             # The key goes down and up on the machine's own keyboard, wherever
             # the guest happens to be sending keystrokes. `values[0]` is

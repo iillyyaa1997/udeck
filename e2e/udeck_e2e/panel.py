@@ -283,6 +283,27 @@ CAME_FORWARD = "another application came forward"
 OTHER_APP = "otherAppActivated"
 
 
+# What uDeck writes when one of its own menus lets go of the pointer on a click
+# made in it — the click no monitor of uDeck's hears, which it counts as heard
+# from then on (`PanelController.noteMenuLetGo`).
+MENU_LET_GO_ON_A_CLICK = "a menu let go on a click in it"
+
+# And what it writes when its global monitor hears a click outside uDeck that is
+# not past the panel — in the margin round it, which keeps it — and leaves the
+# panel be (`PanelController.handleClickOutside`).
+KEPT_BY_THE_MARGIN = "a click outside uDeck but not past the panel"
+
+
+def menu_let_go_on_a_click(lines: str) -> list[str]:
+    """Every line in which uDeck says one of its menus let go on a click made in it."""
+    return [line for line in lines.splitlines() if MENU_LET_GO_ON_A_CLICK in line]
+
+
+def kept_by_the_margin(lines: str) -> list[str]:
+    """Every line in which uDeck says it heard a click outside it that was not past the panel."""
+    return [line for line in lines.splitlines() if KEPT_BY_THE_MARGIN in line]
+
+
 # What uDeck writes when the store refused the settings it was handed:
 # `could not save the settings: <error>`, from `DeckModel.save` through
 # `record` into `DeckLog.plugins.error` (Sources/UDeckKit/Plugins/DeckModel.swift).
@@ -839,6 +860,26 @@ def interrupt_a_held_panel(machine, story, check_dir, label=""):
     said = wait_for_it_to_close(machine, story, f"the switch with no click{label}")
     machine.screenshot(check_dir, f"after the switch with no click{label}")
     return said
+
+
+def choose_rename_in_the_tabs_menu(machine, check_dir):
+    """A right click on the held panel's first tab, and "Rename" chosen in the menu it opens.
+
+    A choice in one of uDeck's own menus, which is a click no monitor of uDeck's
+    hears: the menu tracks the pointer in a loop of its own. "Rename" because it
+    changes nothing the lab reads and is always enabled — "Close tab" is not, with
+    one tab — and because what it does shows on the screenshot that follows: the
+    tab's name selected in a field. Whether the menu really let go on that click
+    is uDeck's to say, and the caller reads it (`menu_let_go_on_a_click`).
+    """
+    machine.right_click(*config.THE_FIRST_TAB, f"on the panel's first tab, at {config.THE_FIRST_TAB}")
+    # A menu is on screen at once; the pause is for the screenshot, which is
+    # evidence and not the verdict.
+    machine.sleep(1)
+    machine.screenshot(check_dir, "the tab's menu")
+    machine.click(*config.RENAME_IN_THE_TABS_MENU, f"on Rename in the tab's menu, at {config.RENAME_IN_THE_TABS_MENU}")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "after Rename was chosen")
 
 
 def bring_forward(machine, application, step, document=None):

@@ -1205,6 +1205,189 @@ def test_a_restored_panel_clicked_past_that_comes_back_whole_fails(monkeypatch, 
         checks.check_a_click_past_a_restored_panel(machine, check_dir, lab)
 
 
+# --- A switch after a choice in one of uDeck's menus -------------------------------------
+
+# What uDeck says when one of its menus lets go on a click made in it — the click no
+# monitor of its hears, which it counts as heard from then on.
+MENU_LET_GO = (
+    "18:20:05.100 Db uDeck[404] [place.unicorns.udeck:panel] a menu let go on a click in it 352 ms ago, "
+    "and uDeck counts that click as heard\n"
+)
+AFTER_A_CHOICE = (REVEAL, PROMOTED, MENU_LET_GO, INTERRUPTED, RESTORED)
+
+
+def test_a_switch_after_a_choice_in_a_menu_stays_an_interruption(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(*AFTER_A_CHOICE), in_front=[config.THE_DESKTOP])
+    checks.check_a_switch_after_a_choice_in_a_menu(machine, check_dir, lab)
+    # The tab's menu is opened with the other button, and "Rename" chosen in it
+    # with the first; the only other click is the one that held the panel open.
+    assert [(x, y) for x, y, _ in machine.right_clicks] == [config.THE_FIRST_TAB]
+    assert [(x, y) for x, y, _ in machine.clicks] == [panel.inside_the_peek(), config.RENAME_IN_THE_TABS_MENU]
+    assert [c for c in machine.ssh.commands if f"open -a {config.THE_DESKTOP}" in c], "the switch is made with no click"
+    # And the pointer is past the panel when it is made, where a click that
+    # dismissed it would have been.
+    assert [(x, y) for x, y, _ in machine.pointer][:3] == [
+        panel.middle_of_the_screen(),
+        panel.top_of_the_strip(),
+        panel.past_the_panel(),
+    ]
+
+
+def test_a_choice_in_a_menu_taken_for_a_click_past_the_panel_fails(monkeypatch, lab, check_dir):
+    """What was measured 3 times of 3 before uDeck heard its menus: nothing said
+    about the menu, and the switch read as a click past the panel. Red, not
+    "could not check" — the menu's missing line is asked about only after the
+    verdict, because a uDeck that never hears its menus does not write it either."""
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, NOTHING, DISMISSED, REVEAL), in_front=[config.THE_DESKTOP])
+    with pytest.raises(CheckFailed) as raised:
+        checks.check_a_switch_after_a_choice_in_a_menu(machine, check_dir, lab)
+    assert "('open', 'collapsed', 'otherAppActivated')" in str(raised.value)
+    assert "closeRequested" in str(raised.value)
+
+
+def test_a_menu_that_never_let_go_on_a_click_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """A right click that opened no menu leaves "Rename" clicked on the panel
+    itself, which the local monitor hears — and the switch is an interruption
+    whatever uDeck does about menus. Green there would be green for nothing."""
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, NOTHING, INTERRUPTED, RESTORED), in_front=[config.THE_DESKTOP])
+    with pytest.raises(LabError, match="never said one of its menus let go on a click"):
+        checks.check_a_switch_after_a_choice_in_a_menu(machine, check_dir, lab)
+
+
+def test_a_menu_that_let_go_on_something_else_is_not_the_choice(monkeypatch, lab, check_dir):
+    """A menu that closed without a choice — dismissed, or taken away by the
+    system — lets go on something that is not a click, and uDeck says so in a
+    line that begins the same way. That is no witness to a choice."""
+    not_a_click = (
+        "18:20:05.100 Db uDeck[404] [place.unicorns.udeck:panel] a menu let go on something other than a click in it\n"
+    )
+    machine = prepared(
+        monkeypatch, growing(REVEAL, PROMOTED, not_a_click, INTERRUPTED, RESTORED), in_front=[config.THE_DESKTOP]
+    )
+    with pytest.raises(LabError, match="never said one of its menus let go on a click"):
+        checks.check_a_switch_after_a_choice_in_a_menu(machine, check_dir, lab)
+
+
+def test_a_choice_in_a_menu_that_closed_the_held_panel_fails(monkeypatch, lab, check_dir):
+    machine = prepared(
+        monkeypatch,
+        growing(REVEAL, PROMOTED, MENU_LET_GO + DISMISSED, INTERRUPTED, RESTORED),
+        in_front=[config.THE_DESKTOP],
+    )
+    with pytest.raises(CheckFailed, match="closed the held panel"):
+        checks.check_a_switch_after_a_choice_in_a_menu(machine, check_dir, lab)
+
+
+def test_a_panel_that_comes_back_as_a_peek_after_a_menu_and_a_switch_fails(monkeypatch, lab, check_dir):
+    steps = list(AFTER_A_CHOICE)
+    steps[-1] = REVEAL
+    machine = prepared(monkeypatch, growing(*steps), in_front=[config.THE_DESKTOP])
+    with pytest.raises(CheckFailed, match="not whole"):
+        checks.check_a_switch_after_a_choice_in_a_menu(machine, check_dir, lab)
+
+
+def test_the_menu_is_read_about_only_once_it_has_had_time_to_let_go(monkeypatch, lab, check_dir):
+    """One read of what the choice brought, and a pause before it: the menu lets
+    go about a third of a second after the click, so a read straight after the
+    click can miss the line and call the scene failed."""
+    machine = prepared(monkeypatch, growing(*AFTER_A_CHOICE), in_front=[config.THE_DESKTOP])
+    order = []
+    sleeping = machine.sleep
+    machine.sleep = lambda seconds: order.append(("sleep", seconds)) or sleeping(seconds)
+    clicking = machine.click
+    machine.click = lambda x, y, step: order.append(("click", (x, y))) or clicking(x, y, step)
+    reading = machine.ssh.ask
+    machine.ssh.ask = lambda command, *a, **k: (order.append(("read",)) if "log show" in command else None) or reading(
+        command, *a, **k
+    )
+    checks.check_a_switch_after_a_choice_in_a_menu(machine, check_dir, lab)
+    after = order[order.index(("click", config.RENAME_IN_THE_TABS_MENU)) :]
+    assert ("sleep", config.SETTLE_SECONDS) in after[: after.index(("read",))]
+
+
+# --- A switch after a click in the margin ---------------------------------------------------
+
+# What uDeck says when its global monitor hears a click outside it that is not past
+# the panel, and lets the panel be.
+MARGIN_KEPT = (
+    "18:20:22.100 Db uDeck[404] [place.unicorns.udeck:panel] a click outside uDeck but not past the panel, "
+    "so it stays\n"
+)
+AFTER_THE_MARGIN = (REVEAL, PROMOTED, INTERRUPTED, RESTORED, MARGIN_KEPT, INTERRUPTED, RESTORED)
+# The Finder for the first switch and for the restored panel, then TextEdit for the second.
+MARGIN_FRONTS = [config.THE_DESKTOP, config.THE_DESKTOP, config.IN_FRONT_BEFORE_THE_PANEL]
+
+
+def test_a_switch_after_a_click_in_the_margin_stays_an_interruption(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(*AFTER_THE_MARGIN), in_front=list(MARGIN_FRONTS))
+    checks.check_a_switch_after_a_click_in_the_margin(machine, check_dir, lab)
+    assert [(x, y) for x, y, _ in machine.clicks] == [panel.inside_the_peek(), config.IN_THE_MARGIN]
+    assert not machine.right_clicks
+    commands = machine.ssh.commands
+    assert [c for c in commands if f"open -a {config.IN_FRONT_BEFORE_THE_PANEL}" in c], "the second switch has no click"
+    # Past the panel twice — before each switch — and never in the margin: the
+    # click there is the only thing that goes there.
+    places = [(x, y) for x, y, _ in machine.pointer]
+    assert places.count(panel.past_the_panel()) == 2
+    assert config.IN_THE_MARGIN not in places
+
+
+def test_a_click_in_the_margin_later_taken_for_a_click_past_the_panel_fails(monkeypatch, lab, check_dir):
+    """What was measured 2 times of 2 on a uDeck whose monitor did not count
+    the click it forgave as heard."""
+    steps = list(AFTER_THE_MARGIN)
+    steps[5], steps[6] = DISMISSED, REVEAL
+    machine = prepared(monkeypatch, growing(*steps), in_front=list(MARGIN_FRONTS))
+    with pytest.raises(CheckFailed) as raised:
+        checks.check_a_switch_after_a_click_in_the_margin(machine, check_dir, lab)
+    assert "('open', 'collapsed', 'otherAppActivated')" in str(raised.value)
+
+
+def test_a_click_in_the_margin_that_closed_the_panel_fails(monkeypatch, lab, check_dir):
+    machine = prepared(
+        monkeypatch, growing(REVEAL, PROMOTED, INTERRUPTED, RESTORED, DISMISSED), in_front=list(MARGIN_FRONTS)
+    )
+    with pytest.raises(CheckFailed, match="margin round the panel, which keeps it alive, closed it"):
+        checks.check_a_switch_after_a_click_in_the_margin(machine, check_dir, lab)
+
+
+def test_a_click_in_the_margin_uDeck_never_mentioned_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """The click may never have reached the monitor — and then the switch would
+    be an interruption for the reason the check is not about."""
+    machine = prepared(
+        monkeypatch, growing(REVEAL, PROMOTED, INTERRUPTED, RESTORED, NOTHING), in_front=list(MARGIN_FRONTS)
+    )
+    with pytest.raises(LabError, match="never said it heard a click outside it"):
+        checks.check_a_switch_after_a_click_in_the_margin(machine, check_dir, lab)
+
+
+def test_a_click_in_the_margin_the_workspace_also_reported_is_not_the_monitors_alone(monkeypatch, lab, check_dir):
+    steps = list(AFTER_THE_MARGIN)
+    steps[4] = MARGIN_KEPT + NOTIFIED
+    machine = prepared(monkeypatch, growing(*steps), in_front=list(MARGIN_FRONTS))
+    with pytest.raises(LabError, match="not the monitor's alone"):
+        checks.check_a_switch_after_a_click_in_the_margin(machine, check_dir, lab)
+
+
+def test_the_finder_not_in_front_of_the_restored_panel_leaves_the_margin_unclicked(monkeypatch, lab, check_dir):
+    machine = prepared(
+        monkeypatch,
+        growing(*AFTER_THE_MARGIN),
+        in_front=[config.THE_DESKTOP, config.IN_FRONT_BEFORE_THE_PANEL],
+    )
+    with pytest.raises(LabError, match=f"{config.IN_FRONT_BEFORE_THE_PANEL} is in front, not the"):
+        checks.check_a_switch_after_a_click_in_the_margin(machine, check_dir, lab)
+    assert [(x, y) for x, y, _ in machine.clicks] == [panel.inside_the_peek()]
+
+
+def test_a_panel_that_comes_back_as_a_peek_after_a_margin_click_and_a_switch_fails(monkeypatch, lab, check_dir):
+    steps = list(AFTER_THE_MARGIN)
+    steps[-1] = REVEAL
+    machine = prepared(monkeypatch, growing(*steps), in_front=list(MARGIN_FRONTS))
+    with pytest.raises(CheckFailed, match="not whole"):
+        checks.check_a_switch_after_a_click_in_the_margin(machine, check_dir, lab)
+
+
 # --- The keyboard shortcut ---------------------------------------------------------------
 
 

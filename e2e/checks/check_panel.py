@@ -1,7 +1,7 @@
 """Does the panel open when it should, and close when it should?
 
-Seventeen checks in three parts. The first six are about the panel appearing
-and by which path; the next six are about it going away again, and they are
+Nineteen checks in three parts. The first six are about the panel appearing
+and by which path; the next eight are about it going away again, and they are
 where the promise the panel is built on lives — **once the panel is held, the
 cursor leaving never closes it**, and everything that does close it is the
 operator saying so. The last five are the other way in, which needs no pointer
@@ -62,17 +62,20 @@ inside the guest. It has to be: the dwell is a fraction of a second, so a
 pointer put at the edge from this Mac would have fired the dwell long before an
 SSH command could push it, and the check would pass by the path it is not about.
 
-**Closing.** The last six take a panel that is up and put it away. Five ask
+**Closing.** The next eight take a panel that is up and put it away. Seven ask
 which event uDeck says did it: `peek -> collapsed on pointerLeft`,
 `open -> collapsed on closeRequested` — by either of the two messengers a click
 past the panel has — `open -> collapsed on otherAppActivated`, and
-`peek -> collapsed on escape`. The phase they name on the left is as much of the
+`peek -> collapsed on escape`. The switch that must stay an interruption is
+asked three times, because what tells it from a click past the panel is the
+clicks uDeck heard itself, and it hears them by three roads: its local monitor,
+its global one — a click in the margin round the panel — and its own menus. The phase they name on the left is as much of the
 verdict as the event on the right — a peek closing when the pointer leaves is
 the panel working, and a *held* panel doing the same is the one failure this
 whole design exists to prevent. And the closing line has to be the only one in
 the read that heard it, with nothing reopening there either.
 
-The sixth asks the question that follows all of them and that none of them can:
+The eighth asks the question that follows all of them and that none of them can:
 where the keyboard went. A panel that is gone from the log and from the screen
 can still be holding it, and the next thing the operator does after putting the
 panel away is type. So `panel.the-key-after-escape` types, into a document, and
@@ -145,7 +148,7 @@ process's hot keys when the process exits, so `panel.the-hotkey-dies-with-udeck`
 is green over a build that never unregisters anything. That is written down
 where it was measured, in that check.
 
-Those eleven go through more steps than the six opening checks, so they read
+Those thirteen go through more steps than the six opening checks, so they read
 the log in steps too (`panel.Story`): one window opened at the start, sliced by what
 each action added to it, and the whole of it kept beside the report as
 `story.log`. A check that read only the end could not tell "nothing happened
@@ -757,6 +760,171 @@ def check_a_click_past_a_restored_panel(machine, check_dir, lab):
             came_back == ["peek"],
             f"the panel came back as {came_back} after a click outside it, not as a peek — uDeck read the "
             "operator putting it away as something interrupting him",
+        )
+    finally:
+        story.keep()
+
+
+def check_a_switch_after_a_choice_in_a_menu(machine, check_dir, lab):
+    """A choice in one of uDeck's own menus, then a switch with no click: still an interruption.
+
+    `panel.a-switch-with-no-click` again, with one thing between the click that
+    holds the panel open and the switch: "Rename" chosen in the context menu of
+    the panel's first tab (`panel.choose_rename_in_the_tabs_menu`). A menu tracks
+    the pointer in a loop of its own, so the click that chooses in it reaches
+    neither of uDeck's click monitors while the system counts it like any other
+    — and uDeck tells a click past the panel from a switch by whether the last
+    click is one it heard (`ApplicationSwitch`). Measured on 2026-09-27 on a
+    build that heard only its monitors: the choice was taken for a click past the
+    panel, the panel closed as dismissed and came back as a peek, 3 times of 3
+    (.build/e2e/kept/20260927-193950Z and -194310Z, probe.tab-menu-1 to -3); and
+    this check, on the build that hears its menus with that taken out again, red
+    2 times of 2 on `closeRequested` (-202433Z). The pointer is taken past the
+    panel before the switch, as in the check it repeats, so that only the clicks
+    uDeck heard can say "switch".
+
+    **Whether the menu really let go on that click is uDeck's to say**, and it is
+    asked after the verdict. A right click that opened no menu would leave the
+    "Rename" click on the panel itself, which the local monitor hears — and the
+    switch would stay an interruption whatever uDeck does about menus. So uDeck
+    has to have written that one of its menus let go on a click in it; without
+    that line the scene did not happen and the check could not check. After the
+    verdict, so that a uDeck which never hears its menus is red rather than
+    "could not check": it writes no such line either.
+
+    The menu of a tab and not of a card, because the lab's uDeck has no plugins
+    and so no cards; both are SwiftUI's `.contextMenu`, the same `NSMenu`
+    underneath. The status-bar menu is not asked here, and measured it could not
+    be: a click on uDeck's item in the menu bar with the panel held is a click
+    past the panel by both roads — its global monitor hears it and another
+    application comes forward, the Finder where the build named it — so the
+    panel is put away before the menu opens, 2 times of 2
+    (-193950Z, probe.status-menu-1; -194310Z, probe.status-menu-2).
+    """
+    log = _prepare(machine, check_dir, lab)
+    story = panel.Story(machine, log, check_dir, lab.note)
+    try:
+        panel.reveal_a_peek(machine, story, "the reveal")
+        panel.hold_it_open(machine, story, check_dir)
+        panel.choose_rename_in_the_tabs_menu(machine, check_dir)
+        # One read, a while after: the menu lets go a third of a second or so
+        # after the click that chose in it (345 to 448 ms, six times, on
+        # 2026-09-27), and a read that came too early costs "could not check"
+        # below, never a verdict.
+        machine.sleep(config.SETTLE_SECONDS)
+        chosen = story.take("the choice in the tab's menu")
+        expect(
+            panel.closed_on(chosen) == [],
+            f"a choice in the tab's own menu closed the held panel on {panel.closed_on(chosen)}: {panel.short(chosen)}",
+        )
+
+        machine.move_pointer(*panel.past_the_panel(), f"past the panel, to {panel.past_the_panel()}")
+        panel.bring_forward(machine, config.THE_DESKTOP, f"bringing the {config.THE_DESKTOP} forward with no click")
+        said = panel.wait_for_it_to_close(machine, story, "the switch with no click after the choice")
+        machine.screenshot(check_dir, "after the switch with no click")
+        panel.expect_it_closed(
+            said, "open", "otherAppActivated", "the switch with no click after a choice in the tab's menu"
+        )
+        if not panel.menu_let_go_on_a_click(chosen):
+            raise LabError(
+                "choosing Rename in the tab's menu",
+                "uDeck never said one of its menus let go on a click in it, so the click at "
+                f"{config.RENAME_IN_THE_TABS_MENU} may have landed on the panel itself, which uDeck hears anyway: "
+                f"{panel.short(chosen)}",
+            )
+
+        said = panel.reveal(machine, story, "the gesture after the switch")
+        came_back = panel.revealed(said)
+        expect(
+            came_back == ["open"],
+            f"the panel came back as {came_back} after a switch that followed a choice in its own menu, not "
+            f"whole — the work the operator was in the middle of was thrown away: {panel.short(said)}",
+        )
+    finally:
+        story.keep()
+
+
+def check_a_switch_after_a_click_in_the_margin(machine, check_dir, lab):
+    """A click in the margin round the panel, then a switch with no click: still an interruption.
+
+    The second of the roads by which uDeck hears a click itself. A click outside
+    uDeck reaches its global monitor, and one in the 24-point margin round the
+    panel is forgiven there — the margin keeps the panel alive
+    (`config.IN_THE_MARGIN`). The monitor has to count it as heard as it forgives
+    it: measured on 2026-09-27, a build whose monitor did not took the margin
+    click for a click past the panel when a switch came 4 and 7 s after it, 2
+    times of 2 (.build/e2e/kept/20260927-183705Z), and was a switch 3 times of 3
+    with it (-165246Z, probe.margin). Neither the unit tests nor any other check
+    held that line (`PanelController.handleClickOutside`); this one does, red 2
+    times of 2 on `closeRequested` with it taken out (-202433Z).
+
+    The scene is `panel.a-click-past-a-restored-panel`'s up to the click: a held
+    panel interrupted, restored straight to `open` with the Finder in front, so
+    that a click on the desktop brings nothing forward and the monitor is the
+    only messenger. The click lands in the margin instead of past the panel, and
+    uDeck has to say it heard it and let the panel be — that line is the
+    witness that the click reached the monitor at all, and a margin click that
+    closed the panel is uDeck's failure. Then the pointer goes past the panel and
+    TextEdit is brought forward with no click, and the panel has to close as
+    interrupted and come back whole.
+    """
+    log = _prepare(machine, check_dir, lab)
+    story = panel.Story(machine, log, check_dir, lab.note)
+    try:
+        said = panel.interrupt_a_held_panel(machine, story, check_dir)
+        panel.expect_it_closed(said, "open", "otherAppActivated", "the switch with no click")
+        said = panel.reveal(machine, story, "the gesture after the switch")
+        restored = panel.revealed(said)
+        expect(
+            restored == ["open"],
+            f"the panel came back as {restored} after another application interrupted it, not whole, so "
+            f"there is no restored panel to click beside: {panel.short(said)}",
+        )
+        in_front = probes.frontmost(machine, "asking which application is in front of the restored panel")
+        if in_front != config.THE_DESKTOP:
+            raise LabError(
+                "putting the Finder in front of the restored panel",
+                f"{in_front} is in front, not the {config.THE_DESKTOP}, so a click on the desktop would bring "
+                "an application forward",
+            )
+
+        machine.click(*config.IN_THE_MARGIN, f"in the margin of the restored panel, at {config.IN_THE_MARGIN}")
+        clicked = panel.answer(machine, story, "the click in the margin", panel.kept_by_the_margin)
+        machine.screenshot(check_dir, "after the click in the margin")
+        expect(
+            panel.closed_on(clicked) == [],
+            f"a click in the margin round the panel, which keeps it alive, closed it on "
+            f"{panel.closed_on(clicked)}: {panel.short(clicked)}",
+        )
+        if panel.news_of_another_application(clicked):
+            raise LabError(
+                "clicking in the margin of the restored panel",
+                "the workspace told uDeck another application came forward, so the click was not the monitor's "
+                f"alone: {panel.short(clicked)}",
+            )
+        if not panel.kept_by_the_margin(clicked):
+            raise LabError(
+                "clicking in the margin of the restored panel",
+                "uDeck never said it heard a click outside it that was not past the panel, so the click may not "
+                f"have reached its monitor at all: {panel.short(clicked)}",
+            )
+
+        machine.move_pointer(*panel.past_the_panel(), f"past the panel, to {panel.past_the_panel()}")
+        panel.bring_forward(
+            machine, config.IN_FRONT_BEFORE_THE_PANEL,
+            f"bringing {config.IN_FRONT_BEFORE_THE_PANEL} forward with no click",
+        )
+        said = panel.wait_for_it_to_close(machine, story, "the switch with no click after the click in the margin")
+        machine.screenshot(check_dir, "after the switch with no click")
+        panel.expect_it_closed(
+            said, "open", "otherAppActivated", "the switch with no click after a click in the margin"
+        )
+        said = panel.reveal(machine, story, "the gesture after it")
+        came_back = panel.revealed(said)
+        expect(
+            came_back == ["open"],
+            f"the panel came back as {came_back} after a switch that followed a click in its margin, not whole "
+            f"— the work the operator was in the middle of was thrown away: {panel.short(said)}",
         )
     finally:
         story.keep()

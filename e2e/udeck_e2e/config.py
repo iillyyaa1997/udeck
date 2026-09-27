@@ -426,6 +426,32 @@ PAST_THE_PANEL = (200, 1100)
 # `peek -> open on interacted` and nothing else, six times in four runs.
 INSIDE_THE_PEEK = (SCREEN_WIDTH // 2, 70)
 
+# Inside the region that keeps the open panel alive and not on the panel: the
+# 24-point margin below it, between y 790 where the panel ends and y 814 where the
+# region does (above), in the middle across. A click here is a click outside uDeck
+# — its global monitor hears it — and uDeck leaves the panel be. Measured in the
+# guest on 2026-09-27 on a restored panel (.build/e2e/kept/20260927-165246Z,
+# probe.margin-1 to -3): the click closed nothing and brought no news of another
+# application, 3 times of 3.
+IN_THE_MARGIN = (SCREEN_WIDTH // 2, 802)
+
+# The first tab of a held panel — "Now", the one tab a fresh uDeck has — which the
+# check of a choice in one of uDeck's own menus right-clicks for its context menu.
+# Read off screenshots of a held panel in the guest (.build/e2e/kept/
+# 20260927-165246Z, probe.margin-1, 02-the-panel-held-open.png): the tab's label
+# 35 pixels in from the open panel's left edge at x 730 and 24 below the 30-point
+# menu bar. Right-clicked there on 2026-09-27, it opened the tab's menu 5 times of
+# 5 (.build/e2e/kept/20260927-193950Z and -194310Z, probe.tab-menu-*).
+THE_FIRST_TAB = (765, 54)
+
+# And the first item of that menu, "Rename". macOS opens a context menu with its
+# top-left corner at the pointer, and on the screenshot of it the menu spans
+# x 765…854 and y 48…106 with "Rename" on its first row, x 781…829 and about
+# y 58…74 (.build/e2e/kept/20260927-194310Z, probe.tab-menu-2, 03-the-tab-s-menu.png).
+# Clicked here, it was chosen 3 times of 3: the next screenshot has the tab's name
+# selected in a field, and uDeck's menu let go on that very click each time.
+RENAME_IN_THE_TABS_MENU = (805, 68)
+
 # The application a check brings forward before the panel is shown, when what it
 # asks is which application the panel leaves in front once it is gone: any
 # ordinary application with a window, as long as it is not the one a click on the

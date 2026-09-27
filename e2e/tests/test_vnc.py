@@ -278,6 +278,9 @@ class FakeApi:
         if self.fails:
             raise self.fails
 
+    def mousePress(self, button):  # noqa: N802 — vncdotool's name
+        self.events.append(("press", button))
+
     def keyPress(self, name):  # noqa: N802 — vncdotool's name
         self.events.append(("key", name))
         if self.fails:
@@ -330,6 +333,26 @@ def test_a_click_goes_through_the_machines_own_pointing_device():
     assert args[-3:] == ["click", "1280", "720"]
     assert vnc_client.parse_action(["click", "10", "20"]) == ("click", ["10", "20"])
     assert vnc_client.parse_action(["click", "-1", "20"]) is None
+
+
+def test_a_right_click_goes_through_the_same_device_with_the_other_button(monkeypatch, capsys):
+    """vncdotool counts buttons from 1, and 3 is the right one — the one that
+    opens a context menu. A left click is button 1, and the two must not be
+    one action with a flag nobody reads."""
+    client = Client((0, "", ""))
+    screen(client).right_click(765, 54, "the tab")
+    args, _ = client.calls[0]
+    assert args[-3:] == ["rightclick", "765", "54"]
+    assert vnc_client.parse_action(["rightclick", "765", "54"]) == ("rightclick", ["765", "54"])
+    for wrong in (["rightclick", "1"], ["rightclick", "-1", "20"], ["rightclick", "a", "b"]):
+        assert vnc_client.parse_action(wrong) is None
+
+    code, api, _ = run_client(monkeypatch, capsys, ["rightclick", "765", "54"])
+    assert code == 0
+    assert ("move", 765, 54) in api.events and ("press", 3) in api.events
+    code, api, _ = run_client(monkeypatch, capsys, ["click", "765", "54"])
+    assert code == 0
+    assert ("press", 1) in api.events and ("press", 3) not in api.events
 
 
 def test_a_key_goes_to_the_machines_own_keyboard_by_the_name_vncdotool_uses():

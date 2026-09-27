@@ -291,6 +291,9 @@ class FakeScreen:
     def click(self, x, y, step):
         self.calls.append(("click", x, y))
 
+    def right_click(self, x, y, step):
+        self.calls.append(("rightclick", x, y))
+
     def key(self, name, step):
         self.calls.append(("key", name))
 
@@ -794,6 +797,16 @@ def test_a_click_off_the_screen_is_refused_and_one_on_it_goes_through(host):
         host.machine.click(2560, 10, "nowhere")
     host.machine.click(2559, 1439, "the corner")
     assert ("click", 2559, 1439) in host.screens[0].calls
+
+
+def test_a_right_click_off_the_screen_is_refused_and_one_on_it_goes_through(host):
+    host.machine.create()
+    host.machine.boot()
+    with pytest.raises(LabError, match="off the 2560×1440 screen"):
+        host.machine.right_click(10, 1440, "nowhere")
+    host.machine.right_click(765, 54, "the tab")
+    assert ("rightclick", 765, 54) in host.screens[0].calls
+    assert not [c for c in host.screens[0].calls if c[0] == "click"], "a right click is not a left one"
 
 
 def test_a_key_goes_to_the_machine_and_names_no_place_to_refuse(host):

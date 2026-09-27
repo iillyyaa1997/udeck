@@ -136,6 +136,10 @@ class Screen:
         """Click where a person would, through the machine's own pointing device."""
         self._act(["click", str(x), str(y)], step)
 
+    def right_click(self, x: int, y: int, step: str) -> None:
+        """The same with the right button — what opens a context menu."""
+        self._act(["rightclick", str(x), str(y)], step)
+
     def key(self, name: str, step: str) -> None:
         """Press a key on the machine's keyboard, named as vncdotool names it (`esc`).
 

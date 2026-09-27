@@ -338,6 +338,13 @@ class Machine:
         self._refuse_off_screen(x, y, what)
         self._on_screen(what, lambda: screen.click(x, y, what))
 
+    def right_click(self, x: int, y: int, step: str) -> None:
+        """The same with the right button, at (x, y) — what opens a context menu there."""
+        what = f"right-clicking {step}"
+        screen = self._screen_for(what)
+        self._refuse_off_screen(x, y, what)
+        self._on_screen(what, lambda: screen.right_click(x, y, what))
+
     def key(self, name: str, step: str) -> None:
         """Press a key on the machine's keyboard, named as vncdotool names it (`esc`).
 
