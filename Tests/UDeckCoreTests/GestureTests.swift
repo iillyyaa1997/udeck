@@ -73,6 +73,20 @@ private struct Driver {
         send(PointerSample(location: cursor, delta: .zero, timestamp: clock))
     }
 
+    /// One report that uDeck asks about before it hears it: the window server
+    /// has already moved the pointer by `dy`, a timer asks where the pointer is
+    /// `ahead` after the report's own moment and finds it there, and only then
+    /// is the report handed over — carrying its own, earlier, timestamp.
+    mutating func moveAskedAboutFirst(dx: CGFloat = 0, dy: CGFloat, over seconds: TimeInterval = 0.008, ahead: TimeInterval) {
+        clock += seconds
+        let reported = clock
+        cursor.x = min(max(cursor.x + dx, geometry.screen.frame.minX), geometry.screen.frame.maxX - 1)
+        cursor.y = min(cursor.y + dy, geometry.screen.frame.maxY)
+        send(PointerSample(location: cursor, delta: .zero, timestamp: reported + ahead))
+        send(PointerSample(location: cursor, delta: CGVector(dx: dx, dy: dy), timestamp: reported))
+        clock = reported + ahead
+    }
+
     private mutating func send(_ sample: PointerSample) {
         outcomes.append(recognizer.handle(sample, geometry: geometry, environment: environment, tuning: tuning))
     }
@@ -451,6 +465,49 @@ struct GestureSplitReportTests {
         let aMomentLater = driver.tuning.dwellDuration / 2
         driver.moveInTwoHalves(dx: 0, dy: Self.throwReport) { $0.reevaluate(after: aMomentLater) }
         #expect(!driver.fired, "a timer between the two halves made the second one a push")
+    }
+}
+
+/// A timer asking where the pointer is, answered before the report that moved it.
+///
+/// uDeck asks on two timers — every 30 ms while a dwell is being timed, and
+/// every 100 ms besides — and the answer, `NSEvent.mouseLocation`, is where the
+/// window server has the pointer, which can be ahead of the reports uDeck has
+/// been handed. Measured in the lab on 2026-09-27, with a build that logged
+/// every sample near the top of the screen (.build/e2e/kept/20260927-195401Z):
+/// the pointer carried into the strip five rows short of the edge, left there
+/// 29 to 32 ms — the dwell's timer comes round at 30 — and then one report of
+/// 60 onto the edge, with nothing after it. 20 of 120 opened by the push. In
+/// all 20 a timer had asked 0.16 to 1.05 ms after the arriving report's own
+/// timestamp and been told the pointer was on the edge already; in none of the
+/// 100 that opened by the dwell had one.
+@Suite("Pointer gesture — a question answered ahead of the report")
+struct GestureAheadOfTheReportTests {
+    /// Five rows short of the edge: in the strip, and not pinned.
+    static let fiveRowsDown = CGPoint(x: 1280, y: ScreenFixtures.externalMain.frame.maxY - 5)
+
+    @Test("a report arriving at the edge is still the arrival when a timer saw it first")
+    func anArrivalAskedAboutFirstIsNotAPush() {
+        var driver = Driver(startingAt: CGPoint(x: 1280, y: Self.fiveRowsDown.y - 60))
+        driver.move(dx: 0, dy: 60)
+        #expect(!driver.geometry.isPinnedToTopEdge(driver.cursor), "the pointer must wait short of the edge")
+        driver.reevaluate(after: 0.030)
+        driver.moveAskedAboutFirst(dy: 60, over: 0.001, ahead: 0.0004)
+        #expect(driver.geometry.isPinnedToTopEdge(driver.cursor), "the report must arrive on the edge")
+        #expect(!driver.fired, "a timer that saw the pointer on the edge first made its arrival a push")
+        driver.rest(for: 0.1)
+        #expect(driver.firedVia == .dwell)
+    }
+
+    /// And the push still counts once the pointer really was on the edge before
+    /// the report: what is ignored is only the timer's word for where it was.
+    @Test("a push after the arrival still counts when a timer saw it first")
+    func aPushAskedAboutFirstStillCounts() {
+        var driver = Driver(startingAt: Self.fiveRowsDown)
+        driver.move(dx: 0, dy: 60)
+        #expect(!driver.fired)
+        driver.moveAskedAboutFirst(dy: driver.tuning.edgePushDistance * 2, ahead: 0.0004)
+        #expect(driver.firedVia == .push)
     }
 }
 

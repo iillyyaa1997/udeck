@@ -67,8 +67,27 @@ public struct HoverGestureRecognizer: Sendable {
     /// left the pointer, and every part of the report is read against it.
     private var wasPinned = false
 
-    /// Whether the cursor was against the top edge once the last sample was
-    /// handled: what `wasPinned` becomes when the next report begins.
+    /// Whether the cursor was against the top edge once the last sample that
+    /// moved was handled: what `wasPinned` becomes when the next report begins.
+    ///
+    /// Only a sample that moved says so (`notePinned`). One that moved nothing
+    /// is uDeck asking where the pointer is on a timer, and the answer is
+    /// `NSEvent.mouseLocation`, which can be ahead of the reports: the window
+    /// server has moved the pointer and the report that moved it has not reached
+    /// uDeck yet. A timer that asked in that gap found the pointer already at
+    /// the edge, and the report that took it there, handled a moment later,
+    /// was read as movement made while pinned — a throw that arrived counted as
+    /// a push.
+    ///
+    /// Measured in the lab on 2026-09-27 with a build that logged every sample
+    /// near the top of the screen: the pointer carried into the strip five rows
+    /// short of the edge, left there 29 to 32 ms — the dwell's own timer comes
+    /// round every 30 — and then one report onto the edge with nothing after it.
+    /// 20 of 120 opened by the push, and in all 20 a timer had asked 0.16 to
+    /// 1.05 ms after the arriving report's timestamp and been told the pointer
+    /// was on the edge already; none of the 100 that opened by the dwell had
+    /// that (.build/e2e/kept/20260927-195401Z). Read this way, 40 of 40 opened
+    /// by the dwell (-200818Z).
     private var pinnedAfterLastSample = false
 
     /// The timestamp every part of the report being handled carries, which is
@@ -128,7 +147,7 @@ public struct HoverGestureRecognizer: Sendable {
             // the gate, and it has to stay current through one — otherwise the
             // first sample after the gate lifts is compared against a stale
             // answer and discarded.
-            pinnedAfterLastSample = geometry.isPinnedToTopEdge(sample.location)
+            notePinned(geometry.isPinnedToTopEdge(sample.location), after: sample)
             return .idle(reason: blocked)
         }
 
@@ -141,7 +160,7 @@ public struct HoverGestureRecognizer: Sendable {
 
         if accumulatedPush(tuning: tuning, now: sample.timestamp) >= tuning.edgePushDistance {
             firedThisVisit = true
-            pinnedAfterLastSample = geometry.isPinnedToTopEdge(sample.location)
+            notePinned(geometry.isPinnedToTopEdge(sample.location), after: sample)
             return .fire(via: .push)
         }
 
@@ -195,6 +214,13 @@ public struct HoverGestureRecognizer: Sendable {
         guard sample.delta != .zero, sample.timestamp != reportTimestamp else { return }
         reportTimestamp = sample.timestamp
         wasPinned = pinnedAfterLastSample
+    }
+
+    /// Where a sample left the pointer, as the next report will read it — if
+    /// the sample moved at all (`pinnedAfterLastSample`).
+    private mutating func notePinned(_ pinned: Bool, after sample: PointerSample) {
+        guard sample.delta != .zero else { return }
+        pinnedAfterLastSample = pinned
     }
 
     private mutating func forgetReports() {
@@ -293,7 +319,7 @@ public struct HoverGestureRecognizer: Sendable {
         tuning: GestureTuning
     ) {
         let pinnedNow = geometry.isPinnedToTopEdge(sample.location)
-        defer { pinnedAfterLastSample = pinnedNow }
+        defer { notePinned(pinnedNow, after: sample) }
 
         guard pinnedNow else {
             // Still in flight. Upward travel only counts once the cursor has

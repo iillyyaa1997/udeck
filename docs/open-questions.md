@@ -121,6 +121,58 @@ wrong and the filter is merely hiding it. And count the reports that come in two
 copies: pairing a report's change of position with the sum of its copies is the
 fix, if they turn out to be common on a real mouse.
 
+**Where was the pointer when the click the news is about went down?** When the
+workspace says another application came forward, uDeck decides whether that was
+a click past the panel partly from where the pointer is *now*
+(`PanelController.pointerIsPastThePanel`), because the news carries no click and
+no place. With the time window gone the news can come late — 2 to 232 ms after
+the button in the runs kept so far — and a pointer that crossed the edge of the
+region that keeps the panel in that time is read on the wrong side of it. Moved
+back onto the panel, a click past it reads as a switch and the panel comes back
+whole; moved past it after a click in the margin that brought another
+application forward, the margin click reads as a dismissal and the work is
+thrown away. The global monitor, which does have the click, now decides from the
+click's own location; the two were the same in all six clicks past uDeck logged
+on 2026-09-27, with the pointer standing still. Not measured with a pointer in
+motion. The position at the click is not simple to have at the news: the
+movement uDeck is handed arrives by the same road as the click, which is the
+road that loses the race.
+*To settle:* a probe that clicks and moves on within a few milliseconds, many
+times, logging where the pointer was at the click and at the news.
+
+**Should a click on uDeck's own item in the menu bar put a held panel away?** It
+does, and by the rule as written: the item is past the panel, the global monitor
+hears the click (it is delivered to another process), and the workspace says
+another application came forward 2 to 3 ms after it — the Finder, the one time
+the build logged the name — so the panel closes as
+dismissed before the menu has opened, 2 times of 2 on 2026-09-27
+(.build/e2e/kept/20260927-193950Z and -194310Z, probe.status-menu-1 and -2). The
+operator reaching for uDeck's own menu may not mean "put it away".
+*To settle:* ask him.
+
+**Does a picker in the settings window let go the way a context menu does?**
+uDeck counts a click inside any of its menus as heard when the menu lets go on
+it (`NSMenu.didEndTrackingNotification`), and that was measured for a tab's
+context menu only — four choices, each letting go on the choosing click. A
+picker is an `NSPopUpButton` over the same `NSMenu`, and the settings window
+closes the panel when it opens, so the case needs the panel revealed again
+over the window. Not measured.
+*To settle:* reveal the panel with the settings window open, choose in a
+picker, switch with no click, and read the verdict line.
+
+**Can a report handled late read the pointer ahead of itself, as a timer did?**
+The gesture's samples take their position from `NSEvent.mouseLocation` when
+they are handled, the reports' as much as the timers'. A timer asking in the gap
+between the window server moving the pointer and uDeck being handed the report
+was measured, and fixed (`HoverGestureRecognizer.notePinned`): 20 pushes in 120
+arrivals, all 20 behind such a question. A report handled after the *next* one
+has already moved the pointer would read that position with a movement of its
+own, and nothing stops it being taken as "already pinned". On an idle guest the
+position read and the event's own location were the same in 39 movements of 39
+(.build/e2e/kept/20260927-154333Z). Not measured under load.
+*To settle:* log each report's own location beside `NSEvent.mouseLocation` in a
+whole lab run at `--jobs 2`, and count the reports near the top where they differ.
+
 **Can a run that did not overrun be reported as one?** The watchdog records a
 timeout before killing, and cancelling it cannot stop a body already past its
 cancellation check — so a producer finishing within a millisecond of its

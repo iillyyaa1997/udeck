@@ -243,15 +243,17 @@ struct ApplicationSwitchTests {
 
     /// A switch made with no click at all after the click that held the panel
     /// open: the Finder brought forward by `open -a` from outside the session.
-    /// Logged the same day (the same run, probe.margin-1): the last click 2036
-    /// ms old as the system counts it, 2020 ms as uDeck heard it — its local
-    /// monitor was handed the click 16 ms after the button went down — and the
-    /// panel showing for 5.7 s. The click came after the panel showed, and it
-    /// is uDeck's own.
+    /// Logged the same day, once uDeck dated a click by its own button
+    /// (.build/e2e/kept/20260927-200818Z, probe.switch-1): the last click 1866
+    /// ms old as the system counts it, and 1.291 µs younger as uDeck heard it —
+    /// the same click, the system's age of it older by the time the asking
+    /// took — its local monitor handed it 8 ms after the button, and the panel
+    /// showing for 5.0 s. The click came after the panel showed, and it is
+    /// uDeck's own.
     static let switchAfterAClickInside = ApplicationSwitch.Verdict.Evidence(
-        secondsSinceLastClick: 2.036,
-        secondsSinceShown: 5.659,
-        secondsSinceLastClickHeard: 2.020,
+        secondsSinceLastClick: 1.866,
+        secondsSinceShown: 5.014,
+        secondsSinceLastClickHeard: 1.866 - 0.000_001_291,
         pointerIsPastThePanel: true
     )
 
@@ -326,10 +328,11 @@ struct ApplicationSwitchTests {
         #expect(ApplicationSwitch.event(given: evidence) == .otherAppActivated)
     }
 
-    /// The same click read both ways has not come out as a tie — uDeck heard
-    /// it 7 to 16 ms after the system dated it, in the six switches of that run
-    /// — but a tie is not news either way: reading it as a click past the panel
-    /// throws work away, so the benefit of the doubt goes to the work.
+    /// The same click read both ways has not come out as a tie — the system's
+    /// age of it came out 1.3 to 24.8 µs older than uDeck's in the eight
+    /// switches of .build/e2e/kept/20260927-200818Z — but a tie is not news
+    /// either way: reading it as a click past the panel throws work away, so
+    /// the benefit of the doubt goes to the work.
     @Test("a click as old as the last one uDeck heard is that one")
     func aTieIsHeard() {
         let evidence = ApplicationSwitch.Verdict.Evidence(
@@ -339,6 +342,28 @@ struct ApplicationSwitchTests {
             pointerIsPastThePanel: true
         )
         #expect(ApplicationSwitch.event(given: evidence) == .otherAppActivated)
+    }
+
+    /// The panel opened by the gesture or the shortcut and never clicked into,
+    /// and a click past it: uDeck has heard no click at all since it started,
+    /// so the age of the last one it heard is infinite. That is the plainest
+    /// case of a click it has not heard, and nothing held it — every other
+    /// click past the panel here comes after a click uDeck did hear. The ages
+    /// are made up; the order is the case.
+    @Test("a click past a panel nobody has clicked into is a click past it")
+    func aClickPastAPanelUDeckNeverHeardAClickIn() {
+        let neverHeard = ApplicationSwitch.LastHeard()
+        #expect(neverHeard.age(at: 12.0) == .infinity, "a click uDeck never heard has no age")
+        let evidence = ApplicationSwitch.Verdict.Evidence(
+            secondsSinceLastClick: Self.clickPastThePanel.secondsSinceLastClick,
+            secondsSinceShown: Self.clickPastThePanel.secondsSinceShown,
+            secondsSinceLastClickHeard: neverHeard.age(at: 12.0),
+            pointerIsPastThePanel: true
+        )
+        #expect(
+            ApplicationSwitch.event(given: evidence) == .closeRequested,
+            "the operator put away a panel he had not clicked into, and it came back whole"
+        )
     }
 
     /// A card in the panel that launches an application: the click was on the
@@ -356,6 +381,50 @@ struct ApplicationSwitchTests {
             pointerIsPastThePanel: false
         )
         #expect(ApplicationSwitch.event(given: unheard) == .otherAppActivated)
+    }
+
+    /// The monitor that heard the click holding the panel open ran late — the
+    /// local one was handed its click 117 ms after the button in the lab on
+    /// 2026-09-27, the slowest of 15 — and in between the operator clicked past
+    /// the panel. Dated by when its monitor ran, the click inside would count
+    /// as heard the click past the panel too, and the news of that click would
+    /// read as a switch. Dated by its own button, it covers nothing after it.
+    /// The news comes 40 ms after the click past the panel, inside the 2 to
+    /// 232 ms the lab has seen.
+    @Test("a click whose monitor ran late has not made the clicks before it ran heard")
+    func aLateMonitorHearsOnlyItsOwnClick() {
+        let inside = 100.000
+        let handedOver = inside + 0.117
+        let pastThePanel = 100.090
+        let news = pastThePanel + 0.040
+        var heard = ApplicationSwitch.LastHeard()
+        heard.heard(wentDown: inside, handedOverAt: handedOver)
+        #expect(heard.wentDown == inside)
+        #expect(abs((heard.handedOverAfter ?? 0) - 0.117) < 1e-9, "how late it was handed over is kept for the log")
+
+        let evidence = ApplicationSwitch.Verdict.Evidence(
+            secondsSinceLastClick: news - pastThePanel,
+            secondsSinceShown: news - 95.0,
+            secondsSinceLastClickHeard: heard.age(at: news),
+            pointerIsPastThePanel: true
+        )
+        #expect(
+            ApplicationSwitch.event(given: evidence) == .closeRequested,
+            "a monitor running late made the click past the panel look heard, and the dismissal became an interruption"
+        )
+    }
+
+    /// Three roads bring clicks — the local monitor, the global one and the
+    /// menus — and one can run behind another. An older click arriving after a
+    /// younger one must not make the younger one news again.
+    @Test("an older click heard late does not make a younger one unheard")
+    func anOlderClickHeardLateChangesNothing() {
+        var heard = ApplicationSwitch.LastHeard()
+        heard.heard(wentDown: 100.090, handedOverAt: 100.101)
+        heard.heard(wentDown: 100.000, handedOverAt: 100.117)
+        #expect(heard.wentDown == 100.090)
+        #expect(abs((heard.handedOverAfter ?? 0) - 0.011) < 1e-9)
+        #expect(abs(heard.age(at: 100.130) - 0.040) < 1e-9)
     }
 
     /// `CGEventSource` answers with an interval, and nothing in its

@@ -18,23 +18,78 @@ for what that promises.
   interrupting him — the next reveal brought back work he had finished with.
   There is no time in the rule now. The news is that click when the pointer is
   past the panel, the last click came after the panel showed, and uDeck has not
-  heard that click itself yet. uDeck hears its own clicks through a local
-  monitor as they are delivered, and everybody else's through the global one,
-  which is the messenger that arrives late — and a click it has heard has been
-  answered already. That last condition is what keeps ⌘-Tab an interruption
-  after a click inside the panel held it open: that click came after the panel
-  showed as well, but it is uDeck's own. It also keeps a click in the margin
-  round the panel, which the monitor forgives, from being read as a click past it
-  when a switch follows. Every activation is logged with all four readings, the
-  switch as much as the dismissal. Measured in the guest on 2026-09-27: twelve
-  clicks past a held panel, the news 5 to 148 ms after the button, all twelve
-  read as closed; six switches with no click after a click inside or in the
-  margin, all six read as switches, uDeck having heard that click 7 to 16 ms
-  after the system dated it. `panel.a-switch-with-no-click` goes red, 2 times of
-  2, on a uDeck that takes any click since the panel showed for a click past it,
-  and on one whose own click monitor notes nothing; a switch after a click in the
-  margin was read as a click past the panel 2 times of 2 when the monitor outside
-  noted nothing.
+  heard that click itself yet. That last condition is what keeps ⌘-Tab an
+  interruption after a click inside the panel held it open: that click came
+  after the panel showed as well, but it is uDeck's own, and a click uDeck has
+  heard has been answered already. uDeck hears its own clicks by three roads:
+  its local monitor for clicks on its windows, its global monitor for everybody
+  else's — the messenger that arrives late, and the one that forgives a click in
+  the margin round the panel — and its own menus. Every activation is logged
+  with all four readings, the switch as much as the dismissal, and with how late
+  uDeck was handed the last click it heard. Measured in the guest on 2026-09-27:
+  twelve clicks past a held panel, the news 5 to 148 ms after the button, all
+  twelve read as closed; three switches with no click after a click inside and
+  three after a click in the margin, all six read as switches, uDeck having
+  been handed that click 7 to 16 ms after the system dated it.
+  `panel.a-switch-with-no-click` goes red, 2 times of 2, on a uDeck that takes
+  any click since the panel showed for a click past it, and on one whose own
+  click monitor notes nothing.
+
+  **A choice in one of uDeck's own menus is a click it heard.** A menu — the
+  context menu of a card or a tab, a picker in the settings window — tracks the
+  pointer in a loop of its own, so the click that chooses in it reaches neither
+  monitor while the system counts it like any other. Measured before the fix: a
+  held panel, "Rename" chosen in its tab's menu, the pointer taken past the panel
+  and another application brought forward with no click — read as a click past
+  the panel and the work thrown away, 3 times of 3. uDeck now counts the click a
+  menu lets go on as heard, dated by that click, which is AppKit's current event
+  when the menu lets go: the choosing click, carrying the timestamp the system
+  gave its last click, in all four choices logged. A menu dismissed by a click
+  past it lets go on something that is not a click, and that click still closes
+  the panel as dismissed, 2 times of 2 before the fix and 2 of 2 after. The
+  status-bar menu is not the same case: with the panel held, a click on uDeck's
+  item in the menu bar is a click past the panel by both roads, and puts the
+  panel away before the menu opens, 2 times of 2. New lab check:
+  `panel.a-switch-after-a-choice-in-a-menu`, red 2 times of 2 on a build that
+  does not hear its menus (the lab can right-click now). Whether a picker in the
+  settings window lets go the same way is not measured.
+
+  **A click is heard when its button went down, not when uDeck got round to it.**
+  The local monitor was handed its click 0.5 to 117 ms after the button, and the
+  global one 11 to 321 ms after, in 21 clicks logged at `--jobs 2`.
+  Dated by the handing-over, a click on the panel whose monitor ran late counted
+  as heard every click made before the monitor ran — a click past the panel
+  among them — and its news read as a switch, under the very load the window
+  was given up for. Clicks are now dated by the event's own timestamp, which is
+  the uptime clock the system dates its last click by: the system's date
+  brackets the event's, 15 clicks of 15, and in the 8 switches that followed a
+  click uDeck had heard the system's age of it came out 1.3 to 24.8 µs older than
+  uDeck's, which is what keeps a tie "heard". The global monitor also decides
+  whether its click was past the panel from where the click was, not from where
+  the pointer is by the time it runs; the notification cannot, and that is
+  written down in docs/open-questions.md.
+
+  **The margin now has a check of its own.** Nothing in the repository held the
+  global monitor counting the click it forgives in the margin as heard: the
+  controller has no Swift tests, and no lab check clicked in the margin — while
+  a build without that line had taken a margin click for a click past the panel
+  2 times of 2 in a probe. New lab check:
+  `panel.a-switch-after-a-click-in-the-margin`, red 2 times of 2 without that
+  line. And a Swift test for the plainest case: a panel nobody has clicked
+  into, clicked past, is closed.
+
+- **An arrival at the edge that a timer saw first is still an arrival.** uDeck
+  asks where the pointer is on two timers, and the answer can run ahead of the
+  movement it has been handed: the window server has moved the pointer and the
+  report that moved it is still on its way. A timer that asked in that gap found
+  the pointer on the edge, and the report that took it there was counted as a
+  push made while pinned. Measured in the lab: the pointer carried into the strip
+  five rows short of the edge, left there about as long as the dwell's own timer
+  takes to come round, and then one report onto the edge — 20 of 120 opened by
+  the push, and every one of the 20 had a timer asking 0.16 to 1.05 ms after the
+  arriving report's timestamp, which none of the 100 dwells had. Only a sample
+  that moved says where the pointer was before the next report now; 40 of 40
+  opened by the dwell afterwards.
 
 - **A throw that stops at the edge is not taken for a push.** Now and then macOS
   hands one movement report to uDeck twice — through its global monitor and

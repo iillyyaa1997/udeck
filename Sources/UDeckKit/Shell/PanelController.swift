@@ -89,15 +89,15 @@ public final class PanelController {
     /// `ApplicationSwitch` asks whether the last click came after this.
     private var shownAt: TimeInterval?
 
-    /// When uDeck last heard a mouse button go down, by either of its two
-    /// click monitors, on the uptime clock — the moment the monitor was handed
-    /// the click, which is never before the button went down.
+    /// The youngest click uDeck has heard itself — by its local monitor, its
+    /// global one, or one of its own menus letting go — dated by when the
+    /// button went down.
     ///
     /// What `ApplicationSwitch` compares the system's last click against: a
     /// click uDeck has heard has been answered already, and the news of another
     /// application coming forward is the news of a click only when that click
     /// is younger than this.
-    private var lastClickHeard: TimeInterval?
+    private var lastHeard = ApplicationSwitch.LastHeard()
 
     /// Keeps the dwell alive while the cursor is not moving.
     private var armingTimer: Timer?
@@ -219,10 +219,21 @@ public final class PanelController {
         // A click anywhere outside the panel dismisses it. Global monitors see
         // only other applications' events, which is precisely the set wanted
         // here — a click inside uDeck must never count as a click outside.
+        //
+        // Where the click was and when its button went down are taken from the
+        // event, not from the moment the monitor is handed it: this monitor is
+        // the messenger that arrives late — 11 to 321 ms after the button in the
+        // lab on 2026-09-27 — and by then the pointer can be somewhere else.
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.handleClickOutside() }
+        ) { [weak self] event in
+            // A global monitor's event has no window, and its location is on
+            // the screen, in the coordinates `NSEvent.mouseLocation` uses: the
+            // two were the same in all six clicks past uDeck logged on
+            // 2026-09-27, with the pointer standing still.
+            let wentDown = event.timestamp
+            let location = event.locationInWindow
+            MainActor.assumeIsolated { self?.handleClickOutside(wentDown: wentDown, at: location) }
         }
 
         // And the clicks that are uDeck's own, which the global monitor never
@@ -237,9 +248,34 @@ public final class PanelController {
         insideClickMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] event in
-            MainActor.assumeIsolated { self?.noteClickHeard() }
+            let wentDown = event.timestamp
+            MainActor.assumeIsolated { self?.noteClickHeard(wentDown: wentDown) }
             return event
         }
+
+        // And the clicks neither monitor sees: the ones made inside uDeck's own
+        // menus — the context menu of a card or a tab, a picker in the settings
+        // window. A menu tracks the pointer in a loop of its own, so a choice in
+        // it reaches no monitor while the system counts it like any other
+        // click, and a switch with no click afterwards took that choice for a
+        // click past the panel: 3 times of 3 on 2026-09-27, a held panel thrown
+        // away after "Rename" in its tab's menu (.build/e2e/kept/20260927-193950Z
+        // and -194310Z, probe.tab-menu-1 to -3).
+        //
+        // Heard when the menu lets go, and dated by the click it let go on,
+        // which is AppKit's current event at that moment: the choosing click
+        // itself, carrying the very timestamp the system gave its last click,
+        // in all four choices logged that day. It cannot be dated by the moment
+        // the menu lets go — that came 345 to 448 ms after the click, in six
+        // choices — for the reason `ApplicationSwitch.LastHeard` gives. Delivered on the posting thread, which is the main one, so
+        // that the current event is still the menu's.
+        tokens.append(NotificationToken(
+            center: .default,
+            name: NSMenu.didEndTrackingNotification,
+            queue: nil
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.noteMenuLetGo() }
+        })
 
         attachedScreenID = screens.screenUnderCursor?.id ?? screens.screens.first?.id
         // The content renders from `shell.phase`; without this it would start
@@ -611,7 +647,7 @@ public final class PanelController {
         return !responder.string.isEmpty
     }
 
-    private func handleClickOutside() {
+    private func handleClickOutside(wentDown: TimeInterval, at location: CGPoint) {
         // Heard before anything is decided about it, in the same call that
         // closes the panel when it is past it — so that the notification can
         // never find this click heard and the panel still open because of it.
@@ -622,10 +658,15 @@ public final class PanelController {
         // brought forward with no click: with this line, a switch 3 times of 3
         // (.build/e2e/kept/20260927-165246Z, probe.margin); without it, the
         // margin click taken for a click past the panel 4 and 7 s after it,
-        // 2 times of 2 (-183705Z).
-        noteClickHeard()
+        // 2 times of 2 (-183705Z). `panel.a-switch-after-a-click-in-the-margin`
+        // holds it.
+        noteClickHeard(wentDown: wentDown)
         guard state.phase.isVisible else { return }
-        guard pointerIsPastThePanel() else { return }
+        // Where the click was, not where the pointer is now.
+        guard isPastThePanel(location) else {
+            DeckLog.panel.debug("a click outside uDeck but not past the panel, so it stays")
+            return
+        }
         apply(.closeRequested)
     }
 
@@ -640,11 +681,39 @@ public final class PanelController {
     /// it is read as a switch — `otherAppActivated` — and the panel collapses
     /// as interrupted rather than staying put.
     private func pointerIsPastThePanel() -> Bool {
-        geometry?.isPastThePanel(NSEvent.mouseLocation, in: state.phase) ?? false
+        isPastThePanel(NSEvent.mouseLocation)
     }
 
-    private func noteClickHeard() {
-        lastClickHeard = ProcessInfo.processInfo.systemUptime
+    private func isPastThePanel(_ location: CGPoint) -> Bool {
+        geometry?.isPastThePanel(location, in: state.phase) ?? false
+    }
+
+    /// A click uDeck has heard, by when its button went down — never by now,
+    /// which can be long after (`ApplicationSwitch.LastHeard`).
+    private func noteClickHeard(wentDown: TimeInterval) {
+        lastHeard.heard(wentDown: wentDown, handedOverAt: ProcessInfo.processInfo.systemUptime)
+    }
+
+    /// One of uDeck's menus let go of the pointer. If it let go on a click,
+    /// that click was the menu's — heard, and answered by whatever the menu did.
+    ///
+    /// Only a click. A menu that is dismissed by a click past it lets go on
+    /// something else — an event of AppKit's own, not a click — and that click
+    /// goes on to whatever it landed on: the Finder came forward and the panel
+    /// closed as dismissed, which is the operator's rule for a click past the
+    /// panel, menu or no menu. Measured on 2026-09-27, 2 times of 2 before
+    /// uDeck heard its menus and 2 of 2 after
+    /// (.build/e2e/kept/20260927-194310Z and -202257Z, probe.tab-menu-outside).
+    private func noteMenuLetGo() {
+        guard let event = NSApp.currentEvent,
+              [.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type)
+        else {
+            DeckLog.panel.debug("a menu let go on something other than a click in it")
+            return
+        }
+        noteClickHeard(wentDown: event.timestamp)
+        let ago = Self.milliseconds(ProcessInfo.processInfo.systemUptime - event.timestamp)
+        DeckLog.panel.debug("a menu let go on a click in it \(ago, privacy: .public) ms ago, and uDeck counts that click as heard")
     }
 
     private func handleApplicationActivated(pid: pid_t?) {
@@ -671,7 +740,7 @@ public final class PanelController {
             // have shown this instant, which no click can come after.
             let now = ProcessInfo.processInfo.systemUptime
             let shown = shownAt.map { now - $0 } ?? 0
-            let heard = lastClickHeard.map { now - $0 } ?? .infinity
+            let heard = lastHeard.age(at: now)
             let click = ApplicationSwitch.secondsSinceLastClick {
                 CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0)
             }
@@ -690,8 +759,11 @@ public final class PanelController {
         if let evidence = verdict.evidence {
             let click = Self.milliseconds(evidence.secondsSinceLastClick)
             let shown = Self.milliseconds(evidence.secondsSinceShown)
+            // And how late uDeck was handed that click, which is how far behind
+            // the machine was running — the one reading that says whether a
+            // verdict was made under load.
             let heard = evidence.secondsSinceLastClickHeard.isFinite
-                ? "\(Self.milliseconds(evidence.secondsSinceLastClickHeard)) ms ago"
+                ? "\(Self.milliseconds(evidence.secondsSinceLastClickHeard)) ms ago, handed to it \(Self.milliseconds(lastHeard.handedOverAfter ?? 0)) ms after the button"
                 : "never"
             if verdict.event == .closeRequested {
                 DeckLog.panel.debug(

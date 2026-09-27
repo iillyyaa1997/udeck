@@ -126,21 +126,38 @@ public enum PanelEvent: Sendable, Equatable {
 /// things happened, not how long they took.
 ///
 /// **What the order is taken from.** uDeck hears every click itself, by one of
-/// two monitors: a click on one of its own windows through the local one, as it
-/// is delivered, and a click anywhere else through the global one, which is the
-/// messenger that loses the race above. A click uDeck has heard has already been
-/// answered — a click on the panel was an interaction, a click past it closed the
-/// panel through the monitor, and a click in the margin round the panel was
-/// forgiven there. So the news of another application can only be the news of a
-/// click that is younger than every click uDeck has heard, and younger than the
-/// panel itself: a click from before the panel showed is about something else.
+/// three roads: a click on one of its own windows through its local monitor, as
+/// it is delivered; a click anywhere else through the global one, which is the
+/// messenger that loses the race above; and a click inside one of its own menus
+/// — the context menu of a card or a tab, a picker in the settings window —
+/// through the menu, when it lets go. A menu tracks the pointer in a loop of its
+/// own and hands neither monitor a thing, so that last road is not optional:
+/// measured on 2026-09-27, a choice in a tab's context menu and then a switch
+/// with no click, and uDeck took the choice for a click past the panel and
+/// threw the held panel away, 3 times of 3
+/// (.build/e2e/kept/20260927-193950Z and -194310Z, probe.tab-menu-1 to -3).
+/// A click uDeck has heard has already been answered — a click on the panel was
+/// an interaction, a click past it closed the panel through the monitor, a
+/// click in the margin round the panel was forgiven there, and a choice in a
+/// menu was the menu's. So the news of another application can only be the
+/// news of a click that is younger than every click uDeck has heard, and
+/// younger than the panel itself: a click from before the panel showed is about
+/// something else.
+///
+/// Younger by when its button went down, and not by when uDeck was handed it
+/// (`LastHeard`): a handler can run a long way behind its click, and every
+/// click in between would otherwise count as heard.
 ///
 /// Measured in the guest on 2026-09-27 (.build/e2e/kept/20260927-165246Z): twelve
 /// clicks past a held panel, the news 5 to 148 ms after the button and the last
 /// click uDeck had heard 13 to 36 s old — all twelve read as closed. Three
 /// switches with no click after a click inside, and three after a click in the
-/// margin of a restored panel: uDeck had heard the last click 7 to 16 ms after
-/// the system dated it, and all six were read as switches.
+/// margin of a restored panel: uDeck had been handed the last click 7 to 16 ms
+/// after the system dated it, and all six were read as switches. Again once
+/// clicks were dated by their own button and menus heard
+/// (.build/e2e/kept/20260927-200818Z): eight switches with no click after a
+/// click uDeck had heard — inside the panel, in its margin, in its tab's menu —
+/// all eight read as switches, and a click past the panel as closed.
 ///
 /// "Any click since the panel showed" is not enough, and the difference is the
 /// work this exists to protect. A peek is held open by a click *inside* it, and
@@ -190,8 +207,9 @@ public enum ApplicationSwitch {
             /// `collapsed`.
             public let secondsSinceShown: TimeInterval
 
-            /// How long ago uDeck itself last heard a mouse button go down, by
-            /// either of its monitors. Infinite when it has heard none.
+            /// How long ago the button of the youngest click uDeck has heard
+            /// itself went down, by whichever road (`LastHeard`). Infinite when
+            /// it has heard none.
             public let secondsSinceLastClickHeard: TimeInterval
 
             public let pointerIsPastThePanel: Bool
@@ -215,13 +233,20 @@ public enum ApplicationSwitch {
 
             /// Whether the last click is one uDeck has not heard yet.
             ///
-            /// Strictly younger. The same click, read twice, comes out *older*
-            /// from the system than from uDeck: uDeck notes a click when its
-            /// monitor is handed it, which is after the button went down, and
-            /// the caller reads uDeck's own clocks before it asks the system.
-            /// Both of those only ever push the two readings of one click apart
-            /// in the direction that says "heard" — 7 to 16 ms apart in the six
-            /// switches the lab logged on 2026-09-27.
+            /// Strictly younger, so a tie is heard. The same click read twice is
+            /// dated by one instant — its button going down, which is the
+            /// event's timestamp for uDeck and the moment the system counts its
+            /// age from — and the caller reads its own clock before it asks the
+            /// system, so the system's age of that click comes out older by
+            /// however long the asking took: "heard", never "news". That is the
+            /// whole margin, and it was measured rather than assumed, on a
+            /// build that logged both readings at microseconds on 2026-09-27
+            /// (.build/e2e/kept/20260927-200818Z): read the way the verdict
+            /// reads it, the system dated its last click 1.2 to 20.7 µs before
+            /// the event's own timestamp, and never after, in all 15 clicks
+            /// uDeck heard; and in the 8 switches that followed a click it had
+            /// heard, the system's age of that click came out older than
+            /// uDeck's by 1.3 to 24.8 µs.
             public var clickIsUnheard: Bool {
                 secondsSinceLastClick < secondsSinceLastClickHeard
             }
@@ -231,6 +256,57 @@ public enum ApplicationSwitch {
 
         /// Nil when nothing was asked, which is when there was no panel on screen.
         public let evidence: Evidence?
+    }
+
+    /// The youngest click uDeck has heard itself, dated by its button going down
+    /// — the event's own timestamp — and never by the moment uDeck was handed it.
+    ///
+    /// The two are not the same moment, and under load they are further apart
+    /// than two clicks. Measured in the guest on 2026-09-27, 21 clicks logged
+    /// with both (.build/e2e/kept/20260927-193950Z and -194310Z): the local
+    /// monitor was handed its click 0.5 to 117 ms after the button went down,
+    /// and the global one 11 to 321 ms after. Dated by the handing-over, a click
+    /// on the panel whose monitor ran late counts as heard every click made
+    /// before the monitor ran — a click past the panel among them — and the news
+    /// of that one reads as a switch: the operator putting the panel away taken
+    /// for an interruption, under exactly the load that made the rule give up
+    /// its window.
+    ///
+    /// The event's clock is the one `ProcessInfo.systemUptime` reads: in the
+    /// same 21 clicks the handing-over came 0.5 to 321 ms after the event's
+    /// timestamp and never before it. And it is the clock the system dates its
+    /// last click by: read just before and just after asking the system, its
+    /// date of the click brackets the event's timestamp, 15 clicks of 15 on a
+    /// build that logged both at microseconds (.build/e2e/kept/20260927-200818Z).
+    public struct LastHeard: Equatable, Sendable {
+        /// When the button went down, in seconds of uptime. Nil until uDeck has
+        /// heard a click.
+        public private(set) var wentDown: TimeInterval?
+
+        /// How long after that uDeck was handed it. Nothing is decided from
+        /// this; it is written down, because it is the one number that says how
+        /// far behind the machine was running.
+        public private(set) var handedOverAfter: TimeInterval?
+
+        public init() {}
+
+        /// A click whose button went down at `wentDown`, heard at `handedOverAt`.
+        ///
+        /// Only a younger click replaces the one held. Three roads bring clicks,
+        /// and one that runs late can bring an older click after a younger one
+        /// has arrived by another — which must not make the younger one news
+        /// again.
+        public mutating func heard(wentDown time: TimeInterval, handedOverAt now: TimeInterval) {
+            if let wentDown, wentDown >= time { return }
+            wentDown = time
+            handedOverAfter = now - time
+        }
+
+        /// How long ago that button went down; infinite when uDeck has heard no
+        /// click at all.
+        public func age(at now: TimeInterval) -> TimeInterval {
+            wentDown.map { now - $0 } ?? .infinity
+        }
     }
 
     /// What to tell the panel when another application became frontmost, and
