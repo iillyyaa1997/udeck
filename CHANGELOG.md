@@ -10,6 +10,53 @@ for what that promises.
 
 ## [Unreleased]
 
+- **A click past the panel closes it however late the news of it comes.** The
+  workspace saying another application came forward is often the first news of
+  a click past the panel, and uDeck read it as that click only within 0.15 s of
+  the button going down. In a whole lab run at `--jobs 2` it came 232 ms after
+  the button, and the operator putting the panel away was read as something
+  interrupting him — the next reveal brought back work he had finished with.
+  There is no time in the rule now. The news is that click when the pointer is
+  past the panel, the last click came after the panel showed, and uDeck has not
+  heard that click itself yet. uDeck hears its own clicks through a local
+  monitor as they are delivered, and everybody else's through the global one,
+  which is the messenger that arrives late — and a click it has heard has been
+  answered already. That last condition is what keeps ⌘-Tab an interruption
+  after a click inside the panel held it open: that click came after the panel
+  showed as well, but it is uDeck's own. It also keeps a click in the margin
+  round the panel, which the monitor forgives, from being read as a click past it
+  when a switch follows. Every activation is logged with all four readings, the
+  switch as much as the dismissal. Measured in the guest on 2026-09-27: twelve
+  clicks past a held panel, the news 5 to 148 ms after the button, all twelve
+  read as closed; six switches with no click after a click inside or in the
+  margin, all six read as switches, uDeck having heard that click 7 to 16 ms
+  after the system dated it. `panel.a-switch-with-no-click` goes red, 2 times of
+  2, on a uDeck that takes any click since the panel showed for a click past it,
+  and on one whose own click monitor notes nothing; a switch after a click in the
+  margin was read as a click past the panel 2 times of 2 when the monitor outside
+  noted nothing.
+
+- **A throw that stops at the edge is not taken for a push.** Now and then macOS
+  hands one movement report to uDeck twice — through its global monitor and
+  through its local one — with the movement halved between the two copies, one
+  timestamp on both, and both placed where the whole report left the pointer.
+  When that was the report arriving at the top edge, the first copy left the
+  pointer pinned and the second counted as movement made while pinned: 32.6 to
+  42.4 points against a threshold of 24, and the panel opened by the push under a
+  hand that had stopped. `panel.a-throw-to-the-edge` was red about one run in
+  five for it. The recognizer now reads the parts of one report — samples that
+  share a timestamp — against where the pointer was before the report began, so
+  both copies of an arrival are the arrival, and both copies of a real push
+  still count. It was not `NSEvent.mouseLocation`, which the review that found
+  the failure blamed: a build that logged each event's own location beside it
+  found the two the same in 39 movements of 39, both copies of every split
+  included, so reading the position from the event would have changed nothing.
+  36 throws of 36 have opened by the dwell since, and 16 jumps of 16 to the top
+  row over VNC, which used to be read as a push 2 times in 16. With the reading
+  by report taken out again the throw went to the push 3 times in 16 and the
+  jump 2 times in 16 — each time exactly the report that had come in two copies,
+  and never one that had not.
+
 - **The settings checks stop turning the lab's own misses into verdicts about
   uDeck.** A click at coordinates is aimed at where the accessibility API said
   the control was a moment earlier, so a window that moved or a pane still being

@@ -420,24 +420,39 @@ def check_a_throw_to_the_edge(machine, check_dir, lab):
     and a throw that sent a report after the one that arrived made a real push,
     which uDeck is right to count (`panel.Throw`).
 
-    **uDeck as it ships is red here about one time in five, and that is uDeck.**
-    Measured on 2026-09-27, each throw on a fresh machine and stopped at the edge
-    after exactly twelve reports every time: `fired by push` 2 times in 8
+    **uDeck up to 7d56860 was red here about one time in five, and that was
+    uDeck.** Measured on 2026-09-27, each throw on a fresh machine and stopped at
+    the edge after exactly twelve reports every time: `fired by push` 2 times in 8
     (.build/e2e/20260927-131004Z) and neither time in this check's runs in the
     panel group and the whole lab (-140526Z, -141957Z); and with a report every
     50 ms instead of every 2 ms, 1 in 10 and 3 in 12 (-132223Z, -133243Z) — so
     not the pace: 6 in 32 in all. -133243Z was a build that logged every movement
-    it handled near the top (never committed), and it shows what happened: in all
-    three of its pushes macOS delivered the report that arrived as two equal
-    movements with one timestamp, and uDeck put *both* at the edge, because it
-    takes the position from `NSEvent.mouseLocation` when it handles a movement
-    rather than from the movement (`PointerMonitor.handleMovement`). The first half
-    then reads as the arrival and the second as movement made while already pinned
-    — 32.6 to 42.4 points, over the threshold — and counts. In the nine that opened
-    by the dwell the arrival came as one movement; reports split the same way
-    further down in three of the twelve, where nothing is pinned and it does no
-    harm. The runs are kept in .build/e2e/kept/. Whether a real mouse on a real
-    Mac is ever split like that is not measured.
+    it handled near the top (never committed): in all three of its pushes the
+    report that arrived came as two equal movements with one timestamp, both at
+    the edge, the first reading as the arrival and the second as movement made
+    while already pinned — 32.6 to 42.4 points, over the threshold.
+
+    Why both were at the edge was first put down to uDeck taking the position
+    from `NSEvent.mouseLocation` rather than from the event, and that was wrong.
+    A second such build logged each event's own location beside it, and which of
+    uDeck's two monitors heard it (-154333Z, 16 throws, 11 with a verdict): the
+    two locations were the same in 39 movements of 39, and a split report is one
+    report heard twice, through the global monitor and through the local one,
+    with the movement halved between the copies and both copies placed on the
+    edge by the event itself. Its three pushes were exactly the three throws
+    whose arriving report came in two copies; reports that came in two copies
+    further down the screen — twice in one throw that opened by the dwell, once
+    in one of the pushes — did no harm. So the fix is in the recognizer, which
+    now reads the parts of one report — samples with one timestamp — against
+    where the pointer was before the report began
+    (`HoverGestureRecognizer.wasPinned`). On that
+    build, 36 throws of 36 opened by the dwell (-163126Z, 32 throws, one of them
+    "could not check" on a screenshot after uDeck had said `fired by dwell`; and
+    -165246Z, 4). With the reading by report taken out again, on a build that
+    logged every movement, 3 of 16 by the push — exactly the three whose
+    arriving report came in two copies (-182236Z). All of these runs are kept in
+    .build/e2e/kept/. Whether a real mouse on a real Mac is ever split like that
+    is not measured.
     """
     log = _prepare(machine, check_dir, lab)
     since = log.mark("noting when the throw begins")
@@ -603,22 +618,33 @@ def check_a_switch_with_no_click(machine, check_dir, lab):
     The other half of what a collapse remembers. A click past the panel is the
     operator putting it away, and it comes back as a peek; another application
     coming forward *without* a click is something interrupting him, and the
-    panel he was working in comes back as he left it. uDeck tells the two apart
-    by one reading — how long ago a mouse button last went down — because the
-    workspace's news of both is the same notification (`ApplicationSwitch`).
+    panel he was working in comes back as he left it. The workspace's news of
+    both is the same notification, and uDeck tells them apart by the order of
+    three things — the panel showing, the last click anywhere, and the last
+    click uDeck heard itself (`ApplicationSwitch`). A click past the panel came
+    after the panel showed and has not reached uDeck's own monitor yet when the
+    news does.
 
     So the pointer is left past the panel, exactly where a click that dismissed
     it would have been, and the Finder is brought forward over SSH with no click
-    at all: only the age of the last click can still say "switch". `open -a` and
-    not an AppleScript activation from inside the guest, which was measured
-    posting no notification at all (2026-09-21); `open -a Finder` posted it
-    every time it was tried, and in this check uDeck logs how old the last click
-    was when the news came — 1735 ms, the first time it ran
-    (.build/e2e/20260921-215814Z).
+    at all: only what uDeck knows of the last click can still say "switch" — and
+    the last click is the one that held the panel open, which came after the
+    panel showed too, and which uDeck heard. `open -a` and not an AppleScript
+    activation from inside the guest, which was measured posting no notification
+    at all (2026-09-21); `open -a Finder` posted it every time it was tried, and
+    in this check uDeck logs every reading it decided from. The first time it
+    ran it logged only how old the last click was — 1735 ms
+    (.build/e2e/20260921-215814Z); on 2026-09-27, in the same scene made three
+    times by a probe, the system dated that click 2036, 2025 and 2154 ms back
+    and uDeck had heard it 16, 11 and 12 ms later
+    (.build/e2e/kept/20260927-165246Z, probe.margin-1 to -3).
 
     A uDeck that read every activation as a click — the state machine would then
     never see an interruption — closes this panel as `closeRequested` and hands
-    back a peek, and this is the only check in the lab that would notice.
+    back a peek, and this is the only check in the lab that would notice. So does
+    a uDeck that took any click since the panel showed for a click past it, and
+    one whose own click monitor noted nothing: measured on 2026-09-27, red 2
+    times of 2 each (.build/e2e/kept/20260927-182236Z, -184219Z).
     """
     log = _prepare(machine, check_dir, lab)
     story = panel.Story(machine, log, check_dir, lab.note)

@@ -512,15 +512,14 @@ STAYS_SHUT_SECONDS = 3
 # it: which application is in front, and whether a second messenger followed the
 # first. uDeck gives the keyboard back in the same millisecond it logs the
 # collapse (every `gave the keyboard back` line of 2026-09-21), and the
-# workspace's news of a click arrives 2 to 32 ms after the click — the
-# measurements are in `ApplicationSwitchTests.slowestClickCausedActivation`
-# (Tests/UDeckCoreTests/PanelStateTests.swift), which is where the slowest of
-# them is written down. Not `ApplicationSwitch.clickWindow`, which this comment
-# used to name for them: that is 0.15 s, the line uDeck draws from those
-# measurements, and it would still be 0.15 s if every one of them changed. On
-# the build that brought the application from before the panel back
-# unconditionally, that application was in front after this long in every run
-# that asked (.build/e2e/20260921-201212Z, -210835Z, -211147Z).
+# workspace's news of a click arrived 2 to 32 ms after the click in the
+# measurements of 2026-09-21 — and once 232 ms after it, in a whole lab run at
+# `--jobs 2` (.build/e2e/kept/20260926-211629Z, panel.a-click-past-the-panel).
+# That one is why uDeck no longer reads the news against any time at all
+# (`ApplicationSwitch`), and two seconds is still eight times it. On the build
+# that brought the application from before the panel back unconditionally, that
+# application was in front after this long in every run that asked
+# (.build/e2e/20260921-201212Z, -210835Z, -211147Z).
 SETTLE_SECONDS = 2
 # Until a control appears after something was pressed.
 UI_APPEAR_SECONDS = 30

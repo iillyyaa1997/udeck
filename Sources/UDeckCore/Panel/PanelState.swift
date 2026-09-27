@@ -111,30 +111,44 @@ public enum PanelEvent: Sendable, Equatable {
 ///
 /// The operator's rule is that a click past the panel is him closing it, whoever
 /// brings the news. So the news is read rather than taken at face value: an
-/// application coming forward while the pointer sits past the panel, a moment
-/// after a click, *is* that click.
+/// application coming forward while the pointer sits past the panel, after a
+/// click that came once the panel was showing and that uDeck has not heard yet,
+/// *is* that click.
+///
+/// **There is no clock in that rule, and there used to be.** It said "a moment
+/// after a click": another application coming forward within 0.15 s of the last
+/// mouse-down, which was five times the slowest delivery measured on 2026-09-21.
+/// A delivery time has no ceiling that can be measured once. On 2026-09-26, in a
+/// whole lab run at `--jobs 2`, the news of a click past a held panel came 232 ms
+/// after the button (.build/e2e/kept/20260926-211629Z,
+/// panel.a-click-past-the-panel), and the panel read the operator putting it
+/// away as an interruption and came back whole. So the rule asks in what order
+/// things happened, not how long they took.
+///
+/// **What the order is taken from.** uDeck hears every click itself, by one of
+/// two monitors: a click on one of its own windows through the local one, as it
+/// is delivered, and a click anywhere else through the global one, which is the
+/// messenger that loses the race above. A click uDeck has heard has already been
+/// answered — a click on the panel was an interaction, a click past it closed the
+/// panel through the monitor, and a click in the margin round the panel was
+/// forgiven there. So the news of another application can only be the news of a
+/// click that is younger than every click uDeck has heard, and younger than the
+/// panel itself: a click from before the panel showed is about something else.
+///
+/// Measured in the guest on 2026-09-27 (.build/e2e/kept/20260927-165246Z): twelve
+/// clicks past a held panel, the news 5 to 148 ms after the button and the last
+/// click uDeck had heard 13 to 36 s old — all twelve read as closed. Three
+/// switches with no click after a click inside, and three after a click in the
+/// margin of a restored panel: uDeck had heard the last click 7 to 16 ms after
+/// the system dated it, and all six were read as switches.
+///
+/// "Any click since the panel showed" is not enough, and the difference is the
+/// work this exists to protect. A peek is held open by a click *inside* it, and
+/// that click came after the panel showed. The operator who then leaves with
+/// ⌘-Tab, clicking nothing, would find the panel closed as dismissed and his work
+/// gone at the next reveal — which is exactly what an honest switch must not do.
+/// That click is uDeck's own, and uDeck heard it.
 public enum ApplicationSwitch {
-    /// How long after a mouse button went down another application coming
-    /// forward is still that button's doing.
-    ///
-    /// Not a preference: it is the delivery time of a system notification, and
-    /// nobody has a taste in those. Measured on 2026-09-21 by logging the age of
-    /// the last mouse-down at the top of the notification's handler, on a
-    /// macOS 27 guest: 2.0, 2.4, 2.5 and 2.7 ms for the first four clicks past a
-    /// held panel on an idle guest; then between 2 and 32 ms in the lab runs
-    /// later that day, the two slowest — 24 and 32 ms — both taken while the
-    /// lab was booting the next check's machine beside the guest (the log
-    /// rounds to whole milliseconds). The slowest, 32 ms, is the number the
-    /// window is held against — `ApplicationSwitchTests` has it — and 0.15 s is
-    /// a little under five times it. Not the "fifty times" this comment claimed
-    /// while the slowest measurement was 2.7 ms, and not "a machine an order of
-    /// magnitude busier", which it promised on the strength of that: a busy
-    /// host has already cost more than ten times. The other side of the line is
-    /// a human letting go of the mouse and reaching for ⌘-Tab, which no one
-    /// does inside a sixth of a second; that switch stays an interruption,
-    /// which is what brings unfinished work back.
-    public static let clickWindow: TimeInterval = 0.15
-
     /// The presses whose age is asked: every button, because the click monitor
     /// that is the other messenger listens for every button, and a click past
     /// the panel with the right button is still the operator putting it away.
@@ -161,13 +175,56 @@ public enum ApplicationSwitch {
 
     /// What was decided about one activation, and what it was decided from.
     public struct Verdict: Equatable, Sendable {
-        /// The two readings the decision took, kept so that both outcomes can
-        /// be written down with them. A switch read as a switch and a click
-        /// read as a switch look the same in the panel's phase; only these
-        /// tell a false interruption from an honest ⌘-Tab afterwards.
+        /// The readings the decision took, kept so that both outcomes can be
+        /// written down with them. A switch read as a switch and a click read
+        /// as a switch look the same in the panel's phase; only these tell a
+        /// false interruption from an honest ⌘-Tab afterwards.
+        ///
+        /// Every one of them is an age, counted back from the same moment.
         public struct Evidence: Equatable, Sendable {
+            /// How long ago any mouse button last went down, anywhere on the
+            /// machine, as the system counts it.
             public let secondsSinceLastClick: TimeInterval
+
+            /// How long the panel has been on screen: since it last came out of
+            /// `collapsed`.
+            public let secondsSinceShown: TimeInterval
+
+            /// How long ago uDeck itself last heard a mouse button go down, by
+            /// either of its monitors. Infinite when it has heard none.
+            public let secondsSinceLastClickHeard: TimeInterval
+
             public let pointerIsPastThePanel: Bool
+
+            public init(
+                secondsSinceLastClick: TimeInterval,
+                secondsSinceShown: TimeInterval,
+                secondsSinceLastClickHeard: TimeInterval,
+                pointerIsPastThePanel: Bool
+            ) {
+                self.secondsSinceLastClick = secondsSinceLastClick
+                self.secondsSinceShown = secondsSinceShown
+                self.secondsSinceLastClickHeard = secondsSinceLastClickHeard
+                self.pointerIsPastThePanel = pointerIsPastThePanel
+            }
+
+            /// Whether the last click came after the panel showed.
+            public var clickCameAfterThePanel: Bool {
+                secondsSinceLastClick < secondsSinceShown
+            }
+
+            /// Whether the last click is one uDeck has not heard yet.
+            ///
+            /// Strictly younger. The same click, read twice, comes out *older*
+            /// from the system than from uDeck: uDeck notes a click when its
+            /// monitor is handed it, which is after the button went down, and
+            /// the caller reads uDeck's own clocks before it asks the system.
+            /// Both of those only ever push the two readings of one click apart
+            /// in the direction that says "heard" — 7 to 16 ms apart in the six
+            /// switches the lab logged on 2026-09-27.
+            public var clickIsUnheard: Bool {
+                secondsSinceLastClick < secondsSinceLastClickHeard
+            }
         }
 
         public let event: PanelEvent
@@ -182,44 +239,35 @@ public enum ApplicationSwitch {
     /// Telling a click from a switch is only worth doing while there is a panel
     /// on screen to collapse. Against the island the keep-alive region is the
     /// island's own, so the question would be about something nobody asked —
-    /// and the readings are closures so that, when it is not asked, they are
+    /// and the readings are one closure so that, when it is not asked, they are
     /// not taken either.
-    public static func verdict(
-        in phase: PanelPhase,
-        secondsSinceLastClick: () -> TimeInterval,
-        pointerIsPastThePanel: () -> Bool
-    ) -> Verdict {
+    public static func verdict(in phase: PanelPhase, readings: () -> Verdict.Evidence) -> Verdict {
         guard phase.isVisible else { return Verdict(event: .otherAppActivated, evidence: nil) }
-        let evidence = Verdict.Evidence(
-            secondsSinceLastClick: secondsSinceLastClick(),
-            pointerIsPastThePanel: pointerIsPastThePanel()
-        )
-        return Verdict(
-            event: event(
-                secondsSinceLastClick: evidence.secondsSinceLastClick,
-                pointerIsPastThePanel: evidence.pointerIsPastThePanel
-            ),
-            evidence: evidence
-        )
+        let evidence = readings()
+        return Verdict(event: event(given: evidence), evidence: evidence)
     }
 
     /// What to tell the panel when another application became frontmost.
     ///
-    /// - Parameters:
-    ///   - secondsSinceLastClick: how long ago any mouse button last went down,
-    ///     anywhere on the machine. Asked of the system rather than remembered
-    ///     from uDeck's own click monitor, because that monitor is the messenger
-    ///     this exists to stop waiting for.
-    ///   - pointerIsPastThePanel: whether the pointer is outside the region that
-    ///     keeps the panel alive — the same test a click outside has to pass. A
-    ///     click *on* the panel that launches something is not the operator
-    ///     putting the panel away, so that stays an interruption.
-    public static func event(
-        secondsSinceLastClick: TimeInterval,
-        pointerIsPastThePanel: Bool,
-        within window: TimeInterval = clickWindow
-    ) -> PanelEvent {
-        guard pointerIsPastThePanel, secondsSinceLastClick >= 0, secondsSinceLastClick <= window else {
+    /// A click past the panel, and so `closeRequested`, when all three hold:
+    ///
+    /// * the pointer is past the panel — outside the region that keeps it alive,
+    ///   the same test a click outside has to pass. A click *on* the panel that
+    ///   launches something is not the operator putting the panel away, so that
+    ///   stays an interruption;
+    /// * the last click came after the panel showed, so it is about this panel;
+    /// * and uDeck has not heard it yet, so no monitor has answered it — it is
+    ///   the click whose news this is, and not the one that held the panel open.
+    ///
+    /// Anything else is another application coming forward on its own account,
+    /// and that is an interruption. An age that cannot be true — below zero, or
+    /// not a number — is not a click.
+    public static func event(given evidence: Verdict.Evidence) -> PanelEvent {
+        guard evidence.pointerIsPastThePanel,
+              evidence.secondsSinceLastClick >= 0,
+              evidence.clickCameAfterThePanel,
+              evidence.clickIsUnheard
+        else {
             return .otherAppActivated
         }
         return .closeRequested

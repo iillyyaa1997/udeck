@@ -806,8 +806,9 @@ def interrupt_a_held_panel(machine, story, check_dir, label=""):
     """A held panel, and another application brought forward over it with no click.
 
     The pointer is taken past the panel first — exactly where a click that
-    dismissed it would have been — so that only the age of the last click is
-    left to tell uDeck this was not one. The Finder comes forward by `open -a`
+    dismissed it would have been — so that only what uDeck knows of the last
+    click is left to tell it this was not one: that click is the one that held
+    the panel open, and uDeck heard it itself (`ApplicationSwitch`). The Finder comes forward by `open -a`
     over SSH, which posted the workspace's notification every time it was
     measured; an AppleScript activation from inside the guest posted none.
 

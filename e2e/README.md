@@ -554,25 +554,50 @@ from `updatePushWindow`), on 2026-09-27, the six opening checks:
 (`.build/e2e/20260927-135536Z`, one run each; and six more throws on the same
 build, each on a fresh machine, all `fired by push`: `-140142Z`. Both kept.)
 
-**uDeck as it ships is red here about one time in five, and it is uDeck.**
+**uDeck up to 7d56860 was red here about one time in five, and it was uDeck.**
 Measured on 2026-09-27, each throw on a fresh machine and every one stopped at
 the edge after exactly twelve reports: `fired by push` 2 times in 8
 (`.build/e2e/20260927-131004Z`) and neither time in this check's runs in the
 panel group and the whole lab (`-140526Z`, `-141957Z`); and with the throw
 slowed to a report every 50 ms, 1 in 10 and 3 in 12 (`-132223Z`, `-133243Z`) —
 6 in 32 in all. `-133243Z` was a build that logged every movement it handled
-near the top of the screen (never committed), and in all three of its pushes it
-shows the same thing: macOS delivered the report that
-arrived as two equal movements with one timestamp, and uDeck put both at the
-edge, because it takes the position from `NSEvent.mouseLocation` when it handles
-a movement rather than from the movement (`PointerMonitor.handleMovement`).
-The first half reads as the arrival, the second as movement made while already
-pinned — 32.6 to 42.4 points, over the 24 — and it counts. In the nine that
-opened by the dwell the arrival came as one movement. The same splitting may be
-what used to make a VNC jump to the top row read as a push (`panel.dwell`,
-above); that is inferred, not measured. Whether a real mouse on a real Mac is
-ever split like that is not measured either. All of these runs are kept in
-`.build/e2e/kept/`.
+near the top of the screen (never committed), and in all three of its pushes the
+report that arrived came as two equal movements with one timestamp, both at the
+edge: the first reads as the arrival, the second as movement made while already
+pinned — 32.6 to 42.4 points, over the 24 — and it counts.
+
+Why both were at the edge was put down at first to uDeck reading the position
+from `NSEvent.mouseLocation` rather than from the event, and that was wrong. A
+second build that logged every movement, with each event's own location beside
+it and which of uDeck's two monitors heard it (`-154333Z`, 16 throws, 11 with a
+verdict, never committed): the two locations were the same in 39 movements of
+39. A split report is one report heard twice — through the global monitor and
+through the local one — with the movement halved between the copies (60 each,
+where a whole report said 120) and both copies placed on the edge by the event
+itself. Its three pushes were exactly the three throws whose arriving report
+came in two copies; reports that came in two copies further down the screen —
+twice in one throw that opened by the dwell, once in one of the pushes — did no
+harm. So
+the fix is in the recognizer, not in where the position is read: the parts of
+one report — samples with one timestamp — are read against where the pointer
+was before the report began (`HoverGestureRecognizer.wasPinned`), so both
+copies of an arrival are the arrival and both copies of a real push still count.
+On that build 36 throws of 36 opened by the dwell (`-163126Z`, 32 of them, one
+"could not check" on a screenshot taken after uDeck had said `fired by dwell`;
+`-165246Z`, 4). With the reading by report taken out again, on a build that
+logged every movement: 3 of 16 by the push, exactly the three whose arriving
+report came in two copies (`-182236Z`).
+
+The same splitting was suspected of what used to make a VNC jump to the top row
+read as a push (`panel.dwell`, above, and `config.INSIDE_THE_STRIP_Y`: 2 of 16),
+and it was that. A probe made the jump 16 times, eight on each of two fresh
+machines. On the fixed build all 16 opened by the dwell (`-165246Z`,
+probe.row0-a and -b); on the build with the reading by report taken out and every
+movement logged, 2 of 16 by the push, and those two were exactly the jumps that
+came in two copies — 720 each, where a jump in one piece said 1440 (`-182236Z`).
+The checks still dwell on row 5; nothing here asks them to move. Whether a real
+mouse on a real Mac is ever split like that is not measured. All of these runs
+are kept in `.build/e2e/kept/`.
 
 ### The panel closing
 
@@ -642,11 +667,18 @@ to come back whole.
 left past it — exactly where a click that dismissed it would have been — and the
 Finder is brought forward over SSH with `open -a` and no click at all. The
 panel has to close on `otherAppActivated` and come back `open` at the next
-gesture. uDeck tells a switch from a click by one reading, how long ago a mouse
-button last went down, because the workspace's news of both is the same
-notification; a uDeck that read every activation as a click would throw the
-operator's unfinished work away on ⌘-Tab, and this is the lab's only check that
-sees it. The switch is `open -a` and not an AppleScript activation from inside
+gesture. The workspace's news of both is the same notification, and uDeck tells
+them apart by the order of three things — the panel showing, the last click
+anywhere, and the last click uDeck heard itself (`ApplicationSwitch`). It used to
+be one reading, how long ago a mouse button last went down, against 0.15 s; the
+news of a click past the panel came 232 ms after it once, in a whole lab run
+(`.build/e2e/kept/20260926-211629Z`), and there is no time in the rule since. A
+uDeck that read every activation as a click would throw the operator's
+unfinished work away on ⌘-Tab, and this is the lab's only check that sees it —
+as it sees a uDeck that took any click since the panel showed for a click past
+it, or whose own click monitor noted nothing: the click that held the panel
+open is after it showed, and it is uDeck's own. Both measured red, 2 times of 2
+each (`.build/e2e/kept/20260927-182236Z`, `-184219Z`). The switch is `open -a` and not an AppleScript activation from inside
 the guest, which was measured posting no notification at all.
 
 `panel.a-click-past-a-restored-panel` is the other road a click takes. One click

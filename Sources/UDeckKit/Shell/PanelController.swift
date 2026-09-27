@@ -80,7 +80,24 @@ public final class PanelController {
     private var tokens: [NotificationToken] = []
     private var keyMonitor: Any?
     private var outsideClickMonitor: Any?
+    private var insideClickMonitor: Any?
     private var exitTimer: Timer?
+
+    /// When the panel last came out of `collapsed`, on the uptime clock.
+    ///
+    /// A click from before it is about something else, and
+    /// `ApplicationSwitch` asks whether the last click came after this.
+    private var shownAt: TimeInterval?
+
+    /// When uDeck last heard a mouse button go down, by either of its two
+    /// click monitors, on the uptime clock — the moment the monitor was handed
+    /// the click, which is never before the button went down.
+    ///
+    /// What `ApplicationSwitch` compares the system's last click against: a
+    /// click uDeck has heard has been answered already, and the news of another
+    /// application coming forward is the news of a click only when that click
+    /// is younger than this.
+    private var lastClickHeard: TimeInterval?
 
     /// Keeps the dwell alive while the cursor is not moving.
     private var armingTimer: Timer?
@@ -208,6 +225,22 @@ public final class PanelController {
             MainActor.assumeIsolated { self?.handleClickOutside() }
         }
 
+        // And the clicks that are uDeck's own, which the global monitor never
+        // sees. Nothing is done with them here but noting that they were heard:
+        // the one that holds a peek open is an interaction the content reports
+        // itself, and what matters about it here is that it is *not* news when
+        // another application comes forward afterwards (`ApplicationSwitch`).
+        // Measured on 2026-09-27 with this monitor noting nothing: that click
+        // was taken for a click past the panel, and `panel.a-switch-with-no-click`
+        // went red 2 times of 2 (.build/e2e/kept/20260927-184219Z). The same
+        // buttons as the monitor outside, and the event goes on as it came.
+        insideClickMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] event in
+            MainActor.assumeIsolated { self?.noteClickHeard() }
+            return event
+        }
+
         attachedScreenID = screens.screenUnderCursor?.id ?? screens.screens.first?.id
         // The content renders from `shell.phase`; without this it would start
         // out disagreeing with the window about which state it is in.
@@ -262,8 +295,10 @@ public final class PanelController {
         pointerPollTimer?.invalidate()
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         if let outsideClickMonitor { NSEvent.removeMonitor(outsideClickMonitor) }
+        if let insideClickMonitor { NSEvent.removeMonitor(insideClickMonitor) }
         keyMonitor = nil
         outsideClickMonitor = nil
+        insideClickMonitor = nil
         for island in islands.values { island.close() }
         islands.removeAll()
         panel.orderOut(nil)
@@ -577,6 +612,18 @@ public final class PanelController {
     }
 
     private func handleClickOutside() {
+        // Heard before anything is decided about it, in the same call that
+        // closes the panel when it is past it — so that the notification can
+        // never find this click heard and the panel still open because of it.
+        //
+        // And heard at all because a click in the margin round the panel is
+        // answered here too, by leaving the panel be. Measured on 2026-09-27 on
+        // a restored panel, a click in that margin and then another application
+        // brought forward with no click: with this line, a switch 3 times of 3
+        // (.build/e2e/kept/20260927-165246Z, probe.margin); without it, the
+        // margin click taken for a click past the panel 4 and 7 s after it,
+        // 2 times of 2 (-183705Z).
+        noteClickHeard()
         guard state.phase.isVisible else { return }
         guard pointerIsPastThePanel() else { return }
         apply(.closeRequested)
@@ -596,6 +643,10 @@ public final class PanelController {
         geometry?.isPastThePanel(NSEvent.mouseLocation, in: state.phase) ?? false
     }
 
+    private func noteClickHeard() {
+        lastClickHeard = ProcessInfo.processInfo.systemUptime
+    }
+
     private func handleApplicationActivated(pid: pid_t?) {
         guard let pid else { return }
 
@@ -611,34 +662,54 @@ public final class PanelController {
         // click monitor, and that is the whole point: the monitor's callback is
         // the message that arrives *second* (see `ApplicationSwitch`), so
         // waiting for it is what made the same click mean two different things.
-        let verdict = ApplicationSwitch.verdict(
-            in: state.phase,
-            secondsSinceLastClick: {
-                ApplicationSwitch.secondsSinceLastClick {
-                    CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0)
-                }
-            },
-            pointerIsPastThePanel: { pointerIsPastThePanel() }
-        )
+        let verdict = ApplicationSwitch.verdict(in: state.phase) {
+            // uDeck's own two marks are turned into ages first, and the system
+            // is asked after, so that one click read both ways can only come
+            // out older from the system — "heard", never "news"
+            // (`ApplicationSwitch.Verdict.Evidence.clickIsUnheard`). A panel on
+            // screen always has `shownAt`; without it the panel is taken to
+            // have shown this instant, which no click can come after.
+            let now = ProcessInfo.processInfo.systemUptime
+            let shown = shownAt.map { now - $0 } ?? 0
+            let heard = lastClickHeard.map { now - $0 } ?? .infinity
+            let click = ApplicationSwitch.secondsSinceLastClick {
+                CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0)
+            }
+            return ApplicationSwitch.Verdict.Evidence(
+                secondsSinceLastClick: click,
+                secondsSinceShown: shown,
+                secondsSinceLastClickHeard: heard,
+                pointerIsPastThePanel: pointerIsPastThePanel()
+            )
+        }
 
-        // Both outcomes are written down, with what they were read from. Only
-        // the dismissal used to be, so a click read as a switch — a main thread
-        // late past the window, a pointer back on the panel — left the log
-        // saying exactly what an honest ⌘-Tab says.
+        // Both outcomes are written down, with every reading they were decided
+        // from. Only the dismissal used to be, so a click read as a switch left
+        // the log saying exactly what an honest ⌘-Tab says; and a line that
+        // gave only the age of the last click could not say whose click it was.
         if let evidence = verdict.evidence {
-            let ms = String(format: "%.0f", evidence.secondsSinceLastClick * 1000)
+            let click = Self.milliseconds(evidence.secondsSinceLastClick)
+            let shown = Self.milliseconds(evidence.secondsSinceShown)
+            let heard = evidence.secondsSinceLastClickHeard.isFinite
+                ? "\(Self.milliseconds(evidence.secondsSinceLastClickHeard)) ms ago"
+                : "never"
             if verdict.event == .closeRequested {
                 DeckLog.panel.debug(
-                    "another application came forward \(ms, privacy: .public) ms after a click past the panel, so the panel counts it as closed"
+                    "another application came forward \(click, privacy: .public) ms after a click past the panel, which came after the panel showed (\(shown, privacy: .public) ms ago) and which uDeck had not heard yet (the last click it heard: \(heard, privacy: .public)), so the panel counts it as closed"
                 )
             } else {
                 let pointer = evidence.pointerIsPastThePanel ? "past the panel" : "on the panel"
                 DeckLog.panel.debug(
-                    "another application came forward \(ms, privacy: .public) ms after the last click, with the pointer \(pointer, privacy: .public), so the panel counts it as a switch"
+                    "another application came forward \(click, privacy: .public) ms after the last click, with the pointer \(pointer, privacy: .public), the panel showing for \(shown, privacy: .public) ms and the last click uDeck heard \(heard, privacy: .public), so the panel counts it as a switch"
                 )
             }
         }
         apply(verdict.event)
+    }
+
+    /// An age as whole milliseconds, for the log.
+    private static func milliseconds(_ seconds: TimeInterval) -> String {
+        String(format: "%.0f", seconds * 1000)
     }
 
     /// The screen arrangement changed: a display was plugged in or unplugged,
@@ -674,6 +745,7 @@ public final class PanelController {
         DeckLog.panel.debug("\(before.rawValue, privacy: .public) -> \(self.state.phase.rawValue, privacy: .public) on \(String(describing: event), privacy: .public)")
 
         if before == .collapsed, state.phase != .collapsed {
+            shownAt = ProcessInfo.processInfo.systemUptime
             // Reveal: hand the gesture a clean slate so a half-armed dwell from
             // before cannot fire into the newly opened panel.
             recognizer.reset()

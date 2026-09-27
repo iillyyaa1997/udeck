@@ -208,56 +208,137 @@ struct PanelRestoreTests {
 
 /// Telling the operator's click apart from a real application switch.
 ///
-/// The numbers below are the lab's, not anybody's taste. They bracket
-/// `ApplicationSwitch.clickWindow` rather than pin it: a window shorter than
-/// the slowest click-caused activation the lab has measured fails here, and so
-/// does one long enough to swallow a hand going from the mouse to ⌘-Tab. A
-/// window anywhere between — 0.05 s or 0.19 s as much as 0.15 s — passes, and
-/// that is deliberate: nothing measured tells those apart, and a test that
-/// pinned the number would only check that it had been typed the same way twice.
+/// Every reading is an age counted back from the moment the news arrived, and
+/// the fixtures below are the lab's, not anybody's taste. What decides is the
+/// order of three things — the panel showing, the last click, and the last click
+/// uDeck heard itself — and never how long ago any of them was.
 @Suite("Panel states — a click past the panel, heard as an app switch")
 struct ApplicationSwitchTests {
-    /// The slowest click-caused activation the lab has measured. All of them
-    /// were measured on 2026-09-21 by logging the age of the last mouse-down at
-    /// the top of the notification's handler: 2.0, 2.4, 2.5 and 2.7 ms for the
-    /// first four clicks past a held panel on an idle guest; then between 2 and
-    /// 32 ms in the runs later that day, the two slowest — 24 and 32 ms — both
-    /// taken while the lab was booting the next check's machine beside the guest
-    /// (the log rounds to whole milliseconds). The 32 ms is in
-    /// .build/e2e/20260921-211640Z/focus.who-is-in-front until the lab prunes it.
-    static let slowestClickCausedActivation: TimeInterval = 0.032
+    /// The click past a held panel that the lab saw read as a switch, while the
+    /// window this replaced still decided it (.build/e2e/kept/20260926-211629Z,
+    /// panel.a-click-past-the-panel): the news came 232 ms after the button, in
+    /// a whole lab run at `--jobs 2`, where the next check's machine boots
+    /// beside the one being checked. The panel had been showing for 28.1 s and
+    /// the click that held it open was 24.4 s old, as the reveal and the
+    /// interaction lines of the same log place them.
+    static let lateClickPastThePanel = ApplicationSwitch.Verdict.Evidence(
+        secondsSinceLastClick: 0.232,
+        secondsSinceShown: 28.105,
+        secondsSinceLastClickHeard: 24.365,
+        pointerIsPastThePanel: true
+    )
 
-    /// A switch made with no click at all, measured in the first run: `open -a
-    /// Finder` from outside the session, with the last click seven and a half
-    /// seconds old.
-    static let switchWithNoClick: TimeInterval = 7.577
+    /// A click past a held panel with its news on time, as uDeck logged all
+    /// four readings of it on 2026-09-27 (.build/e2e/kept/20260927-165246Z,
+    /// probe.click-1, one of twelve such clicks there, every one read as
+    /// closed): the news 6 ms after the button, the panel showing for 18.2 s,
+    /// and the last click uDeck had heard — the one that held it open — 14.3 s
+    /// before.
+    static let clickPastThePanel = ApplicationSwitch.Verdict.Evidence(
+        secondsSinceLastClick: 0.006,
+        secondsSinceShown: 18.155,
+        secondsSinceLastClickHeard: 14.337,
+        pointerIsPastThePanel: true
+    )
 
-    /// A click *inside* the panel, measured in the same run: the activation that
-    /// follows it arrives about 12 ms later. It is only ever uDeck's own, but a
-    /// card that launches something would put another application's name on it.
-    static let clickInsideThePanel: TimeInterval = 0.012
+    /// A switch made with no click at all after the click that held the panel
+    /// open: the Finder brought forward by `open -a` from outside the session.
+    /// Logged the same day (the same run, probe.margin-1): the last click 2036
+    /// ms old as the system counts it, 2020 ms as uDeck heard it — its local
+    /// monitor was handed the click 16 ms after the button went down — and the
+    /// panel showing for 5.7 s. The click came after the panel showed, and it
+    /// is uDeck's own.
+    static let switchAfterAClickInside = ApplicationSwitch.Verdict.Evidence(
+        secondsSinceLastClick: 2.036,
+        secondsSinceShown: 5.659,
+        secondsSinceLastClickHeard: 2.020,
+        pointerIsPastThePanel: true
+    )
 
-    /// The fastest a hand could leave the mouse and reach ⌘-Tab. Not measured —
-    /// it is the far side of the line, and it only has to be an honest lower
-    /// bound on a deliberate second action.
-    static let handFromMouseToKey: TimeInterval = 0.2
+    /// A click *inside* the panel that brings another application forward: a
+    /// card that launches something. Measured on 2026-09-21: the activation
+    /// arrives about 12 ms after the click. The other two ages are not
+    /// measured — no check makes this scene — and only their order matters: the
+    /// panel showed before the click, and uDeck heard the click after it
+    /// happened.
+    static let clickInsideThePanel = ApplicationSwitch.Verdict.Evidence(
+        secondsSinceLastClick: 0.012,
+        secondsSinceShown: 4.0,
+        secondsSinceLastClickHeard: 0.011,
+        pointerIsPastThePanel: false
+    )
 
-    @Test("an application coming forward a moment after a click past the panel is that click")
+    @Test("an application coming forward after a click past the panel is that click")
     func aClickPastThePanelIsRead() {
+        #expect(ApplicationSwitch.event(given: Self.clickPastThePanel) == .closeRequested)
+    }
+
+    /// The reason the window went. Its line was 0.15 s, and the lab has seen
+    /// the news come later than that; any other line would only move the
+    /// failure to a busier machine.
+    @Test("however late the news of a click past the panel comes, it is still that click")
+    func theNewsHasNoDeadline() {
         #expect(
-            ApplicationSwitch.event(
-                secondsSinceLastClick: Self.slowestClickCausedActivation, pointerIsPastThePanel: true
-            ) == .closeRequested
+            ApplicationSwitch.event(given: Self.lateClickPastThePanel) == .closeRequested,
+            "the operator put the panel away, and a slow notification turned it into an interruption"
         )
     }
 
-    @Test("⌘-Tab, and every switch made without a click, is still an interruption")
-    func aSwitchWithNoClickIsStillAnInterruption() {
+    /// The trap that "any click since the panel showed" falls into. The click
+    /// that held the peek open came after the panel showed, and the pointer has
+    /// since gone past the panel; the operator ⌘-Tabs away without clicking.
+    /// That click is uDeck's own and it heard it, so this is a switch.
+    @Test("a click inside the panel and then a switch with no click is an interruption")
+    func aClickInsideAndThenASwitchIsAnInterruption() {
+        #expect(Self.switchAfterAClickInside.clickCameAfterThePanel, "the fixture must be the trap: a click after the panel showed")
         #expect(
-            ApplicationSwitch.event(
-                secondsSinceLastClick: Self.switchWithNoClick, pointerIsPastThePanel: true
-            ) == .otherAppActivated
+            ApplicationSwitch.event(given: Self.switchAfterAClickInside) == .otherAppActivated,
+            "the click that held the panel open was read as a click past it, and the work in it was thrown away"
         )
+    }
+
+    /// And through the panel itself: the work comes back whole, which is what
+    /// the operator actually sees.
+    @Test("the panel held open by a click inside it comes back whole after a switch with no click")
+    func theWorkComesBackAfterAClickInsideAndASwitch() {
+        var state = PanelState()
+        state.apply(.revealRequested)
+        state.apply(.interacted)
+        state.apply(ApplicationSwitch.event(given: Self.switchAfterAClickInside))
+        #expect(state.collapseReason == .interrupted)
+        state.apply(.revealRequested)
+        #expect(state.phase == .open)
+    }
+
+    /// A click from before the panel showed is about something else — the
+    /// operator clicked in another application and then reached for the
+    /// shortcut. Here uDeck never heard it (it was not running yet, say), so
+    /// only its age against the panel's can say so. The ages are made up; the
+    /// order is the case.
+    @Test("a click from before the panel showed is not a click past it")
+    func aClickFromBeforeThePanelIsNotAboutIt() {
+        let evidence = ApplicationSwitch.Verdict.Evidence(
+            secondsSinceLastClick: Self.switchAfterAClickInside.secondsSinceShown + 1,
+            secondsSinceShown: Self.switchAfterAClickInside.secondsSinceShown,
+            secondsSinceLastClickHeard: .infinity,
+            pointerIsPastThePanel: true
+        )
+        #expect(ApplicationSwitch.event(given: evidence) == .otherAppActivated)
+    }
+
+    /// The same click read both ways has not come out as a tie — uDeck heard
+    /// it 7 to 16 ms after the system dated it, in the six switches of that run
+    /// — but a tie is not news either way: reading it as a click past the panel
+    /// throws work away, so the benefit of the doubt goes to the work.
+    @Test("a click as old as the last one uDeck heard is that one")
+    func aTieIsHeard() {
+        let evidence = ApplicationSwitch.Verdict.Evidence(
+            secondsSinceLastClick: Self.switchAfterAClickInside.secondsSinceLastClick,
+            secondsSinceShown: Self.switchAfterAClickInside.secondsSinceShown,
+            secondsSinceLastClickHeard: Self.switchAfterAClickInside.secondsSinceLastClick,
+            pointerIsPastThePanel: true
+        )
+        #expect(ApplicationSwitch.event(given: evidence) == .otherAppActivated)
     }
 
     /// A card in the panel that launches an application: the click was on the
@@ -265,40 +346,16 @@ struct ApplicationSwitchTests {
     /// thing that is now in front of it, and he is coming back.
     @Test("a click inside the panel that brings something forward is not a dismissal")
     func aClickInsideIsNotADismissal() {
-        #expect(
-            ApplicationSwitch.event(
-                secondsSinceLastClick: Self.clickInsideThePanel, pointerIsPastThePanel: false
-            ) == .otherAppActivated
+        #expect(ApplicationSwitch.event(given: Self.clickInsideThePanel) == .otherAppActivated)
+        // And not only because uDeck heard it: the pointer on the panel is
+        // enough on its own.
+        let unheard = ApplicationSwitch.Verdict.Evidence(
+            secondsSinceLastClick: Self.clickInsideThePanel.secondsSinceLastClick,
+            secondsSinceShown: Self.clickInsideThePanel.secondsSinceShown,
+            secondsSinceLastClickHeard: .infinity,
+            pointerIsPastThePanel: false
         )
-    }
-
-    @Test("the window takes in every click the lab has measured, and no hand reaching for ⌘-Tab")
-    func theWindowIsBracketedByMeasurement() {
-        #expect(
-            ApplicationSwitch.clickWindow >= Self.slowestClickCausedActivation,
-            "a click the lab has seen arrive would be read as a switch, and bring back work the operator put away"
-        )
-        #expect(
-            ApplicationSwitch.clickWindow < Self.handFromMouseToKey,
-            "a window that long swallows a deliberate ⌘-Tab made just after a click, and with it the work it was protecting"
-        )
-    }
-
-    /// About the comparison and not about the number: a click exactly at the
-    /// edge is inside. Written in terms of the window so that it holds whatever
-    /// the window is — the bracket above is what holds the window.
-    @Test("the edge of the window is the edge of the window")
-    func theWindowHasAnEdge() {
-        #expect(
-            ApplicationSwitch.event(
-                secondsSinceLastClick: ApplicationSwitch.clickWindow, pointerIsPastThePanel: true
-            ) == .closeRequested
-        )
-        #expect(
-            ApplicationSwitch.event(
-                secondsSinceLastClick: ApplicationSwitch.clickWindow + 0.001, pointerIsPastThePanel: true
-            ) == .otherAppActivated
-        )
+        #expect(ApplicationSwitch.event(given: unheard) == .otherAppActivated)
     }
 
     /// `CGEventSource` answers with an interval, and nothing in its
@@ -307,10 +364,13 @@ struct ApplicationSwitchTests {
     @Test("an impossible answer about the last click is not a click")
     func anImpossibleAnswerIsNotAClick() {
         for nonsense in [-1.0, -0.0001, -TimeInterval.infinity] {
-            #expect(
-                ApplicationSwitch.event(secondsSinceLastClick: nonsense, pointerIsPastThePanel: true)
-                    == .otherAppActivated
+            let evidence = ApplicationSwitch.Verdict.Evidence(
+                secondsSinceLastClick: nonsense,
+                secondsSinceShown: Self.clickPastThePanel.secondsSinceShown,
+                secondsSinceLastClickHeard: Self.clickPastThePanel.secondsSinceLastClickHeard,
+                pointerIsPastThePanel: true
             )
+            #expect(ApplicationSwitch.event(given: evidence) == .otherAppActivated, "\(nonsense)")
         }
     }
 
@@ -326,60 +386,40 @@ struct ApplicationSwitchTests {
         )
         for youngest in ApplicationSwitch.clickEventTypes {
             let age = ApplicationSwitch.secondsSinceLastClick { type in
-                type == youngest ? Self.slowestClickCausedActivation : Self.switchWithNoClick
+                type == youngest ? Self.lateClickPastThePanel.secondsSinceLastClick : Self.switchAfterAClickInside.secondsSinceLastClick
             }
             #expect(
-                age == Self.slowestClickCausedActivation,
+                age == Self.lateClickPastThePanel.secondsSinceLastClick,
                 "a press of button type \(youngest.rawValue) a moment ago was not taken for the last click"
             )
         }
     }
 
     /// Against the island there is nothing to tell apart, and so nothing to
-    /// read — not the clock, not the pointer.
+    /// read — not the clocks, not the pointer.
     @Test("with no panel on screen an activation is only a switch, and nothing is asked")
     func nothingIsAskedAboutTheIsland() {
-        var asked: [String] = []
-        let verdict = ApplicationSwitch.verdict(
-            in: .collapsed,
-            secondsSinceLastClick: {
-                asked.append("how long ago the last click was")
-                return Self.slowestClickCausedActivation
-            },
-            pointerIsPastThePanel: {
-                asked.append("where the pointer is")
-                return true
-            }
-        )
+        var asked = false
+        let verdict = ApplicationSwitch.verdict(in: .collapsed) {
+            asked = true
+            return Self.clickPastThePanel
+        }
         #expect(verdict == ApplicationSwitch.Verdict(event: .otherAppActivated, evidence: nil))
-        #expect(asked.isEmpty, "the island asked \(asked)")
+        #expect(!asked, "the island was asked about")
     }
 
     /// Both answers keep what they were decided from, because both are written
-    /// to the log: a click read as a switch — a main thread late past the
-    /// window, a pointer back on the panel — must be told from ⌘-Tab afterwards.
+    /// to the log: a click read as a switch must be told from ⌘-Tab afterwards.
     @Test("a panel on screen is asked about, and both answers keep their evidence")
     func bothAnswersKeepTheirEvidence() {
         for phase in [PanelPhase.peek, .open, .fullscreen] {
-            let click = ApplicationSwitch.verdict(
-                in: phase,
-                secondsSinceLastClick: { Self.slowestClickCausedActivation },
-                pointerIsPastThePanel: { true }
-            )
+            let click = ApplicationSwitch.verdict(in: phase) { Self.lateClickPastThePanel }
             #expect(click.event == .closeRequested, "\(phase)")
-            #expect(click.evidence == .init(
-                secondsSinceLastClick: Self.slowestClickCausedActivation, pointerIsPastThePanel: true
-            ))
+            #expect(click.evidence == Self.lateClickPastThePanel)
 
-            let onThePanel = ApplicationSwitch.verdict(
-                in: phase,
-                secondsSinceLastClick: { Self.clickInsideThePanel },
-                pointerIsPastThePanel: { false }
-            )
-            #expect(onThePanel.event == .otherAppActivated, "\(phase)")
-            #expect(onThePanel.evidence == .init(
-                secondsSinceLastClick: Self.clickInsideThePanel, pointerIsPastThePanel: false
-            ))
+            let switched = ApplicationSwitch.verdict(in: phase) { Self.switchAfterAClickInside }
+            #expect(switched.event == .otherAppActivated, "\(phase)")
+            #expect(switched.evidence == Self.switchAfterAClickInside)
         }
     }
 
@@ -391,11 +431,7 @@ struct ApplicationSwitchTests {
     @Test("a click past the panel leaves it dismissed, whichever message brought the news")
     func theClickDismissesThroughEitherRoad() {
         let byTheMonitor = PanelEvent.closeRequested
-        let byTheNotification = ApplicationSwitch.verdict(
-            in: .open,
-            secondsSinceLastClick: { Self.slowestClickCausedActivation },
-            pointerIsPastThePanel: { true }
-        ).event
+        let byTheNotification = ApplicationSwitch.verdict(in: .open) { Self.lateClickPastThePanel }.event
         for event in [byTheMonitor, byTheNotification] {
             var state = PanelState()
             state.apply(.revealRequested)
@@ -417,24 +453,14 @@ struct ApplicationSwitchTests {
         var state = PanelState()
         state.apply(.revealRequested, collapseOnAppSwitch: false)
         state.apply(.interacted, collapseOnAppSwitch: false)
-        state.apply(
-            ApplicationSwitch.event(
-                secondsSinceLastClick: Self.slowestClickCausedActivation, pointerIsPastThePanel: true
-            ),
-            collapseOnAppSwitch: false
-        )
+        state.apply(ApplicationSwitch.event(given: Self.lateClickPastThePanel), collapseOnAppSwitch: false)
         #expect(state.phase == .collapsed)
         #expect(state.collapseReason == .dismissed)
 
         // And the switch it is not still obeys the setting.
         state.apply(.revealRequested, collapseOnAppSwitch: false)
         state.apply(.interacted, collapseOnAppSwitch: false)
-        state.apply(
-            ApplicationSwitch.event(
-                secondsSinceLastClick: Self.switchWithNoClick, pointerIsPastThePanel: true
-            ),
-            collapseOnAppSwitch: false
-        )
+        state.apply(ApplicationSwitch.event(given: Self.switchAfterAClickInside), collapseOnAppSwitch: false)
         #expect(state.phase == .open)
     }
 
@@ -445,11 +471,7 @@ struct ApplicationSwitchTests {
             state.apply(.revealRequested)
             state.apply(.interacted)
             if phase == .fullscreen { state.apply(.toggleFullscreen) }
-            state.apply(
-                ApplicationSwitch.event(
-                    secondsSinceLastClick: Self.switchWithNoClick, pointerIsPastThePanel: true
-                )
-            )
+            state.apply(ApplicationSwitch.event(given: Self.switchAfterAClickInside))
             #expect(state.collapseReason == .interrupted)
             state.apply(.revealRequested)
             #expect(state.phase == phase, "unfinished work comes back; that is what an interruption is for")
