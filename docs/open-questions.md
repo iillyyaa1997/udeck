@@ -103,8 +103,23 @@ handled. Under load or event coalescing those describe different movements, and
 the calibration would be learning from a mismatch. Implausible ratios are
 rejected, so the effect is absorbed rather than acted on — but absorbing a lot
 of garbage is not the same as not being fed any.
+
+Half of it was measured on 2026-09-27, in the lab, with a build that logged
+every movement it handled near the top of the screen
+(`.build/e2e/kept/20260927-154333Z`): the position read now and the event's own
+location were the same in 39 movements of 39, so reading it now is not where a
+mismatch comes from there. One comes from somewhere else. macOS hands some
+reports to uDeck twice — through its global monitor and through its local one —
+with the movement halved between the two copies and both placed where the whole
+report left the pointer. Read against `PointerDeltaCalibration.observe` — not
+measured as learning — the first copy pairs a whole report's change of position
+with half its delta, a scale twice the true one, which is inside the accepted
+range and so learned from; the second changes no position and is ignored. The gesture itself reads the two copies as one report
+(`HoverGestureRecognizer.wasPinned`); the calibration does not yet.
 *To settle:* count rejections in the field. A high rate means the pairing is
-wrong and the filter is merely hiding it.
+wrong and the filter is merely hiding it. And count the reports that come in two
+copies: pairing a report's change of position with the sum of its copies is the
+fix, if they turn out to be common on a real mouse.
 
 **Can a run that did not overrun be reported as one?** The watchdog records a
 timeout before killing, and cancelling it cannot stop a body already past its

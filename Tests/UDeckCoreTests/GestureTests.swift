@@ -45,6 +45,38 @@ private struct Driver {
         return outcome
     }
 
+    /// One report handed over as two events, the way macOS sometimes delivers
+    /// it: the pointer moves once, and each event carries half the movement,
+    /// the one timestamp, and the place the whole report left the pointer.
+    /// `between` runs after the first half — whatever else uDeck might hear in
+    /// the gap between the two monitors the halves arrive through.
+    mutating func moveInTwoHalves(
+        dx: CGFloat,
+        dy: CGFloat,
+        over seconds: TimeInterval = 0.008,
+        between: (inout Driver) -> Void = { _ in }
+    ) {
+        clock += seconds
+        let reported = clock
+        cursor.x = min(max(cursor.x + dx, geometry.screen.frame.minX), geometry.screen.frame.maxX - 1)
+        cursor.y = min(cursor.y + dy, geometry.screen.frame.maxY)
+        let half = CGVector(dx: dx / 2, dy: dy / 2)
+        send(PointerSample(location: cursor, delta: half, timestamp: reported))
+        between(&self)
+        send(PointerSample(location: cursor, delta: half, timestamp: reported))
+    }
+
+    /// uDeck asking again where the pointer is, on a timer: nothing moved, and
+    /// the timestamp is the moment it asked.
+    mutating func reevaluate(after seconds: TimeInterval) {
+        clock += seconds
+        send(PointerSample(location: cursor, delta: .zero, timestamp: clock))
+    }
+
+    private mutating func send(_ sample: PointerSample) {
+        outcomes.append(recognizer.handle(sample, geometry: geometry, environment: environment, tuning: tuning))
+    }
+
     /// Stays put for a while, the way a real stream still reports the odd event.
     @discardableResult
     mutating func rest(for seconds: TimeInterval, steps: Int = 8) -> GestureOutcome {
@@ -361,6 +393,64 @@ struct GestureTests {
         #expect(!arming.isEmpty)
         #expect(arming.allSatisfy { $0 >= 0 && $0 <= 1 })
         #expect(arming.last! > arming.first!)
+    }
+}
+
+/// One report handed over as two events.
+///
+/// Measured in the lab on 2026-09-27, with a build that logged every movement
+/// it heard near the top of the screen (.build/e2e/kept/20260927-154333Z): now
+/// and then a report reaches uDeck twice, once through its global monitor and
+/// once through its local one, with the movement halved between the two copies,
+/// one timestamp on both, and both placed where the whole report left the
+/// pointer — in the event's own location as much as in `NSEvent.mouseLocation`.
+/// When the report that did it was the one arriving at the edge, the throw was
+/// taken for a push.
+@Suite("Pointer gesture — one report in two halves")
+struct GestureSplitReportTests {
+    /// A report of the lab's throw as uDeck reads it, in points: 65.2, whose
+    /// halves were 32.6 each in the push they caused
+    /// (.build/e2e/kept/20260927-133243Z, probe.throw-7).
+    static let throwReport: CGFloat = 65.2
+
+    /// Two reports short of the edge, so that the second one arrives exactly on it.
+    static let twoReportsBelowTheEdge = CGPoint(x: 1280, y: ScreenFixtures.externalMain.frame.maxY - 2 * throwReport)
+
+    @Test("a throw whose last report comes in two halves is still a throw, not a push")
+    func aSplitArrivalIsNotAPush() {
+        var driver = Driver(startingAt: Self.twoReportsBelowTheEdge)
+        driver.move(dx: 0, dy: Self.throwReport)
+        driver.moveInTwoHalves(dx: 0, dy: Self.throwReport)
+        #expect(driver.geometry.isPinnedToTopEdge(driver.cursor), "the throw must end against the edge")
+        #expect(!driver.fired, "the second half of the report that arrived at the edge was counted as a push")
+        driver.rest(for: 0.3)
+        #expect(driver.firedVia == .dwell)
+    }
+
+    /// Merged, not dropped: a report made against the edge counts whole even when
+    /// it comes in two halves. Each half here is short of the threshold on its
+    /// own and over it with the other, so a recognizer that threw the second
+    /// copy away as a duplicate would miss a real push.
+    @Test("a push whose report comes in two halves counts both of them")
+    func aSplitPushCountsWhole() {
+        var driver = Driver(startingAt: Self.twoReportsBelowTheEdge)
+        driver.move(dx: 0, dy: 2 * Self.throwReport)
+        #expect(!driver.fired)
+        driver.moveInTwoHalves(dx: 0, dy: 2 * driver.tuning.edgePushDistance * 3 / 4)
+        #expect(driver.firedVia == .push)
+    }
+
+    /// uDeck also asks where the pointer is on a timer, and those samples have
+    /// timestamps of their own. The halves come through two different monitors,
+    /// so one can land between them; the lab has not seen it, and it must not
+    /// turn the second half back into a report of its own.
+    @Test("asking where the pointer is between the two halves does not split the report")
+    func aReevaluationBetweenTheHalvesChangesNothing() {
+        var driver = Driver(startingAt: Self.twoReportsBelowTheEdge)
+        driver.move(dx: 0, dy: Self.throwReport)
+        let aMomentLater = driver.tuning.dwellDuration / 2
+        driver.moveInTwoHalves(dx: 0, dy: Self.throwReport) { $0.reevaluate(after: aMomentLater) }
+        #expect(!driver.fired, "a timer between the two halves made the second one a push")
     }
 }
 

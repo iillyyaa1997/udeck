@@ -42,12 +42,38 @@ public struct HoverGestureRecognizer: Sendable {
     private var firedThisVisit = false
     private var insideStrip = false
 
-    /// Whether the cursor was already against the top edge before the movement
+    /// Whether the cursor was already against the top edge before the report
     /// currently being handled. The delta that *arrives* at the edge is the
     /// throw itself, not the push that follows it — counting it would make the
     /// gesture fire on any fast flick towards a menu-bar target, which is the
     /// most common false positive there is.
+    ///
+    /// Before the *report*, and a report is not always one event. Measured in
+    /// the lab on 2026-09-27, with a build that logged every movement it heard
+    /// near the top of the screen (.build/e2e/kept/20260927-154333Z): now and
+    /// then macOS hands one report to uDeck twice — once through its global
+    /// monitor and once through its local one — with the movement halved
+    /// between the two copies, one timestamp on both, and both placed where the
+    /// whole report left the pointer, in the event's own location as much as in
+    /// `NSEvent.mouseLocation`. Read event by event, the first copy of the
+    /// report that arrives at the edge leaves the pointer pinned, so the second
+    /// is movement made while already pinned — 32.6 to 42.4 points against a
+    /// threshold of 24 — and a throw that stopped at the edge opened the panel
+    /// by the push. `panel.a-throw-to-the-edge` was red 6 times in 32 for it;
+    /// the two builds that logged every movement caught six such pushes between
+    /// them, and in all six the report that arrived had come in two copies, while
+    /// in every throw they logged that opened by the dwell it had come in one.
+    /// So this is taken once, when a report begins, from where the last sample
+    /// left the pointer, and every part of the report is read against it.
     private var wasPinned = false
+
+    /// Whether the cursor was against the top edge once the last sample was
+    /// handled: what `wasPinned` becomes when the next report begins.
+    private var pinnedAfterLastSample = false
+
+    /// The timestamp every part of the report being handled carries, which is
+    /// the only thing that tells the second half of a report from the next one.
+    private var reportTimestamp: TimeInterval?
 
     /// Hard bound on the history buffer, so a long slow approach cannot grow it
     /// without limit. Well above what `approachSampleDistance` needs at any
@@ -67,6 +93,7 @@ public struct HoverGestureRecognizer: Sendable {
         environment: GestureEnvironment,
         tuning: GestureTuning
     ) -> GestureOutcome {
+        beginReportUnlessContinuing(sample)
         recordHistory(sample)
 
         guard let geometry, geometry.containsPointer(sample.location, in: geometry.triggerStrip) else {
@@ -101,7 +128,7 @@ public struct HoverGestureRecognizer: Sendable {
             // the gate, and it has to stay current through one — otherwise the
             // first sample after the gate lifts is compared against a stale
             // answer and discarded.
-            wasPinned = geometry.isPinnedToTopEdge(sample.location)
+            pinnedAfterLastSample = geometry.isPinnedToTopEdge(sample.location)
             return .idle(reason: blocked)
         }
 
@@ -114,7 +141,7 @@ public struct HoverGestureRecognizer: Sendable {
 
         if accumulatedPush(tuning: tuning, now: sample.timestamp) >= tuning.edgePushDistance {
             firedThisVisit = true
-            wasPinned = geometry.isPinnedToTopEdge(sample.location)
+            pinnedAfterLastSample = geometry.isPinnedToTopEdge(sample.location)
             return .fire(via: .push)
         }
 
@@ -136,7 +163,7 @@ public struct HoverGestureRecognizer: Sendable {
     public mutating func suppressUntilPointerLeaves() {
         dwellStart = nil
         dwellHorizontalTravel = 0
-        wasPinned = false
+        forgetReports()
         pushWindow.removeAll(keepingCapacity: true)
         firedThisVisit = true
     }
@@ -148,8 +175,32 @@ public struct HoverGestureRecognizer: Sendable {
         dwellHorizontalTravel = 0
         firedThisVisit = false
         insideStrip = false
-        wasPinned = false
+        forgetReports()
         pushWindow.removeAll(keepingCapacity: true)
+    }
+
+    // MARK: - Reports
+
+    /// Begins a new report, unless this sample is the rest of the one being
+    /// handled.
+    ///
+    /// A sample that moved nothing begins nothing. It is uDeck asking again
+    /// where the pointer is, on a timer, so that a dwell can finish under a hand
+    /// that has stopped — and it carries a timestamp of its own, taken when it
+    /// was asked. Were it to begin a report, one such question landing between
+    /// the two halves of a report would make the second half a report of its
+    /// own again. The two halves reach uDeck through two different monitors, so
+    /// a timer can fire between them; the lab has not seen it happen.
+    private mutating func beginReportUnlessContinuing(_ sample: PointerSample) {
+        guard sample.delta != .zero, sample.timestamp != reportTimestamp else { return }
+        reportTimestamp = sample.timestamp
+        wasPinned = pinnedAfterLastSample
+    }
+
+    private mutating func forgetReports() {
+        wasPinned = false
+        pinnedAfterLastSample = false
+        reportTimestamp = nil
     }
 
     // MARK: - Gates
@@ -242,7 +293,7 @@ public struct HoverGestureRecognizer: Sendable {
         tuning: GestureTuning
     ) {
         let pinnedNow = geometry.isPinnedToTopEdge(sample.location)
-        defer { wasPinned = pinnedNow }
+        defer { pinnedAfterLastSample = pinnedNow }
 
         guard pinnedNow else {
             // Still in flight. Upward travel only counts once the cursor has
@@ -250,7 +301,8 @@ public struct HoverGestureRecognizer: Sendable {
             pushWindow.removeAll(keepingCapacity: true)
             return
         }
-        // Count only movement made while already pinned.
+        // Count only movement made while already pinned: pinned before the
+        // report this sample is part of.
         if wasPinned && sample.delta.dy > 0 {
             pushWindow.append((sample.timestamp, sample.delta.dy))
         }
