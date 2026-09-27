@@ -45,7 +45,10 @@ pinned and once on them (`wobble_along_the_strip`). It is how the lab asks about
 the line between the two paths — upward movement that never reaches the edge is
 not a push — and its path is read back report by report, because a verdict about
 it means something only if the rocking went where it was sent and carried enough
-to have been a push (`Wobble`).
+to have been a push (`Wobble`). Its other half is the throw on its own, which
+carries the pointer to the edge and posts nothing after it (`throw_to_the_edge`):
+the movement that arrives at the edge is not a push either, and what the lab
+reads back about it — that it reached the edge and stopped there — is `Throw`.
 
 And then the panel as a scene, because more than one group of checks needs to
 make it. Showing a peek, holding it open with a click, taking the pointer past
@@ -568,10 +571,17 @@ class Wobble:
             )
 
     def summary(self) -> str:
+        """What the report keeps of the path — every number the lab's prose about the wobble quotes.
+
+        The time the reports took is in it because that prose quotes it too, and a
+        number only a throwaway measurement ever held cannot be checked again once
+        the run it was in has been rotated away.
+        """
+        took = self.track[-1][2] if self.track else 0.0
         return (
             f"the wobble rocked between rows {self.rows_visited()}, {self.reports_in_the_strip()} of its "
-            f"{len(self.track)} reports inside the strip, with {self.upward_in_the_strip():g} points of upward "
-            f"travel there within {config.EDGE_PUSH_WINDOW_SECONDS}s"
+            f"{len(self.track)} reports inside the strip, in {took:.2f}s, with {self.upward_in_the_strip():g} "
+            f"points of upward travel there within {config.EDGE_PUSH_WINDOW_SECONDS}s"
         )
 
 
@@ -604,6 +614,87 @@ def wobble_along_the_strip(machine, step: str, rows: tuple[int, int]) -> Wobble:
     wobble.expect_it_stayed_in_its_rows()
     wobble.expect_it_came_to_rest_in_the_strip()
     return wobble
+
+
+class Throw:
+    """Where the throw on its own took the pointer, read back from the guest, and whether it stopped there.
+
+    The throw is what `panel.push` does before it pushes, and on its own it is the
+    other half of uDeck's guard: the movement that *arrives* at the edge is not a
+    push, only movement made after it (`HoverGestureRecognizer.wasPinned`). So a
+    verdict about it needs two things the lab can get wrong, and both are asked
+    before uDeck is. The pointer has to have reached the edge, or there was nothing
+    to arrive at. And the throw has to have stopped there: it watches the pointer
+    between reports and stops the moment it reads it pinned, but a reading that
+    lags one report behind lets one more report through, and that one is made
+    against the edge — a real push, which uDeck is right to count. A report moves
+    the pointer exactly its own size — six of 40 moved it 240 pixels
+    (`config.PUSH_DELTA`), and each of the 39 throws measured on 2026-09-27, every
+    one on a fresh machine (kept in .build/e2e/kept/), went from row 720 to row 0
+    in exactly twelve of 60 — so from where the throw began the number of reports
+    it needed is known, and one more than that is a push the lab made. Not one of
+    the 39 sent a report more.
+    """
+
+    def __init__(self, said: str, step: str) -> None:
+        def place(point):
+            return None if point is None else (round(float(point[0])), round(float(point[1])))
+
+        try:
+            read = json.loads(said)
+            self.thrown = int(read["thrown"])
+            self.began = place(read["from"])
+            self.at = place(read["at"])
+            self.pinned = read["pinned"] is True
+        except (ValueError, KeyError, TypeError, IndexError):
+            raise LabError(step, f"the guest's push script said something the lab cannot read: {said!r}") from None
+        self.step = step
+
+    def needed(self) -> int:
+        """How many reports carry the pointer from where it began to where it counts as pinned."""
+        rise = max(0, self.began[1] - config.PINNED_TOLERANCE_PIXELS)
+        return -(-rise // round(abs(config.THROW_DELTA)))
+
+    def expect_it_reached_the_edge(self) -> None:
+        """Nothing arrived at an edge the pointer never reached."""
+        if not self.pinned or self.at is None or self.at[1] > config.PINNED_TOLERANCE_PIXELS:
+            raise LabError(
+                self.step,
+                f"the throw left the pointer at {self.at}, not against the top edge, so nothing arrived there",
+            )
+
+    def expect_it_stopped_there(self) -> None:
+        """A report after the one that arrived is a push the lab made, and uDeck would be right to count it."""
+        if self.began is None:
+            raise LabError(self.step, "the guest's push script did not say where the pointer began, so whether "
+                                      "the throw stopped at the edge is unknown")
+        if self.thrown > self.needed():
+            raise LabError(
+                self.step,
+                f"the throw sent {self.thrown} reports from {self.began} where {self.needed()} reach the edge: "
+                f"{self.thrown - self.needed()} of them were made against it, which is a push — the pointer was "
+                "read back late, and a verdict now would be about the lab's movement",
+            )
+
+    def summary(self) -> str:
+        return (
+            f"the throw carried the pointer from {self.began} to {self.at} in {self.thrown} reports "
+            f"of {abs(config.THROW_DELTA):g}, and stopped there"
+        )
+
+
+def throw_to_the_edge(machine, step: str) -> Throw:
+    """Carry the pointer from where it is to the top edge, from inside the guest, and post nothing after.
+
+    `panel.push`'s throw exactly, one run of the same script with no push after it:
+    `steps` 0. Whether it reached the edge and stopped there is the lab's to answer,
+    and it is answered here, before anyone reads what uDeck said about it.
+    """
+    said = push_upward(machine, step, throw=True, steps=0)
+    thrown = Throw(said, step)
+    thrown.expect_it_reached_the_edge()
+    thrown.expect_it_stopped_there()
+    return thrown
 
 
 def press_the_chord(machine, key_code: int, step: str, modifiers: tuple[str, ...] = config.HOTKEY_MODIFIERS) -> None:

@@ -49,7 +49,9 @@ are made through ctypes.
 
 A negative delta is upward. `throw-cap` may be 0, which is what the control in
 the middle of the screen uses: it pushes where the pointer already is, and a
-throw would carry it somewhere else.
+throw would carry it somewhere else. And `steps` may be 0, which is the throw on
+its own (`panel.a-throw-to-the-edge`): the pointer is carried to the edge and
+nothing is posted after it arrives.
 
 `sideways` is how far each report of the push also carries the pointer to the
 right, in pixels, and `wobble` is 1 to send every other report back *down* by
@@ -69,6 +71,10 @@ Where the pointer is after every report of the push is read back and printed as
 `track`, with the time since the push began, because for the wobble the path is
 the measurement: which rows it rocked between, and how much upward travel it
 made inside the strip in how long.
+
+Where the pointer was before anything is posted is printed as `from`, so that
+the lab can tell how many reports the throw needed to reach the edge and hold it
+against how many it sent (`thrown`).
 
 The throw stops the moment the pointer is within `pinned` pixels of the top,
 which is why `throw-cap` is a cap and not a count. That is not tidiness. uDeck
@@ -227,7 +233,7 @@ def main(argv):
     system = ctypes.CDLL(None)
     where = pointer_reader()
     said = {"uid": system.getuid(), "euid": system.geteuid(), "throw": [], "push": [],
-            "thrown": 0, "at": None, "pinned": None, "track": []}  # fmt: skip
+            "thrown": 0, "from": None, "at": None, "pinned": None, "track": []}  # fmt: skip
     if said["euid"] == 0:
         # Said rather than refused: the run is the measurement, and a refusal
         # here would hide the kernel's own answer from whoever reads the report.
@@ -249,6 +255,8 @@ def main(argv):
         return 1
 
     try:
+        start = where()
+        said["from"] = [round(start[0], 1), round(start[1], 1)] if start else None
         # The throw: upward movement until the pointer can go no higher, and then
         # not one report more. uDeck does not count the movement that *arrives* at
         # the edge — the throw is not a push — but it counts everything after, so a
@@ -288,7 +296,9 @@ def main(argv):
     said["throw"] = sorted(set(said["throw"]))
     said["push"] = sorted(set(said["push"]))
     print(json.dumps(said))
-    return 0 if said["push"] == ["KERN_SUCCESS"] else 1
+    # Every report that was posted went through, and something was: the throw's
+    # count as much as the push's, now that a run can be a throw and nothing else.
+    return 0 if set(said["throw"]) | set(said["push"]) == {"KERN_SUCCESS"} else 1
 
 
 def usage():

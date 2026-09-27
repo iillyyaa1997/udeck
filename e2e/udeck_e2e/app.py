@@ -326,6 +326,36 @@ def preferences(machine, step: str) -> str | None:
     return done.stdout
 
 
+# Sparkle's own name for whether it looks by itself: the key its setter writes into
+# uDeck's preferences when the operator's switch changes it, and the key it reads —
+# before the plist — every time it decides whether to schedule a check.
+AUTOMATIC_CHECKS = "SUEnableAutomaticChecks"
+
+
+def automatic_checks(machine, step: str) -> str | None:
+    """What uDeck's preferences in the guest say about `AUTOMATIC_CHECKS` — `"1"`, `"0"` — or None when nothing.
+
+    One key and not the whole domain (`preferences`), because a check reads this
+    one as an answer. `defaults read` of a key nobody wrote fails, and that is
+    None — measured in a macOS 27 guest on 2026-09-27, with uDeck running and
+    the switch not yet touched: a non-zero exit and `Error: Could not find key
+    'SUEnableAutomaticChecks' in domain 'place.unicorns.udeck'.` A domain that is
+    not there at all is "does not exist" (`preferences`), and is None too. Anything else that fails
+    is the lab unable to read it, never a key that is not there: `ask`, for the
+    reason `running_pids` has.
+    """
+    done = machine.ssh.ask(f"defaults read {BUNDLE_ID} {AUTOMATIC_CHECKS}", step)
+    if done.returncode == 0:
+        return done.stdout.strip()
+    said = f"{done.stdout or ''}\n{done.stderr or ''}"
+    if "Could not find key" in said or "does not exist" in said:
+        return None
+    lines = said.strip().splitlines()
+    raise LabError(
+        step, f"{AUTOMATIC_CHECKS} could not be read: {lines[-1] if lines else f'exit {done.returncode}'}"
+    )
+
+
 def forget_preferences(machine, step: str) -> None:
     """Take away what macOS keeps for uDeck, so the next uDeck starts as a new one would.
 

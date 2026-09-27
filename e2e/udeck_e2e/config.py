@@ -301,20 +301,29 @@ INSIDE_THE_STRIP_Y = 5
 #
 # Hence the numbers below: twice the pace, the throw's own, with a smaller step
 # sideways so the wobble still ends inside the strip. Measured on a build as it
-# ships, six times in each place, each on a machine of its own
-# (.build/e2e/20260926-192908Z):
-# between rows 4 and 6 the dwell six times of six, with 82 to 88 points of upward
-# travel inside the strip within one push window; between rows 0 and 2 the push
-# six times of six. 100 reports took 0.31 to 0.36 s.
+# ships, six times in each place, each on a machine of its own: between rows 4
+# and 6 the dwell six times of six, between rows 0 and 2 the push six times of six
+# (.build/e2e/20260926-192908Z).
+#
+# **None of the runs named so far in this block is on this Mac any more**: the lab
+# keeps ten, and they were rotated out before anything copied them, so what they
+# measured stands as it was written and can no longer be checked. The numbers
+# that can be are the ones every run of the two checks writes into its ledger
+# (`Wobble.summary`), in the runs of a build as it ships kept in .build/e2e/kept/:
+# upward travel inside the strip within one push window of 76, 78, 76, 82 and 82
+# points short of the edge, and 52, 62, 60, 68 and 58 at it (20260926-211629Z,
+# -220316Z, -225415Z, 20260927-140526Z, -141957Z), with the dwell and the push
+# every time; and the hundred reports took 0.31 to 0.33 s in the last two, the
+# first runs that wrote it down.
 #
 # **At the edge the track is short, and that is not the wobble failing.** Once
 # the push opens the panel the pointer does not always keep following the
 # reports: in three of the six trials of the build that logged every movement,
 # uDeck heard nothing for 0.12 to 0.22 s after the panel opened while the script
-# was still posting (-192517Z), and the travel the script read back at the edge
-# was 44 to 54 points (-192908Z) where short of it, with no panel in the way, it
-# was 82 to 88. So how much the wobble carried is asked only of a wobble that
-# was *not* taken for a push — which is the one case where it matters.
+# was still posting (-192517Z, rotated out like the rest). Hence the smaller
+# numbers at the edge above, with no panel in the way short of it. So how much the
+# wobble carried is asked only of a wobble that was *not* taken for a push —
+# which is the one case where it matters.
 
 # uDeck's own push threshold and the window it has to be reached in
 # (`edgePushDistance`, `edgePushWindow`). The lab reads its own wobble against
@@ -353,9 +362,9 @@ WOBBLE_DELTA = -float(SHORT_OF_THE_EDGE_ROWS[1] - SHORT_OF_THE_EDGE_ROWS[0])
 # slides at `dwellHorizontalSpeedLimit` (250 points a second) or has slid
 # `dwellHorizontalTolerance` (12 points) since the last restart. Two pixels every
 # 2 ms is a thousand a second, and even at a pace too slow for that it is twelve
-# points every six reports — about 20 ms at the 3.1 to 3.6 ms a report took in
-# the measurement, well inside the 0.06 s dwell. Small enough that a hundred of
-# them stay inside the strip.
+# points every six reports — about 20 ms at the 3.1 to 3.3 ms a report took (a
+# hundred in 0.31 to 0.33 s, above), well inside the 0.06 s dwell. Small enough
+# that a hundred of them stay inside the strip.
 WOBBLE_SIDEWAYS = 2
 
 # Reports in the wobble, and the pause after each: the throw's own pace, the

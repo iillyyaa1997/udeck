@@ -13,14 +13,17 @@ see the last section.
 
 > **Being built.** What exists today: the command, its pre-flight and report,
 > the machines and the golden image they are cloned from, their screen and
-> pointer over VNC, a self-check, the builds a check needs, and the first checks
-> of uDeck itself — the update, with its wrong-key control, and the panel: the
-> hover gesture that opens it, with its pointer-in-the-middle control and the
-> line between its two paths, the ways of putting it away again, and the keyboard shortcut that opens the panel and
-> puts it away — whichever way it was opened — with its wrong-chord control and
-> a check that the combination dies with uDeck. "Open at Login" and its checks
-> follow, and so do the two that change a setting in uDeck's own window and ask
-> whether it holds.
+> pointer over VNC, a self-check, the builds a check needs, and twenty-seven
+> checks of uDeck itself in four groups (`e2e/run.sh --list`). `updates`: the
+> update, with its wrong-key control, and when uDeck looks for one at all — never
+> by itself as it ships, and by itself once the operator switches that on.
+> `panel`: the hover gesture that opens it, with its pointer-in-the-middle
+> control and the line between its two paths, the ways of putting it away again,
+> and the keyboard shortcut that opens the panel and puts it away — whichever way
+> it was opened — with its wrong-chord control and a check that the combination
+> dies with uDeck. `login`: "Open at Login", through a restart and an update, and
+> switched off. `settings`: two changes made in uDeck's own window, and whether
+> they hold across a restart.
 
 ## Running it
 
@@ -233,14 +236,24 @@ alone, and neither writes a preference to get what it wants — the one thing
 done to the preferences from outside is taking them away (below).
 
 `updates.it-does-not-look-by-itself` starts uDeck as it ships and listens to
-the feed for 20 s: the feed must hear nothing from it. Then it presses "Check
-now" and the feed must hear that, within 20 s — because a uDeck that cannot
-reach its feed is exactly as quiet as one that chose not to ask, and a quiet
-that proves nothing is "could not check".
+the feed for 20 s, then opens the settings window on the About pane and listens
+5 s more: the feed must hear nothing from uDeck in any of it, up to the click on
+"Check now". Opening the window is something the operator does, and a uDeck that
+looked because its window appeared — or half a minute after it started — asked
+without being asked. Then the feed must hear the button within 20 s, counting
+only what is new since the read that ended the listening, which the click
+follows at once — because a uDeck that cannot reach its feed is exactly as quiet
+as one that chose not to ask, and a quiet that proves nothing is "could not
+check". The first version of the check took that mark before it opened the
+window, so a request the window caused passed as the button's.
 `updates.switched-on-it-looks-by-itself` turns the switch on with the pointer
-and presses nothing else: the feed must hear uDeck within 15 s. When it does
-not, the switch is read back — still off is a click that missed and the lab's;
-on is uDeck's.
+and presses nothing else: the feed must hear uDeck within 15 s, and then
+Sparkle's own setting in the guest, `SUEnableAutomaticChecks`, must read on — a
+switch that makes one check instead of turning checking on brings the very same
+request. When the feed hears nothing, two things are asked before that is
+uDeck's: the switch is read back — still off is a click that missed, and the
+lab's — and the feed is asked whether it still answers, because a feed that
+died hears nobody.
 
 **What each is red for**, each measured on 2026-09-26 by breaking uDeck and
 running the check. `SUEnableAutomaticChecks` switched to true in the plist:
@@ -255,6 +268,23 @@ the switch reading on and the feed hearing nothing (`20260926-210840Z`,
 said *could not check*, because a uDeck that asks nothing when asked makes the
 quiet before it worthless (`20260926-211336Z`).
 
+And three more on 2026-09-27, for what the first versions let through. A uDeck
+that looks when its settings window appears — `updater?.checkNow()` in
+`SettingsView`'s `onAppear` — and one that looks when the About pane appears:
+`it-does-not-look-by-itself` failed on both, the feed having heard uDeck 30 and
+32 s after launch with the window open (`20260927-134954Z`, `-135200Z`). A
+switch whose setter asks for one check instead of turning checking on
+(`updater.checkNow()` in the About pane's binding): `switched-on-it-looks-by-itself`
+failed, the feed having heard uDeck within the second and Sparkle keeping no
+`SUEnableAutomaticChecks` at all (`20260927-135358Z`). On the build as it ships
+the same read says `1` straight after the request, and a restart then asks the
+feed nothing for 30 s, because the last check is a second old — which is why the
+setting is read rather than proved by a restart (`20260927-132223Z`,
+`probe.switch-then-restart`). And the two check files as they were before, run
+against the first and the third of these, were green on both
+(`20260927-141653Z`, `-141823Z`) — which is what the new sentences are for. All
+of these runs are in `.build/e2e/kept/`.
+
 **The oracle is the feed's log, not uDeck's.** The guest's `http.server` writes
 one line per request, and nothing else on the machine knows the feed's address.
 The lab asks the same server whether it is up, so its own requests carry
@@ -265,8 +295,10 @@ stack opening a connection to port 8765 over `lo0`, and an ATS warning about
 plain HTTP — so a check reading it would be reading the network stack's diary.
 
 **Why seconds are enough**, measured on 2026-09-26 with a throwaway check file
-that is not kept (`.build/e2e/20260926-203904Z`), and read against the source of
-Sparkle 2.9.6, the version `Package.resolved` pins:
+that is not kept (`.build/e2e/20260926-203904Z`, and the run itself has since
+been rotated out without a copy, so the numbers in this list stand as they were
+written), and read against the source of Sparkle 2.9.6, the version
+`Package.resolved` pins:
 
 * With automatic checks off, Sparkle schedules nothing at all
   (`scheduleNextUpdateCheckFiringImmediately:` returns). uDeck as it ships was
@@ -415,10 +447,11 @@ has to come back down between the ups.
 
 So `panel.a-wobble-short-of-the-edge` slides the pointer along the strip from
 left of it, rocking between rows 4 and 6 — up two rows, down two, two pixels to
-the right each time, a hundred reports with a 2 ms pause after each (3.1 to
-3.6 ms apart, measured, with the pointer read back after every one), all of it
-one run of push-pointer.py inside the guest. The slide is what keeps the dwell away while it
-happens: uDeck restarts the dwell whenever the pointer slides, so the push path
+the right each time, a hundred reports with a 2 ms pause after each (0.31 to
+0.33 s for the hundred, with the pointer read back after every one, in the four
+wobbles of `.build/e2e/20260927-140526Z` and `-141957Z`), all of it one run of
+push-pointer.py inside the guest. The slide is what keeps the dwell away while it happens: uDeck restarts
+the dwell whenever the pointer slides, so the push path
 gets the whole wobble to be wrong about. When the pointer stops, at rest in the
 strip, the dwell fires, and that is the verdict *and* the witness: `fired by
 dwell` is uDeck saying it saw the pointer in the strip, saw it stop, and never
@@ -447,16 +480,26 @@ twice, on others (.build/e2e/20260926-185410Z, -191139Z, -191601Z); a build that
 logged every movement it heard is where the numbers above come from
 (-192056Z, -192517Z, never committed). At the throw's own pace, six times in
 each place on a machine of its own: the dwell six times of six between rows 4
-and 6, with 82 to 88 points of upward travel inside the strip within one window,
-and the push six times of six between rows 0 and 2 (-192908Z).
+and 6, and the push six times of six between rows 0 and 2 (-192908Z).
+
+None of the runs named so far in this section is on this Mac any more — they
+were rotated out before anything copied them — so what they measured stands as
+written and cannot be checked again. What can be is what every run of the two
+checks writes into its ledger (`Wobble.summary`). In the runs of a build as it
+ships kept in `.build/e2e/kept/` — `20260926-211629Z`, `-220316Z`, `-225415Z`,
+`20260927-140526Z` and `-141957Z` — the upward travel inside the strip within
+one window was 76, 78, 76, 82 and 82 points short of the edge, against the 48
+asked of it, and 52, 62, 60, 68 and 58 at it, with the dwell and the push every
+time.
 
 The travel is asked only of a wobble that was not taken for a push. Once the
 push opens the panel the pointer does not always keep following the reports — in
 three of six trials uDeck heard nothing for 0.12 to 0.22 s after the panel
-opened while the script was still posting (-192517Z) — so at the edge the track
-read back holds less, 44 to 54 points against 82 to 88 short of it (-192908Z),
-and a check that asked first would call a working push "could not check". A push
-short of the edge is wrong however little the track says it carried.
+opened while the script was still posting (-192517Z, gone like the rest) — so at
+the edge the track read back holds less, 52 to 68 points against 76 to 82 short
+of it in the runs kept, and a check that asked first could call a working push
+"could not check". A push short of the edge is wrong however little the track
+says it carried.
 
 Measured against broken builds of uDeck on 2026-09-26, one run each, the two
 checks and the three opening checks:
@@ -469,14 +512,67 @@ checks and the three opening checks:
 | no dwell ever firing | ❌ nothing opened | ✅ | | | |
 
 (.build/e2e/20260926-193702Z, -193959Z, -194444Z, -194748Z; the unbroken build,
-both green, -193525Z.) `panel.dwell` went red on the first two as well, once
-each, and why is known only in part. Its log says `fired by push` for a pointer
+both green, -193525Z — all rotated out since, and not kept.) `panel.dwell` went
+red on the first two as well, once each, and why is known only in part. Its log says `fired by push` for a pointer
 that was only placed, and the build that logged every movement showed a VNC
 jump into the strip arriving with a deltaY of 717 or 1434, sometimes as two
 events — upward movement the first mutant counts on arrival, and the second can
 count from its second event. That is the same accident that used to make the
 top row read as a push, and how often it would catch either mutant is not
 measured. The wobble goes red on them by construction.
+
+### The throw on its own
+
+The guard has a second half, and neither wobble draws it: uDeck counts upward
+movement only while the pointer is pinned *and was pinned before it*, because the
+movement that arrives at the edge is the throw itself — uDeck's own comment on
+`wasPinned` calls a throw at a menu-bar target the most common false positive
+there is. The wobble at the edge is pinned before every report it makes, and
+short of the edge nothing is pinned at all, so a uDeck without that condition is
+green on both — and on `panel.push` too, which is a push whichever report fires
+it.
+
+`panel.a-throw-to-the-edge` is `panel.push` without the push: the same throw
+from the middle of the screen, stopped the moment the pointer is pinned, and
+nothing posted after it (push-pointer.py with no steps). The pointer comes to
+rest against the edge, in the strip, and the panel has to open by the dwell.
+Before uDeck is asked anything, the lab reads back two things (`panel.Throw`).
+The pointer is against the edge. And the throw stopped there: it stops when it
+reads the pointer pinned, and a reading one report late would let through a
+report made against the edge, which is a real push. A report moves the pointer
+exactly its own size, so from where the throw began the number it needed is
+known — twelve of sixty from row 720 — and one more is the lab's push, not
+uDeck's mistake.
+
+Against a build of uDeck with that condition taken out (`wasPinned &&` removed
+from `updatePushWindow`), on 2026-09-27, the six opening checks:
+
+| uDeck built with | throw | wobble short of the edge | wobble at the edge | `panel.dwell` | `panel.push` | middle |
+|---|---|---|---|---|---|---|
+| the arrival counted as a push | ❌ push | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+(`.build/e2e/20260927-135536Z`, one run each; and six more throws on the same
+build, each on a fresh machine, all `fired by push`: `-140142Z`. Both kept.)
+
+**uDeck as it ships is red here about one time in five, and it is uDeck.**
+Measured on 2026-09-27, each throw on a fresh machine and every one stopped at
+the edge after exactly twelve reports: `fired by push` 2 times in 8
+(`.build/e2e/20260927-131004Z`) and neither time in this check's runs in the
+panel group and the whole lab (`-140526Z`, `-141957Z`); and with the throw
+slowed to a report every 50 ms, 1 in 10 and 3 in 12 (`-132223Z`, `-133243Z`) —
+6 in 32 in all. `-133243Z` was a build that logged every movement it handled
+near the top of the screen (never committed), and in all three of its pushes it
+shows the same thing: macOS delivered the report that
+arrived as two equal movements with one timestamp, and uDeck put both at the
+edge, because it takes the position from `NSEvent.mouseLocation` when it handles
+a movement rather than from the movement (`PointerMonitor.handleMovement`).
+The first half reads as the arrival, the second as movement made while already
+pinned — 32.6 to 42.4 points, over the 24 — and it counts. In the nine that
+opened by the dwell the arrival came as one movement. The same splitting may be
+what used to make a VNC jump to the top row read as a push (`panel.dwell`,
+above); that is inferred, not measured. Whether a real mouse on a real Mac is
+ever split like that is not measured either. All of these runs are kept in
+`.build/e2e/kept/`.
 
 ### The panel closing
 
@@ -1003,6 +1099,14 @@ pre-flight sends, before it sends it — and a directory per check with what it
 collected. The last ten runs that checked something are kept, and separately the
 last ten the pre-flight refused, so retrying a refused run cannot delete the
 evidence of a real one.
+
+So a run this file or a check's comments name as evidence may be gone by the
+time anyone looks for it, and a number quoted from a run that is gone can no
+longer be checked. The pruning touches nothing under `.build/e2e/` that is not
+named like a run, so runs worth keeping are copied to `.build/e2e/kept/`, where
+the ten of 2026-09-26 from 21:04 to 22:54 UTC and the runs of the review of
+2026-09-27 are. A run named here that is in neither place was rotated out, and
+where a number rests on one, the text says so.
 
 Ctrl-C stops the run and still cleans up, and so do closing the terminal and
 `kill`: the interrupted check's machine is shut down from inside and deleted

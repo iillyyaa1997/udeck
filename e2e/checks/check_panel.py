@@ -1,6 +1,6 @@
 """Does the panel open when it should, and close when it should?
 
-Sixteen checks in three parts. The first five are about the panel appearing
+Seventeen checks in three parts. The first six are about the panel appearing
 and by which path; the next six are about it going away again, and they are
 where the promise the panel is built on lives — **once the panel is held, the
 cursor leaving never closes it**, and everything that does close it is the
@@ -21,14 +21,18 @@ panel, the pointer already pinned there while the device keeps pushing opens it,
 and the pointer in the middle of the screen — held, and pushed at — opens
 nothing (Q37).
 
-The next two are the line between the paths, which none of those three draws.
-A push is upward movement made *while the pointer is pinned*, and the strip is
-taller than the pinned rows: a pointer can move up inside it and still not be
-against anything. So the pointer slides along the strip rocking up and down
-between two rows short of pinned — and the panel has to open by the dwell once
-it stops, never by the push — and then makes the same rocking four rows higher,
-where it is pinned, and the panel has to open by the push. One movement in two
-places, and the only difference between them is the one the guard is about.
+The next three are the line between the paths, which none of those three draws.
+A push is upward movement made *while the pointer is pinned, and was pinned
+before it*. The strip is taller than the pinned rows: a pointer can move up
+inside it and still not be against anything. So the pointer slides along the
+strip rocking up and down between two rows short of pinned — and the panel has
+to open by the dwell once it stops, never by the push — and then makes the same
+rocking four rows higher, where it is pinned, and the panel has to open by the
+push. One movement in two places, and the only difference between them is the
+first half of the guard. The second half is the movement that *arrives* at the
+edge, which is a throw and not a push: the pointer is thrown from the middle of
+the screen, stopped the moment it is pinned, and left there — and the panel has
+to open by the dwell.
 
 The two paths are not two ways of saying the same thing. A dwell only needs the
 pointer to be somewhere; a push needs movement *reported after the pointer can
@@ -141,7 +145,7 @@ process's hot keys when the process exits, so `panel.the-hotkey-dies-with-udeck`
 is green over a build that never unregisters anything. That is written down
 where it was measured, in that check.
 
-Those eleven go through more steps than the five opening checks, so they read
+Those eleven go through more steps than the six opening checks, so they read
 the log in steps too (`panel.Story`): one window opened at the start, sliced by what
 each action added to it, and the whole of it kept beside the report as
 `story.log`. A check that read only the end could not tell "nothing happened
@@ -310,9 +314,11 @@ def check_a_wobble_short_of_the_edge(machine, check_dir, lab):
     (`panel.Wobble`): the rocking stayed in its two rows, came to rest in the
     strip, and — before a dwell may count as a pass — carried enough upward
     travel that a uDeck counting it would have had to fire the push. Measured on
-    2026-09-26, six times on one machine (.build/e2e/20260926-192908Z): the dwell
-    six times of six, with 82 to 88 points of upward travel inside the strip
-    within one push window.
+    2026-09-26, six times (.build/e2e/20260926-192908Z, rotated out since and not
+    kept): the dwell six times of six. The travel inside the strip within one push
+    window, as the runs kept in .build/e2e/kept/ wrote it down: 76, 78, 76, 82 and
+    82 points (20260926-211629Z, -220316Z, -225415Z, 20260927-140526Z, -141957Z),
+    against the 48 asked of it.
     """
     log = _prepare(machine, check_dir, lab)
     since = log.mark("noting when the wobble begins")
@@ -352,8 +358,10 @@ def check_the_same_wobble_at_the_edge(machine, check_dir, lab):
     a rocking whose ups were lost on the way, or a push path that is broken for
     everyone. Here the rocking is the same, report for report, and the only thing
     that changed is that the pointer is pinned while it makes it; uDeck has to
-    open the panel by the push. Measured on 2026-09-26, six times on one machine
-    (.build/e2e/20260926-192908Z): the push six times of six.
+    open the panel by the push. Measured on 2026-09-26, six times
+    (.build/e2e/20260926-192908Z, rotated out since and not kept): the push six
+    times of six; and the push in each of the five runs kept in .build/e2e/kept/
+    that the other half names.
 
     A wobble that was not taken for a push is asked, before that becomes a
     verdict, whether it could have been one — the same question the first half
@@ -379,6 +387,77 @@ def check_the_same_wobble_at_the_edge(machine, check_dir, lab):
             fired[:1] == ["push"],
             f"the panel opened by {opened_by} first, not by the push — upward movement made while the pointer "
             "was pinned was not counted",
+        )
+        _expect_the_panel_opened(said)
+    finally:
+        log.collect(check_dir, since, "keeping what uDeck said")
+
+
+def check_a_throw_to_the_edge(machine, check_dir, lab):
+    """The pointer thrown at the edge and left there, with nothing after it: the dwell, never the push.
+
+    The other half of the guard the wobbles are about. uDeck counts upward movement
+    as a push only while the pointer is pinned *and was pinned before it*
+    (`HoverGestureRecognizer.updatePushWindow`, `wasPinned`), because the movement
+    that arrives at the edge is the throw itself — and a throw at a menu-bar target
+    is, in uDeck's own words there, the most common false positive there is. The
+    wobble at the edge is pinned before every report it makes, and short of the
+    edge nothing is pinned at all, so neither of them can tell a uDeck that counts
+    the arrival from one that does not; nor can `panel.push`, which is a push
+    whichever report fires it. A uDeck with the second condition taken out was
+    green on all five of the checks above, and this one said `fired by push` 7
+    times in 7, each on a fresh machine (measured 2026-09-27,
+    .build/e2e/20260927-135536Z and -140142Z, kept in .build/e2e/kept/).
+
+    So this is `panel.push` without the push: the same throw, from the middle of
+    the screen, stopped the moment the pointer is pinned (`panel.throw_to_the_edge`).
+    It arrives at the edge in the strip and stays there, so the dwell is owed, and
+    `fired by dwell` is the verdict and the witness at once — uDeck saw the pointer
+    arrive, saw it stop, and did not take the arrival for a push.
+
+    Where the throw went is read back before uDeck is asked anything, and it decides
+    whether there is a verdict at all: a pointer short of the edge arrived nowhere,
+    and a throw that sent a report after the one that arrived made a real push,
+    which uDeck is right to count (`panel.Throw`).
+
+    **uDeck as it ships is red here about one time in five, and that is uDeck.**
+    Measured on 2026-09-27, each throw on a fresh machine and stopped at the edge
+    after exactly twelve reports every time: `fired by push` 2 times in 8
+    (.build/e2e/20260927-131004Z) and neither time in this check's runs in the
+    panel group and the whole lab (-140526Z, -141957Z); and with a report every
+    50 ms instead of every 2 ms, 1 in 10 and 3 in 12 (-132223Z, -133243Z) — so
+    not the pace: 6 in 32 in all. -133243Z was a build that logged every movement
+    it handled near the top (never committed), and it shows what happened: in all
+    three of its pushes macOS delivered the report that arrived as two equal
+    movements with one timestamp, and uDeck put *both* at the edge, because it
+    takes the position from `NSEvent.mouseLocation` when it handles a movement
+    rather than from the movement (`PointerMonitor.handleMovement`). The first half
+    then reads as the arrival and the second as movement made while already pinned
+    — 32.6 to 42.4 points, over the threshold — and counts. In the nine that opened
+    by the dwell the arrival came as one movement; reports split the same way
+    further down in three of the twelve, where nothing is pinned and it does no
+    harm. The runs are kept in .build/e2e/kept/. Whether a real mouse on a real
+    Mac is ever split like that is not measured.
+    """
+    log = _prepare(machine, check_dir, lab)
+    since = log.mark("noting when the throw begins")
+    try:
+        panel.park_in_the_middle(machine)
+        thrown = panel.throw_to_the_edge(machine, "throwing the pointer at the top edge and leaving it there")
+        lab.note(f"   {thrown.summary()}")
+        said = _wait_for_uDecks_answer(machine, log, since, config.DWELL_SECONDS)
+        machine.screenshot(check_dir, "after the throw")
+        fired = panel.fired_by(said)
+
+        expect(
+            fired != [],
+            "uDeck did not open the panel for a pointer that came to rest against the top edge, in the strip, "
+            f"where the dwell should have: what it says of the gesture: {panel.short(said)}",
+        )
+        expect(
+            fired == ["dwell"],
+            f"the panel opened by {fired}, not by the dwell — the throw that arrived at the edge was counted as "
+            "a push, with nothing moving after it",
         )
         _expect_the_panel_opened(said)
     finally:
@@ -1237,7 +1316,7 @@ def check_the_hotkey_dies_with_udeck(machine, check_dir, lab):
         story.keep()
 
 
-# --- What all sixteen do ------------------------------------------------------------
+# --- What all seventeen do ----------------------------------------------------------
 
 
 def _prepare(machine, check_dir, lab, launch=True):
@@ -1245,8 +1324,11 @@ def _prepare(machine, check_dir, lab, launch=True):
 
     The build carries a feed nobody serves, on the guest's own loopback: a lab
     build must not be able to update itself against anything real (Q41), and the
-    panel does not care either way. What it costs is one failed update check at
-    launch, which uDeck says on a pane nobody here reads.
+    panel does not care either way. It costs nothing at all: uDeck ships with
+    automatic checks off, so it never asks that feed unless somebody presses
+    "Check now", which nothing here does — `updates.it-does-not-look-by-itself`
+    listens to a uDeck started as it ships, and its feed hears nothing from it
+    until the button.
     """
     feed = updates.Feed(machine, lab.note)
     builder = lab.builder(feed.url, check_dir.name)

@@ -298,3 +298,30 @@ def test_a_machine_that_keeps_them_after_the_delete_is_the_lab_unable_to_start_c
     with pytest.raises(LabError, match="still keeps preferences") as raised:
         app.forget_preferences(machine, "forgetting")
     assert "SULastCheckTime" in raised.value.reason
+
+
+# --- Whether Sparkle looks by itself ----------------------------------------------------
+
+SETTING = f"defaults read {app.BUNDLE_ID} {app.AUTOMATIC_CHECKS}"
+# What `defaults read` said in a macOS 27 guest on 2026-09-27 for a key nobody had written.
+NO_SUCH_KEY = f"Error: Could not find key '{app.AUTOMATIC_CHECKS}' in domain '{app.BUNDLE_ID}'."
+NO_SUCH_DOMAIN = f"Domain {app.BUNDLE_ID} does not exist"
+
+
+def test_what_sparkle_keeps_for_looking_by_itself_is_read_as_it_prints_it():
+    assert app.automatic_checks(FakeMachine({SETTING: "1\n"}), "reading") == "1"
+    assert app.automatic_checks(FakeMachine({SETTING: "0\n"}), "reading") == "0"
+
+
+def test_a_key_that_is_not_there_is_nothing_kept():
+    """What `defaults read` says for a key nobody wrote — only the key missing, or the whole domain."""
+    assert app.automatic_checks(FakeMachine({SETTING: Failed(1, NO_SUCH_KEY)}), "reading") is None
+    assert app.automatic_checks(FakeMachine({SETTING: Failed(1, NO_SUCH_DOMAIN)}), "reading") is None
+
+
+def test_a_key_that_could_not_be_read_is_never_a_key_that_is_not_there():
+    """"Not there" is a verdict about uDeck's switch; a dropped connection or a refusal is the lab's."""
+    with pytest.raises(LabError, match="SSH"):
+        app.automatic_checks(FakeMachine({SETTING: Dropped}), "reading")
+    with pytest.raises(LabError, match="could not be read: Operation not permitted"):
+        app.automatic_checks(FakeMachine({SETTING: Failed(1, "Operation not permitted")}), "reading")

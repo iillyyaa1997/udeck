@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from fakes import Dropped, Failed, Lab, Machine, wobble_output
+from fakes import Dropped, Failed, Lab, Machine, throw_output, wobble_output
 
 from udeck_e2e import app, config, panel
 from udeck_e2e.errors import CheckFailed, LabError
@@ -377,6 +377,9 @@ def test_a_wobble_short_of_the_edge_opens_the_panel_by_the_dwell(monkeypatch, la
     assert pushed_with(machine)[0] == "0"
     assert pushed_with(machine)[-2:] == [str(config.WOBBLE_SIDEWAYS), "1"]
     assert any("rocked between rows [4, 6]" in note for note in lab.notes)
+    # How long the hundred reports took is kept too: the lab's prose about the pace quotes it.
+    took = config.WOBBLE_STEPS * config.WOBBLE_PAUSE_SECONDS
+    assert any(f"reports inside the strip, in {took:.2f}s" in note for note in lab.notes)
 
 
 def test_a_wobble_short_of_the_edge_taken_for_a_push_fails(monkeypatch, lab, check_dir):
@@ -463,9 +466,9 @@ def test_the_same_wobble_at_the_edge_that_opened_nothing_fails(monkeypatch, lab,
 
 
 def test_a_push_at_the_edge_passes_however_short_the_track_after_it(monkeypatch, lab, check_dir):
-    """Measured: at the edge the travel the script read back was 44 to 54 points,
-    against 82 to 88 short of it, because the panel the push opened stops the
-    pointer following. The push is its own proof that the movement sufficed."""
+    """Measured: at the edge the travel the script read back was 52 to 68 points, against
+    76 to 82 short of it (the runs `config` names), because the panel the push opened stops
+    the pointer following. The push is its own proof that the movement sufficed."""
     short = wobble_output(EDGE, pace=config.WOBBLE_PAUSE_SECONDS * 10)
     machine = wobbled(monkeypatch, ATTACHED + IDLE + PUSH + REVEAL, EDGE, short)
     checks.check_the_same_wobble_at_the_edge(machine, check_dir, lab)
@@ -501,6 +504,77 @@ def test_a_wobble_check_whose_log_cannot_be_read_is_not_a_verdict(monkeypatch, l
         with pytest.raises(LabError, match="SSH") as raised:
             check(machine, check_dir, lab)
         assert not isinstance(raised.value, CheckFailed), check.__name__
+
+
+# --- The throw on its own ------------------------------------------------------------
+
+
+def thrown(monkeypatch, log_says, said=None):
+    """A prepared machine whose guest threw the pointer at the edge, as asked, and stopped there."""
+    machine = prepared(monkeypatch, log_says)
+    machine.ssh.answers["push-pointer"] = said if said is not None else throw_output()
+    return machine
+
+
+def test_a_throw_to_the_edge_opens_the_panel_by_the_dwell(monkeypatch, lab, check_dir):
+    machine = thrown(monkeypatch, ATTACHED + IDLE + DWELL + REVEAL)
+    checks.check_a_throw_to_the_edge(machine, check_dir, lab)
+    # Parked in the middle and never placed anywhere else from this Mac: the throw
+    # carries it to the edge from inside the guest.
+    assert [(x, y) for x, y, _ in machine.pointer] == [panel.middle_of_the_screen()]
+    # The throw panel.push makes, and not one report of push after it.
+    arguments = pushed_with(machine)
+    assert arguments[0] == str(config.THROW_CAP)
+    assert arguments[4] == "0", "steps: nothing is posted once the pointer has arrived"
+    assert any("in 12 reports" in note for note in lab.notes)
+
+
+def test_a_throw_taken_for_a_push_fails(monkeypatch, lab, check_dir):
+    """The guard this check exists for: the movement that arrives at the edge is the throw."""
+    machine = thrown(monkeypatch, ATTACHED + IDLE + PUSH + REVEAL)
+    with pytest.raises(CheckFailed, match="the throw that arrived at the edge was counted as a push"):
+        checks.check_a_throw_to_the_edge(machine, check_dir, lab)
+
+
+def test_a_throw_whose_panel_never_opened_fails(monkeypatch, lab, check_dir):
+    """The pointer came to rest in the strip, so the dwell is owed: nothing is not a pass here."""
+    machine = thrown(monkeypatch, ATTACHED + IDLE)
+    with pytest.raises(CheckFailed, match="came to rest against the top edge"):
+        checks.check_a_throw_to_the_edge(machine, check_dir, lab)
+    assert machine.now >= config.GESTURE_ANSWER_SECONDS
+
+    fired_only = thrown(monkeypatch, ATTACHED + IDLE + DWELL)
+    with pytest.raises(CheckFailed, match="the panel did not open"):
+        checks.check_a_throw_to_the_edge(fired_only, check_dir, lab)
+
+
+def test_a_throw_that_never_reached_the_edge_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """Nothing arrived anywhere; whatever uDeck said is about some other movement."""
+    short = throw_output(thrown=30, at=(1280.0, 313.0), pinned=False)
+    machine = thrown(monkeypatch, ATTACHED + IDLE + PUSH + REVEAL, short)
+    with pytest.raises(LabError, match="not against the top edge") as raised:
+        checks.check_a_throw_to_the_edge(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+    # Asked before uDeck is: no holding for the dwell, and the log read once — for the report.
+    assert machine.now < config.DWELL_SECONDS
+    assert sum("log show" in c for c in machine.ssh.commands) == 1
+
+
+def test_a_throw_that_kept_going_at_the_edge_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """A report after the one that arrived is made against the edge — a real push, and a uDeck
+    that counted it would be right. The pointer read back late is the lab's, not uDeck's."""
+    overshot = throw_output(thrown=13)
+    machine = thrown(monkeypatch, ATTACHED + IDLE + PUSH + REVEAL, overshot)
+    with pytest.raises(LabError, match="13 reports from .* where 12 reach the edge") as raised:
+        checks.check_a_throw_to_the_edge(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_throw_check_whose_log_cannot_be_read_is_not_a_verdict(monkeypatch, lab, check_dir):
+    machine = thrown(monkeypatch, Dropped)
+    with pytest.raises(LabError, match="SSH") as raised:
+        checks.check_a_throw_to_the_edge(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
 
 
 # --- The pointer leaving a peek -------------------------------------------------------

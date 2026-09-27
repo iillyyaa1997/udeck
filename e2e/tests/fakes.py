@@ -212,3 +212,17 @@ def wobble_output(rows, steps=None, pace=None, start_x=None, sideways=None):
         for n in range(steps)
     ]
     return json.dumps({"uid": 501, "euid": 501, "push": ["KERN_SUCCESS"], "track": track})
+
+
+def throw_output(began=(1280.0, 720.0), thrown=12, at=(1280.0, 0.0), pinned=True):
+    """What the guest's push script prints after a throw with no push after it.
+
+    By default the throw as it goes: from the middle of the screen, where the lab
+    parks the pointer, to the top row in the twelve reports of sixty that takes,
+    and stopped there — nothing posted after it, so no push and no track.
+    """
+    return json.dumps({
+        "uid": 501, "euid": 501, "throw": ["KERN_SUCCESS"], "push": [], "thrown": thrown,
+        "from": list(began) if began is not None else None, "at": list(at) if at is not None else None,
+        "pinned": pinned, "track": [],
+    })  # fmt: skip

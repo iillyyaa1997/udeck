@@ -84,10 +84,15 @@ class FakeKernel:
         return 0
 
 
-def run(monkeypatch, capsys, argv, positions, answers=None):
-    """Run the script with the kernel faked and the pointer at `positions` in turn."""
+# Where every run but the wobble begins: the middle of the screen, where the lab parks it.
+MIDDLE = (1280.0, 720.0)
+
+
+def run(monkeypatch, capsys, argv, positions, answers=None, start=MIDDLE):
+    """Run the script with the kernel faked, the pointer at `start` before anything is posted,
+    and at `positions` in turn after each report."""
     kernel = FakeKernel(answers)
-    seen = iter(positions)
+    seen = iter([start, *positions])
     last = [positions[-1] if positions else None]
 
     def post(library, connect, delta, sideways=0):
@@ -136,6 +141,40 @@ def test_the_cap_is_a_cap_and_running_out_of_it_is_said_rather_than_raised(monke
     # Read once more when the cap runs out, which is the next step of the descent.
     assert said["at"] == [1280.0, 480.0]
     assert kernel.posted == [-60] * 3 + [-12] * 5, "the push is made either way"
+
+
+def test_where_the_pointer_was_before_anything_is_posted_is_printed(monkeypatch, capsys):
+    """How many reports the throw needed depends on where it began, and only then does
+    the count it sent say whether it kept going after the pointer arrived."""
+    code, said, _ = run(monkeypatch, capsys, [30, -60, 0, 2, 5, -12, 0, 0, 0], DESCENT)
+    assert code == 0
+    assert said["from"] == [1280.0, 720.0]
+    assert said["thrown"] == 12
+
+
+def test_the_throw_alone_posts_nothing_once_the_pointer_has_arrived(monkeypatch, capsys):
+    """`panel.a-throw-to-the-edge`: the pointer carried to the edge and left there. Not one
+    report after the one that arrived — any of them would be a push, and uDeck would be right."""
+    code, said, kernel = run(monkeypatch, capsys, [30, -60, 0, 2, 0, -12, 0, 0, 0], DESCENT)
+    assert code == 0
+    assert kernel.posted == [-60] * 12
+    assert said["pinned"] is True and said["at"] == [1280.0, 0.0]
+    assert said["push"] == [] and said["track"] == []
+
+
+def test_a_refused_throw_is_a_non_zero_exit_too(monkeypatch, capsys):
+    """With nothing after it, the throw is the whole run, and a kernel that refused part of it
+    must not come back as a run that went through."""
+    refusal = -536870207  # kIOReturnNotPrivileged
+    code, said, _ = run(monkeypatch, capsys, [30, -60, 0, 2, 0, -12, 0, 0, 0], DESCENT, [0] * 11 + [refusal])
+    assert code == 1
+    assert said["throw"] == ["KERN_SUCCESS", "kIOReturnNotPrivileged"]
+
+
+def test_a_run_that_posted_nothing_is_not_a_run_that_went_through(monkeypatch, capsys):
+    code, said, kernel = run(monkeypatch, capsys, [0, -60, 0, 2, 0, -12, 0, 0, 0], [MIDDLE])
+    assert code == 1
+    assert kernel.posted == []
 
 
 def test_the_control_takes_no_throw_at_all(monkeypatch, capsys):
@@ -224,6 +263,8 @@ def test_the_wrong_number_of_arguments_never_posts_anything(count):
 # --- The wobble ---------------------------------------------------------------------
 
 ROCKING = [(1140.0 + 3 * (n + 1), 4.0 if n % 2 == 0 else 6.0) for n in range(6)]
+# Where the wobble is placed from outside before the script runs: left of the strip, on the lower row.
+PLACED = (1140.0, 6.0)
 
 
 def test_the_wobble_sends_every_other_report_back_down_and_slides_on_every_one(monkeypatch, capsys):
@@ -234,7 +275,7 @@ def test_the_wobble_sends_every_other_report_back_down_and_slides_on_every_one(m
     come back down between the ups — and it has to slide while it does, or the
     dwell fires in the middle of it and the push path is never asked.
     """
-    code, said, kernel = run(monkeypatch, capsys, [0, -60, 0, 2, 6, -2, 0, 3, 1], ROCKING)
+    code, said, kernel = run(monkeypatch, capsys, [0, -60, 0, 2, 6, -2, 0, 3, 1], ROCKING, start=PLACED)
     assert code == 0
     assert kernel.posted == [-2, 2, -2, 2, -2, 2]
     assert kernel.sideways == [3] * 6
@@ -259,7 +300,7 @@ def test_where_the_pointer_went_after_every_report_of_the_push_is_printed(monkey
     # start of the push shows up as a different number.
     ticks = iter(1 + float(n) / 100 for n in range(100))
     monkeypatch.setattr(push_pointer.time, "monotonic", lambda: next(ticks))
-    code, said, _ = run(monkeypatch, capsys, [0, -60, 0, 2, 6, -2, 0, 3, 1], ROCKING)
+    code, said, _ = run(monkeypatch, capsys, [0, -60, 0, 2, 6, -2, 0, 3, 1], ROCKING, start=PLACED)
     assert code == 0
     assert [entry[:2] for entry in said["track"]] == [list(at) for at in ROCKING]
     # One clock reading when the push begins, then one per report.

@@ -524,6 +524,7 @@ def test_a_blip_while_uDeck_starts_is_not_uDeck_failing_to_start(machine, lab, c
 UDECK_ASKED = '127.0.0.1 - - [26/Sep/2026 20:45:31] "GET /appcast.xml HTTP/1.1" 200 -'
 LAB_ASKED = f'127.0.0.1 - - [26/Sep/2026 20:40:18] "GET /appcast.xml?{updates.LAB_PROBE} HTTP/1.1" 200 -'
 SWITCH = ui.Element(checks.AUTOMATIC, 955, 385, 215, 16, role="AXCheckBox", value=checks.SWITCH_OFF)
+CHECK_NOW = ui.Element("updates.checkNow", 1027, 450, 88, 20)
 
 
 def about_tree(value=checks.SWITCH_OFF, identifier=checks.AUTOMATIC):
@@ -540,12 +541,14 @@ class Scene:
 
     uDeck asks its feed when the switch is clicked or "Check now" is — unless the
     test says it does not — and the lab's own probe is in the log from the start,
-    the way `serve` leaves it. The switch reads on once a click has landed on it.
+    the way `serve` leaves it. The switch reads on once a click has landed on it,
+    and Sparkle keeps automatic checks on once a switch that turns them on has been
+    clicked: `switch_turns_it_on=False` is a switch that asks for one check instead.
     """
 
     def __init__(self, monkeypatch, machine, asks_when_switched=True, asks_when_asked=True,
                  asks_by_itself_after=None, value=checks.SWITCH_OFF, identifier=checks.AUTOMATIC,
-                 click_lands=True):
+                 click_lands=True, asks_when_the_window_opens=False, switch_turns_it_on=True):
         self.machine = machine
         self.log = [LAB_ASKED]
         self.switched = []
@@ -557,11 +560,20 @@ class Scene:
         self.asks_when_switched = asks_when_switched
         self.asks_when_asked = asks_when_asked
         self.asks_by_itself_after = asks_by_itself_after
+        self.asks_when_the_window_opens = asks_when_the_window_opens
+        self.switch_turns_it_on = switch_turns_it_on
+        self.kept = None
         self.launched_at = None
+        self.window_opened_at = None
+        self.check_now_at = None
         self.read_at = []
+        # Reads and clicks in the order they happened: at one instant of the fake clock
+        # a read can come either side of a click, and only the order tells which.
+        self.events = []
         monkeypatch.setattr(checks, "_a_uDeck_that_never_looked", lambda *a: None)
-        monkeypatch.setattr(checks, "_open_the_about_pane", lambda machine, check_dir: None)
+        monkeypatch.setattr(checks, "_open_the_about_pane", self.open_the_about_pane)
         monkeypatch.setattr(app, "launch", self.launch)
+        monkeypatch.setattr(app, "automatic_checks", lambda machine, step: self.kept)
         monkeypatch.setattr(ui, "tree", self.tree)
         monkeypatch.setattr(ui, "click", self.click)
         monkeypatch.setattr(ui, "static_texts", lambda machine, step, window=ui.SETTINGS_WINDOW: ["uDeck is up to date."])
@@ -574,7 +586,15 @@ class Scene:
                 self.switched.append(step)
                 if self.click_lands:
                     self.value = "1"
+                    if self.switch_turns_it_on:
+                        self.kept = checks.KEPT_ON
                 if self.asks_when_switched and self.click_lands:
+                    self.log.append(UDECK_ASKED)
+            if (x, y) == CHECK_NOW.middle:
+                self.check_now_at = self.machine.now
+                self.events.append(("click", self.machine.now))
+                self.clicked.append(CHECK_NOW.identifier)
+                if self.asks_when_asked:
                     self.log.append(UDECK_ASKED)
 
         machine.click = click_at
@@ -582,6 +602,13 @@ class Scene:
     def launch(self, machine, step="starting uDeck"):
         self.launched_at = machine.now
         return {"101"}
+
+    def open_the_about_pane(self, machine, check_dir):
+        """The settings window on the About pane, found with its button — as the check's own helper returns it."""
+        self.window_opened_at = machine.now
+        if self.asks_when_the_window_opens:
+            self.log.append(UDECK_ASKED)
+        return CHECK_NOW
 
     def tree(self, machine, step, window=ui.SETTINGS_WINDOW):
         self.walks += 1
@@ -595,6 +622,7 @@ class Scene:
 
     def read_log(self, step):
         self.read_at.append(self.machine.now)
+        self.events.append(("read", self.machine.now))
         if (self.asks_by_itself_after is not None and self.launched_at is not None
                 and self.machine.now - self.launched_at >= self.asks_by_itself_after
                 and UDECK_ASKED not in self.log):
@@ -624,9 +652,44 @@ def test_it_listens_for_the_whole_quiet_window_before_it_asks(machine, lab, chec
 def test_a_uDeck_that_asks_its_feed_by_itself_fails(machine, lab, check_dir, monkeypatch):
     """What a build shipping with automatic checks on does: it asks straight after launch."""
     scene = Scene(monkeypatch, machine, asks_by_itself_after=2)
-    with pytest.raises(CheckFailed, match="asked its feed for an update by itself within .* of starting"):
+    with pytest.raises(CheckFailed, match="asked its feed for an update by itself .* after it started, before"):
         checks.check_it_does_not_look_by_itself(machine, check_dir, lab)
     assert scene.clicked == [], "the witness must never be what the verdict is about"
+    assert scene.window_opened_at is None, "said as soon as it was heard, before the window is opened"
+
+
+def test_a_uDeck_that_asks_when_its_settings_window_opens_fails(machine, lab, check_dir, monkeypatch):
+    """Opening the window is something the operator does, not something he asks uDeck to look with.
+
+    The first version of this check took the witness's mark before it opened the
+    window, so this request was counted as the button's and the check was green."""
+    scene = Scene(monkeypatch, machine, asks_when_the_window_opens=True)
+    with pytest.raises(CheckFailed, match="by itself .* with its settings window open, before anyone pressed Check now"):
+        checks.check_it_does_not_look_by_itself(machine, check_dir, lab)
+    assert scene.clicked == [], "Check now is never pressed once uDeck has asked by itself"
+
+
+def test_a_request_after_the_quiet_window_and_before_the_click_is_still_uDeck_asking(
+        machine, lab, check_dir, monkeypatch):
+    """A uDeck that looks twenty-odd seconds after it starts, while the lab opens its window."""
+    scene = Scene(monkeypatch, machine, asks_by_itself_after=checks.QUIET_SECONDS + 1)
+    with pytest.raises(CheckFailed, match="with its settings window open"):
+        checks.check_it_does_not_look_by_itself(machine, check_dir, lab)
+    assert scene.clicked == []
+
+
+def test_the_window_is_listened_to_before_the_click_and_the_mark_is_read_straight_before_it(
+        machine, lab, check_dir, monkeypatch):
+    """What the witness counts from is the read that ends the listening, with nothing between it
+    and the click but the click itself — a `ui.click` there would walk the window for the button
+    first, and a request in that walk would be counted as the button's."""
+    scene = Scene(monkeypatch, machine)
+    checks.check_it_does_not_look_by_itself(machine, check_dir, lab)
+    assert scene.check_now_at - scene.window_opened_at >= checks.WINDOW_QUIET_SECONDS
+    clicked = scene.events.index(("click", scene.check_now_at))
+    assert scene.events[clicked - 1] == ("read", scene.check_now_at), "the last read before the click is at the click"
+    assert scene.walks == 0, "the button is the one the pane was found with, not looked for again"
+    assert any("of quiet up to the click on Check now" in note for note in lab.notes)
 
 
 def test_a_request_late_in_the_window_is_still_uDeck_asking(machine, lab, check_dir, monkeypatch):
@@ -680,7 +743,49 @@ def test_switched_on_and_heard_passes_without_check_now(machine, lab, check_dir,
     # Heard, so the switch is not walked again: the walk would only have delayed nothing.
     assert scene.walks == 1
     assert any("after automatic checks were turned on" in note for note in lab.notes)
+    assert any(f"{app.AUTOMATIC_CHECKS} = {checks.KEPT_ON}" in note for note in lab.notes)
     assert (check_dir / "about-before-the-switch.txt").read_text() == about_tree()
+
+
+def test_a_switch_that_makes_one_check_instead_of_turning_checking_on_fails(machine, lab, check_dir, monkeypatch):
+    """A setter that calls `checkNow` — or Sparkle's `checkForUpdatesInBackground` — brings the
+    same request as one that turns checking on, and leaves uDeck as quiet as it ships from then on."""
+    scene = Scene(monkeypatch, machine, switch_turns_it_on=False)
+    with pytest.raises(CheckFailed, match="made one check instead of turning checking on") as raised:
+        checks.check_switched_on_it_looks_by_itself(machine, check_dir, lab)
+    assert "nothing at all" in str(raised.value)
+    assert scene.value == "1", "the switch reads on, which is what the operator sees"
+    assert "updates.checkNow" not in scene.clicked
+
+
+def test_sparkles_setting_is_read_until_it_says_on_and_no_longer(machine, lab, check_dir, monkeypatch):
+    """Room for the preferences daemon, and nothing more: a value that arrives is taken at once."""
+    Scene(monkeypatch, machine)
+    answers = [None, None, checks.KEPT_ON]
+    monkeypatch.setattr(app, "automatic_checks", lambda m, step: answers.pop(0) if len(answers) > 1 else answers[0])
+    began = machine.now
+    checks.check_switched_on_it_looks_by_itself(machine, check_dir, lab)
+    assert answers == [checks.KEPT_ON]
+    assert machine.now - began < checks.SWITCHED_ON_SECONDS + checks.KEPT_SECONDS
+
+
+def test_a_switch_sparkle_keeps_off_fails(machine, lab, check_dir, monkeypatch):
+    scene = Scene(monkeypatch, machine, switch_turns_it_on=False)
+    scene.kept = "0"
+    with pytest.raises(CheckFailed, match=f"keeps {app.AUTOMATIC_CHECKS} as 0"):
+        checks.check_switched_on_it_looks_by_itself(machine, check_dir, lab)
+
+
+def test_a_feed_that_died_is_not_a_switch_that_reached_nothing(machine, lab, check_dir, monkeypatch):
+    """The same question the update asks before it says uDeck found nothing: a feed that is
+    gone hears nobody, and "the switch did not reach the updater" would be about the lab."""
+    scene = Scene(monkeypatch, machine, asks_when_switched=False)
+    machine.ssh.answers["http_code"] = "000"
+    with pytest.raises(LabError, match="stopped answering") as raised:
+        checks.check_switched_on_it_looks_by_itself(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+    assert scene.value == "1", "the switch moved, so only the feed stands between this and a verdict"
+    assert any(updates.LAB_PROBE in c for c in machine.ssh.commands)
 
 
 def test_a_switch_that_reaches_nothing_fails_after_the_measured_wait(machine, lab, check_dir, monkeypatch):

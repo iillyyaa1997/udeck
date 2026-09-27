@@ -16,7 +16,7 @@ import re
 from pathlib import Path
 
 import pytest
-from fakes import Dropped, Failed, Machine, wobble_output
+from fakes import Dropped, Failed, Machine, throw_output, wobble_output
 
 from udeck_e2e import config, panel, probes
 from udeck_e2e.errors import LabError
@@ -661,6 +661,80 @@ def test_what_the_guest_printed_is_read_or_refused():
     empty = panel.Wobble('{"track": []}', config.SHORT_OF_THE_EDGE_ROWS, "wobbling")
     with pytest.raises(LabError, match="no position"):
         empty.expect_it_stayed_in_its_rows()
+
+
+# --- The throw on its own --------------------------------------------------------------
+
+
+def test_the_throw_on_its_own_is_the_push_checks_throw_with_nothing_after_it():
+    """The same script, the same throw, and `steps` 0: the movement that arrives, and no more."""
+    machine = Machine({"push-pointer": throw_output()})
+    thrown = panel.throw_to_the_edge(machine, "throwing")
+    ran = [c for c in machine.ssh.commands if panel.GUEST_PUSH in c][0].split()[2:]
+    assert ran[:4] == [
+        str(config.THROW_CAP), str(config.THROW_DELTA), str(config.THROW_PAUSE_SECONDS),
+        str(config.PINNED_TOLERANCE_PIXELS),
+    ]  # fmt: skip
+    assert ran[4] == "0"
+    assert thrown.began == (1280, 720) and thrown.at == (1280, 0) and thrown.thrown == 12
+
+
+def test_the_throw_on_its_own_is_the_push_checks_throw_and_the_arrival_is_a_push_if_counted():
+    """Only the report that arrives lands in the strip, so nothing before it can start a dwell,
+    and that one report is well over uDeck's push threshold even at the half a point per unit
+    uDeck may read it at — the one report a uDeck counting arrivals would count."""
+    alone = Machine({"push-pointer": throw_output()})
+    panel.throw_to_the_edge(alone, "throwing")
+    pushed = Machine({"push-pointer": '{"push": ["KERN_SUCCESS"]}'})
+    panel.push_upward(pushed, "pushing at the edge", throw=True)
+
+    def throw(machine):
+        return [c for c in machine.ssh.commands if panel.GUEST_PUSH in c][0].split()[2:6]
+
+    assert throw(alone) == throw(pushed)
+    assert abs(config.THROW_DELTA) > _default("stripHeight")
+    assert abs(config.THROW_DELTA) >= config.WOBBLE_MARGIN * _default("edgePushDistance")
+
+
+def test_the_reports_a_throw_needs_are_counted_from_where_it_began():
+    """Each report moves the pointer its own size, so the count that reaches the edge is known:
+    from the middle of the screen twelve of sixty, and a thirteenth would be made against it."""
+    assert panel.Throw(throw_output(), "t").needed() == 12
+    assert panel.Throw(throw_output(began=(1280.0, 722.0)), "t").needed() == 12
+    assert panel.Throw(throw_output(began=(1280.0, 723.0), thrown=13), "t").needed() == 13
+    assert panel.Throw(throw_output(began=(1280.0, 1.0), thrown=0), "t").needed() == 0
+
+
+def test_a_throw_that_went_one_report_past_the_edge_is_the_labs_failure():
+    with pytest.raises(LabError, match="1 of them were made against it"):
+        panel.Throw(throw_output(thrown=13), "t").expect_it_stopped_there()
+    panel.Throw(throw_output(thrown=12), "t").expect_it_stopped_there()
+
+
+def test_a_throw_short_of_the_edge_is_the_labs_failure():
+    for said in (
+        throw_output(thrown=30, at=(1280.0, 313.0), pinned=False),
+        throw_output(at=(1280.0, config.PINNED_TOLERANCE_PIXELS + 1.0)),
+        throw_output(at=None, pinned=False),
+    ):
+        with pytest.raises(LabError, match="not against the top edge"):
+            panel.Throw(said, "t").expect_it_reached_the_edge()
+    panel.Throw(throw_output(at=(1280.0, config.PINNED_TOLERANCE_PIXELS)), "t").expect_it_reached_the_edge()
+
+
+def test_a_throw_that_does_not_say_where_it_began_cannot_be_held_to_its_count():
+    with pytest.raises(LabError, match="did not say where the pointer began"):
+        panel.Throw(throw_output(began=None), "t").expect_it_stopped_there()
+
+
+def test_the_throw_is_asked_where_it_went_before_anyone_asks_uDeck():
+    for said, reason in ((throw_output(thrown=13), "made against it"),
+                         (throw_output(pinned=False, at=(1280.0, 60.0)), "not against the top edge")):
+        with pytest.raises(LabError, match=reason):
+            panel.throw_to_the_edge(Machine({"push-pointer": said}), "throwing")
+    for said in ("", "Traceback (most recent call last):", '{"push": ["KERN_SUCCESS"]}'):
+        with pytest.raises(LabError, match="cannot read"):
+            panel.Throw(said, "throwing")
 
 
 # --- The two places the closing checks need -------------------------------------------
