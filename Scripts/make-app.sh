@@ -10,6 +10,7 @@
 #
 # Usage:  Scripts/make-app.sh [--debug] [--install] [--sign IDENTITY] [--dmg]
 #                             [--test-feed URL --test-key PUBLIC_KEY]
+#                             [--test-plugins BASE_URL]
 #                             [--out DIR] [--version X.Y.Z] [--build N] [--zip]
 #
 # --debug bundles the debug build instead of the release one, into
@@ -27,6 +28,11 @@
 # --test-feed and --test-key build the release configuration against a throwaway
 # appcast and public key, which is how the end-to-end lab in `e2e/` tests an
 # update without going near the real feed.
+#
+# --test-plugins points the official plugin catalogue at a fake GitHub: its API
+# at BASE_URL/api and its raw file host at BASE_URL/raw, which is how the lab
+# tests installing plugins without going near github.com. The repository's name
+# stays the shipped one.
 #
 # The lab also needs three things an ordinary build does not. --out puts the
 # bundle somewhere other than dist/, so a test build never lands where the
@@ -54,6 +60,7 @@ INSTALL=0
 CONFIG="release"
 TEST_FEED=""
 TEST_KEY=""
+TEST_PLUGINS=""
 OUT="dist"
 SET_VERSION=""
 SET_BUILD=""
@@ -66,6 +73,7 @@ while [ $# -gt 0 ]; do
         --install) INSTALL=1; shift ;;
         --test-feed) TEST_FEED="$2"; shift 2 ;;
         --test-key) TEST_KEY="$2"; shift 2 ;;
+        --test-plugins) TEST_PLUGINS="$2"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         --version) SET_VERSION="$2"; shift 2 ;;
         --build) SET_BUILD="$2"; shift 2 ;;
@@ -99,6 +107,17 @@ if [ -n "$TEST_FEED$TEST_KEY" ]; then
         # A debug build carries no feed at all (see below), so pointing one at a
         # test feed would silently do nothing.
         echo "--test-feed builds the release configuration; drop --debug" >&2
+        exit 2
+    fi
+fi
+
+if [ -n "$TEST_PLUGINS" ]; then
+    case "$TEST_PLUGINS" in
+        http://*|https://*) ;;
+        *) echo "--test-plugins needs a base URL, http:// or https://" >&2; exit 2 ;;
+    esac
+    if [ "$CONFIG" = "debug" ]; then
+        echo "--test-plugins builds the release configuration; drop --debug" >&2
         exit 2
     fi
 fi
@@ -178,6 +197,19 @@ fi
 if [ -n "$TEST_FEED" ]; then
     /usr/libexec/PlistBuddy -c "Set :SUFeedURL $TEST_FEED" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $TEST_KEY" "$APP/Contents/Info.plist"
+fi
+
+# The same for the plugin catalogue: the address is baked in rather than passed
+# at run time for the same reason, and because the lab tests the release build.
+BASE="${TEST_PLUGINS%/}"
+if [ -n "$TEST_PLUGINS" ]; then
+    /usr/libexec/PlistBuddy -c "Set :UDeckPluginsAPIBase $BASE/api" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :UDeckPluginsRawBase $BASE/raw" "$APP/Contents/Info.plist"
+fi
+
+# `NSAllowsLocalNetworking` is what lets either be plain HTTP on the loopback
+# address inside the test machine.
+if [ -n "$TEST_FEED$TEST_PLUGINS" ]; then
     /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity" "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
     /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$APP/Contents/Info.plist"

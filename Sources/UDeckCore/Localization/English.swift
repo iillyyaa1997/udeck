@@ -140,6 +140,94 @@ struct English: Vocabulary {
             "uDeck runs this plugin as you, without a sandbox. Allowing it means agreeing to run this program; declining means uDeck never starts it."
         case .permissionsAllowAndRun: "Allow and run"
 
+        // Plugins from a repository
+        case .pluginsOfficialCatalogue: "Official catalogue"
+        case .pluginsOfficialCatalogueHelp(let source):
+            "uDeck reads the list of plugins in \(source) a few seconds after it starts and once a day, and when you press Check now — the list and each plugin's manifest, nothing else. A plugin's files are fetched only when you press Install. Off, uDeck makes no request about plugins at all; what is installed keeps running."
+        case .catalogueCheckNow: "Check now"
+        case .catalogueChecked(let source, let time): "\(source) · checked \(time)"
+        case .catalogueNeverRead(let source): "\(source) · not read yet"
+        case .catalogueReading: "Reading the catalogue…"
+        case .catalogueOff:
+            "The official catalogue is off. Installed plugins keep running; uDeck does not look for their updates."
+        case .catalogueEmpty: "The repository offers no plugins yet."
+        case .catalogueUpdatesWaiting(let count):
+            count == 1 ? "1 update is waiting" : "\(count) updates are waiting"
+        case .catalogueLimited(let readAt, let until):
+            "GitHub allows 60 requests an hour from this network without signing in, and they are used up — by uDeck or by something else on the same connection. "
+                + (readAt.map { "The list below is from \($0); " } ?? "")
+                + "uDeck will look again after \(until)."
+        case .catalogueRawLimited(let until):
+            "GitHub's file host asked uDeck to wait; no file is fetched from it before \(until)."
+        case .catalogueUnreachable(let reason, let readAt):
+            "Could not reach GitHub: \(reason)." + (readAt.map { " The list below is from \($0)." } ?? "")
+        case .catalogueNotFound(let source): "\(source) could not be found, or it is private."
+        case .catalogueNotARepository(let source, let branch):
+            "\(source) is not a uDeck plugin repository: there is no udeck-plugins.json at the top of \(branch)."
+        case .catalogueFutureFormat(let declared):
+            "This repository is in format \(declared); this uDeck reads format \(RepositoryPassport.supportedFormat). Update uDeck."
+        case .catalogueInvalidPassport(let source, let reason):
+            "\(source) has a udeck-plugins.json that uDeck cannot read: \(reason)."
+        case .catalogueRefused(let status): "GitHub refused the request (HTTP \(status))."
+        case .catalogueBadAnswer(let reason): "GitHub answered with something uDeck could not read: \(reason)."
+        case .catalogueArrivedDifferent(let path, let expected, let got):
+            "\(path) arrived different from what the repository lists (expected \(expected), got \(got))."
+        case .catalogueVerified: "Verified"
+        case .catalogueSize(let files, let size): files == 1 ? "1 file · \(size)" : "\(files) files · \(size)"
+        case .catalogueAsksTo(let list): "Asks to \(list)"
+        case .catalogueInstall: "Install"
+        case .catalogueUpdate: "Update"
+        case .catalogueReplace: "Replace…"
+        case .catalogueInstalled: "Installed"
+        case .catalogueAvailable(let version): "\(version) available"
+        case .catalogueChangedStill(let version): "Changed in the repository, still \(version)"
+        case .catalogueRepositoryNowHas(let version): "The repository now has \(version)"
+        case .catalogueSwitchTo(let version): "Switch to \(version)"
+        case .catalogueUpdateNeedsAPI(let version, let api): "\(version) needs a newer uDeck (api \(api))"
+        case .catalogueUpdateNeedsUDeck(let version, let required): "\(version) needs uDeck \(required)"
+        case .catalogueUpdateCannotInstall(let version): "\(version) cannot be installed here"
+        case .catalogueGone: "No longer in the repository"
+        case .catalogueOwnFolder(let id): "A folder of your own named \(id) is installed"
+        case .catalogueMissing(let id, let path): "\(id) is not in \(path)"
+        case .catalogueReinstall(let version): "Reinstall \(version)"
+        case .catalogueDetails: "Details"
+        case .catalogueWhatChanged: "What changed"
+        case .catalogueOpenOnGitHub: "Open on GitHub"
+        case .catalogueEarlierVersions: "Earlier versions…"
+        case .catalogueBackTo(let version): "Back to \(version)"
+        case .catalogueRemove: "Remove"
+        case .catalogueWorking: "Working…"
+        case .catalogueReplaceConfirm(let id, let path):
+            "A folder of your own named \(id) is in \(path). Installing moves it to the Trash and puts the repository's \(id) in its place."
+        case .catalogueUpdateOverChanges(let id, let version):
+            "Your changes to \(id) will be moved to the Trash and replaced with \(version)."
+        case .catalogueRemoveConfirm(let id):
+            "Remove \(id)? Its folder and its cache are deleted, and your permission decision, its settings and every window of it on every tab go with them."
+        case .catalogueRemoveOwnConfirm(let id):
+            "Remove \(id)? Its folder is moved to the Trash — it may be your only copy — and its cache, your permission decision, its settings and every window of it go."
+        case .catalogueRefusal(let refusal): Self.refusal(refusal)
+        case .catalogueFileUnreachable(let path, let reason):
+            "\(path) could not be fetched: \(reason); nothing was installed."
+        case .catalogueTookTooLong: "The install took more than five minutes and was stopped; nothing was installed."
+        case .catalogueCannotWrite(let reason): "uDeck could not write to disk: \(reason)"
+        case .catalogueRecordsBroken(let reason):
+            "~/.udeck/installed.json cannot be read, so uDeck installs, updates and removes nothing until it can: \(reason)"
+        case .pluginMarkVerified: "Verified"
+        case .pluginMarkOwnFolder: "A folder of your own"
+        case .pluginMarkModified: "Modified locally"
+        case .pluginMarkMissing: "Missing"
+        case .pluginFrom(let source, let commit): "From \(source) at \(commit)"
+        case .pluginPinned: "Kept at this version — newer ones are still shown"
+        case .historyTitle(let name): "Earlier versions of \(name)"
+        case .historyReading: "Reading the plugin's history…"
+        case .historyNone: "The history has no versions of this plugin."
+        case .historyInstalledMark: "installed"
+        case .historyInstall: "Install this version"
+        case .historyFailed: "The history could not be read:"
+        case .windowNotInPluginsFolder(let id, let path): "\(id) is not in \(path)"
+        case .windowWillNotRun(let id): "\(id) will not run:"
+        case .windowReinstall: "Reinstall"
+
         // What a plugin may ask for
         case .capabilityRead(let glob): "read files matching \(glob)"
         case .capabilityWrite(let glob): "write files matching \(glob)"
@@ -176,7 +264,7 @@ struct English: Vocabulary {
         case .updatesCheckNow: "Check now"
         case .updatesAutomatically: "Check for updates automatically"
         case .updatesAutomaticallyHelp:
-            "Once a day. uDeck makes no network connection of any kind until you turn this on."
+            "Once a day, uDeck asks github.com whether there is a newer version. Off, it asks only when you press Check now."
         case .updatesNeverChecked: "Never checked."
         case .updatesJustChecked: "Checked just now."
         case .updatesLastChecked(let when): "Last checked \(when)."
@@ -247,6 +335,59 @@ struct English: Vocabulary {
         case .unitPoints(let value): "\(value) pt"
         case .unitSeconds(let value): String(format: "%.1f s", value)
         case .unitPercent(let value): "\(value) %"
+        }
+    }
+}
+
+extension English {
+    /// Every refusal names the plugin, what is wrong, and what would fix it —
+    /// in the words of docs/plugin-repository.md where it has them.
+    static func refusal(_ refusal: RepositoryRefusal) -> String {
+        switch refusal {
+        case .folderNameNotAnID(let folder):
+            "plugins/\(folder) is not a plugin id: lowercase letters, digits, \".\", \"_\" and \"-\", at most 64, starting with a letter or a digit."
+        case .noManifest(let path): "\(path) is missing; a plugin folder needs one."
+        case .manifestUnreadable(let path, let detail): "\(path) is not a valid manifest: \(detail)"
+        case .manifestIDMismatch(let declared, let folder):
+            "The manifest in plugins/\(folder) says its id is \"\(declared)\"; it has to be the folder's name."
+        case .manifestProblem(let id, let detail): "\(id): \(detail)"
+        case .apiNotSpoken(let name, let version, let api):
+            "\(name) \(version) is written for plugin contract api \(api); this uDeck speaks api \(PluginAPI.current). Update uDeck to install it."
+        case .needsNewerUDeck(let name, let version, let required, let running):
+            "\(name) \(version) needs uDeck \(required) or later; this is uDeck \(running). Update uDeck (Settings → About) to install it."
+        case .versionNotComparable(let name, let version):
+            "\(name)'s version \"\(version)\" is not MAJOR.MINOR.PATCH, so uDeck cannot tell it from another version; it cannot be installed from a repository."
+        case .minUDeckNotComparable(let name, let text):
+            "\(name)'s minUDeck \"\(text)\" is not MAJOR.MINOR.PATCH, so uDeck cannot tell which release it needs; it cannot be installed from a repository."
+        case .producerMissing(let path): "\(path) is what the manifest runs, and the repository does not have it."
+        case .producerNotExecutable(let path):
+            "\(path) is not committed as executable (git mode 100755), and uDeck takes the bit from the repository; commit it with chmod +x."
+        case .producerOutsideFolder(let path): "\(path) leads out of the plugin's folder."
+        case .linkOrSubmodule(let path, let isLink):
+            "\(path) is a \(isLink ? "symbolic link" : "submodule"); a plugin from a repository may contain only files and folders."
+        case .nameNotAllowed(let path):
+            "\(path): names may use only letters, digits, \".\", \"_\" and \"-\", and may not start with \".\""
+        case .namesDifferOnlyInCase(let path, let other):
+            "\(path) and \(other) differ only in letter case, and a Mac's disk takes them for one file."
+        case .tooLarge(let id, let bytes, let files):
+            "\(id) is \(ByteCount.text(bytes, kilo: "KB", mega: "MB")) in \(files) files; uDeck installs plugins of up to 10 MB and \(RepositoryRules.maximumFiles) files."
+        case .fileTooLarge(let path, let bytes):
+            "\(path) is \(ByteCount.text(bytes, kilo: "KB", mega: "MB")); one file of a plugin may be up to 5 MB."
+        case .nestedTooDeep(let path): "\(path) is nested more than \(RepositoryRules.maximumDepth) folders deep."
+        case .sizeNotListed(let path): "The repository lists no size for \(path)."
+        case .arrivedDifferent(let path, let expected, let got):
+            "\(path) arrived different from what the repository lists (expected \(expected), got \(got)); nothing was installed."
+        case .folderDoesNotAddUp(let id):
+            "The files of \(id) do not add up to the folder the repository lists; nothing was installed."
+        case .lfsPointer(let path):
+            "\(path) is a Git LFS pointer, not the file; uDeck does not fetch LFS content."
+        case .arrivedLarger(let path, _):
+            "\(path) arrived larger than the repository lists; nothing was installed."
+        case .failsTheUsualChecks(_, let detail): detail
+        case .notTheVersionShown(let id, let shown, let arrived):
+            "\(id) arrived as \(arrived), not the \(shown) the catalogue showed; nothing was installed. Check again."
+        case .folderAppeared(let id):
+            "A folder named \(id) appeared in the plugins folder while uDeck was installing; nothing was changed."
         }
     }
 }

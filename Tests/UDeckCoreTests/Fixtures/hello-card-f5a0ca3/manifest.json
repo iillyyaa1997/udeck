@@ -1,0 +1,28 @@
+{
+  "id": "hello-card",
+  "name": "Hello card",
+  "version": "0.1.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "The smallest working plugin: one card, every row type, no permissions.",
+  "author": "uDeck",
+  "run": ["./hello.sh"],
+  "interval": 5,
+  "timeout": 2,
+  "settings": [
+    {
+      "key": "greeting",
+      "type": "string",
+      "default": "Hello",
+      "label": "Greeting",
+      "help": "The word the card opens with."
+    },
+    {
+      "key": "show_table",
+      "type": "bool",
+      "default": true,
+      "label": "Show the example table"
+    }
+  ],
+  "window": { "defaultWidth": 5, "defaultHeight": 4, "minWidth": 3, "minHeight": 2 }
+}

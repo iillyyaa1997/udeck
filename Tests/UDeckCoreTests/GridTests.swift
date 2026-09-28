@@ -190,16 +190,42 @@ struct LayoutTests {
         #expect(!placedFirst.overlaps(placedSecond))
     }
 
-    @Test("windows belonging to an uninstalled plugin are dropped, and named")
-    func pruneRemovesOrphans() {
+    /// The rule this replaced dropped a window whenever its plugin was not
+    /// found, and "not found" included a manifest with a typo in it.
+    @Test("reading the plugins folder takes no window away, found or not")
+    func readingTheFolderKeepsEveryWindow() {
         var layout = DeckLayout.firstRun()
         let tab = layout.tabs[0].id
         let gone = PluginIdentifier(rawValue: "gone")!
         layout.addWindow(pluginID: plugin, to: tab)
         layout.addWindow(pluginID: gone, to: tab)
-        let removed = layout.pruneWindows(keepingPlugins: [plugin])
-        #expect(removed == [gone])
-        #expect(layout.tabs[0].windows.allSatisfy { $0.pluginID == plugin })
+        #expect(WindowRule.windowsToRemove(after: .pluginsFolderRead(found: [plugin]), from: layout).isEmpty)
+        #expect(WindowRule.windowsToRemove(after: .pluginsFolderRead(found: []), from: layout).isEmpty)
+    }
+
+    @Test("a plugin removed through uDeck takes its windows with it, on every tab, and nobody else's")
+    func removalTakesEveryWindowOfThatPlugin() {
+        var layout = DeckLayout.firstRun()
+        let first = layout.tabs[0].id
+        let second = layout.addTab(named: "Two")
+        let gone = PluginIdentifier(rawValue: "gone")!
+        layout.addWindow(pluginID: gone, to: first)
+        layout.addWindow(pluginID: plugin, to: first)
+        layout.addWindow(pluginID: gone, to: second)
+        let removed = WindowRule.windowsToRemove(after: .pluginRemovedThroughUDeck(gone), from: layout)
+        #expect(removed.count == 2)
+        layout.removeWindows(removed)
+        #expect(layout.tabs.flatMap(\.windows).map(\.pluginID) == [plugin])
+    }
+
+    @Test("the operator removing one window takes that window and no other")
+    func operatorRemovesOneWindow() {
+        var layout = DeckLayout.firstRun()
+        let tab = layout.tabs[0].id
+        let one = layout.addWindow(pluginID: plugin, to: tab)!
+        layout.addWindow(pluginID: plugin, to: tab)
+        #expect(WindowRule.windowsToRemove(after: .removedByOperator(window: one), from: layout) == [one])
+        #expect(WindowRule.windowsToRemove(after: .removedByOperator(window: UUID()), from: layout).isEmpty)
     }
 
     @Test("a layout decoded with nonsense in it is brought back to something legal")

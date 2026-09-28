@@ -13,11 +13,50 @@ import UDeckCore
 @Observable
 public final class DeckModel {
     public private(set) var settings: AppSettings
-    public private(set) var layout: DeckLayout
+    public internal(set) var layout: DeckLayout
     public private(set) var plugins: [DiscoveredPlugin] = []
-    public private(set) var snapshots: [String: PluginSnapshot] = [:]
-    public private(set) var grants: PermissionGrants
-    public private(set) var pluginSettings: PluginSettings
+    public internal(set) var snapshots: [String: PluginSnapshot] = [:]
+    public internal(set) var grants: PermissionGrants
+    public internal(set) var pluginSettings: PluginSettings
+
+    // MARK: - Plugins from a repository (DeckModel+Repository.swift)
+
+    /// `installed.json`: where each plugin uDeck installed came from.
+    public internal(set) var installed: InstalledPlugins
+    /// Why `installed.json` could not be read, while it cannot. uDeck installs,
+    /// updates and removes nothing meanwhile, since any of those would have to
+    /// overwrite it.
+    public internal(set) var installedProblem: String?
+    /// Where each plugin folder stands — verified, modified, a folder of the
+    /// operator's own — as of the last read of the plugins folder.
+    public internal(set) var standings: [String: PluginStanding] = [:]
+    /// The official catalogue as the cache holds it, shown at once.
+    public internal(set) var catalogue: Catalogue?
+    public internal(set) var catalogueState: CatalogueState
+    public internal(set) var catalogueRefreshing = false
+    /// The one install, update or removal running, if any. They run one after
+    /// another, which is what keeps `installed.json` and the plugins folder
+    /// from ever being written by two of them at once.
+    public internal(set) var busyPlugin: String?
+    /// What the last operation on a plugin came to, when it did not succeed.
+    public internal(set) var operationProblems: [String: OperationProblem] = [:]
+    /// Earlier versions, as they were read.
+    public internal(set) var histories: [String: HistoryLoad] = [:]
+
+    /// The running uDeck's own version, as `CFBundleShortVersionString` says it.
+    public let udeckVersion: String
+    /// The same, as a version — nil for a build somebody stamped by hand,
+    /// which skips every `minUDeck` comparison rather than refusing everything.
+    public let udeck: SemanticVersion?
+    let endpoints: GitHubEndpoints
+    let limits: RateLimitRecorder
+    let trash: any PluginTrash
+    var catalogueTimer: Timer?
+    var launchRefresh: Task<Void, Never>?
+    /// Plugins being replaced or removed: nothing of them is scheduled.
+    var quieted: Set<String> = []
+    /// Runs in flight, per plugin, so quieting one can wait for its run to end.
+    var runsInFlight: [String: Int] = [:]
 
     /// Problems worth showing the operator: a settings file that would not
     /// parse, a layout that could not be written, a plugin whose windows had to
@@ -31,7 +70,7 @@ public final class DeckModel {
 
     /// Records a failure the operator needs to know about, keeping the most
     /// recent few rather than growing without bound.
-    private func record(_ description: String) {
+    func record(_ description: String) {
         DeckLog.plugins.error("\(description, privacy: .public)")
         guard !problems.contains(description) else { return }
         problems.append(description)
@@ -71,7 +110,7 @@ public final class DeckModel {
     /// current as the last thing that told it.
     public var onPluginsChanged: (() -> Void)?
 
-    private let paths: UDeckPaths
+    let paths: UDeckPaths
     private let executor: PollExecutor
     private var pollTasks: [String: Task<Void, Never>] = [:]
 
@@ -91,9 +130,27 @@ public final class DeckModel {
     private var grantsStore: JSONFileStore<PermissionGrants> { .init(url: paths.grantsFile) }
     private var pluginSettingsStore: JSONFileStore<PluginSettings> { .init(url: paths.pluginSettingsFile) }
 
-    public init(paths: UDeckPaths = .fromEnvironment(), executor: PollExecutor = PollExecutor()) {
+    public init(
+        paths: UDeckPaths = .fromEnvironment(),
+        executor: PollExecutor = PollExecutor(),
+        udeckVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0",
+        endpoints: GitHubEndpoints = .from(infoDictionary: Bundle.main.infoDictionary),
+        trash: any PluginTrash = SystemTrash()
+    ) {
         self.paths = paths
         self.executor = executor
+        self.udeckVersion = udeckVersion
+        self.udeck = SemanticVersion(udeckVersion)
+        self.endpoints = endpoints
+        self.trash = trash
+
+        // Before the plugins folder is first read: an install, update or
+        // removal a crash interrupted is finished or undone, so nothing below
+        // reads a folder half-way through one.
+        let recovered = PluginInstaller(
+            paths: paths, discovery: PluginDiscovery(searchPath: []), trash: trash,
+            fetch: { _, _ in throw ProviderError.unreachable("nothing is fetched while recovering") }
+        ).recover()
 
         // Every store is loaded the same way: a missing file is a first run, a
         // broken file is reported and the defaults are used *without* the broken
@@ -114,7 +171,32 @@ public final class DeckModel {
         layout = load(JSONFileStore<DeckLayout>(url: paths.layoutFile), default: DeckLayout.firstRun()).normalized()
         grants = load(JSONFileStore<PermissionGrants>(url: paths.grantsFile), default: PermissionGrants())
         pluginSettings = load(JSONFileStore<PluginSettings>(url: paths.pluginSettingsFile), default: PluginSettings())
+        do {
+            installed = try JSONFileStore<InstalledPlugins>(url: paths.installedFile).load() ?? InstalledPlugins()
+        } catch {
+            installed = InstalledPlugins()
+            installedProblem = "\(error)"
+            problems.append("\(error)")
+        }
+        let store = CatalogueStore(paths: paths)
+        let catalogueState = store.state()
+        self.catalogueState = catalogueState
+        limits = RateLimitRecorder(catalogueState.rateLimit)
         self.problems = problems
+
+        if udeck == nil {
+            DeckLog.plugins.error(
+                "this uDeck's own version \(udeckVersion, privacy: .public) is not MAJOR.MINOR.PATCH; minUDeck is not compared"
+            )
+        }
+        for operation in recovered {
+            DeckLog.plugins.info("recovered at launch: \(String(describing: operation), privacy: .public)")
+            if case .removalFinished(let id) = operation, let identifier = PluginIdentifier(rawValue: id) {
+                forgetEverythingElse(about: identifier)
+            }
+        }
+        catalogue = Catalogue.load(from: store, address: provider.address, udeck: udeck,
+                                   language: strings.language.rawValue)
 
         for directory in paths.directoriesToCreate {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -135,23 +217,28 @@ public final class DeckModel {
     /// thing that can fail quietly and a button is a thing the operator can
     /// press when they suspect it has.
     public func discoverPlugins() {
-        let discovery = PluginDiscovery(searchPath: settings.pluginExecutableSearchPath)
         plugins = discovery.scan(paths.plugins)
         DeckLog.plugins.debug(
             "read the plugins folder: \(self.plugins.count, privacy: .public) found"
         )
 
-        let installed = Set(plugins.compactMap { $0.manifest?.id })
-        let orphaned = layout.pruneWindows(keepingPlugins: installed)
-        if !orphaned.isEmpty {
-            record(
-                "removed windows for plugins that are no longer installed: "
-                + orphaned.map(\.rawValue).joined(separator: ", ")
-            )
+        // Windows are never removed because a plugin is missing: a window
+        // whose plugin is not here stays and says so (`PluginPresence`).
+        let found = Set(plugins.compactMap { $0.manifest?.id })
+        let gone = WindowRule.windowsToRemove(after: .pluginsFolderRead(found: found), from: layout)
+        if !gone.isEmpty {
+            layout.removeWindows(gone)
             saveLayout()
         }
+        reverify()
         restartPolling()
         onPluginsChanged?()
+    }
+
+    /// How plugin folders are read: the configured search path, and this
+    /// uDeck's version for `minUDeck`.
+    var discovery: PluginDiscovery {
+        PluginDiscovery(searchPath: settings.pluginExecutableSearchPath, udeck: udeck)
     }
 
     public func plugin(withID id: PluginIdentifier) -> DiscoveredPlugin? {
@@ -205,6 +292,7 @@ public final class DeckModel {
 
         for plugin in plugins {
             guard let manifest = plugin.manifest, manifest.kind == .poll,
+                  !quieted.contains(manifest.id.rawValue),
                   placedPluginIDs.contains(manifest.id),
                   launchDecision(for: manifest.id).isAllowed,
                   let interval = manifest.interval, interval > 0
@@ -224,6 +312,12 @@ public final class DeckModel {
         }
     }
 
+    /// Cancels one plugin's poll loop. Part of quieting it: see `quiet`.
+    func stopPolling(_ id: PluginIdentifier) {
+        pollTasks[id.rawValue]?.cancel()
+        pollTasks[id.rawValue] = nil
+    }
+
     /// How long to wait before polling this plugin again.
     ///
     /// A plugin that has just failed is asked again later than one that
@@ -239,7 +333,8 @@ public final class DeckModel {
     public func refreshAll(reason: RefreshReason) {
         refreshTask?.cancel()
         let due = plugins.filter { plugin in
-            guard plugin.manifest?.kind == .poll, let id = plugin.manifest?.id else { return false }
+            guard plugin.manifest?.kind == .poll, let id = plugin.manifest?.id,
+                  !quieted.contains(id.rawValue) else { return false }
             return placedPluginIDs.contains(id)
         }
         refreshTask = Task { [weak self] in
@@ -270,7 +365,9 @@ public final class DeckModel {
     }
 
     private func poll(_ plugin: DiscoveredPlugin, reason: RefreshReason) async {
-        guard let id = plugin.manifest?.id else { return }
+        guard let id = plugin.manifest?.id, !quieted.contains(id.rawValue) else { return }
+        runsInFlight[id.rawValue, default: 0] += 1
+        defer { runsInFlight[id.rawValue, default: 1] -= 1 }
         let outcome = await executor.poll(
             plugin: plugin,
             grant: grants[id],
@@ -340,7 +437,9 @@ public final class DeckModel {
     }
 
     public func removeWindow(_ windowID: UUID, from tabID: UUID) {
-        layout.removeWindow(windowID, from: tabID)
+        let gone = WindowRule.windowsToRemove(after: .removedByOperator(window: windowID), from: layout)
+        guard !gone.isEmpty else { return }
+        layout.removeWindows(gone)
         saveLayout()
         restartPolling()
     }
@@ -504,7 +603,6 @@ public final class DeckModel {
     /// uDeck happened to inherit.
     private func resolve(command: String, for id: PluginIdentifier) -> URL? {
         guard let directory = plugin(withID: id)?.directory else { return nil }
-        let discovery = PluginDiscovery(searchPath: settings.pluginExecutableSearchPath)
         return try? discovery.resolveExecutable(command, in: directory).get()
     }
 
@@ -525,15 +623,19 @@ public final class DeckModel {
 
     // MARK: - Persistence
 
-    private func saveLayout() {
+    func saveLayout() {
         save(layoutStore, layout, named: "layout")
     }
 
-    private func savePluginSettings() {
+    func savePluginSettings() {
         save(pluginSettingsStore, pluginSettings, named: "plugin settings")
     }
 
-    private func save<T: Codable & Sendable>(_ store: JSONFileStore<T>, _ value: T, named name: String) {
+    func saveGrants() {
+        save(grantsStore, grants, named: "permission decisions")
+    }
+
+    func save<T: Codable & Sendable>(_ store: JSONFileStore<T>, _ value: T, named name: String) {
         do {
             try store.save(value)
         } catch {

@@ -65,12 +65,11 @@ public final class UpdateStatus {
 /// is what `swift build && .build/debug/uDeck` is.
 @MainActor
 public protocol UpdateChecking: AnyObject {
-    /// Whether uDeck looks for a new version on its own.
+    /// Whether uDeck looks for a new version on its own, once a day.
     ///
-    /// Off until the operator turns it on. uDeck makes no network connection of
-    /// any kind otherwise, and an application that quietly starts talking to a
-    /// server because it was updated is doing something the operator did not
-    /// ask for — even when the server is its own.
+    /// On as uDeck ships (`SUEnableAutomaticChecks` in Info.plist), until the
+    /// operator turns it off in Settings → About. What it asks, and of whom, is
+    /// written down in README and SECURITY.md.
     var checksAutomatically: Bool { get set }
 
     /// Everything the screen draws.

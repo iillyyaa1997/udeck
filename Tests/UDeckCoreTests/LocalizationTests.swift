@@ -66,6 +66,39 @@ struct LocalizationTests {
         .permissionsPluginAsksTo(name: "disk-space"), .permissionsUnsandboxed,
         .permissionsAllowAndRun,
 
+        .pluginsOfficialCatalogue, .pluginsOfficialCatalogueHelp(source: "github.com/o/r"),
+        .catalogueCheckNow, .catalogueChecked(source: "github.com/o/r", at: "14:02"),
+        .catalogueNeverRead(source: "github.com/o/r"), .catalogueReading, .catalogueOff, .catalogueEmpty,
+        .catalogueUpdatesWaiting(2),
+        .catalogueLimited(readAt: "14:02", until: "15:07"), .catalogueRawLimited(until: "15:07"),
+        .catalogueUnreachable(reason: "offline", readAt: "14:02"), .catalogueNotFound(source: "github.com/o/r"),
+        .catalogueNotARepository(source: "github.com/o/r", branch: "main"), .catalogueFutureFormat(declared: 2),
+        .catalogueInvalidPassport(source: "github.com/o/r", reason: "no name"), .catalogueRefused(status: 451),
+        .catalogueBadAnswer(reason: "garbled"),
+        .catalogueArrivedDifferent(path: "udeck-plugins.json", expected: "1a2b3c4", got: "5d6e7f8"),
+        .catalogueVerified, .catalogueSize(files: 4, size: "6 KB"), .catalogueAsksTo("run sysctl"),
+        .catalogueInstall, .catalogueUpdate, .catalogueReplace, .catalogueInstalled,
+        .catalogueAvailable(version: "1.3.0"), .catalogueChangedStill(version: "1.2.0"),
+        .catalogueRepositoryNowHas(version: "1.1.0"), .catalogueSwitchTo(version: "1.1.0"),
+        .catalogueUpdateNeedsAPI(version: "2.0.0", api: 2), .catalogueUpdateNeedsUDeck(version: "1.3.0", required: "0.8.0"),
+        .catalogueUpdateCannotInstall(version: "1.3.0"), .catalogueGone, .catalogueOwnFolder(id: "uptime"),
+        .catalogueMissing(id: "uptime", path: "~/.udeck/plugins"), .catalogueReinstall(version: "1.2.0"),
+        .catalogueDetails, .catalogueWhatChanged, .catalogueOpenOnGitHub, .catalogueEarlierVersions,
+        .catalogueBackTo(version: "1.0.0"), .catalogueRemove, .catalogueWorking,
+        .catalogueReplaceConfirm(id: "uptime", path: "~/.udeck/plugins"),
+        .catalogueUpdateOverChanges(id: "uptime", version: "1.3.0"),
+        .catalogueRemoveConfirm(id: "uptime"), .catalogueRemoveOwnConfirm(id: "uptime"),
+        .catalogueRefusal(.lfsPointer(path: "plugins/uptime/data.bin")),
+        .catalogueFileUnreachable(path: "plugins/uptime/uptime.sh", reason: "offline"),
+        .catalogueTookTooLong, .catalogueCannotWrite(reason: "disk full"),
+        .catalogueRecordsBroken(reason: "not JSON"),
+        .pluginMarkVerified, .pluginMarkOwnFolder, .pluginMarkModified, .pluginMarkMissing,
+        .pluginFrom(source: "github.com/o/r", commit: "5c3e0d2"), .pluginPinned,
+        .historyTitle(name: "uptime"), .historyReading, .historyNone, .historyInstalledMark, .historyInstall,
+        .historyFailed,
+        .windowNotInPluginsFolder(id: "uptime", path: "~/.udeck/plugins"), .windowWillNotRun(id: "uptime"),
+        .windowReinstall,
+
         .capabilityRead(glob: "~/notes/*"), .capabilityWrite(glob: "/tmp/*"),
         .capabilityExec(command: "git"), .capabilityNetwork(host: "example.com"),
         .capabilityScreen, .capabilitySecret(name: "token"),
@@ -98,7 +131,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 161,
+        #expect(Self.all.count == 229,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
@@ -168,6 +201,110 @@ struct LocalizationTests {
         // installed" leaves the reader to guess which window they are looking at.
         #expect(strings(.generalNotInstalled("/x/.build/debug")).contains("/x/.build/debug"))
         #expect(strings(.controlDensity(name: "Normal")).contains("Normal"))
+    }
+
+    /// The repository's sentences carry what the operator acts on: the version,
+    /// the path, the time.
+    @Test("the catalogue's sentences keep their values", arguments: Language.allCases)
+    func catalogueValuesSurvive(language: Language) {
+        let strings = Strings(language)
+        let checked = strings(.catalogueChecked(source: "github.com/o/r", at: "14:02"))
+        #expect(checked.contains("github.com/o/r") && checked.contains("14:02"))
+        let limited = strings(.catalogueLimited(readAt: "14:02", until: "15:07"))
+        #expect(limited.contains("14:02") && limited.contains("15:07") && limited.contains("60"))
+        #expect(!strings(.catalogueLimited(readAt: nil, until: "15:07")).contains("nil"))
+        #expect(strings(.catalogueAvailable(version: "1.3.0")).contains("1.3.0"))
+        #expect(strings(.catalogueChangedStill(version: "1.2.0")).contains("1.2.0"))
+        #expect(strings(.catalogueUpdateNeedsUDeck(version: "1.3.0", required: "0.8.0")).contains("0.8.0"))
+        #expect(strings(.catalogueUpdateNeedsAPI(version: "2.0.0", api: 2)).contains("api 2"))
+        #expect(strings(.catalogueReplaceConfirm(id: "uptime", path: "~/.udeck/plugins")).contains("~/.udeck/plugins"))
+        #expect(strings(.catalogueMissing(id: "uptime", path: "~/.udeck/plugins")).contains("uptime"))
+        #expect(strings(.windowNotInPluginsFolder(id: "uptime", path: "~/.udeck/plugins")).contains("~/.udeck/plugins"))
+        #expect(strings(.catalogueSize(files: 4, size: "6 KB")).contains("4"))
+        let different = strings(.catalogueRefusal(.arrivedDifferent(path: "plugins/uptime/uptime.sh",
+                                                                    expected: "1a2b3c4", got: "5d6e7f8")))
+        #expect(different.contains("plugins/uptime/uptime.sh") && different.contains("1a2b3c4")
+                && different.contains("5d6e7f8"))
+        let large = strings(.catalogueRefusal(.tooLarge(id: "uptime", bytes: 14 * 1024 * 1024, files: 312)))
+        #expect(large.contains("14") && large.contains("312") && large.contains("200"))
+    }
+
+    /// Where docs/plugin-repository.md gives the words, uDeck says exactly them.
+    @Test("the refusals in English are the specification's own sentences")
+    func refusalsAreTheSpecification() {
+        let english = Strings(.english)
+        func say(_ refusal: RepositoryRefusal) -> String { english(.catalogueRefusal(refusal)) }
+        #expect(say(.apiNotSpoken(name: "uptime", version: "2.0.0", api: 2))
+                == "uptime 2.0.0 is written for plugin contract api 2; this uDeck speaks api 1. Update uDeck to install it.")
+        #expect(say(.needsNewerUDeck(name: "uptime", version: "1.4.0", required: "0.8.0", running: "0.6.0"))
+                == "uptime 1.4.0 needs uDeck 0.8.0 or later; this is uDeck 0.6.0. Update uDeck (Settings → About) to install it.")
+        #expect(say(.versionNotComparable(name: "uptime", version: "1.2"))
+                == "uptime's version \"1.2\" is not MAJOR.MINOR.PATCH, so uDeck cannot tell it from another version; it cannot be installed from a repository.")
+        #expect(say(.linkOrSubmodule(path: "plugins/uptime/lib", isLink: true))
+                == "plugins/uptime/lib is a symbolic link; a plugin from a repository may contain only files and folders.")
+        #expect(say(.arrivedDifferent(path: "plugins/uptime/uptime.sh", expected: "1a2b3c4", got: "5d6e7f8"))
+                == "plugins/uptime/uptime.sh arrived different from what the repository lists (expected 1a2b3c4, got 5d6e7f8); nothing was installed.")
+        #expect(say(.folderDoesNotAddUp(id: "uptime"))
+                == "The files of uptime do not add up to the folder the repository lists; nothing was installed.")
+        #expect(say(.tooLarge(id: "uptime", bytes: 14 * 1024 * 1024, files: 312))
+                == "uptime is 14 MB in 312 files; uDeck installs plugins of up to 10 MB and 200 files.")
+        #expect(say(.nameNotAllowed(path: "plugins/uptime/Run Me.sh"))
+                == "plugins/uptime/Run Me.sh: names may use only letters, digits, \".\", \"_\" and \"-\", and may not start with \".\"")
+        #expect(say(.lfsPointer(path: "plugins/uptime/data.bin"))
+                == "plugins/uptime/data.bin is a Git LFS pointer, not the file; uDeck does not fetch LFS content.")
+        #expect(say(.failsTheUsualChecks(id: "uptime", detail: "uptime.sh is not executable — try chmod +x"))
+                == "uptime.sh is not executable — try chmod +x")
+        #expect(english(.catalogueLimited(readAt: "14:02", until: "15:07"))
+                == "GitHub allows 60 requests an hour from this network without signing in, and they are used up — by uDeck or by something else on the same connection. The list below is from 14:02; uDeck will look again after 15:07.")
+        #expect(english(.catalogueUnreachable(reason: "offline", readAt: "14:02"))
+                == "Could not reach GitHub: offline. The list below is from 14:02.")
+        #expect(english(.catalogueNotFound(source: "github.com/owner/repo"))
+                == "github.com/owner/repo could not be found, or it is private.")
+        #expect(english(.catalogueNotARepository(source: "github.com/owner/repo", branch: "main"))
+                == "github.com/owner/repo is not a uDeck plugin repository: there is no udeck-plugins.json at the top of main.")
+        #expect(english(.catalogueFutureFormat(declared: 2))
+                == "This repository is in format 2; this uDeck reads format 1. Update uDeck.")
+        #expect(english(.catalogueChecked(source: "github.com/iillyyaa1997/udeck-plugins", at: "14:02"))
+                == "github.com/iillyyaa1997/udeck-plugins · checked 14:02")
+        #expect(english(.catalogueReplaceConfirm(id: "uptime", path: "~/.udeck/plugins"))
+                == "A folder of your own named uptime is in ~/.udeck/plugins. Installing moves it to the Trash and puts the repository's uptime in its place.")
+        #expect(english(.catalogueUpdateOverChanges(id: "uptime", version: "1.3.0"))
+                == "Your changes to uptime will be moved to the Trash and replaced with 1.3.0.")
+        #expect(english(.windowNotInPluginsFolder(id: "uptime", path: "~/.udeck/plugins"))
+                == "uptime is not in ~/.udeck/plugins")
+    }
+
+    /// Every refusal has something to say in every language, and says the path.
+    @Test("every refusal is said in every language", arguments: Language.allCases)
+    func everyRefusalIsSaid(language: Language) {
+        let strings = Strings(language)
+        let path = "plugins/x/y.sh"
+        let all: [RepositoryRefusal] = [
+            .folderNameNotAnID(folder: "X"), .noManifest(path: path), .manifestUnreadable(path: path, detail: "d"),
+            .manifestIDMismatch(declared: "a", folder: "b"), .manifestProblem(id: "x", detail: "d"),
+            .apiNotSpoken(name: "x", version: "1.0.0", api: 2),
+            .needsNewerUDeck(name: "x", version: "1.0.0", required: "9.0.0", running: "0.5.0"),
+            .versionNotComparable(name: "x", version: "1"), .minUDeckNotComparable(name: "x", text: "y"),
+            .producerMissing(path: path), .producerNotExecutable(path: path), .producerOutsideFolder(path: path),
+            .linkOrSubmodule(path: path, isLink: true), .linkOrSubmodule(path: path, isLink: false),
+            .nameNotAllowed(path: path), .namesDifferOnlyInCase(path: path, other: "plugins/x/Y.sh"),
+            .tooLarge(id: "x", bytes: 1, files: 1), .fileTooLarge(path: path, bytes: 6_000_000),
+            .nestedTooDeep(path: path), .sizeNotListed(path: path),
+            .arrivedDifferent(path: path, expected: "a", got: "b"), .folderDoesNotAddUp(id: "x"),
+            .lfsPointer(path: path), .arrivedLarger(path: path, bytes: 2), .failsTheUsualChecks(id: "x", detail: "d"),
+            .notTheVersionShown(id: "x", shown: "1.0.0", arrived: "1.0.1"), .folderAppeared(id: "x"),
+        ]
+        for refusal in all {
+            let text = strings(.catalogueRefusal(refusal))
+            #expect(!text.isEmpty)
+            switch refusal {
+            case .noManifest, .manifestUnreadable, .producerMissing, .producerNotExecutable, .producerOutsideFolder,
+                 .linkOrSubmodule, .nameNotAllowed, .namesDifferOnlyInCase, .fileTooLarge, .nestedTooDeep,
+                 .sizeNotListed, .arrivedDifferent, .lfsPointer, .arrivedLarger:
+                #expect(text.contains(path), "\(language) drops the path from \(refusal)")
+            default: break
+            }
+        }
     }
 
     /// The one sentence on the login card that can be false while everything around

@@ -121,6 +121,54 @@ struct DeckWindowView: View {
 
     @ViewBuilder
     private func body(for presentation: CardPresentation) -> some View {
+        switch model.presence(of: window.pluginID) {
+        case .present:
+            card(for: presentation)
+        case .broken(let problems):
+            missing(problems: problems, reinstallable: model.installed[window.pluginID] != nil)
+        case .missing(let reinstallable):
+            missing(problems: [], reinstallable: reinstallable)
+        }
+    }
+
+    /// A window whose plugin is not here to run. It stays where it is and says
+    /// so — windows are never removed because a plugin is missing — with
+    /// **Reinstall** when uDeck installed it, and **Remove from tab** always.
+    private func missing(problems: [String], reinstallable: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if problems.isEmpty {
+                note(strings(.windowNotInPluginsFolder(id: window.pluginID.rawValue,
+                                                       path: model.pluginsDirectoryDisplayPath)), tint: theme.warn)
+            } else {
+                note(strings(.windowWillNotRun(id: window.pluginID.rawValue)), tint: theme.warn)
+                ForEach(Array(problems.enumerated()), id: \.offset) { _, problem in
+                    Text(problem)
+                        .font(theme.chipFont)
+                        .foregroundStyle(theme.dim)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack(spacing: 8) {
+                if reinstallable {
+                    Button(strings(.windowReinstall)) {
+                        shell.onInteract()
+                        model.reinstall(window.pluginID.rawValue)
+                    }
+                    .buttonStyle(GhostButtonStyle(theme: theme))
+                }
+                Button(strings(.cardRemoveFromTab)) {
+                    shell.onInteract()
+                    model.removeWindow(window.id, from: tabID)
+                }
+                .buttonStyle(GhostButtonStyle(theme: theme))
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("window.\(window.pluginID.rawValue).missing")
+    }
+
+    @ViewBuilder
+    private func card(for presentation: CardPresentation) -> some View {
         switch model.launchDecision(for: window.pluginID) {
         case .awaitingDecision(let pending):
             PermissionRequestView(

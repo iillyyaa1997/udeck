@@ -714,8 +714,9 @@ SETTINGS_SAVE_SECONDS = 20
 # anywhere to say it happened.
 #
 # Every non-optional stored property of `AppSettings`, which is exactly what the
-# synthesised encoder writes; the two optional ones (`textSize`, `language`) say
-# nothing until the operator chooses, so they are not required to be there.
+# synthesised encoder writes; the optional ones (`textSize`, `language`,
+# `officialCatalogue`) say nothing until the operator chooses, so they are not
+# required to be there.
 # Thirteen keys after one click, in every file these checks have left: 1921
 # bytes for the switch and 1935 for the shortcut on 2026-09-25 and again on
 # 2026-09-26 (.build/e2e/20260926-142454Z). `test_the_settings_file_carries_every_key_uDeck_encodes`

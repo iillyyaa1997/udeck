@@ -149,6 +149,93 @@ struct Russian: Vocabulary {
             "uDeck запускает этот плагин от вашего имени, без песочницы. Разрешить — значит согласиться запустить эту программу; отказать — значит uDeck её никогда не запустит."
         case .permissionsAllowAndRun: "Разрешить и запустить"
 
+        // Плагины из репозитория
+        case .pluginsOfficialCatalogue: "Официальный каталог"
+        case .pluginsOfficialCatalogueHelp(let source):
+            "uDeck читает список плагинов в \(source) через несколько секунд после запуска, раз в день и по кнопке «Проверить» — только список и манифест каждого плагина. Файлы плагина скачиваются, лишь когда вы нажимаете «Установить». Если выключить, uDeck не делает никаких запросов о плагинах; установленные продолжают работать."
+        case .catalogueCheckNow: "Проверить"
+        case .catalogueChecked(let source, let time): "\(source) · проверено в \(time)"
+        case .catalogueNeverRead(let source): "\(source) · ещё не прочитан"
+        case .catalogueReading: "Читаю каталог…"
+        case .catalogueOff:
+            "Официальный каталог выключен. Установленные плагины продолжают работать; их обновления uDeck не ищет."
+        case .catalogueEmpty: "В репозитории пока нет плагинов."
+        case .catalogueUpdatesWaiting(let count): "Ждут обновления: \(count)"
+        case .catalogueLimited(let readAt, let until):
+            "GitHub без входа разрешает 60 запросов в час с одного адреса, и они израсходованы — uDeck или чем-то ещё на этом же подключении. "
+                + (readAt.map { "Список ниже — на \($0); " } ?? "")
+                + "uDeck посмотрит снова после \(until)."
+        case .catalogueRawLimited(let until):
+            "Файловый сервер GitHub попросил подождать; до \(until) файлы с него не скачиваются."
+        case .catalogueUnreachable(let reason, let readAt):
+            "Не удалось связаться с GitHub: \(reason)." + (readAt.map { " Список ниже — на \($0)." } ?? "")
+        case .catalogueNotFound(let source): "\(source) не найден или закрыт."
+        case .catalogueNotARepository(let source, let branch):
+            "\(source) — не репозиторий плагинов uDeck: в корне \(branch) нет udeck-plugins.json."
+        case .catalogueFutureFormat(let declared):
+            "Этот репозиторий в формате \(declared); этот uDeck читает формат \(RepositoryPassport.supportedFormat). Обновите uDeck."
+        case .catalogueInvalidPassport(let source, let reason):
+            "udeck-plugins.json в \(source) uDeck прочитать не может: \(reason)."
+        case .catalogueRefused(let status): "GitHub отказал в запросе (HTTP \(status))."
+        case .catalogueBadAnswer(let reason): "GitHub ответил так, что uDeck не понял ответа: \(reason)."
+        case .catalogueArrivedDifferent(let path, let expected, let got):
+            "\(path) пришёл не таким, как его перечисляет репозиторий (ожидался \(expected), пришёл \(got))."
+        case .catalogueVerified: "Проверен"
+        case .catalogueSize(let files, let size): "файлов: \(files) · \(size)"
+        case .catalogueAsksTo(let list): "Просит \(list)"
+        case .catalogueInstall: "Установить"
+        case .catalogueUpdate: "Обновить"
+        case .catalogueReplace: "Заменить…"
+        case .catalogueInstalled: "Установлен"
+        case .catalogueAvailable(let version): "Доступна \(version)"
+        case .catalogueChangedStill(let version): "Изменён в репозитории, всё ещё \(version)"
+        case .catalogueRepositoryNowHas(let version): "В репозитории теперь \(version)"
+        case .catalogueSwitchTo(let version): "Перейти на \(version)"
+        case .catalogueUpdateNeedsAPI(let version, let api): "\(version) нужен uDeck новее (api \(api))"
+        case .catalogueUpdateNeedsUDeck(let version, let required): "\(version) нужен uDeck \(required)"
+        case .catalogueUpdateCannotInstall(let version): "\(version) здесь не установить"
+        case .catalogueGone: "Больше нет в репозитории"
+        case .catalogueOwnFolder(let id): "Установлена ваша собственная папка \(id)"
+        case .catalogueMissing(let id, let path): "\(id) нет в \(path)"
+        case .catalogueReinstall(let version): "Переустановить \(version)"
+        case .catalogueDetails: "Подробности"
+        case .catalogueWhatChanged: "Что изменилось"
+        case .catalogueOpenOnGitHub: "Открыть на GitHub"
+        case .catalogueEarlierVersions: "Прежние версии…"
+        case .catalogueBackTo(let version): "Вернуть \(version)"
+        case .catalogueRemove: "Удалить"
+        case .catalogueWorking: "Выполняется…"
+        case .catalogueReplaceConfirm(let id, let path):
+            "В \(path) лежит ваша собственная папка \(id). Установка переместит её в Корзину и поставит на её место \(id) из репозитория."
+        case .catalogueUpdateOverChanges(let id, let version):
+            "Ваши изменения в \(id) будут перемещены в Корзину и заменены версией \(version)."
+        case .catalogueRemoveConfirm(let id):
+            "Удалить \(id)? Его папка и кэш удаляются, а вместе с ними уходят ваше решение о разрешениях, его настройки и все его окна на всех вкладках."
+        case .catalogueRemoveOwnConfirm(let id):
+            "Удалить \(id)? Его папка переместится в Корзину — возможно, это ваша единственная копия, — а кэш, решение о разрешениях, настройки и все его окна уйдут."
+        case .catalogueRefusal(let refusal): Self.refusal(refusal)
+        case .catalogueFileUnreachable(let path, let reason):
+            "\(path) не удалось скачать: \(reason); ничего не установлено."
+        case .catalogueTookTooLong: "Установка шла дольше пяти минут и была остановлена; ничего не установлено."
+        case .catalogueCannotWrite(let reason): "uDeck не смог записать на диск: \(reason)"
+        case .catalogueRecordsBroken(let reason):
+            "~/.udeck/installed.json не читается, поэтому uDeck ничего не устанавливает, не обновляет и не удаляет, пока это не исправлено: \(reason)"
+        case .pluginMarkVerified: "Проверен"
+        case .pluginMarkOwnFolder: "Ваша собственная папка"
+        case .pluginMarkModified: "Изменён на этом Mac"
+        case .pluginMarkMissing: "Папки нет"
+        case .pluginFrom(let source, let commit): "Из \(source), коммит \(commit)"
+        case .pluginPinned: "Оставлен на этой версии — о новых всё равно сообщается"
+        case .historyTitle(let name): "Прежние версии \(name)"
+        case .historyReading: "Читаю историю плагина…"
+        case .historyNone: "В истории нет версий этого плагина."
+        case .historyInstalledMark: "установлена"
+        case .historyInstall: "Установить эту версию"
+        case .historyFailed: "Историю прочитать не удалось:"
+        case .windowNotInPluginsFolder(let id, let path): "\(id) нет в \(path)"
+        case .windowWillNotRun(let id): "\(id) не запустится:"
+        case .windowReinstall: "Переустановить"
+
         // Что плагин может попросить
         case .capabilityRead(let glob): "читать файлы по маске \(glob)"
         case .capabilityWrite(let glob): "писать файлы по маске \(glob)"
@@ -185,7 +272,7 @@ struct Russian: Vocabulary {
         case .updatesCheckNow: "Проверить сейчас"
         case .updatesAutomatically: "Проверять обновления автоматически"
         case .updatesAutomaticallyHelp:
-            "Раз в сутки. Пока это выключено, uDeck не выходит в сеть вообще."
+            "Раз в сутки uDeck спрашивает github.com, нет ли новой версии. Если выключить — только по кнопке «Проверить сейчас»."
         case .updatesNeverChecked: "Ещё не проверялось."
         case .updatesJustChecked: "Проверено только что."
         case .updatesLastChecked(let when): "Проверено \(when)."
@@ -266,6 +353,59 @@ struct Russian: Vocabulary {
         case .unitPoints(let value): "\(value) пт"
         case .unitSeconds(let value): String(format: "%.1f с", value)
         case .unitPercent(let value): "\(value) %"
+        }
+    }
+}
+
+extension Russian {
+    /// Каждый отказ называет плагин, что не так и что это исправит.
+    static func refusal(_ refusal: RepositoryRefusal) -> String {
+        func size(_ bytes: Int) -> String { ByteCount.text(bytes, kilo: "КБ", mega: "МБ", unit: "Б", separator: ",") }
+        return switch refusal {
+        case .folderNameNotAnID(let folder):
+            "plugins/\(folder) — не идентификатор плагина: строчные латинские буквы, цифры, «.», «_» и «-», не длиннее 64, в начале буква или цифра."
+        case .noManifest(let path): "Нет \(path); без него папка — не плагин."
+        case .manifestUnreadable(let path, let detail): "\(path) — не годный манифест: \(detail)"
+        case .manifestIDMismatch(let declared, let folder):
+            "Манифест в plugins/\(folder) называет свой id «\(declared)»; он должен совпадать с именем папки."
+        case .manifestProblem(let id, let detail): "\(id): \(detail)"
+        case .apiNotSpoken(let name, let version, let api):
+            "\(name) \(version) написан для контракта плагинов api \(api); этот uDeck знает api \(PluginAPI.current). Обновите uDeck, чтобы его установить."
+        case .needsNewerUDeck(let name, let version, let required, let running):
+            "\(name) \(version) нужен uDeck \(required) или новее; это uDeck \(running). Обновите uDeck (Настройки → О программе), чтобы его установить."
+        case .versionNotComparable(let name, let version):
+            "Версия \(name) «\(version)» — не MAJOR.MINOR.PATCH, uDeck не может отличить её от другой; из репозитория её не установить."
+        case .minUDeckNotComparable(let name, let text):
+            "minUDeck у \(name) «\(text)» — не MAJOR.MINOR.PATCH, и неясно, какой выпуск uDeck нужен; из репозитория его не установить."
+        case .producerMissing(let path): "Манифест запускает \(path), а в репозитории его нет."
+        case .producerNotExecutable(let path):
+            "\(path) закоммичен без права на запуск (режим git 100755), а uDeck берёт это право из репозитория; закоммитьте его после chmod +x."
+        case .producerOutsideFolder(let path): "\(path) ведёт за пределы папки плагина."
+        case .linkOrSubmodule(let path, let isLink):
+            "\(path) — \(isLink ? "символическая ссылка" : "подмодуль"); в плагине из репозитория могут быть только файлы и папки."
+        case .nameNotAllowed(let path):
+            "\(path): в именах можно только латинские буквы, цифры, «.», «_» и «-», и имя не может начинаться с «.»"
+        case .namesDifferOnlyInCase(let path, let other):
+            "\(path) и \(other) различаются только регистром букв, а диск Mac считает их одним файлом."
+        case .tooLarge(let id, let bytes, let files):
+            "\(id) — это \(size(bytes)) в \(files) файлах; uDeck ставит плагины до 10 МБ и до \(RepositoryRules.maximumFiles) файлов."
+        case .fileTooLarge(let path, let bytes):
+            "\(path) весит \(size(bytes)); один файл плагина может быть не больше 5 МБ."
+        case .nestedTooDeep(let path): "\(path) вложен глубже \(RepositoryRules.maximumDepth) папок."
+        case .sizeNotListed(let path): "Репозиторий не указал размер \(path)."
+        case .arrivedDifferent(let path, let expected, let got):
+            "\(path) пришёл не таким, как его перечисляет репозиторий (ожидался \(expected), пришёл \(got)); ничего не установлено."
+        case .folderDoesNotAddUp(let id):
+            "Файлы \(id) не складываются в ту папку, которую перечисляет репозиторий; ничего не установлено."
+        case .lfsPointer(let path):
+            "\(path) — указатель Git LFS, а не сам файл; содержимое LFS uDeck не скачивает."
+        case .arrivedLarger(let path, _):
+            "\(path) пришёл больше, чем указано в репозитории; ничего не установлено."
+        case .failsTheUsualChecks(_, let detail): detail
+        case .notTheVersionShown(let id, let shown, let arrived):
+            "\(id) пришёл версией \(arrived), а не \(shown), как показывал каталог; ничего не установлено. Проверьте снова."
+        case .folderAppeared(let id):
+            "Пока uDeck устанавливал, в папке плагинов появилась папка \(id); ничего не изменено."
         }
     }
 }

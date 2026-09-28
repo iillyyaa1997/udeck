@@ -20,10 +20,12 @@ import UDeckKit
 /// version, latest version, one sentence — which is where somebody who cares
 /// about the answer already is.
 ///
-/// **Automatic checks start off.** uDeck otherwise makes no network connection
-/// at all — it asks macOS for no permissions and talks to nothing — so the
-/// first outbound connection this application ever makes should be one the
-/// operator switched on.
+/// **Automatic checks start on** (`SUEnableAutomaticChecks` in Info.plist): once
+/// a day uDeck asks its feed whether there is a newer version, the way it reads
+/// the official plugin catalogue once a day — both on from the first launch, by
+/// the operator's decision that fewer questions for a new person outweigh a
+/// quiet first minute. The switch in Settings → About turns it off; README and
+/// SECURITY.md say what is asked and when.
 @MainActor
 final class SparkleUpdater: NSObject, UpdateChecking {
     let status: UpdateStatus
@@ -81,6 +83,16 @@ final class SparkleUpdater: NSObject, UpdateChecking {
         status.stage = .available(version: version)
     }
 
+    /// Sparkle's answer to "Check now" while an update found by a check of its
+    /// own is still waiting for the operator: it does not check again, it asks
+    /// for that update to be brought forward. `checkNow` has already said
+    /// "checking", so the update is put back on the screen — otherwise the
+    /// pane would say "checking" forever over an Install button it never draws.
+    fileprivate func updateBroughtForward() {
+        guard pendingChoice != nil, let version = status.latestVersion else { return }
+        status.stage = .available(version: version)
+    }
+
     fileprivate func finishedCheck(foundSomething: Bool) {
         status.lastCheck = updater.lastUpdateCheckDate ?? Date()
         if !foundSomething {
@@ -120,8 +132,8 @@ private final class InlineUpdateDriver: NSObject, SPUUserDriver {
     /// twice in two different voices would be one time too many.
     ///
     /// Answered with whatever the operator has already set, so this is never
-    /// reached in practice — `SUEnableAutomaticChecks` in the plist is what
-    /// stops Sparkle wanting to ask.
+    /// reached in practice — `SUEnableAutomaticChecks` in the plist answers the
+    /// question before Sparkle would want to ask it.
     func show(
         _ request: SPUUpdatePermissionRequest,
         reply: @escaping (SUUpdatePermissionResponse) -> Void
@@ -197,7 +209,9 @@ private final class InlineUpdateDriver: NSObject, SPUUserDriver {
         acknowledgement()
     }
 
-    func showUpdateInFocus() {}
+    func showUpdateInFocus() {
+        owner?.updateBroughtForward()
+    }
 
     func dismissUpdateInstallation() {}
 }

@@ -168,6 +168,95 @@ public enum Phrase: Sendable, Equatable {
     case permissionsUnsandboxed
     case permissionsAllowAndRun
 
+    // MARK: - Plugins from a repository
+
+    /// The switch for the official catalogue, and what it means — which is also
+    /// what uDeck fetches, said where the operator decides about it.
+    case pluginsOfficialCatalogue
+    case pluginsOfficialCatalogueHelp(source: String)
+    case catalogueCheckNow
+    case catalogueChecked(source: String, at: String)
+    case catalogueNeverRead(source: String)
+    case catalogueReading
+    case catalogueOff
+    case catalogueEmpty
+    case catalogueUpdatesWaiting(Int)
+
+    /// Why the list below is not fresh, each in the words of
+    /// docs/plugin-repository.md. `readAt` is when the list below was read,
+    /// already formatted, or nil when there is no list.
+    case catalogueLimited(readAt: String?, until: String)
+    case catalogueRawLimited(until: String)
+    case catalogueUnreachable(reason: String, readAt: String?)
+    case catalogueNotFound(source: String)
+    case catalogueNotARepository(source: String, branch: String)
+    case catalogueFutureFormat(declared: Int)
+    case catalogueInvalidPassport(source: String, reason: String)
+    case catalogueRefused(status: Int)
+    case catalogueBadAnswer(reason: String)
+    case catalogueArrivedDifferent(path: String, expected: String, got: String)
+
+    /// A catalogue row.
+    case catalogueVerified
+    case catalogueSize(files: Int, size: String)
+    case catalogueAsksTo(String)
+    case catalogueInstall
+    case catalogueUpdate
+    case catalogueReplace
+    case catalogueInstalled
+    case catalogueAvailable(version: String)
+    case catalogueChangedStill(version: String)
+    case catalogueRepositoryNowHas(version: String)
+    case catalogueSwitchTo(version: String)
+    case catalogueUpdateNeedsAPI(version: String, api: Int)
+    case catalogueUpdateNeedsUDeck(version: String, required: String)
+    case catalogueUpdateCannotInstall(version: String)
+    case catalogueGone
+    case catalogueOwnFolder(id: String)
+    case catalogueMissing(id: String, path: String)
+    case catalogueReinstall(version: String)
+    case catalogueDetails
+    case catalogueWhatChanged
+    case catalogueOpenOnGitHub
+    case catalogueEarlierVersions
+    case catalogueBackTo(version: String)
+    case catalogueRemove
+    case catalogueWorking
+
+    /// What a confirmation says before anything goes.
+    case catalogueReplaceConfirm(id: String, path: String)
+    case catalogueUpdateOverChanges(id: String, version: String)
+    case catalogueRemoveConfirm(id: String)
+    case catalogueRemoveOwnConfirm(id: String)
+
+    /// Every refusal names the plugin, what is wrong, and what would fix it.
+    case catalogueRefusal(RepositoryRefusal)
+    case catalogueFileUnreachable(path: String, reason: String)
+    case catalogueTookTooLong
+    case catalogueCannotWrite(reason: String)
+    case catalogueRecordsBroken(reason: String)
+
+    /// Where a plugin on this machine stands, as its row in Settings marks it.
+    case pluginMarkVerified
+    case pluginMarkOwnFolder
+    case pluginMarkModified
+    case pluginMarkMissing
+    case pluginFrom(source: String, commit: String)
+    case pluginPinned
+
+    /// Earlier versions, from the folder's history.
+    case historyTitle(name: String)
+    case historyReading
+    case historyNone
+    case historyInstalledMark
+    case historyInstall
+    case historyFailed
+
+    /// A window whose plugin is not here: it stays, and says so.
+    case windowNotInPluginsFolder(id: String, path: String)
+    case windowWillNotRun(id: String)
+    case windowReinstall
+
     // MARK: - What a plugin may ask for
 
     case capabilityRead(glob: String)
@@ -233,8 +322,9 @@ public enum Phrase: Sendable, Equatable {
 
     // MARK: - Updates
 
-    /// uDeck makes no network connection until this is switched on, which is
-    /// why the switch says what it will start doing rather than just "check".
+    /// On as uDeck ships; the switch says what it does rather than just
+    /// "check", because it is one of the two things uDeck asks the network
+    /// about by itself (the other is the official plugin catalogue).
     case updatesTitle
     case updatesCheckNow
     case updatesAutomatically

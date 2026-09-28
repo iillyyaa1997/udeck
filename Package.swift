@@ -64,6 +64,11 @@ let package = Package(
             ]
         ),
 
-        .testTarget(name: "UDeckCoreTests", dependencies: ["UDeckCore"], path: "Tests/UDeckCoreTests"),
+        .testTarget(
+            name: "UDeckCoreTests", dependencies: ["UDeckCore"], path: "Tests/UDeckCoreTests",
+            // Read from disk by path, the way `RepositoryExamples` reads
+            // `examples/`: a frozen plugin folder whose git hashes are known.
+            exclude: ["Fixtures"]
+        ),
     ]
 )

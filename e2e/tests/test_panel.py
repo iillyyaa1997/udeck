@@ -1168,15 +1168,15 @@ def test_the_settings_file_carries_every_key_uDeck_encodes():
 
     `AppSettings` has a hand-written decoder and a synthesised encoder, so what
     it writes is exactly its stored properties — every one of them, every time.
-    The two optional ones say nothing until the operator chooses, so they are
-    the two a file may honestly be without.
+    The optional ones say nothing until the operator chooses, so they are the
+    ones a file may honestly be without.
     """
     stored = re.findall(r"^    public var (\w+): ([^\n{]+)$", _app_settings_source(), re.MULTILINE)
     assert stored, "AppSettings no longer declares its properties this way"
     written = tuple(name for name, kind in stored if not kind.strip().endswith("?"))
     optional = [name for name, kind in stored if kind.strip().endswith("?")]
     assert config.SETTINGS_KEYS == written
-    assert optional == ["textSize", "language"]
+    assert optional == ["textSize", "language", "officialCatalogue"]
 
 
 def test_the_defaults_the_file_has_to_still_carry_are_uDecks_own():

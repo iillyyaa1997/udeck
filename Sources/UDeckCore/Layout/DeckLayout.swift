@@ -158,24 +158,14 @@ public struct DeckLayout: Codable, Equatable, Sendable {
         )
     }
 
-    /// Drops every window belonging to a plugin that is no longer installed.
-    ///
-    /// Called after discovery, so that uninstalling a plugin does not leave a
-    /// window that can never render. Returns the ids that were removed so the
-    /// caller can tell the operator rather than making it look like the layout
-    /// quietly changed on its own.
-    @discardableResult
-    public mutating func pruneWindows(keepingPlugins installed: Set<PluginIdentifier>) -> [PluginIdentifier] {
-        var removed: Set<PluginIdentifier> = []
-        for tabIndex in tabs.indices {
-            let before = tabs[tabIndex].windows
-            let kept = before.filter { installed.contains($0.pluginID) }
-            if kept.count != before.count {
-                removed.formUnion(before.filter { !installed.contains($0.pluginID) }.map(\.pluginID))
-                tabs[tabIndex].windows = GridEngine.normalized(kept, columns: columns)
-            }
+    /// Takes these windows out, wherever they are, and lets every grid they
+    /// were in settle.
+    public mutating func removeWindows(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        for tabIndex in tabs.indices where tabs[tabIndex].windows.contains(where: { ids.contains($0.id) }) {
+            tabs[tabIndex].windows.removeAll { ids.contains($0.id) }
+            tabs[tabIndex].windows = GridEngine.normalized(tabs[tabIndex].windows, columns: columns)
         }
-        return removed.sorted()
     }
 
     /// Brings a decoded layout into a legal state: a positive column count, at
@@ -226,6 +216,39 @@ public struct DeckLayout: Codable, Equatable, Sendable {
                     seenWindows.insert(replacement)
                 }
             }
+        }
+    }
+}
+
+/// Which windows leave the layout, and when.
+///
+/// **Never because a plugin is missing.** Reading the plugins folder used to
+/// drop every window whose plugin was not found, and "not found" included a
+/// folder whose manifest did not parse — so a folder replaced in two steps lost
+/// its window if the watcher read the folder in between, a typo saved in a
+/// manifest lost it too, and so did switching a working copy between branches.
+/// A window whose plugin is not there now stays where it is and says so
+/// (`PluginPresence`). It goes when the operator removes it, or when the plugin
+/// itself is removed through uDeck — and then from every tab.
+public enum WindowRule {
+    public enum Event: Sendable {
+        /// The plugins folder was read and these plugins were found.
+        case pluginsFolderRead(found: Set<PluginIdentifier>)
+        /// The operator took one window off its tab.
+        case removedByOperator(window: UUID)
+        /// The plugin was removed through uDeck.
+        case pluginRemovedThroughUDeck(PluginIdentifier)
+    }
+
+    /// The windows `event` takes out of `layout`.
+    public static func windowsToRemove(after event: Event, from layout: DeckLayout) -> Set<UUID> {
+        switch event {
+        case .pluginsFolderRead:
+            return []
+        case .removedByOperator(let window):
+            return layout.tabs.contains { $0.windows.contains { $0.id == window } } ? [window] : []
+        case .pluginRemovedThroughUDeck(let id):
+            return Set(layout.tabs.flatMap { $0.windows.filter { $0.pluginID == id }.map(\.id) })
         }
     }
 }

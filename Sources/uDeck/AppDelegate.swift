@@ -73,6 +73,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         model.discoverPlugins()
         controller.start()
+        // The official catalogue is read a few seconds after the panel is
+        // ready — on the very first launch too, before anything is pressed —
+        // unless it was read in the last day, and once a day after that.
+        // Settings → Plugins → Official catalogue switches it off.
+        model.startCatalogueSchedule()
 
         appearanceObserver = NSApp.observe(\.effectiveAppearance) { [weak model] _, _ in
             MainActor.assumeIsolated { model?.refreshTheme() }

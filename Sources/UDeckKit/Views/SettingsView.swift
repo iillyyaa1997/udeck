@@ -78,6 +78,9 @@ public struct SettingsView: View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(Section.allCases, selection: $section) { item in
                 Label(model.strings(item.title), systemImage: item.symbol).tag(item)
+                    // How many plugin updates are waiting, where the operator
+                    // looks for the Plugins pane.
+                    .badge(item == .plugins ? model.updatesWaiting : 0)
                     // Identifiers, not titles: every title here is translated,
                     // and the language is a setting inside this same window, so
                     // anything driving the screen from outside — the end-to-end
@@ -1144,6 +1147,13 @@ private struct PluginSettingsSection: View {
                 Divider()
             }
 
+            // Installed through uDeck, and the folder has gone: the record
+            // still says where it came from, so it can be put back.
+            ForEach(missingIDs, id: \.self) { id in
+                MissingPluginRow(model: model, id: id)
+                Divider()
+            }
+
             // Was a headed group of its own on the Look tab, where it had
             // nothing to do with how the panel looks. It is a fact about cards,
             // it cannot be changed from here, and one line is the whole of it.
@@ -1153,6 +1163,12 @@ private struct PluginSettingsSection: View {
             )))
                 .font(.caption).foregroundStyle(.secondary)
         }
+
+        CatalogueSection(model: model)
+    }
+
+    private var missingIDs: [String] {
+        model.installed.plugins.keys.filter { !model.folderExists($0) }.sorted()
     }
 }
 
@@ -1187,6 +1203,9 @@ private struct PluginRow: View {
                         .foregroundStyle(.orange)
                 }
             }
+
+            InstalledRepositoryControls(model: model, id: plugin.folderName,
+                                        versionOnDisk: plugin.manifest?.version)
 
             if expanded, let manifest = model.displayManifest(for: plugin) {
                 details(manifest)
@@ -1246,8 +1265,12 @@ private struct PluginRow: View {
     private func permissions(_ manifest: PluginManifest) -> some View {
         let requested = manifest.permissions.capabilities
         if requested.isEmpty {
-            Label(strings(.permissionsAsksNothing), systemImage: "checkmark.seal")
+            // Plain text, and no seal: a seal means one thing in uDeck — a
+            // maintainer of the official repository read the plugin — and a
+            // plugin asking for nothing is not a plugin somebody checked.
+            Text(strings(.permissionsAsksNothing))
                 .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("plugin.\(manifest.id).asksNothing")
         } else {
             VStack(alignment: .leading, spacing: 3) {
                 Text(strings(.permissionsAsksTo)).font(.subheadline)

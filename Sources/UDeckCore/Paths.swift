@@ -49,6 +49,20 @@ public struct UDeckPaths: Sendable, Equatable {
     /// Per-plugin values for the settings a manifest declares.
     public var pluginSettingsFile: URL { root.appendingPathComponent("plugin-settings.json") }
 
+    /// Every plugin uDeck installed from a repository: where it came from, and
+    /// what it was when it was put there. See docs/plugin-repository.md.
+    public var installedFile: URL { root.appendingPathComponent("installed.json") }
+
+    /// What uDeck knows about each plugin repository: listings by commit,
+    /// manifests by hash, the limit. Not under `cache/`, where every folder
+    /// belongs to a plugin of the same name and `catalogue` is a legal id.
+    public var catalogue: URL { root.appendingPathComponent("catalogue", isDirectory: true) }
+
+    /// Where an install, update or removal assembles its work before one rename
+    /// puts it in place: beside `plugins/`, so on the same volume, and outside
+    /// it, so the folder watcher never sees a half-written plugin.
+    public var staging: URL { root.appendingPathComponent("staging", isDirectory: true) }
+
     /// Directories uDeck creates on first launch. Creating them is the caller's
     /// job so that read-only code paths never have a filesystem side effect.
     public var directoriesToCreate: [URL] { [root, plugins, cache] }

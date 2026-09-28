@@ -118,9 +118,19 @@ public struct PluginManifest: Codable, Equatable, Sendable {
     public var settings: [SettingDeclaration]
     public var window: WindowHints
 
+    /// The lowest uDeck release that has everything this plugin uses inside its
+    /// `api`, as `MAJOR.MINOR.PATCH`, or nil for any uDeck that speaks the api.
+    ///
+    /// Optional and new, which is exactly what the `api: 1` promise allows: a
+    /// uDeck older than the field ignores it as it ignores any field it does
+    /// not know. `api` says which contract; this says which release first had
+    /// a row type, a setting type or an environment variable the plugin needs.
+    /// See docs/plugin-repository.md.
+    public var minUDeck: String?
+
     private enum CodingKeys: String, CodingKey {
         case id, name, version, api, kind, description, author, homepage
-        case run, interval, timeout, restart, permissions, settings, window
+        case run, interval, timeout, restart, permissions, settings, window, minUDeck
     }
 
     public init(
@@ -138,7 +148,8 @@ public struct PluginManifest: Codable, Equatable, Sendable {
         restart: RestartPolicy? = nil,
         permissions: PermissionRequest = PermissionRequest(),
         settings: [SettingDeclaration] = [],
-        window: WindowHints = WindowHints()
+        window: WindowHints = WindowHints(),
+        minUDeck: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -155,6 +166,7 @@ public struct PluginManifest: Codable, Equatable, Sendable {
         self.permissions = permissions
         self.settings = settings
         self.window = window
+        self.minUDeck = minUDeck
     }
 
     public init(from decoder: any Decoder) throws {
@@ -174,8 +186,26 @@ public struct PluginManifest: Codable, Equatable, Sendable {
             restart: try c.decodeIfPresent(RestartPolicy.self, forKey: .restart),
             permissions: try c.decodeIfPresent(PermissionRequest.self, forKey: .permissions) ?? PermissionRequest(),
             settings: try c.decodeIfPresent([SettingDeclaration].self, forKey: .settings) ?? [],
-            window: try c.decodeIfPresent(WindowHints.self, forKey: .window) ?? WindowHints()
+            window: try c.decodeIfPresent(WindowHints.self, forKey: .window) ?? WindowHints(),
+            minUDeck: Self.lenientText(c, .minUDeck)
         )
+    }
+
+    /// `minUDeck` as whatever text it was written as, never a reason to refuse
+    /// the manifest.
+    ///
+    /// A uDeck from before the field accepted any value under that key, since it
+    /// ignored the key altogether, and the `api: 1` promise forbids refusing a
+    /// manifest that used to load. So `"minUDeck": 5` is read as the text `5`
+    /// — which is not a version, and says so as a note — rather than failing
+    /// the decode and taking the whole plugin with it.
+    private static func lenientText(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) -> String? {
+        if let text = try? c.decodeIfPresent(String.self, forKey: key) { return text }
+        if let number = try? c.decodeIfPresent(Double.self, forKey: key) {
+            return number == number.rounded() && abs(number) < 1e15 ? String(Int64(number)) : String(number)
+        }
+        if let flag = try? c.decodeIfPresent(Bool.self, forKey: key) { return String(flag) }
+        return c.contains(key) && (try? c.decodeNil(forKey: key)) != true ? "(not text)" : nil
     }
 }
 
@@ -195,6 +225,12 @@ public enum ManifestProblem: Equatable, Sendable, CustomStringConvertible {
     case duplicateSettingKey(String)
     case invalidSettingDeclaration(key: String, reason: String)
     case invalidWindowHints(reason: String)
+
+    /// `minUDeck` names a release newer than the uDeck reading the manifest.
+    /// Fatal, like an `api` this uDeck does not speak: the author said which
+    /// release first had what the plugin uses, and a folder copied in by hand
+    /// is held to that as much as one installed from a repository.
+    case needsNewerUDeck(required: SemanticVersion, running: SemanticVersion)
 
     public var description: String {
         switch self {
@@ -226,6 +262,8 @@ public enum ManifestProblem: Equatable, Sendable, CustomStringConvertible {
             "setting \"\(key)\": \(reason)"
         case .invalidWindowHints(let reason):
             "\"window\": \(reason)"
+        case .needsNewerUDeck(let required, let running):
+            "needs uDeck \(required) or later; this is \(running)"
         }
     }
 }
@@ -235,12 +273,23 @@ extension PluginManifest {
     ///
     /// Returns all the problems rather than the first one: an author fixing a
     /// manifest should not have to discover its faults one launch at a time.
-    public func problems(gridColumns: Int = DeckLayout.defaultColumns) -> [ManifestProblem] {
+    ///
+    /// `udeck` is the running uDeck's own version, when it is one. It is told
+    /// rather than read from the bundle so tests can set it, and nil — a build
+    /// somebody stamped by hand — skips the `minUDeck` comparison rather than
+    /// refusing every plugin that declares one.
+    public func problems(
+        gridColumns: Int = DeckLayout.defaultColumns,
+        udeck: SemanticVersion? = nil
+    ) -> [ManifestProblem] {
         var found: [ManifestProblem] = []
 
         let supported = PluginAPI.oldestSupported ... PluginAPI.current
         if !supported.contains(api) {
             found.append(.unsupportedAPI(declared: api, supported: supported))
+        }
+        if let udeck, let required = minUDeck.flatMap(SemanticVersion.init), required > udeck {
+            found.append(.needsNewerUDeck(required: required, running: udeck))
         }
         if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             found.append(.blankName)

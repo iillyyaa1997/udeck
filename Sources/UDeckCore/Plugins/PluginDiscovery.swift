@@ -13,6 +13,18 @@ public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertibl
     case executableNotExecutable(String)
     case malformedTranslation(file: String, detail: String)
 
+    /// `version` is not `MAJOR.MINOR.PATCH`. A note, never a refusal: the
+    /// contract allowed any string before repositories gave versions a meaning,
+    /// and such a plugin keeps running with its grants keyed by that string. It
+    /// only cannot be published in a repository until the version parses.
+    case versionNotComparable(String)
+
+    /// `minUDeck` is there and is not `MAJOR.MINOR.PATCH`, so there is nothing
+    /// to hold the plugin to. A note rather than a refusal: a uDeck from before
+    /// the field loaded this manifest, and the `api: 1` promise forbids
+    /// refusing it now. A repository refuses it at install instead.
+    case minUDeckNotComparable(String)
+
     public var description: String {
         switch self {
         case .missingManifest:
@@ -35,6 +47,10 @@ public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertibl
             "\(path) is not executable — try chmod +x"
         case .malformedTranslation(let file, let detail):
             "\(file) is not valid and was ignored: \(detail) — the plugin still works in the language manifest.json is written in"
+        case .versionNotComparable(let version):
+            "version \"\(version)\" is not MAJOR.MINOR.PATCH — fine for a folder of your own, required to publish it in a repository"
+        case .minUDeckNotComparable(let text):
+            "minUDeck \"\(text)\" is not MAJOR.MINOR.PATCH, so no uDeck release can be held to it and it was ignored — required to publish it in a repository"
         }
     }
 
@@ -47,7 +63,7 @@ public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertibl
     /// would be a far worse outcome than one that is briefly in English.
     public var isFatal: Bool {
         switch self {
-        case .malformedTranslation: false
+        case .malformedTranslation, .versionNotComparable, .minUDeckNotComparable: false
         default: true
         }
     }
@@ -118,8 +134,18 @@ public struct PluginDiscovery: Sendable {
 
     private let searchPath: [String]
 
-    public init(searchPath: [String]) {
+    /// The running uDeck's own version, which a manifest's `minUDeck` is held
+    /// to. Told rather than read from the bundle, so tests can set it; nil when
+    /// the running version does not parse, which skips that comparison rather
+    /// than refusing every plugin that declares one.
+    private let udeck: SemanticVersion?
+
+    /// The running uDeck's version this discovery holds manifests to.
+    public var udeckVersion: SemanticVersion? { udeck }
+
+    public init(searchPath: [String], udeck: SemanticVersion? = nil) {
         self.searchPath = searchPath
+        self.udeck = udeck
     }
 
     /// `FileManager.default` is documented as safe to use concurrently for the
@@ -182,7 +208,13 @@ public struct PluginDiscovery: Sendable {
         if manifest.id.rawValue != folderName {
             problems.append(.identifierMismatch(declared: manifest.id.rawValue, folder: folderName))
         }
-        problems += manifest.problems().map(DiscoveryProblem.manifest)
+        problems += manifest.problems(udeck: udeck).map(DiscoveryProblem.manifest)
+        if SemanticVersion(manifest.version) == nil {
+            problems.append(.versionNotComparable(manifest.version))
+        }
+        if let minUDeck = manifest.minUDeck, SemanticVersion(minUDeck) == nil {
+            problems.append(.minUDeckNotComparable(minUDeck))
+        }
 
         let resolved = resolveExecutable(manifest.run.first ?? "", in: directory)
         switch resolved {

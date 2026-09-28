@@ -100,6 +100,19 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// without anyone editing a file.
     public var language: Language?
 
+    /// Whether uDeck reads the official plugin catalogue, or `nil` for the
+    /// shipped answer, which is yes.
+    ///
+    /// On from the first launch, because it is what makes uDeck convenient to
+    /// somebody who has never heard of a plugin repository — and optional so
+    /// that the settings file says nothing until the operator switches it off.
+    /// Off, uDeck makes no request about plugins at all; installed plugins keep
+    /// running, and uDeck stops knowing about their updates.
+    public var officialCatalogue: Bool?
+
+    /// The catalogue switch as it stands.
+    public var readsOfficialCatalogue: Bool { officialCatalogue ?? true }
+
     public init(
         version: Int = 1,
         density: Density = .normal,
@@ -117,7 +130,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         ],
         pollWhileCollapsed: Bool = false,
         textSize: CGFloat? = nil,
-        language: Language? = nil
+        language: Language? = nil,
+        officialCatalogue: Bool? = nil
     ) {
         self.version = version
         self.density = density
@@ -134,6 +148,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.pollWhileCollapsed = pollWhileCollapsed
         self.textSize = textSize
         self.language = language
+        self.officialCatalogue = officialCatalogue
     }
 
     /// How big the text actually is.
@@ -332,6 +347,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         // longer has should cost the operator that one setting, not the file.
         language = (try c.decodeIfPresent(String.self, forKey: .language)).flatMap(Language.init(rawValue:))
         textSize = try c.decodeIfPresent(CGFloat.self, forKey: .textSize)
+        officialCatalogue = try c.decodeIfPresent(Bool.self, forKey: .officialCatalogue)
     }
 
     /// These settings with `glass` and `ink` brought into line with the look
