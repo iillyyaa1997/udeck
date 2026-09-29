@@ -850,13 +850,20 @@ not taken on trust after a crash. It is deleted only when it is provably
 uDeck's own by the same rule the warning uses (see *What goes to the Trash*):
 it hashes to a tree uDeck put there — the intent's, or the one `installed.json`
 recorded for the id — and holds nothing the hash does not see, `.DS_Store`
-aside; and the intent did not say it was the operator's. Anything else goes to
-the Trash. A download of the same version as a folder with the operator's
+aside — and, when the copy is the old folder after a removal or an exchange,
+the intent did not say it was the operator's. (When the swap never happened,
+the copy under the id is the download, and the intent's word about the *old*
+copy says nothing about it.) Anything else goes to the Trash. A download of the same version as a folder with the operator's
 `.env` beside it hashes the same as that folder; the `.env` is what tells them
 apart. The one exception is a journal written before its download finished,
 which has no record yet: the swap it would precede never began, so what is
 under the id is the raw host's files, whole or in part, and they are deleted
 when nothing the hash does not see is among them.
+
+A staging folder with no journal at all is deleted: the operation died before
+it wrote one, when nothing of the operator's had been moved in. One whose
+journal is there but cannot be read — a newer uDeck wrote it, or it was cut
+short — or which holds an old copy moved aside, goes to the Trash whole.
 
 Without this, a crash between the swap and the record would leave a plugin that
 looks modified by its own owner.

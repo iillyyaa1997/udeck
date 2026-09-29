@@ -512,6 +512,33 @@ struct PluginInstallerTests {
         #expect(stagingIsEmpty())
     }
 
+    @Test("a journal this uDeck cannot read sends its staging folder to the Trash, not away")
+    func recoverUnreadableJournal() throws {
+        let old = FakeRepository.withUptime(version: "0.9.0")
+        let trash = TestTrash(in: temp.url)
+        let directory = paths.staging.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let aside = directory.appendingPathComponent("displaced/uptime")
+        try write(old, into: aside)
+        try Data("secret".utf8).write(to: aside.appendingPathComponent(".env"))
+        // A newer uDeck's journal, with an operation this one does not know.
+        try Data(#"{"operation":"move","id":"uptime"}"#.utf8).write(to: directory.appendingPathComponent("intent.json"))
+        let done = installer(FetchLog(old), trash: trash).recover()
+        #expect(done == [.discarded(directory: directory.lastPathComponent)])
+        #expect(trash.names == [directory.lastPathComponent], "the old copy and its .env go to the Trash")
+        #expect(stagingIsEmpty())
+    }
+
+    @Test("a staging folder with no journal at all held nothing of the operator's, and is deleted")
+    func recoverNoJournal() throws {
+        let trash = TestTrash(in: temp.url)
+        let directory = paths.staging.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try write(FakeRepository.withUptime(), into: directory.appendingPathComponent("uptime"))
+        let done = installer(FetchLog(FakeRepository.withUptime()), trash: trash).recover()
+        #expect(done == [.discarded(directory: directory.lastPathComponent)])
+        #expect(trash.names.isEmpty)
+        #expect(stagingIsEmpty())
+    }
+
     @Test("a removal whose folder had gone is finished; one whose folder is there never started")
     func recoverRemoval() throws {
         let repository = FakeRepository.withUptime()

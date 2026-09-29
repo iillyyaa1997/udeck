@@ -656,8 +656,19 @@ public struct PluginInstaller: Sendable {
                   let intent = try? JSONDecoder.iso8601.decode(InstallIntent.self, from: data),
                   PluginIdentifier(rawValue: intent.id) != nil else {
                 // No journal: the operation died before it wrote one, when
-                // nothing of the operator's had been moved in yet.
-                try? fileManager.removeItem(at: directory)
+                // nothing of the operator's had been moved in yet — unless a
+                // journal is there and cannot be read (a newer uDeck wrote it,
+                // or it was cut short), or an old copy was already moved
+                // aside. Then what is in it cannot be told apart, and the whole
+                // folder goes to the Trash rather than away.
+                let unreadable = fileManager.fileExists(atPath: intentURL.path)
+                let movedAside = fileManager.fileExists(
+                    atPath: directory.appendingPathComponent("displaced", isDirectory: true).path)
+                if unreadable || movedAside {
+                    dispose(directory, operators: true)
+                } else {
+                    try? fileManager.removeItem(at: directory)
+                }
                 done.append(.discarded(directory: directory.lastPathComponent))
                 continue
             }
