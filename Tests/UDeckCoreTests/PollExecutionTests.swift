@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import UDeckCore
+import UDeckPluginFormatFixtures
 
 /// These run real child processes against the plugins in `examples/`.
 ///

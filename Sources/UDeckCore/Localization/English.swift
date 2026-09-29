@@ -205,7 +205,7 @@ struct English: Vocabulary {
             "Remove \(id)? Its folder and its cache are deleted, and your permission decision, its settings and every window of it on every tab go with them."
         case .catalogueRemoveOwnConfirm(let id):
             "Remove \(id)? Its folder is moved to the Trash — it may be your only copy — and its cache, your permission decision, its settings and every window of it go."
-        case .catalogueRefusal(let refusal): Self.refusal(refusal)
+        case .catalogueRefusal(let refusal): refusal.message
         case .catalogueFileUnreachable(let path, let reason):
             "\(path) could not be fetched: \(reason); nothing was installed."
         case .catalogueTookTooLong: "The install took more than five minutes and was stopped; nothing was installed."
@@ -337,59 +337,6 @@ struct English: Vocabulary {
         case .unitPoints(let value): "\(value) pt"
         case .unitSeconds(let value): String(format: "%.1f s", value)
         case .unitPercent(let value): "\(value) %"
-        }
-    }
-}
-
-extension English {
-    /// Every refusal names the plugin, what is wrong, and what would fix it —
-    /// in the words of docs/plugin-repository.md where it has them.
-    static func refusal(_ refusal: RepositoryRefusal) -> String {
-        switch refusal {
-        case .folderNameNotAnID(let folder):
-            "plugins/\(folder) is not a plugin id: lowercase letters, digits, \".\", \"_\" and \"-\", at most 64, starting with a letter or a digit."
-        case .noManifest(let path): "\(path) is missing; a plugin folder needs one."
-        case .manifestUnreadable(let path, let detail): "\(path) is not a valid manifest: \(detail)"
-        case .manifestIDMismatch(let declared, let folder):
-            "The manifest in plugins/\(folder) says its id is \"\(declared)\"; it has to be the folder's name."
-        case .manifestProblem(let id, let detail): "\(id): \(detail)"
-        case .apiNotSpoken(let name, let version, let api):
-            "\(name) \(version) is written for plugin contract api \(api); this uDeck speaks api \(PluginAPI.current). Update uDeck to install it."
-        case .needsNewerUDeck(let name, let version, let required, let running):
-            "\(name) \(version) needs uDeck \(required) or later; this is uDeck \(running). Update uDeck (Settings → About) to install it."
-        case .versionNotComparable(let name, let version):
-            "\(name)'s version \"\(version)\" is not MAJOR.MINOR.PATCH, so uDeck cannot tell it from another version; it cannot be installed from a repository."
-        case .minUDeckNotComparable(let name, let text):
-            "\(name)'s minUDeck \"\(text)\" is not MAJOR.MINOR.PATCH, so uDeck cannot tell which release it needs; it cannot be installed from a repository."
-        case .producerMissing(let path): "\(path) is what the manifest runs, and the repository does not have it."
-        case .producerNotExecutable(let path):
-            "\(path) is not committed as executable (git mode 100755), and uDeck takes the bit from the repository; commit it with chmod +x."
-        case .producerOutsideFolder(let path): "\(path) leads out of the plugin's folder."
-        case .linkOrSubmodule(let path, let isLink):
-            "\(path) is a \(isLink ? "symbolic link" : "submodule"); a plugin from a repository may contain only files and folders."
-        case .nameNotAllowed(let path):
-            "\(path): names may use only letters, digits, \".\", \"_\" and \"-\", and may not start with \".\""
-        case .namesDifferOnlyInCase(let path, let other):
-            "\(path) and \(other) differ only in letter case, and a Mac's disk takes them for one file."
-        case .tooLarge(let id, let bytes, let files):
-            "\(id) is \(ByteCount.text(bytes, kilo: "KB", mega: "MB")) in \(files) files; uDeck installs plugins of up to 10 MB and \(RepositoryRules.maximumFiles) files."
-        case .fileTooLarge(let path, let bytes):
-            "\(path) is \(ByteCount.text(bytes, kilo: "KB", mega: "MB")); one file of a plugin may be up to 5 MB."
-        case .nestedTooDeep(let path): "\(path) is nested more than \(RepositoryRules.maximumDepth) folders deep."
-        case .sizeNotListed(let path): "The repository lists no size for \(path)."
-        case .arrivedDifferent(let path, let expected, let got):
-            "\(path) arrived different from what the repository lists (expected \(expected), got \(got)); nothing was installed."
-        case .folderDoesNotAddUp(let id):
-            "The files of \(id) do not add up to the folder the repository lists; nothing was installed."
-        case .lfsPointer(let path):
-            "\(path) is a Git LFS pointer, not the file; uDeck does not fetch LFS content."
-        case .arrivedLarger(let path, _):
-            "\(path) arrived larger than the repository lists; nothing was installed."
-        case .failsTheUsualChecks(_, let detail): detail
-        case .notTheVersionShown(let id, let shown, let arrived):
-            "\(id) arrived as \(arrived), not the \(shown) the catalogue showed; nothing was installed. Check again."
-        case .folderAppeared(let id):
-            "A folder named \(id) appeared in the plugins folder while uDeck was installing; nothing was changed."
         }
     }
 }

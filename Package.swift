@@ -20,11 +20,21 @@ let package = Package(
         // parts of that job that look easy — verifying a download, replacing a
         // running bundle, relaunching — are the parts that go wrong quietly.
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+
+        // The plugin format — manifests, cards, repositories and their rules —
+        // in a package of its own, so that it builds on Linux as well, where
+        // the check a plugin repository's CI runs needs it. Linked by path: one
+        // commit is one version of the app and of the format.
+        .package(path: "Packages/UDeckPluginFormat"),
     ],
     targets: [
         // Pure model + logic. Foundation and CoreGraphics only — no AppKit, no
         // SwiftUI — so all of it is testable without a window server.
-        .target(name: "UDeckCore", path: "Sources/UDeckCore"),
+        .target(
+            name: "UDeckCore",
+            dependencies: [.product(name: "UDeckPluginFormat", package: "UDeckPluginFormat")],
+            path: "Sources/UDeckCore"
+        ),
 
         // Everything that touches AppKit/SwiftUI: the panel window, pointer
         // monitoring, screen observation, card rendering, settings UI.
@@ -65,10 +75,28 @@ let package = Package(
         ),
 
         .testTarget(
-            name: "UDeckCoreTests", dependencies: ["UDeckCore"], path: "Tests/UDeckCoreTests",
-            // Read from disk by path, the way `RepositoryExamples` reads
-            // `examples/`: a frozen plugin folder whose git hashes are known.
-            exclude: ["Fixtures"]
+            name: "UDeckCoreTests",
+            dependencies: [
+                "UDeckCore",
+                .product(name: "UDeckPluginFormatFixtures", package: "UDeckPluginFormat"),
+            ],
+            path: "Tests/UDeckCoreTests"
+        ),
+
+        // The plugin format's own tests, run from here as well: `swift test` in
+        // the repository runs every test uDeck has, wherever the code under test
+        // lives. A package's tests are not built for the packages that depend
+        // on it, so without this they would run only from
+        // Packages/UDeckPluginFormat. Named apart from the package's own test
+        // target, so that no two targets in one build share a name.
+        .testTarget(
+            name: "PluginFormatTests",
+            dependencies: [
+                .product(name: "UDeckPluginFormat", package: "UDeckPluginFormat"),
+                .product(name: "UDeckPluginFormatFixtures", package: "UDeckPluginFormat"),
+            ],
+            path: "Packages/UDeckPluginFormat/Tests/UDeckPluginFormatTests",
+            exclude: ["Fixtures", "Corpus"]
         ),
     ]
 )

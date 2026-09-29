@@ -23,6 +23,14 @@ are all in there precisely so they can be tested without a window server. If you
 find yourself putting a decision in a view or in a window controller, it
 probably belongs one layer down.
 
+**The plugin format lives in `Packages/UDeckPluginFormat`, which has no macOS.**
+Manifests, discovery, cards, repositories and their rules: everything a plugin
+is checked against, in a package that also builds on Linux, because that is
+where a plugin repository's CI runs. It uses `FoundationEssentials` there, so no
+`NSRegularExpression`, `JSONSerialization`, `CharacterSet` or `String(format:)`
+in it; CI builds it on Linux (the `plugin-format-linux` job) and says so when
+something slips in. `swift test` at the top runs its tests too.
+
 ## Getting started
 
 ```sh

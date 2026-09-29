@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import Testing
 @testable import UDeckCore
+import UDeckPluginFormatFixtures
 
 /// Installing, updating and removing a plugin from a repository, on a real
 /// disk: every refusal leaves `~/.udeck` as it was, a swap is one step or a

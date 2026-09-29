@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import Testing
 @testable import UDeckCore
+import UDeckPluginFormatFixtures
 
 /// A card's action that is still running when its plugin is quieted is ended —
 /// politely, then not — before the plugin's folder is swapped or removed, and

@@ -706,8 +706,8 @@ installed.
 The hash is not a signature. What makes the content trustworthy is that the
 listing came from the provider over TLS; what the hash adds is the certainty
 that the files on disk are exactly the files that listing named, no more and no
-fewer. `Insecure.SHA1` from CryptoKit does the arithmetic in stage 1; swift-crypto
-offers the same type for the Linux build of stage 2.
+fewer. The arithmetic is `Insecure.SHA1` from swift-crypto, which on a Mac is
+CryptoKit's own type re-exported, and on Linux an implementation of its own.
 
 ### Replacing a folder without losing its window
 
@@ -1205,8 +1205,9 @@ guest's `~/.udeck` over SSH.
 
 ### Unit tests
 
-Everything that decides something lives in UDeckCore, where `swift test` can
-reach it; UDeckKit has no tests. The GitHub client takes its transport as a
+Everything that decides something lives in UDeckCore, or in the plugin format
+it links (`Packages/UDeckPluginFormat`, which builds on Linux as well), where
+`swift test` can reach it; UDeckKit has no tests. The GitHub client takes its transport as a
 parameter, so tests answer it with recorded responses (a stub `URLProtocol`),
 never the network. What they cover:
 

@@ -1,4 +1,5 @@
 import Foundation
+import UDeckPluginFormat
 
 /// One tab: a name and a grid of windows.
 public struct DeckTab: Identifiable, Codable, Equatable, Sendable {
@@ -19,7 +20,9 @@ public struct DeckTab: Identifiable, Codable, Equatable, Sendable {
 /// copied between machines. Nothing in it refers to points or pixels — a layout
 /// written on a 2560pt display has to be right on a 1728pt one.
 public struct DeckLayout: Codable, Equatable, Sendable {
-    public static let defaultColumns = 12
+    /// Twelve, and the same number a manifest's `window.defaultWidth` is held
+    /// to — both come from `PluginWindowLimits`.
+    public static let defaultColumns = PluginWindowLimits.gridColumns
 
     /// The tallest a single window may be, in row units.
     ///
@@ -27,7 +30,9 @@ public struct DeckLayout: Codable, Equatable, Sendable {
     /// into cells, and without a ceiling a single flick downwards could ask for
     /// a window thousands of rows tall, which the grid would dutifully lay out.
     /// Twenty-four rows is well past the height of any panel on any screen.
-    public static let maximumWindowHeight = 24
+    /// A manifest's `window.defaultHeight` is held to the same number, in the
+    /// format itself (`PluginWindowLimits.maximumHeight`).
+    public static let maximumWindowHeight = PluginWindowLimits.maximumHeight
 
     /// The lowest row a window may occupy.
     ///
