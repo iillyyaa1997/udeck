@@ -128,6 +128,32 @@ public enum GitHash {
         return tree(entries)
     }
 
+    /// What in a folder on disk the tree id leaves out, as paths relative to it:
+    /// dot-names at any depth (`.git`, `.env`, `.venv`) and anything that is
+    /// neither a file nor a folder — the entries `tree(ofDirectoryAt:)` skips.
+    ///
+    /// The hash skipping them is what keeps `.DS_Store` from making a plugin
+    /// modified, and the same skip would let a folder holding the operator's
+    /// `.env` pass for exactly what uDeck installed. Whoever throws such a folder
+    /// away asks this first: uDeck never destroys something it did not put
+    /// there. `.DS_Store` itself is left out of the answer — the Finder writes
+    /// it into any folder somebody opens, and it holds nothing of anybody's.
+    public static func unhashed(inDirectoryAt url: URL) -> [String] {
+        let fileManager = FileManager.default
+        guard let names = try? fileManager.contentsOfDirectory(atPath: url.path) else { return [] }
+        var found: [String] = []
+        for name in names.sorted() where name != ".DS_Store" {
+            let child = url.appendingPathComponent(name)
+            let type = (try? fileManager.attributesOfItem(atPath: child.path))?[.type] as? FileAttributeType
+            if name.hasPrefix(".") || (type != .typeDirectory && type != .typeRegular) {
+                found.append(name)
+            } else if type == .typeDirectory {
+                found += unhashed(inDirectoryAt: child).map { "\(name)/\($0)" }
+            }
+        }
+        return found
+    }
+
     /// Whether `text` is forty lowercase hexadecimal characters.
     public static func isObjectID(_ text: String) -> Bool {
         text.utf8.count == 40 && text.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }

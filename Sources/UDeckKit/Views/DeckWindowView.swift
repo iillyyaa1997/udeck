@@ -124,8 +124,8 @@ struct DeckWindowView: View {
         switch model.presence(of: window.pluginID) {
         case .present:
             card(for: presentation)
-        case .broken(let problems):
-            missing(problems: problems, reinstallable: model.installed[window.pluginID] != nil)
+        case .broken(let problems, let reinstallable):
+            missing(problems: problems, reinstallable: reinstallable)
         case .missing(let reinstallable):
             missing(problems: [], reinstallable: reinstallable)
         }
@@ -133,7 +133,8 @@ struct DeckWindowView: View {
 
     /// A window whose plugin is not here to run. It stays where it is and says
     /// so — windows are never removed because a plugin is missing — with
-    /// **Reinstall** when uDeck installed it, and **Remove from tab** always.
+    /// **Reinstall** when uDeck installed it and the official catalogue is on,
+    /// and **Remove from tab** always.
     private func missing(problems: [String], reinstallable: Bool) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if problems.isEmpty {

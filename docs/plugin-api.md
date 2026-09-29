@@ -111,8 +111,9 @@ plugin set under version control somewhere else.
 |---|---|---|
 | `id` | yes | Lowercase letters, digits and `- _ .`, 1–64 characters, matching the folder name. |
 | `name` | yes | What the operator sees. |
-| `version` | yes | Your plugin's version. Changing it re-asks the permission question — see [Permissions](#permissions). |
+| `version` | yes | Your plugin's version, as `MAJOR.MINOR.PATCH` — see [Versions](#versions). Changing it re-asks the permission question — see [Permissions](#permissions). |
 | `api` | yes | The contract version this plugin is written against. Currently `1`. |
+| `minUDeck` | no | The oldest uDeck release that has everything your plugin uses, as `MAJOR.MINOR.PATCH` — see [Versions](#versions). Absent means any uDeck that speaks your `api`. |
 | `kind` | yes | `poll` or `resident`. Only `poll` is implemented; see [Runtime kinds](#runtime-kinds). |
 | `run` | yes | The command, as an argument vector. Never a shell string. |
 | `interval` | for `poll` | Seconds between runs. At least **1** — a producer is a whole process, and asking for one more often than that is a busy loop rather than a poll. |
@@ -335,7 +336,7 @@ variable should fall back to your declared default rather than crash.
 | `UDECK_API` | The contract version uDeck is speaking (`1`). |
 | `UDECK_PLUGIN_ID` | Your plugin's id. |
 | `UDECK_PLUGIN_DIR` | Your plugin's folder. Also the working directory. |
-| `UDECK_CACHE_DIR` | A directory that is yours to write in. Created before each run. |
+| `UDECK_CACHE_DIR` | A directory that is yours to write in. Created before each run. The only place you should write: see below. |
 | `UDECK_APPEARANCE` | `dark`. The panel hangs over whatever is on screen, so it does not follow the system appearance; the variable exists so that it can start to without breaking you. |
 | `UDECK_REFRESH_REASON` | `launch`, `interval` or `manual`. |
 | `UDECK_LANG` | The language the panel is currently speaking, as a code: `en`, `ru`. Answer in it if you can, and fall back to whatever you write in if you cannot. |
@@ -351,6 +352,14 @@ English; one that reads `UDECK_LANG` follows the panel.
 The environment is **built, not inherited.** Nothing else from uDeck's own
 environment is passed through, which is deliberate: a third-party plugin should
 never see whatever secrets happen to be in the shell that started the app.
+
+**Write only into `UDECK_CACHE_DIR`**, never into `UDECK_PLUGIN_DIR`, even
+though it is your working directory. A plugin installed from a repository is
+compared with what the repository holds every time uDeck reads the plugins
+folder, and a file written into its own folder makes it **Modified locally** on
+every run — it loses its **Verified** mark and is offered a reinstall it does
+not need. Your cache directory is yours, survives updates, and is removed with
+the plugin.
 
 ---
 
@@ -467,6 +476,39 @@ Changing your plugin's `version` re-opens the question, so an update that starts
 asking for more cannot inherit an answer given to an earlier version.
 
 `screen` needs macOS Accessibility and is **not implemented in this version.**
+
+---
+
+## Versions
+
+`version` is three whole numbers:
+
+```
+MAJOR.MINOR.PATCH        each part 0, or 1–999999999 with no leading zero
+```
+
+`1.2.0`, `0.1.0` and `10.0.3` are versions; `1.2`, `v1.2.0`, `1.2.0-beta` and
+`01.2.0` are not. Two versions compare part by part, as numbers: `1.10.0` is
+newer than `1.9.0`. As a guide: PATCH for a fix, MINOR for something new (a
+setting, a row, a permission), MAJOR when something the operator relied on
+changes — a setting's `key` renamed or removed, or the card meaning something
+else.
+
+A folder you put into `~/.udeck/plugins` yourself still runs with any `version`
+string; one that does not parse gets a note in Settings. A plugin installed from
+a repository has to have one uDeck can compare — without it there is no "1.3.0
+available" and no going back — so there it is required.
+
+`minUDeck` uses the same grammar and is compared with the running uDeck's own
+version. It says which *release* first had something your plugin uses inside
+its `api` — a row type, a setting type, an environment variable — where `api`
+says which *contract*. A uDeck older than `minUDeck` refuses the plugin, with a
+message naming both versions, whether it was copied in by hand or offered by a
+catalogue; a uDeck from before the field existed ignores it, as it ignores any
+field it does not know. Leave it out if any uDeck that speaks your `api` will
+do.
+
+How repositories use both is in [Plugin repositories](plugin-repository.md#versions-and-compatibility).
 
 ---
 

@@ -26,14 +26,18 @@ public struct FolderRenames: Sendable {
     public var exchange: @Sendable (_ from: URL, _ to: URL) -> Int32
     /// Moves `from` to `to`, failing rather than overwriting what is at `to`.
     public var exclusive: @Sendable (_ from: URL, _ to: URL) -> Int32
+    /// One move of the fallback, on a volume that cannot exchange.
+    public var move: @Sendable (_ from: URL, _ to: URL) throws -> Void
 
     public init(exchange: @escaping @Sendable (URL, URL) -> Int32,
-                exclusive: @escaping @Sendable (URL, URL) -> Int32) {
+                exclusive: @escaping @Sendable (URL, URL) -> Int32,
+                move: @escaping @Sendable (URL, URL) throws -> Void = FolderRenames.fileManagerMove) {
         self.exchange = exchange
         self.exclusive = exclusive
+        self.move = move
     }
 
-    /// `renamex_np` with `RENAME_SWAP` and `RENAME_EXCL`.
+    /// `renamex_np` with `RENAME_SWAP` and `RENAME_EXCL`, and `FileManager`'s move.
     public static let system = FolderRenames(
         exchange: { from, to in
             renamex_np(from.path, to.path, UInt32(RENAME_SWAP)) == 0 ? 0 : errno
@@ -42,6 +46,10 @@ public struct FolderRenames: Sendable {
             renamex_np(from.path, to.path, UInt32(RENAME_EXCL)) == 0 ? 0 : errno
         }
     )
+
+    public static let fileManagerMove: @Sendable (URL, URL) throws -> Void = { from, to in
+        try FileManager.default.moveItem(at: from, to: to)
+    }
 }
 
 /// One install, update or earlier version to be made: a plugin's folder at one
@@ -375,9 +383,8 @@ public struct PluginInstaller: Sendable {
         let id = request.id.rawValue
         let live = paths.plugins.appendingPathComponent(id, isDirectory: true)
         let existing = records.plugins[id]
-        let liveExists = fileManager.fileExists(atPath: live.path)
-        let liveTree = liveExists ? (try? GitHash.tree(ofDirectoryAt: live)) ?? nil : nil
-        let operators = liveExists && (existing == nil || liveTree != existing?.tree)
+        let liveExists = folderIsTaken(id)
+        let operators = liveExists && Self.holdsTheOperatorsWork(live, record: existing)
 
         let record = makeRecord(request, existing: existing)
         do {
@@ -465,16 +472,26 @@ public struct PluginInstaller: Sendable {
             .appendingPathComponent(id, isDirectory: true)
         do {
             try fileManager.createDirectory(at: displaced.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try fileManager.moveItem(at: live, to: displaced)
+            try renames.move(live, displaced)
         } catch {
             abandon(at: staging)
             throw InstallError.cannotWrite("moving the old \(id) aside: \(error.localizedDescription)")
         }
         do {
-            try fileManager.moveItem(at: staged, to: live)
+            try renames.move(staged, live)
         } catch {
             // Put the old copy back rather than leave nothing at all.
-            try? fileManager.moveItem(at: displaced, to: live)
+            do {
+                try renames.move(displaced, live)
+            } catch {
+                // The old copy is still in staging, beside the journal, and
+                // may be the operator's only one: staging stays as it is, and
+                // the next launch puts it back (`recover`). Throwing the
+                // staging folder away here would delete it.
+                throw InstallError.cannotWrite(
+                    "moving \(id) into place, and then back: \(error.localizedDescription); the old copy is kept in "
+                    + "\(displaced.path) and goes back at the next launch")
+            }
             abandon(at: staging)
             throw InstallError.cannotWrite("moving \(id) into place: \(error.localizedDescription)")
         }
@@ -522,9 +539,8 @@ public struct PluginInstaller: Sendable {
         let records = try loadRecords()
         let live = paths.plugins.appendingPathComponent(id.rawValue, isDirectory: true)
         let existing = records[id]
-        let liveExists = fileManager.fileExists(atPath: live.path)
-        let liveTree = liveExists ? (try? GitHash.tree(ofDirectoryAt: live)) ?? nil : nil
-        let operators = liveExists && (existing == nil || liveTree != existing?.tree)
+        let liveExists = folderIsTaken(id.rawValue)
+        let operators = liveExists && Self.holdsTheOperatorsWork(live, record: existing)
 
         let directory = paths.staging.appendingPathComponent(UUID().uuidString, isDirectory: true)
         do {
@@ -644,6 +660,31 @@ public struct PluginInstaller: Sendable {
     }
 
     // MARK: - Pieces
+
+    /// Whether something already sits at `plugins/<id>` — asked of the disk,
+    /// as the swap will find it, and not of a list of folders read earlier.
+    ///
+    /// On a volume that ignores case, which is how a Mac ships, `plugins/Uptime`
+    /// is `plugins/uptime` to the rename that puts a plugin in place, whatever
+    /// its spelling. A row that compared names exactly would offer **Install**
+    /// over it without a word, and the swap would take it anyway.
+    public func folderIsTaken(_ id: String) -> Bool {
+        Self.folderIsTaken(id, in: paths)
+    }
+
+    public static func folderIsTaken(_ id: String, in paths: UDeckPaths) -> Bool {
+        FileManager.default.fileExists(atPath: paths.plugins.appendingPathComponent(id, isDirectory: true).path)
+    }
+
+    /// Whether the folder at `live` holds anything of the operator's: there is
+    /// no record of uDeck putting it there, it no longer hashes to what was
+    /// put there, or it holds something the hash does not see — a `.env`, a
+    /// `.git` — which the hash matching says nothing about.
+    static func holdsTheOperatorsWork(_ live: URL, record: InstalledRecord?) -> Bool {
+        guard let record else { return true }
+        let tree = (try? GitHash.tree(ofDirectoryAt: live)) ?? nil
+        return tree != record.tree || !GitHash.unhashed(inDirectoryAt: live).isEmpty
+    }
 
     private func write(_ intent: InstallIntent, in directory: URL) throws {
         let data = try JSONEncoder.iso8601.encode(intent)

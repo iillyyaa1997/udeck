@@ -246,6 +246,52 @@ struct CatalogueTests {
         #expect(!UpdateOffer.current.isWaiting && !UpdateOffer.older(version: "1").isWaiting)
     }
 
+    /// The specification: *"A plugin marked modified is not updated over
+    /// without a word."* The catalogue's row has the same button, and the
+    /// same rule.
+    @Test("Update and Switch to over a copy changed on disk name the version its changes are replaced with")
+    func updatingOverChanges() {
+        #expect(UpdateOffer.newer(version: "1.3.0").versionReplacingChanges(standing: .modifiedLocally) == "1.3.0")
+        #expect(UpdateOffer.changedStill(version: "1.2.0").versionReplacingChanges(standing: .modifiedLocally) == "1.2.0")
+        #expect(UpdateOffer.older(version: "1.1.0").versionReplacingChanges(standing: .modifiedLocally) == "1.1.0")
+        #expect(UpdateOffer.newer(version: "1.3.0").versionReplacingChanges(standing: .verified) == nil,
+                "nothing of the operator's to warn about")
+        #expect(UpdateOffer.current.versionReplacingChanges(standing: .modifiedLocally) == nil, "nothing offered")
+        #expect(UpdateOffer.goneFromRepository.versionReplacingChanges(standing: .modifiedLocally) == nil)
+    }
+
+    /// *"Off, uDeck makes no request about plugins at all"* — and **Reinstall**
+    /// is a download, wherever its button is.
+    @Test("Reinstall is offered only while the official catalogue is on")
+    func reinstallFollowsTheSwitch() throws {
+        #expect(PluginStanding.modifiedLocally.offersReinstall(readsCatalogue: true))
+        #expect(PluginStanding.missing.offersReinstall(readsCatalogue: true))
+        #expect(!PluginStanding.verified.offersReinstall(readsCatalogue: true))
+        #expect(!PluginStanding.folderOfYourOwn.offersReinstall(readsCatalogue: true))
+        #expect(!PluginStanding.modifiedLocally.offersReinstall(readsCatalogue: false))
+        #expect(!PluginStanding.missing.offersReinstall(readsCatalogue: false))
+
+        let repository = FakeRepository.withUptime()
+        let id = PluginIdentifier(rawValue: "uptime")!
+        let installed = InstalledPlugins(plugins: ["uptime": record(repository)])
+        #expect(PluginPresence.of(id, plugins: [], installed: installed, readsCatalogue: true) == .missing(reinstallable: true))
+        #expect(PluginPresence.of(id, plugins: [], installed: installed, readsCatalogue: false) == .missing(reinstallable: false))
+        #expect(PluginPresence.of(id, plugins: [], installed: InstalledPlugins(), readsCatalogue: true)
+                == .missing(reinstallable: false))
+
+        // A folder under the id that will not run: its window offers the same.
+        let temp = TemporaryDirectory()
+        let broken = temp.writePlugin(folder: "uptime", manifest: "{ not json")
+        let found = PluginDiscovery(searchPath: ["/bin"], udeck: udeck).load(broken)
+        guard case .broken(_, let on) = PluginPresence.of(id, plugins: [found], installed: installed, readsCatalogue: true),
+              case .broken(_, let off) = PluginPresence.of(id, plugins: [found], installed: installed, readsCatalogue: false)
+        else {
+            Issue.record("a folder that will not run is broken")
+            return
+        }
+        #expect(on && !off)
+    }
+
     @Test("the catalogue loads from the cache alone, sorted by name, translated where there is a translation")
     func loadsFromTheCache() throws {
         let temp = TemporaryDirectory()

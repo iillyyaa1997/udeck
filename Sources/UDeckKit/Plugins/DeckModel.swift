@@ -53,10 +53,10 @@ public final class DeckModel {
     let trash: any PluginTrash
     var catalogueTimer: Timer?
     var launchRefresh: Task<Void, Never>?
-    /// Plugins being replaced or removed: nothing of them is scheduled.
-    var quieted: Set<String> = []
-    /// Runs in flight, per plugin, so quieting one can wait for its run to end.
-    var runsInFlight: [String: Int] = [:]
+    /// Plugins being replaced or removed, on which nothing starts, and the
+    /// runs of each in flight — polls and card actions — so quieting one can
+    /// wait for them to end.
+    var pluginRuns = PluginQuiet()
 
     /// Problems worth showing the operator: a settings file that would not
     /// parse, a layout that could not be written, a plugin whose windows had to
@@ -292,7 +292,7 @@ public final class DeckModel {
 
         for plugin in plugins {
             guard let manifest = plugin.manifest, manifest.kind == .poll,
-                  !quieted.contains(manifest.id.rawValue),
+                  !pluginRuns.isQuiet(manifest.id.rawValue),
                   placedPluginIDs.contains(manifest.id),
                   launchDecision(for: manifest.id).isAllowed,
                   let interval = manifest.interval, interval > 0
@@ -334,7 +334,7 @@ public final class DeckModel {
         refreshTask?.cancel()
         let due = plugins.filter { plugin in
             guard plugin.manifest?.kind == .poll, let id = plugin.manifest?.id,
-                  !quieted.contains(id.rawValue) else { return false }
+                  !pluginRuns.isQuiet(id.rawValue) else { return false }
             return placedPluginIDs.contains(id)
         }
         refreshTask = Task { [weak self] in
@@ -365,9 +365,8 @@ public final class DeckModel {
     }
 
     private func poll(_ plugin: DiscoveredPlugin, reason: RefreshReason) async {
-        guard let id = plugin.manifest?.id, !quieted.contains(id.rawValue) else { return }
-        runsInFlight[id.rawValue, default: 0] += 1
-        defer { runsInFlight[id.rawValue, default: 1] -= 1 }
+        guard let id = plugin.manifest?.id, pluginRuns.begin(id.rawValue) else { return }
+        defer { pluginRuns.end(id.rawValue) }
         let outcome = await executor.poll(
             plugin: plugin,
             grant: grants[id],
@@ -556,6 +555,12 @@ public final class DeckModel {
         guard let executable = resolve(command: action.run[0], for: id) else {
             return "\(action.run[0]) was not found"
         }
+        // Nothing of a plugin runs across the swap of its folder or its
+        // removal: an action pressed meanwhile is refused, and one that starts
+        // is counted, so quieting the plugin waits for it as it waits for a poll.
+        guard pluginRuns.begin(id.rawValue) else {
+            return "\(id) is being updated or removed; try again in a moment"
+        }
 
         let process = Process()
         process.executableURL = executable
@@ -568,9 +573,14 @@ public final class DeckModel {
         process.environment = actionEnvironment(for: id)
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
+        let plugin = id.rawValue
+        process.terminationHandler = { [weak self] _ in
+            Task { @MainActor in self?.pluginRuns.end(plugin) }
+        }
         do {
             try process.run()
         } catch {
+            pluginRuns.end(plugin)
             return "\(action.run[0]) could not be started: \(error.localizedDescription)"
         }
         return nil

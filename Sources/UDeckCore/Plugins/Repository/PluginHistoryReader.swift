@@ -115,22 +115,31 @@ public enum PluginPresence: Equatable, Sendable {
     /// Found and usable.
     case present
     /// A folder is there under this id, and it will not run: its problems.
-    case broken([String])
-    /// No folder under this id at all. `reinstallable` when uDeck installed it.
+    /// `reinstallable` as for `missing`.
+    case broken([String], reinstallable: Bool)
+    /// No folder under this id at all. `reinstallable` when uDeck installed it
+    /// and may ask the repository for it — **Official catalogue** is on.
     case missing(reinstallable: Bool)
 
     /// Where `id` stands among the folders found and the records kept.
+    ///
+    /// `readsCatalogue` is the **Official catalogue** switch. Off, uDeck makes
+    /// no request about plugins at all, and **Reinstall** is a download, so it
+    /// is not offered — as **Back to** and **Earlier versions** are not.
     public static func of(
         _ id: PluginIdentifier,
         plugins: [DiscoveredPlugin],
-        installed: InstalledPlugins
+        installed: InstalledPlugins,
+        readsCatalogue: Bool
     ) -> PluginPresence {
+        let reinstallable = installed[id] != nil && readsCatalogue
         if let plugin = plugins.first(where: { $0.manifest?.id == id && $0.folderName == id.rawValue }) {
-            return plugin.isUsable ? .present : .broken(plugin.problems.filter(\.isFatal).map(\.description))
+            return plugin.isUsable
+                ? .present : .broken(plugin.problems.filter(\.isFatal).map(\.description), reinstallable: reinstallable)
         }
         if let folder = plugins.first(where: { $0.folderName == id.rawValue }) {
-            return .broken(folder.problems.filter(\.isFatal).map(\.description))
+            return .broken(folder.problems.filter(\.isFatal).map(\.description), reinstallable: reinstallable)
         }
-        return .missing(reinstallable: installed[id] != nil)
+        return .missing(reinstallable: reinstallable)
     }
 }

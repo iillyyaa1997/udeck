@@ -239,6 +239,14 @@ public enum PluginStanding: Equatable, Sendable {
     /// uDeck installed it, and its folder is gone.
     case missing
 
+    /// Whether this plugin's row offers **Reinstall**: what the record says was
+    /// installed, put back over a copy changed on disk or where the folder has
+    /// gone. It is a download, so only while **Official catalogue** is on —
+    /// off, uDeck makes no request about plugins at all.
+    public func offersReinstall(readsCatalogue: Bool) -> Bool {
+        readsCatalogue && (self == .modifiedLocally || self == .missing)
+    }
+
     /// Where a folder stands, from its record and what its folder hashes to now
     /// (nil when there is no folder).
     public static func of(record: InstalledRecord?, folderExists: Bool, treeOnDisk: String?) -> PluginStanding {

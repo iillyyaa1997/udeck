@@ -166,7 +166,7 @@ extension DeckModel {
 
     /// Whether a window's plugin is here to run.
     public func presence(of id: PluginIdentifier) -> PluginPresence {
-        PluginPresence.of(id, plugins: plugins, installed: installed)
+        PluginPresence.of(id, plugins: plugins, installed: installed, readsCatalogue: settings.readsOfficialCatalogue)
     }
 
     /// What the repository has for an installed plugin, or nil when uDeck did
@@ -186,8 +186,11 @@ extension DeckModel {
         installed.plugins.keys.filter { updateOffer(for: $0)?.isWaiting == true && folderExists($0) }.count
     }
 
+    /// Whether something sits at `plugins/<id>` — asked the way the swap
+    /// will find it, so a folder spelt `Uptime` on a volume that ignores case
+    /// is offered **Replace…** rather than an **Install** that would take it.
     public func folderExists(_ id: String) -> Bool {
-        plugins.contains { $0.folderName == id }
+        PluginInstaller.folderIsTaken(id, in: paths)
     }
 
     /// The page where a plugin's folder is read, at a commit.
@@ -233,21 +236,25 @@ extension DeckModel {
 
     // MARK: - Quieting
 
-    /// Stops scheduling a plugin's polls and waits for a run in flight to end —
-    /// which cannot take longer than its `timeout` and the half-second grace —
-    /// so nothing of it runs across a swap or a removal.
+    /// Stops scheduling a plugin's polls, refuses its card actions, and waits
+    /// for the runs in flight to end — a poll cannot take longer than its
+    /// `timeout` and the half-second grace — so nothing of it runs across a
+    /// swap or a removal.
+    ///
+    /// A card's action has no timeout of its own, so the same wait is all it
+    /// is given: one still running when it is up keeps running across the swap.
     func quiet(_ id: PluginIdentifier) async {
-        quieted.insert(id.rawValue)
+        pluginRuns.quiet(id.rawValue)
         stopPolling(id)
         let limit = (plugin(withID: id)?.manifest?.timeout ?? 5) + 1.5
         let deadline = Date().addingTimeInterval(limit)
-        while (runsInFlight[id.rawValue] ?? 0) > 0, Date() < deadline {
+        while pluginRuns.isRunning(id.rawValue), Date() < deadline {
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
     }
 
     func resume(_ id: PluginIdentifier) {
-        quieted.remove(id.rawValue)
+        pluginRuns.resume(id.rawValue)
         restartPolling()
     }
 
@@ -274,8 +281,9 @@ extension DeckModel {
 
     /// **Reinstall**: what the record says was installed, put back — over a
     /// copy changed on disk, which goes to the Trash, or where it has gone.
+    /// A download, so not while **Official catalogue** is off.
     public func reinstall(_ id: String) {
-        guard let record = installed.plugins[id] else { return }
+        guard settings.readsOfficialCatalogue, let record = installed.plugins[id] else { return }
         runAtCommit(.reinstall, id: id, commit: record.commit, version: record.version)
     }
 
@@ -316,7 +324,9 @@ extension DeckModel {
     /// An operation at a commit that is not the head: its listing from the
     /// cache, or one request for it.
     private func runAtCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String) {
-        guard busyPlugin == nil else { return }
+        // Off, uDeck makes no request about plugins at all — whichever button
+        // was pressed, and whatever screen it was on.
+        guard settings.readsOfficialCatalogue, busyPlugin == nil else { return }
         busyPlugin = id
         operationProblems[id] = nil
         let refresher = CatalogueRefresher(provider: provider, store: catalogueStore, limits: limits)
@@ -346,7 +356,8 @@ extension DeckModel {
         version: String,
         manifest: Data?
     ) {
-        guard busyPlugin == nil, let identifier = PluginIdentifier(rawValue: id) else { return }
+        guard settings.readsOfficialCatalogue, busyPlugin == nil,
+              let identifier = PluginIdentifier(rawValue: id) else { return }
         guard installedProblem == nil else {
             operationProblems[id] = .recordsBroken(installedProblem ?? "")
             return

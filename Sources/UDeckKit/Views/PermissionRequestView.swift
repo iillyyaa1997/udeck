@@ -52,12 +52,17 @@ struct PermissionRequestView: View {
                     model.decidePermissions(for: pluginID, allow: true)
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
+                // Identifiers, not titles, for whatever drives the panel from
+                // outside — the end-to-end lab places a plugin and allows it here,
+                // as the operator does, and every title is translated.
+                .accessibilityIdentifier("consent.\(pluginID.rawValue).allow")
 
                 Button(strings(.actionDecline)) {
                     shell.onInteract()
                     model.decidePermissions(for: pluginID, allow: false)
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
+                .accessibilityIdentifier("consent.\(pluginID.rawValue).decline")
             }
         }
     }

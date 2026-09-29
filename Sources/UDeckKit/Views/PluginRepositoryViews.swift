@@ -115,6 +115,9 @@ struct CatalogueRowView: View {
     @Environment(\.openURL) private var openURL
     @State private var details = false
     @State private var confirming = false
+    /// The version **Update** or **Switch to** was pressed for, over a copy
+    /// changed on disk: what the warning names before anything is replaced.
+    @State private var updatingOverChanges: String?
 
     private var id: String { entry.id }
     private var manifest: PluginManifest? { entry.manifest(in: strings.language.rawValue) }
@@ -160,6 +163,12 @@ struct CatalogueRowView: View {
                     model.install(id)
                 }
             }
+            if let version = updatingOverChanges {
+                confirmation(strings(.catalogueUpdateOverChanges(id: id, version: version)),
+                             button: strings(.catalogueUpdate), identifier: "catalogue.\(id).confirm") {
+                    model.update(id)
+                }
+            }
             if let problem = model.operationProblems[id] {
                 ProblemText(problem: problem).accessibilityIdentifier("catalogue.\(id).problem")
             }
@@ -197,11 +206,11 @@ struct CatalogueRowView: View {
             case .installed(let offer):
                 switch offer {
                 case .newer, .changedStill:
-                    Button(strings(.catalogueUpdate)) { model.update(id) }
+                    Button(strings(.catalogueUpdate)) { update(offer) }
                         .disabled(model.busyPlugin != nil)
                         .accessibilityIdentifier("catalogue.\(id).update")
                 case .older(let version):
-                    Button(strings(.catalogueSwitchTo(version: version))) { model.update(id) }
+                    Button(strings(.catalogueSwitchTo(version: version))) { update(offer) }
                         .disabled(model.busyPlugin != nil)
                         .accessibilityIdentifier("catalogue.\(id).update")
                 default:
@@ -216,6 +225,17 @@ struct CatalogueRowView: View {
                     .buttonStyle(.link)
                     .accessibilityIdentifier("catalogue.\(id).details")
             }
+        }
+    }
+
+    /// **Update** or **Switch to**: at once, or — over a copy changed on
+    /// disk — only after saying that those changes go to the Trash, as the
+    /// same button on the installed plugin's row does.
+    private func update(_ offer: UpdateOffer) {
+        if let version = offer.versionReplacingChanges(standing: model.standing(of: id)) {
+            updatingOverChanges = version
+        } else {
+            model.update(id)
         }
     }
 
@@ -256,10 +276,14 @@ struct CatalogueRowView: View {
             HStack {
                 Button(button, role: .destructive) {
                     confirming = false
+                    updatingOverChanges = nil
                     action()
                 }
                 .accessibilityIdentifier(identifier)
-                Button(strings(.actionCancel)) { confirming = false }
+                Button(strings(.actionCancel)) {
+                    confirming = false
+                    updatingOverChanges = nil
+                }
             }
         }
         .padding(8)
@@ -357,12 +381,16 @@ struct InstalledRepositoryControls: View {
             }
             if let offer, offer.isWaiting || isOlder(offer) {
                 Button(isOlder(offer) ? strings(.catalogueSwitchTo(version: olderVersion(offer))) : strings(.catalogueUpdate)) {
-                    if standing == .modifiedLocally { confirming = .updateOverChanges } else { model.update(id) }
+                    if offer.versionReplacingChanges(standing: standing) != nil {
+                        confirming = .updateOverChanges
+                    } else {
+                        model.update(id)
+                    }
                 }
                 .disabled(busy)
                 .accessibilityIdentifier("plugin.\(id).update")
             }
-            if let record, standing == .modifiedLocally || standing == .missing {
+            if let record, standing.offersReinstall(readsCatalogue: model.settings.readsOfficialCatalogue) {
                 Button(strings(.catalogueReinstall(version: record.version))) { model.reinstall(id) }
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).reinstall")
@@ -404,11 +432,8 @@ struct InstalledRepositoryControls: View {
             text = own ? strings(.catalogueRemoveOwnConfirm(id: id)) : strings(.catalogueRemoveConfirm(id: id))
             button = strings(.catalogueRemove)
         case .updateOverChanges:
-            let version: String = switch offer {
-            case .newer(let v)?, .changedStill(let v)?, .older(let v)?: v
-            default: ""
-            }
-            text = strings(.catalogueUpdateOverChanges(id: id, version: version))
+            text = strings(.catalogueUpdateOverChanges(
+                id: id, version: offer?.versionReplacingChanges(standing: standing) ?? ""))
             button = strings(.catalogueUpdate)
         }
         return VStack(alignment: .leading, spacing: 5) {
@@ -462,6 +487,12 @@ struct HistoryList: View {
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+        // A container of its own, or the identifier lands on every line in it
+        // and replaces theirs: measured in the lab on 2026-09-29, each version,
+        // its date and its **Install this version** all answered to
+        // `plugin.<id>.history`, and no line could be told from another
+        // (.build/e2e/20260928-221216Z, plugins.earlier-version).
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("plugin.\(id).history")
     }
 

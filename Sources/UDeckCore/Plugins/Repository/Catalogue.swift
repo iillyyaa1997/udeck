@@ -133,6 +133,22 @@ public enum UpdateOffer: Equatable, Sendable {
         }
     }
 
+    /// The version **Update** or **Switch to** would put in place, when the
+    /// copy it replaces was changed on disk — so the button says first that
+    /// those changes go to the Trash: *"Your changes to uptime will be moved
+    /// to the Trash and replaced with 1.3.0."* Nil when there is nothing of the
+    /// operator's to warn about, or nothing offered.
+    ///
+    /// One rule for every place the button is, the catalogue's row as much as
+    /// the installed plugin's.
+    public func versionReplacingChanges(standing: PluginStanding) -> String? {
+        guard standing == .modifiedLocally else { return nil }
+        switch self {
+        case .newer(let version), .changedStill(let version), .older(let version): return version
+        case .current, .cannotRun, .goneFromRepository: return nil
+        }
+    }
+
     /// Compares an installed record with the head's entry for the same id.
     public static func of(_ record: InstalledRecord, head entry: CatalogueEntry?) -> UpdateOffer {
         guard let entry else { return .goneFromRepository }

@@ -77,10 +77,15 @@ public struct SettingsView: View {
         // visibility is stated rather than left to be remembered.
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(Section.allCases, selection: $section) { item in
-                Label(model.strings(item.title), systemImage: item.symbol).tag(item)
+                Label(model.strings(item.title), systemImage: item.symbol)
                     // How many plugin updates are waiting, where the operator
                     // looks for the Plugins pane.
                     .badge(item == .plugins ? model.updatesWaiting : 0)
+                    // After the badge, not before it: a tag under `.badge` is
+                    // not the row's, and a List that finds no tag on its rows
+                    // selects nothing — measured in the lab on 2026-09-28, no
+                    // click on any section changed the pane.
+                    .tag(item)
                     // Identifiers, not titles: every title here is translated,
                     // and the language is a setting inside this same window, so
                     // anything driving the screen from outside — the end-to-end
