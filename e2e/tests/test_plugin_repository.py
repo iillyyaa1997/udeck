@@ -562,4 +562,42 @@ def test_a_question_the_fake_never_answers_is_a_lab_error_in_seconds_with_what_c
             github.serve(tmp_path)
     finally:
         github.stop()
-    assert time.monotonic() - started < 15
+    # Bound and not listening, curl on its own gives up only after some 8 s: the
+    # lab's --connect-timeout is what brings it under that.
+    assert time.monotonic() - started < (6 if how == "bound" else 15)
+
+
+SLOW_NAMES = """import socket, time
+def _slow(name=""):
+    time.sleep(10)
+    return name
+socket.getfqdn = _slow
+"""
+
+
+def test_the_real_fake_listens_at_once_and_only_then_says_so(tmp_path):
+    """The fake itself, not its Server class alone: with name lookups taking 10 s,
+    the `listening` line comes within seconds, and a connection made right after
+    it is taken."""
+    (tmp_path / "site").mkdir()
+    (tmp_path / "site" / "sitecustomize.py").write_text(SLOW_NAMES)
+    port = free_port()
+    env = dict(os.environ, PYTHONPATH=str(tmp_path / "site"), PYTHONDONTWRITEBYTECODE="1")
+    fake = subprocess.Popen(
+        [sys.executable, str(plugin_repository.SCRIPT), "serve", str(plugin_repository.FIXTURES), str(port),
+         "iillyyaa1997/udeck-plugins", str(tmp_path / "log.jsonl")],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env,
+    )
+    started = time.monotonic()
+    try:
+        said = []
+        reader = threading.Thread(target=lambda: said.append(fake.stdout.readline()), daemon=True)
+        reader.start()
+        reader.join(8)
+        assert said and said[0].startswith(fake_github.LISTENING), f"no listening line within 8 s: {said}"
+        assert time.monotonic() - started < 8
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            pass
+    finally:
+        fake.kill()
+        fake.wait()

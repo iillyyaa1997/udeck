@@ -530,11 +530,13 @@ class Server(http.server.ThreadingHTTPServer):
     `HTTPServer.server_bind` asks `socket.getfqdn` for the address it bound, and
     until that returns the port is bound and not listening. macOS drops a
     connection attempt to such a port without an answer — no refusal — so a
-    client that asked in that window waits on its own retransmissions: 1, 2, 3,
-    4, 5, 7, 11, 19 and 35 seconds after it asked (measured on the lab's Mac with
-    curl, against a port that began to listen 20 seconds after it was bound: the
-    answer came 35 seconds after the question). The name is never used — no
-    answer here is built with it — so it is not looked up.
+    client that asked in that window waits instead of being told no. On CI's
+    macos-26 runner two tests hung in curl for their whole 30 s against the
+    http.server version of this fake (runs 36536857958 and 36562389702) and
+    passed once the lookup was gone (run 36576951064); that a slow lookup was
+    the cause is the likeliest reading, not a measurement. How long a client
+    waits varies: on one Mac curl gave up by itself after about 8 s. The name is
+    never used — no answer here is built with it — so it is not looked up.
     """
 
     daemon_threads = True
