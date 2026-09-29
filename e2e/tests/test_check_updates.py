@@ -825,7 +825,14 @@ def test_the_sections_the_lab_clicks_carry_their_tag_on_the_outside():
     """`_open_the_about_pane` clicks `section.about`, and only a row whose tag is its outermost
     trait is one the List can select. Measured on 2026-09-28: with `.badge` after `.tag`, four
     clicks on four sections left the General pane up, and every check that opens About said
-    "could not check" about a window that could not be navigated at all."""
+    "could not check" about a window that could not be navigated at all.
+
+    This reads the order of two words in SettingsView.swift, and that is all it proves: it is
+    a tripwire for the one edit that broke it, not evidence that a section can be chosen. The
+    behaviour is proved in the lab, by the checks that click a section and then need what is
+    on it — `updates.sparkle`, `updates.wrong-key` and `updates.switched-on-it-looks-by-itself`
+    (`_open_the_about_pane` waits for `updates.checkNow`, which only About has), and every
+    `plugins.*` check that opens Settings → Plugins (`ui.plugins_pane`)."""
     view = (Path(__file__).resolve().parents[2] / "Sources" / "UDeckKit" / "Views" / "SettingsView.swift").read_text()
     row = view[view.index("List(Section.allCases, selection: $section)"):]
     row = row[:row.index(".accessibilityIdentifier(\"section.")]

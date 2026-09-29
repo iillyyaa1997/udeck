@@ -70,18 +70,21 @@ CARD_SECONDS = 30
 NOTICED_SECONDS = 15
 
 # How long uDeck with the catalogue switched off is listened to (the table's own
-# two minutes), and how long a second **Check now** under a used-up limit is.
+# two minutes).
 SILENCE_SECONDS = 120
-BLOCKED_SECONDS = 10
 
-# How far ahead the fake says the limit resets.
-LIMIT_MINUTES = 15
+# How far ahead the fake says the limit resets. The table asks for "no API
+# request before the reset", so the check listens until then: short enough to
+# listen to whole, long enough for a Check now, an install and a second Check
+# now to happen inside it on a busy guest.
+LIMIT_SECONDS = 150
 
 # What the rows say, in the guest's English (Q43): English.swift.
 AVAILABLE_1_1_0 = "1.1.0 available"
 VERIFIED = "Verified"
 MODIFIED = "Modified locally"
 LIMIT_USED_UP = "they are used up"
+TRASH_WARNING = "Your changes to {id} will be moved to the Trash"
 ARRIVED_DIFFERENT = "arrived different from what the repository lists"
 
 # What the fixture's card says, row by row (e2e/fixtures/plugin-repository/*/plugins/uptime/uptime.sh).
@@ -259,8 +262,15 @@ def check_earlier_version(machine, check_dir, lab):
     history — the commits that changed `plugins/uptime`, read from the fake — has
     two versions in it.
 
-    **Red for**: an earlier version installed without being pinned, and a
-    history that is not read from the repository.
+    Before 1.0.0 is chosen, a `.env` is put into the installed folder over SSH, as
+    an operator keeps a token beside a plugin. The folder's hash does not see it,
+    so the row still says **Verified** — and the copy still goes to the Trash with
+    it, so **Install this version** has to say so first (Q118), and the `.env` has
+    to be in the guest's Trash afterwards, not gone.
+
+    **Red for**: an earlier version installed without being pinned, a history
+    that is not read from the repository, and a replacement that sends the
+    operator's file to the Trash without a word.
     """
     scene = _prepare(machine, check_dir, lab, main="c2")
     try:
@@ -279,7 +289,18 @@ def check_earlier_version(machine, check_dir, lab):
                    if r.is_api and r.path.endswith("/commits") and "path=plugins%2Fuptime" in r.query.replace("/", "%2F")]
         expect(history, "Earlier versions… listed versions without asking the repository for the folder's history")
 
-        record = _operate(scene, f"plugin.{UPTIME}.history.1.0.0.install", "choosing 1.0.0",
+        # Its own each run: a guest shared with an earlier check keeps its Trash.
+        token = f"TOKEN={uuid.uuid4().hex}"
+        machine.ssh.run(f"printf '%s\\n' {token} > {UDECK_HOME}/plugins/{UPTIME}/.env", "keeping a .env beside the plugin")
+        _press(machine, f"plugin.{UPTIME}.history.1.0.0.install", "choosing 1.0.0")
+        warning = _wait_until(machine, f"plugin.{UPTIME}.history.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "the-warning.txt")
+        expect(
+            warning is not None and TRASH_WARNING.format(id=UPTIME) in warning and "1.0.0" in warning,
+            f"with a .env in {UPTIME}'s folder, Install this version said {warning!r} before replacing it; it has to "
+            f"say {TRASH_WARNING.format(id=UPTIME)!r}… and name 1.0.0",
+        )
+        record = _operate(scene, f"plugin.{UPTIME}.history.confirm", "confirming 1.0.0",
                           lambda r: r and r.get("version") == "1.0.0")  # fmt: skip
         expect(record is not None and record.get("version") == "1.0.0", f"after choosing 1.0.0, installed.json says {record!r}")
         expect(record.get("commit") == scene.github.commit("c1"), f"1.0.0 was installed from {record.get('commit')}, not c1")
@@ -287,6 +308,14 @@ def check_earlier_version(machine, check_dir, lab):
         offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == AVAILABLE_1_1_0, NOTICED_SECONDS)
         _keep_the_pane(machine, check_dir, lab, "after-the-earlier-version.txt")
         expect(offer == AVAILABLE_1_1_0, f"pinned at 1.0.0, the row says {offer!r} and not {AVAILABLE_1_1_0!r}")
+        looked = machine.ssh.ask(f"grep -rl {token} ~/.Trash", "looking in the Trash")
+        if looked.returncode > 1:
+            raise LabError("looking in the Trash", f"the guest's Trash could not be read: {looked.stderr.strip()!r}")
+        expect(looked.stdout.split(), f"the .env that was in {UPTIME}'s folder is not in the Trash after 1.0.0 replaced it")
+        expect(
+            not _exists(machine, f"{UDECK_HOME}/plugins/{UPTIME}/.env"),
+            f"the .env is still in {UPTIME}'s folder: 1.0.0 was not what replaced it",
+        )
     finally:
         scene.close()
 
@@ -298,11 +327,14 @@ def check_remove_leaves_nothing(machine, check_dir, lab):
     and `installed.json`, and its window. The plugin's setting value is the one
     thing the lab puts there itself — `uptime` declares no setting the panel can
     change — and it is put there while uDeck is not running, so that the removal
-    has something in that file to take away. Then the plugin is installed and
-    placed again: the card asks for consent again, and says it has run once.
+    has something in that file to take away. Each of the three is read before
+    **Remove** is pressed: an entry that was never there proves nothing about
+    the removal. Then the plugin is installed and placed again: the card asks
+    for consent again, and says it has run once.
 
     **Red for**: a removal that leaves the cache behind (the count goes on from
-    where it was), or the grant (the card runs without asking).
+    where it was), the grant (the card runs without asking), or the setting value
+    (`PluginSettings.forget` doing nothing).
     """
     scene = _prepare(machine, check_dir, lab, main="c1")
     try:
@@ -315,6 +347,11 @@ def check_remove_leaves_nothing(machine, check_dir, lab):
                 raise LabError("before the removal", f"{UPTIME} ran and there is no {path} ({what}) to remove")
         if UPTIME not in ((_read_json(machine, GRANTS) or {}).get("byPlugin") or {}):
             raise LabError("before the removal", f"{UPTIME} was allowed and {GRANTS} has no decision for it")
+        # The lab wrote it and uDeck has run since, and saves this file whenever
+        # a setting changes: it has to be there still for its going to mean anything.
+        kept = ((_read_json(machine, PLUGIN_SETTINGS) or {}).get("values") or {}).get(UPTIME)
+        if not kept:
+            raise LabError("before the removal", f"the lab left a setting value for {UPTIME} and {PLUGIN_SETTINGS} has none: {kept!r}")
 
         ui.plugins_pane(machine, "opening Settings → Plugins")
         _press(machine, f"plugin.{UPTIME}.remove", "pressing Remove")
@@ -429,22 +466,28 @@ def check_refuses_a_link(machine, check_dir, lab):
 
 
 def check_limit_is_explained(machine, check_dir, lab):
-    """With the limit used up, **Check now** says so and when it ends; no API request follows; an install still works.
+    """With the limit used up, **Check now** says so and when it ends; no API request comes before the reset; an install still works.
 
     The fake answers every API request 403 with `remaining: 0` and a reset
-    `LIMIT_MINUTES` ahead. **Check now** has to say why the list is old and when
+    `LIMIT_SECONDS` ahead. **Check now** has to say why the list is old and when
     uDeck will look again — that reset, in the guest's own clock. A second
-    **Check now** then reaches no API at all before the reset, and installing a
-    plugin already listed works, because it needs the raw host only.
+    **Check now**, and installing a plugin already listed — which needs the raw
+    host only — then follow, and the fake is listened to until the reset: no API
+    request in all that time. After the reset, **Check now** has to reach the API
+    again and be answered, which is what tells a uDeck that waited from one that
+    stopped asking for good.
 
     **Red for**: a uDeck that does not read the limit from the answer: it keeps
-    asking, and says a plain refusal instead of the limit.
+    asking, and says a plain refusal instead of the limit; and one that never
+    asks again once the limit is over.
     """
     scene = _prepare(machine, check_dir, lab, main="c1")
     try:
         _the_catalogue_read(scene, since=0, commit="c1")
         now = int(machine.ssh.run("/bin/date +%s", "reading the guest's clock").stdout.strip())
-        until = now + LIMIT_MINUTES * 60
+        until = now + LIMIT_SECONDS
+        # The reset in the lab's own clock, to listen by without asking the guest each time.
+        reset_at = machine.clock() + LIMIT_SECONDS
         scene.github.tell("using the limit up", limit_until=until)
         at = machine.ssh.run(f"/bin/date -r {until} +%H:%M", "the reset in the guest's clock").stdout.strip()
 
@@ -464,14 +507,38 @@ def check_limit_is_explained(machine, check_dir, lab):
 
         again = _count(scene)
         _press(machine, "catalogue.checkNow", "pressing Check now again")
-        machine.sleep(BLOCKED_SECONDS)
-        asked = [r for r in _since(scene, again, "reading the fake's log") if r.is_api]
-        expect(not asked, f"with the limit used up until {at}, Check now still asked the API: {described(asked)}")
-
         record, during = _install(scene, UPTIME, pane_open=True)
         expect(record.get("version") == "1.0.0", f"installing under a used-up limit put {record!r} in place")
         api = [r for r in during if r.is_api]
         expect(not api, f"installing under a used-up limit asked the API {described(api)}")
+
+        if machine.clock() >= reset_at - 5:
+            raise LabError("listening until the reset", f"Check now and the install took past the reset at {at}, so nothing was listened to")
+        asked = []
+        while machine.clock() < reset_at - 1 and not asked:
+            machine.sleep(min(5, max(0.5, reset_at - 1 - machine.clock())))
+            asked = [r for r in _since(scene, again, "listening until the reset") if r.is_api]
+        expect(
+            not asked,
+            f"with the limit used up until {at}, uDeck asked the API before the reset: {described(asked)}",
+        )
+        lab.note(f"   no API request from the second Check now to the reset at {at}")
+
+        while machine.clock() < reset_at + 2:
+            machine.sleep(1)
+        after = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now after the reset")
+        answered = []
+        deadline = machine.clock() + OPERATION_SECONDS
+        while not answered and machine.clock() < deadline:
+            machine.sleep(1)
+            answered = [r for r in _since(scene, after, "reading the fake's log") if r.is_api and r.status in (200, 304)]
+        _keep_the_pane(machine, check_dir, lab, "after-the-reset.txt")
+        expect(
+            bool(answered),
+            f"after the reset at {at}, Check now did not reach the API: uDeck asked "
+            f"{described(_since(scene, after, 'reading the fake log'))} — it stopped asking for good",
+        )
     finally:
         scene.close()
 
@@ -620,7 +687,7 @@ class Scene:
         # The last screenshot is the lab's own ("at the end"), taken for every check.
         self.github.collect_log(self.check_dir)
         self.log.collect(self.check_dir, self.mark, "collecting uDeck's own account", name="udeck.log")
-        for path in (INSTALLED, LAYOUT, GRANTS):
+        for path in (INSTALLED, LAYOUT, GRANTS, PLUGIN_SETTINGS):
             try:
                 text = self.machine.ssh.ask(f"cat {path} 2>/dev/null || true", "collecting uDeck's files").stdout
                 if text:

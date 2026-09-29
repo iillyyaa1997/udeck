@@ -35,21 +35,42 @@ for what that promises.
     to the Trash; only the Finder's `.DS_Store` does not count;
   - **Update** and **Switch to** on the catalogue's row replaced a copy changed on
     disk without the warning the installed plugin's row gives; both rows now say
-    *"Your changes to uptime will be moved to the Trash…"* first;
+    *"Your changes to uptime will be moved to the Trash…"* first — and so do
+    **Back to**, **Install this version** under **Earlier versions…** and
+    **Reinstall**, on the row and on a window whose plugin will not run. The
+    warning is shown whenever something of the operator's is about to go to the
+    Trash, by the one rule the installer decides the Trash by (`OperatorsWork`):
+    a copy changed on disk, a folder of their own, or one holding what the hash
+    does not see. A `.env` beside a plugin leaves it **Verified** and used to go
+    to the Trash without a word;
   - **Reinstall** asked GitHub with **Official catalogue** off. It is not offered
     then, on the plugin's row or on a window whose plugin is missing, and uDeck
     refuses every install, update and reinstall while the switch is off;
   - a card's action could start while its plugin was being swapped or removed.
     Actions are refused while a plugin is quiet, and one already running is
     waited for as long as a poll in flight is — the plugin's `timeout` and a
-    second and a half — and keeps running past that, since an action has no
-    timeout of its own;
+    second and a half. An action has no timeout of its own, so one still
+    running then is ended: it runs in a process group of its own, which gets
+    `SIGTERM`, a second, and `SIGKILL`, and only when nothing of it is left is
+    the folder swapped or removed. If something will not end, the operation
+    stops with *"Something uptime started would not end, so its folder was left
+    as it was"*, and the folder is untouched;
   - on a volume that ignores case, a folder spelt `Uptime` was offered **Install**
     rather than **Replace…**, and the swap took it anyway. Whether `plugins/<id>`
-    is taken is now asked of the disk, as the swap finds it;
+    is taken is now asked of the disk, as the swap finds it. And the swap kept
+    the name `Uptime`, which discovery refuses for a plugin whose id is
+    `uptime`: **Replace…** put in place a plugin that did not run, and
+    **Reinstall** did it again. A folder spelt otherwise is now renamed to the
+    id before the swap;
   - on a volume that cannot swap folders in one step, a failed move and a failed
     move back threw the staging folder away with the old copy in it. The old copy
-    now stays there, beside its journal, and the next launch puts it back.
+    now stays there, beside its journal, and the next launch puts it back — and
+    if that launch cannot either, it deleted it on the line after trying. Now
+    staging and its journal stay until a launch can; if something else has taken
+    `plugins/<id>` meanwhile, the old copy goes to the Trash. A copy under the id
+    in staging is deleted only when it hashes to the download it was;
+  - docs/plugin-api.md said uDeck *"hands over secrets, or does not"*; it hands
+    over none, as SECURITY.md says, and now so does the contract.
   - the settings window's sections could not be chosen at all: the badge that
     counts waiting updates was put on each sidebar row after its `tag`, so the
     List found no tag and selected nothing. Measured in the lab on 2026-09-28,
@@ -83,6 +104,15 @@ for what that promises.
   - the card's **Allow and run** and **Decline** carry identifiers
     (`consent.<id>.allow`, `consent.<id>.decline`), so the lab allows a plugin
     where the operator does.
+
+  A second review of the checks: `plugins.remove-leaves-nothing` reads the
+  setting value in `plugin-settings.json` before **Remove**, so its going means
+  something, and keeps the file with the evidence; `plugins.limit-is-explained`
+  used to listen for ten seconds after the second **Check now** — the fake's
+  limit is now two and a half minutes, the check listens until the reset, and
+  after it **Check now** has to reach the API again; `plugins.earlier-version`
+  puts a `.env` into the folder first, and **Install this version** has to warn
+  before it goes to the Trash.
 
 - **A click past the panel closes it however late the news of it comes.** The
   workspace saying another application came forward is often the first news of
