@@ -44,36 +44,36 @@ def _load():
 checks = _load()
 
 ATTACHED = "Timestamp               Ty Process[PID:TID]\n"
-IDLE = "18:20:00.001 Db uDeck[404] [place.unicorns.udeck:gesture] idle: outsideStrip\n"
-DWELL = "18:20:01.123 Db uDeck[404] [place.unicorns.udeck:gesture] fired by dwell on Built-in\n"
-PUSH = "18:20:01.456 Db uDeck[404] [place.unicorns.udeck:gesture] fired by push on Built-in\n"
+IDLE = "2026-09-18 18:20:00.001 Db uDeck[404:1a2b] [place.unicorns.udeck:gesture] idle: outsideStrip\n"
+DWELL = "2026-09-18 18:20:01.123 Db uDeck[404:1a2b] [place.unicorns.udeck:gesture] fired by dwell on Built-in\n"
+PUSH = "2026-09-18 18:20:01.456 Db uDeck[404:1a2b] [place.unicorns.udeck:gesture] fired by push on Built-in\n"
 # What uDeck says when the panel actually opens — from inside the change, and
 # only when there was one. `fired by …` is written three lines earlier.
-REVEAL = "18:20:01.460 Db uDeck[404] [place.unicorns.udeck:panel] collapsed -> peek on revealRequested\n"
-IGNORED = "18:20:01.460 Db uDeck[404] [place.unicorns.udeck:panel] revealRequested ignored in peek\n"
+REVEAL = "2026-09-18 18:20:01.460 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] collapsed -> peek on revealRequested\n"
+IGNORED = "2026-09-18 18:20:01.460 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] revealRequested ignored in peek\n"
 # The panel going away, one line per way it can. Which phase it left is written
 # beside what took it: the two together are what a closing check reads.
-POINTER_LEFT = "18:20:09.100 Db uDeck[404] [place.unicorns.udeck:panel] peek -> collapsed on pointerLeft\n"
-PROMOTED = "18:20:03.200 Db uDeck[404] [place.unicorns.udeck:panel] peek -> open on interacted\n"
-DISMISSED = "18:20:12.300 Db uDeck[404] [place.unicorns.udeck:panel] open -> collapsed on closeRequested\n"
-INTERRUPTED = "18:20:12.300 Db uDeck[404] [place.unicorns.udeck:panel] open -> collapsed on otherAppActivated\n"
-PEEK_DISMISSED = "18:20:12.300 Db uDeck[404] [place.unicorns.udeck:panel] peek -> collapsed on closeRequested\n"
+POINTER_LEFT = "2026-09-18 18:20:09.100 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] peek -> collapsed on pointerLeft\n"
+PROMOTED = "2026-09-18 18:20:03.200 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] peek -> open on interacted\n"
+DISMISSED = "2026-09-18 18:20:12.300 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] open -> collapsed on closeRequested\n"
+INTERRUPTED = "2026-09-18 18:20:12.300 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] open -> collapsed on otherAppActivated\n"
+PEEK_DISMISSED = "2026-09-18 18:20:12.300 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] peek -> collapsed on closeRequested\n"
 ESCAPED = (
-    "18:20:12.300 Db uDeck[404] [place.unicorns.udeck:panel] peek -> collapsed on escape(isEditingText: false)\n"
+    "2026-09-18 18:20:12.300 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] peek -> collapsed on escape(isEditingText: false)\n"
 )
 # A panel restored whole, which is what an interrupted one comes back as.
-RESTORED = "18:20:20.100 Db uDeck[404] [place.unicorns.udeck:panel] collapsed -> open on revealRequested\n"
+RESTORED = "2026-09-18 18:20:20.100 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] collapsed -> open on revealRequested\n"
 NOTHING = ""
 # The gate a living uDeck names after every collapse, and the one it names while a
 # panel is on screen with the pointer in the strip.
-GATED = "18:20:12.540 Db uDeck[404] [place.unicorns.udeck:gesture] idle: alreadyFiredThisVisit\n"
-VISIBLE = "18:20:01.520 Db uDeck[404] [place.unicorns.udeck:gesture] idle: alreadyVisible\n"
+GATED = "2026-09-18 18:20:12.540 Db uDeck[404:1a2b] [place.unicorns.udeck:gesture] idle: alreadyFiredThisVisit\n"
+VISIBLE = "2026-09-18 18:20:01.520 Db uDeck[404:1a2b] [place.unicorns.udeck:gesture] idle: alreadyVisible\n"
 # The workspace's news of a click past the panel, which the click monitor does not write.
 NOTIFIED = (
-    "18:20:12.300 Db uDeck[404] [place.unicorns.udeck:panel] another application came forward 6 ms after "
+    "2026-09-18 18:20:12.300 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] another application came forward 6 ms after "
     "a click past the panel, so the panel counts it as closed\n"
 )
-LATE_NEWS = "18:20:12.310 Db uDeck[404] [place.unicorns.udeck:panel] otherAppActivated ignored in collapsed\n"
+LATE_NEWS = "2026-09-18 18:20:12.310 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] otherAppActivated ignored in collapsed\n"
 
 
 def growing(*steps):
@@ -1210,7 +1210,7 @@ def test_a_restored_panel_clicked_past_that_comes_back_whole_fails(monkeypatch, 
 # What uDeck says when one of its menus lets go on a click made in it — the click no
 # monitor of its hears, which it counts as heard from then on.
 MENU_LET_GO = (
-    "18:20:05.100 Db uDeck[404] [place.unicorns.udeck:panel] a menu let go on a click in it 352 ms ago, "
+    "2026-09-18 18:20:05.100 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] a menu let go on a click in it 352 ms ago, "
     "and uDeck counts that click as heard\n"
 )
 AFTER_A_CHOICE = (REVEAL, PROMOTED, MENU_LET_GO, INTERRUPTED, RESTORED)
@@ -1259,7 +1259,7 @@ def test_a_menu_that_let_go_on_something_else_is_not_the_choice(monkeypatch, lab
     system — lets go on something that is not a click, and uDeck says so in a
     line that begins the same way. That is no witness to a choice."""
     not_a_click = (
-        "18:20:05.100 Db uDeck[404] [place.unicorns.udeck:panel] a menu let go on something other than a click in it\n"
+        "2026-09-18 18:20:05.100 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] a menu let go on something other than a click in it\n"
     )
     machine = prepared(
         monkeypatch, growing(REVEAL, PROMOTED, not_a_click, INTERRUPTED, RESTORED), in_front=[config.THE_DESKTOP]
@@ -1310,7 +1310,7 @@ def test_the_menu_is_read_about_only_once_it_has_had_time_to_let_go(monkeypatch,
 # What uDeck says when its global monitor hears a click outside it that is not past
 # the panel, and lets the panel be.
 MARGIN_KEPT = (
-    "18:20:22.100 Db uDeck[404] [place.unicorns.udeck:panel] a click outside uDeck but not past the panel, "
+    "2026-09-18 18:20:22.100 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] a click outside uDeck but not past the panel, "
     "so it stays\n"
 )
 AFTER_THE_MARGIN = (REVEAL, PROMOTED, INTERRUPTED, RESTORED, MARGIN_KEPT, INTERRUPTED, RESTORED)
@@ -1391,7 +1391,7 @@ def test_a_panel_that_comes_back_as_a_peek_after_a_margin_click_and_a_switch_fai
 # --- The keyboard shortcut ---------------------------------------------------------------
 
 
-REGISTERED = "18:20:00.500 Db uDeck[404] [place.unicorns.udeck:panel] hotkey ⌃⌥U registered\n"
+REGISTERED = "2026-09-18 18:20:00.500 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] hotkey ⌃⌥U registered\n"
 ANOTHER_SHORTCUT = REGISTERED.replace("⌃⌥U", "⌃⌥J")
 # The two lines the shortcut answers with, in the order it writes them: shown,
 # and promoted to a panel that is being worked in.

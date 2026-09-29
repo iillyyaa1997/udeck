@@ -235,7 +235,7 @@ def test_the_options_that_would_leave_a_lab_build_lying_about_are_refused(checko
 # the numbers it has to clear (test_panel.py), and read the settings view, so the
 # identifier the update checks click is the one uDeck gives the switch
 # (test_check_updates.py). Reading a source file cannot build anything.
-MAY_READ_THE_CHECKOUT = {"test_panel.py", "test_check_updates.py"}
+MAY_READ_THE_CHECKOUT = {"test_panel.py", "test_check_updates.py", "test_check_plugins.py"}
 
 
 def test_this_is_the_only_file_that_runs_anything_in_the_repository():

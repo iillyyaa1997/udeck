@@ -52,6 +52,9 @@ GUEST_PYTHON = "/usr/bin/python3"
 # The header the lab marks its own requests with; `fake-github.py` names it too.
 LAB_HEADER = "X-UDeck-Lab"
 
+# What the fake prints once it listens, and not before; `fake-github.py` names it too.
+LISTENING = "listening"
+
 # What the fixtures leave out whatever the checkout holds, as the fake does.
 _LEFT_OUT = {".DS_Store", "__pycache__"}
 
@@ -217,30 +220,57 @@ class FakeGitHub:
         self._expect_state(state, step)
 
     def _wait_until_it_answers(self, step: str) -> None:
+        """Until the fake says it listens, and then until it answers.
+
+        Nothing is asked of it before its line is in `server.out`: a question sent
+        to a port that is bound and not yet listening is dropped without a
+        refusal (see `fake-github.py`'s `Server`), and would be a wait on curl's
+        retransmissions rather than on the fake. What the fake and the last
+        question said are in the failure, so a fake that is slow to start reads
+        differently from one that started and does not answer.
+        """
         deadline = self.machine.clock() + config.PLUGINS_UP_SECONDS
+        said = ""
         while True:
-            if self.answers_now(step):
-                return
+            said = self._said(step)
+            if LISTENING in said:
+                status, _, complaint = self._ask_once("/lab/alive", step)
+                if status == 200:
+                    return
+                said = f"{said or 'it said nothing'}; the last question got {status or 'no answer'}" + (
+                    f" ({complaint})" if complaint else ""
+                )
             if self.machine.clock() >= deadline:
-                said = self.machine.ssh.ask(f"tail -5 {shlex.quote(self.dir)}/server.out", step).stdout.strip()
                 raise LabError(
                     step, f"the fake GitHub did not answer within {config.PLUGINS_UP_SECONDS:.0f}s: {said or 'it said nothing'}"
                 )
             self.machine.sleep(1)
 
-    def _ask(self, what: str, step: str) -> tuple[int, str]:
-        """One request of the lab's own to the fake — marked, so the log never counts it as uDeck's."""
+    def _said(self, step: str) -> str:
+        """The last lines the fake printed: its listening line, or why it died."""
+        return (self.machine.ssh.ask(f"tail -5 {shlex.quote(self.dir)}/server.out", step).stdout or "").strip()
+
+    def _ask_once(self, what: str, step: str) -> tuple[int, str, str]:
+        """(status, body, curl's complaint) for one request of the lab's own — marked, so
+        the log never counts it as uDeck's. Status 0 is no answer at all."""
         done = self.machine.ssh.ask(
-            f"/usr/bin/curl -s -H {shlex.quote(LAB_HEADER + ': 1')} -w '\\n%{{http_code}}' "
+            f"/usr/bin/curl -sS --connect-timeout {config.PLUGINS_CONNECT_SECONDS:g} "
+            f"--max-time {config.PLUGINS_ASK_SECONDS:g} -H {shlex.quote(LAB_HEADER + ': 1')} -w '\\n%{{http_code}}' "
             f"{shlex.quote(self.base_url + what)}",
             step,
-            seconds=30,
+            seconds=config.PLUGINS_ASK_SECONDS + 15,
         )
         body, _, code = (done.stdout or "").rpartition("\n")
+        complaint = (done.stderr or "").strip()
         try:
-            return int(code.strip()), body
+            status = int(code.strip())
         except ValueError:
-            return 0, done.stdout or ""
+            return 0, done.stdout or "", complaint
+        return status, body, complaint
+
+    def _ask(self, what: str, step: str) -> tuple[int, str]:
+        status, body, _ = self._ask_once(what, step)
+        return status, body
 
     def answers_now(self, step: str) -> bool:
         """Whether the fake is still there, asked once — for a check about to judge a silence."""

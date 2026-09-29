@@ -67,10 +67,22 @@ for what that promises.
     now stays there, beside its journal, and the next launch puts it back — and
     if that launch cannot either, it deleted it on the line after trying. Now
     staging and its journal stay until a launch can; if something else has taken
-    `plugins/<id>` meanwhile, the old copy goes to the Trash. A copy under the id
-    in staging is deleted only when it hashes to the download it was;
+    `plugins/<id>` meanwhile, the old copy goes to the Trash. A copy a crash left
+    in staging is deleted only when it is provably uDeck's own — it hashes to a
+    tree uDeck put there and holds nothing the hash does not see — and goes to the
+    Trash otherwise. It used to be deleted whenever it hashed to the download: an
+    old copy of the same version with a `.env` beside it hashes the same, and a
+    removal whose folder had been put back lost the copy it had moved, `.env`
+    and all;
   - docs/plugin-api.md said uDeck *"hands over secrets, or does not"*; it hands
-    over none, as SECURITY.md says, and now so does the contract.
+    over none, as SECURITY.md says, and now so does the contract. The consent
+    sheet said a plugin would *"receive the secret "X" from uDeck"*; it now says
+    the plugin asks for the secret and that uDeck does not hand out secrets yet,
+    in English and Russian;
+  - **Reinstall** on the catalogue's row of a plugin whose folder was missing
+    did not ask the Trash rule when pressed, as every other button that replaces
+    a folder does; a folder put there since the row was drawn is now replaced
+    only after the warning.
   - the settings window's sections could not be chosen at all: the badge that
     counts waiting updates was put on each sidebar row after its `tag`, so the
     List found no tag and selected nothing. Measured in the lab on 2026-09-28,

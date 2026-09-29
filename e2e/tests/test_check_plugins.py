@@ -69,6 +69,20 @@ def test_the_checks_name_the_fixture_plugins_there_are():
     )
 
 
+def test_the_action_the_check_presses_writes_where_the_check_reads():
+    """plugins.an-update-ends-a-running-action reads what the fixture's Hold writes, in the words it writes."""
+    for commit in ("c1", "c2"):
+        hold = (plugin_repository.FIXTURES / commit / "plugins" / "uptime" / "hold.sh").read_text()
+        assert f"log={checks.HOLD_LOG}\n" in hold
+        assert 'echo "ended ' in hold and 'echo "changed under it ' in hold and 'echo "started ' in hold
+
+
+def test_the_remove_warning_the_check_waits_for_is_uDecks_own_words():
+    english = (Path(__file__).resolve().parents[2] / "Sources" / "UDeckCore" / "Localization" / "English.swift").read_text()
+    assert checks.REMOVE_TO_THE_TRASH in english
+    assert checks.TRASH_WARNING.format(id="\\(id)") in english
+
+
 def _record(**changes):
     commit, tree = "a" * 40, "b" * 40
     record = {

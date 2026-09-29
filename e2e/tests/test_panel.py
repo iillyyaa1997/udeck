@@ -166,6 +166,57 @@ def test_news_of_another_application_is_every_line_the_workspace_brought():
 # --- The oracle ------------------------------------------------------------------------
 
 
+# One record as `log show --style ndjson` printed it in a guest (.build/e2e/20260929-120510Z,
+# logprobe.reads), trimmed to the fields the lab reads and a few it does not, and the
+# line `--style compact` printed for the same record.
+RECORD = {
+    "timezoneName": "", "messageType": "Debug", "eventType": "logEvent", "formatString": "idle: %{public}s",
+    "subsystem": "place.unicorns.udeck", "category": "gesture", "threadID": 7592,
+    "processImagePath": "/Applications/uDeck.app/Contents/MacOS/uDeck", "timestamp": "2026-09-29 12:09:40.943740+0000",
+    "machTimestamp": 6435470946, "eventMessage": "idle: alreadyVisible", "traceID": 10620182846374404,
+    "processID": 943,
+}  # fmt: skip
+RECORD_AS_COMPACT = "2026-09-29 12:09:40.943 Db uDeck[943:1da8] [place.unicorns.udeck:gesture] idle: alreadyVisible"
+
+
+def ndjson(*records):
+    return "\n".join(json.dumps(record) for record in records) + '\n{"count": %d, "finished": 1}\n' % len(records)
+
+
+def test_a_record_reads_as_compact_printed_it():
+    assert panel.as_compact(ndjson(RECORD)).splitlines() == [panel.COMPACT_HEADER, RECORD_AS_COMPACT]
+
+
+def test_a_record_the_store_answered_twice_is_read_once():
+    """.build/e2e/20260929-080845Z: every line of a read doubled, the same record twice;
+    the same window read later held each once. One peek must not read as two."""
+    later = {**RECORD, "machTimestamp": RECORD["machTimestamp"] + 5000, "eventMessage": "collapsed -> peek on revealRequested",
+             "category": "panel"}  # fmt: skip
+    said = panel.as_compact(ndjson(RECORD, RECORD, later, later))
+    assert said == panel.as_compact(ndjson(RECORD, later))
+    assert panel.revealed(said) == ["peek"]
+
+
+def test_two_alike_messages_on_their_own_ticks_are_two_events():
+    """Words, thread and millisecond alike, and still two: only the clock's own tick says it is one record."""
+    again = {**RECORD, "machTimestamp": RECORD["machTimestamp"] + 1}
+    other_thread = {**RECORD, "threadID": RECORD["threadID"] + 1}
+    lines = panel.as_compact(ndjson(RECORD, again, other_thread)).splitlines()[1:]
+    assert lines == [RECORD_AS_COMPACT, RECORD_AS_COMPACT, RECORD_AS_COMPACT.replace(":1da8]", ":1da9]")]
+
+
+def test_an_answer_that_is_not_records_is_the_lab_unable_to_read_its_log():
+    for broken in ("Timestamp  Ty Process[PID:TID]\n", "[1, 2]\n", json.dumps({"eventMessage": "x"}) + "\n"):
+        with pytest.raises(ValueError):
+            panel.as_compact(broken)
+    machine = Machine({"log show": "not json at all"})
+    log = panel.GestureLog(machine, note=lambda text: None)
+    log.kept = True
+    with pytest.raises(LabError, match="not a record"):
+        log.read("2026-09-18 18:20:00", "reading")
+    assert "--style ndjson" in [c for c in machine.ssh.commands if "log show" in c][0]
+
+
 def test_the_guest_is_asked_to_keep_uDecks_debug_messages():
     """`log show` finds nothing otherwise: the unified log keeps no debug messages."""
     machine = Machine({"log config": "Mode for 'place.unicorns.udeck'  DEBUG PERSIST_DEBUG"})
@@ -227,7 +278,7 @@ def test_what_uDeck_says_when_the_store_refuses_it_is_read_out_of_that_window():
     too: a check that read it as "uDeck could not save" from silence would be
     blaming a full disk for a control wired to nothing."""
     refused = (
-        "18:20:00.001 Db uDeck[404] [place.unicorns.udeck:plugins] could not save the settings: "
+        "2026-09-18 18:20:00.001 Db uDeck[404:1a2b] [place.unicorns.udeck:plugins] could not save the settings: "
         'Error Domain=NSCocoaErrorDomain Code=513 "You don’t have permission"'
     )
     assert panel.could_not_save(ATTACHED + refused + "\n") == [refused]

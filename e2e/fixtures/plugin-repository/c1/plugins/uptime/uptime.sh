@@ -12,7 +12,7 @@
 #
 # The lab's copy (e2e/fixtures/plugin-repository): the official plugin with one
 # row more, the version, so that a check can tell which version's output a card
-# is showing.
+# is showing, and one card action, Hold (hold.sh), which runs until it is ended.
 #
 # POSIX sh and nothing a stock macOS lacks: sysctl, date, sed, cat, mkdir, mv.
 # It writes nothing but its counter, and nothing outside UDECK_CACHE_DIR --
@@ -148,6 +148,7 @@ cat <<JSON
     $(kv "$label_runs" "$runs_value" "$runs_state"),
     $(kv version "$version" ok)$reasons
   ],
+  "actions": [ { "label": "Hold", "run": ["./hold.sh"] } ],
   "ttl": 120
 }
 JSON

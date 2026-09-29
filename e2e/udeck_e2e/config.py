@@ -629,6 +629,13 @@ PLUGINS_REPOSITORY = "iillyyaa1997/udeck-plugins"
 # Until the fake GitHub answers on the guest's loopback after it is started.
 PLUGINS_UP_SECONDS = 30
 
+# One question of the lab's to the fake: until curl has a connection, and until it
+# has the whole answer. Without them a question the fake never took — a port bound
+# and not yet listening drops it without a refusal — holds the lab for as long as
+# the SSH call lets it, and the wait above never gets to say what the fake said.
+PLUGINS_CONNECT_SECONDS = 5
+PLUGINS_ASK_SECONDS = 15
+
 # How often a known lab failure is retried before the check becomes "could not
 # check": SSH refusing right after a clone boots, a hung `tart` call, and macOS
 # refusing a machine because it believes two are already running.

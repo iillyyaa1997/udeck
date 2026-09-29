@@ -53,7 +53,7 @@ KEEPING = "Mode for 'place.unicorns.udeck'  DEBUG PERSIST_DEBUG"
 
 
 def _said(category, text):
-    return f"18:20:00.001 Db uDeck[404] [place.unicorns.udeck:{category}] {text}\n"
+    return f"2026-09-18 18:20:00.001 Db uDeck[404:1a2b] [place.unicorns.udeck:{category}] {text}\n"
 
 
 REGISTERED = _said("panel", f"hotkey {config.THE_HOTKEY} registered")

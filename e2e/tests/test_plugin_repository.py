@@ -30,6 +30,8 @@ from udeck_e2e import config, plugin_repository
 from udeck_e2e.errors import LabError
 from udeck_e2e.plugin_repository import FakeGitHub, Request, parse_log, uDecks
 
+from fakes import Machine as FakeMachine
+
 REPOSITORY = config.PLUGINS_REPOSITORY
 
 
@@ -65,10 +67,16 @@ def test_the_fixtures_are_what_the_checks_are_written_against():
         plugins = root / commit / "plugins"
         assert sorted(p.name for p in plugins.iterdir()) == ["future-api", "future-udeck", "linked", "uptime"]
         manifest = json.loads((plugins / "uptime" / "manifest.json").read_text())
-        assert manifest["version"] == version and manifest["permissions"] == {"exec": ["sysctl"]}
+        assert manifest["version"] == version and manifest["permissions"] == {"exec": ["sysctl", "./hold.sh"]}
         # The card says which version it is, so a check can tell 1.0.0's output from 1.1.0's.
-        assert f"version={version}\n" in (plugins / "uptime" / "uptime.sh").read_text()
+        producer = (plugins / "uptime" / "uptime.sh").read_text()
+        assert f"version={version}\n" in producer
         assert os.access(plugins / "uptime" / "uptime.sh", os.X_OK)
+        # And it offers the action plugins.an-update-ends-a-running-action presses, granted by name.
+        assert '"actions": [ { "label": "Hold", "run": ["./hold.sh"] } ]' in producer
+        hold = (plugins / "uptime" / "hold.sh").read_text()
+        assert os.access(plugins / "uptime" / "hold.sh", os.X_OK)
+        assert "trap" in hold and "ended" in hold and "changed under it" in hold
         assert json.loads((plugins / "future-api" / "manifest.json").read_text())["api"] == 2
         assert json.loads((plugins / "future-udeck" / "manifest.json").read_text())["minUDeck"] == "99.0.0"
         assert (plugins / "linked" / "lib").is_symlink()
@@ -159,7 +167,7 @@ class Served:
         shutil.copytree(plugin_repository.FIXTURES, self.root, symlinks=True)
         self.log = tmp_path / "requests.jsonl"
         self.fake = fake_github.Fake(str(self.root), REPOSITORY, str(self.log), clock=clock)
-        self.server = fake_github.http.server.ThreadingHTTPServer(("127.0.0.1", 0), fake_github.handler_for(self.fake))
+        self.server = fake_github.Server(("127.0.0.1", 0), fake_github.handler_for(self.fake))
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base = f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -467,7 +475,7 @@ def test_the_lab_serves_the_fake_tells_it_what_to_say_and_reads_what_it_was_aske
     assert github.tree_in_guest(str(copy), "hashing") == github.tree("c2", "plugins/uptime")
     assert set(github.files("c1", "plugins/uptime")) == {
         "plugins/uptime/README.md", "plugins/uptime/manifest.json", "plugins/uptime/manifest.ru.json",
-        "plugins/uptime/uptime.sh",
+        "plugins/uptime/uptime.sh", "plugins/uptime/hold.sh",
     }  # fmt: skip
     kept = github.collect_log(tmp_path)
     assert kept and (tmp_path / "github-requests.jsonl").read_text() == kept
@@ -494,3 +502,64 @@ def test_a_fake_that_never_answers_is_a_lab_error_with_what_it_said(tmp_path):
     machine.sleep = lambda seconds: clock.__setitem__(0, clock[0] + seconds)
     with pytest.raises(LabError, match="did not answer within"):
         github.serve(tmp_path)
+
+
+def test_the_fake_is_asked_nothing_before_it_says_it_listens():
+    """A question sent while its port is bound and not listening is dropped unanswered."""
+    machine = FakeMachine({"tail -5": ["", "", f"{plugin_repository.LISTENING}: on 127.0.0.1"], "/usr/bin/curl": "alive\n\n200"})
+    github = FakeGitHub(machine, note=lambda text: None)
+    github._wait_until_it_answers("waiting")
+    asked = [c for c in machine.ssh.commands if "tail -5" in c or "/usr/bin/curl" in c]
+    assert ["curl" in c for c in asked] == [False, False, False, True]
+
+
+def test_the_fake_and_the_lab_name_the_same_line():
+    assert fake_github.LISTENING == plugin_repository.LISTENING
+
+
+def test_the_fake_does_not_look_its_own_name_up_between_bind_and_listen(monkeypatch):
+    """`HTTPServer.server_bind` would; while it did, the port dropped every question."""
+    looked_up = []
+    monkeypatch.setattr(socket, "getfqdn", lambda name="": looked_up.append(name) or name)
+    server = fake_github.Server(("127.0.0.1", 0), fake_github.handler_for(None))
+    try:
+        assert looked_up == [] and server.server_name == "127.0.0.1"
+    finally:
+        server.server_close()
+
+
+STAND_IN = """#!{python}
+# Stands in for the fake: says it listens, and then does not answer.
+import socket, sys, time
+port = int(sys.argv[4])  # stand-in, fake-github.py, serve, ROOT, PORT
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", port))
+if sys.argv[0].endswith("silent"):
+    s.listen(1)  # the connection is taken by the system and never answered
+print("listening: a stand-in", flush=True)
+time.sleep(120)
+"""
+
+
+@pytest.mark.parametrize("how", ["bound", "silent"])
+def test_a_question_the_fake_never_answers_is_a_lab_error_in_seconds_with_what_curl_said(tmp_path, monkeypatch, how):
+    """Bound and not listening: no connection. Listening and silent: no answer. Neither holds the lab."""
+    monkeypatch.setattr(config, "PLUGINS_CONNECT_SECONDS", 1)
+    monkeypatch.setattr(config, "PLUGINS_ASK_SECONDS", 20)
+    monkeypatch.setattr(config, "PLUGINS_UP_SECONDS", 2)
+    if how == "silent":
+        monkeypatch.setattr(config, "PLUGINS_ASK_SECONDS", 1)
+    stand_in = tmp_path / f"stand-in-{how}"
+    stand_in.write_text(STAND_IN.format(python=sys.executable))
+    stand_in.chmod(0o755)
+    machine = Here()
+    guest = tmp_path / "guest"
+    github = FakeGitHub(machine, note=lambda text: None, port=free_port(), guest_dir=str(guest), python=str(stand_in))
+    started = time.monotonic()
+    try:
+        with pytest.raises(LabError, match="did not answer within.*listening: a stand-in.*no answer.*curl: \\(28\\)"):
+            github.serve(tmp_path)
+    finally:
+        github.stop()
+    assert time.monotonic() - started < 15

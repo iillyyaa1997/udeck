@@ -1,6 +1,6 @@
 """Plugins from a repository: the catalogue, installing, updating, removing — and saying no.
 
-Thirteen checks, one per row of the table in docs/plugin-repository.md ("The
+Fifteen checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"), and all of them against the same two things: a release build of
 this checkout, and a fake GitHub served inside the guest
 (`plugin_repository.FakeGitHub`, `e2e/guest/fake-github.py`) whose content is
@@ -85,6 +85,10 @@ VERIFIED = "Verified"
 MODIFIED = "Modified locally"
 LIMIT_USED_UP = "they are used up"
 TRASH_WARNING = "Your changes to {id} will be moved to the Trash"
+REMOVE_TO_THE_TRASH = "Its folder is moved to the Trash"
+
+# What the fixture's card action writes, in the guest (e2e/fixtures/plugin-repository/*/plugins/uptime/hold.sh).
+HOLD_LOG = "/tmp/udeck-e2e-hold.log"
 ARRIVED_DIFFERENT = "arrived different from what the repository lists"
 
 # What the fixture's card says, row by row (e2e/fixtures/plugin-repository/*/plugins/uptime/uptime.sh).
@@ -289,9 +293,7 @@ def check_earlier_version(machine, check_dir, lab):
                    if r.is_api and r.path.endswith("/commits") and "path=plugins%2Fuptime" in r.query.replace("/", "%2F")]
         expect(history, "Earlier versions… listed versions without asking the repository for the folder's history")
 
-        # Its own each run: a guest shared with an earlier check keeps its Trash.
-        token = f"TOKEN={uuid.uuid4().hex}"
-        machine.ssh.run(f"printf '%s\\n' {token} > {UDECK_HOME}/plugins/{UPTIME}/.env", "keeping a .env beside the plugin")
+        token = _keep_a_dot_env(machine, "before choosing 1.0.0")
         _press(machine, f"plugin.{UPTIME}.history.1.0.0.install", "choosing 1.0.0")
         warning = _wait_until(machine, f"plugin.{UPTIME}.history.confirmText", lambda said: bool(said), NOTICED_SECONDS)
         _keep_the_pane(machine, check_dir, lab, "the-warning.txt")
@@ -308,14 +310,7 @@ def check_earlier_version(machine, check_dir, lab):
         offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == AVAILABLE_1_1_0, NOTICED_SECONDS)
         _keep_the_pane(machine, check_dir, lab, "after-the-earlier-version.txt")
         expect(offer == AVAILABLE_1_1_0, f"pinned at 1.0.0, the row says {offer!r} and not {AVAILABLE_1_1_0!r}")
-        looked = machine.ssh.ask(f"grep -rl {token} ~/.Trash", "looking in the Trash")
-        if looked.returncode > 1:
-            raise LabError("looking in the Trash", f"the guest's Trash could not be read: {looked.stderr.strip()!r}")
-        expect(looked.stdout.split(), f"the .env that was in {UPTIME}'s folder is not in the Trash after 1.0.0 replaced it")
-        expect(
-            not _exists(machine, f"{UDECK_HOME}/plugins/{UPTIME}/.env"),
-            f"the .env is still in {UPTIME}'s folder: 1.0.0 was not what replaced it",
-        )
+        _expect_it_in_the_trash(machine, token, "1.0.0 replaced it")
     finally:
         scene.close()
 
@@ -667,6 +662,148 @@ def check_window_survives_a_broken_manifest(machine, check_dir, lab):
         scene.close()
 
 
+def check_every_replacement_warns_first(machine, check_dir, lab):
+    """Reinstall, Update on the catalogue row, Back to and Remove, each over a folder with a `.env`, each warns first.
+
+    `plugins.earlier-version` asks this of **Install this version**; the other
+    buttons that replace or remove the folder ask the same rule (Q118), and each
+    is pressed here in turn, in one scene: every time a fresh `.env` is put into
+    the installed folder over SSH, the button is pressed, the warning has to be
+    on the screen before anything happens, and once it is confirmed the `.env`
+    has to be in the guest's Trash and no longer in the folder.
+
+    **Reinstall** is offered only on a folder that is not what was installed, so
+    for it `uptime.sh` gets a line of the operator's as well; **Back to 1.0.0**
+    follows the update to 1.1.0 that **Update** on the catalogue row made.
+
+    **Red for**: a button that replaces or removes a folder holding the
+    operator's `.env` without saying first that it goes to the Trash, and a
+    `.env` that does not reach the Trash.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        mark = _wait_until(machine, f"plugin.{UPTIME}.mark", lambda said: said and VERIFIED in said, NOTICED_SECONDS)
+        if mark is None or VERIFIED not in mark:
+            raise LabError("before the first .env", f"the installed row's mark is {mark!r}, not {VERIFIED!r}")
+
+        # Reinstall, on a folder changed by the operator and holding a .env.
+        token = _keep_a_dot_env(machine, "before Reinstall")
+        machine.ssh.run(f"printf '# a line the operator added\\n' >> {UDECK_HOME}/plugins/{UPTIME}/uptime.sh",
+                        "changing an installed file")  # fmt: skip
+        _wait_until(machine, f"plugin.{UPTIME}.reinstall", lambda said: said is not None, NOTICED_SECONDS, present=True)
+        before = (_read_json(machine, INSTALLED) or {}).get("plugins", {}).get(UPTIME, {}).get("installedAt")
+        _warned_then_confirmed(scene, f"plugin.{UPTIME}.reinstall", f"plugin.{UPTIME}", "Reinstall", "1.0.0",
+                               lambda r: r and r.get("installedAt") != before and r.get("version") == "1.0.0")  # fmt: skip
+        _expect_it_in_the_trash(machine, token, "Reinstall")
+
+        # Update, on the catalogue row, with main moved to c2.
+        scene.github.tell("moving main to c2", main="c2")
+        _press(machine, "catalogue.checkNow", "pressing Check now")
+        offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == AVAILABLE_1_1_0, OPERATION_SECONDS)
+        if offer != AVAILABLE_1_1_0:
+            raise CheckFailed(f"after Check now, with main at c2, {UPTIME}'s row says {offer!r}, not {AVAILABLE_1_1_0!r}")
+        token = _keep_a_dot_env(machine, "before Update")
+        _warned_then_confirmed(scene, f"catalogue.{UPTIME}.update", f"catalogue.{UPTIME}", "Update on the catalogue row",
+                               "1.1.0", lambda r: r and r.get("version") == "1.1.0")  # fmt: skip
+        _expect_it_in_the_trash(machine, token, "Update on the catalogue row")
+
+        # Back to 1.0.0.
+        token = _keep_a_dot_env(machine, "before Back to")
+        _warned_then_confirmed(scene, f"plugin.{UPTIME}.backTo", f"plugin.{UPTIME}", "Back to 1.0.0", "1.0.0",
+                               lambda r: r and r.get("version") == "1.0.0")  # fmt: skip
+        _expect_it_in_the_trash(machine, token, "Back to 1.0.0")
+
+        # Remove.
+        token = _keep_a_dot_env(machine, "before Remove")
+        _press(machine, f"plugin.{UPTIME}.remove", "pressing Remove")
+        said = _wait_until(machine, f"plugin.{UPTIME}.confirmText", lambda text: bool(text), NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "the-warning-before-remove.txt")
+        expect(
+            said is not None and REMOVE_TO_THE_TRASH in said,
+            f"with a .env in {UPTIME}'s folder, Remove said {said!r} before removing it; it has to say "
+            f"{REMOVE_TO_THE_TRASH!r}",
+        )
+        _press(machine, f"plugin.{UPTIME}.confirm", "confirming the removal")
+        gone = _wait_for_disk(machine, lambda: not _exists(machine, f"{UDECK_HOME}/plugins/{UPTIME}"), OPERATION_SECONDS)
+        expect(gone, f"after Remove was confirmed, ~/.udeck/plugins/{UPTIME} is still there")
+        _expect_it_in_the_trash(machine, token, "Remove")
+    finally:
+        scene.close()
+
+
+def check_an_update_ends_a_running_action(machine, check_dir, lab):
+    """An update pressed while the card's action runs ends the action first, and only then replaces the folder.
+
+    The fixture's card has one action, **Hold** (`hold.sh`), which runs until it
+    is ended and writes down, five times a second, whether the manifest at its
+    plugin's place is still the one it started with — and, on `SIGTERM`, that it
+    was ended. It is pressed on the card, and then **Update** is pressed in
+    Settings while it runs. uDeck quiets the plugin (Q117): the action is given
+    as long as a poll could take, then its process group is ended, and the
+    folder is swapped after that (`DeckModel.quiet`, `PluginQuiet.quiet`).
+
+    **Red for**: an update that swaps the folder while the action is still
+    running in it (the action writes "changed under it"), and one that never
+    ends the action (it is still running afterwards, or the update does not
+    happen).
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        _place(scene, UPTIME)
+        machine.ssh.run(f"rm -f {HOLD_LOG}", "clearing the action's own log")
+        _allow_and_read_the_card(scene, UPTIME, "before the action")
+
+        scene.github.tell("moving main to c2", main="c2")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        _press(machine, "catalogue.checkNow", "pressing Check now")
+        offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == AVAILABLE_1_1_0, OPERATION_SECONDS)
+        if offer != AVAILABLE_1_1_0:
+            raise CheckFailed(f"after Check now, with main at c2, {UPTIME}'s row says {offer!r}, not {AVAILABLE_1_1_0!r}")
+
+        _open_the_panel(machine, "opening the panel to press Hold")
+        hold = f"card.{UPTIME}.action.0"
+        try:
+            button = ui.wait_for(machine, hold, "waiting for the card's Hold", ui.PANEL)
+        except NotThere as error:
+            raise CheckFailed(f"{UPTIME}'s card offers no Hold action: {error.reason}") from None
+        machine.click(*button.middle, "pressing Hold on the card")
+        started = _wait_for_disk(machine, lambda: "started" in _hold_log(machine), NOTICED_SECONDS)
+        if not started:
+            raise CheckFailed(f"Hold was pressed and the action never started: {_hold_log(machine)!r}")
+        _put_the_panel_away(machine, "after pressing Hold")
+        if not _hold_is_running(machine):
+            raise LabError("before the update", f"the action ended by itself before the update: {_hold_log(machine)!r}")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        record = _operate(scene, f"plugin.{UPTIME}.update", "updating uptime while Hold runs",
+                          lambda r: r and r.get("version") == "1.1.0")  # fmt: skip
+        # The action looks at its folder five times a second, so it is given
+        # time to have seen a swap made under it — and it ends within that time
+        # only if something ended it, which is the other half of the verdict.
+        # Read at once, a swap under it 0.3 s before could go unwritten
+        # (measured: a uDeck that swapped without ending it read as "started"
+        # and nothing more, .build/e2e/20260929-122337Z).
+        _wait_for_disk(machine, lambda: not _hold_is_running(machine), NOTICED_SECONDS)
+        said = _hold_log(machine)
+        try:
+            (check_dir / "hold.log").write_text(said)
+        except OSError:
+            pass
+        expect(record is not None, f"with Hold running, Update did not put 1.1.0 in place; the action's log: {said[:300]!r}")
+        expect(
+            "changed under it" not in said,
+            f"the folder was replaced while the action was still running in it: {said[:300]!r}",
+        )
+        expect("ended" in said, f"the update replaced the folder and the action was never ended: {said[:300]!r}")
+        expect(not _hold_is_running(machine), f"the action is still running after the update: {said[:300]!r}")
+    finally:
+        scene.close()
+
+
 # --- What the checks share ------------------------------------------------------------------
 
 
@@ -864,6 +1001,50 @@ def _operate(scene, identifier, what, done, plugin=UPTIME):
         if done(record) or scene.machine.clock() >= deadline:
             return record if done(record) else None
         scene.machine.sleep(1)
+
+
+def _keep_a_dot_env(machine, step):
+    """A `.env` of the operator's, with a token of its own, put into the installed folder: the token."""
+    # Its own each time: a guest shared with an earlier check keeps its Trash.
+    token = f"TOKEN={uuid.uuid4().hex}"
+    machine.ssh.run(f"printf '%s\\n' {token} > {UDECK_HOME}/plugins/{UPTIME}/.env", f"keeping a .env beside the plugin {step}")
+    return token
+
+
+def _warned_then_confirmed(scene, button, row, what, version, done):
+    """`button` pressed; the warning on `row` says the Trash and `version`; confirmed; the record `done` wants."""
+    machine = scene.machine
+    _press(machine, button, f"pressing {what}")
+    warning = _wait_until(machine, f"{row}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-warning-before-{what.split()[0].lower()}.txt")
+    expect(
+        warning is not None and TRASH_WARNING.format(id=UPTIME) in warning and version in warning,
+        f"with a .env in {UPTIME}'s folder, {what} said {warning!r} before replacing it; it has to say "
+        f"{TRASH_WARNING.format(id=UPTIME)!r}… and name {version}",
+    )
+    record = _operate(scene, f"{row}.confirm", f"confirming {what}", done)
+    expect(record is not None, f"{what} was confirmed and installed.json never showed it: {_read_json(machine, INSTALLED)!r}")
+    return record
+
+
+def _expect_it_in_the_trash(machine, token, what):
+    """The `.env` with `token` is in the guest's Trash, and no longer in the folder."""
+    looked = machine.ssh.ask(f"grep -rl {token} ~/.Trash", "looking in the Trash")
+    if looked.returncode > 1:
+        raise LabError("looking in the Trash", f"the guest's Trash could not be read: {looked.stderr.strip()!r}")
+    expect(looked.stdout.split(), f"the .env that was in {UPTIME}'s folder is not in the Trash after {what}")
+    expect(
+        not _exists(machine, f"{UDECK_HOME}/plugins/{UPTIME}/.env"),
+        f"the .env is still in {UPTIME}'s folder after {what}: it was not what {what} replaced",
+    )
+
+
+def _hold_log(machine):
+    return machine.ssh.ask(f"cat {HOLD_LOG} 2>/dev/null || true", "reading the action's own log").stdout
+
+
+def _hold_is_running(machine):
+    return machine.ssh.ask("/usr/bin/pgrep -f hold.sh", "asking whether the action runs").returncode == 0
 
 
 def _expect_a_whole_record(record, commit, tree, version, pinned, previous):

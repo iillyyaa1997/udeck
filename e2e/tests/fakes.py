@@ -6,6 +6,7 @@ is how that difference gets lost in one place and never tested there.
 """
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,41 @@ from udeck_e2e.guest import parse_boot_time
 
 def done(out="", rc=0):
     return subprocess.CompletedProcess([], rc, out, "")
+
+
+# A line as `log show --style compact` prints it, which is how the tests write
+# what uDeck said: date, time, type, process[pid:tid], [subsystem:category], words.
+_COMPACT = re.compile(
+    r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3}) (Db|I |Df|E |F ) ([^\[]+)\[(\d+):([0-9a-f]+)\] \[([^:\]]+):([^\]]+)\] (.*)$"
+)
+_TYPE = {"Db": "Debug", "I ": "Info", "Df": "Default", "E ": "Error", "F ": "Fault"}
+
+
+def ndjson_of(compact):
+    """What the tests wrote as compact lines, as `log show --style ndjson` answers.
+
+    The lab reads ndjson (`panel.as_compact`), and the tests say what uDeck said
+    the way a person reads it. Each line is its own record — its own tick of the
+    clock, so two alike lines stay two events, as they would be in the guest —
+    and the column header is left out, as ndjson has none. A line that is not a
+    record is passed on as it is, for the reader to refuse.
+    """
+    records = []
+    for index, line in enumerate(compact.splitlines()):
+        if not line.strip() or line.startswith("Timestamp "):
+            continue
+        found = _COMPACT.match(line)
+        if not found:
+            records.append(line)
+            continue
+        when, kind, process, pid, tid, subsystem, category, message = found.groups()
+        records.append(json.dumps({
+            "timestamp": f"{when}000+0000", "messageType": _TYPE[kind], "processImagePath": f"/Applications/uDeck.app/Contents/MacOS/{process}",
+            "processID": int(pid), "threadID": int(tid, 16), "machTimestamp": 1_000_000 + index,
+            "subsystem": subsystem, "category": category, "eventMessage": message,
+        }))  # fmt: skip
+    records.append(json.dumps({"count": len(records), "finished": 1}))
+    return "\n".join(records) + "\n"
 
 
 class Dropped:
@@ -58,7 +94,9 @@ class Guest:
         for pattern, answer in self.answers.items():
             if pattern in command:
                 if isinstance(answer, list):
-                    return answer.pop(0) if len(answer) > 1 else answer[0]
+                    answer = answer.pop(0) if len(answer) > 1 else answer[0]
+                if isinstance(answer, str) and "--style ndjson" in command:
+                    return ndjson_of(answer)
                 return answer
         return None
 

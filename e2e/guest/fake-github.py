@@ -57,6 +57,7 @@ import hashlib
 import http.server
 import json
 import os
+import socketserver
 import sys
 import threading
 import time
@@ -518,14 +519,44 @@ def handler_for(fake: Fake):
     return Handler
 
 
+# The line the fake prints once its socket is listening, and not before: the lab
+# asks nothing of it until the line is there (`FakeGitHub._wait_until_it_answers`).
+LISTENING = "listening"
+
+
+class Server(http.server.ThreadingHTTPServer):
+    """http.server's own, without the name lookup it makes between bind and listen.
+
+    `HTTPServer.server_bind` asks `socket.getfqdn` for the address it bound, and
+    until that returns the port is bound and not listening. macOS drops a
+    connection attempt to such a port without an answer — no refusal — so a
+    client that asked in that window waits on its own retransmissions: 1, 2, 3,
+    4, 5, 7, 11, 19 and 35 seconds after it asked (measured on the lab's Mac with
+    curl, against a port that began to listen 20 seconds after it was bound: the
+    answer came 35 seconds after the question). The name is never used — no
+    answer here is built with it — so it is not looked up.
+    """
+
+    daemon_threads = True
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 def serve(root: str, port: int, owner_repo: str, log_path: str) -> None:
+    started = time.monotonic()
     fake = Fake(root, owner_repo, log_path)
     # 127.0.0.1 and nothing else: the guest's own network is reachable from the
     # Mac the lab runs on (measured for the update feed), and nothing outside the
     # machine has any business with this.
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler_for(fake))
-    server.daemon_threads = True
-    print(f"serving {owner_repo} from {root} on 127.0.0.1:{port}", flush=True)
+    server = Server(("127.0.0.1", port), handler_for(fake))
+    # How long it took is part of the line: a fake slow to start is what the lab
+    # has to be able to tell from a fake that never answers.
+    print(
+        f"{LISTENING}: {owner_repo} from {root} on 127.0.0.1:{port}, {time.monotonic() - started:.2f}s after it started",
+        flush=True,
+    )
     server.serve_forever()
 
 

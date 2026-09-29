@@ -65,6 +65,7 @@ check that says it.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 from collections.abc import Callable
@@ -333,6 +334,64 @@ def news_of_another_application(lines: str) -> list[str]:
     return [line for line in lines.splitlines() if CAME_FORWARD in line or OTHER_APP in line]
 
 
+# The column header `log show --style compact` prints, kept so that what the lab
+# reads and keeps looks as it always has.
+COMPACT_HEADER = "Timestamp               Ty Process[PID:TID]"
+
+# `log show`'s two-letter type column, as compact prints it (Debug and Info
+# measured against the same records read both ways, .build/e2e/20260929-120510Z).
+_TYPES = {"Debug": "Db", "Info": "I ", "Default": "Df", "Error": "E ", "Fault": "F "}
+
+
+def as_compact(ndjson: str) -> str:
+    """The records `log show --style ndjson` printed, as compact prints them, each once.
+
+    **`log show` can print one record twice.** Twice in one run of the lab
+    (.build/e2e/20260929-080845Z: panel.a-click-past-a-restored-panel and
+    panel.a-switch-after-a-choice-in-a-menu) every line of the first read came
+    back doubled — the same time to the millisecond, the same thread, the same
+    words, one after the other — and the check read one peek as two. The same
+    window read again at the end of each check (gesture.log) held every one of
+    those lines once: the doubles were the store answering twice for a record,
+    not uDeck saying it twice, which a later read could not have undone.
+
+    Compact's millisecond cannot tell a record read twice from two records, so
+    the lab reads ndjson, whose `machTimestamp` is the clock's own tick: two
+    messages from one thread cannot share one. A record whose tick, process,
+    thread and words were already read is that record again, and is dropped;
+    anything else is kept, however alike.
+    """
+    lines = [COMPACT_HEADER]
+    seen = set()
+    for raw in ndjson.splitlines():
+        if not raw.strip():
+            continue
+        try:
+            record = json.loads(raw)
+        except ValueError:
+            raise ValueError(f"not JSON: {raw[:200]!r}") from None
+        if not isinstance(record, dict):
+            raise ValueError(f"not a record: {raw[:200]!r}")
+        if "eventMessage" not in record:
+            # The summary `log show` ends with: {"count": …, "finished": 1}.
+            continue
+        try:
+            key = (record["machTimestamp"], record["processID"], record["threadID"], record["eventMessage"])
+            kind = _TYPES.get(record["messageType"], str(record["messageType"])[:2].ljust(2))
+            line = (
+                f"{record['timestamp'][:23]} {kind} {os.path.basename(record.get('processImagePath') or '')}"
+                f"[{record['processID']}:{int(record['threadID']):x}] "
+                f"[{record.get('subsystem', '')}:{record.get('category', '')}] {record['eventMessage']}"
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"a record without {error}: {raw[:200]!r}") from None
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(line)
+    return "\n".join(lines) + "\n"
+
+
 class GestureLog:
     """uDeck's own account of the gesture, kept in the guest's log and read back.
 
@@ -403,7 +462,7 @@ class GestureLog:
         predicate = f'subsystem == "{SUBSYSTEM}" AND ({categories})'
         done = self.machine.ssh.ask(
             f"/usr/bin/log show --start {shlex.quote(mark)} --predicate {shlex.quote(predicate)} "
-            f"--debug --info --style compact",
+            f"--debug --info --style ndjson",
             step,
         )
         if done.returncode != 0:
@@ -412,7 +471,10 @@ class GestureLog:
                 step,
                 f"the guest would not read uDeck's log: {said[-1] if said else f'exit {done.returncode}'}",
             )
-        return done.stdout
+        try:
+            return as_compact(done.stdout)
+        except ValueError as error:
+            raise LabError(step, f"the guest's log answered with something that is not a record: {error}") from None
 
     def _read_or_say_why_not(self, mark: str, step: str) -> str:
         """The same, as evidence: a read that fails says so and hands back nothing.
