@@ -86,3 +86,92 @@ jobs:
             echo "== $(basename "$plugin")"
             python3 -m unittest discover -s "$plugin" -p 'test_*.py' -v
           done
+
+  # The plugin format has to build and pass its tests on Linux as well: it is
+  # what the repository check will be built from (stage 2), and a plugin
+  # repository's CI runs on Linux. Nothing else in this repository is built
+  # here — the app needs AppKit — which is why the format is a package of its
+  # own, Packages/UDeckPluginFormat.
+  plugin-format-linux:
+    name: Plugin format on Linux (${{ matrix.arch }})
+    # A build or a git that hangs would otherwise hold the runner for six hours.
+    timeout-minutes: 30
+    strategy:
+      # Each architecture reports for itself: a failure on one says nothing
+      # about the other, and must not cancel it.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # Swift 6.4.0 exactly, pinned by digest rather than by tag: the Static Linux
+    # SDK below has to match the toolchain release for release, and a tag can
+    # be moved to another build. The digest is the multi-architecture one, so
+    # the same line serves both runners.
+    container: swift:6.4.0-noble@sha256:64bab762bc73a3fda6d9ebc559258bd6d7660c10a705bb25ecacad2f99d066f9
+    env:
+      # The SDK and its checksum as swift.org lists them for 6.4.0
+      # (https://www.swift.org/api/v1/install/releases.json).
+      STATIC_SDK_URL: https://download.swift.org/swift-6.4.0-release/static-sdk/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz
+      STATIC_SDK_CHECKSUM: 47d2fd89eebfdf9eb4d536b6710414297f755c17926cdebc4742c08982b40a9e
+    defaults:
+      run:
+        working-directory: Packages/UDeckPluginFormat
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the toolchain
+        run: |
+          swift --version
+          uname -m
+          git --version
+
+      - name: Build
+        run: swift build --build-tests
+
+      # The corpus tests build a few hundred git repositories, so git has to be
+      # there; the image has it.
+      - name: Test
+        run: swift test
+
+      - name: Install the Static Linux SDK
+        run: swift sdk install "$STATIC_SDK_URL" --checksum "$STATIC_SDK_CHECKSUM"
+
+      # A static musl binary runs on any Linux of its architecture, with
+      # nothing installed — what a repository's CI downloads and runs.
+      # `--build-system native`: with Swift 6.4.0's default build system a
+      # static Swift standard library with Foundation fails to link on Linux
+      # (swiftlang/swift-build#1764). If this step fails on one architecture,
+      # that is the finding: the SDK does not build for it at this release.
+      - name: Build udeck-plugin as a static musl binary
+        run: |
+          swift build -c release --build-system native \
+            --swift-sdk "${{ matrix.arch }}-swift-linux-musl" --product udeck-plugin
+
+      - name: Check that the binary is static and runs
+        run: |
+          set -eu
+          bin=$(swift build -c release --build-system native \
+            --swift-sdk "${{ matrix.arch }}-swift-linux-musl" --show-bin-path)
+          binary="$bin/udeck-plugin"
+          ls -l "$binary"
+          readelf -h "$binary" | grep 'Machine:'
+          if readelf -l "$binary" | grep -q 'INTERP'; then
+            echo "udeck-plugin asks for a dynamic loader; it is not a static binary" >&2
+            exit 1
+          fi
+          if readelf -d "$binary" | grep -q 'NEEDED'; then
+            echo "udeck-plugin needs shared libraries; it is not a static binary" >&2
+            readelf -d "$binary" | grep 'NEEDED' >&2
+            exit 1
+          fi
+          # The placeholder prints its version and exits 2, "could not check".
+          status=0
+          "$binary" > out.txt 2> err.txt || status=$?
+          cat out.txt err.txt
+          test "$status" -eq 2
+          grep -q '^udeck-plugin [0-9]*\.[0-9]*\.[0-9]*$' out.txt
+          grep -q 'check is not built yet' err.txt
