@@ -186,13 +186,15 @@ struct CardBodyView: View {
             // Keyed by position, not by content: a card may legitimately carry
             // two buttons with the same label and command, and identity by
             // content makes them collide.
-            ForEach(Array(card.actions.enumerated()), id: \.offset) { _, action in
+            ForEach(Array(card.actions.enumerated()), id: \.offset) { index, action in
                 Button(action.label) {
                     shell.onInteract()
                     run(action)
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
                 .help(action.run.joined(separator: " "))
+                // By position, as the buttons are kept: what the lab presses.
+                .accessibilityIdentifier("card.\(pluginID.rawValue).action.\(index)")
             }
             Spacer(minLength: 0)
         }

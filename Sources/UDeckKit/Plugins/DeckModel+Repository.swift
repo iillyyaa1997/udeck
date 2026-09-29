@@ -247,38 +247,29 @@ extension DeckModel {
 
     // MARK: - Quieting
 
-    /// Stops scheduling a plugin's polls, refuses its card actions, and waits
-    /// for the runs in flight to end — a poll cannot take longer than its
-    /// `timeout` and the half-second grace — so nothing of it runs across a
-    /// swap or a removal.
+    /// Stops scheduling a plugin's polls and refuses its card actions, then
+    /// quiets it by `PluginQuiet.quiet` — what to wait for, what to end and
+    /// what to answer are decided there, in UDeckCore, where they are tested —
+    /// so nothing of it runs across a swap or a removal. Answers whether
+    /// nothing of the plugin is running; false, and its folder is not touched.
     ///
-    /// A card's action has no timeout of its own. One still running when that
-    /// wait is up is ended — `SIGTERM` to its process group, a second, then
-    /// `SIGKILL` — and waited for again. Answers whether nothing of the plugin
-    /// is running; false, and its folder is not touched.
+    /// Whether anything runs is asked of `pluginRuns`, which counts a card
+    /// action until its whole process group has ended (`ActionProcesses`).
     func quiet(_ id: PluginIdentifier) async -> Bool {
         pluginRuns.quiet(id.rawValue)
         stopPolling(id)
         let plugin = id.rawValue
-        let actions = actionProcesses
-        let settled = await PluginQuiet.settle(
-            wait: (self.plugin(withID: id)?.manifest?.timeout ?? 5) + 1.5,
-            andThen: Self.actionEndGrace * 2 + 1,
-            isRunning: { [weak self] in await MainActor.run { self?.pluginRuns.isRunning(plugin) ?? false } },
-            stopActions: {
-                DeckLog.plugins.info("ending \(plugin, privacy: .public)'s card action, still running after the wait")
-                await actions.stop(plugin, grace: Self.actionEndGrace)
-            }
+        let settled = await PluginQuiet.quiet(
+            plugin,
+            pollTimeout: self.plugin(withID: id)?.manifest?.timeout,
+            actions: actionProcesses,
+            isRunning: { [weak self] in await MainActor.run { self?.pluginRuns.isRunning(plugin) ?? false } }
         )
         if !settled {
             DeckLog.plugins.error("\(plugin, privacy: .public) is still running; its folder is left as it was")
         }
         return settled
     }
-
-    /// Between `SIGTERM` and `SIGKILL` for a card action that outlasts the
-    /// wait, and again after it.
-    static let actionEndGrace: TimeInterval = 1
 
     func resume(_ id: PluginIdentifier) {
         pluginRuns.resume(id.rawValue)

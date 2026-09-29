@@ -601,6 +601,85 @@ struct PluginInstallerTests {
         #expect(stagingIsEmpty())
     }
 
+    /// What the Trash holds, by name, and whether a `.env` of the operator's is among it.
+    func trashed(_ trash: TestTrash) -> (names: [String], env: Bool) {
+        let inside = (try? FileManager.default.subpathsOfDirectory(atPath: trash.folder.path)) ?? []
+        return (trash.names, inside.contains { $0.hasSuffix("/.env") })
+    }
+
+    /// Reinstalling the same version over a folder with a `.env` beside it: the
+    /// old copy in staging hashes to the intended tree, exactly as the download
+    /// would. It used to be taken for the download and deleted with the `.env`.
+    @Test("after an exchange, an old copy that hashes like the download but holds a .env goes to the Trash")
+    func recoverOldCopySameTreeWithAnEnv() throws {
+        let repository = FakeRepository.withUptime()
+        try write(repository, into: live)
+        try Data("# changed\n".utf8).write(to: live.appendingPathComponent("README.md"))
+        let trash = TestTrash(in: temp.url)
+        let directory = try stagingFolder(InstallIntent(operation: .reinstall, id: "uptime",
+                                                        record: intendedRecord(repository), oldCopyIsOperators: true),
+                                          holding: repository)
+        try Data("TOKEN=mine\n".utf8).write(to: directory.appendingPathComponent("uptime/.env"))
+        #expect(installer(FetchLog(repository), trash: trash).recover() == [.neverSwapped(id: "uptime")])
+        #expect(trashed(trash).names == ["uptime"] && trashed(trash).env, "the .env is in the Trash")
+        #expect(stagingIsEmpty())
+    }
+
+    /// A removal had moved the folder into staging, and something was put at
+    /// `plugins/<id>` again before the next launch. The moved copy used to be
+    /// deleted with the staging folder.
+    @Test("a removal whose place was taken again sends the copy it had moved to the Trash, .env and all")
+    func recoverRemovalPlaceTakenAgain() throws {
+        let repository = FakeRepository.withUptime()
+        try JSONFileStore<InstalledPlugins>(url: paths.installedFile)
+            .save(InstalledPlugins(plugins: ["uptime": intendedRecord(repository)]))
+        try write(repository, into: live)
+        let trash = TestTrash(in: temp.url)
+        let directory = try stagingFolder(InstallIntent(operation: .remove, id: "uptime", record: nil,
+                                                        oldCopyIsOperators: true), holding: repository)
+        try Data("TOKEN=mine\n".utf8).write(to: directory.appendingPathComponent("uptime/.env"))
+        #expect(installer(FetchLog(repository), trash: trash).recover() == [.removalNeverStarted(id: "uptime")])
+        #expect(trashed(trash).names == ["uptime"] && trashed(trash).env)
+        #expect(try GitHash.tree(ofDirectoryAt: live) == repository.treeID("plugins/uptime"), "the folder there stays")
+        #expect(stagingIsEmpty())
+    }
+
+    /// The journal is not the only witness: a copy it calls uDeck's that holds
+    /// a `.env` all the same is judged by the rule.
+    @Test("a copy the journal calls uDeck's goes to the Trash all the same when it holds a .env")
+    func recoverByTheRuleNotTheJournal() throws {
+        let repository = FakeRepository.withUptime()
+        try JSONFileStore<InstalledPlugins>(url: paths.installedFile)
+            .save(InstalledPlugins(plugins: ["uptime": intendedRecord(repository)]))
+        let trash = TestTrash(in: temp.url)
+        let directory = try stagingFolder(InstallIntent(operation: .remove, id: "uptime", record: nil,
+                                                        oldCopyIsOperators: false), holding: repository)
+        try Data("TOKEN=mine\n".utf8).write(to: directory.appendingPathComponent("uptime/.env"))
+        #expect(installer(FetchLog(repository), trash: trash).recover() == [.removalFinished(id: "uptime")])
+        #expect(trashed(trash).names == ["uptime"] && trashed(trash).env)
+        #expect(stagingIsEmpty())
+    }
+
+    @Test("what recovery can prove is uDeck's own is deleted, not put in the Trash")
+    func recoverDeletesOnlyWhatIsProvablyUDecks() throws {
+        let repository = FakeRepository.withUptime()
+        try JSONFileStore<InstalledPlugins>(url: paths.installedFile)
+            .save(InstalledPlugins(plugins: ["uptime": intendedRecord(repository)]))
+        let trash = TestTrash(in: temp.url)
+        // A removal that had moved uDeck's own copy, Finder's litter and all.
+        let directory = try stagingFolder(InstallIntent(operation: .remove, id: "uptime", record: nil,
+                                                        oldCopyIsOperators: false), holding: repository)
+        try Data().write(to: directory.appendingPathComponent("uptime/.DS_Store"))
+        #expect(installer(FetchLog(repository), trash: trash).recover() == [.removalFinished(id: "uptime")])
+        // A download cut short, its journal written before it had a record.
+        let partial = try stagingFolder(InstallIntent(operation: .install, id: "uptime", record: nil,
+                                                      oldCopyIsOperators: false), holding: repository)
+        try FileManager.default.removeItem(at: partial.appendingPathComponent("uptime/README.md"))
+        #expect(installer(FetchLog(repository), trash: trash).recover() == [.neverSwapped(id: "uptime")])
+        #expect(trash.names.isEmpty, "nothing of the operator's was there: \(trash.names)")
+        #expect(stagingIsEmpty())
+    }
+
     // MARK: - One rule for the Trash, and the warning before it
 
     /// Q118: the warning before **Update**, **Back to**, **Earlier versions…**,

@@ -244,7 +244,7 @@ struct Russian: Vocabulary {
         case .capabilityExec(let command): "запускать \(command)"
         case .capabilityNetwork(let host): "обращаться к \(host) по сети"
         case .capabilityScreen: "видеть список запущенных приложений и переключаться между ними"
-        case .capabilitySecret(let name): "получать от uDeck секрет «\(name)»"
+        case .capabilitySecret(let name): "секрет «\(name)» (uDeck пока секретов не выдаёт)"
 
         // О программе
         case .aboutTitle: "uDeck"

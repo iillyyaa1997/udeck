@@ -236,15 +236,26 @@ struct PermissionTests {
         #expect(!PermissionGate.mayRun(CardAction(label: "a", run: []), requestedBy: asking(["ps"]), grant: grant))
     }
 
-    @Test("secrets are the one capability the host genuinely holds for a running plugin")
-    func secretsAreHostMediated() {
-        #expect(Capability.secret("printer").processEnforcement == .hostMediated)
+    /// Q120: a plugin may still declare a secret, and is asked about it, but
+    /// nothing hands one over — so nothing may say the host holds it for the
+    /// plugin, and the consent sheet says it will not be given, in both
+    /// languages.
+    @Test("a secret is asked about and said not to be handed out, in English and Russian")
+    func secretsAreNotProvided() {
+        #expect(Capability.secret("printer").processEnforcement == .notProvided)
         #expect(Capability.read("/tmp/*").processEnforcement == .declaredOnly)
         #expect(Capability.exec("ps").processEnforcement == .declaredOnly)
 
-        let grant = PluginGrant(granted: [.secret("printer")], decidedForVersion: "1.0.0")
-        #expect(PermissionGate.mayReceiveSecret("printer", grant: grant))
-        #expect(!PermissionGate.mayReceiveSecret("mailer", grant: grant))
+        let english = Strings(.english)(Capability.secret("printer").summaryPhrase)
+        #expect(english == "be given the secret \"printer\" (uDeck does not hand out secrets yet)")
+        #expect(Capability.secret("printer").summary == english)
+        #expect(Strings(.english)(.permissionsAsksTo) + " " + english
+                == "This plugin asks to: be given the secret \"printer\" (uDeck does not hand out secrets yet)")
+        let russian = Strings(.russian)(Capability.secret("printer").summaryPhrase)
+        #expect(russian == "секрет «printer» (uDeck пока секретов не выдаёт)")
+        for text in [english, russian] {
+            #expect(!text.contains("receive") && !text.contains("получать"), "\(text) promises a secret")
+        }
     }
 
     @Test("grants survive a round trip through JSON")

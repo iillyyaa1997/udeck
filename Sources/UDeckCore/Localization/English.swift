@@ -236,7 +236,7 @@ struct English: Vocabulary {
         case .capabilityExec(let command): "run \(command)"
         case .capabilityNetwork(let host): "reach \(host) over the network"
         case .capabilityScreen: "list and switch between running applications"
-        case .capabilitySecret(let name): "receive the secret \"\(name)\" from uDeck"
+        case .capabilitySecret(let name): "be given the secret \"\(name)\" (uDeck does not hand out secrets yet)"
 
         // About
         case .aboutTitle: "uDeck"

@@ -118,6 +118,9 @@ struct CatalogueRowView: View {
     /// The version **Update** or **Switch to** was pressed for, over a copy
     /// changed on disk: what the warning names before anything is replaced.
     @State private var updatingOverChanges: String?
+    /// The same for **Reinstall** on a row whose folder was missing: something
+    /// may have been put at its place since the row was drawn.
+    @State private var reinstallingOverChanges: String?
 
     private var id: String { entry.id }
     private var manifest: PluginManifest? { entry.manifest(in: strings.language.rawValue) }
@@ -169,6 +172,13 @@ struct CatalogueRowView: View {
                     model.update(id)
                 }
             }
+            if let version = reinstallingOverChanges {
+                confirmation(strings(.catalogueUpdateOverChanges(id: id, version: version)),
+                             button: strings(.catalogueReinstall(version: version)),
+                             identifier: "catalogue.\(id).confirm") {
+                    model.reinstall(id)
+                }
+            }
             if let problem = model.operationProblems[id] {
                 ProblemText(problem: problem).accessibilityIdentifier("catalogue.\(id).problem")
             }
@@ -217,7 +227,7 @@ struct CatalogueRowView: View {
                     EmptyView()
                 }
             case .missing:
-                Button(strings(.windowReinstall)) { model.reinstall(id) }
+                Button(strings(.windowReinstall)) { reinstall() }
                     .disabled(model.busyPlugin != nil)
                     .accessibilityIdentifier("catalogue.\(id).reinstall")
             case .cannotInstall:
@@ -225,6 +235,18 @@ struct CatalogueRowView: View {
                     .buttonStyle(.link)
                     .accessibilityIdentifier("catalogue.\(id).details")
             }
+        }
+    }
+
+    /// **Reinstall** of a plugin whose folder was missing: the rule is asked
+    /// of the disk when the button is pressed, as every other button that
+    /// replaces a folder asks it — a folder put there since the row was drawn
+    /// is replaced, and goes to the Trash, only after the warning.
+    private func reinstall() {
+        if model.operatorsWorkGoesToTrash(id), let version = model.installed.plugins[id]?.version {
+            reinstallingOverChanges = version
+        } else {
+            model.reinstall(id)
         }
     }
 
@@ -273,16 +295,19 @@ struct CatalogueRowView: View {
                               action: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(text).font(.caption).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("catalogue.\(id).confirmText")
             HStack {
                 Button(button, role: .destructive) {
                     confirming = false
                     updatingOverChanges = nil
+                    reinstallingOverChanges = nil
                     action()
                 }
                 .accessibilityIdentifier(identifier)
                 Button(strings(.actionCancel)) {
                     confirming = false
                     updatingOverChanges = nil
+                    reinstallingOverChanges = nil
                 }
             }
         }

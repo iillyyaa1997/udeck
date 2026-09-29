@@ -223,12 +223,19 @@ CONTRIBUTING.md                   how to add a plugin, git commit -s, what revie
 plugins/uptime/
 ```
 
-**CI.** `validate.yml` runs on `pull_request` and on `push` to `main` — never on
-`pull_request_target`, which would run a stranger's code with the repository's
-secrets. It runs `python3 .github/scripts/check-repo.py --official`, which
-implements rules 1–17 with nothing but the Python standard library, and, for a
-pull request, checks the sign-off of every commit between the base and the
-head.
+**CI.** `validate.yml` runs on `pull_request` into `main` and on `push` to
+`main` — never on `pull_request_target`, which would run a stranger's code with
+the repository's secrets. It runs `.github/scripts/check-repo.py --official`,
+which implements rules 1–17 with nothing but the Python standard library, and,
+for a pull request, checks the sign-off of every commit between the base and the
+head. The copy that runs, with its tests, is the base's, read out of git into a
+folder of its own; only the pull request that brings the check into `main`, when
+the base has none, is checked by its own copy. Python runs isolated (`-I`) from
+that folder, not from the checkout, so a `unittest/` or a `tempfile.py` in a pull
+request is never imported in place of the standard library's, and no step takes
+the check's path from an environment an earlier step could write. What the
+workflow cannot guard is itself: GitHub runs a `pull_request` workflow as the
+pull request has it. That rests on the review below.
 
 > **Later — stage 2.** The script is replaced by `udeck-plugin check-repo .
 > --strict --official`, built from the same Swift library uDeck uses, and the
@@ -827,22 +834,29 @@ before the plugins folder is first read, uDeck looks in `~/.udeck/staging/`:
 
 * **An install, update or earlier version** — if `plugins/<id>` now hashes to
   the tree in the intent, the swap happened and the record did not: the record
-  is written, and the copy that lost — in staging — is deleted, or moved to the
-  Trash if the intent says it was the operator's own. Otherwise the record is
-  not written, and nothing in staging is deleted unless it is known to be
-  uDeck's own download (it hashes to the intended tree):
+  is written. Otherwise the record is not written:
   * an old copy the two-rename fallback moved aside goes back to
     `plugins/<id>`. If it cannot be moved back, the staging folder and its
     journal stay exactly as they are and the next launch tries again; if
     something else is at `plugins/<id>` by then, the old copy goes to the Trash
     rather than over it. It is never deleted: it may be the operator's only
-    copy;
-  * a copy under the id that does not hash to the intended tree is the old one
-    after a swap whose record was never written, with the new copy changed
-    since: it is disposed of as the intent says, never simply deleted when it
-    was the operator's.
+    copy.
 * **A removal** — if `plugins/<id>` is gone, the rest of the removal is
   finished; if it is still there, the removal never started.
+
+Whatever copy is then left in staging under the id is the one that lost, and
+which copy it is — the new download, or the old folder after an exchange — is
+not taken on trust after a crash. It is deleted only when it is provably
+uDeck's own by the same rule the warning uses (see *What goes to the Trash*):
+it hashes to a tree uDeck put there — the intent's, or the one `installed.json`
+recorded for the id — and holds nothing the hash does not see, `.DS_Store`
+aside; and the intent did not say it was the operator's. Anything else goes to
+the Trash. A download of the same version as a folder with the operator's
+`.env` beside it hashes the same as that folder; the `.env` is what tells them
+apart. The one exception is a journal written before its download finished,
+which has no record yet: the swap it would precede never began, so what is
+under the id is the raw host's files, whole or in part, and they are deleted
+when nothing the hash does not see is among them.
 
 Without this, a crash between the swap and the record would leave a plugin that
 looks modified by its own owner.
@@ -921,8 +935,9 @@ The third case is why the row's mark is not the rule: a `.env` put beside a
 plugin leaves it **Verified**, and it still goes to the Trash with the copy.
 Every button that replaces or removes the folder asks the rule, of the disk, when
 it is pressed — **Update** and **Switch to** on either row, **Back to**, **Install
-this version** under **Earlier versions…**, **Reinstall** (on the row and on a
-window whose plugin will not run), and **Remove** — and, when it says yes, shows
+this version** under **Earlier versions…**, **Reinstall** (on the plugin's row,
+on the catalogue's row of a plugin whose folder is missing, and on a window
+whose plugin will not run), and **Remove** — and, when it says yes, shows
 *"Your changes to uptime will be moved to the Trash and replaced with 1.0.0."*
 (for **Remove**, that the folder goes to the Trash) before anything happens.
 The rule is `OperatorsWork` in UDeckCore, and the installer decides the Trash
@@ -1178,6 +1193,8 @@ guest's `~/.udeck` over SSH.
 | `plugins.catalogue-off-means-no-network` | Switched off and relaunched, uDeck makes no request to the fake for two minutes. |
 | `plugins.modified-locally` | A line appended to an installed file over SSH makes the row say **Modified locally** within seconds, and **Verified** is gone. |
 | `plugins.window-survives-a-broken-manifest` | A placed plugin's manifest broken over SSH keeps its window in `layout.json`, which says what is wrong; fixed, the card comes back without being added again. |
+| `plugins.every-replacement-warns-first` | Over a folder with a `.env` put in over SSH — for **Reinstall**, also a line appended to `uptime.sh` — **Reinstall**, **Update** on the catalogue row, **Back to 1.0.0** and **Remove** each say first that the copy goes to the Trash; confirmed, each does what it says, and every `.env` is in the guest's Trash and no longer in the folder. |
+| `plugins.an-update-ends-a-running-action` | With the fixture card's **Hold** action running, **Update** ends it before it replaces the folder: the action wrote that it was ended and never that its folder changed under it, nothing of it runs afterwards, and 1.1.0 is in place. |
 
 ### Unit tests
 
@@ -1202,9 +1219,14 @@ never the network. What they cover:
 * what goes to the Trash: one rule, held against what the installer does, for a
   folder as installed, with `.DS_Store`, with a `.env`, with a `.git`, changed,
   and of the operator's own;
-* quieting: a card action that outlasts the wait is ended with its process
-  group, the swap happens only after it has ended, and a plugin that will not
-  end leaves its folder as it was;
+* quieting, decided whole in UDeckCore (`PluginQuiet.quiet`): a run that ends
+  within a poll's `timeout` and the second and a half after it is waited for
+  and not ended, a card action that outlasts that wait is ended with its
+  process group, the swap happens only after it has ended, and a plugin that
+  will not end leaves its folder as it was;
+* recovery by the rule: a copy left in staging with a `.env` goes to the Trash
+  whether it hashes like the download or the journal calls it uDeck's, and what
+  is provably uDeck's own is deleted;
 * the rate-limit state: blocking, resetting, the reserve for unrequested
   refreshes;
 * `installed.json`: reading and writing, and the status computation;

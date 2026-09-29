@@ -132,9 +132,4 @@ public enum PermissionGate {
         guard manifest.permissions.capabilities.contains(capability) else { return false }
         return grant.granted.contains(capability)
     }
-
-    /// May the host hand this plugin the named secret?
-    public static func mayReceiveSecret(_ name: String, grant: PluginGrant?) -> Bool {
-        grant?.granted.contains(.secret(name)) ?? false
-    }
 }

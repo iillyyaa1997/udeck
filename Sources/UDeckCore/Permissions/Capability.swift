@@ -12,7 +12,8 @@ public enum Capability: Hashable, Sendable {
     case network(String)
     /// Enumerate and switch between running applications.
     case screen
-    /// Receive a named secret from the host's keychain entry for it.
+    /// Be handed a named secret by the host. Declared and asked about; this
+    /// version of uDeck hands over none (`CapabilityEnforcement.notProvided`).
     case secret(String)
 
     public var family: Family {
@@ -69,13 +70,20 @@ public enum CapabilityEnforcement: Equatable, Sendable {
     /// process is not prevented from doing it. Withholding the grant stops the
     /// plugin from launching, which is the enforcement that does exist.
     case declaredOnly
+
+    /// Something only the host could provide, and this version provides to no
+    /// plugin, granted or not: a secret. Asked about, so that a plugin that
+    /// needs one is declined or allowed knowingly, and so that the answer is
+    /// on record for the version that starts handing them over — which is also
+    /// when a gate on it would have something to gate.
+    case notProvided
 }
 
 extension Capability {
     /// How this capability behaves for the plugin's own process.
     public var processEnforcement: CapabilityEnforcement {
         switch self {
-        case .secret: .hostMediated
+        case .secret: .notProvided
         case .read, .write, .exec, .network, .screen: .declaredOnly
         }
     }
@@ -104,7 +112,7 @@ extension Capability {
         case .exec(let command): "run \(command)"
         case .network(let host): "reach \(host) over the network"
         case .screen: "list and switch between running applications"
-        case .secret(let name): "receive the secret \"\(name)\" from uDeck"
+        case .secret(let name): "be given the secret \"\(name)\" (uDeck does not hand out secrets yet)"
         }
     }
 }

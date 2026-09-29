@@ -84,6 +84,47 @@ struct ActionProcessesTests {
         #expect(Date().timeIntervalSince(started) < 3, "and nothing waited out the whole of andThen")
     }
 
+    // MARK: - Quieting, decided whole (Q117)
+
+    /// What `DeckModel.quiet` hands the swap: a card action that outlives the
+    /// wait for polls is ended, and the answer is asked of the runs, not assumed.
+    @Test("quieting ends a card action that outlives the wait for polls, and says so only once it has ended")
+    func quietEndsWhatOutlivesTheWait() async throws {
+        let actions = ActionProcesses()
+        try start(actions, Self.stubborn)
+        await ActionProcesses.pause(0.2)
+        let started = Date()
+        let quiet = await PluginQuiet.quiet("uptime", pollTimeout: 0, actions: actions, grace: 0.3,
+                                            isRunning: { actions.isRunning("uptime") })
+        #expect(quiet, "the action was ended, and nothing of the plugin runs")
+        #expect(!actions.isRunning("uptime"))
+        #expect(Date().timeIntervalSince(started) >= 1.5, "the polls' wait came first: \(Date().timeIntervalSince(started))")
+    }
+
+    @Test("quieting waits out a run that ends within a poll's timeout, and ends nothing")
+    func quietWaitsForAPollsTimeout() async throws {
+        let actions = ActionProcesses()
+        let finished = temp.url.appendingPathComponent("finished")
+        // Longer than the half-second grace alone, shorter than the timeout
+        // and the grace after it.
+        try start(actions, ["-c", "/bin/sleep 1.5; : > \(finished.path)"])
+        let quiet = await PluginQuiet.quiet("uptime", pollTimeout: 1, actions: actions, grace: 0.3,
+                                            isRunning: { actions.isRunning("uptime") })
+        #expect(quiet)
+        #expect(FileManager.default.fileExists(atPath: finished.path), "the run was ended instead of waited for")
+        #expect(await PluginQuiet.quiet("uptime", pollTimeout: nil, actions: actions, isRunning: { false }))
+    }
+
+    @Test("quieting a plugin something of which will not end says so, and the folder must stay")
+    func quietSaysWhenSomethingWillNotEnd() async {
+        let actions = ActionProcesses()
+        let asked = Flag()
+        let quiet = await PluginQuiet.quiet("uptime", pollTimeout: 0, actions: actions, grace: 0.1,
+                                            isRunning: { asked.set(); return true })
+        #expect(!quiet)
+        #expect(asked.isSet)
+    }
+
     // MARK: - The folder is not touched under a live process
 
     func installer(_ repository: FakeRepository, trash: TestTrash, renames: FolderRenames = .system) -> PluginInstaller {

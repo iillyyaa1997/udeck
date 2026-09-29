@@ -130,6 +130,39 @@ extension PluginQuiet {
         return await waitUntilIdle(isRunning, for: andThen)
     }
 
+    /// Quieting a plugin, decided whole (Q117), for a caller that has already
+    /// stopped anything more of it from starting: what to wait for, what to
+    /// end, and what to answer.
+    ///
+    /// * Its runs in flight — polls, which end within their `timeout`
+    ///   (`pollTimeout`, 5 seconds when the manifest gives none) and the half
+    ///   second after it, and card actions — are waited for that long, plus a
+    ///   second.
+    /// * Anything still running then is a card action, which has no deadline of
+    ///   its own: `actions` ends it — `SIGTERM` to its process group, `grace`,
+    ///   then `SIGKILL` — and the runs are waited for again, twice `grace` and
+    ///   a second.
+    /// * The answer is whether nothing of the plugin runs, asked of
+    ///   `isRunning`, never assumed: false, and its folder must not be touched.
+    public static func quiet(
+        _ plugin: String,
+        pollTimeout: TimeInterval?,
+        actions: ActionProcesses,
+        grace: TimeInterval = actionEndGrace,
+        isRunning: @escaping @Sendable () async -> Bool
+    ) async -> Bool {
+        await settle(
+            wait: (pollTimeout ?? 5) + 1.5,
+            andThen: grace * 2 + 1,
+            isRunning: isRunning,
+            stopActions: { await actions.stop(plugin, grace: grace) }
+        )
+    }
+
+    /// Between `SIGTERM` and `SIGKILL` for a card action that outlasts the
+    /// wait, and again after it.
+    public static let actionEndGrace: TimeInterval = 1
+
     private static func waitUntilIdle(_ isRunning: () async -> Bool, for seconds: TimeInterval) async -> Bool {
         let deadline = Date().addingTimeInterval(seconds)
         while await isRunning(), Date() < deadline {

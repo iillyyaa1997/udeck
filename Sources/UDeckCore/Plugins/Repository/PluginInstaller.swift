@@ -636,11 +636,16 @@ public struct PluginInstaller: Sendable {
     ///
     /// * An install, update or earlier version — if `plugins/<id>` now hashes to
     ///   the tree in the intent, the swap happened and the record did not: the
-    ///   record is written. Otherwise the swap never happened. Either way the
-    ///   staging folder goes — its contents are the copy that lost: deleted, or
-    ///   to the Trash if the intent says it was the operator's.
+    ///   record is written. Otherwise the swap never happened.
     /// * A removal — if `plugins/<id>` is gone, the rest of the removal is
     ///   finished; if it is still there, the removal never started.
+    ///
+    /// Either way, whatever copy is left in staging is the one that lost, and
+    /// it is deleted only when uDeck can tell it is its own
+    /// (`OperatorsWork.isAtStake(in:knownTrees:)`): it hashes to a tree uDeck
+    /// put there, and holds nothing the hash does not see. Anything else goes
+    /// to the Trash — which copy it is, after a crash, is exactly what cannot be
+    /// taken on trust.
     public func recover() -> [RecoveredOperation] {
         let entries = (try? fileManager.contentsOfDirectory(
             at: paths.staging, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
@@ -668,9 +673,17 @@ public struct PluginInstaller: Sendable {
         let displaced = directory.appendingPathComponent("displaced", isDirectory: true)
             .appendingPathComponent(id, isDirectory: true)
         let liveExists = fileManager.fileExists(atPath: live.path)
+        // The tree uDeck last recorded for this id, read before anything here
+        // changes the record: an old copy that still hashes to it is uDeck's.
+        let recorded = (try? loadRecords())?.plugins[id]?.tree
+        let known = [recorded, intent.record?.tree].compactMap { $0 }
 
         if intent.operation == .remove {
             guard !liveExists else {
+                // Something is at `plugins/<id>` again. A folder the removal had
+                // already moved here is still the old copy, and the operator's
+                // when the journal or the rule says so.
+                disposeRecovered(inStaging, known: known, operators: intent.oldCopyIsOperators)
                 try? fileManager.removeItem(at: directory)
                 return .removalNeverStarted(id: id)
             }
@@ -679,7 +692,7 @@ public struct PluginInstaller: Sendable {
             } catch {
                 return .leftForLater(id: id, reason: "\(error)")
             }
-            dispose(inStaging, operators: intent.oldCopyIsOperators)
+            disposeRecovered(inStaging, known: known, operators: intent.oldCopyIsOperators)
             try? fileManager.removeItem(at: directory)
             return .removalFinished(id: id)
         }
@@ -695,14 +708,13 @@ public struct PluginInstaller: Sendable {
             } catch {
                 return .leftForLater(id: id, reason: "\(error)")
             }
-            dispose(inStaging, operators: intent.oldCopyIsOperators)
-            dispose(displaced, operators: intent.oldCopyIsOperators)
+            disposeRecovered(inStaging, known: known, operators: intent.oldCopyIsOperators)
+            disposeRecovered(displaced, known: known, operators: intent.oldCopyIsOperators)
             try? fileManager.removeItem(at: directory)
             return .recordWritten(id: id)
         }
 
-        // The folder is not the one the intent would record. Nothing in staging
-        // is deleted unless it is known to be uDeck's own download.
+        // The folder is not the one the intent would record.
         //
         // An old copy moved aside by the two-rename fallback goes back where it
         // was. If it cannot, staging and its journal stay as they are and the
@@ -726,16 +738,33 @@ public struct PluginInstaller: Sendable {
             }
         }
         // What is under the id in staging is the new download when the swap
-        // never happened: it hashes to the intended tree, and goes. After an
-        // exchange whose record was never written, and a folder changed since,
-        // it is the old copy instead — the copy that lost, disposed of as the
-        // intent says, never simply deleted when it was the operator's.
-        if let record = intent.record, fileManager.fileExists(atPath: inStaging.path),
-           ((try? GitHash.tree(ofDirectoryAt: inStaging)) ?? nil) != record.tree {
-            dispose(inStaging, operators: intent.oldCopyIsOperators)
+        // never happened, and the old copy after an exchange whose record was
+        // never written and whose new copy was changed since. Which one it is
+        // is not taken from the journal: a download hashes to the intended tree
+        // and holds nothing else, and an old copy of the same version with the
+        // operator's `.env` beside it hashes the same. So it is judged by the
+        // rule, and goes to the Trash unless it is provably uDeck's own. A
+        // journal with no record yet was written before any download finished,
+        // and the swap it would precede never began: only the raw host's files
+        // are in it, whole or in part — which hash to nothing, so they are
+        // deleted when nothing the hash does not see is among them.
+        if intent.record == nil, fileManager.fileExists(atPath: inStaging.path),
+           GitHash.unhashed(inDirectoryAt: inStaging).isEmpty {
+            try? fileManager.removeItem(at: inStaging)
+        } else {
+            disposeRecovered(inStaging, known: known, operators: false)
         }
         try? fileManager.removeItem(at: directory)
         return .neverSwapped(id: id)
+    }
+
+    /// A copy a crash left in staging: deleted only when it is provably
+    /// uDeck's own — it hashes to one of the `known` trees and holds nothing
+    /// the hash does not see — and the journal did not call it the operator's;
+    /// to the Trash otherwise.
+    private func disposeRecovered(_ folder: URL, known: [String], operators: Bool) {
+        guard fileManager.fileExists(atPath: folder.path) else { return }
+        dispose(folder, operators: operators || OperatorsWork.isAtStake(in: folder, knownTrees: known))
     }
 
     // MARK: - Pieces
@@ -825,6 +854,15 @@ public enum OperatorsWork {
     public static func isAtStake(in folder: URL, record: InstalledRecord?) -> Bool {
         isAtStake(record: record, treeOnDisk: (try? GitHash.tree(ofDirectoryAt: folder)) ?? nil,
                   unhashed: GitHash.unhashed(inDirectoryAt: folder))
+    }
+
+    /// The same, of a folder whose record is not certain — a copy a crash left
+    /// in staging: it is uDeck's own only when it hashes to one of the trees
+    /// uDeck put there (`knownTrees`) and holds nothing the hash does not see.
+    public static func isAtStake(in folder: URL, knownTrees: [String]) -> Bool {
+        let tree = (try? GitHash.tree(ofDirectoryAt: folder)) ?? nil
+        guard let tree, knownTrees.contains(tree) else { return true }
+        return !GitHash.unhashed(inDirectoryAt: folder).isEmpty
     }
 
     /// Whether replacing or removing `plugins/<id>` now would send something
