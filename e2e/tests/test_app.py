@@ -325,3 +325,24 @@ def test_a_key_that_could_not_be_read_is_never_a_key_that_is_not_there():
         app.automatic_checks(FakeMachine({SETTING: Dropped}), "reading")
     with pytest.raises(LabError, match="could not be read: Operation not permitted"):
         app.automatic_checks(FakeMachine({SETTING: Failed(1, "Operation not permitted")}), "reading")
+
+
+# --- An operator who switched automatic checks off -----------------------------------
+
+WRITE_OFF = f"defaults write {app.BUNDLE_ID} {app.AUTOMATIC_CHECKS} -bool false"
+
+
+def test_switching_automatic_checks_off_writes_the_one_key_and_reads_it_back():
+    machine = FakeMachine({SETTING: "0\n"})
+    app.switch_automatic_checks_off(machine, "switching off")
+    commands = machine.ssh.commands
+    assert [c for c in commands if "defaults write" in c] == [WRITE_OFF]
+    assert commands.index(WRITE_OFF) < max(i for i, c in enumerate(commands) if SETTING in c)
+
+
+def test_a_switch_off_that_did_not_take_is_the_lab_unable_to_set_the_machine_up():
+    """Read back as on, or as nothing, the check after it would be about a machine nobody switched off."""
+    with pytest.raises(LabError, match="reads back as 1"):
+        app.switch_automatic_checks_off(FakeMachine({SETTING: "1\n"}), "switching off")
+    with pytest.raises(LabError, match="reads back as nothing at all"):
+        app.switch_automatic_checks_off(FakeMachine({SETTING: Failed(1, NO_SUCH_KEY)}), "switching off")

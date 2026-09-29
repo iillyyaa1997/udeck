@@ -1,0 +1,13 @@
+{
+  "id": "future-udeck",
+  "name": "Future uDeck",
+  "version": "1.4.0",
+  "api": 1,
+  "minUDeck": "99.0.0",
+  "kind": "poll",
+  "description": "Needs a uDeck that does not exist yet.",
+  "author": "uDeck lab",
+  "run": ["./run.sh"],
+  "interval": 60,
+  "timeout": 2
+}

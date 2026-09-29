@@ -1,0 +1,12 @@
+{
+  "id": "linked",
+  "name": "Linked",
+  "version": "1.0.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "Holds a symbolic link.",
+  "author": "uDeck lab",
+  "run": ["./run.sh"],
+  "interval": 60,
+  "timeout": 2
+}

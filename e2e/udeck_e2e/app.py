@@ -379,3 +379,25 @@ def forget_preferences(machine, step: str) -> None:
             f"macOS still keeps preferences for {BUNDLE_ID} after the lab deleted them: "
             f"{' '.join(left.split())[:300]}",
         )
+
+
+def switch_automatic_checks_off(machine, step: str) -> None:
+    """Leave the machine as an operator who switched automatic checks off leaves it.
+
+    uDeck ships with them on, so the check that turns the switch on needs a
+    machine where somebody turned it off — and doing that in the window would
+    first cost a check, whose last-check date then stops the switch from causing
+    another for a day. So the lab writes what the switch's setter writes,
+    `AUTOMATIC_CHECKS` as false, which Sparkle reads before the plist; nothing
+    else. Only with uDeck not running, as `forget_preferences`, and read back:
+    a machine where it did not take would make "the switch turned it on" a
+    sentence about nothing.
+    """
+    machine.ssh.run(f"defaults write {BUNDLE_ID} {AUTOMATIC_CHECKS} -bool false", step)
+    kept = automatic_checks(machine, step)
+    if kept != "0":
+        raise LabError(
+            step,
+            f"the lab wrote {AUTOMATIC_CHECKS} as false for {BUNDLE_ID}, and it reads back as "
+            f"{kept if kept is not None else 'nothing at all'}",
+        )

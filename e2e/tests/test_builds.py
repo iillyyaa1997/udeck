@@ -11,7 +11,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from udeck_e2e import config
+from udeck_e2e import config, plugin_repository
 from udeck_e2e.builds import Builder, SigningKey, make_key
 from udeck_e2e.errors import LabError
 
@@ -52,7 +52,8 @@ class Script:
     """Stands in for Scripts/make-app.sh: records the call, makes what it would make."""
 
     def __init__(self, rc=0, out="==> Done", err="", leaves_bundle=False, makes_zip=True,
-                 wrong_version="", identifier="place.unicorns.udeck", timeouts=0, interrupts=False):
+                 wrong_version="", identifier="place.unicorns.udeck", timeouts=0, interrupts=False,
+                 ignores_test_plugins=False, local_networking=True):
         self.rc, self.out, self.err = rc, out, err
         self.leaves_bundle = leaves_bundle
         self.makes_zip = makes_zip
@@ -60,6 +61,10 @@ class Script:
         self.identifier = identifier
         self.timeouts = timeouts
         self.interrupts = interrupts
+        # A make-app.sh that dropped --test-plugins leaves the addresses the
+        # application ships with, which are GitHub's.
+        self.ignores_test_plugins = ignores_test_plugins
+        self.local_networking = local_networking
         self.stopped = False
         self.ignores_sigterm = False
         self.process = None
@@ -79,7 +84,18 @@ class Script:
                 "CFBundleIdentifier": self.identifier,
                 "SUFeedURL": options.get("--test-feed"),
                 "SUPublicEDKey": options.get("--test-key"),
+                # What Sources/uDeck/Support/Info.plist ships, and what
+                # make-app.sh sets from --test-plugins.
+                "UDeckPluginsAPIBase": "https://api.github.com",
+                "UDeckPluginsRawBase": "https://raw.githubusercontent.com",
+                "UDeckPluginsRepository": "iillyyaa1997/udeck-plugins",
             }
+            base = (options.get("--test-plugins") or "").rstrip("/")
+            if base and not self.ignores_test_plugins:
+                plist["UDeckPluginsAPIBase"] = f"{base}/api"
+                plist["UDeckPluginsRawBase"] = f"{base}/raw"
+            if (options.get("--test-feed") or base) and self.local_networking:
+                plist["NSAppTransportSecurity"] = {"NSAllowsLocalNetworking": True}
             with zipfile.ZipFile(out / f"uDeck-{options['--version']}.zip", "w") as archive:
                 archive.writestr("uDeck.app/Contents/Info.plist", plistlib.dumps(plist))
         if self.leaves_bundle:
@@ -172,6 +188,27 @@ def test_a_lab_build_goes_to_its_own_directory_with_its_own_versions_and_stays_z
     assert kwargs["stdin"] is subprocess.DEVNULL and kwargs["start_new_session"] is True
     assert build.zip.name == "uDeck-0.4.1.zip" and build.zip.is_file()
     assert (build.zip.parent / "build.log").read_text().startswith("==> Done")
+
+
+def test_every_lab_build_reads_its_plugin_catalogue_from_the_fake_in_the_guest(tmp_path):
+    """A lab build reads the catalogue by itself after every launch: never from github.com."""
+    script = Script()
+    builder(script, tmp_path).build("0.4.1", "6")
+    options = dict(zip(script.calls[0][0][1:], script.calls[0][0][2:]))
+    assert options["--test-plugins"] == plugin_repository.base_url() == f"http://127.0.0.1:{config.PLUGINS_PORT}"
+
+
+def test_a_build_that_would_read_github_is_refused(tmp_path):
+    """The mutant: make-app.sh without --test-plugins, and the build keeps GitHub's addresses."""
+    with pytest.raises(LabError, match="UDeckPluginsAPIBase is 'https://api.github.com'") as raised:
+        builder(Script(ignores_test_plugins=True), tmp_path).build("0.4.1", "6")
+    assert "UDeckPluginsRawBase is 'https://raw.githubusercontent.com'" in raised.value.reason
+
+
+def test_a_build_that_cannot_speak_plain_http_to_the_fake_is_refused(tmp_path):
+    """Without local networking every request to the fake fails inside uDeck, and reads as silence."""
+    with pytest.raises(LabError, match="without NSAllowsLocalNetworking"):
+        builder(Script(local_networking=False), tmp_path).build("0.4.1", "6")
 
 
 def test_the_public_key_the_bundle_carries_is_this_runs_key(tmp_path):

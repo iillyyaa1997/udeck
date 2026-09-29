@@ -13,17 +13,21 @@ see the last section.
 
 > **Being built.** What exists today: the command, its pre-flight and report,
 > the machines and the golden image they are cloned from, their screen and
-> pointer over VNC, a self-check, the builds a check needs, and twenty-nine
-> checks of uDeck itself in four groups (`e2e/run.sh --list`). `updates`: the
-> update, with its wrong-key control, and when uDeck looks for one at all — never
-> by itself as it ships, and by itself once the operator switches that on.
+> pointer over VNC, a self-check, the builds a check needs, a fake GitHub for
+> the plugin catalogue, and forty-two checks of uDeck itself in five groups
+> (`e2e/run.sh --list`). `updates`: the
+> update, with its wrong-key control, and when uDeck looks for one at all — by
+> itself as it ships, and by itself again once an operator who switched that off
+> switches it back on.
 > `panel`: the hover gesture that opens it, with its pointer-in-the-middle
 > control and the line between its two paths, the ways of putting it away again,
 > and the keyboard shortcut that opens the panel and puts it away — whichever way
 > it was opened — with its wrong-chord control and a check that the combination
 > dies with uDeck. `login`: "Open at Login", through a restart and an update, and
 > switched off. `settings`: two changes made in uDeck's own window, and whether
-> they hold across a restart.
+> they hold across a restart. `plugins`: the thirteen checks of
+> docs/plugin-repository.md — the catalogue, installing, updating, earlier
+> versions, removing, and each refusal — against a fake GitHub in the guest.
 
 ## Running it
 
@@ -191,6 +195,14 @@ three ways — each of them something a check depends on:
 * they carry the version the lab asked for in both keys, including
   `CFBundleVersion`, which is the one Sparkle compares when it decides whether an
   update is newer;
+* they read their plugin catalogue from the fake GitHub the plugin checks serve
+  inside the machine (`--test-plugins http://127.0.0.1:8766`), never from
+  github.com: uDeck reads the catalogue by itself a few seconds after every
+  launch, so this holds for every build, whichever check it is for. A check that
+  does not serve the fake leaves nothing listening there, and uDeck reads
+  nothing. The lab refuses a build whose `UDeckPluginsAPIBase` or
+  `UDeckPluginsRawBase` is anything else, or which lacks
+  `NSAllowsLocalNetworking`;
 * they stay zips on this Mac. A lab build is the *released* application,
   identifier and all, so an unpacked copy here could take the release's login
   item merely by being launched. It is unpacked inside the machine and nowhere
@@ -230,37 +242,53 @@ archive. No archive in the log, and the run says so rather than passing.
 
 ### Looking for an update by itself
 
-uDeck ships with automatic checks **off** — `SUEnableAutomaticChecks` is false
-in `Sources/uDeck/Support/Info.plist` — because it otherwise makes no network
-connection at all, and the first one it ever makes should be one the operator
-chose (commit `e00a79a`; the same reason is on `SparkleUpdater` and
-`UpdateChecking.checksAutomatically`). The About pane has the switch that turns
-them on (`updates.automatic`), so both checks here go through it or leave it
-alone, and neither writes a preference to get what it wants — the one thing
-done to the preferences from outside is taking them away (below).
+uDeck ships with automatic checks **on** — `SUEnableAutomaticChecks` is true
+in `Sources/uDeck/Support/Info.plist`, the operator's decision recorded in
+`docs/plugin-repository.md` ("What uDeck fetches, and when") and said in the
+README: once a day uDeck asks its feed for a newer version, the first time
+straight after its first launch. Until the plugin catalogue came it shipped with
+them off, and the first of these checks held it to the opposite.
 
-`updates.it-does-not-look-by-itself` starts uDeck as it ships and listens to
-the feed for 20 s, then opens the settings window on the About pane and listens
-5 s more: the feed must hear nothing from uDeck in any of it, up to the click on
-"Check now". Opening the window is something the operator does, and a uDeck that
-looked because its window appeared — or half a minute after it started — asked
-without being asked. Then the feed must hear the button within 20 s, counting
-only what is new since the read that ended the listening, which the click
-follows at once — because a uDeck that cannot reach its feed is exactly as quiet
-as one that chose not to ask, and a quiet that proves nothing is "could not
-check". The first version of the check took that mark before it opened the
-window, so a request the window caused passed as the button's.
-`updates.switched-on-it-looks-by-itself` turns the switch on with the pointer
-and presses nothing else: the feed must hear uDeck within 15 s, and then
-Sparkle's own setting in the guest, `SUEnableAutomaticChecks`, must read on — a
+`updates.it-looks-by-itself` starts uDeck as it ships, on a machine that
+remembers nothing about updates, presses nothing and opens nothing, and listens
+to the feed: uDeck must ask it within 20 s. Nothing is pressed so that the
+request cannot be "Check now"'s, and no window is opened so that it cannot be
+one a window caused. The feed is the lab's, on the guest's loopback — a lab
+build whose `SUFeedURL` is anything else is refused when it is built
+(`Builder._verify`) — so a request heard there is one that did not go to
+github.com, and a build left pointing at the real feed is red here. When the
+feed hears nothing, it is asked whether it still answers before that silence is
+uDeck's.
+
+`updates.switched-on-it-looks-by-itself` needs a switch to turn on, so it starts
+from a machine whose operator turned it off: after forgetting everything, the
+lab writes `SUEnableAutomaticChecks` false into uDeck's preferences — what the
+switch's setter writes, and the one preference the lab ever writes — and reads
+it back before uDeck starts. Turning it off in the window instead would first
+cost a check, and that check's date would keep the switch from causing another
+for a day. uDeck must then stay quiet until the switch is touched (a request
+before it is uDeck ignoring the operator's off, and a failure), the switch must
+read off (reading on, the pane is not showing what uDeck does), and after the
+switch is turned on with the pointer, with nothing else pressed, the feed must
+hear uDeck within 15 s and Sparkle's own setting in the guest must read on — a
 switch that makes one check instead of turning checking on brings the very same
 request. When the feed hears nothing, two things are asked before that is
 uDeck's: the switch is read back — still off is a click that missed, and the
 lab's — and the feed is asked whether it still answers, because a feed that
 died hears nobody.
 
-**What each is red for**, each measured on 2026-09-26 by breaking uDeck and
-running the check. `SUEnableAutomaticChecks` switched to true in the plist:
+**What the first is red for**: `SUEnableAutomaticChecks` false in the plist, as
+uDeck shipped before — the feed hears nothing for the whole 20 s. The lab's own
+tests drive that shape (`test_a_uDeck_that_ships_with_automatic_checks_off_fails`),
+and the whole check, run against such a build on 2026-09-28, failed after
+listening 22 s (`.build/e2e/20260928-212410Z`); against the plist as it ships
+it passed, the feed hearing uDeck 2 and 9 s after it started
+(`20260928-205437Z`, `20260928-211113Z`). All three are kept in `.build/e2e/kept/`.
+
+**What each was red for before**, when uDeck shipped with automatic checks off
+and the first check was `updates.it-does-not-look-by-itself`, which required
+the feed to hear nothing until "Check now" was pressed. Each was measured on
+2026-09-26 by breaking uDeck and running the check. `SUEnableAutomaticChecks` switched to true in the plist:
 `it-does-not-look-by-itself` failed — the feed heard uDeck at 21:06:01, and the
 check said so within 10 s of starting it — and `switched-on-it-looks-by-itself`
 could not check, because the switch already read on
@@ -280,8 +308,8 @@ that looks when its settings window appears — `updater?.checkNow()` in
 switch whose setter asks for one check instead of turning checking on
 (`updater.checkNow()` in the About pane's binding): `switched-on-it-looks-by-itself`
 failed, the feed having heard uDeck within the second and Sparkle keeping no
-`SUEnableAutomaticChecks` at all (`20260927-135358Z`). On the build as it ships
-the same read says `1` straight after the request, and a restart then asks the
+`SUEnableAutomaticChecks` at all (`20260927-135358Z`). On the build as it shipped
+then the same read says `1` straight after the request, and a restart then asks the
 feed nothing for 30 s, because the last check is a second old — which is why the
 setting is read rather than proved by a restart (`20260927-132223Z`,
 `probe.switch-then-restart`). And the two check files as they were before, run
@@ -305,13 +333,14 @@ written), and read against the source of Sparkle 2.9.6, the version
 `Package.resolved` pins:
 
 * With automatic checks off, Sparkle schedules nothing at all
-  (`scheduleNextUpdateCheckFiringImmediately:` returns). uDeck as it ships was
-  started and listened to for 255 s, and the feed heard nothing.
+  (`scheduleNextUpdateCheckFiringImmediately:` returns). uDeck as it shipped
+  then, with them off, was started and listened to for 255 s, and the feed
+  heard nothing.
 * With them on, a uDeck that has never looked is overdue: with no
   `SULastCheckTime`, Sparkle counts from `distantPast` and looks at once. Forced
   on in the guest's preferences, six launches asked the feed between 1.3 and
   2.9 s after `open -a` — which is what a build shipping with the switch on
-  does, and why 20 s of listening is enough to catch it.
+  does, and why 20 s of listening is enough to hear it.
 * Turning the switch on posts a settings change, and Sparkle resets its cycle
   after one second (`resetUpdateCycleAfterDelay`). The guest's clock read
   20:45:30.09 just before the click, and the feed logged uDeck at 20:45:31.
@@ -319,7 +348,7 @@ written), and read against the source of Sparkle 2.9.6, the version
   button, the walk that finds it included.
 
 **Both checks start from a machine that remembers nothing**
-(`app.forget_preferences`). Sparkle reads `SUEnableAutomaticChecks`,
+(`app.forget_preferences`) — the switch's check then writes its one key. Sparkle reads `SUEnableAutomaticChecks`,
 `SULastCheckTime` and `SUScheduledCheckInterval` from the preferences before the
 plist, and the remembered date matters most: measured, the switch turned off and
 on again three minutes after a check caused no request in the minute after the
@@ -1141,6 +1170,51 @@ not two), and the verdict names that line when it is there and says it was
 absent when it is not — a home directory that cannot be written and a control
 wired to nothing leave the same empty place, and they are two different people's
 problem.
+
+### Plugins from a repository
+
+Thirteen checks, one per row of the table in docs/plugin-repository.md ("The
+lab's checks"). None of them talks to github.com. A fake GitHub runs inside the
+guest (`e2e/guest/fake-github.py`, the guest's own Python and the standard
+library only, on `127.0.0.1:8766`), answering the part of the API uDeck uses —
+the default branch, the head with its `ETag` and `304`, a tree with and without
+`recursive=1`, a folder's history — and a raw file host beside it. Its content
+is the fixture commits in `e2e/fixtures/plugin-repository/`: `c1` holds
+`uptime` 1.0.0 and the three plugins uDeck must refuse (`future-api` with
+`api: 2`, `future-udeck` with `minUDeck: 99.0.0`, `linked` with a symbolic
+link), `c2` the same with `uptime` 1.1.0. The fake hashes them into real git
+blob, tree and commit ids itself — there is no git in the guest — and the lab's
+own tests hold its hashing against `git hash-object`, `git write-tree` and `git
+commit-tree`. uDeck's Swift then has to agree with it, file by file and folder
+by folder, or nothing installs.
+
+**The lab drives the fake by rewriting a small state file over SSH**: which
+commit `main` is at, "the limit is used up until T" (`403` with
+`x-ratelimit-remaining: 0`), "answer this file with different bytes", "say the
+listing is truncated". Each change is read back through the fake before a check
+relies on it.
+
+**Three oracles, none of them what uDeck says about itself.** The fake's access
+log — one JSON line per request — is the traffic: what uDeck asked for, and what
+it did not. The lab's own requests carry `X-UDeck-Lab: 1` and are never counted
+as uDeck's. The guest's `~/.udeck` is what uDeck did to the disk: the installed
+folder hashed as git would (by the fake's code, in the guest, against the id the
+fake gave the fixture), `installed.json`, `layout.json`, `grants.json`. And the
+screens — Settings → Plugins and the card in the panel, found by its subrole
+`AXSystemDialog` — are read through the identifiers uDeck gives every control
+there, and pressed with the machine's pointer. The settings window is moved and
+sized to most of the guest's screen first (`ui.place_settings`): the Plugins
+pane is one long scroll, and a control below the window's edge has a place and
+no pixel to click.
+
+**What the lab does by hand.** Placing a plugin on a tab is writing
+`layout.json` while uDeck is not running — the table asks what uDeck does with a
+window it has, not how windows are made. Consent is given where the operator
+gives it, on the card (`consent.<id>.allow`). A file changed on disk and a
+manifest broken and mended are changed over SSH, because that is what "changed
+on disk" means. One value is left in `plugin-settings.json` before a removal,
+so that the removal has something there to take away. Every install, update,
+earlier version, removal and switch is a click.
 
 ## Reading the result
 

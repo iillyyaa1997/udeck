@@ -87,12 +87,12 @@ def test_a_lab_build_lands_where_it_was_told_carries_both_versions_and_leaves_on
 
 
 def test_a_lab_build_looks_for_updates_by_itself_exactly_as_the_release_does(checkout):
-    """`updates.it-does-not-look-by-itself` judges what uDeck *ships* on a lab build.
+    """`updates.it-looks-by-itself` judges what uDeck *ships* on a lab build.
 
     That is only true while the build pointed at a test feed carries the release's
     own answer to "may Sparkle look by itself, and how often" — so a script that
-    switched automatic checks on for the lab, to make a check quicker, would turn
-    that check into one about the lab's build and leave the release unchecked.
+    changed automatic checks for the lab, to make a check quicker or quieter, would
+    turn that check into one about the lab's build and leave the release unchecked.
     """
     done = make_app(
         checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99",

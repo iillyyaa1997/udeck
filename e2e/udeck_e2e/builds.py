@@ -16,6 +16,13 @@ was decided rather than assumed:
   carries the release's bundle identifier, so an unpacked copy here could take
   the release's login item merely by being launched. Nothing in this module
   unpacks one.
+* **It never reads its plugin catalogue from github.com.** uDeck reads the
+  official catalogue by itself a few seconds after it starts, so every lab build
+  — whichever check it is for — is pointed at the fake GitHub the plugin checks
+  serve on the guest's loopback (`--test-plugins`, `plugin_repository`). A check
+  that does not serve the fake leaves nothing listening there, and uDeck reads
+  nothing; a build that shipped the real addresses would reach out to GitHub from
+  every guest with a network, so `_verify` refuses it.
 
 The signing key is made here and thrown away with the run. Sparkle's own
 `generate_keys` would put a private key in the login keychain — a permanent
@@ -43,7 +50,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from udeck_e2e import config
+from udeck_e2e import config, plugin_repository
 from udeck_e2e.errors import LabError
 
 Note = Callable[[str], None]
@@ -101,6 +108,7 @@ class Builder:
         feed_url: str,
         key: SigningKey,
         note: Note,
+        plugins_url: str = plugin_repository.base_url(),
         popen: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
         seconds: float = config.BUILD_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
@@ -113,6 +121,7 @@ class Builder:
         # versions, and the second must not overwrite what the first is still using.
         self.work_dir = work_dir / hashlib.sha256(feed_url.encode()).hexdigest()[:8]
         self.feed_url = feed_url
+        self.plugins_url = plugins_url
         self.key = key
         self.note = note
         self.seconds = seconds
@@ -142,6 +151,7 @@ class Builder:
                     "--zip",
                     "--test-feed", self.feed_url,
                     "--test-key", self.key.public_key,
+                    "--test-plugins", self.plugins_url,
                 ],
                 step,
                 out / "build.log",
@@ -183,14 +193,29 @@ class Builder:
                 plist = plistlib.loads(archive.read(INFO_PLIST))
         except (OSError, KeyError, ValueError, zipfile.BadZipFile) as error:
             raise LabError(step, f"could not read {INFO_PLIST} from the build: {error}") from None
+        base = self.plugins_url.rstrip("/")
         wanted = {
             "CFBundleShortVersionString": version,
             # The one Sparkle compares.
             "CFBundleVersion": build_number,
             "SUFeedURL": self.feed_url,
             "SUPublicEDKey": self.key.public_key,
+            # The plugin catalogue, at the fake in the guest and never at GitHub:
+            # a build that kept the shipped addresses reads github.com a few
+            # seconds after every launch in every check.
+            "UDeckPluginsAPIBase": f"{base}/api",
+            "UDeckPluginsRawBase": f"{base}/raw",
+            # The repository stays the official one's name, which is what the
+            # fake answers for.
+            "UDeckPluginsRepository": config.PLUGINS_REPOSITORY,
         }
         wrong = [f"{key} is {plist.get(key)!r}, not {value!r}" for key, value in wanted.items() if plist.get(key) != value]
+        transport = plist.get("NSAppTransportSecurity")
+        if not (isinstance(transport, dict) and transport.get("NSAllowsLocalNetworking") is True):
+            # Without it the fake, plain HTTP on the loopback, is refused before a
+            # request leaves uDeck, and every plugin check would read that silence
+            # as uDeck's.
+            wrong.append(f"NSAppTransportSecurity is {transport!r}, without NSAllowsLocalNetworking")
         identifier = str(plist.get("CFBundleIdentifier", ""))
         if identifier.endswith(".debug"):
             # A lab build has to be the application that is released, identifier

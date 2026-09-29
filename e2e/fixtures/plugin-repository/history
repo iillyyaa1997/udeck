@@ -1,0 +1,5 @@
+# The fixture commits, oldest first: each folder beside this file is the whole
+# repository at one commit, and each is the parent of the next. The fake
+# (e2e/guest/fake-github.py) hashes them into real git ids.
+c1
+c2

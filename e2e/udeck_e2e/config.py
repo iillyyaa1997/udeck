@@ -615,6 +615,20 @@ THE_CHORD_IN_A_DOCUMENT = "\x15"
 # baked into every lab build (SUFeedURL), so a check and its builds agree on it.
 FEED_PORT = 8765
 
+# The port the fake GitHub is served on, inside the guest (`plugin_repository`).
+# It is baked into every lab build as well (`UDeckPluginsAPIBase`,
+# `UDeckPluginsRawBase`), whether or not the check serves the fake: a lab build of
+# uDeck reads its plugin catalogue at launch, and one that was not pointed here
+# would read it from github.com. With nothing listening, it reads nothing.
+PLUGINS_PORT = 8766
+
+# The repository the fake answers for: the official one's own name, which is what
+# a lab build carries in `UDeckPluginsRepository` as it ships.
+PLUGINS_REPOSITORY = "iillyyaa1997/udeck-plugins"
+
+# Until the fake GitHub answers on the guest's loopback after it is started.
+PLUGINS_UP_SECONDS = 30
+
 # How often a known lab failure is retried before the check becomes "could not
 # check": SSH refusing right after a clone boots, a hung `tart` call, and macOS
 # refusing a machine because it believes two are already running.

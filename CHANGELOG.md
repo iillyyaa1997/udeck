@@ -10,6 +10,80 @@ for what that promises.
 
 ## [Unreleased]
 
+- **uDeck installs plugins from the official repository, and says what it
+  connects to.** Stage 1 of [docs/plugin-repository.md](docs/plugin-repository.md):
+  Settings → Plugins lists the plugins of `github.com/iillyyaa1997/udeck-plugins`,
+  read anonymously from `api.github.com` and `raw.githubusercontent.com`, and
+  installs one by its files at the commit it showed — each checked against its
+  hash, the folder against its tree, swapped into place in one step, recorded in
+  `installed.json`. Updates are shown and applied on request, earlier versions
+  come from the repository's history, and removal takes the plugin's grants,
+  settings, cache and windows with it. The catalogue is read at launch, then once
+  a day, and **Official catalogue** turns it off; uDeck's own update checks are
+  on by default as well. README and SECURITY.md no longer say that uDeck makes no
+  connection unless asked: they say what it asks, where, how often and how to
+  turn each off, and — plainly — that plugins have no sandbox, that a permission
+  is a declaration and not a wall, and that uDeck hands plugins no secrets. The
+  plugin contract gains `minUDeck`, the `MAJOR.MINOR.PATCH` grammar for
+  `version`, and the rule that a plugin writes only into `UDECK_CACHE_DIR`.
+
+  What a first review of it found, and what changed:
+  - a file whose name starts with `.` — a `.env`, a working copy's `.git` — put
+    into an installed plugin's folder was deleted with the old copy on Update,
+    **Back to** or **Remove**, because the folder's hash skips such names and the
+    copy looked untouched. A copy holding anything the hash does not see now goes
+    to the Trash; only the Finder's `.DS_Store` does not count;
+  - **Update** and **Switch to** on the catalogue's row replaced a copy changed on
+    disk without the warning the installed plugin's row gives; both rows now say
+    *"Your changes to uptime will be moved to the Trash…"* first;
+  - **Reinstall** asked GitHub with **Official catalogue** off. It is not offered
+    then, on the plugin's row or on a window whose plugin is missing, and uDeck
+    refuses every install, update and reinstall while the switch is off;
+  - a card's action could start while its plugin was being swapped or removed.
+    Actions are refused while a plugin is quiet, and one already running is
+    waited for as long as a poll in flight is — the plugin's `timeout` and a
+    second and a half — and keeps running past that, since an action has no
+    timeout of its own;
+  - on a volume that ignores case, a folder spelt `Uptime` was offered **Install**
+    rather than **Replace…**, and the swap took it anyway. Whether `plugins/<id>`
+    is taken is now asked of the disk, as the swap finds it;
+  - on a volume that cannot swap folders in one step, a failed move and a failed
+    move back threw the staging folder away with the old copy in it. The old copy
+    now stays there, beside its journal, and the next launch puts it back.
+  - the settings window's sections could not be chosen at all: the badge that
+    counts waiting updates was put on each sidebar row after its `tag`, so the
+    List found no tag and selected nothing. Measured in the lab on 2026-09-28,
+    four clicks on four sections left the General pane up
+    (`.build/e2e/kept/20260928-210038Z`), and every `updates` check that opens
+    About could not check (`20260928-205437Z`); with the tag after the badge, a
+    click on About shows About (`20260928-210526Z`).
+
+  The lab's `updates.it-does-not-look-by-itself` is now
+  `updates.it-looks-by-itself`: uDeck as it ships, with nothing pressed and no
+  window opened, has to ask the lab's feed within 20 s. And
+  `updates.switched-on-it-looks-by-itself` starts from a machine whose operator
+  switched automatic checks off — the one preference the lab writes — and fails
+  if uDeck asks before the switch is turned back on. Measured on 2026-09-28: the
+  four `updates` checks green at `--jobs 2` (`.build/e2e/20260928-211113Z`), and
+  `it-looks-by-itself` red against a plist with automatic checks off
+  (`20260928-212410Z`).
+
+  The lab gains the thirteen `plugins` checks of the document, against a fake
+  GitHub served inside the guest (`e2e/guest/fake-github.py`) from fixture
+  commits (`e2e/fixtures/plugin-repository/`) that it hashes into real git ids
+  itself — held against `git` by the lab's own tests, and against uDeck's Swift
+  by every install. Every lab build now reads its catalogue from that fake and
+  never from github.com (`--test-plugins`), and the build step refuses one that
+  would. Each check was measured red against a mutant of its own on 2026-09-29.
+  What the checks found on the way:
+  - **Earlier versions…** could not be driven by identifier: the identifier on
+    the history's box replaced every line's own, so each version and its
+    **Install this version** answered to `plugin.<id>.history`. The box is now a
+    container of its own.
+  - the card's **Allow and run** and **Decline** carry identifiers
+    (`consent.<id>.allow`, `consent.<id>.decline`), so the lab allows a plugin
+    where the operator does.
+
 - **A click past the panel closes it however late the news of it comes.** The
   workspace saying another application came forward is often the first news of
   a click past the panel, and uDeck read it as that click only within 0.15 s of

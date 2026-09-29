@@ -1518,11 +1518,9 @@ def _prepare(machine, check_dir, lab, launch=True):
 
     The build carries a feed nobody serves, on the guest's own loopback: a lab
     build must not be able to update itself against anything real (Q41), and the
-    panel does not care either way. It costs nothing at all: uDeck ships with
-    automatic checks off, so it never asks that feed unless somebody presses
-    "Check now", which nothing here does — `updates.it-does-not-look-by-itself`
-    listens to a uDeck started as it ships, and its feed hears nothing from it
-    until the button.
+    panel does not care either way. uDeck ships with automatic checks on, so it
+    asks that feed straight after it starts (`updates.it-looks-by-itself`) and
+    gets no answer, which nothing here looks at.
     """
     feed = updates.Feed(machine, lab.note)
     builder = lab.builder(feed.url, check_dir.name)
