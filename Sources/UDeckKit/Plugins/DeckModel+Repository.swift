@@ -11,6 +11,7 @@ public enum OperationProblem: Equatable, Sendable {
     case unreachable(path: String, reason: String)
     case tookTooLong
     case cannotWrite(String)
+    case stillRunning(id: String)
     /// The listing of the commit it needed could not be had.
     case catalogue(CatalogueError)
 
@@ -25,6 +26,7 @@ public enum OperationProblem: Equatable, Sendable {
             case .unreachable(let path, let reason): self = .unreachable(path: path, reason: reason)
             case .tookTooLong: self = .tookTooLong
             case .cannotWrite(let reason): self = .cannotWrite(reason)
+            case .stillRunning(let id): self = .stillRunning(id: id)
             }
         case let error as ProviderError:
             switch error {
@@ -164,6 +166,15 @@ extension DeckModel {
         standings[id] ?? .folderOfYourOwn
     }
 
+    /// Whether replacing or removing `id`'s folder now would send something of
+    /// the operator's to the Trash — asked of the disk when a button is
+    /// pressed, by the rule the installer decides the Trash by
+    /// (`OperatorsWork`), so that the warning is shown whenever that happens
+    /// and not only when the row says **Modified locally**.
+    public func operatorsWorkGoesToTrash(_ id: String) -> Bool {
+        OperatorsWork.goesToTrash(id, in: paths, record: installed.plugins[id])
+    }
+
     /// Whether a window's plugin is here to run.
     public func presence(of id: PluginIdentifier) -> PluginPresence {
         PluginPresence.of(id, plugins: plugins, installed: installed, readsCatalogue: settings.readsOfficialCatalogue)
@@ -241,17 +252,33 @@ extension DeckModel {
     /// `timeout` and the half-second grace — so nothing of it runs across a
     /// swap or a removal.
     ///
-    /// A card's action has no timeout of its own, so the same wait is all it
-    /// is given: one still running when it is up keeps running across the swap.
-    func quiet(_ id: PluginIdentifier) async {
+    /// A card's action has no timeout of its own. One still running when that
+    /// wait is up is ended — `SIGTERM` to its process group, a second, then
+    /// `SIGKILL` — and waited for again. Answers whether nothing of the plugin
+    /// is running; false, and its folder is not touched.
+    func quiet(_ id: PluginIdentifier) async -> Bool {
         pluginRuns.quiet(id.rawValue)
         stopPolling(id)
-        let limit = (plugin(withID: id)?.manifest?.timeout ?? 5) + 1.5
-        let deadline = Date().addingTimeInterval(limit)
-        while pluginRuns.isRunning(id.rawValue), Date() < deadline {
-            try? await Task.sleep(nanoseconds: 50_000_000)
+        let plugin = id.rawValue
+        let actions = actionProcesses
+        let settled = await PluginQuiet.settle(
+            wait: (self.plugin(withID: id)?.manifest?.timeout ?? 5) + 1.5,
+            andThen: Self.actionEndGrace * 2 + 1,
+            isRunning: { [weak self] in await MainActor.run { self?.pluginRuns.isRunning(plugin) ?? false } },
+            stopActions: {
+                DeckLog.plugins.info("ending \(plugin, privacy: .public)'s card action, still running after the wait")
+                await actions.stop(plugin, grace: Self.actionEndGrace)
+            }
+        )
+        if !settled {
+            DeckLog.plugins.error("\(plugin, privacy: .public) is still running; its folder is left as it was")
         }
+        return settled
     }
+
+    /// Between `SIGTERM` and `SIGKILL` for a card action that outlasts the
+    /// wait, and again after it.
+    static let actionEndGrace: TimeInterval = 1
 
     func resume(_ id: PluginIdentifier) {
         pluginRuns.resume(id.rawValue)
@@ -379,9 +406,8 @@ extension DeckModel {
             do {
                 DeckLog.plugins.info("\(operation.rawValue, privacy: .public) \(id, privacy: .public) at \(commit, privacy: .public)")
                 let staged = try await installer.stage(request, manifest: manifest)
-                await quiet(identifier)
                 defer { resume(identifier) }
-                let record = try installer.commit(staged)
+                let record = try await installer.commit(staged, once: { await self.quiet(identifier) })
                 DeckLog.plugins.info("\(id, privacy: .public) \(record.version, privacy: .public) is in place")
                 reloadInstalled()
                 discoverPlugins()
@@ -412,10 +438,9 @@ extension DeckModel {
         let installer = self.installer
         Task {
             defer { busyPlugin = nil }
-            await quiet(identifier)
             defer { resume(identifier) }
             do {
-                let removal = try installer.beginRemoval(identifier)
+                let removal = try await installer.beginRemoval(identifier, once: { await self.quiet(identifier) })
                 forgetEverythingElse(about: identifier)
                 try installer.finishRemoval(removal)
                 DeckLog.plugins.info("removed \(id, privacy: .public)")

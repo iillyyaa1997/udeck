@@ -21,6 +21,9 @@ struct DeckWindowView: View {
     var onGestureEnded: () -> Void
 
     @State private var isHovering = false
+    /// **Reinstall** was pressed over a folder holding something of the
+    /// operator's: the warning is up, and the next press reinstalls.
+    @State private var confirmingReinstall = false
 
     private var manifest: PluginManifest? { model.displayManifest(withID: window.pluginID) }
     private var presentation: CardPresentation { model.presentation(for: window.pluginID) }
@@ -149,11 +152,24 @@ struct DeckWindowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            if confirmingReinstall, let version = model.installed.plugins[window.pluginID.rawValue]?.version {
+                // The same warning, by the same rule, as every other button
+                // that replaces a folder: something of the operator's goes to
+                // the Trash (`OperatorsWork`).
+                note(strings(.catalogueUpdateOverChanges(id: window.pluginID.rawValue, version: version)),
+                     tint: theme.warn)
+            }
             HStack(spacing: 8) {
                 if reinstallable {
                     Button(strings(.windowReinstall)) {
                         shell.onInteract()
-                        model.reinstall(window.pluginID.rawValue)
+                        let id = window.pluginID.rawValue
+                        if !confirmingReinstall, model.operatorsWorkGoesToTrash(id) {
+                            confirmingReinstall = true
+                        } else {
+                            confirmingReinstall = false
+                            model.reinstall(id)
+                        }
                     }
                     .buttonStyle(GhostButtonStyle(theme: theme))
                 }

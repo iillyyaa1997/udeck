@@ -234,6 +234,7 @@ public enum Phrase: Sendable, Equatable {
     case catalogueFileUnreachable(path: String, reason: String)
     case catalogueTookTooLong
     case catalogueCannotWrite(reason: String)
+    case catalogueStillRunning(id: String)
     case catalogueRecordsBroken(reason: String)
 
     /// Where a plugin on this machine stands, as its row in Settings marks it.

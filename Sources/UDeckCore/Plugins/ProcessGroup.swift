@@ -69,7 +69,45 @@ enum ProcessGroup {
             close(outFDs[0]); close(outFDs[1])
             throw SpawnError.pipeFailed(errno)
         }
+        let pid: pid_t
+        do {
+            pid = try spawn(executable: executable, arguments: arguments, workingDirectory: workingDirectory,
+                            environment: environment, output: (outFDs[1], errFDs[1]))
+        } catch {
+            close(outFDs[0])
+            close(errFDs[0])
+            throw error
+        }
+        return SpawnedProcess(
+            pid: pid,
+            standardOutput: FileHandle(fileDescriptor: outFDs[0], closeOnDealloc: true),
+            standardError: FileHandle(fileDescriptor: errFDs[0], closeOnDealloc: true)
+        )
+    }
 
+    /// Starts `executable` in a new process group with stdin, stdout and
+    /// stderr all at `/dev/null`: a card's action, whose output nobody reads.
+    /// Answers the pid, which is also the group's id.
+    static func spawnDiscardingOutput(
+        executable: URL,
+        arguments: [String],
+        workingDirectory: URL,
+        environment: [String: String]
+    ) throws -> pid_t {
+        try spawn(executable: executable, arguments: arguments, workingDirectory: workingDirectory,
+                  environment: environment, output: nil)
+    }
+
+    /// The spawn itself. `output` is the write ends of two pipes, moved onto 1
+    /// and 2 in the child and closed in the parent whatever happens; nil sends
+    /// both to `/dev/null`.
+    private static func spawn(
+        executable: URL,
+        arguments: [String],
+        workingDirectory: URL,
+        environment: [String: String],
+        output: (Int32, Int32)?
+    ) throws -> pid_t {
         var actions = posix_spawn_file_actions_t(nil as OpaquePointer?)
         posix_spawn_file_actions_init(&actions)
         defer { posix_spawn_file_actions_destroy(&actions) }
@@ -78,10 +116,15 @@ enum ProcessGroup {
         // then are the originals closed in the child. Closing first would close
         // the descriptor the dup is being made from.
         posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
-        posix_spawn_file_actions_adddup2(&actions, outFDs[1], 1)
-        posix_spawn_file_actions_adddup2(&actions, errFDs[1], 2)
-        posix_spawn_file_actions_addclose(&actions, outFDs[1])
-        posix_spawn_file_actions_addclose(&actions, errFDs[1])
+        if let (out, err) = output {
+            posix_spawn_file_actions_adddup2(&actions, out, 1)
+            posix_spawn_file_actions_adddup2(&actions, err, 2)
+            posix_spawn_file_actions_addclose(&actions, out)
+            posix_spawn_file_actions_addclose(&actions, err)
+        } else {
+            posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
+            posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0)
+        }
         // `_np` rather than the macOS 26 spelling: the package floor is macOS
         // 14, where only the non-portable name exists.
         posix_spawn_file_actions_addchdir_np(&actions, workingDirectory.path)
@@ -130,20 +173,13 @@ enum ProcessGroup {
 
         // The parent's copies of the write ends go now, whatever happened: while
         // the parent holds one, the read end never reaches end-of-file.
-        close(outFDs[1])
-        close(errFDs[1])
-
-        guard status == 0 else {
-            close(outFDs[0])
-            close(errFDs[0])
-            throw SpawnError.spawnFailed(status)
+        if let (out, err) = output {
+            close(out)
+            close(err)
         }
 
-        return SpawnedProcess(
-            pid: pid,
-            standardOutput: FileHandle(fileDescriptor: outFDs[0], closeOnDealloc: true),
-            standardError: FileHandle(fileDescriptor: errFDs[0], closeOnDealloc: true)
-        )
+        guard status == 0 else { throw SpawnError.spawnFailed(status) }
+        return pid
     }
 
     // MARK: - Waiting

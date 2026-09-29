@@ -635,15 +635,28 @@ catalogue was read. What the operator saw is what they get.
    a plugin running — a translation that will not parse — travels with it and
    is shown next to it, as it would be for any folder. Its `version` must be
    the one the catalogue showed.
-6. **Quiet the plugin** if a copy of it is installed: stop scheduling its polls
-   and wait for a run in flight to end (it cannot take longer than its
-   `timeout` and the half-second grace).
+6. **Quiet the plugin** if a copy of it is installed: stop scheduling its polls,
+   refuse its card actions, and wait for a run in flight to end — as long as a
+   poll can take, its `timeout` and a second and a half. A card's action has no
+   timeout of its own, so one still running when that wait is up is **ended**:
+   `SIGTERM` to its process group (an action runs in a group of its own, so
+   whatever it started goes with it), a second, then `SIGKILL`, and a further
+   wait for it to be gone. Only then is the folder touched. If anything of the
+   plugin still runs after that, the operation stops with *"Something uptime
+   started would not end, so its folder was left as it was"*, the staged copy
+   is thrown away, and `plugins/<id>` is exactly as it was: uDeck never swaps
+   or removes a folder under a live process.
 7. **Swap the folder into place** in one step (see [Replacing a folder without
-   losing its window](#replacing-a-folder-without-losing-its-window)).
+   losing its window](#replacing-a-folder-without-losing-its-window)). On a
+   volume that ignores case, a folder spelt `Uptime` is where the swap for
+   `uptime` lands, and a swap keeps the name a folder had — while discovery
+   holds a folder's name to its id exactly. So a folder spelt otherwise is
+   first renamed to the id, in place, and the swap lands on the exact name.
 8. **Write the record** into `installed.json`.
 9. **Dispose of the old copy**, which the swap left in staging: deleted, or
-   moved to the Trash when it was a folder of the operator's own or had been
-   changed locally — uDeck never destroys something it did not put there.
+   moved to the Trash when it holds anything of the operator's — see [What
+   goes to the Trash](#what-goes-to-the-trash) — because uDeck never destroys
+   something it did not put there.
 10. **Remove the staging folder**, re-read the plugins folder, and let polling
     resume.
 
@@ -814,10 +827,20 @@ before the plugins folder is first read, uDeck looks in `~/.udeck/staging/`:
 
 * **An install, update or earlier version** — if `plugins/<id>` now hashes to
   the tree in the intent, the swap happened and the record did not: the record
-  is written. Otherwise the swap never happened, and nothing needs undoing.
-  Either way the staging folder is removed — its contents are the copy that
-  lost: deleted, or moved to the Trash if the intent says it was the
-  operator's own.
+  is written, and the copy that lost — in staging — is deleted, or moved to the
+  Trash if the intent says it was the operator's own. Otherwise the record is
+  not written, and nothing in staging is deleted unless it is known to be
+  uDeck's own download (it hashes to the intended tree):
+  * an old copy the two-rename fallback moved aside goes back to
+    `plugins/<id>`. If it cannot be moved back, the staging folder and its
+    journal stay exactly as they are and the next launch tries again; if
+    something else is at `plugins/<id>` by then, the old copy goes to the Trash
+    rather than over it. It is never deleted: it may be the operator's only
+    copy;
+  * a copy under the id that does not hash to the intended tree is the old one
+    after a swap whose record was never written, with the new copy changed
+    since: it is disposed of as the intent says, never simply deleted when it
+    was the operator's.
 * **A removal** — if `plugins/<id>` is gone, the rest of the removal is
   finished; if it is still there, the removal never started.
 
@@ -878,13 +901,39 @@ current values move to `previous`, and `pinned` goes back to `false`. A new
 `version` re-asks the permission question when the plugin asks for anything,
 as it always has.
 
-A plugin marked **modified** is not updated over without a word: *"Your changes
-to uptime will be moved to the Trash and replaced with 1.3.0."*
+A plugin whose copy holds anything of the operator's is not updated over
+without a word: *"Your changes to uptime will be moved to the Trash and
+replaced with 1.3.0."* — see [What goes to the Trash](#what-goes-to-the-trash).
+
+### What goes to the Trash
+
+One rule decides whether the copy an operation replaces or removes goes to the
+Trash or is deleted, and the same rule decides whether the button says so
+first. A copy is the operator's when
+
+* there is no record of uDeck putting it there (a folder of their own), or
+* it no longer hashes to what was put there (**Modified locally**), or
+* it holds something the hash does not see — a name starting with `.`, such as
+  a `.env` or a working copy's `.git`, or anything that is neither a file nor a
+  folder. The Finder's `.DS_Store` does not count.
+
+The third case is why the row's mark is not the rule: a `.env` put beside a
+plugin leaves it **Verified**, and it still goes to the Trash with the copy.
+Every button that replaces or removes the folder asks the rule, of the disk, when
+it is pressed — **Update** and **Switch to** on either row, **Back to**, **Install
+this version** under **Earlier versions…**, **Reinstall** (on the row and on a
+window whose plugin will not run), and **Remove** — and, when it says yes, shows
+*"Your changes to uptime will be moved to the Trash and replaced with 1.0.0."*
+(for **Remove**, that the folder goes to the Trash) before anything happens.
+The rule is `OperatorsWork` in UDeckCore, and the installer decides the Trash
+by the same function.
 
 ### Earlier versions
 
 The row's menu has **Earlier versions…**, and after an update the row offers
-**Back to 1.0.0**, which is the same thing for `previous`.
+**Back to 1.0.0**, which is the same thing for `previous`. Over a copy holding
+anything of the operator's, both say first that it goes to the Trash, as
+**Update** does.
 
 A repository keeps every version it ever had in its history, so that is where
 uDeck looks for them — there is no list of releases to maintain:
@@ -947,15 +996,18 @@ that says what goes. For a plugin installed from a repository:
 | Its last card | in memory | yes |
 | Its catalogue data | `~/.udeck/catalogue/` | no — it belongs to the repository, and pruning takes care of it |
 
-It is quieted first, like an update, so nothing of it is running while its
-folder goes.
+It is quieted first, like an update — a card action still running is ended —
+so nothing of it is running while its folder goes; if something of it will not
+end, nothing is removed.
 
 Removing everything matters. Today a plugin deleted by hand leaves its grants
 behind, and putting the same version back runs it at once with the answers
 given to the old copy.
 
-**A folder of your own** is moved to the Trash, not deleted — it may be the
-author's only copy — and everything else in the table goes the same way.
+**A folder of your own** — or any copy holding something of the operator's, by
+the rule in [What goes to the Trash](#what-goes-to-the-trash) — is moved to the
+Trash, not deleted: it may be the author's only copy. Everything else in the
+table goes the same way.
 
 ---
 
@@ -1117,12 +1169,12 @@ guest's `~/.udeck` over SSH.
 | `plugins.install-fetches-one-folder` | **Install** on `uptime` requests only files under `plugins/uptime/` at the listed commit, and no API request at all. The folder in the guest hashes to the fixture's tree; the record in `installed.json` has every field above; the row says **Verified**. |
 | `plugins.card-reaches-the-panel` | Placed on an empty tab and allowed, `uptime`'s card appears, and says it has run once. |
 | `plugins.update-keeps-the-window` | With `main` moved to `c2`, **Check now** shows *1.1.0 available*; after **Update**, `layout.json` has the same window (same id, same place), the card shows 1.1.0's output after the new consent, and `previous` holds 1.0.0. |
-| `plugins.earlier-version` | **Earlier versions…** lists 1.1.0 and 1.0.0; choosing 1.0.0 installs it, `pinned` is `true`, and the row still says *1.1.0 available*. |
-| `plugins.remove-leaves-nothing` | After **Remove**: no folder, no `cache/uptime`, no entry in `grants.json`, `plugin-settings.json` or `installed.json`, no window. Installed again, it asks for consent again and its card says it has run once. |
+| `plugins.earlier-version` | **Earlier versions…** lists 1.1.0 and 1.0.0; with a `.env` put into the folder over SSH, choosing 1.0.0 first says *"Your changes to uptime will be moved to the Trash…"*; confirmed, it installs 1.0.0, `pinned` is `true`, the row still says *1.1.0 available*, and the `.env` is in the guest's Trash. |
+| `plugins.remove-leaves-nothing` | Before **Remove**, `cache/uptime`, the grant and a setting value are there to be taken; after it: no folder, no `cache/uptime`, no entry in `grants.json`, `plugin-settings.json` or `installed.json`, no window. Installed again, it asks for consent again and its card says it has run once. |
 | `plugins.refuses-what-it-cannot-run` | Fixtures with `api: 2` and `minUDeck: "99.0.0"` are listed with their reasons and no **Install**, and nothing of theirs but the manifest was ever requested. |
 | `plugins.refuses-changed-files` | With the fake altering one file, the install is refused with the "arrived different" message; there is no `plugins/uptime` and nothing left in `staging/`. |
 | `plugins.refuses-a-link` | A fixture whose listing has a symbolic link is listed as not installable, naming the path. |
-| `plugins.limit-is-explained` | With the limit used up, **Check now** shows the message and the reset time; the log shows no API request before the reset; installing a plugin already listed still works. |
+| `plugins.limit-is-explained` | With the limit used up for two and a half minutes, **Check now** shows the message and the reset time; after a second **Check now** and an install of a plugin already listed — which works — the log shows no API request until the reset; after it, **Check now** reaches the API again. |
 | `plugins.catalogue-off-means-no-network` | Switched off and relaunched, uDeck makes no request to the fake for two minutes. |
 | `plugins.modified-locally` | A line appended to an installed file over SSH makes the row say **Modified locally** within seconds, and **Verified** is gone. |
 | `plugins.window-survives-a-broken-manifest` | A placed plugin's manifest broken over SSH keeps its window in `layout.json`, which says what is wrong; fixed, the card comes back without being added again. |
@@ -1143,8 +1195,16 @@ never the network. What they cover:
   listing;
 * the installer: a clean install; a file whose hash is wrong; a file missing or
   extra; a link, a submodule, an LFS pointer, a name out of rule, a folder too
-  big; a folder that appeared before the rename; the swap and its fallback;
-  each branch of the recovery at launch;
+  big; a folder that appeared before the rename; the swap and its fallback; a
+  folder spelt `Uptime` on a volume that ignores case, replaced and reinstalled;
+  each branch of the recovery at launch, including an old copy that cannot be
+  moved back and one whose place has been taken;
+* what goes to the Trash: one rule, held against what the installer does, for a
+  folder as installed, with `.DS_Store`, with a `.env`, with a `.git`, changed,
+  and of the operator's own;
+* quieting: a card action that outlasts the wait is ended with its process
+  group, the swap happens only after it has ended, and a plugin that will not
+  end leaves its folder as it was;
 * the rate-limit state: blocking, resetting, the reserve for unrequested
   refreshes;
 * `installed.json`: reading and writing, and the status computation;

@@ -533,11 +533,179 @@ struct PluginInstallerTests {
         #expect(stagingIsEmpty())
     }
 
+    /// The two-rename fallback's old copy, waiting in staging, could not be
+    /// moved back: it used to be deleted with the staging folder on the next
+    /// line. Now staging and its journal stay, and a later launch tries again.
+    @Test("an old copy that cannot be put back stays in staging, beside its journal, until it can")
+    func recoverCannotPutBack() throws {
+        let old = FakeRepository.withUptime(version: "0.9.0")
+        let repository = FakeRepository.withUptime()
+        let directory = try stagingFolder(InstallIntent(operation: .update, id: "uptime",
+                                                        record: intendedRecord(repository), oldCopyIsOperators: true),
+                                          holding: repository)
+        let displaced = directory.appendingPathComponent("displaced/uptime", isDirectory: true)
+        try write(old, into: displaced)
+        let stuck = FolderRenames(exchange: FolderRenames.system.exchange, exclusive: FolderRenames.system.exclusive,
+                                  move: { _, _ in throw CocoaError(.fileWriteNoPermission) })
+        let trash = TestTrash(in: temp.url)
+        for _ in 1...2 {
+            let done = installer(FetchLog(repository), trash: trash, renames: stuck).recover()
+            #expect(done.count == 1)
+            guard case .leftForLater(id: "uptime", _)? = done.first else {
+                Issue.record("not left for later: \(done)")
+                return
+            }
+            #expect(try GitHash.tree(ofDirectoryAt: displaced) == old.treeID("plugins/uptime"), "the old copy is kept")
+            #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("intent.json").path))
+        }
+        #expect(trash.names.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: live.path))
+
+        #expect(installer(FetchLog(repository), trash: trash).recover() == [.neverSwapped(id: "uptime")])
+        #expect(try GitHash.tree(ofDirectoryAt: live) == old.treeID("plugins/uptime"), "a launch that can puts it back")
+        #expect(stagingIsEmpty())
+    }
+
+    @Test("an old copy whose place has been taken goes to the Trash, not away, and the folder there is left alone")
+    func recoverPlaceTaken() throws {
+        let old = FakeRepository.withUptime(version: "0.9.0")
+        let repository = FakeRepository.withUptime()
+        let directory = try stagingFolder(InstallIntent(operation: .update, id: "uptime",
+                                                        record: intendedRecord(repository), oldCopyIsOperators: false),
+                                          holding: repository)
+        try write(old, into: directory.appendingPathComponent("displaced/uptime"))
+        temp.writePlugin(folder: "uptime", manifest: FakeRepository.manifest(),
+                         script: (name: "uptime.sh", body: "#!/bin/sh\necho somebody else\n", executable: true))
+        let theirs = try GitHash.tree(ofDirectoryAt: live)
+        let trash = TestTrash(in: temp.url)
+        #expect(installer(FetchLog(repository), trash: trash).recover() == [.neverSwapped(id: "uptime")])
+        #expect(trash.names == ["uptime"], "the old copy is in the Trash")
+        #expect(try GitHash.tree(ofDirectoryAt: live) == theirs)
+        #expect(stagingIsEmpty())
+    }
+
+    @Test("after an exchange whose record was never written, the old copy in staging is not simply deleted")
+    func recoverOldCopyAfterAnExchange() throws {
+        // The exchange happened — the new copy is live and the old one sits in
+        // staging under the id — and the live copy was changed before the next
+        // launch, so it no longer hashes to what the intent would record.
+        let repository = FakeRepository.withUptime()
+        try write(repository, into: live)
+        try Data("# changed\n".utf8).write(to: live.appendingPathComponent("README.md"))
+        let old = FakeRepository.withUptime(version: "0.9.0")
+        let trash = TestTrash(in: temp.url)
+        _ = try stagingFolder(InstallIntent(operation: .update, id: "uptime", record: intendedRecord(repository),
+                                            oldCopyIsOperators: true), holding: old)
+        _ = installer(FetchLog(repository), trash: trash).recover()
+        #expect(trash.names == ["uptime"], "the operator's old copy is in the Trash")
+        #expect(stagingIsEmpty())
+    }
+
+    // MARK: - One rule for the Trash, and the warning before it
+
+    /// Q118: the warning before **Update**, **Back to**, **Earlier versions…**,
+    /// **Reinstall** and **Remove** is shown by the rule the installer sends a
+    /// copy to the Trash by — including a `.env` the row's mark does not see.
+    @Test("what goes to the Trash is what the warning is shown for, one rule for both")
+    func oneRuleForTheTrashAndTheWarning() async throws {
+        let repository = FakeRepository.withUptime()
+        let id = PluginIdentifier(rawValue: "uptime")!
+        #expect(!OperatorsWork.goesToTrash("uptime", in: paths, record: nil), "no folder, nothing to lose")
+
+        // Each state of the folder, and whether a reinstall over it sends it to
+        // the Trash: the rule has to say the same beforehand.
+        let states: [(String, (URL) throws -> Void, Bool)] = [
+            ("as installed", { _ in }, false),
+            ("with the Finder's .DS_Store", { try Data().write(to: $0.appendingPathComponent(".DS_Store")) }, false),
+            ("with a .env", { try Data("TOKEN=mine\n".utf8).write(to: $0.appendingPathComponent(".env")) }, true),
+            ("with a .git", { try FileManager.default.createDirectory(
+                at: $0.appendingPathComponent(".git"), withIntermediateDirectories: true)
+                try Data("ref\n".utf8).write(to: $0.appendingPathComponent(".git/HEAD")) }, true),
+            ("with a file changed", { try Data("# mine\n".utf8).write(to: $0.appendingPathComponent("README.md")) }, true),
+        ]
+        for (name, change, operators) in states {
+            try? FileManager.default.removeItem(at: live)
+            let trash = TestTrash(in: temp.url.appendingPathComponent(UUID().uuidString))
+            let i = installer(FetchLog(repository), trash: trash)
+            try i.commit(try await i.stage(request(repository)))
+            try change(live)
+            let record = try records().plugins["uptime"]
+            let warned = OperatorsWork.goesToTrash("uptime", in: paths, record: record)
+            #expect(warned == operators, "\(name): the warning says \(warned)")
+            if name == "with a .env" {
+                let tree = try GitHash.tree(ofDirectoryAt: live)
+                #expect(PluginStanding.of(record: record, folderExists: true, treeOnDisk: tree) == .verified,
+                        "the row's mark does not see a .env; the warning has to")
+            }
+            try i.commit(try await i.stage(request(repository, .reinstall)))
+            #expect(!trash.names.isEmpty == warned, "\(name): the installer and the warning disagree")
+        }
+
+        // A folder of the operator's own, with no record, is theirs whole.
+        try? FileManager.default.removeItem(at: live)
+        try JSONFileStore<InstalledPlugins>(url: paths.installedFile).save(InstalledPlugins())
+        temp.writePlugin(folder: "uptime", manifest: FakeRepository.manifest())
+        #expect(OperatorsWork.goesToTrash("uptime", in: paths, record: nil))
+        let trash = TestTrash(in: temp.url)
+        let remover = installer(FetchLog(repository), trash: trash)
+        try remover.finishRemoval(try remover.beginRemoval(id))
+        #expect(trash.names == ["uptime"])
+    }
+
+    // MARK: - A folder spelt with other case
+
+    func folderNames() -> [String] {
+        (try? FileManager.default.contentsOfDirectory(atPath: paths.plugins.path)) ?? []
+    }
+
+    /// The swap keeps the name the folder had, and discovery holds a folder's
+    /// name to its id exactly: **Replace…** over `Uptime` used to leave the
+    /// repository's `uptime` under `Uptime`, not running, and **Reinstall**
+    /// did the same again.
+    @Test("Replace… and Reinstall over a folder spelt Uptime leave it spelt uptime, and running",
+          .enabled(if: TemporaryDirectory().ignoresCase(),
+                   "the temporary directory's volume tells case apart, so there is no Uptime to land on"))
+    func replaceOverOtherCase() async throws {
+        #expect(temp.ignoresCase())
+        temp.writePlugin(folder: "Uptime", manifest: FakeRepository.manifest(),
+                         script: (name: "uptime.sh", body: "#!/bin/sh\necho mine\n", executable: true))
+        #expect(folderNames() == ["Uptime"])
+        let repository = FakeRepository.withUptime()
+        let trash = TestTrash(in: temp.url)
+        let i = installer(FetchLog(repository), trash: trash)
+        #expect(i.folderIsTaken("uptime"))
+        try i.commit(try await i.stage(request(repository, .replace)))
+        #expect(folderNames() == ["uptime"], "the folder is named after its id")
+        #expect(trash.names == ["Uptime"] || trash.names == ["uptime"], "the operator's folder is in the Trash")
+        let found = discovery.scan(paths.plugins)
+        #expect(found.count == 1 && found.first?.folderName == "uptime" && found.first?.isUsable == true,
+                "discovery finds a plugin that runs: \(found.map { ($0.folderName, $0.problems) })")
+
+        // Spelt otherwise again — by hand, or by a copy made in the Finder —
+        // and reinstalled.
+        #expect(rename(live.path, paths.plugins.appendingPathComponent("Uptime").path) == 0)
+        #expect(folderNames() == ["Uptime"])
+        try i.commit(try await i.stage(request(repository, .reinstall)))
+        #expect(folderNames() == ["uptime"])
+        #expect(discovery.scan(paths.plugins).first?.isUsable == true)
+    }
+
     @Test("a staging folder with no journal is thrown away")
     func recoverWithoutAJournal() throws {
         let directory = paths.staging.appendingPathComponent("orphan", isDirectory: true)
         try FileManager.default.createDirectory(at: directory.appendingPathComponent("uptime"), withIntermediateDirectories: true)
         #expect(installer(FetchLog(FakeRepository())).recover() == [.discarded(directory: "orphan")])
         #expect(stagingIsEmpty())
+    }
+}
+
+extension TemporaryDirectory {
+    /// Whether the volume the directory is on ignores case, as a Mac's does as
+    /// it ships: asked of the disk with a file of the test's own.
+    func ignoresCase() -> Bool {
+        let probe = url.appendingPathComponent("case-probe")
+        guard (try? Data().write(to: probe)) != nil else { return false }
+        defer { try? FileManager.default.removeItem(at: probe) }
+        return FileManager.default.fileExists(atPath: url.appendingPathComponent("CASE-PROBE").path)
     }
 }

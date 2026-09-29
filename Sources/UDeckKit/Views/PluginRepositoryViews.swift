@@ -228,11 +228,11 @@ struct CatalogueRowView: View {
         }
     }
 
-    /// **Update** or **Switch to**: at once, or — over a copy changed on
-    /// disk — only after saying that those changes go to the Trash, as the
-    /// same button on the installed plugin's row does.
+    /// **Update** or **Switch to**: at once, or — over a copy holding
+    /// something of the operator's — only after saying that it goes to the
+    /// Trash, as the same button on the installed plugin's row does.
     private func update(_ offer: UpdateOffer) {
-        if let version = offer.versionReplacingChanges(standing: model.standing(of: id)) {
+        if let version = offer.versionReplacingChanges(operatorsWork: model.operatorsWorkGoesToTrash(id)) {
             updatingOverChanges = version
         } else {
             model.update(id)
@@ -305,7 +305,16 @@ struct InstalledRepositoryControls: View {
     @State private var confirming: Confirmation?
     @State private var showingHistory = false
 
-    enum Confirmation { case remove, updateOverChanges }
+    enum Confirmation: Equatable {
+        /// **Remove**; `own` when something of the operator's goes to the Trash.
+        case remove(own: Bool)
+        /// A button that replaces the folder, pressed over a copy holding
+        /// something of the operator's: the version it is replaced with, and
+        /// what the confirmation then does.
+        case overChanges(version: String, then: Replacement)
+    }
+
+    enum Replacement: Equatable { case update, reinstall, backTo }
 
     private var record: InstalledRecord? { model.installed.plugins[id] }
     private var standing: PluginStanding { model.standing(of: id) }
@@ -381,8 +390,8 @@ struct InstalledRepositoryControls: View {
             }
             if let offer, offer.isWaiting || isOlder(offer) {
                 Button(isOlder(offer) ? strings(.catalogueSwitchTo(version: olderVersion(offer))) : strings(.catalogueUpdate)) {
-                    if offer.versionReplacingChanges(standing: standing) != nil {
-                        confirming = .updateOverChanges
+                    if let version = offer.versionReplacingChanges(operatorsWork: model.operatorsWorkGoesToTrash(id)) {
+                        confirming = .overChanges(version: version, then: .update)
                     } else {
                         model.update(id)
                     }
@@ -391,12 +400,16 @@ struct InstalledRepositoryControls: View {
                 .accessibilityIdentifier("plugin.\(id).update")
             }
             if let record, standing.offersReinstall(readsCatalogue: model.settings.readsOfficialCatalogue) {
-                Button(strings(.catalogueReinstall(version: record.version))) { model.reinstall(id) }
+                Button(strings(.catalogueReinstall(version: record.version))) {
+                    replace(.reinstall, version: record.version)
+                }
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).reinstall")
             }
             if let previous = record?.previous, model.settings.readsOfficialCatalogue {
-                Button(strings(.catalogueBackTo(version: previous.version))) { model.backToPrevious(id) }
+                Button(strings(.catalogueBackTo(version: previous.version))) {
+                    replace(.backTo, version: previous.version)
+                }
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).backTo")
             }
@@ -408,11 +421,32 @@ struct InstalledRepositoryControls: View {
                 .disabled(busy && !showingHistory)
                 .accessibilityIdentifier("plugin.\(id).earlier")
             }
-            Button(strings(.catalogueRemove), role: .destructive) { confirming = .remove }
+            Button(strings(.catalogueRemove), role: .destructive) {
+                confirming = .remove(own: model.operatorsWorkGoesToTrash(id))
+            }
                 .disabled(busy)
                 .accessibilityIdentifier("plugin.\(id).remove")
         }
         .font(.caption)
+    }
+
+    /// **Reinstall** or **Back to**: at once, or — when the copy it replaces
+    /// holds something of the operator's — only after saying that it goes to
+    /// the Trash, by the rule the installer decides the Trash by.
+    private func replace(_ replacement: Replacement, version: String) {
+        if model.operatorsWorkGoesToTrash(id) {
+            confirming = .overChanges(version: version, then: replacement)
+        } else {
+            perform(replacement)
+        }
+    }
+
+    private func perform(_ replacement: Replacement) {
+        switch replacement {
+        case .update: model.update(id)
+        case .reinstall: model.reinstall(id)
+        case .backTo: model.backToPrevious(id)
+        }
     }
 
     private func isOlder(_ offer: UpdateOffer) -> Bool {
@@ -424,17 +458,19 @@ struct InstalledRepositoryControls: View {
     }
 
     private func confirmation(_ kind: Confirmation) -> some View {
-        let own = standing == .folderOfYourOwn || standing == .modifiedLocally
         let text: String
         let button: String
         switch kind {
-        case .remove:
+        case .remove(let own):
             text = own ? strings(.catalogueRemoveOwnConfirm(id: id)) : strings(.catalogueRemoveConfirm(id: id))
             button = strings(.catalogueRemove)
-        case .updateOverChanges:
-            text = strings(.catalogueUpdateOverChanges(
-                id: id, version: offer?.versionReplacingChanges(standing: standing) ?? ""))
-            button = strings(.catalogueUpdate)
+        case .overChanges(let version, let replacement):
+            text = strings(.catalogueUpdateOverChanges(id: id, version: version))
+            switch replacement {
+            case .update: button = strings(.catalogueUpdate)
+            case .reinstall: button = strings(.catalogueReinstall(version: version))
+            case .backTo: button = strings(.catalogueBackTo(version: version))
+            }
         }
         return VStack(alignment: .leading, spacing: 5) {
             Text(text).font(.caption).fixedSize(horizontal: false, vertical: true)
@@ -444,7 +480,7 @@ struct InstalledRepositoryControls: View {
                     confirming = nil
                     switch kind {
                     case .remove: model.remove(id)
-                    case .updateOverChanges: model.update(id)
+                    case .overChanges(_, let replacement): perform(replacement)
                     }
                 }
                 .accessibilityIdentifier("plugin.\(id).confirm")
@@ -462,6 +498,9 @@ struct HistoryList: View {
     var id: String
     var installedCommit: String?
     @Environment(\.strings) private var strings
+    /// The version **Install this version** was pressed for over a copy
+    /// holding something of the operator's: what the warning names first.
+    @State private var confirming: PluginHistory.Line?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -482,6 +521,9 @@ struct HistoryList: View {
                 }
                 ForEach(history.lines, id: \.commit) { line in
                     row(line)
+                }
+                if let line = confirming {
+                    confirmation(line)
                 }
             }
         }
@@ -512,12 +554,38 @@ struct HistoryList: View {
                 Text(strings(.catalogueRefusal(refusal))).font(.caption).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Button(strings(.historyInstall)) { model.installEarlier(id, line: line) }
+                Button(strings(.historyInstall)) {
+                    // The same warning as **Update** and **Back to**, by the
+                    // same rule: something of the operator's goes to the Trash.
+                    if model.operatorsWorkGoesToTrash(id) {
+                        confirming = line
+                    } else {
+                        model.installEarlier(id, line: line)
+                    }
+                }
                     .disabled(model.busyPlugin != nil)
                     .accessibilityIdentifier("plugin.\(id).history.\(line.version).install")
             }
         }
         .font(.callout)
+    }
+
+    private func confirmation(_ line: PluginHistory.Line) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(strings(.catalogueUpdateOverChanges(id: id, version: line.version)))
+                .font(.caption).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("plugin.\(id).history.confirmText")
+            HStack {
+                Button(strings(.historyInstall), role: .destructive) {
+                    confirming = nil
+                    model.installEarlier(id, line: line)
+                }
+                .accessibilityIdentifier("plugin.\(id).history.confirm")
+                Button(strings(.actionCancel)) { confirming = nil }
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.1)))
     }
 }
 
@@ -583,6 +651,7 @@ struct ProblemText: View {
         case .unreachable(let path, let reason): [strings(.catalogueFileUnreachable(path: path, reason: reason))]
         case .tookTooLong: [strings(.catalogueTookTooLong)]
         case .cannotWrite(let reason): [strings(.catalogueCannotWrite(reason: reason))]
+        case .stillRunning(let id): [strings(.catalogueStillRunning(id: id))]
         case .catalogue(let error):
             switch error {
             case .unreachable(let reason): [strings(.catalogueUnreachable(reason: reason, readAt: nil))]

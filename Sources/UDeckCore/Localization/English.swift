@@ -210,6 +210,8 @@ struct English: Vocabulary {
             "\(path) could not be fetched: \(reason); nothing was installed."
         case .catalogueTookTooLong: "The install took more than five minutes and was stopped; nothing was installed."
         case .catalogueCannotWrite(let reason): "uDeck could not write to disk: \(reason)"
+        case .catalogueStillRunning(let id):
+            "Something \(id) started would not end, so its folder was left as it was. Try again in a moment."
         case .catalogueRecordsBroken(let reason):
             "~/.udeck/installed.json cannot be read, so uDeck installs, updates and removes nothing until it can: \(reason)"
         case .pluginMarkVerified: "Verified"

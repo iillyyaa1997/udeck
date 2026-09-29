@@ -248,16 +248,17 @@ struct CatalogueTests {
 
     /// The specification: *"A plugin marked modified is not updated over
     /// without a word."* The catalogue's row has the same button, and the
-    /// same rule.
-    @Test("Update and Switch to over a copy changed on disk name the version its changes are replaced with")
+    /// same rule — whether the installer will send something of the
+    /// operator's to the Trash (`OperatorsWork`), not the row's mark.
+    @Test("Update and Switch to over the operator's work name the version it is replaced with")
     func updatingOverChanges() {
-        #expect(UpdateOffer.newer(version: "1.3.0").versionReplacingChanges(standing: .modifiedLocally) == "1.3.0")
-        #expect(UpdateOffer.changedStill(version: "1.2.0").versionReplacingChanges(standing: .modifiedLocally) == "1.2.0")
-        #expect(UpdateOffer.older(version: "1.1.0").versionReplacingChanges(standing: .modifiedLocally) == "1.1.0")
-        #expect(UpdateOffer.newer(version: "1.3.0").versionReplacingChanges(standing: .verified) == nil,
+        #expect(UpdateOffer.newer(version: "1.3.0").versionReplacingChanges(operatorsWork: true) == "1.3.0")
+        #expect(UpdateOffer.changedStill(version: "1.2.0").versionReplacingChanges(operatorsWork: true) == "1.2.0")
+        #expect(UpdateOffer.older(version: "1.1.0").versionReplacingChanges(operatorsWork: true) == "1.1.0")
+        #expect(UpdateOffer.newer(version: "1.3.0").versionReplacingChanges(operatorsWork: false) == nil,
                 "nothing of the operator's to warn about")
-        #expect(UpdateOffer.current.versionReplacingChanges(standing: .modifiedLocally) == nil, "nothing offered")
-        #expect(UpdateOffer.goneFromRepository.versionReplacingChanges(standing: .modifiedLocally) == nil)
+        #expect(UpdateOffer.current.versionReplacingChanges(operatorsWork: true) == nil, "nothing offered")
+        #expect(UpdateOffer.goneFromRepository.versionReplacingChanges(operatorsWork: true) == nil)
     }
 
     /// *"Off, uDeck makes no request about plugins at all"* — and **Reinstall**

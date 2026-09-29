@@ -279,6 +279,16 @@ path, a UTF-8 locale, and nothing carried over from however uDeck was started.
 `confirm`, when present, asks the operator before running. Use it for anything
 that changes something.
 
+**An action may be ended when your plugin is updated or removed.** It runs in a
+process group of its own, with standard input, output and error at `/dev/null`,
+and it counts as running until everything in that group has ended. While your
+plugin's folder is being replaced or removed, no action starts; one already
+running is given as long as a poll could take — your `timeout` and a second and
+a half — and then its group gets `SIGTERM`, a second later `SIGKILL`. uDeck
+never swaps your folder under a running process. So an action that takes long
+should leave things in a state it can resume from, and should not start work in
+the background it expects to survive.
+
 **The grant follows the version, and the manifest has to still be asking.** A
 grant is decided against the `version` in your manifest, so bumping it re-asks —
 and an action runs only when the manifest on disk *now* declares `exec` for that
@@ -464,8 +474,11 @@ is:
 * **uDeck decides whether to launch you at all.** All of your declared
   capabilities, or none: half-granting would be theatre.
 * **Services uDeck performs for you are genuinely gated.** It runs your card's
-  actions, and refuses ones you were not granted `exec` for. It hands over
-  secrets, or does not.
+  actions, and refuses ones you were not granted `exec` for.
+* **uDeck hands plugins no secrets.** You may declare `secrets`, and the
+  operator is asked about them like any other capability, but this version of
+  uDeck delivers none: nothing is put in your environment or anywhere else for
+  you. A plugin that needs a token has to get it itself.
 
 So uDeck's interface says *"this plugin asks to…"*, never *"this plugin is
 forbidden from…"*. Declare honestly anyway: the declaration is what the operator

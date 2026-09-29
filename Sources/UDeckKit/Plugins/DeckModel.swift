@@ -57,6 +57,9 @@ public final class DeckModel {
     /// runs of each in flight — polls and card actions — so quieting one can
     /// wait for them to end.
     var pluginRuns = PluginQuiet()
+    /// Card actions that are running, each in a process group of its own, so
+    /// that quieting a plugin can end the ones that outlast the wait.
+    let actionProcesses = ActionProcesses()
 
     /// Problems worth showing the operator: a settings file that would not
     /// parse, a layout that could not be written, a plugin whose windows had to
@@ -562,26 +565,26 @@ public final class DeckModel {
             return "\(id) is being updated or removed; try again in a moment"
         }
 
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = Array(action.run.dropFirst())
-        process.currentDirectoryURL = plugin(withID: id)?.directory
-        // Built, not inherited — the same rule as a producer's environment, and
-        // for the same reason. This is the one path the documentation calls
-        // host-mediated, so it is the last place that should quietly hand a
-        // plugin whatever was in the shell that started uDeck.
-        process.environment = actionEnvironment(for: id)
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
         let plugin = id.rawValue
-        process.terminationHandler = { [weak self] _ in
-            Task { @MainActor in self?.pluginRuns.end(plugin) }
-        }
         do {
-            try process.run()
+            // In a process group of its own, so that quieting the plugin can
+            // end it and whatever it started (`ActionProcesses`). It counts as
+            // running until the whole group has ended.
+            //
+            // The environment is built, not inherited — the same rule as a
+            // producer's, and for the same reason. This is the one path the
+            // documentation calls host-mediated, so it is the last place that
+            // should quietly hand a plugin whatever was in the shell that
+            // started uDeck.
+            try actionProcesses.start(
+                plugin: plugin, executable: executable, arguments: Array(action.run.dropFirst()),
+                workingDirectory: self.plugin(withID: id)?.directory ?? executable.deletingLastPathComponent(),
+                environment: actionEnvironment(for: id),
+                ended: { [weak self] in Task { @MainActor in self?.pluginRuns.end(plugin) } }
+            )
         } catch {
             pluginRuns.end(plugin)
-            return "\(action.run[0]) could not be started: \(error.localizedDescription)"
+            return "\(action.run[0]) could not be started: \(error)"
         }
         return nil
     }

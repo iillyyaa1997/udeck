@@ -218,6 +218,8 @@ struct Russian: Vocabulary {
             "\(path) не удалось скачать: \(reason); ничего не установлено."
         case .catalogueTookTooLong: "Установка шла дольше пяти минут и была остановлена; ничего не установлено."
         case .catalogueCannotWrite(let reason): "uDeck не смог записать на диск: \(reason)"
+        case .catalogueStillRunning(let id):
+            "То, что запустил \(id), не завершилось, поэтому его папка осталась как была. Попробуйте ещё раз через минуту."
         case .catalogueRecordsBroken(let reason):
             "~/.udeck/installed.json не читается, поэтому uDeck ничего не устанавливает, не обновляет и не удаляет, пока это не исправлено: \(reason)"
         case .pluginMarkVerified: "Проверен"

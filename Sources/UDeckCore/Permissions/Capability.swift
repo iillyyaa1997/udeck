@@ -56,7 +56,8 @@ public enum Capability: Hashable, Sendable {
 ///   capability means the plugin never runs — enforced, not advisory.
 /// * Services the host performs on the plugin's behalf are genuinely gated: a
 ///   card's action button is run by the host, and the host refuses when `exec`
-///   was not granted; secrets are handed over by the host, or not at all.
+///   was not granted. The host hands over no secrets at all: `secrets` is
+///   declared and asked about, and this version delivers none.
 ///
 /// So the interface says "this plugin asks for…" rather than "this plugin is
 /// forbidden from…", and the difference is not pedantry.

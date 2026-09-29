@@ -9,8 +9,8 @@ import UDeckCore
 /// "restricted" or "sandboxed": a plugin is an ordinary program run as the
 /// operator, and once it is running it can do whatever the operator can. The
 /// honest promise is "it does not run unless you say so", plus real control over
-/// the things uDeck itself does on the plugin's behalf — secrets it hands over,
-/// and commands it runs from a card's buttons.
+/// the things uDeck itself does on the plugin's behalf: the commands it runs
+/// from a card's buttons. It hands plugins no secrets.
 struct PermissionRequestView: View {
     @Environment(\.strings) private var strings
     var model: DeckModel

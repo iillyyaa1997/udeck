@@ -142,6 +142,9 @@ public enum InstallError: Error, Equatable, Sendable {
     case tookTooLong
     /// The disk said no.
     case cannotWrite(String)
+    /// Something of the plugin was still running after it was quieted and its
+    /// card actions were ended, so its folder was left as it was.
+    case stillRunning(id: String)
 
     public var refusals: [RepositoryRefusal] {
         if case .refused(let refusals) = self { refusals } else { [] }
@@ -174,7 +177,9 @@ public enum RecoveredOperation: Equatable, Sendable {
     case removalNeverStarted(id: String)
     /// A staging folder with no journal: nothing of the operator's was in it yet.
     case discarded(directory: String)
-    /// `installed.json` would not parse, so the journal is left for a later launch.
+    /// Something could not be finished — `installed.json` would not parse, or
+    /// an old copy could not be put back or moved to the Trash — so staging
+    /// and its journal are left as they are for a later launch.
     case leftForLater(id: String, reason: String)
 }
 
@@ -372,7 +377,21 @@ public struct PluginInstaller: Sendable {
         }
     }
 
-    // MARK: - Steps 7–10
+    // MARK: - Steps 6–10
+
+    /// Step 6, then the rest: `quiet` is the caller quieting the plugin, and
+    /// answers whether nothing of it is running any more. Only then is the
+    /// staged plugin put in place; when something of it would not end, the
+    /// folder is left exactly as it was and the staged copy goes. uDeck never
+    /// swaps a folder under a live process.
+    @discardableResult
+    public func commit(_ staged: StagedInstall, once quiet: @Sendable () async -> Bool) async throws -> InstalledRecord {
+        guard await quiet() else {
+            abandon(staged)
+            throw InstallError.stillRunning(id: staged.request.id.rawValue)
+        }
+        return try commit(staged)
+    }
 
     /// Puts a staged plugin in place and records it. The caller has quieted
     /// the plugin first, so nothing of it runs across the swap.
@@ -384,7 +403,7 @@ public struct PluginInstaller: Sendable {
         let live = paths.plugins.appendingPathComponent(id, isDirectory: true)
         let existing = records.plugins[id]
         let liveExists = folderIsTaken(id)
-        let operators = liveExists && Self.holdsTheOperatorsWork(live, record: existing)
+        let operators = OperatorsWork.goesToTrash(id, in: paths, record: existing)
 
         let record = makeRecord(request, existing: existing)
         do {
@@ -395,6 +414,14 @@ public struct PluginInstaller: Sendable {
         } catch {
             abandon(staged)
             throw InstallError.cannotWrite("\(error)")
+        }
+        if liveExists {
+            do {
+                try spellExactly(id)
+            } catch {
+                abandon(staged)
+                throw error
+            }
         }
 
         let displaced = try swap(staged.folder, into: live, liveExists: liveExists, staging: staged.directory, id: id)
@@ -498,6 +525,25 @@ public struct PluginInstaller: Sendable {
         return displaced
     }
 
+    /// On a volume that ignores case — which is how a Mac ships —
+    /// `plugins/Uptime` is where the swap for `uptime` lands. The swap
+    /// exchanges what the two names hold and keeps the names, so the new copy
+    /// would sit under `Uptime`, and discovery holds a folder's name to its
+    /// plugin's id exactly: the install would put in place a plugin that does
+    /// not run, and **Reinstall** would do it again. So a folder spelt otherwise
+    /// is first renamed to the id, in place, and the swap then lands on the
+    /// exact name.
+    private func spellExactly(_ id: String) throws {
+        let names = (try? fileManager.contentsOfDirectory(atPath: paths.plugins.path)) ?? []
+        guard !names.contains(id),
+              let spelt = names.first(where: { $0.lowercased() == id.lowercased() }) else { return }
+        let from = paths.plugins.appendingPathComponent(spelt, isDirectory: true)
+        let to = paths.plugins.appendingPathComponent(id, isDirectory: true)
+        guard rename(from.path, to.path) == 0 else {
+            throw InstallError.cannotWrite("renaming \(spelt) to \(id): \(String(cString: strerror(errno)))")
+        }
+    }
+
     private func abandon(at staging: URL) {
         try? fileManager.removeItem(at: staging)
     }
@@ -531,16 +577,23 @@ public struct PluginInstaller: Sendable {
         public var oldCopyIsOperators: Bool
     }
 
-    /// Starts removing a plugin: the journal, then its folder moved into
-    /// staging in one rename, so it is gone from the plugins folder at once.
-    /// The caller has quieted it first, and forgets its grants, settings,
+    /// Starts removing a plugin once `quiet` says nothing of it is running:
+    /// the journal, then its folder moved into staging in one rename, so it is
+    /// gone from the plugins folder at once. When something of it would not
+    /// end, nothing is touched. The caller forgets its grants, settings,
     /// windows and card before calling `finishRemoval`.
+    public func beginRemoval(_ id: PluginIdentifier, once quiet: @Sendable () async -> Bool) async throws -> Removal {
+        guard await quiet() else { throw InstallError.stillRunning(id: id.rawValue) }
+        return try beginRemoval(id)
+    }
+
+    /// `beginRemoval(_:once:)` for a caller that has quieted the plugin itself.
     public func beginRemoval(_ id: PluginIdentifier) throws -> Removal {
         let records = try loadRecords()
         let live = paths.plugins.appendingPathComponent(id.rawValue, isDirectory: true)
         let existing = records[id]
         let liveExists = folderIsTaken(id.rawValue)
-        let operators = liveExists && Self.holdsTheOperatorsWork(live, record: existing)
+        let operators = OperatorsWork.goesToTrash(id.rawValue, in: paths, record: existing)
 
         let directory = paths.staging.appendingPathComponent(UUID().uuidString, isDirectory: true)
         do {
@@ -648,12 +701,38 @@ public struct PluginInstaller: Sendable {
             return .recordWritten(id: id)
         }
 
-        // The swap never happened. What is in staging under the id is the new
-        // download and goes; an old copy moved aside by the two-rename fallback
-        // goes back where it was.
-        if !liveExists, fileManager.fileExists(atPath: displaced.path) {
-            try? fileManager.createDirectory(at: paths.plugins, withIntermediateDirectories: true)
-            try? fileManager.moveItem(at: displaced, to: live)
+        // The folder is not the one the intent would record. Nothing in staging
+        // is deleted unless it is known to be uDeck's own download.
+        //
+        // An old copy moved aside by the two-rename fallback goes back where it
+        // was. If it cannot, staging and its journal stay as they are and the
+        // next launch tries again; if something else is at `plugins/<id>` now,
+        // the old copy goes to the Trash rather than over it. Either way it is
+        // never deleted: it may be the operator's only copy.
+        if fileManager.fileExists(atPath: displaced.path) {
+            if !liveExists {
+                do {
+                    try fileManager.createDirectory(at: paths.plugins, withIntermediateDirectories: true)
+                    try renames.move(displaced, live)
+                } catch {
+                    return .leftForLater(id: id, reason: "putting the old copy back: \(error.localizedDescription)")
+                }
+            } else {
+                do {
+                    try trash.discard(displaced)
+                } catch {
+                    return .leftForLater(id: id, reason: "moving the old copy to the Trash: \(error.localizedDescription)")
+                }
+            }
+        }
+        // What is under the id in staging is the new download when the swap
+        // never happened: it hashes to the intended tree, and goes. After an
+        // exchange whose record was never written, and a folder changed since,
+        // it is the old copy instead — the copy that lost, disposed of as the
+        // intent says, never simply deleted when it was the operator's.
+        if let record = intent.record, fileManager.fileExists(atPath: inStaging.path),
+           ((try? GitHash.tree(ofDirectoryAt: inStaging)) ?? nil) != record.tree {
+            dispose(inStaging, operators: intent.oldCopyIsOperators)
         }
         try? fileManager.removeItem(at: directory)
         return .neverSwapped(id: id)
@@ -674,16 +753,6 @@ public struct PluginInstaller: Sendable {
 
     public static func folderIsTaken(_ id: String, in paths: UDeckPaths) -> Bool {
         FileManager.default.fileExists(atPath: paths.plugins.appendingPathComponent(id, isDirectory: true).path)
-    }
-
-    /// Whether the folder at `live` holds anything of the operator's: there is
-    /// no record of uDeck putting it there, it no longer hashes to what was
-    /// put there, or it holds something the hash does not see — a `.env`, a
-    /// `.git` — which the hash matching says nothing about.
-    static func holdsTheOperatorsWork(_ live: URL, record: InstalledRecord?) -> Bool {
-        guard let record else { return true }
-        let tree = (try? GitHash.tree(ofDirectoryAt: live)) ?? nil
-        return tree != record.tree || !GitHash.unhashed(inDirectoryAt: live).isEmpty
     }
 
     private func write(_ intent: InstallIntent, in directory: URL) throws {
@@ -729,5 +798,40 @@ extension JSONDecoder {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return decoder
+    }
+}
+
+/// Whether replacing or removing a plugin's folder sends something of the
+/// operator's to the Trash.
+///
+/// One rule, and two readers: the installer decides by it whether the copy
+/// that loses goes to the Trash or is deleted, and every button that replaces
+/// or removes a folder — **Update**, **Switch to**, **Back to**, **Earlier
+/// versions…**, **Reinstall**, **Remove** — decides by it whether to say so
+/// first. A warning decided by anything else would be silent exactly when the
+/// two disagree, which is when it is needed.
+public enum OperatorsWork {
+    /// Whether a folder holds anything of the operator's: there is no record
+    /// of uDeck putting it there, it no longer hashes to what was put there
+    /// (`treeOnDisk`), or it holds something the hash does not see — a
+    /// `.env`, a `.git` (`unhashed`) — which the hash matching says nothing
+    /// about.
+    public static func isAtStake(record: InstalledRecord?, treeOnDisk: String?, unhashed: [String]) -> Bool {
+        guard let record else { return true }
+        return treeOnDisk != record.tree || !unhashed.isEmpty
+    }
+
+    /// The same, of the folder at `folder` as it is on disk now.
+    public static func isAtStake(in folder: URL, record: InstalledRecord?) -> Bool {
+        isAtStake(record: record, treeOnDisk: (try? GitHash.tree(ofDirectoryAt: folder)) ?? nil,
+                  unhashed: GitHash.unhashed(inDirectoryAt: folder))
+    }
+
+    /// Whether replacing or removing `plugins/<id>` now would send something
+    /// of the operator's to the Trash: there is a folder there, asked as the
+    /// swap will find it, and it holds something of theirs.
+    public static func goesToTrash(_ id: String, in paths: UDeckPaths, record: InstalledRecord?) -> Bool {
+        guard PluginInstaller.folderIsTaken(id, in: paths) else { return false }
+        return isAtStake(in: paths.plugins.appendingPathComponent(id, isDirectory: true), record: record)
     }
 }
