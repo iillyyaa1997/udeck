@@ -121,17 +121,56 @@ you through, or run the binary you built yourself, which has no such problem.
 Notarisation is intended but not paid for yet. Nothing about the architecture
 changes when it arrives — only the build step.
 
-uDeck is **not sandboxed**, and cannot be: plugins run commands. What that means
-for plugin trust is spelled out honestly in
-[the permissions section of the plugin API](docs/plugin-api.md#permissions) —
-please read it before installing a plugin somebody else wrote.
+uDeck is **not sandboxed**, and cannot be: plugins run commands. A plugin runs
+as you, with everything you can do; the permissions in its manifest are a
+declaration uDeck shows you before it runs, not a wall around it, and uDeck
+hands plugins no secrets. What that means for plugin trust is spelled out in
+[the permissions section of the plugin API](docs/plugin-api.md#permissions) and
+in [SECURITY.md](SECURITY.md) — please read it before installing a plugin
+somebody else wrote. A plugin marked **Verified** in the catalogue is one a
+maintainer of the official repository read before merging it; that is not the
+same as safe.
+
+## What uDeck connects to, and when
+
+uDeck goes on the network by itself for two things, both **on from the first
+launch**, both with a switch that turns them off. Nothing else — and neither
+sends an account, an identifier, a cookie or a list of what you have installed.
+
+**Its own updates**, through [Sparkle](https://sparkle-project.org). uDeck asks
+`https://github.com/iillyyaa1997/udeck/releases/latest/download/appcast.xml`
+whether there is a newer version: straight after launch when it has not asked
+in the last day — so on the very first launch too — and then once a day while
+it runs. The answer appears in Settings → About. The update itself is
+downloaded only when you press Install there; nothing installs by itself, and
+Sparkle's system profile is not sent. **Settings → About → Check for updates
+automatically** turns the daily question off; **Check now** still asks, when
+you press it.
+
+**The official plugin catalogue**, from
+[`github.com/iillyyaa1997/udeck-plugins`](https://github.com/iillyyaa1997/udeck-plugins).
+uDeck reads it from `api.github.com` and `raw.githubusercontent.com`, anonymously:
+
+* about five seconds after launch, unless it was read successfully in the last
+  24 hours — the very first launch included;
+* once every 24 hours while uDeck runs, and an hour after a read that failed;
+* when Settings → Plugins is opened and the list is more than an hour old, and
+  whenever **Check now** is pressed there;
+* and when you press **Install**, **Update**, **Reinstall**, **Back to** or
+  **Earlier versions**, the files that needs — so GitHub learns which plugin.
+
+A read is usually one or two requests, each carrying `User-Agent:
+uDeck/<version>` and the network address any request carries; no plugin is
+downloaded or installed by itself. **Settings → Plugins → Official catalogue**
+turns all of it off: uDeck then makes no request about plugins at all, the
+plugins you have keep running, and uDeck stops knowing about their updates.
+What exactly is read, cached and counted against GitHub's limits is in
+[docs/plugin-repository.md](docs/plugin-repository.md#what-udeck-fetches-and-when).
+
+Plugins are another matter: a plugin is a program you installed, and it can
+reach the network whenever it likes — see [Security](SECURITY.md).
 
 ## Updates
-
-uDeck can update itself, through [Sparkle](https://sparkle-project.org). It is
-**off until you turn it on**, in Settings → About: uDeck makes no network
-connection of any kind otherwise, and an application that quietly starts talking
-to a server because it was updated is doing something you did not ask for.
 
 A release is a tag. `v0.2.0` on `main` builds, tests, signs and publishes the
 archive and the update feed; the version in the tag has to match the one in
