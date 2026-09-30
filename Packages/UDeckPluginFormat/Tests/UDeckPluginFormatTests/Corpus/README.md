@@ -48,9 +48,10 @@ of the rules, each with the findings the script reported.
   * `expected` — the exit status (0 clean or only warnings, 1 errors, 2 could
     not check), and every finding: `level`, `rule`, `path`, and the Python
     check's `message`;
-  * `divergence` — only on `P05` and `P10`, the two places the Python check is
-    wrong: what it does, what the Swift check must do instead, and the findings
-    the Swift check must report.
+  * `divergence` — only where the Python check is wrong: `P05`, `P10`, and
+    the Python check's own test of `restart`, which builds P10's manifest
+    again (`TESTS_THAT_DIVERGE` in `make-corpus.py`). What it does, what the
+    Swift check must do instead, and the findings the Swift check must report.
 
 ## The two places Python is wrong
 
@@ -62,17 +63,31 @@ of the rules, each with the findings the script reported.
 * **P10, `restart`** — Python calls it a field the contract does not define,
   which uDeck ignores (rule 12). uDeck decodes it as a `RestartPolicy` with four
   required fields; `{"mode": "never"}` does not decode, and uDeck would not load
-  the plugin at all. The Swift check must report rule 3.
+  the plugin at all. The Swift check must report rule 3 — and, strictly, rule
+  12 as Python does, since the contract does not describe `restart`. The same
+  manifest, spelt with other spaces, is what check-repo.py's own test
+  `Rule12OnlyWhatTheContractDefines.test_in_the_manifest [restart, …]` builds,
+  and it carries the same divergence.
 
 ## How the Swift side uses it
 
 `CorpusTests` builds every case's repository with `git fast-import`, as the
 Python tests did, and checks that each commit gets the id recorded here — the
 proof that the repository is byte for byte the one the Python check read. Each
-content is checked against its id too. The replay itself — the Swift check's
-findings against `expected`, compared as level, rule and path, with
-`divergence` where there is one — is marked as a known issue until the rules
-are ported (stage 2, wave B).
+content is checked against its id too.
+
+Then it replays every case: the Swift check (`RepositoryCheck`) runs on the
+repository the way the Python check was run — strictly, as the official
+repository when `check.official` says so, with the case's base and head — and
+its findings are compared with `expected` as level, rule and path, with
+`divergence` where there is one, and so is the exit status: 273 of 273, with
+no exception. The rules the Python check never had add nothing here: rule 18
+needs history, which only rule 17's nine cases have, and none of them changes a
+plugin; rule 19 has nothing to say of the `minUDeck` three cases declare
+(0.6.0 twice and 99.0.0, each past the smallest number the first release that
+reads the field can have). A finding of theirs
+would have to be named in `CorpusReplay.newRules`, which a test keeps empty.
+Every finding's words are read too, in every layer: none may name a Swift type.
 
 ## Making it again
 

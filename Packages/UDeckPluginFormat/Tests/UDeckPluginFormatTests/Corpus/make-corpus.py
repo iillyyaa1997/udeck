@@ -323,6 +323,34 @@ class Result(unittest.TextTestResult):
 
 # --- the probes: the edges the rules map found (report 10, P01-P18) -------------
 
+# A manifest whose "restart" uDeck cannot decode: {"mode": "never"}. P10 is the
+# probe of it, and check-repo.py's own test of restart builds the same manifest.
+RESTART = {
+    "python": "calls restart a field the contract does not define, which uDeck ignores (rule 12)",
+    "swift": "refuses the manifest under rule 3: uDeck does not ignore restart, it decodes it as a "
+             "RestartPolicy with four required fields, and {\"mode\": \"never\"} does not decode, so "
+             "uDeck would not load this plugin at all; and, strictly, reports restart under rule 12 as Python "
+             "does, since the contract does not describe it",
+    "findings": [{"level": "error", "rule": "3", "path": "plugins/sample/manifest.json"},
+                 {"level": "error", "rule": "12", "path": "plugins/sample/manifest.json"}],
+}
+
+# check-repo.py's own tests that are wrong the way a probe is, by the name the
+# case is recorded under.
+TESTS_THAT_DIVERGE = {
+    "Rule12OnlyWhatTheContractDefines.test_in_the_manifest [restart, which the contract does not describe]": RESTART,
+}
+
+
+def diverge(cases):
+    """Marks the tests of TESTS_THAT_DIVERGE with their divergence, and fails if one is not there."""
+    by_name = {case["name"]: case for case in cases}
+    for name, divergence in TESTS_THAT_DIVERGE.items():
+        if name not in by_name:
+            sys.exit("no case {} to mark as diverging; did its test change?".format(name))
+        by_name[name]["divergence"] = divergence
+
+
 def acceptances(tcr):
     """Repositories that keep a rule whose own tests only ever break it.
 
@@ -366,13 +394,7 @@ def probes(tcr):
         ("P07 LFS pointer hawser", tcr.repository(**{"data.txt": b"version https://hawser.github.com/spec/v1\noid sha256:00\nsize 1\n"}), None),
         ("P08 LFS pointer v1 padded past 1024 bytes", tcr.repository(**{"data.txt": b"version https://git-lfs.github.com/spec/v1\n" + b"x" * 2000 + b"\n"}), None),
         ("P09 bare-name run[0] jq", tcr.repository(**{"manifest.json": m(run=["jq", "."])}), None),
-        ("P10 restart field", tcr.repository(**{"manifest.json": m(restart={"mode": "never"})}), {
-            "python": "calls restart a field the contract does not define, which uDeck ignores (rule 12)",
-            "swift": "refuses the manifest under rule 3: uDeck does not ignore restart, it decodes it as a "
-                     "RestartPolicy with four required fields, and {\"mode\": \"never\"} does not decode, so "
-                     "uDeck would not load this plugin at all",
-            "findings": [{"level": "error", "rule": "3", "path": "plugins/sample/manifest.json"}],
-        }),
+        ("P10 restart field", tcr.repository(**{"manifest.json": m(restart={"mode": "never"})}), RESTART),
         ("P11 window defaultWidth 4.0", tcr.repository(**{"manifest.json": m(window={"defaultWidth": 4.0})}), None),
         ("P12 minUDeck 99.0.0", tcr.repository(**{"manifest.json": m(minUDeck="99.0.0")}), None),
         ("P13 settings key with trailing newline", tcr.repository(**{
@@ -519,6 +541,7 @@ def main(argv=None):
             sys.exit("check-repo.py's own tests did not pass here, so nothing they recorded is worth keeping")
 
         cases = recorder.cases
+        diverge(cases)
         base = against_the_good_repository(cases)
         table = verdicts(cases)
         missing = [rule for rule, counts in table.items() if not counts["breaks"] or not counts["passes"]]

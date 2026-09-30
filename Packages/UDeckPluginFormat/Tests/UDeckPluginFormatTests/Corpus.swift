@@ -329,18 +329,86 @@ enum CorpusGit {
     }
 }
 
-// MARK: - The Swift check, as far as it goes
+// MARK: - The Swift check, run on a case
 
-/// What the Swift check found in a case's repository.
-///
-/// Wave B ports check-repo.py's rules to Swift, and this is where they are
-/// called from. Until then there is nothing to call, and it says so.
+/// What the Swift check says of a case's repository, run the way the Python
+/// check was: strictly, as the official repository when the case says so, and
+/// with its base and head.
 enum CorpusReplay {
-    struct NotPortedYet: Error, CustomStringConvertible {
-        var description: String { "the repository rules are not in Swift yet (stage 2, wave B)" }
+    struct Outcome: Equatable, CustomStringConvertible {
+        /// 0 clean or only warnings, 1 errors, 2 could not check.
+        var exit: Int
+        var findings: Set<String>
+        /// Every finding's words — not compared with the corpus, only read.
+        var messages: [String] = []
+        var description: String { "exit \(exit), \(findings.sorted())" }
+
+        static func == (one: Outcome, other: Outcome) -> Bool {
+            one.exit == other.exit && one.findings == other.findings
+        }
     }
 
-    static func findings(of item: Corpus.Case, in repository: BuiltRepository?) throws -> Set<String> {
-        throw NotPortedYet()
+    static func run(_ item: Corpus.Case, of corpus: Corpus, in scratch: URL,
+                    mode: CheckMode? = nil) throws -> Outcome {
+        let built = try CorpusGit.build(item, of: corpus, in: scratch)
+        let folder = scratch.appendingPathComponent("repository", isDirectory: true)
+        func commit(_ reference: Corpus.CommitReference?) -> String? {
+            guard let reference else { return nil }
+            if let index = reference.commit, let ids = built?.commits, ids.indices.contains(index) { return ids[index] }
+            return reference.sha
+        }
+        var options = RepositoryCheck.Options(mode: mode ?? (item.check.official ? .official : .strict),
+                                              base: commit(item.check.base), head: commit(item.check.head),
+                                              environment: try environment(for: item, of: corpus, in: scratch))
+        // A folder that is not a repository stays one that is not, wherever
+        // the scratch folder happens to be.
+        options.gitEnvironment["GIT_CEILING_DIRECTORIES"] = scratch.path
+        do {
+            let report = try RepositoryCheck.repository(folder.path, at: item.check.ref, options: options)
+            return Outcome(exit: report.errors.isEmpty ? 0 : 1,
+                           findings: Set(report.findings.map { "\($0.level.rawValue) \($0.rule) \($0.path)" }),
+                           messages: report.findings.map(\.message))
+        } catch is CheckFailure {
+            return Outcome(exit: 2, findings: [])
+        }
+    }
+
+    /// The environment the check is started with. For a case with a personal
+    /// attributes file, every way git could find one points at it — the
+    /// check must hear none of them.
+    static func environment(for item: Corpus.Case, of corpus: Corpus, in scratch: URL) throws -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        guard let id = item.globalAttributes else { return environment }
+        let attributes = try corpus.bytes(id)
+        let home = scratch.appendingPathComponent("home", isDirectory: true)
+        let xdg = home.appendingPathComponent(".config/git", isDirectory: true)
+        try FileManager.default.createDirectory(at: xdg, withIntermediateDirectories: true)
+        let file = home.appendingPathComponent("attributes")
+        try attributes.write(to: file)
+        try attributes.write(to: xdg.appendingPathComponent("attributes"))
+        let config = home.appendingPathComponent(".gitconfig")
+        try Data("[core]\n\tattributesFile = \(file.path)\n".utf8).write(to: config)
+        environment["HOME"] = home.path
+        environment["XDG_CONFIG_HOME"] = home.appendingPathComponent(".config").path
+        environment["GIT_CONFIG_GLOBAL"] = config.path
+        return environment
+    }
+
+    /// Findings of rules the Python check never had — so the corpus cannot
+    /// hold them — that the Swift check reports in a case. None today: rule 18
+    /// needs history, which only rule 17's cases have, and none of them
+    /// changes a plugin; rule 19 says nothing of the `minUDeck` the corpus
+    /// declares — 0.6.0 and 99.0.0 are both past the smallest number the
+    /// release that first reads the field can have, and nothing a plugin uses
+    /// came after 0.1.0. Once that release
+    /// has its number, a case declaring it or less gets rule 19's warning,
+    /// and it is listed here.
+    static let newRules: [String: Set<String>] = [:]
+
+    /// What the Swift check must say of a case, as the corpus records it.
+    static func expected(_ item: Corpus.Case) -> Outcome {
+        let findings = item.findingsForSwift.union(newRules[item.name] ?? [])
+        let exit = item.divergence == nil ? item.expected.exit : findings.contains { $0.hasPrefix("error ") } ? 1 : 0
+        return Outcome(exit: exit, findings: findings)
     }
 }

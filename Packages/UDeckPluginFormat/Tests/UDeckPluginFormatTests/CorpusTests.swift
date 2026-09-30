@@ -8,10 +8,11 @@ import UDeckPluginFormatFixtures
 ///
 /// Two halves. That the corpus is sound — it reads, every content is what its
 /// id says, every repository in it can be built again exactly as the Python
-/// check saw it, every rule is both broken and kept somewhere in it — is tested
-/// now. That the Swift check says what the corpus says is marked as a known
-/// issue until the rules are ported (stage 2, wave B): `withKnownIssue` then
-/// fails loudly, which is the reminder to take the mark off.
+/// check saw it, every rule is both broken and kept somewhere in it. And that
+/// the Swift check says what the corpus says, case by case: level, rule and
+/// path, and the exit status — where the Python check was wrong, as the
+/// case's divergence says. No finding it makes, in any layer, names a type of
+/// Swift's.
 @Suite("The corpus of the Python check")
 struct CorpusTests {
     func corpus() throws -> Corpus { try #require(Corpus.loaded, "Corpus/corpus.json did not load: \(loadError())") }
@@ -83,8 +84,8 @@ struct CorpusTests {
             #expect(probes[acceptance]?.expected.findings.isEmpty == true, "\(acceptance) is missing or not clean")
         }
 
-        let diverging = corpus.cases.filter { $0.divergence != nil }.compactMap(\.probe).sorted()
-        #expect(diverging == ["P05", "P10"])
+        let diverging = corpus.cases.filter { $0.divergence != nil }.map { $0.probe ?? $0.name }.sorted()
+        #expect(diverging == ["P05", "P10", Self.secondRestart])
 
         // P05: Python normalises sub/../../sample/run.sh and passes it; uDeck
         // refuses a path that leaves the folder on the way.
@@ -93,13 +94,34 @@ struct CorpusTests {
         #expect(climbing.findingsForSwift == ["error 5 plugins/sample/manifest.json"])
 
         // P10: Python calls restart a field uDeck ignores; uDeck decodes it,
-        // and a partial one does not decode at all.
+        // and a partial one does not decode at all. Strictly, restart is a
+        // field the contract does not define as well.
         let restart = try #require(probes["P10"])
         #expect(restart.expected.findings.map(\.key) == ["error 12 plugins/sample/manifest.json"])
-        #expect(restart.findingsForSwift == ["error 3 plugins/sample/manifest.json"])
+        #expect(restart.findingsForSwift == ["error 3 plugins/sample/manifest.json", "error 12 plugins/sample/manifest.json"])
         #expect(throws: DecodingError.self) {
             _ = try JSONDecoder().decode(RestartPolicy.self, from: Data(#"{"mode": "never"}"#.utf8))
         }
+    }
+
+    /// The Python check's own test of `restart` builds P10's manifest again,
+    /// and carries P10's divergence: the same JSON, the same answer.
+    static let secondRestart = "Rule12OnlyWhatTheContractDefines.test_in_the_manifest [restart, which the contract does not describe]"
+
+    @Test("the Python check's own test of restart diverges as P10 does, with P10's manifest")
+    func secondRestartIsP10() throws {
+        let corpus = try corpus()
+        func manifest(_ item: Corpus.Case?) throws -> StrictJSON.Value? {
+            guard let blob = item?.repository?.commits.last?.set["plugins/sample/manifest.json"]?.blob else { return nil }
+            return StrictJSON.parse(Array(try corpus.bytes(blob))).value
+        }
+        let p10 = try #require(corpus.cases.first { $0.probe == "P10" })
+        let second = try #require(corpus.cases.first { $0.name == Self.secondRestart })
+        let p10Manifest = try #require(try manifest(p10))
+        #expect(try manifest(second) == p10Manifest, "not P10's manifest")
+        #expect(second.expected.findings.map(\.key) == p10.expected.findings.map(\.key))
+        #expect(second.findingsForSwift == p10.findingsForSwift)
+        #expect(second.divergence?.swift == p10.divergence?.swift)
     }
 
     /// The commit ids are the proof: git's id for a commit covers every byte of
@@ -123,13 +145,52 @@ struct CorpusTests {
         }
     }
 
-    @Test("the Swift check reports what the corpus says, in every case")
-    func replay() throws {
+    /// Level, rule and path, exactly — and for P05 and P10 what the corpus
+    /// says the Swift check must say instead. The exit status too.
+    @Test("the Swift check reports what the corpus says, in every case", arguments: Corpus.loaded?.cases ?? [])
+    func replay(_ item: Corpus.Case) throws {
         let corpus = try corpus()
-        withKnownIssue("the repository rules are ported to Swift in stage 2, wave B") {
-            for item in corpus.cases {
-                let found = try CorpusReplay.findings(of: item, in: nil)
-                #expect(found == item.findingsForSwift, "\(item.name)")
+        let temp = TemporaryDirectory()
+        let outcome = try CorpusReplay.run(item, of: corpus, in: temp.url)
+        #expect(outcome == CorpusReplay.expected(item))
+        Self.inWords(outcome, item)
+    }
+
+    /// The findings the corpus cannot hold would be of the new rules only, and
+    /// named: there are none today, and a replay that grew a list of
+    /// exceptions would prove nothing.
+    @Test("the Swift check adds nothing to the corpus")
+    func newRulesOnly() throws {
+        let corpus = try corpus()
+        let names = Set(corpus.cases.map(\.name))
+        for (name, findings) in CorpusReplay.newRules {
+            #expect(names.contains(name), "no case \(name)")
+            #expect(findings.allSatisfy { $0.split(separator: " ")[1] == Substring(CheckRule.minimumUDeck) })
+        }
+        #expect(CorpusReplay.newRules.isEmpty)
+    }
+
+    /// The strict check is the installable one and more: whatever uDeck would
+    /// refuse, strict refuses too, in every case of the corpus.
+    @Test("strict never passes what uDeck would refuse", arguments: Corpus.loaded?.cases ?? [])
+    func strictHoldsWhatInstallableHolds(_ item: Corpus.Case) throws {
+        let corpus = try corpus()
+        let installable = try CorpusReplay.run(item, of: corpus, in: TemporaryDirectory().url, mode: .installable)
+        let strict = try CorpusReplay.run(item, of: corpus, in: TemporaryDirectory().url, mode: .strict)
+        if installable.exit != 0 { #expect(strict.exit == installable.exit, "installable \(installable), strict \(strict)") }
+        Self.inWords(installable, item)
+        Self.inWords(strict, item)
+    }
+
+    /// What a finding says is for an author: the names of the fields and the
+    /// kinds of JSON values, never the Swift types a decoder was reading into.
+    static let swiftWords = ["Dictionary<", "Array<", "Optional", "Swift.", "CodingKeys", "DecodingError", "Index ",
+                             "Cannot initialize", "_JSONKey", "not representable", "a Double", "(root)"]
+
+    static func inWords(_ outcome: CorpusReplay.Outcome, _ item: Corpus.Case) {
+        for message in outcome.messages {
+            for word in swiftWords where message.contains(word) {
+                Issue.record("\(item.name): \"\(message)\" says \"\(word)\"")
             }
         }
     }
