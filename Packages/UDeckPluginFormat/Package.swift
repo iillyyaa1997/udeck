@@ -24,9 +24,13 @@ let package = Package(
         // the same way. Nothing ships them.
         .library(name: "UDeckPluginFormatFixtures", targets: ["UDeckPluginFormatFixtures"]),
 
-        // A placeholder until the checks exist: it proves that the library
-        // builds into a static Linux binary, and nothing is released from it.
+        // The command authors and repositories' CI run: `check` and
+        // `check-repo` for now. Not released yet (stage 2, wave D).
         .executable(name: "udeck-plugin", targets: ["udeck-plugin"]),
+
+        // What the command does, for the tests that run it — here and from
+        // uDeck's own `swift test`. Nothing else links it.
+        .library(name: "UDeckPluginCommand", targets: ["UDeckPluginCommand"]),
     ],
     dependencies: [
         // SHA-1 for git's hashes, SHA-256 later for the licence check. On Apple
@@ -40,7 +44,11 @@ let package = Package(
             dependencies: [.product(name: "Crypto", package: "swift-crypto")]
         ),
 
-        .executableTarget(name: "udeck-plugin", dependencies: ["UDeckPluginFormat"]),
+        // What `udeck-plugin` does, apart from being started: its arguments,
+        // what it prints and how it exits — a library, so tests can run it.
+        .target(name: "UDeckPluginCommand", dependencies: ["UDeckPluginFormat"]),
+
+        .executableTarget(name: "udeck-plugin", dependencies: ["UDeckPluginCommand"]),
 
         .target(
             name: "UDeckPluginFormatFixtures",
@@ -50,7 +58,7 @@ let package = Package(
 
         .testTarget(
             name: "UDeckPluginFormatTests",
-            dependencies: ["UDeckPluginFormat", "UDeckPluginFormatFixtures"],
+            dependencies: ["UDeckPluginFormat", "UDeckPluginFormatFixtures", "UDeckPluginCommand"],
             // Read from disk by path, like uDeck's own fixtures: a frozen plugin
             // folder whose git hashes are known, and the corpus of repositories
             // the Python check was run on.

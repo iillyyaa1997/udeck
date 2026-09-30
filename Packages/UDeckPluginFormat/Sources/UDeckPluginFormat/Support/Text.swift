@@ -44,4 +44,39 @@ enum Blank {
     static func isBlankOnOneLine(_ text: some StringProtocol) -> Bool {
         text.unicodeScalars.allSatisfy(isSpace)
     }
+
+    /// `text.trimmingCharacters(in: .whitespacesAndNewlines)`.
+    static func trimmed(_ text: String) -> String {
+        let scalars = text.unicodeScalars
+        guard let first = scalars.firstIndex(where: { !isSpaceOrNewline($0) }),
+              let last = scalars.lastIndex(where: { !isSpaceOrNewline($0) }) else { return "" }
+        return String(scalars[first ... last])
+    }
+}
+
+/// What Python calls white space — `str.isspace()`, and so what `str.strip()`
+/// takes away and what `\s` matches in a pattern. The official repository's
+/// rules were written in Python and read a licence line and a name with it, so
+/// the Swift check reads them with the same characters: Python's list differs
+/// from Foundation's (U+001C–U+001F are space to it, U+200B is not).
+enum PythonSpace {
+    static func contains(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.value {
+        case 0x09 ... 0x0D, 0x1C ... 0x20, 0x85, 0xA0, 0x1680, 0x2000 ... 0x200A, 0x2028, 0x2029, 0x202F, 0x205F,
+             0x3000: true
+        default: false
+        }
+    }
+
+    /// `text.rstrip()`.
+    static func trimmingEnd(_ text: Substring.UnicodeScalarView) -> Substring.UnicodeScalarView {
+        var text = text
+        while let last = text.last, contains(last) { text.removeLast() }
+        return text
+    }
+
+    /// Whether `text.strip()` is empty.
+    static func isBlank(_ text: String) -> Bool {
+        text.unicodeScalars.allSatisfy(contains)
+    }
 }

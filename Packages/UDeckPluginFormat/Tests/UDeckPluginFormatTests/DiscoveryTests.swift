@@ -125,6 +125,43 @@ struct DiscoveryTests {
 
 @Suite("Discovery messages")
 struct DiscoveryMessageTests {
+    static let good = #"{"id":"x","name":"X","version":"1.0.0","api":1,"kind":"poll","run":["./r.sh"],"interval":5,"timeout":2"#
+
+    /// A manifest the decoder refuses is said in the words of the JSON — the
+    /// field as the file spells it, and the kind of value — never in the
+    /// names of the Swift types it was being read into.
+    @Test("a decoding error names the field and the kind of value, in words", arguments: [
+        (#"{"id":"x","name":"X","version":1,"api":1,"kind":"poll","run":["./r.sh"],"interval":5,"timeout":2}"#,
+         #""version" must be a string, not a number"#),
+        (#"{"id":"x","name":"X","version":"1.0.0","api":1,"kind":"poll","interval":5,"timeout":2}"#,
+         #""run" is required"#),
+        (good + #","permissions":[]}"#, #""permissions" must be an object, not a list"#),
+        (#"{"id":"x","name":"X","version":"1.0.0","api":1,"kind":"poll","run":"./r.sh","interval":"5","timeout":2}"#,
+         #""run" must be a list, not a string"#),
+        (#"{"id":"x","name":"X","version":"1.0.0","api":1,"kind":"poll","run":["./r.sh"],"interval":"5","timeout":2}"#,
+         #""interval" must be a number, not a string"#),
+        (good + #","settings":[{"key":"k","type":"frob","label":"K","default":1}]}"#,
+         #""settings[0].type" is "frob", which is not one of the values it can have"#),
+        (good + #","settings":[{"key":"k","type":"int","label":"K"}]}"#, #""settings[0].default" is required"#),
+        (#"{"id":"x","name":null,"version":"1.0.0","api":1,"kind":"poll","run":["./r.sh"],"interval":5,"timeout":2}"#,
+         #""name" must be a string, not null"#),
+        (#"{"id":"x","name":"X","version":"1.0.0","api":1,"kind":"poll","run":["./r.sh"],"interval":1e400,"timeout":2}"#,
+         "the number 1e400 cannot be read where it is: it is too large, or not a whole number where one belongs"),
+        (#"{"id":"x","name":"X","version":"1.0.0","api":1.5,"kind":"poll","run":["./r.sh"],"interval":5,"timeout":2}"#,
+         "the number 1.5 cannot be read where it is: it is too large, or not a whole number where one belongs"),
+        (#"{"id":"x","name":"X","version":"1.0.0","api":true,"kind":"poll","run":["./r.sh"],"interval":5,"timeout":2}"#,
+         #""api" must be a whole number, not true or false"#),
+        ("not json", "is not valid JSON"),
+    ])
+    func decodingErrorsInWords(_ manifest: String, _ said: String) {
+        do {
+            _ = try JSONDecoder().decode(PluginManifest.self, from: Data(manifest.utf8))
+            Issue.record("\(manifest) decoded")
+        } catch {
+            #expect(PluginDiscovery.describe(error) == said)
+        }
+    }
+
     /// Every one of these ends up in front of a plugin author who is trying to
     /// work out why their plugin did not load, so each has to read as one
     /// complete sentence rather than as two templates stapled together.

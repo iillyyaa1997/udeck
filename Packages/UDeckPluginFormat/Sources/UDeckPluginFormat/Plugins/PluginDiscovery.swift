@@ -384,24 +384,101 @@ public struct PluginDiscovery: Sendable {
     }
 
     /// A decoding error in terms a plugin author can act on: which field, and
-    /// what was wrong with it.
+    /// what was wrong with it — in the words of the JSON, never the names of
+    /// the Swift types it was being read into.
     public static func describe(_ error: any Error) -> String {
         guard let decoding = error as? DecodingError else { return "\(error)" }
-        func path(_ context: DecodingError.Context) -> String {
-            let joined = context.codingPath.map(\.stringValue).joined(separator: ".")
-            return joined.isEmpty ? "(root)" : joined
-        }
         switch decoding {
         case .keyNotFound(let key, let context):
-            return "missing required field \"\(key.stringValue)\" at \(path(context))"
+            return "\"\(field(context.codingPath + [key]))\" is required"
         case .typeMismatch(let type, let context):
-            return "field \(path(context)) should be \(type)"
+            let found = found(in: context.debugDescription).map { ", not \($0)" } ?? ""
+            return "\"\(field(context.codingPath))\" must be \(kind(of: type))\(found)"
         case .valueNotFound(let type, let context):
-            return "field \(path(context)) is null but must be \(type)"
+            return "\"\(field(context.codingPath))\" must be \(kind(of: type)), not null"
         case .dataCorrupted(let context):
-            return "\(path(context)): \(context.debugDescription)"
+            return corrupted(context)
         @unknown default:
             return "\(error)"
         }
+    }
+
+    /// A field as a manifest spells it: `settings[0].type`, `window.minWidth`.
+    static func field(_ path: [any CodingKey]) -> String {
+        var text = ""
+        for key in path {
+            // An element of a list is a key named "Index 3" whose number is 3.
+            if let index = key.intValue, key.stringValue == "Index \(index)" {
+                text += "[\(index)]"
+            } else {
+                text += (text.isEmpty ? "" : ".") + key.stringValue
+            }
+        }
+        return text
+    }
+
+    /// What a value of `type` is, in the words of a message.
+    static func kind(of type: Any.Type) -> String {
+        switch type {
+        case is String.Type: return "a string"
+        case is Bool.Type: return "true or false"
+        case is Int.Type, is Int8.Type, is Int16.Type, is Int32.Type, is Int64.Type,
+             is UInt.Type, is UInt8.Type, is UInt16.Type, is UInt32.Type, is UInt64.Type:
+            return "a whole number"
+        case is Double.Type, is Float.Type: return "a number"
+        default:
+            let name = "\(type)"
+            if name.hasPrefix("Array<") || name.hasPrefix("[") && !name.contains(":") { return "a list" }
+            if name.hasPrefix("Dictionary<") || name.hasPrefix("[") { return "an object" }
+            return "something else"
+        }
+    }
+
+    /// What the decoder found instead, from its own sentence ("Expected to
+    /// decode … but found an array instead."), in the words of a message — or
+    /// nil when its sentence is not that one.
+    static func found(in description: String) -> String? {
+        guard let start = description.firstRange(of: "but found "),
+              let end = description[start.upperBound...].firstRange(of: " instead") else {
+            return nil
+        }
+        var found = description[start.upperBound ..< end.lowerBound]
+        for article in ["a ", "an "] where found.hasPrefix(article) { found = found.dropFirst(article.count) }
+        switch found {
+        case "array": return "a list"
+        case "dictionary": return "an object"
+        case "string": return "a string"
+        case "number": return "a number"
+        case "bool", "boolean": return "true or false"
+        case "null", "null value": return "null"
+        default: return nil
+        }
+    }
+
+    /// A value the decoder could not take. Its own sentence where uDeck's
+    /// decoders wrote one; the decoder's where they did not, with the names
+    /// of Swift types taken out.
+    static func corrupted(_ context: DecodingError.Context) -> String {
+        let place = context.codingPath.isEmpty ? nil : "\"\(field(context.codingPath))\""
+        let said = context.debugDescription
+        if said.hasPrefix("The given data was not valid JSON") {
+            // A number the decoder cannot hold where it stands — 1.5 where a
+            // whole number belongs, 1e400 in a field it reads — is reported
+            // as JSON that is not valid, with no field; the sentence under it
+            // names the number.
+            let underlying = context.underlyingError.map { "\($0)" } ?? ""
+            if let start = underlying.firstRange(of: "Number "),
+               let end = underlying[start.upperBound...].firstRange(of: " is not representable") {
+                return "the number \(underlying[start.upperBound ..< end.lowerBound]) cannot be read where it is: it is "
+                    + "too large, or not a whole number where one belongs"
+            }
+            return place.map { "\($0) is not valid JSON" } ?? "is not valid JSON"
+        }
+        // "Cannot initialize PluginKind from invalid String value frob"
+        if said.hasPrefix("Cannot initialize "), let value = said.firstRange(of: " value ") {
+            let text = said[value.upperBound...]
+            return "\(place ?? "the value") is \"\(text)\", which is not one of the values it can have"
+        }
+        return place.map { "\($0): \(said)" } ?? said
     }
 }

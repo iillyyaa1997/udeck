@@ -94,6 +94,7 @@ let package = Package(
             dependencies: [
                 .product(name: "UDeckPluginFormat", package: "UDeckPluginFormat"),
                 .product(name: "UDeckPluginFormatFixtures", package: "UDeckPluginFormat"),
+                .product(name: "UDeckPluginCommand", package: "UDeckPluginFormat"),
             ],
             path: "Packages/UDeckPluginFormat/Tests/UDeckPluginFormatTests",
             exclude: ["Fixtures", "Corpus"]
