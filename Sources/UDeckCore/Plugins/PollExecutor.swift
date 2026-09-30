@@ -181,7 +181,7 @@ extension PollExecution {
             self = .card(card.withinDrawingLimits())
         } catch {
             self = .failure(PluginFailure(
-                reason: .unparsableOutput(PluginDiscovery.describe(error)),
+                reason: .unparsableOutput(PluginDiscovery.describe(error, in: Data(trimmed.utf8))),
                 diagnostics: diagnostics,
                 occurredAt: now
             ))

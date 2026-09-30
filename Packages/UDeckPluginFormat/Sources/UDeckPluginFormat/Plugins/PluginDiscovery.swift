@@ -225,7 +225,7 @@ public struct PluginDiscovery: Sendable {
         } catch {
             return DiscoveredPlugin(directory: directory, folderName: folderName,
                                     manifest: nil, executable: nil,
-                                    problems: [.malformedManifest(Self.describe(error))])
+                                    problems: [.malformedManifest(Self.describe(error, in: data))])
         }
 
         let (translations, translationProblems) = loadTranslations(in: directory)
@@ -280,13 +280,13 @@ public struct PluginDiscovery: Sendable {
         for url in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             let file = url.lastPathComponent
             guard let code = Self.languageCode(ofTranslationFile: file) else { continue }
+            var text: Data?
             do {
-                let decoded = try JSONDecoder().decode(
-                    ManifestTranslation.self, from: try Data(contentsOf: url)
-                )
+                text = try Data(contentsOf: url)
+                let decoded = try JSONDecoder().decode(ManifestTranslation.self, from: text ?? Data())
                 translations[code] = decoded
             } catch {
-                problems.append(.malformedTranslation(file: file, detail: Self.describe(error)))
+                problems.append(.malformedTranslation(file: file, detail: Self.describe(error, in: text)))
             }
         }
         return (translations, problems)
@@ -386,7 +386,12 @@ public struct PluginDiscovery: Sendable {
     /// A decoding error in terms a plugin author can act on: which field, and
     /// what was wrong with it — in the words of the JSON, never the names of
     /// the Swift types it was being read into.
-    public static func describe(_ error: any Error) -> String {
+    ///
+    /// `data`, when the caller still has it, is what the decoder read: a
+    /// decoder that does not say which number it could not hold — outside
+    /// Apple's own Foundation it attaches no reason at all — is answered from
+    /// the text itself.
+    public static func describe(_ error: any Error, in data: Data? = nil) -> String {
         guard let decoding = error as? DecodingError else { return "\(error)" }
         switch decoding {
         case .keyNotFound(let key, let context):
@@ -397,7 +402,7 @@ public struct PluginDiscovery: Sendable {
         case .valueNotFound(let type, let context):
             return "\"\(field(context.codingPath))\" must be \(kind(of: type)), not null"
         case .dataCorrupted(let context):
-            return corrupted(context)
+            return corrupted(context, in: data)
         @unknown default:
             return "\(error)"
         }
@@ -458,7 +463,7 @@ public struct PluginDiscovery: Sendable {
     /// A value the decoder could not take. Its own sentence where uDeck's
     /// decoders wrote one; the decoder's where they did not, with the names
     /// of Swift types taken out.
-    static func corrupted(_ context: DecodingError.Context) -> String {
+    static func corrupted(_ context: DecodingError.Context, in data: Data? = nil) -> String {
         let place = context.codingPath.isEmpty ? nil : "\"\(field(context.codingPath))\""
         let said = context.debugDescription
         if said.hasPrefix("The given data was not valid JSON") {
@@ -469,8 +474,10 @@ public struct PluginDiscovery: Sendable {
             let underlying = context.underlyingError.map { "\($0)" } ?? ""
             if let start = underlying.firstRange(of: "Number "),
                let end = underlying[start.upperBound...].firstRange(of: " is not representable") {
-                return "the number \(underlying[start.upperBound ..< end.lowerBound]) cannot be read where it is: it is "
-                    + "too large, or not a whole number where one belongs"
+                return unreadable(String(underlying[start.upperBound ..< end.lowerBound]))
+            }
+            if let data, let number = unreadableNumber(in: data) {
+                return unreadable(number)
             }
             return place.map { "\($0) is not valid JSON" } ?? "is not valid JSON"
         }
@@ -480,5 +487,43 @@ public struct PluginDiscovery: Sendable {
             return "\(place ?? "the value") is \"\(text)\", which is not one of the values it can have"
         }
         return place.map { "\($0): \(said)" } ?? said
+    }
+
+    /// The sentence for a number a decoder could not hold where it stands;
+    /// `nil` names none.
+    static func unreadable(_ number: String?) -> String {
+        let which = number.map { "the number \($0)" } ?? "a number in it"
+        return "\(which) cannot be read where it is: it is too large, or not a whole number where one belongs"
+    }
+
+    /// Which number in `data` a decoder would have choked on, when the text is
+    /// JSON and only its numbers are in question. One too large for a `Double`
+    /// is named; so is the only number that is not whole. With several of
+    /// those, any one of them may be the field that wanted a whole number, so
+    /// none is named — a wrong name is worse than none. `nil` when the text is
+    /// not JSON for another reason.
+    static func unreadableNumber(in data: Data) -> String?? {
+        let document = StrictJSON.parse(Array(data))
+        guard let value = document.value else {
+            for problem in document.problems {
+                if let tail = problem.range(of: " is too large a number to read") {
+                    let head = problem[..<tail.lowerBound]
+                    return .some(head.split(separator: " ").last.map(String.init))
+                }
+            }
+            return nil
+        }
+        var notWhole: [String] = []
+        var pending = [value]
+        while let next = pending.popLast() {
+            switch next {
+            case .number(let number) where number.wholeValue == nil: notWhole.append(number.literal)
+            case .array(let items): pending.append(contentsOf: items)
+            case .object(let object): pending.append(contentsOf: object.members.map(\.value))
+            default: break
+            }
+        }
+        if notWhole.isEmpty { return nil }
+        return .some(notWhole.count == 1 ? notWhole[0] : nil)
     }
 }

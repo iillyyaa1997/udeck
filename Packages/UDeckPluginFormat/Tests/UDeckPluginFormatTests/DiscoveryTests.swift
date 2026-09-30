@@ -158,8 +158,26 @@ struct DiscoveryMessageTests {
             _ = try JSONDecoder().decode(PluginManifest.self, from: Data(manifest.utf8))
             Issue.record("\(manifest) decoded")
         } catch {
-            #expect(PluginDiscovery.describe(error) == said)
+            #expect(PluginDiscovery.describe(error, in: Data(manifest.utf8)) == said)
         }
+    }
+
+    /// Outside Apple's own Foundation, JSONDecoder reports a number it cannot
+    /// hold as JSON that is not valid and attaches no reason, so the number is
+    /// found in the text. The same error, built as Linux builds it, is read
+    /// here on every platform.
+    @Test("a number the decoder could not hold is named from the text when the error does not name it", arguments: [
+        (#"{"id":"x","api":1.5,"interval":5}"#, "the number 1.5 cannot be read where it is: it is too large, or not a whole number where one belongs"),
+        (#"{"id":"x","api":1,"interval":1e400}"#, "the number 1e400 cannot be read where it is: it is too large, or not a whole number where one belongs"),
+        (#"{"id":"x","api":1.5,"interval":2.5}"#, "a number in it cannot be read where it is: it is too large, or not a whole number where one belongs"),
+        (#"{"id":"x","api":1,"interval":5}"#, "is not valid JSON"),
+        ("not json", "is not valid JSON"),
+    ])
+    func numberNamedFromTheText(_ text: String, _ said: String) {
+        let error = DecodingError.dataCorrupted(DecodingError.Context(
+            codingPath: [], debugDescription: "The given data was not valid JSON.", underlyingError: nil))
+        #expect(PluginDiscovery.describe(error, in: Data(text.utf8)) == said)
+        #expect(PluginDiscovery.describe(error) == "is not valid JSON", "without the text, nothing is guessed")
     }
 
     /// Every one of these ends up in front of a plugin author who is trying to

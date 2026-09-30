@@ -206,7 +206,7 @@ enum PluginRules {
         do {
             manifest = try JSONDecoder().decode(PluginManifest.self, from: Data(content))
         } catch {
-            report.error("3", path, "is not a manifest uDeck can read: \(PluginDiscovery.describe(error))")
+            report.error("3", path, "is not a manifest uDeck can read: \(PluginDiscovery.describe(error, in: Data(content)))")
             return Manifest()
         }
         let command = manifest.run.first ?? ""
@@ -287,7 +287,7 @@ enum PluginRules {
                     report.error("3", path, ManifestProblem.emptyRunCommand.description)
                 }
             } catch {
-                report.error("3", path, "is not a manifest uDeck can read: \(PluginDiscovery.describe(error))")
+                report.error("3", path, "is not a manifest uDeck can read: \(PluginDiscovery.describe(error, in: Data(content)))")
             }
         }
         guard let object = value.object else { return result }
