@@ -165,26 +165,6 @@ struct RepositoryCheckTests {
         }
     }
 
-    /// The strict check asks a translation for every setting it translates;
-    /// with fields found at once, four times the settings take about four
-    /// times as long.
-    @Test("a translation is checked in time proportional to its settings")
-    func translationIsLinear() throws {
-        func translation(_ count: Int) throws -> StrictJSON.Value {
-            let text = "{\"settings\":{" + (0 ..< count).map { "\"k\($0)\":{\"label\":\"L\"}" }.joined(separator: ",") + "}}"
-            return try #require(StrictJSON.parse(Array(text.utf8)).value)
-        }
-        let small = try translation(16_000)
-        let large = try translation(64_000)
-        var smallTime = Double.infinity
-        var largeTime = Double.infinity
-        for _ in 0 ..< 3 {
-            smallTime = min(smallTime, StrictJSONTests.fastest(1) { #expect(ManifestShape.translationProblems(of: small, manifest: nil).isEmpty) })
-            largeTime = min(largeTime, StrictJSONTests.fastest(1) { #expect(ManifestShape.translationProblems(of: large, manifest: nil).isEmpty) })
-        }
-        #expect(largeTime / smallTime < 6, "\(smallTime) s, then \(largeTime) s for four times as many settings")
-    }
-
     /// A command of nothing but a line break is no command — uDeck would look
     /// for a program by that name and not find one.
     @Test("run[0] of only line breaks is rule 3, strictly")

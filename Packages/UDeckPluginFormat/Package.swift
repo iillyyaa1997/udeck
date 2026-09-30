@@ -64,5 +64,13 @@ let package = Package(
             // the Python check was run on.
             exclude: ["Fixtures", "Corpus"]
         ),
+
+        // How long reading takes. Apart from the tests above so that uDeck's
+        // top-level `swift test`, which builds those but not these, never runs
+        // them beside its test of the host's CPU time.
+        .testTarget(
+            name: "UDeckPluginFormatTimingTests",
+            dependencies: ["UDeckPluginFormat"]
+        ),
     ]
 )

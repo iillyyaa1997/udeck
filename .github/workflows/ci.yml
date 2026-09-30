@@ -35,6 +35,13 @@ jobs:
       - name: Test
         run: swift test
 
+      # The plugin format's timing tests keep every core busy for seconds, so
+      # they run here, on their own, and never beside uDeck's test of the host's
+      # CPU time above.
+      - name: Test how long the plugin format takes to read
+        working-directory: Packages/UDeckPluginFormat
+        run: swift test --filter UDeckPluginFormatTimingTests
+
       # The lab in e2e/ drives real machines, and hosted runners have no nested
       # virtualisation — but its own tests need neither Tart nor a machine, and
       # they are the ones worth running everywhere: what they cover is the
