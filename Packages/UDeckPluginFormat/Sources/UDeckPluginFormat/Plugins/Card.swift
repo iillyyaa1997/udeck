@@ -50,7 +50,7 @@ public struct MeterRow: Codable, Equatable, Sendable {
         self.state = state
     }
 
-    private enum CodingKeys: String, CodingKey { case value, label, caption, state }
+    enum CodingKeys: String, CodingKey, CaseIterable { case value, label, caption, state }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -68,6 +68,8 @@ public struct ListItem: Codable, Equatable, Sendable {
     public var note: String?
     public var icon: CardIcon?
     public var state: CardState?
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case text, note, icon, state }
 
     public init(text: String, note: String? = nil, icon: CardIcon? = nil, state: CardState? = nil) {
         self.text = text
@@ -92,7 +94,7 @@ public struct SparkRow: Equatable, Sendable {
 }
 
 public struct CardTableColumn: Codable, Equatable, Sendable {
-    public enum Alignment: String, Codable, Sendable { case leading, trailing }
+    public enum Alignment: String, Codable, Sendable, CaseIterable { case leading, trailing }
 
     public var title: String
     public var align: Alignment
@@ -102,7 +104,7 @@ public struct CardTableColumn: Codable, Equatable, Sendable {
         self.align = align
     }
 
-    private enum CodingKeys: String, CodingKey { case title, align }
+    enum CodingKeys: String, CodingKey, CaseIterable { case title, align }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -116,6 +118,8 @@ public struct CardTableColumn: Codable, Equatable, Sendable {
 public struct CardTable: Codable, Equatable, Sendable {
     public var columns: [CardTableColumn]
     public var rows: [[String]]
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case columns, rows }
 
     public init(columns: [CardTableColumn], rows: [[String]]) {
         self.columns = columns
@@ -137,6 +141,8 @@ public struct CanvasRow: Codable, Equatable, Sendable {
     public var kind: String
     public var payload: String?
     public var height: Double?
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case kind, payload, height }
 
     public init(kind: String, payload: String? = nil, height: Double? = nil) {
         self.kind = kind
@@ -219,5 +225,5 @@ public struct CardAction: Codable, Equatable, Sendable, Identifiable {
         self.confirm = confirm
     }
 
-    private enum CodingKeys: String, CodingKey { case label, run, confirm }
+    enum CodingKeys: String, CodingKey, CaseIterable { case label, run, confirm }
 }

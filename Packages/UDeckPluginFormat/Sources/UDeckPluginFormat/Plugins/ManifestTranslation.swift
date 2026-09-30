@@ -52,7 +52,7 @@ public struct ManifestTranslation: Codable, Equatable, Sendable {
         )
     }
 
-    enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case name
         case description
         case settings
@@ -83,7 +83,7 @@ public struct SettingTranslation: Codable, Equatable, Sendable {
         )
     }
 
-    enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case label
         case help
         case options

@@ -132,7 +132,7 @@ public struct PermissionRequest: Codable, Equatable, Sendable {
         self.secrets = secrets
     }
 
-    private enum CodingKeys: String, CodingKey { case read, write, exec, network, screen, secrets }
+    enum CodingKeys: String, CodingKey, CaseIterable { case read, write, exec, network, screen, secrets }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

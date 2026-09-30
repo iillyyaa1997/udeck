@@ -58,6 +58,14 @@ public struct SemanticVersion: Comparable, Hashable, Sendable, CustomStringConve
 
     public var description: String { "\(major).\(minor).\(patch)" }
 
+    /// The smallest version after this one: `1.2.4` after `1.2.3`, and
+    /// `1.3.0` after `1.2.999999999`.
+    var next: SemanticVersion {
+        if patch < Self.largestPart { return SemanticVersion(major: major, minor: minor, patch: patch + 1) }
+        if minor < Self.largestPart { return SemanticVersion(major: major, minor: minor + 1, patch: 0) }
+        return SemanticVersion(major: min(major + 1, Self.largestPart), minor: 0, patch: 0)
+    }
+
     public static func < (lhs: SemanticVersion, rhs: SemanticVersion) -> Bool {
         (lhs.major, lhs.minor, lhs.patch) < (rhs.major, rhs.minor, rhs.patch)
     }

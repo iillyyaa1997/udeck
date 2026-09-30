@@ -480,6 +480,50 @@ struct PollExecutionTests {
         #expect(environment["UDECK_TEST_MARKER"] == nil)
         #expect(environment["UDECK_SETTING_GREETING"] == "\"Hello\"")
     }
+
+    /// A producer can read each of these, so each is part of the plugin
+    /// contract, and the release registry `minUDeck` is worked out from has to
+    /// date it. Listed from the environment uDeck builds, not from a list of
+    /// its own, so a variable added here without a date turns this red.
+    @Test("every variable a producer is handed has the release it came in")
+    func environmentIsDated() {
+        let temp = TemporaryDirectory()
+        let plugin = example("hello-card")
+        let environment = executor.environment(
+            for: plugin.manifest!, plugin: plugin, settings: PluginSettings(),
+            cacheDirectory: temp.url, searchPath: ["/usr/bin"], appearance: .dark, reason: .manual, language: "en"
+        )
+        let handed = Set(environment.keys.filter { $0.hasPrefix("UDECK_") }
+            .map { $0.hasPrefix("UDECK_SETTING_") ? "UDECK_SETTING_*" : $0 })
+        #expect(handed.count == 8, "\(handed.sorted())")
+        for name in handed {
+            #expect(ContractFeatures.release(of: .environment(name)) != nil, "\(name) is not in ContractFeatures.registry")
+        }
+        let dated = Set(ContractFeatures.registry.keys.compactMap { feature -> String? in
+            if case .environment(let name) = feature { name } else { nil }
+        })
+        #expect(dated == handed, "the registry dates a variable uDeck does not hand over")
+    }
+
+    /// A card's action is handed fewer of them, and each is part of the
+    /// contract all the same: listed from the environment an action gets, and
+    /// dated in the registry as an action's.
+    @Test("every variable a card's action is handed has the release it came in")
+    func actionEnvironmentIsDated() throws {
+        let temp = TemporaryDirectory()
+        let id = try #require(PluginIdentifier(rawValue: "hello-card"))
+        let environment = ActionProcesses.environment(for: id, directory: temp.url, searchPath: ["/usr/bin"])
+        let handed = Set(environment.keys.filter { $0.hasPrefix("UDECK_") })
+        #expect(handed == ["UDECK_API", "UDECK_PLUGIN_ID", "UDECK_PLUGIN_DIR"], "\(handed.sorted())")
+        let dated = Set(ContractFeatures.registry.keys.compactMap { feature -> String? in
+            if case .actionEnvironment(let name) = feature { name } else { nil }
+        })
+        #expect(dated == handed, "an action's variables and the registry's differ")
+        // What an action is handed, a producer is handed too, under the same name.
+        for name in handed {
+            #expect(ContractFeatures.release(of: .environment(name)) == ContractFeatures.release(of: .actionEnvironment(name)))
+        }
+    }
 }
 
 @Suite("Settings and layout files")

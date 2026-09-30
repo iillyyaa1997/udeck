@@ -589,25 +589,10 @@ public final class DeckModel {
         return nil
     }
 
-    /// The environment a card's action runs in.
-    ///
-    /// Deliberately the same shape as a producer's: a known search path, a
-    /// UTF-8 locale, and nothing else carried over from however uDeck happened
-    /// to be started.
+    /// The environment a card's action runs in (`ActionProcesses.environment`).
     private func actionEnvironment(for id: PluginIdentifier) -> [String: String] {
-        var environment: [String: String] = [
-            "PATH": settings.pluginExecutableSearchPath.joined(separator: ":"),
-            "HOME": NSHomeDirectory(),
-            "LANG": "en_US.UTF-8",
-            "LC_ALL": "en_US.UTF-8",
-            "UDECK_API": String(PluginAPI.current),
-            "UDECK_PLUGIN_ID": id.rawValue,
-        ]
-        if let directory = plugin(withID: id)?.directory {
-            environment["UDECK_PLUGIN_DIR"] = directory.path
-        }
-        if let tmp = ProcessInfo.processInfo.environment["TMPDIR"] { environment["TMPDIR"] = tmp }
-        return environment
+        ActionProcesses.environment(for: id, directory: plugin(withID: id)?.directory,
+                                    searchPath: settings.pluginExecutableSearchPath)
     }
 
     /// Resolves an action's command the same way a manifest's `run` is

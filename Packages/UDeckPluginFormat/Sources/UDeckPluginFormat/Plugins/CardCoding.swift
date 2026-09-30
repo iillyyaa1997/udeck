@@ -45,7 +45,7 @@ extension KeyValueRow: Codable {
 }
 
 extension SparkRow: Codable {
-    private enum CodingKeys: String, CodingKey { case values, caption }
+    enum CodingKeys: String, CodingKey, CaseIterable { case values, caption }
 
     /// Either a bare array of numbers, or an object with `values` and an
     /// optional `caption`. Both forms are part of the contract; the bare array
@@ -76,6 +76,14 @@ extension SparkRow: Codable {
     }
 }
 
+extension CardRow {
+    /// The row types a card may use: the one key each row object has. Every
+    /// one is dated in the release registry (`ContractFeatures`).
+    public enum Kind: String, Sendable, CaseIterable {
+        case text, kv, meter, list, spark, table, log, canvas
+    }
+}
+
 extension CardRow: Codable {
     /// Every row is an object with exactly one key naming its type.
     ///
@@ -94,16 +102,16 @@ extension CardRow: Codable {
             )
         }
 
-        switch key.stringValue {
-        case "text": self = .text(try container.decode(String.self, forKey: key))
-        case "kv": self = .keyValue(try container.decode(KeyValueRow.self, forKey: key))
-        case "meter": self = .meter(try container.decode(MeterRow.self, forKey: key))
-        case "list": self = .list(try container.decode([ListItem].self, forKey: key))
-        case "spark": self = .spark(try container.decode(SparkRow.self, forKey: key))
-        case "table": self = .table(try container.decode(CardTable.self, forKey: key))
-        case "log": self = .log(try container.decode([String].self, forKey: key))
-        case "canvas": self = .canvas(try container.decode(CanvasRow.self, forKey: key))
-        default: self = .unsupported(kind: key.stringValue)
+        switch Kind(rawValue: key.stringValue) {
+        case .text?: self = .text(try container.decode(String.self, forKey: key))
+        case .kv?: self = .keyValue(try container.decode(KeyValueRow.self, forKey: key))
+        case .meter?: self = .meter(try container.decode(MeterRow.self, forKey: key))
+        case .list?: self = .list(try container.decode([ListItem].self, forKey: key))
+        case .spark?: self = .spark(try container.decode(SparkRow.self, forKey: key))
+        case .table?: self = .table(try container.decode(CardTable.self, forKey: key))
+        case .log?: self = .log(try container.decode([String].self, forKey: key))
+        case .canvas?: self = .canvas(try container.decode(CanvasRow.self, forKey: key))
+        case nil: self = .unsupported(kind: key.stringValue)
         }
     }
 
@@ -128,7 +136,7 @@ extension CardRow: Codable {
 }
 
 extension Card: Codable {
-    private enum CodingKeys: String, CodingKey { case state, title, chip, rows, actions, ttl }
+    enum CodingKeys: String, CodingKey, CaseIterable { case state, title, chip, rows, actions, ttl }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

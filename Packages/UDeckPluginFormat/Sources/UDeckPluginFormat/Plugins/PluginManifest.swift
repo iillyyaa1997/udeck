@@ -36,7 +36,7 @@ public enum PluginKind: String, Codable, Sendable, CaseIterable {
 
 /// What a `resident` plugin should do when it exits.
 public struct RestartPolicy: Codable, Equatable, Sendable {
-    public enum Mode: String, Codable, Sendable {
+    public enum Mode: String, Codable, Sendable, CaseIterable {
         case always
         case onFailure = "on-failure"
         case never
@@ -46,6 +46,12 @@ public struct RestartPolicy: Codable, Equatable, Sendable {
     public var initialBackoff: TimeInterval
     public var maximumBackoff: TimeInterval
     public var backoffFactor: Double
+
+    /// Spelt out, as the synthesized ones would be, so that the repository
+    /// check and the release registry can list them.
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case mode, initialBackoff, maximumBackoff, backoffFactor
+    }
 
     public init(
         mode: Mode = .onFailure,
@@ -75,7 +81,7 @@ public struct WindowHints: Codable, Equatable, Sendable {
         self.minimumHeight = minimumHeight
     }
 
-    private enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case defaultWidth, defaultHeight, minimumWidth = "minWidth", minimumHeight = "minHeight"
     }
 
@@ -146,7 +152,9 @@ public struct PluginManifest: Codable, Equatable, Sendable {
     /// See docs/plugin-repository.md.
     public var minUDeck: String?
 
-    private enum CodingKeys: String, CodingKey {
+    /// Every field the contract defines. The repository check calls anything
+    /// else a typo (rule 12), and the release registry dates each of these.
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case id, name, version, api, kind, description, author, homepage
         case run, interval, timeout, restart, permissions, settings, window, minUDeck
     }

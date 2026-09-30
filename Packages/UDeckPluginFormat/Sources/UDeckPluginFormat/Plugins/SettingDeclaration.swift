@@ -62,6 +62,8 @@ public struct SettingOption: Codable, Equatable, Sendable {
     public var value: String
     public var label: String
 
+    enum CodingKeys: String, CodingKey, CaseIterable { case value, label }
+
     public init(value: String, label: String) {
         self.value = value
         self.label = label
@@ -70,7 +72,7 @@ public struct SettingOption: Codable, Equatable, Sendable {
 
 /// A setting a plugin declares so the host can render it.
 public struct SettingDeclaration: Codable, Equatable, Sendable {
-    public enum Kind: String, Codable, Sendable {
+    public enum Kind: String, Codable, Sendable, CaseIterable {
         case bool
         case int
         case string
@@ -86,7 +88,7 @@ public struct SettingDeclaration: Codable, Equatable, Sendable {
     public var maximum: Int?
     public var options: [SettingOption]?
 
-    private enum CodingKeys: String, CodingKey {
+    enum CodingKeys: String, CodingKey, CaseIterable {
         case key, type, label, help
         case defaultValue = "default"
         case minimum = "min"
