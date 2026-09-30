@@ -120,6 +120,15 @@ What uDeck does with the file:
   from the future is how files end up installed from the wrong place.
 * **A field it does not know** — ignored. The repository check (below) reports
   it, because an unknown field in a hand-written file is usually a typo.
+* **Larger than 64 KiB** — refused as a whole, before a byte of it is read as
+  JSON: *"github.com/owner/repo has a udeck-plugins.json that uDeck cannot
+  read: it is 70000 bytes, and a passport may be at most 64 KiB (65536
+  bytes)."* A passport is three short fields — a name of at most 64 characters
+  and a description of at most 280 — and even with every character written as
+  a `\u` escape pair and indented generously it stays under 8 KiB; 64 KiB is
+  eight times that. uDeck reads the catalogue on its main thread, and how long
+  that takes must not be up to what a repository puts in the file. The
+  repository check refuses it too, in every layer.
 
 ### A plugin's folder
 
@@ -165,8 +174,10 @@ used to accept, and a repository's CI is under no such promise.
 | 9 | No Git LFS pointer files; no `export-ignore`, `export-subst` or `filter` attribute applies to anything under `plugins/`. | refuses LFS pointers (it cannot see attributes) | error |
 | 10 | `README.md` in the folder. | — | error |
 | 11 | At least one `manifest.<lang>.json`. | — | warning |
-| 12 | No field in `manifest.json` or in a translation that the contract does not define. | ignored | error |
+| 12 | No field in `manifest.json` or in a translation that the contract does not define — `restart` included. | ignored (`restart` is decoded) | error |
 | 13 | An executable file contains no carriage return (`\r`). | — | error |
+| 18 | Whenever anything in a plugin's folder changed, its `version` went up. | — | error, given a base to compare with |
+| 19 | `minUDeck` is not below the uDeck release that has everything the plugin uses. | — | error; a `minUDeck` that does nothing is a warning |
 
 Why each of the less obvious ones:
 
@@ -190,9 +201,98 @@ Why each of the less obvious ones:
   attributes change what an *archive* of the repository contains without
   changing the repository, so a GitLab archive (stage 4) would disagree with
   the tree it came from.
+* **`restart` (12).** uDeck's decoder reads it — for resident plugins, which
+  no uDeck runs yet — and the contract ([plugin-api.md](plugin-api.md)) does
+  not describe it. So uDeck installs a plugin with a whole `restart` and
+  refuses one whose `restart` does not decode (rule 3, in every layer), and the
+  strict check calls the field what it calls any field outside the contract.
+  The day the contract describes it, it leaves rule 12 and joins the release
+  registry with the release that does.
 * **Carriage returns (13).** A script saved with Windows line endings fails on
   a Mac with *bad interpreter: /bin/sh^M*, which nobody reading the card will
   guess.
+* **Versions go up (18).** A version names one content wherever it is
+  installed from: "1.2.0" on one machine is "1.2.0" on every other, and uDeck's
+  **Earlier versions** keeps one entry per version. Which plugins changed is
+  read against where the change branched off; the new version is held to the
+  target branch's tip, so that of two pull requests that both take a plugin to
+  1.1.0, the second to be checked against the tip that has the first goes on to
+  1.1.1. A new plugin needs no more than a version that parses. The version is
+  read as uDeck reads it, by uDeck's own decoder — a manifest the strict reader
+  refuses and uDeck installs (a byte order mark, `1e400` in a field nobody
+  reads) is held to the rule all the same; one uDeck cannot read at all is rule
+  3's error already.
+* **`minUDeck` (19).** Worked out from what the manifest and its translations
+  use, dated by the registry of which release first had each part of the
+  contract. Declared lower, it lets an older uDeck install a plugin it cannot
+  run; left out when it is needed, the same. Declared no higher than the
+  release that first reads the field, it does nothing — every uDeck that reads
+  it meets it — and the check says it can go. Declared higher than the plugin
+  needs, it is the author's call: something changed in how uDeck behaves that
+  no part of the contract names, and the check leaves it alone.
+
+### The check
+
+`udeck-plugin check-repo` checks a repository and `udeck-plugin check` one
+plugin folder, built from the library uDeck itself runs, `UDeckPluginFormat`.
+Three layers, each the one before and more:
+
+| Flags | Rules | Meaning |
+|---|---|---|
+| none | the passport, 1, 3–8, LFS pointers (9) | uDeck will install it — decided by the code uDeck runs when it lists a catalogue and installs |
+| `--strict` | also 2, the attributes of 9, 10–13, 19, fields the passport does not define, and JSON read strictly: no field twice, no byte order mark, a whole number written as one | the rule for any repository's CI |
+| `--official` | also 14–16, and 17 with `--base` and `--head` | the official repository |
+
+`--base <target branch's tip> --head <commit>` adds rule 18, in any layer, and
+rule 17 with `--official` — only there: the sign-offs are the official
+repository's rule, not something a base brings. Without them `check-repo`
+compares versions with the commit before `HEAD`, which on a branch that is
+only ever squash-merged into is the branch as it was.
+
+Rule 18 needs history, and a CI checkout has one commit unless told otherwise.
+Without `--base`, a `HEAD` whose parent the clone left out gets a warning —
+*"rule 18 not checked: HEAD has no parent here — fetch history (fetch-depth: 2
+or 0)"* — rather than passing unseen; a first commit, which has no parent
+anywhere, gets nothing. With `--base`, a base whose history does not meet the
+head's in the clone is an error — *"cannot compare with origin/main: no common
+history here — fetch full history (fetch-depth: 0)"* — rather than every
+plugin looking changed.
+
+A repository is read through git at one commit, never through its working
+tree. One plugin folder is read the same way when it is committed in a git
+working copy — and the check says when the working copy holds changes it did
+not see — and from disk when it is not, where there are no attributes. A link
+to a folder is followed, and the findings name the path as it was given: a
+folder linked into uDeck's plugins folder is such a link. Exit status: 0 when
+there are no errors (warnings do not fail the check), 1 when there are, 2 when
+nothing could be checked.
+
+**What git is told, and what it is not.** Git runs with nobody's global or
+system configuration and no `GIT_` variable inherited. A repository's own
+configuration is still read — and it names programs git runs in more places
+than one: a clean filter run on every file whose timestamps moved when the
+index is refreshed (as `git status` does), a file-system monitor, hooks, a
+pager, diff drivers, and in a partial clone a fetch of a missing object over
+whatever transport and `ssh` command it names. None of them runs: no command
+the check gives refreshes the index, diffs or checks anything out — whether a
+working copy has changes is found by hashing its files as they are and reading
+the index as it is — the monitor and the hooks are switched off, no transport
+of any kind is allowed and no missing object is fetched, the `ssh` command is
+emptied besides, no pager is started and no signature verified. A
+repository's configuration can make the check fail; it is not a way to make it
+run a program — the tests try a clean filter, a file-system monitor, and a
+partial clone's fetch over `ssh` and over a transport that is a command of its
+own.
+
+That is what makes it safe to open git's `safe.directory` — its refusal to read
+a repository another user owns — and it is opened for the one repository being
+checked, by the path git compares, never for `*`. In CI the checkout is often
+made by one user and read by another: a job in a container runs as root over a
+workspace the runner made, and git would refuse it. The two places the check
+runs are a repository's CI, reading the clone it just made of itself, and an
+author's machine, reading their own working copy; in neither is the repository
+a stranger's to the one who asked for the check, and in both, what git reads is
+data and nothing more.
 
 ### The official repository
 
@@ -237,12 +337,13 @@ the check's path from an environment an earlier step could write. What the
 workflow cannot guard is itself: GitHub runs a `pull_request` workflow as the
 pull request has it. That rests on the review below.
 
-> **Later — stage 2.** The script is replaced by `udeck-plugin check-repo .
-> --strict --official`, built from the same Swift library uDeck uses, and the
-> script is deleted rather than kept alongside: two implementations of one set
-> of rules drift, which is exactly what happened to the bash check in uDeck's
-> own CI. Stage 2 also adds the check that a plugin's `version` went up
-> whenever its folder changed, and the check of `minUDeck`.
+> **Later — stage 2.** The script is replaced by `udeck-plugin check-repo
+> --official` ([The check](#the-check)), built from the same Swift library uDeck
+> uses, and the script is deleted rather than kept alongside: two
+> implementations of one set of rules drift, which is exactly what happened to
+> the bash check in uDeck's own CI. With it the official repository gets rules
+> 18 and 19 — the version check and `minUDeck` — which the script does not
+> have.
 
 **Branch protection is what "Verified" rests on.** On `main`: a pull request
 is required, with no exception for administrators; `validate` must pass; force
@@ -323,9 +424,9 @@ Where the grammar is enforced:
   "draft" is not MAJOR.MINOR.PATCH — fine for a folder of your own, required to
   publish it in a repository"*), and the plugin runs as it did.
 
-> **Later — stage 2.** The repository check requires `version` to go up
-> whenever anything in the plugin's folder changed since the default branch,
-> so "changed, but still 1.2.0" cannot happen in a checked repository.
+The repository check requires `version` to go up whenever anything in the
+plugin's folder changed (rule 18), so "changed, but still 1.2.0" cannot happen
+in a checked repository.
 
 ### `api`
 
@@ -379,12 +480,20 @@ hand), the comparison is skipped and logged rather than refusing every plugin.
 
 In stage 1 an author writes `minUDeck` by hand, or leaves it out.
 
-> **Later — stage 2.** The validator works it out. It knows which uDeck release
-> introduced each manifest field, setting type and permission kind, reads the
-> manifest, and tells the author the lowest `minUDeck` that is true. What a
-> producer *prints* — which row types its cards use — cannot be seen without
-> running it; `udeck-plugin run` sees one card and warns about row types newer
-> than the declared `minUDeck`.
+The repository check works it out (rule 19). It knows which uDeck release
+introduced each manifest field, setting type and permission kind — every part
+of the contract is dated, the variables a producer and a card's action are
+handed included, and a test fails on one that is not — reads the manifest,
+and tells the author the lowest `minUDeck` that is true. Every part of the
+contract today came in uDeck 0.1.0, before any release that reads `minUDeck`,
+so no plugin needs one yet. A plugin that declares one no higher than the
+release that first reads it is told it does nothing; while that release has
+no number yet, that is any version up to the smallest it can have — 0.5.1
+after 0.5.0. A higher one is the author's to set, and is left alone.
+
+> **Later — stage 2.** What a producer *prints* — which row types its cards use
+> — cannot be seen without running it; `udeck-plugin run` sees one card and
+> warns about row types newer than the declared `minUDeck`.
 
 > **Later — stage 5.** An older uDeck installs the newest version of the plugin
 > whose `minUDeck` it meets, from the repository's history, instead of refusing.
@@ -1212,7 +1321,16 @@ parameter, so tests answer it with recorded responses (a stub `URLProtocol`),
 never the network. What they cover:
 
 * versions: the grammar, including what it refuses, and the ordering;
-* the passport: every field, a missing file, a higher `format`;
+* the passport: every field, a missing file, a higher `format`, one past 64
+  KiB, and the time its reader takes — four times the text, about four times as
+  long;
+* the repository check: the corpus of what the Python check said about 273
+  repositories, replayed in every layer, and the words of every finding; rule
+  18 against a base, against the commit before, in a clone of one commit and
+  without a common history; rule 19 against a registry every part of the
+  contract is dated in; and git reading a repository whose configuration names
+  a clean filter, a partial clone's fetch over `ssh`, or another owner, without
+  running anything;
 * git hashing, against vectors made with `git hash-object` and `git mktree` —
   including one frozen copy of `examples/hello-card` from `f5a0ca3`, whose tree
   is `44fccaa893276f9d6ee963108fb0a66f59534351`;

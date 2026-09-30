@@ -10,6 +10,51 @@ for what that promises.
 
 ## [Unreleased]
 
+- **The plugin format is a package of its own, and `udeck-plugin` checks
+  plugins with it, on a Mac and on Linux.** Stage 2 of
+  [docs/plugin-repository.md](docs/plugin-repository.md) begins. Manifests,
+  discovery, cards, capabilities, versions, the passport, the listing and
+  git's hashes moved from UDeckCore into `Packages/UDeckPluginFormat`, which
+  builds with FoundationEssentials and swift-crypto alone; uDeck links it by
+  path, so one commit is one version of both. CI builds and tests it on Linux
+  as well, x86_64 and aarch64, and links `udeck-plugin` into a static musl
+  binary that needs nothing installed.
+
+  `udeck-plugin check <folder>…` and `udeck-plugin check-repo` are every rule
+  of the official repository's Python check, in Swift, in three layers: with
+  no flag, what uDeck refuses to install, decided by the code uDeck itself
+  runs; `--strict`, everything a repository's CI should hold a plugin to; and
+  `--official`, the official repository's own rules 14–17, sign-offs only
+  there. A repository is read through git at one commit, never through its
+  working tree; one folder is read as committed in a working copy, from disk
+  elsewhere, and through a link to it. Exit status 0, 1 or 2, as the Python
+  check had. The two places the Python check was wrong are right: a `run[0]`
+  that climbs out of the folder and back is rule 5, and a `restart` uDeck
+  cannot decode is rule 3 — and `restart`, which the contract does not
+  describe, is rule 12 under `--strict`, as it was. Held to a frozen corpus of
+  what the Python check said about 273 repositories: all 273 agree, three of
+  them as their divergence says.
+
+  Two rules are new. **Rule 18**: whenever anything in a plugin's folder
+  changed, its `version` went up — against `--base`, the target branch's tip,
+  for a pull request, and against the commit before for a push; a clone
+  without that history gets a warning or an error that says to fetch it,
+  never a silent pass. **Rule 19**: `minUDeck` is not below the release that
+  has everything the plugin uses, worked out from a registry that dates every
+  part of the contract — a test fails on one that is not dated — and one that
+  does nothing is a warning.
+
+  Git is told nothing by anybody's configuration, and nothing a repository's
+  own configuration names can make it run a program: no clean filter (no
+  `git status`), no file-system monitor or hooks, no transport and no fetch of
+  a missing object, no `ssh` command; `safe.directory` is opened for the
+  repository being checked only. The passport is read by a JSON reader of the
+  format's own, which takes `format` from the number as written — so
+  `1.00000000000000000000001` is no format 1 — in time proportional to the
+  text; and it has a limit, 64 KiB, past which uDeck refuses it unread, since
+  its catalogue is read on the main thread. The words of every finding name
+  fields and kinds of JSON values, never a Swift type.
+
 - **uDeck installs plugins from the official repository, and says what it
   connects to.** Stage 1 of [docs/plugin-repository.md](docs/plugin-repository.md):
   Settings → Plugins lists the plugins of `github.com/iillyyaa1997/udeck-plugins`,
