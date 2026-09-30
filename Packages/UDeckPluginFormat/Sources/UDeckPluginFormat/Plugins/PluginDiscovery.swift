@@ -506,7 +506,7 @@ public struct PluginDiscovery: Sendable {
         let document = StrictJSON.parse(Array(data))
         guard let value = document.value else {
             for problem in document.problems {
-                if let tail = problem.range(of: " is too large a number to read") {
+                if let tail = problem.firstRange(of: " is too large a number to read") {
                     let head = problem[..<tail.lowerBound]
                     return .some(head.split(separator: " ").last.map(String.init))
                 }
