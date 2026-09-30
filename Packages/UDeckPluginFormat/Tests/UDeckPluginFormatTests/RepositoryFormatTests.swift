@@ -76,6 +76,26 @@ struct RepositoryFormatTests {
         }
     }
 
+    /// uDeck reads the catalogue on its main thread, so how long a passport
+    /// takes to read must not be up to the repository: past 64 KiB it is
+    /// refused unread, and the refusal says the limit.
+    @Test("a passport larger than 64 KiB is refused before it is read, saying so")
+    func passportTooLarge() {
+        func passport(_ bytes: Int) -> Data {
+            let start = #"{"format":1,"name":"x","padding":""#
+            let end = #""}"#
+            return Data((start + String(repeating: "a", count: bytes - start.utf8.count - end.utf8.count) + end).utf8)
+        }
+        #expect(RepositoryPassport.maximumBytes == 65_536)
+        #expect(RepositoryPassport.read(passport(65_536)) == .success(RepositoryPassport(format: 1, name: "x")))
+        let refusal = RepositoryPassport.Problem.invalid("it is 65537 bytes, and a passport may be at most 64 KiB (65536 bytes)")
+        #expect(RepositoryPassport.read(passport(65_537)) == .failure(refusal))
+        // Not even looked at: bytes that are no JSON at all are refused for
+        // their size, not their content.
+        #expect(RepositoryPassport.read(Data(repeating: 0x5B, count: 1 << 20))
+                == .failure(.invalid("it is 1048576 bytes, and a passport may be at most 64 KiB (65536 bytes)")))
+    }
+
     // MARK: - minUDeck and the version note
 
     let discoveryAt060 = PluginDiscovery(searchPath: ["/bin"], udeck: SemanticVersion("0.6.0"))

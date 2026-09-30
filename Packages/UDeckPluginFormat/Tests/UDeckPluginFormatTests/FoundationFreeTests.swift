@@ -112,7 +112,12 @@ struct FoundationFreeTests {
         for format in ["1", "1.0", "1e0", "10e-1", "1.5", "-0", "-0.0", "0", "2", "-1", "9007199254740993",
                        "9223372036854775807", "9223372036854775808", "1e300", "1e400", "1e-400", "1e-320",
                        "0.1", "1.0000000000000002", "1.00000000000000001", "true", "false", "null", "\"1\"",
-                       "[1]", "{}", "01", "+1", "NaN"] {
+                       "[1]", "{}", "01", "+1", "NaN",
+                       // What wave A's review measured moving under JSONDecoder,
+                       // and the neighbours of each.
+                       "1.00000000000000000000001", "0.99999999999999999999999", "2.00000000000000000001",
+                       "1e0000000000000000000000", "9.223372036854776e18", "9223372036854775807.0",
+                       "9223372036854775807e0", "92233720368547758070e-1", "-9223372036854775808", "1E0", "1.0e+0"] {
             texts.append(#"{"format": \#(format), "name": "x"}"#)
         }
         for name in ["\"\"", "\"   \"", "\"x\"", "\"\(String(repeating: "n", count: 64))\"",
@@ -127,9 +132,31 @@ struct FoundationFreeTests {
         texts += ["", " ", "not json", "[1]", "1", "\"x\"", "null", #"{"format":1,"name":"x",}"#,
                   #"{"format":1,"name":"x"} trailing"#, #"{"format":1,"name":"One","name":"Two"}"#,
                   #"{"format":2,"format":1,"name":"x"}"#, #"{"format":1,"name":"x","extra":{"deep":[1,{"a":null}]}}"#,
-                  #"{"format":1,"name":"x","n":1e300}"#, "\t{\"format\":1,\"name\":\"x\"}\r\n"]
+                  #"{"format":1,"name":"x","n":1e300}"#, "\t{\"format\":1,\"name\":\"x\"}\r\n",
+                  #"{"format":1,"name":"x","list":[1,2,]}"#, #"{"format":1,"name":"x",,}"#, #"{"format":1,,"name":"x"}"#,
+                  #"{"format":1,"name":"x","n":-1e400}"#]
+        for depth in [511, 512, 513] {
+            texts.append("{\"format\":1,\"name\":\"x\",\"deep\":" + String(repeating: "[", count: depth)
+                         + String(repeating: "]", count: depth) + "}")
+        }
         return texts
     }()
+
+    /// Where the passport reads differently from uDeck before it, on purpose,
+    /// and what it says now. `format` is read from the number as written, and
+    /// only a whole number is one: JSONSerialization read the first two below
+    /// through a `Double`, as 1 and as 0. The third and fourth `Double`
+    /// cannot hold at all — 2^63 rounded up, which JSONSerialization clamped to
+    /// `Int.max`, and a minus infinity it ignored in an unknown field. The last
+    /// is 1 with an exponent of twenty-two zeros, which JSONSerialization
+    /// refused as not JSON and is simply 1.
+    static let moved: [String: Result<RepositoryPassport, RepositoryPassport.Problem>] = [
+        #"{"format": 1.00000000000000001, "name": "x"}"#: .failure(.invalid("\"format\" must be a whole number")),
+        #"{"format": 1e-400, "name": "x"}"#: .failure(.invalid("\"format\" must be a whole number")),
+        #"{"format": 9.223372036854776e18, "name": "x"}"#: .failure(.invalid("\"format\" must be a whole number")),
+        #"{"format":1,"name":"x","n":-1e400}"#: .failure(.missing),
+        #"{"format": 1e0000000000000000000000, "name": "x"}"#: .success(RepositoryPassport(format: 1, name: "x")),
+    ]
 
     @Test("a passport reads as before, pinned")
     func passportPinned() {
@@ -147,12 +174,57 @@ struct FoundationFreeTests {
         // In UTF-16, with its byte order mark, as JSONSerialization read it too.
         let utf16 = Data([0xFF, 0xFE]) + Data(#"{"format":1,"name":"Юникод"}"#.utf16.flatMap { [UInt8($0 & 0xFF), UInt8($0 >> 8)] })
         #expect(RepositoryPassport.read(utf16) == .success(RepositoryPassport(format: 1, name: "Юникод")))
+        // UTF-32 without a byte order mark, told by its zeros; with one, refused,
+        // as JSONSerialization refused it.
+        let utf32 = Data(#"{"format":1,"name":"x"}"#.unicodeScalars.flatMap { scalar in
+            (0 ..< 4).map { UInt8(truncatingIfNeeded: scalar.value >> (8 * $0)) }
+        })
+        #expect(RepositoryPassport.read(utf32) == .success(RepositoryPassport(format: 1, name: "x")))
+        #expect(RepositoryPassport.read(Data([0xFF, 0xFE, 0, 0]) + utf32) == .failure(.missing))
+
+        // `format` is the number as written: a whole number, however it is
+        // spelt, and nothing a Double merely rounds to one.
+        let whole = RepositoryPassport(format: 1, name: "x")
+        for format in ["1", "1.0", "1e0", "10e-1", "1.0e+0", "0.1e1", "1e0000000000000000000000"] {
+            #expect(read(#"{"format": \#(format), "name": "x"}"#) == .success(whole), "\(format)")
+        }
+        let notWhole = RepositoryPassport.Problem.invalid("\"format\" must be a whole number")
+        for format in ["1.00000000000000000000001", "0.99999999999999999999999", "1.00000000000000001",
+                       "2.00000000000000000001", "1e-400", "9223372036854775808", "9.223372036854776e18", "1e300"] {
+            #expect(read(#"{"format": \#(format), "name": "x"}"#) == .failure(notWhole), "\(format)")
+        }
+        // Near 2^63, where a Double's rounding changed which refusal it is:
+        // the largest Int is a format from the future, one more is no whole
+        // number an Int holds.
+        for format in ["9223372036854775807", "9223372036854775807.0", "92233720368547758070e-1"] {
+            #expect(read(#"{"format": \#(format), "name": "x"}"#) == .failure(.futureFormat(declared: Int.max)), "\(format)")
+        }
+        #expect(read(#"{"format": -9223372036854775808, "name": "x"}"#)
+                == .failure(.invalid("\"format\" must be 1 or more, got \(Int.min)")))
+
+        // As deep as JSONSerialization read — 513 containers, the passport
+        // itself one of them — and no deeper.
+        func nested(_ depth: Int) -> String {
+            "{\"format\":1,\"name\":\"x\",\"deep\":" + String(repeating: "[", count: depth) + String(repeating: "]", count: depth) + "}"
+        }
+        #expect(read(nested(512)) == .success(whole))
+        #expect(read(nested(513)) == .failure(.missing))
+        #expect(read(nested(30_000)) == .failure(.missing), "deep is refused, not a crash")
+        // Deeper still is larger than a passport may be, and is not read at all.
+        #expect(read(nested(100_000)) == .failure(.invalid(RepositoryPassport.tooLarge(nested(100_000).utf8.count))))
+
+        // A comma before a closing bracket, which JSONSerialization allowed;
+        // half a surrogate pair, which it did not.
+        #expect(read(#"{"format":1,"name":"x","list":[1,2,],}"#) == .success(whole))
+        #expect(read(#"{"format":1,"name":"\ud800"}"#) == .failure(.missing))
+        // A field given twice counts the first time.
+        #expect(read(#"{"format":2,"format":1,"name":"x"}"#) == .failure(.futureFormat(declared: 2)))
     }
 
-    /// The one input measured to read differently: a number past what a
-    /// `Double` holds. JSONSerialization refused `1e400` as not JSON and read
-    /// `-1e400` as minus infinity; JSONDecoder refuses both. A passport holding
-    /// one is now "not JSON" whatever the sign.
+    /// A number past what a `Double` holds. JSONSerialization refused `1e400`
+    /// as not JSON and read `-1e400` as minus infinity; the passport's reader
+    /// refuses both, as JSONDecoder does. A passport holding one is "not JSON"
+    /// whatever the sign.
     @Test("a number past a Double's range is not JSON, whatever its sign")
     func hugeNumbersAreNotJSON() {
         for number in ["1e400", "-1e400", "-1e309"] {
@@ -201,10 +273,18 @@ struct FoundationFreeTests {
         inputs.append(Data(("{\"format\":1,\"name\":\"x\",\"deep\":" + String(repeating: "[", count: 600)
                             + String(repeating: "]", count: 600) + "}").utf8))
         for data in inputs {
-            #expect(RepositoryPassport.read(data) == Self.readAsBefore(data),
-                    "\(String(decoding: data.prefix(60), as: UTF8.self).debugDescription)")
+            let text = String(decoding: data, as: UTF8.self)
+            if let now = Self.moved[text] {
+                #expect(RepositoryPassport.read(data) == now, "\(text.debugDescription)")
+                #expect(Self.readAsBefore(data) != now, "\(text.debugDescription) did not move; take it off the list")
+            } else {
+                #expect(RepositoryPassport.read(data) == Self.readAsBefore(data),
+                        "\(String(decoding: data.prefix(60), as: UTF8.self).debugDescription)")
+            }
         }
-        #expect(inputs.count > 60)
+        let compared = Set(inputs.map { String(decoding: $0, as: UTF8.self) })
+        #expect(Self.moved.keys.allSatisfy(compared.contains), "every input that moved is compared")
+        #expect(inputs.count > 80)
     }
     #endif
 
