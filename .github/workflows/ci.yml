@@ -168,10 +168,38 @@ jobs:
             readelf -d "$binary" | grep 'NEEDED' >&2
             exit 1
           fi
-          # The placeholder prints its version and exits 2, "could not check".
+          "$binary" --version | tee out.txt
+          grep -q '^udeck-plugin [0-9]*\.[0-9]*\.[0-9]*$' out.txt
+          # With nothing to do it says how to use it and exits 2, "could not check".
           status=0
           "$binary" > out.txt 2> err.txt || status=$?
-          cat out.txt err.txt
           test "$status" -eq 2
-          grep -q '^udeck-plugin [0-9]*\.[0-9]*\.[0-9]*$' out.txt
-          grep -q 'check is not built yet' err.txt
+          grep -q '^usage: udeck-plugin' err.txt
+          # And it checks: the examples, strictly, read through git — the static
+          # binary starting git itself, which only Linux can show. The checkout
+          # was made for the runner and is read here as root, so reading it
+          # "at <commit>" rather than "on disk" is safe.directory at work.
+          "$binary" check --strict ../../examples/*/ | tee out.txt
+          test "$(grep -c '^checked .* at [0-9a-f]\{12\} strictly: 0 errors' out.txt)" -eq 4
+          # A plugin repository made here, as an author makes one: clean at its
+          # first commit, both for check-repo and for check, and a change
+          # without a new version refused against the commit before (rule 18).
+          repo="$(mktemp -d)/repository"
+          mkdir -p "$repo/plugins"
+          cp -R ../../examples/hello-card "$repo/plugins/hello-card"
+          printf '{"format": 1, "name": "Made in CI"}\n' > "$repo/udeck-plugins.json"
+          commit() { git -C "$repo" -c user.name=CI -c user.email=ci@example.invalid commit -q "$@"; }
+          git -C "$repo" init -q -b main
+          git -C "$repo" add -A
+          commit -m "A plugin"
+          "$binary" check-repo --strict --repo "$repo" | tee out.txt
+          grep -q '^checked 1 plugin folder at [0-9a-f]\{12\} strictly: 0 errors, [0-9]* warnings\?$' out.txt
+          "$binary" check --strict "$repo/plugins/hello-card" | tee out.txt
+          grep -q "^checked $repo/plugins/hello-card at [0-9a-f]\\{12\\} strictly: 0 errors" out.txt
+          printf '\nChanged.\n' >> "$repo/plugins/hello-card/README.md"
+          commit -a -m "A change without a new version"
+          status=0
+          "$binary" check-repo --repo "$repo" > out.txt || status=$?
+          cat out.txt
+          test "$status" -eq 1
+          grep -q '^error: plugins/hello-card/manifest.json: the folder changed.*\[rule 18\]$' out.txt
