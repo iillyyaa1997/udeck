@@ -15,8 +15,8 @@ import Foundation
 public enum RepositoryCheck {
     public struct Options: Sendable {
         public var mode: CheckMode
-        /// The target branch's tip and the commit being checked, for rule 17;
-        /// both or neither.
+        /// The target branch's tip and the commit being checked, for rules 17
+        /// and 18; both or neither.
         public var base: String?
         public var head: String?
         /// The environment git starts from. Every `GIT_` variable in it is left
@@ -59,10 +59,16 @@ public enum RepositoryCheck {
                               mode: mode, attributes: attributes, report: &report)
         }
 
+        let head = tree.commit ?? revision
         if let base = options.base, let headRevision = options.head {
             let baseCommit = try git.commit(base)
             let headCommit = try git.commit(headRevision)
             if mode.official { try OfficialRules.signOffs(git, base: baseCommit, head: headCommit, report: &report) }
+            try VersionBump.check(git, base: baseCommit, head: headCommit, label: base, report: &report)
+        } else {
+            // A push, with nothing to name a base: the branch as it was before
+            // this commit, which on a squash-merged branch is the target's tip.
+            try VersionBump.checkAgainstParent(git, head: head, report: &report)
         }
         if tree.entries[CommitListing.pluginsFolder]?.kind == .tree {
             report.pluginFolders = tree.children(of: CommitListing.pluginsFolder).filter { $0.kind == .tree }.count

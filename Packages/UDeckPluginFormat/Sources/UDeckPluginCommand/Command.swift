@@ -31,7 +31,10 @@ public enum Command {
           --official    also the official repository's rules 14-16, and 17 (sign-offs)
                         with --base and --head; implies --strict
           --base <rev>  the target branch's tip, and --head <rev> the commit to
-          --head <rev>  check: rule 17 (sign-offs) with --official.
+          --head <rev>  check: rule 18 (a changed plugin's version goes up), and
+                        17 with --official. Without them, check-repo compares
+                        versions with the commit before HEAD, and warns when the
+                        clone does not have it.
           --repo <path> the repository (default: the current folder)
 
         Exit status: 0 no errors (warnings do not fail), 1 errors, 2 could not check.
