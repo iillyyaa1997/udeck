@@ -267,7 +267,9 @@ passport first, makes it exit 2: the check could not be made.
 A repository is read through git at one commit, never through its working
 tree. One plugin folder is read the same way when it is committed in a git
 working copy — and the check says when the working copy holds changes it did
-not see — and from disk when it is not, where there are no attributes. A link
+not see, counting a file's executable bit only where git does (not with
+`core.fileMode` false) — and from disk when it is not, where there are no
+attributes. A link
 to a folder is followed, and the findings name the path as it was given: a
 folder linked into uDeck's plugins folder is such a link. Exit status: 0 when
 there are no errors (warnings do not fail the check), 1 when there are, 2 when

@@ -15,6 +15,10 @@ import Foundation
 /// (`git ls-files`, which never refreshes it) for what was added to it; and
 /// git is asked only which new files it would not ignore.
 ///
+/// A file's executable bit counts only where git counts it: a repository
+/// whose `core.fileMode` is false — git's answer for a file system that cannot
+/// keep the bit — has git ignore it on disk, and so does this.
+///
 /// A working copy whose files git converts on the way out — line endings, a
 /// smudge filter — reads as changed even when it is not: its bytes on disk are
 /// not the committed ones. That costs a note, never a finding; the folder is
@@ -46,6 +50,10 @@ enum WorkingCopy {
         }
         guard indexed == committed else { return true }
 
+        // Read from the repository's configuration, which starts nothing.
+        let fileMode = try git.attempt(["config", "--bool", "--get", "core.fileMode"])
+        let bitCounts = !(fileMode.status == 0 && Blank.trimmed(String(decoding: fileMode.output, as: UTF8.self)) == "false")
+
         // Each committed file on disk, hashed with no filter in between.
         let manager = FileManager.default
         for (path, committedAs) in committed {
@@ -58,7 +66,10 @@ enum WorkingCopy {
                 onDisk = "\(TreeEntry.link) \(GitHash.blob(Data(target.utf8)))"
             case .typeRegular?:
                 let executable = (GitHash.integer(attributes[.posixPermissions]) ?? 0) & 0o100 != 0
-                onDisk = "\(executable ? TreeEntry.executable : TreeEntry.file) \(try GitHash.blob(ofFileAt: url))"
+                // Where the bit does not count, git keeps the mode it has.
+                let mode = bitCounts ? (executable ? TreeEntry.executable : TreeEntry.file)
+                    : String(committedAs.prefix { $0 != " " })
+                onDisk = "\(mode) \(try GitHash.blob(ofFileAt: url))"
             default:
                 return true
             }

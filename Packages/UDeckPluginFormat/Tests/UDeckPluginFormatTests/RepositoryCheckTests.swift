@@ -657,6 +657,7 @@ struct RepositoryCheckTests {
         ("nothing", false), ("a file's content", true), ("a file's mode", true), ("a file removed", true),
         ("a new file added to the index", true), ("a new file", true), ("a new file that is ignored", false),
         ("a .DS_Store", false), ("a link retargeted", true), ("a submodule, as committed", false),
+        ("a file's mode, where core.fileMode is false", false), ("a file's content, where core.fileMode is false", true),
     ])
     func workingCopyChanges(_ change: String, _ noted: Bool) throws {
         let repository = try TestRepository(["plugins/sample/lib": .link("run.sh")])
@@ -676,6 +677,14 @@ struct RepositoryCheckTests {
             try repository.write(["plugins/sample/run.log": .text("output\n")])
         case "a .DS_Store": try repository.write(["plugins/sample/.DS_Store": .bytes(Data([0, 0, 0, 1]))])
         case "a link retargeted": try repository.write(["plugins/sample/lib": .link("README.md")])
+        case "a file's mode, where core.fileMode is false":
+            // As git status has it: no change at all.
+            try repository.git("config", "core.fileMode", "false")
+            try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sample.appendingPathComponent("README.md").path)
+            #expect(try repository.git("status", "--porcelain").isEmpty)
+        case "a file's content, where core.fileMode is false":
+            try repository.git("config", "core.fileMode", "false")
+            try repository.write(["plugins/sample/README.md": .text("# Changed\n")])
         case "a submodule, as committed":
             // Committed straight from the index: a submodule nobody checked
             // out has no folder, and `git add -A` would take it away again.
