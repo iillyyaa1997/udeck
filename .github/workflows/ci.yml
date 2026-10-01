@@ -32,8 +32,19 @@ jobs:
       # The plugin tests run real child processes against the fixtures in
       # examples/, including one that hangs on purpose, so they are not fast
       # and must not be run in parallel with each other.
+      #
+      # uDeck's own tests, and only those: here every test target runs in one
+      # process, and the plugin format's tests hold the cooperative pool's
+      # threads for minutes with the git and plugin processes they wait on.
+      # Beside them, on a runner of three cores, a card action's 0.2 s pause
+      # took 160 s to come back, and its sleep had ended by then (run
+      # 36885251320). The format's tests run in the package, below.
       - name: Test
-        run: swift test
+        run: swift test --skip PluginFormatTests
+
+      - name: Test the plugin format
+        working-directory: Packages/UDeckPluginFormat
+        run: swift test --skip UDeckPluginFormatTimingTests
 
       # The plugin format's timing tests keep every core busy for seconds, so
       # they run here, on their own, and never beside uDeck's test of the host's
