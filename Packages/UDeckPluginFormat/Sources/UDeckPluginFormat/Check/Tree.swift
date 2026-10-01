@@ -79,7 +79,11 @@ final class Tree {
         ordered.filter { $0.path.hasPrefix(folder + "/") }
     }
 
-    /// Reads the contents of these files, once each.
+    /// Reads the contents of these files, once each. A file the commit lists
+    /// and the clone does not hold — a partial clone leaves blobs out, and
+    /// nothing is fetched (`Git`) — is a check that cannot be made. (A git
+    /// older than 2.44 stops before this, at the listing, whose sizes it
+    /// tries to fetch: exit status 2 all the same, in git's words.)
     func load(_ wanted: [TreeEntry]) throws {
         let missing = wanted.filter { $0.kind == .blob && contents[$0.path] == nil }
         guard !missing.isEmpty else { return }
@@ -87,7 +91,7 @@ final class Tree {
         case .git(let git, _):
             let blobs = try git.blobs(missing.map(\.id))
             for entry in missing {
-                guard let bytes = blobs[entry.id] else { throw CheckFailure("git could not read blob \(entry.id)") }
+                guard let bytes = blobs[entry.id] else { throw CheckFailure(Git.notInThisClone(entry.path, blob: entry.id)) }
                 contents[entry.path] = bytes
             }
         case .disk(let folder, let name):

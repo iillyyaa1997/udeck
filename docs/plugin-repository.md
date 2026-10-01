@@ -256,7 +256,13 @@ or 0)"* — rather than passing unseen; a first commit, which has no parent
 anywhere, gets nothing. With `--base`, a base whose history does not meet the
 head's in the clone is an error — *"cannot compare with origin/main: no common
 history here — fetch full history (fetch-depth: 0)"* — rather than every
-plugin looking changed.
+plugin looking changed. A clone without blobs (`filter: blob:none`) has every
+commit and tree and only the files it checked out, and the check fetches
+nothing: a manifest the base lists and the clone does not hold is an error too
+— *"cannot compare with origin/main: plugins/uptime/manifest.json is not in
+this clone — fetch without a blob filter"* — rather than the plugin passing as
+new. Any other file the check must read and the clone does not hold, the
+passport first, makes it exit 2: the check could not be made.
 
 A repository is read through git at one commit, never through its working
 tree. One plugin folder is read the same way when it is committed in a git

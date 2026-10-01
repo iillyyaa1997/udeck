@@ -134,8 +134,9 @@ struct VersionBumpTests {
     }
 
     func check(_ folder: URL, _ mode: CheckMode, base: String? = nil, head: String? = nil,
-               in repository: TestRepository) throws -> CheckReport {
+               in repository: TestRepository, extra: [String: String] = [:]) throws -> CheckReport {
         var options = RepositoryCheck.Options(mode: mode, base: base, head: head)
+        options.gitEnvironment = extra
         options.gitEnvironment["GIT_CEILING_DIRECTORIES"] = repository.temp.url.path
         return try RepositoryCheck.repository(folder.path, at: head ?? "HEAD", options: options)
     }
@@ -176,6 +177,70 @@ struct VersionBumpTests {
         #expect(report.findings.map(\.description) == [
             "error: cannot compare with origin/main: no common history here — fetch full history (fetch-depth: 0) [rule 18]",
         ])
+    }
+
+    /// A clone without blobs — `actions/checkout` with `filter: blob:none` —
+    /// has every commit and tree and only the files it checked out, and the
+    /// check fetches nothing. The manifest the base has is listed and not
+    /// there: the check says it cannot compare, rather than taking the plugin
+    /// for one that is new. A plugin new on the branch, which the base does
+    /// not list at all, still needs nothing.
+    @Test("in a clone without blobs, rule 18 says it cannot compare, and a new plugin still needs nothing")
+    func bumpInABloblessClone() throws {
+        let repository = try TestRepository()
+        try repository.git("config", "uploadpack.allowFilter", "true")
+        try repository.git("checkout", "-q", "-b", "topic")
+        var files: [String: TestRepository.File?] = [:]
+        for (path, file) in try TestRepository.good() where path.hasPrefix("plugins/sample/") {
+            files[path.replacingOccurrences(of: "plugins/sample/", with: "plugins/second/")] = file
+        }
+        files["plugins/second/manifest.json"] = try TestRepository.manifest(["id": "second"])
+        // Changed, and not bumped: the manifest's blob is a new one.
+        files[Self.manifest] = try TestRepository.manifest(["description": "Changed, and still 1.0.0."])
+        try repository.commit(files)
+        try repository.git("checkout", "-q", "main")
+        let unbumped = "error: plugins/sample/manifest.json: the folder changed, and \"version\" is 1.0.0 where "
+        #expect(try repository.check(.installable, base: "main", head: "topic").findings.map(\.description).count == 1)
+        #expect(try repository.check(.installable, base: "main", head: "topic").findings.first?.description
+                    .hasPrefix(unbumped) == true)
+
+        let clone = repository.temp.url.appendingPathComponent("blobless-\(UUID().uuidString)")
+        try CorpusGit.run(["clone", "-q", "--no-local", "--no-checkout", "--filter=blob:none",
+                           "file://\(repository.folder.path)", clone.path], in: repository.temp.url, scratch: repository.temp.url)
+        try CorpusGit.run(["checkout", "-q", "topic"], in: clone, scratch: repository.temp.url)
+        #expect(try CorpusGit.run(["config", "remote.origin.partialclonefilter"], in: clone, scratch: repository.temp.url)
+                    .trimmingCharacters(in: .whitespacesAndNewlines) == "blob:none", "the clone is not a partial one")
+
+        let notHere = "plugins/sample/manifest.json is not in this clone — fetch without a blob filter [rule 18]"
+        let base = try CorpusGit.run(["rev-parse", "HEAD^1"], in: clone, scratch: repository.temp.url)
+        // A git older than 2.44 knows no GIT_NO_LAZY_FETCH and tries to fetch
+        // whatever it is asked for, and stops when it cannot (Linux's CI image
+        // has 2.43): the same answer there.
+        for (mode, extra) in [(CheckMode.installable, [:]), (.strict, [:]), (.installable, ["GIT_NO_LAZY_FETCH": "0"])] {
+            let againstBase = try check(clone, mode, base: "origin/main", head: "HEAD", in: repository, extra: extra)
+            #expect(againstBase.findings.map(\.description) == ["error: cannot compare with origin/main: \(notHere)"],
+                    "\(mode) \(extra)")
+            let againstParent = try check(clone, mode, in: repository, extra: extra)
+            #expect(againstParent.findings.map(\.description)
+                    == ["error: cannot compare with the commit before, \(base.prefix(12)): \(notHere)"], "\(mode) \(extra)")
+        }
+        // And a file the check reads that the clone does not hold is a check
+        // that could not be made — said so; an older git, which tries to
+        // fetch what it lists the size of, stops first and says it in its own
+        // words.
+        for extra in [[:], ["GIT_NO_LAZY_FETCH": "0"]] {
+            var options = RepositoryCheck.Options(mode: .installable)
+            options.gitEnvironment = extra.merging(["GIT_CEILING_DIRECTORIES": repository.temp.url.path]) { new, _ in new }
+            #expect {
+                try RepositoryCheck.repository(clone.path, at: "origin/main", options: options)
+            } throws: { error in
+                guard error is CheckFailure else { return false }
+                return !extra.isEmpty || "\(error)".hasPrefix("git could not read plugins/sample/manifest.json (blob ")
+                    && "\(error)".hasSuffix("): it is not in this clone — fetch without a blob filter")
+            }
+        }
+        let command = CommandTests().run("check-repo", "--repo", clone.path, "--base", "origin/main", "--head", "HEAD")
+        #expect(command.status == 1, "\(command.output)")
     }
 
     // MARK: - From the command line

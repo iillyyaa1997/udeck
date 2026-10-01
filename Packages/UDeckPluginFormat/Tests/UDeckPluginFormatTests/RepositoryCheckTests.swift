@@ -330,6 +330,28 @@ struct RepositoryCheckTests {
         #expect(FileManager.default.fileExists(atPath: marker.path), "the ext transport never runs, so this proves nothing")
     }
 
+    /// The passport is the first file read, and one the commit lists and the
+    /// clone does not hold is a check that could not be made — not a passport
+    /// that is not JSON, nor a submodule.
+    @Test("a passport that is not in the clone is a check that could not be made, in every layer")
+    func passportNotInTheClone() throws {
+        let repository = try TestRepository()
+        let blob = try repository.git("rev-parse", "HEAD:udeck-plugins.json")
+        try FileManager.default.removeItem(at: repository.folder.appendingPathComponent(
+            ".git/objects/\(blob.prefix(2))/\(blob.dropFirst(2))"))
+        let said = "git could not read udeck-plugins.json (blob \(blob.prefix(12))): it is not in this clone — fetch "
+            + "without a blob filter"
+        #expect(Git.notInThisClone("udeck-plugins.json", blob: blob) == said)
+        for mode in [CheckMode.installable, .strict, .official] {
+            #expect { try repository.check(mode) } throws: { "\($0)" == said }
+        }
+        for flag in [[], ["--strict"], ["--official"]] {
+            let result = CommandTests().run(["check-repo", "--repo", repository.folder.path] + flag)
+            #expect(result.status == 2, "\(flag)")
+            #expect(result.output == ["could not check: \(said)"], "\(flag)")
+        }
+    }
+
     /// git refuses a repository another user owns; a CI container running as
     /// root over a runner's checkout is one. The check opens that refusal for
     /// the one repository it reads, by the path git compares, and no other.

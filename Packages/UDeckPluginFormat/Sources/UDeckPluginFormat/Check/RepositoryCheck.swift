@@ -45,7 +45,7 @@ public enum RepositoryCheck {
         var report = CheckReport()
         report.commit = tree.commit
 
-        passport(tree, mode: mode, report: &report)
+        try passport(tree, mode: mode, report: &report)
         let folders = pluginFolders(tree, mode: mode, report: &report)
         let everything = folders.isEmpty ? [] : tree.under(CommitListing.pluginsFolder)
         try tree.load(everything.filter { ($0.size ?? 0) <= RepositoryRules.maximumFileBytes })
@@ -163,10 +163,12 @@ public enum RepositoryCheck {
 
     // MARK: - The passport
 
-    static func passport(_ tree: Tree, mode: CheckMode, report: inout CheckReport) {
+    /// A passport the commit lists and the clone does not hold — a partial
+    /// clone's — is a check that could not be made, never a finding about it.
+    static func passport(_ tree: Tree, mode: CheckMode, report: inout CheckReport) throws {
         let path = RepositoryPassport.path
         let entry = tree.entries[path]
-        if let entry, entry.kind == .blob { try? tree.load([entry]) }
+        if let entry, entry.kind == .blob { try tree.load([entry]) }
         let content = entry.flatMap(tree.content)
         let before = report.findings.count
         if mode.strict { strictPassport(entry, content, report: &report) }

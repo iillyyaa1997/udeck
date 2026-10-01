@@ -38,11 +38,13 @@ for what that promises.
   Two rules are new. **Rule 18**: whenever anything in a plugin's folder
   changed, its `version` went up — against `--base`, the target branch's tip,
   for a pull request, and against the commit before for a push; a clone
-  without that history gets a warning or an error that says to fetch it,
-  never a silent pass. **Rule 19**: `minUDeck` is not below the release that
-  has everything the plugin uses, worked out from a registry that dates every
-  part of the contract — a test fails on one that is not dated — and one that
-  does nothing is a warning.
+  without that history, or without the blobs to compare (`filter: blob:none`),
+  gets a warning or an error that says to fetch it, never a silent pass, and a
+  clone without any other file the check must read is exit status 2.
+  **Rule 19**: `minUDeck` is not below the release that has everything the
+  plugin uses, worked out from a registry that dates every part of the
+  contract — a test fails on one that is not dated — and one that does
+  nothing is a warning.
 
   Git is told nothing by anybody's configuration, and nothing a repository's
   own configuration names can make it run a program: no clean filter (no

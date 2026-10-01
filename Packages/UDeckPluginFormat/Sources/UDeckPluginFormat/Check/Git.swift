@@ -33,8 +33,11 @@ import Musl
 /// checkout), the monitor and the hooks are switched off, no transport of any
 /// kind is allowed (`GIT_ALLOW_PROTOCOL`, which overrides every configuration),
 /// a missing object is not fetched (`GIT_NO_LAZY_FETCH`), and the `ssh` command
-/// is emptied besides. A repository's configuration can still make a command
-/// fail; it cannot make one do anything else.
+/// is emptied besides. A manifest rule 18 compares and a partial clone left
+/// out is never asked for in the first place (`absent`): a git too old to know
+/// `GIT_NO_LAZY_FETCH` would try to fetch it and stop. A repository's
+/// configuration can still make a command fail; it cannot make one do
+/// anything else.
 ///
 /// `safe.directory` — git's refusal to read a repository another user owns —
 /// is opened for the one repository being checked, and no other: in CI the
@@ -204,9 +207,33 @@ struct Git {
         return entries
     }
 
+    /// What is said of a file a commit lists and this clone does not hold.
+    static func notInThisClone(_ path: String, blob: String) -> String {
+        "git could not read \(path) (blob \(blob.prefix(12))): it is not in this clone — fetch without a blob filter"
+    }
+
+    /// The objects `commits` have under `paths` that this clone does not hold
+    /// — what a partial clone left out — found without fetching any.
+    /// `rev-list --missing=print` never fetches, whatever the git; `cat-file`,
+    /// asked for such an object, has a git older than 2.44 (which does not
+    /// know `GIT_NO_LAZY_FETCH`) try to fetch it, find no transport allowed,
+    /// and stop. So nothing missing is ever asked of it. Every commit is
+    /// listed, whatever it changed (`--full-history --sparse`).
+    func absent(at commits: [String], under paths: [String]) throws -> Set<String> {
+        let output = try run(["rev-list", "--objects", "--no-walk", "--full-history", "--sparse", "--missing=print"]
+                             + commits + ["--"] + paths)
+        var absent = Set<String>()
+        for line in output.split(separator: 0x0A) where line.first == UInt8(ascii: "?") {
+            absent.insert(String(decoding: line.dropFirst().prefix { $0 != 0x20 }, as: UTF8.self))
+        }
+        return absent
+    }
+
     /// The contents of objects, each named any way `git cat-file` understands —
     /// a blob id, or `<commit>:<path>` — in one `git cat-file --batch`. A name
-    /// that names no blob is left out of the answer.
+    /// that names no blob is left out of the answer: git says the same
+    /// "missing" for a path a commit does not have and for an object a partial
+    /// clone left out, so a caller that must tell them apart asks by blob id.
     func blobs(_ names: [String]) throws -> [String: [UInt8]] {
         let wanted = Array(Set(names)).sorted()
         guard !wanted.isEmpty else { return [:] }

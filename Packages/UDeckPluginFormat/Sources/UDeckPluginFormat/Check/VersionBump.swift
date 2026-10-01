@@ -39,18 +39,32 @@ enum VersionBump {
         let changed = after.filter { before[$0.key] != $0.value && PluginIdentifier(rawValue: $0.key) != nil }.keys.sorted()
         guard !changed.isEmpty else { return }
 
-        let manifest = PluginDiscovery.manifestFilename
-        let blobs = try git.blobs(changed.flatMap { ["\(base):plugins/\($0)/\(manifest)", "\(head):plugins/\($0)/\(manifest)"] })
-        func version(_ commit: String, _ id: String) -> SemanticVersion? {
-            guard let bytes = blobs["\(commit):plugins/\(id)/\(manifest)"],
+        // Read by blob id, from each commit's listing: git says "missing" alike
+        // for a manifest a commit does not have, which is a plugin that is new
+        // there, and for one a partial clone left out (`filter: blob:none`),
+        // which is a version that cannot be compared — said, never passed.
+        // What the clone does not hold is never asked for (`Git.absent`).
+        let atBase = try manifests(git, at: base, of: changed)
+        let atHead = try manifests(git, at: head, of: changed)
+        let absent = try git.absent(at: [base, head], under: ["plugins/"])
+        let blobs = try git.blobs((Array(atBase.values) + Array(atHead.values)).filter { !absent.contains($0) })
+        func version(_ blob: String?) -> SemanticVersion? {
+            guard let blob, let bytes = blobs[blob],
                   let decoded = try? JSONDecoder().decode(PluginManifest.self, from: Data(bytes)) else { return nil }
             return SemanticVersion(decoded.version)
         }
+        let manifest = PluginDiscovery.manifestFilename
         let name = label.map { base.hasPrefix($0) ? String(base.prefix(12)) : "\($0) (\(base.prefix(12)))" }
             ?? "the commit before, \(base.prefix(12)),"
         for id in changed {
-            guard let now = version(head, id), let then = version(base, id), now <= then else { continue }
-            report.error(CheckRule.versionBump, "plugins/\(id)/\(manifest)",
+            let path = "plugins/\(id)/\(manifest)"
+            if [atBase[id], atHead[id]].contains(where: { $0.map { blobs[$0] == nil } ?? false }) {
+                report.error(CheckRule.versionBump, "", "cannot compare with \(label ?? "the commit before, \(base.prefix(12))"): "
+                             + "\(path) is not in this clone — fetch without a blob filter")
+                continue
+            }
+            guard let now = version(atHead[id]), let then = version(atBase[id]), now <= then else { continue }
+            report.error(CheckRule.versionBump, path,
                          "the folder changed, and \"version\" is \(now) where \(name) has \(then); "
                          + "any change goes out as a new version — \(then.next) or later")
         }
@@ -83,4 +97,22 @@ enum VersionBump {
         return folders
     }
 
+    /// The blob id of `plugins/<id>/manifest.json` at `commit`, for each of
+    /// `ids` that has one there — from the commit's listing, which a clone
+    /// without blobs still has whole.
+    static func manifests(_ git: Git, at commit: String, of ids: [String]) throws -> [String: String] {
+        let wanted = Set(ids)
+        let output = try git.run(["ls-tree", "-r", "-z", commit, "--", "plugins/"])
+        var manifests: [String: String] = [:]
+        for record in output.split(separator: 0, omittingEmptySubsequences: true) {
+            guard let tab = record.firstIndex(of: 0x09) else { continue }
+            let meta = String(decoding: record[..<tab], as: UTF8.self).split(separator: " ")
+            let path = String(decoding: record[record.index(after: tab)...], as: UTF8.self)
+            let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+            guard meta.count == 3, meta[1] == "blob", parts.count == 3, parts[0] == "plugins",
+                  parts[2] == PluginDiscovery.manifestFilename, wanted.contains(String(parts[1])) else { continue }
+            manifests[String(parts[1])] = String(meta[2])
+        }
+        return manifests
+    }
 }

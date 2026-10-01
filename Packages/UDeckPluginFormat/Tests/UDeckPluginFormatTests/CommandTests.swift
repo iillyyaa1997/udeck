@@ -15,6 +15,10 @@ struct CommandTests {
     }
 
     func run(_ arguments: String...) -> Run {
+        run(arguments)
+    }
+
+    func run(_ arguments: [String]) -> Run {
         var output: [String] = []
         var errors: [String] = []
         let status = Command.run(arguments, environment: ProcessInfo.processInfo.environment, output: { output.append($0) },
