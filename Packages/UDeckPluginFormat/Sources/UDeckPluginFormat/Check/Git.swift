@@ -97,7 +97,7 @@ struct Git {
         environment["GIT_TERMINAL_PROMPT"] = "0"
         environment["GIT_OPTIONAL_LOCKS"] = "0"
         environment["GIT_LITERAL_PATHSPECS"] = "1"
-        // Git 2.44 and later: a missing object stays missing.
+        // Git 2.45 and later: a missing object stays missing.
         environment["GIT_NO_LAZY_FETCH"] = "1"
         // Every git since 2.6: the list of transports allowed, empty.
         environment["GIT_ALLOW_PROTOCOL"] = ""
@@ -141,8 +141,21 @@ struct Git {
                   result.status == 0 else { return nil }
             return String(decoding: result.output.dropLast(), as: UTF8.self)
         }
-        guard let found = ask("--show-toplevel") ?? ask("--absolute-git-dir") else { return nil }
-        return resolved(found)
+        // The top of the working copy is where git found `.git` — except
+        // when core.worktree points the working tree elsewhere: git compares
+        // safe.directory with the folder it found `.git` in, and that folder
+        // is the repository's.
+        if let top = ask("--show-toplevel").flatMap(resolved) {
+            if FileManager.default.fileExists(atPath: top + "/.git") { return top }
+            if let directory = ask("--absolute-git-dir").flatMap(resolved), directory.hasSuffix("/.git"),
+               let slash = directory.lastIndex(of: "/") {
+                return String(directory[..<slash])
+            }
+            return top
+        }
+        // No working tree: a bare repository, or `path` inside a `.git` — the
+        // repository itself is what git compares.
+        return ask("--absolute-git-dir").flatMap(resolved)
     }
 
     /// Runs git in the repository and answers its whole result, whatever the
@@ -245,7 +258,7 @@ struct Git {
     /// The objects `commits` have under `paths` that this clone does not hold
     /// — what a partial clone left out — found without fetching any.
     /// `rev-list --missing=print` never fetches, whatever the git; `cat-file`,
-    /// asked for such an object, has a git older than 2.44 (which does not
+    /// asked for such an object, has a git older than 2.45 (which does not
     /// know `GIT_NO_LAZY_FETCH`) try to fetch it, find no transport allowed,
     /// and stop. So nothing missing is ever asked of it. Every commit is
     /// listed, whatever it changed (`--full-history --sparse`).

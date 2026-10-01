@@ -115,7 +115,7 @@ final class Tree {
     /// Reads the contents of these files, once each. A file the commit lists
     /// and the clone does not hold — a partial clone leaves blobs out, and
     /// nothing is fetched (`Git`) — is a check that cannot be made. (A git
-    /// older than 2.44 stops before this, at the listing, whose sizes it
+    /// older than 2.45 stops before this, at the listing, whose sizes it
     /// tries to fetch: exit status 2 all the same, in git's words.)
     func load(_ wanted: [TreeEntry]) throws {
         let missing = wanted.filter { $0.kind == .blob && contents[$0.path] == nil }

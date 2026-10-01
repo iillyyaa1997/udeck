@@ -165,7 +165,7 @@ public enum RepositoryCheck {
     /// a CI job's timeout — left in the temporary folder (`ScratchFolder`).
     /// `udeck-plugin` does it as it starts.
     public static func sweepTemporaryFolder() {
-        ScratchFolder.sweep(FileManager.default.temporaryDirectory)
+        ScratchFolder.sweep(ScratchFolder.home)
     }
 
     // MARK: - The passport

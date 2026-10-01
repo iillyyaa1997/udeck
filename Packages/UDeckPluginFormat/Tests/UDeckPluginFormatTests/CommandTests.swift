@@ -123,7 +123,7 @@ struct CommandTests {
     @Test("check and check-repo take away the folder a stopped run left", arguments: ["check", "check-repo"])
     func sweepAsItStarts(_ command: String) throws {
         let repository = try TestRepository()
-        let left = URL(fileURLWithPath: NSTemporaryDirectory())
+        let left = ScratchFolder.home
             .appendingPathComponent("\(ScratchFolder.prefix)\(Int32.max - 1)-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: left, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: left) }

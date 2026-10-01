@@ -329,7 +329,7 @@ struct RepositoryCheckTests {
             #expect(!FileManager.default.fileExists(atPath: marker.path), "the repository's ssh command ran: \(extra)")
         }
         check([:])
-        // A git older than 2.44 fetches whatever GIT_NO_LAZY_FETCH says: no
+        // A git older than 2.45 fetches whatever GIT_NO_LAZY_FETCH says: no
         // transport is allowed to it.
         check(["GIT_NO_LAZY_FETCH": "0"])
         // And were ssh allowed, the command the repository names is not the one.
@@ -455,12 +455,19 @@ struct RepositoryCheckTests {
         for name in kept { try make(name) }
         let young = "udeck-plugin-index-\(gone)-\(UUID().uuidString)"
         try make(young, changed: Date())
+        // Ten minutes is not an hour: another container's check may still be
+        // at work in it.
+        let recent = "udeck-plugin-index-\(gone)-\(UUID().uuidString)"
+        try make(recent, changed: Date().addingTimeInterval(-600))
         let file = "udeck-plugin-index-\(gone)-\(UUID().uuidString)"
         try make(file, file: true)
+        // Another user's folders are not this user's to take away.
+        ScratchFolder.sweep(temp.url, owner: Int(getuid()) + 1)
+        #expect(Set(try manager.contentsOfDirectory(atPath: temp.url.path)) == Set(kept + [left, young, recent, file]))
         ScratchFolder.sweep(temp.url)
         let after = Set(try manager.contentsOfDirectory(atPath: temp.url.path))
         #expect(!after.contains(left), "a folder a stopped run left is still there")
-        #expect(after == Set(kept + [young, file]), "\(after)")
+        #expect(after == Set(kept + [young, recent, file]), "\(after)")
 
         // A new one is named for this process.
         let made = try ScratchFolder.make(in: temp.url)
@@ -542,6 +549,19 @@ struct RepositoryCheckTests {
                 == top.replacingOccurrences(of: "/repository", with: "/bare.git"))
         #expect(Git(repository: repository.folder.appendingPathComponent(".git/objects").path, inherited: environment,
                     extra: ceiling).trusted == top + "/.git")
+
+        // A working tree that core.worktree puts elsewhere: git compares the
+        // folder it found `.git` in, and the check is read from there.
+        let split = repository.temp.url.appendingPathComponent("split")
+        let files = repository.temp.url.appendingPathComponent("split-files")
+        try FileManager.default.createDirectory(at: files, withIntermediateDirectories: true)
+        try CorpusGit.run(["clone", "-q", repository.folder.path, split.path], in: repository.temp.url,
+                          scratch: repository.temp.url)
+        try CorpusGit.run(["config", "core.worktree", files.path], in: split, scratch: repository.temp.url)
+        let splitTop = top.replacingOccurrences(of: "/repository", with: "/split")
+        #expect(Git(repository: split.path, inherited: environment, extra: ceiling).trusted == splitTop)
+        #expect(try RepositoryCheck.repository(split.path, options: options).findings.isEmpty,
+                "another owner, and the working tree elsewhere")
 
         // Were it not opened, git would refuse, and the check would say why.
         let refused = Git(repository: repository.folder.path, trusting: nil, inherited: [:],
@@ -676,6 +696,7 @@ struct RepositoryCheckTests {
         ("a new file added to the index", true), ("a new file", true), ("a new file that is ignored", false),
         ("a .DS_Store", false), ("a link retargeted", true), ("a submodule, as committed", false),
         ("a file's mode, where core.fileMode is false", false), ("a file's content, where core.fileMode is false", true),
+        ("a file's mode, where core.fileMode is no", false),
     ])
     func workingCopyChanges(_ change: String, _ noted: Bool) throws {
         let repository = try TestRepository(["plugins/sample/lib": .link("run.sh")])
@@ -698,6 +719,11 @@ struct RepositoryCheckTests {
         case "a file's mode, where core.fileMode is false":
             // As git status has it: no change at all.
             try repository.git("config", "core.fileMode", "false")
+            try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sample.appendingPathComponent("README.md").path)
+            #expect(try repository.git("status", "--porcelain").isEmpty)
+        case "a file's mode, where core.fileMode is no":
+            // git reads a boolean in any of its spellings; so does the check.
+            try repository.git("config", "core.fileMode", "no")
             try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: sample.appendingPathComponent("README.md").path)
             #expect(try repository.git("status", "--porcelain").isEmpty)
         case "a file's content, where core.fileMode is false":

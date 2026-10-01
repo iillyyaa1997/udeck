@@ -55,6 +55,25 @@ struct VersionBumpTests {
         #expect(try repository.check(.strict, base: target, head: topic).findings.isEmpty)
     }
 
+    /// A manifest path that was a submodule on the base held no manifest
+    /// there: the plugin is new, and a new plugin needs no version.
+    @Test("a manifest that was a submodule on the base is a new plugin, not a changed one")
+    func submoduleBefore() throws {
+        let repository = try TestRepository()
+        let first = try repository.git("rev-parse", "HEAD")
+        try repository.git("update-index", "--add", "--cacheinfo", "160000,\(first),plugins/third/manifest.json")
+        try CorpusGit.run(["commit", "-q", "-m", TestRepository.signedOff], in: repository.folder, scratch: repository.temp.url)
+        let base = try repository.git("rev-parse", "HEAD")
+        #expect(try repository.git("ls-tree", base, "plugins/third/manifest.json").hasPrefix("160000 commit "))
+        var files: [String: TestRepository.File?] = [:]
+        for (path, file) in try TestRepository.good() where path.hasPrefix("plugins/sample/") {
+            files[path.replacingOccurrences(of: "plugins/sample/", with: "plugins/third/")] = file
+        }
+        files["plugins/third/manifest.json"] = try TestRepository.manifest(["id": "third"])
+        let head = try repository.commit(files)
+        #expect(try repository.check(.strict, base: base, head: head).findings.isEmpty)
+    }
+
     /// Two pull requests both take `sample` to 1.0.1 with different content;
     /// the second, checked against the tip that has the first, must go on.
     @Test("the version is held to the target's tip, not to where the branch began")
@@ -213,9 +232,10 @@ struct VersionBumpTests {
 
         let notHere = "plugins/sample/manifest.json is not in this clone — fetch without a blob filter [rule 18]"
         let base = try CorpusGit.run(["rev-parse", "HEAD^1"], in: clone, scratch: repository.temp.url)
-        // A git older than 2.44 knows no GIT_NO_LAZY_FETCH and tries to fetch
+        // A git older than 2.45 knows no GIT_NO_LAZY_FETCH and tries to fetch
         // whatever it is asked for, and stops when it cannot (Linux's CI image
-        // has 2.43): the same answer there.
+        // has 2.43); GIT_NO_LAZY_FETCH=0 is how a newer one behaves the same:
+        // rule 18 gives the same answer either way.
         for (mode, extra) in [(CheckMode.installable, [:]), (.strict, [:]), (.installable, ["GIT_NO_LAZY_FETCH": "0"])] {
             let againstBase = try check(clone, mode, base: "origin/main", head: "HEAD", in: repository, extra: extra)
             #expect(againstBase.findings.map(\.description) == ["error: cannot compare with origin/main: \(notHere)"],
@@ -227,7 +247,9 @@ struct VersionBumpTests {
         // And a file the check reads that the clone does not hold is a check
         // that could not be made — said so; an older git, which tries to
         // fetch what it lists the size of, stops first and says it in its own
-        // words.
+        // words. Which of the two this machine's git is decides what the
+        // first case has to say: GIT_NO_LAZY_FETCH came with git 2.45.
+        let lazyFetchCanBeRefused = try !Self.gitVersion(in: repository).lexicographicallyPrecedes([2, 45])
         for extra in [[:], ["GIT_NO_LAZY_FETCH": "0"]] {
             var options = RepositoryCheck.Options(mode: .installable)
             options.gitEnvironment = extra.merging(["GIT_CEILING_DIRECTORIES": repository.temp.url.path]) { new, _ in new }
@@ -235,7 +257,8 @@ struct VersionBumpTests {
                 try RepositoryCheck.repository(clone.path, at: "origin/main", options: options)
             } throws: { error in
                 guard error is CheckFailure else { return false }
-                return !extra.isEmpty || "\(error)".hasPrefix("git could not read plugins/sample/manifest.json (blob ")
+                return !extra.isEmpty || !lazyFetchCanBeRefused
+                    || "\(error)".hasPrefix("git could not read plugins/sample/manifest.json (blob ")
                     && "\(error)".hasSuffix("): it is not in this clone — fetch without a blob filter")
             }
         }
@@ -257,5 +280,13 @@ struct VersionBumpTests {
         let strict = CommandTests().run("check-repo", "--strict", "--repo=\(repository.folder.path)", "--base=\(base)", "--head=\(head)")
         #expect(strict.output.filter { $0.hasSuffix("[rule 17]") }.isEmpty)
         #expect(strict.output.filter { $0.hasSuffix("[rule 18]") }.count == 1)
+    }
+
+    /// This machine's git as numbers: "git version 2.43.0" is [2, 43, 0].
+    static func gitVersion(in repository: TestRepository) throws -> [Int] {
+        let said = try CorpusGit.run(["version"], in: repository.temp.url, scratch: repository.temp.url)
+        let words = said.split(separator: " ")
+        guard words.count >= 3 else { return [] }
+        return words[2].split(separator: ".").prefix(3).map { Int($0.prefix { $0.isNumber }) ?? 0 }
     }
 }
