@@ -253,7 +253,8 @@ struct RepositoryCheckTests {
         try repository.git("status", "--porcelain")
         #expect(FileManager.default.fileExists(atPath: marker.path), "the monitor never runs, so this proves nothing")
 
-        let git = Git(repository: repository.folder.path, inherited: environment)
+        let git = Git(repository: repository.folder.path, inherited: environment,
+                      extra: ["GIT_CEILING_DIRECTORIES": repository.temp.url.path])
         #expect(git.environment["GIT_DIR"] == nil)
         #expect(git.environment["GIT_CONFIG_GLOBAL"] == "/dev/null")
         #expect(git.environment["GIT_CONFIG_NOSYSTEM"] == "1")
@@ -352,6 +353,103 @@ struct RepositoryCheckTests {
         }
     }
 
+    /// A plugin folder may hold files named `HEAD`, `objects` and `refs`; git
+    /// finds the working copy above it all the same, and asked as another
+    /// user — a container running as root — reads it, because the path the
+    /// check opens `safe.directory` for is the one git compares: git's answer,
+    /// not a guess from the files there.
+    @Test("a plugin folder holding HEAD, objects and refs is not taken for a bare repository")
+    func notABareRepository() throws {
+        let repository = try TestRepository([
+            "plugins/sample/HEAD": .text("x\n"), "plugins/sample/objects/a": .text("x\n"),
+            "plugins/sample/refs/a": .text("x\n"),
+        ])
+        let folder = repository.folder.appendingPathComponent("plugins/sample")
+        let top = try repository.git("rev-parse", "--show-toplevel")
+        let ceiling = ["GIT_CEILING_DIRECTORIES": repository.temp.url.path]
+        #expect(Git(repository: folder.path, inherited: ProcessInfo.processInfo.environment, extra: ceiling).trusted == top)
+        var options = RepositoryCheck.Options(mode: .installable)
+        options.gitEnvironment = ceiling.merging(["GIT_TEST_ASSUME_DIFFERENT_OWNER": "1"]) { new, _ in new }
+        let checked = try RepositoryCheck.folder(folder.path, options: options)
+        #expect(checked.commit == (try repository.git("rev-parse", "HEAD")))
+        #expect(checked.findings.isEmpty, "\(checked.findings)")
+        #expect(checked.notes.isEmpty, "\(checked.notes)")
+    }
+
+    /// git's own answers go through files rather than pipes, and the files
+    /// have no names from the moment they are made: a run stopped by a
+    /// signal leaves nothing in the temporary folder.
+    @Test("a program the check runs finds nothing of the check's in the temporary folder")
+    func nothingNamedInTheTemporaryFolder() throws {
+        let temp = TemporaryDirectory()
+        let result = try Subprocess.run(["sh", "-c", "ls -A \"$0\"; cat; echo said >&2", temp.url.path],
+                                        environment: ProcessInfo.processInfo.environment, input: Array("in\n".utf8),
+                                        in: temp.url.path)
+        #expect(result.status == 0)
+        #expect(String(decoding: result.output, as: UTF8.self) == "in\n", "the folder held something while it ran")
+        #expect(String(decoding: result.errors, as: UTF8.self) == "said\n")
+        // An exit status, and the end of a signal.
+        let environment = ProcessInfo.processInfo.environment
+        #expect(try Subprocess.run(["sh", "-c", "exit 3"], environment: environment, in: temp.url.path).status == 3)
+        #expect(try Subprocess.run(["sh", "-c", "kill -9 $$"], environment: environment, in: temp.url.path).status == -1)
+        // An answer far past what a pipe holds.
+        let large = try Subprocess.run(["cat"], environment: environment, input: [UInt8](repeating: 0x61, count: 3_000_000),
+                                       in: temp.url.path)
+        #expect(large.output.count == 3_000_000)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: temp.url.path).isEmpty)
+    }
+
+    /// The one folder the check makes — the index it reads a commit's
+    /// attributes through — is named for its process, and what a stopped run
+    /// left is taken away by the next: only a folder of that name whose
+    /// process is gone, this user's, and unchanged for an hour. The command
+    /// sweeps as it starts (`CommandTests`).
+    @Test("folders stopped runs left are taken away, and nothing else")
+    func leftFoldersSwept() throws {
+        let temp = TemporaryDirectory()
+        let manager = FileManager.default
+        // No process has a number this large.
+        let gone = Int32.max - 1
+        let alive = ProcessInfo.processInfo.processIdentifier
+        let old = Date().addingTimeInterval(-2 * ScratchFolder.leftAfter)
+        let uuid = UUID().uuidString
+        func make(_ name: String, changed: Date = old, file: Bool = false) throws {
+            let url = temp.url.appendingPathComponent(name)
+            if file {
+                try Data("x".utf8).write(to: url)
+            } else {
+                try manager.createDirectory(at: url, withIntermediateDirectories: true)
+                try Data("index".utf8).write(to: url.appendingPathComponent("index"))
+            }
+            try manager.setAttributes([.modificationDate: changed], ofItemAtPath: url.path)
+        }
+        let left = "udeck-plugin-index-\(gone)-\(uuid)"
+        let kept = [
+            "udeck-plugin-index-\(alive)-\(uuid)",           // a process that is running
+            "udeck-plugin-index-\(gone)-\(UUID().uuidString)-young",  // not one of these names
+            "udeck-plugin-index-\(uuid)",                     // no process in the name
+            "udeck-plugin-index-0-\(uuid)",                   // no process has the number 0
+            "udeck-plugin-index-1-\(uuid)",                   // the first process, not ours to signal
+            "udeck-plugin-\(gone)-\(uuid)",                   // another kind
+            "somebody-else-\(gone)-\(uuid)",
+        ]
+        try make(left)
+        for name in kept { try make(name) }
+        let young = "udeck-plugin-index-\(gone)-\(UUID().uuidString)"
+        try make(young, changed: Date())
+        let file = "udeck-plugin-index-\(gone)-\(UUID().uuidString)"
+        try make(file, file: true)
+        ScratchFolder.sweep(temp.url)
+        let after = Set(try manager.contentsOfDirectory(atPath: temp.url.path))
+        #expect(!after.contains(left), "a folder a stopped run left is still there")
+        #expect(after == Set(kept + [young, file]), "\(after)")
+
+        // A new one is named for this process.
+        let made = try ScratchFolder.make(in: temp.url)
+        #expect(made.lastPathComponent.hasPrefix("udeck-plugin-index-\(alive)-"))
+        #expect(UUID(uuidString: String(made.lastPathComponent.dropFirst("udeck-plugin-index-\(alive)-".count))) != nil)
+    }
+
     /// git refuses a repository another user owns; a CI container running as
     /// root over a runner's checkout is one. The check opens that refusal for
     /// the one repository it reads, by the path git compares, and no other.
@@ -368,19 +466,28 @@ struct RepositoryCheckTests {
 
         // The path git itself gives the top of the working copy, links resolved.
         let top = try repository.git("rev-parse", "--show-toplevel")
+        let environment = ProcessInfo.processInfo.environment
+        let ceiling = ["GIT_CEILING_DIRECTORIES": repository.temp.url.path]
         for path in [repository.folder.path, folder.path] {
-            let git = Git(repository: path, inherited: [:])
+            let git = Git(repository: path, inherited: environment, extra: ceiling)
             #expect(git.trusted == top)
             #expect(git.arguments.contains("safe.directory=\(top)"))
             #expect(!git.arguments.contains("safe.directory=*"))
+            #expect(git.arguments.filter { $0.hasPrefix("safe.directory=") }.count == 1)
         }
         // Where there is no repository, nothing is opened; a bare one is its
-        // own top.
-        #expect(Git(repository: repository.temp.url.path, inherited: [:]).trusted == nil)
-        #expect(Git(repository: repository.temp.url.appendingPathComponent("nowhere").path, inherited: [:]).trusted == nil)
+        // own top, and so is the `.git` of a working copy, from inside it.
+        #expect(Git(repository: repository.temp.url.path, inherited: environment, extra: ceiling).trusted == nil)
+        #expect(Git(repository: repository.temp.url.appendingPathComponent("nowhere").path, inherited: environment,
+                    extra: ceiling).trusted == nil)
         let bare = repository.temp.url.appendingPathComponent("bare.git")
         try CorpusGit.run(["init", "-q", "--bare", bare.path], in: repository.temp.url, scratch: repository.temp.url)
-        #expect(Git(repository: bare.path, inherited: [:]).trusted == top.replacingOccurrences(of: "/repository", with: "/bare.git"))
+        #expect(Git(repository: bare.path, inherited: environment, extra: ceiling).trusted
+                == top.replacingOccurrences(of: "/repository", with: "/bare.git"))
+        #expect(Git(repository: bare.appendingPathComponent("objects").path, inherited: environment, extra: ceiling).trusted
+                == top.replacingOccurrences(of: "/repository", with: "/bare.git"))
+        #expect(Git(repository: repository.folder.appendingPathComponent(".git/objects").path, inherited: environment,
+                    extra: ceiling).trusted == top + "/.git")
 
         // Were it not opened, git would refuse, and the check would say why.
         let refused = Git(repository: repository.folder.path, trusting: nil, inherited: [:],

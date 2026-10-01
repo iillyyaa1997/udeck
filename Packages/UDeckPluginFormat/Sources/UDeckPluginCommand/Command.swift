@@ -56,8 +56,10 @@ public enum Command {
             output(usage)
             return 0
         case "check":
+            RepositoryCheck.sweepTemporaryFolder()
             return check(rest, environment: environment, output: output, errors: errors)
         case "check-repo":
+            RepositoryCheck.sweepTemporaryFolder()
             return checkRepository(rest, environment: environment, output: output, errors: errors)
         case "new", "run", "link", "pin":
             errors("udeck-plugin \(command): not in this release")

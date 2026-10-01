@@ -50,7 +50,10 @@ for what that promises.
   own configuration names can make it run a program: no clean filter (no
   `git status`), no file-system monitor or hooks, no transport and no fetch of
   a missing object, no `ssh` command; `safe.directory` is opened for the
-  repository being checked only. The passport is read by a JSON reader of the
+  repository being checked only, at the path git itself answers for it. Git's
+  answers go through files that have no names, so a run that is stopped
+  leaves nothing behind but the one folder a strict check makes, which a run
+  an hour later takes away. The passport is read by a JSON reader of the
   format's own, which takes `format` from the number as written — so
   `1.00000000000000000000001` is no format 1 — in time proportional to the
   text; and it has a limit, 64 KiB, past which uDeck refuses it unread, since

@@ -161,6 +161,13 @@ public enum RepositoryCheck {
         return report
     }
 
+    /// Takes away what runs of the check that were stopped — by a signal, by
+    /// a CI job's timeout — left in the temporary folder (`ScratchFolder`).
+    /// `udeck-plugin` does it as it starts.
+    public static func sweepTemporaryFolder() {
+        ScratchFolder.sweep(FileManager.default.temporaryDirectory)
+    }
+
     // MARK: - The passport
 
     /// A passport the commit lists and the clone does not hold — a partial

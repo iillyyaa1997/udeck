@@ -109,6 +109,24 @@ struct CommandTests {
         #expect(both.output.count == 3)
     }
 
+    /// A run stopped by a signal leaves its index folder behind; the next run
+    /// takes it away as it starts — both commands do.
+    @Test("check and check-repo take away the folder a stopped run left", arguments: ["check", "check-repo"])
+    func sweepAsItStarts(_ command: String) throws {
+        let repository = try TestRepository()
+        let left = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("\(ScratchFolder.prefix)\(Int32.max - 1)-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: left, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: left) }
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-2 * ScratchFolder.leftAfter)],
+                                              ofItemAtPath: left.path)
+        let result = command == "check"
+            ? run("check", repository.folder.appendingPathComponent("plugins/sample").path)
+            : run("check-repo", "--repo", repository.folder.path)
+        #expect(result.status == 0, "\(result.output)")
+        #expect(!FileManager.default.fileExists(atPath: left.path), "the folder a stopped run left is still there")
+    }
+
     @Test("check takes a link to a plugin folder, and names the link")
     func checkThroughALink() throws {
         let repository = try TestRepository(["plugins/sample/README.md": nil])

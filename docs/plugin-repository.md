@@ -292,7 +292,12 @@ own.
 
 That is what makes it safe to open git's `safe.directory` — its refusal to read
 a repository another user owns — and it is opened for the one repository being
-checked, by the path git compares, never for `*`. In CI the checkout is often
+checked, by the path git compares, never for `*`. Which path that is, git
+answers: asked once where the repository is, with the folder being checked and
+each folder above it opened — the only paths git can compare for a repository
+it finds from there — and told only its answer after that. A plugin folder
+that merely holds files named `HEAD`, `objects` and `refs` is no bare
+repository unless git says so. In CI the checkout is often
 made by one user and read by another: a job in a container runs as root over a
 workspace the runner made, and git would refuse it. The two places the check
 runs are a repository's CI, reading the clone it just made of itself, and an

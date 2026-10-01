@@ -18,7 +18,10 @@ import Musl
 /// Foundation the Linux build leaves out (by memory — the Linux job is where
 /// that would show). Its input and output go through files, not pipes: a git
 /// answer can be megabytes, and a pipe nobody reads yet fills at sixty-four
-/// kilobytes and stops both sides.
+/// kilobytes and stops both sides. The files have no names: each is unlinked
+/// the moment it is made and lives on in its descriptors, so a run that is
+/// stopped — a signal, a CI job's timeout — leaves nothing behind in the
+/// temporary folder, where folders of them used to pile up.
 enum Subprocess {
     struct Result {
         /// The exit status, or -1 when a signal ended it.
@@ -27,16 +30,19 @@ enum Subprocess {
         var errors: [UInt8]
     }
 
-    /// Runs `arguments[0]`, found on the `PATH` of `environment`.
-    static func run(_ arguments: [String], environment: [String: String], input: [UInt8] = []) throws -> Result {
-        let scratch = FileManager.default.temporaryDirectory
-            .appendingPathComponent("udeck-plugin-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: scratch) }
-        let inputFile = scratch.appendingPathComponent("in").path
-        let outputFile = scratch.appendingPathComponent("out").path
-        let errorFile = scratch.appendingPathComponent("err").path
-        try Data(input).write(to: URL(fileURLWithPath: inputFile))
+    /// Runs `arguments[0]`, found on the `PATH` of `environment`, with its
+    /// files made in `folder`.
+    static func run(_ arguments: [String], environment: [String: String], input: [UInt8] = [],
+                    in folder: String = FileManager.default.temporaryDirectory.path) throws -> Result {
+        var files: [Int32] = []
+        defer { for file in files { close(file) } }
+        // Standard input, output and error, in that order: each one made takes
+        // the lowest descriptor free, so when this process runs with one of
+        // 0, 1 or 2 closed, every one of them is copied into place before
+        // anything is copied over it.
+        for _ in 0 ..< 3 { files.append(try nameless(in: folder)) }
+        try put(input, into: files[0])
+        guard lseek(files[0], 0, SEEK_SET) == 0 else { throw CheckFailure("could not rewind a file of the check's own") }
 
         #if canImport(Darwin)
         var actions: posix_spawn_file_actions_t?
@@ -45,9 +51,12 @@ enum Subprocess {
         #endif
         posix_spawn_file_actions_init(&actions)
         defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_addopen(&actions, 0, inputFile, O_RDONLY, 0)
-        posix_spawn_file_actions_addopen(&actions, 1, outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
-        posix_spawn_file_actions_addopen(&actions, 2, errorFile, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+        for (target, file) in files.enumerated() {
+            posix_spawn_file_actions_adddup2(&actions, file, Int32(target))
+        }
+        for file in files where file > 2 {
+            posix_spawn_file_actions_addclose(&actions, file)
+        }
 
         // `env` finds the program on the PATH it is handed, which is the one
         // in `environment` — not whatever this process happened to inherit.
@@ -69,7 +78,47 @@ enum Subprocess {
         // seven bits are a signal, the next eight the exit status.
         let exited = status & 0x7F == 0
         return Result(status: exited ? (status >> 8) & 0xFF : -1,
-                      output: Array(try Data(contentsOf: URL(fileURLWithPath: outputFile))),
-                      errors: Array(try Data(contentsOf: URL(fileURLWithPath: errorFile))))
+                      output: try contents(of: files[1]), errors: try contents(of: files[2]))
+    }
+
+    /// A new file in `folder`, open for reading and writing, and already
+    /// without a name.
+    static func nameless(in folder: String) throws -> Int32 {
+        var template = Array((folder.hasSuffix("/") ? folder : folder + "/").utf8CString.dropLast())
+            + Array("udeck-plugin-XXXXXX".utf8CString)
+        let file = mkstemp(&template)
+        guard file >= 0 else {
+            throw CheckFailure("could not make a file in \(folder): \(String(cString: strerror(errno)))")
+        }
+        unlink(&template)
+        return file
+    }
+
+    static func put(_ bytes: [UInt8], into file: Int32) throws {
+        var written = 0
+        while written < bytes.count {
+            let count = bytes[written...].withUnsafeBytes { write(file, $0.baseAddress, $0.count) }
+            if count < 0 {
+                guard errno == EINTR else { throw CheckFailure("could not write a file of the check's own") }
+                continue
+            }
+            written += count
+        }
+    }
+
+    /// Everything in `file`, from its start.
+    static func contents(of file: Int32) throws -> [UInt8] {
+        guard lseek(file, 0, SEEK_SET) == 0 else { throw CheckFailure("could not rewind a file of the check's own") }
+        var bytes: [UInt8] = []
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        while true {
+            let count = buffer.withUnsafeMutableBytes { read(file, $0.baseAddress, $0.count) }
+            if count < 0 {
+                guard errno == EINTR else { throw CheckFailure("could not read a file of the check's own") }
+                continue
+            }
+            if count == 0 { return bytes }
+            bytes += buffer[..<count]
+        }
     }
 }

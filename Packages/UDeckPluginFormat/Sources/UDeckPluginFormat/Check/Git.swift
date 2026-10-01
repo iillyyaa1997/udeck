@@ -70,13 +70,25 @@ struct Git {
     }
 
     init(repository: String, inherited: [String: String], extra: [String: String] = [:]) {
-        self.init(repository: repository, trusting: Self.topLevel(of: repository), inherited: inherited, extra: extra)
+        let environment = Self.environment(inherited: inherited, extra: extra)
+        self.init(repository: repository, trusting: Self.topLevel(of: repository, environment: environment),
+                  environment: environment)
     }
 
     /// With `trusted` given rather than found — for tests.
     init(repository: String, trusting trusted: String?, inherited: [String: String], extra: [String: String] = [:]) {
+        self.init(repository: repository, trusting: trusted, environment: Self.environment(inherited: inherited, extra: extra))
+    }
+
+    private init(repository: String, trusting trusted: String?, environment: [String: String]) {
         self.repository = repository
         self.trusted = trusted
+        self.environment = environment
+    }
+
+    /// The environment git runs in: `inherited` less every `GIT_` variable,
+    /// with the check's own, and then `extra`.
+    static func environment(inherited: [String: String], extra: [String: String]) -> [String: String] {
         var environment = inherited.filter { !$0.key.hasPrefix("GIT_") }
         environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
         environment["GIT_CONFIG_NOSYSTEM"] = "1"
@@ -91,28 +103,46 @@ struct Git {
         environment["GIT_ALLOW_PROTOCOL"] = ""
         environment["LC_ALL"] = "C"
         environment.merge(extra) { _, new in new }
-        self.environment = environment
+        return environment
     }
 
-    /// Where git finds the repository that `path` is in, the way git walks up
-    /// to find it: the first folder holding `.git`, or a bare repository
-    /// itself — every link resolved, since that is the path git compares
-    /// `safe.directory` with. Nil when there is none.
-    static func topLevel(of path: String) -> String? {
-        guard let resolved = realpath(path, nil) else { return nil }
-        var folder = String(cString: resolved)
-        free(resolved)
-        let manager = FileManager.default
+    /// Where git finds the repository that `path` is in — every link
+    /// resolved, since that is the path git compares `safe.directory` with —
+    /// as git itself answers it: the top of a working copy, or, where git
+    /// says there is no working tree, the repository itself (a bare one, or
+    /// the `.git` of a working copy when `path` is inside it). A folder that
+    /// merely holds files named like a repository's is not one unless git
+    /// says so. Nil when git finds none.
+    ///
+    /// Until git has found the repository nobody knows which path it will
+    /// compare, so for this one question `safe.directory` is opened for `path`
+    /// and every folder above it: the only paths git can compare for a
+    /// repository it finds from `path`, which is the repository being checked.
+    /// Every command after names only the path git answered.
+    static func topLevel(of path: String, environment: [String: String]) -> String? {
+        func resolved(_ path: String) -> String? {
+            guard let real = realpath(path, nil) else { return nil }
+            defer { free(real) }
+            return String(cString: real)
+        }
+        guard let start = resolved(path) else { return nil }
+        var opened: [String] = []
+        var folder = start
         while true {
-            let inside = folder == "/" ? "/" : folder + "/"
-            if manager.fileExists(atPath: inside + ".git") { return folder }
-            if manager.fileExists(atPath: inside + "HEAD"), manager.fileExists(atPath: inside + "objects"),
-               manager.fileExists(atPath: inside + "refs") {
-                return folder
-            }
-            guard folder != "/", let slash = folder.lastIndex(of: "/") else { return nil }
+            opened += ["-c", "safe.directory=\(folder)"]
+            guard folder != "/", let slash = folder.lastIndex(of: "/") else { break }
             folder = slash == folder.startIndex ? "/" : String(folder[..<slash])
         }
+        // One question a call, so that the answer is the whole of what git
+        // printed, less its line break — a path may hold one of its own.
+        func ask(_ question: String) -> String? {
+            guard let result = try? Subprocess.run(["git"] + switches + opened + ["-C", start, "rev-parse", question],
+                                                   environment: environment),
+                  result.status == 0 else { return nil }
+            return String(decoding: result.output.dropLast(), as: UTF8.self)
+        }
+        guard let found = ask("--show-toplevel") ?? ask("--absolute-git-dir") else { return nil }
+        return resolved(found)
     }
 
     /// Runs git in the repository and answers its whole result, whatever the
@@ -262,9 +292,7 @@ struct Git {
     /// matches a pattern written for folders only.
     func attributes(_ attributes: [String], at commit: String, of paths: [[UInt8]]) throws -> [[UInt8]: [String: String]] {
         guard !paths.isEmpty else { return [:] }
-        let scratch = FileManager.default.temporaryDirectory
-            .appendingPathComponent("udeck-plugin-index-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let scratch = try ScratchFolder.make()
         defer { try? FileManager.default.removeItem(at: scratch) }
         let index = ["GIT_INDEX_FILE": scratch.appendingPathComponent("index").path]
         _ = try run(["read-tree", commit], environment: index)
