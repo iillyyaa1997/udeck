@@ -101,13 +101,18 @@ mkdir -p ~/.udeck/plugins
 cp -R examples/hello-card ~/.udeck/plugins/
 ```
 
-To write one of your own, start from a plugin that already works:
+To write one of your own, start from a plugin that already works, and run it
+the way uDeck will:
 
 ```sh
-Scripts/new-plugin.sh my-first-plugin
+udeck-plugin new my-first-plugin --author "Your Name"
+udeck-plugin check --strict my-first-plugin
+udeck-plugin run my-first-plugin
 ```
 
-and follow **[Writing a plugin](docs/writing-a-plugin.md)** from there.
+`udeck-plugin` is built from this repository —
+`swift build -c release --package-path Packages/UDeckPluginFormat --product udeck-plugin` —
+and **[Writing a plugin](docs/writing-a-plugin.md)** goes on from there.
 
 `~/.udeck` can be moved with the `UDECK_HOME` environment variable.
 

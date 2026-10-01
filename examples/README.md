@@ -27,7 +27,10 @@ The folder is watched: it appears in the panel by itself, with nothing to press.
 ## Write your own
 
 ```sh
-Scripts/new-plugin.sh my-first-plugin
+udeck-plugin new my-first-plugin --author "Your Name"
+udeck-plugin run my-first-plugin
 ```
 
-Then follow [Writing a plugin](../docs/writing-a-plugin.md).
+Then follow [Writing a plugin](../docs/writing-a-plugin.md), which also says
+where `udeck-plugin` comes from. The examples here are held to
+`udeck-plugin check --strict`, with no warning, in CI.

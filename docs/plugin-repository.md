@@ -504,9 +504,10 @@ release that first reads it is told it does nothing; while that release has
 no number yet, that is any version up to the smallest it can have — 0.5.1
 after 0.5.0. A higher one is the author's to set, and is left alone.
 
-> **Later — stage 2.** What a producer *prints* — which row types its cards use
-> — cannot be seen without running it; `udeck-plugin run` sees one card and
-> warns about row types newer than the declared `minUDeck`.
+What a producer *prints* — which row types its cards use — cannot be seen
+without running it, so the check does not see it; `udeck-plugin run` sees one
+card, and warns about any part of it newer than the declared `minUDeck` — or,
+with none declared, newer than the release that first reads `minUDeck`.
 
 > **Later — stage 5.** An older uDeck installs the newest version of the plugin
 > whose `minUDeck` it meets, from the repository's history, instead of refusing.

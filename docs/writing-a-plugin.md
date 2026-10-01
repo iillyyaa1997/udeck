@@ -15,7 +15,7 @@ A folder with two things in it:
 ```
 my-plugin/
   manifest.json   what it is, what it needs, what the operator can change
-  run.sh          prints one JSON object and exits
+  my-plugin.sh    prints one JSON object and exits
 ```
 
 uDeck runs the producer on an interval and draws what it printed. That is the
@@ -27,23 +27,61 @@ uDeck plugin.
 
 ## 2. Make one that already works
 
-```sh
-Scripts/new-plugin.sh my-first-plugin
-```
-
-That writes a working plugin into `~/.udeck/plugins/my-first-plugin/`. Run it
-the way uDeck will, first, before you change anything:
+`udeck-plugin` is the command for writing plugins, built from this repository
+(macOS and Linux; `run` takes a Mac):
 
 ```sh
-~/.udeck/plugins/my-first-plugin/run.sh | python3 -m json.tool
+swift build -c release --package-path Packages/UDeckPluginFormat --product udeck-plugin
+# it is Packages/UDeckPluginFormat/.build/release/udeck-plugin — put it on your PATH
 ```
 
-Then open the panel and add it to a tab. **You do not have to tell uDeck about
-it** — the plugins folder is watched, so it is already in the list.
+Start from a plugin that works:
 
-Change the text it prints, wait five seconds, and watch the card change. That is
-the whole development loop. The ⟳ button on the card runs it on demand when five
-seconds is too long to wait.
+```sh
+udeck-plugin new my-first-plugin --author "Your Name"
+```
+
+That writes `./my-first-plugin/` — or, inside a plugin repository (a folder
+with `udeck-plugins.json` at its top), `plugins/my-first-plugin/` there, with a
+`LICENSE` when the repository's own is the Apache License 2.0: a manifest, a
+Russian translation, a README with the sections a reviewer reads, and an
+executable `my-first-plugin.sh`. It never writes into `~/.udeck`. Before you
+change anything, check it and run it:
+
+```sh
+udeck-plugin check --strict my-first-plugin   # every rule a repository's CI holds it to
+udeck-plugin run my-first-plugin              # run it the way uDeck will
+```
+
+**`run` runs it exactly as uDeck does** — the same code: in its own folder,
+with the environment uDeck builds, not your shell's, under its `timeout`, in a
+process group of its own, with the 1 MiB limit — and prints the card as uDeck
+reads it, how long the run took, how it ended, everything it wrote to standard
+error, and what uDeck would have forgiven without a word: a key it ignores
+(`stat` for `state`, `tll` for `ttl`), a row type it does not draw, what it
+cuts at a limit, a card printed and then a run past the deadline, a file
+written into the plugin's own folder. Its `UDECK_CACHE_DIR` is in a folder made
+for that one run; `--home <folder>` keeps one between runs, and `--lang` and
+`--reason` set `UDECK_LANG` and `UDECK_REFRESH_REASON`. Exit status 0 means
+uDeck would draw the card, 1 that it would show a failure.
+
+Then put it where uDeck looks and add it to a tab:
+
+```sh
+cp -R my-first-plugin ~/.udeck/plugins/
+```
+
+**You do not have to tell uDeck about it** — the plugins folder is watched, so
+it is already in the list. Change the text it prints in the copy there, wait,
+and watch the card change. That is the whole development loop. The ⟳ button on
+the card runs it on demand when the interval is too long to wait.
+
+`udeck-plugin link my-first-plugin` puts a link to the folder into
+`~/.udeck/plugins/` instead of a copy, so that the folder can stay where you
+work on it — in a repository, under git. It links only an id nothing else has
+taken, and it never touches what uDeck installed (`rm` the link to undo it).
+**This release of uDeck does not list a plugin through a link yet**: it skips
+a link in its plugins folder. Until one that reads links, copy the folder.
 
 ---
 
@@ -205,7 +243,8 @@ change that.
 ## 9. What uDeck does when you misbehave
 
 Each of these shows a different, readable message on the card, so you find out
-by looking rather than by guessing:
+by looking rather than by guessing — and `udeck-plugin run` says each the way
+uDeck would, before you install anything:
 
 | What you did | What happens |
 |---|---|
@@ -223,11 +262,13 @@ it, not to wait.
 
 ## 10. Before you ship
 
-- [ ] The folder name equals the manifest's `id`.
-- [ ] `run.sh` is executable (`chmod +x`).
-- [ ] Running it by hand prints exactly one JSON object, and nothing else on
-      stdout.
-- [ ] It prints a valid card when its sources are **missing** — try it with the
+- [ ] `udeck-plugin check --strict` says 0 errors and 0 warnings: the folder
+      name equals the manifest's `id`, the producer is executable, every field
+      is one the contract has, the README and a translation are there.
+- [ ] `udeck-plugin run` draws a card with no warning — one JSON object on
+      stdout and nothing else, inside its `timeout`, writing nothing into its
+      own folder.
+- [ ] It prints a valid card when its sources are **missing** — run it with the
       files renamed away.
 - [ ] `ttl` is about four intervals, and `timeout` is shorter than `interval`.
 - [ ] Every setting has a `label`; the ones whose meaning is not obvious have

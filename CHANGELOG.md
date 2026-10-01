@@ -10,6 +10,38 @@ for what that promises.
 
 ## [Unreleased]
 
+- **`udeck-plugin new`, `run` and `link`: the commands an author works with.**
+  `new <id>` makes a plugin that already works and passes `check --strict`:
+  inside a plugin repository (`udeck-plugins.json` in the folder or above it)
+  as `plugins/<id>/`, anywhere else as `./<id>/`, never in `~/.udeck` — a
+  manifest, a Russian translation, a README with what a reviewer reads, an
+  executable POSIX `sh` producer that builds its JSON safely, and, where the
+  repository's own LICENSE is the Apache License 2.0, a LICENSE of the
+  plugin's own, `Copyright <year> <author>` above that text. The author is
+  `--author` or git's `user.name`. `run <folder>` (a Mac's command) runs the
+  producer once with uDeck's own code — in its folder, with the environment
+  uDeck builds, under its `timeout`, in a process group of its own, with the
+  1 MiB limit, a uDeck folder of its own unless `--home` names one — and says
+  how it ended, how long it took, all of its standard error, the card as uDeck
+  reads it or the failure uDeck would show, and what uDeck would have let pass
+  without a word: a field it ignores (`stat`, `tll`), a row type it does not
+  draw, what it cuts at a limit, a card printed before a run past its
+  deadline, a file written into the plugin's own folder, a part of the card
+  newer than `minUDeck`. `link <folder>` puts a link, `~/.udeck/plugins/<id>`
+  → the folder, for an id nothing else has taken, and never touches
+  `installed.json`; this release of uDeck does not list a plugin through a
+  link yet, and says so. Running a producer moved into the plugin format's
+  package for it — the process group, the deadline, the output limit, the
+  environment, and what a run comes to — on the standard library,
+  FoundationEssentials and Darwin, and uDeck runs every plugin with it, as
+  before: its tests of running plugins are unchanged and pass.
+  `Scripts/new-plugin.sh` is gone, and the guides start from `udeck-plugin`
+  instead; the contract no longer offers `UDECK_HOME` as the way to keep a
+  plugin under version control, and says exactly which variables a card's
+  action gets. CI holds the examples to `udeck-plugin check --strict`, with no
+  warning, instead of a shape check of its own, and fails when the tests leave
+  a `udeck-tests-*` folder behind.
+
 - **The plugin format is a package of its own, and `udeck-plugin` checks
   plugins with it, on a Mac and on Linux.** Stage 2 of
   [docs/plugin-repository.md](docs/plugin-repository.md) begins. Manifests,

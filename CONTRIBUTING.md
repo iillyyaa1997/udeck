@@ -44,6 +44,29 @@ command-line tools — because the panel's surface is `NSGlassEffectView` and a
 type the SDK does not declare cannot be compiled against, guarded or not. What
 you build still runs on macOS 14, where it falls back to a blur.
 
+## Writing a plugin, or an example
+
+A plugin is not a change to uDeck: it is a folder, and the official ones live in
+[`udeck-plugins`](https://github.com/iillyyaa1997/udeck-plugins), which has a
+CONTRIBUTING of its own. What both repositories hold a plugin to is the
+`udeck-plugin` command, built from `Packages/UDeckPluginFormat` here:
+
+```sh
+swift build -c release --package-path Packages/UDeckPluginFormat --product udeck-plugin
+udeck-plugin new my-plugin --author "Your Name"   # a plugin that works, to start from
+udeck-plugin check --strict my-plugin             # every rule a repository's CI holds it to
+udeck-plugin run my-plugin                        # run it as uDeck does, and see what uDeck makes of it
+udeck-plugin link my-plugin                       # into ~/.udeck/plugins, as a link
+```
+
+([Writing a plugin](docs/writing-a-plugin.md) says what each does, and what this
+release of uDeck does not do with a link yet.) The plugins in `examples/` are
+uDeck's test fixtures as well as its documentation, and CI holds every one of
+them to `udeck-plugin check --strict` with no warning — so a new example is
+whatever passes that, not a shape this file has to describe. Do not write into
+`~/.udeck` to try one: `run` needs no install, and a test that needs a uDeck
+folder makes one of its own (`UDECK_HOME`, or `--home` for the command).
+
 ## What a good change looks like
 
 * **A test for anything with a decision in it.** The pointer gesture is driven

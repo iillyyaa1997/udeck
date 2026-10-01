@@ -76,8 +76,14 @@ plugin that shows up saying `run.sh is not executable — try chmod +x` is a
 five-second fix.
 
 `~/.udeck` can be moved by setting `UDECK_HOME`. That is how uDeck's own test
-suite runs against a throwaway directory, and it is a supported way to keep a
-plugin set under version control somewhere else.
+suite runs against a throwaway directory. It is not the way to keep a plugin you
+are writing in a repository: it moves all of uDeck's state with it — layout,
+settings, grants, what was installed — and uDeck started from Finder or at login
+is not started from your shell, so it is not handed a variable set there. The
+way is a link, `~/.udeck/plugins/<id>` → your folder, which
+`udeck-plugin link <folder>` makes for an id nothing else has taken. This
+release of uDeck does not list a plugin through a link yet — see
+[Writing a plugin](writing-a-plugin.md#2-make-one-that-already-works).
 
 ---
 
@@ -274,7 +280,12 @@ operator then reads the path they are agreeing to rather than a name that could
 mean any file on the machine.
 
 The action's environment is built the same way a producer's is — a known search
-path, a UTF-8 locale, and nothing carried over from however uDeck was started.
+path, a UTF-8 locale, and nothing carried over from however uDeck was started —
+with fewer of uDeck's variables in it: `UDECK_API`, `UDECK_PLUGIN_ID` and
+`UDECK_PLUGIN_DIR`, beside `PATH`, `HOME`, `LANG`, `LC_ALL` and `TMPDIR`. No
+`UDECK_CACHE_DIR`, `UDECK_LANG`, `UDECK_APPEARANCE`, `UDECK_REFRESH_REASON` and
+no settings: an action is a command the operator pressed, not a run that
+answers with a card.
 
 `confirm`, when present, asks the operator before running. Use it for anything
 that changes something.
@@ -654,16 +665,31 @@ host being killed mid-poll.
 
 ## Testing your plugin
 
-Run it the way uDeck will, and check that what comes out is a card:
+Run it the way uDeck will, and see what uDeck makes of it:
 
 ```sh
-cd ~/.udeck/plugins/hello
-UDECK_API=1 UDECK_APPEARANCE=dark UDECK_REFRESH_REASON=manual \
-  ./hello.sh | python3 -m json.tool
+udeck-plugin run ~/src/my-plugins/plugins/hello
 ```
 
-Then let uDeck load it: open the panel, add it to a tab, and watch what it says.
-Use the ⟳ button to run it on demand.
+`udeck-plugin run` runs the producer with uDeck's own code: in the plugin's
+folder, with the environment above built the way uDeck builds it — every
+`UDECK_` variable, the search path, and of the shell's own only `HOME` and
+`TMPDIR`, as uDeck passes on its own — under `timeout`, in
+a process group of its own, with the output limit. Then it says how the run
+ended and how long it took, prints all of its standard error, the card as uDeck
+reads it or the failure uDeck would show, in uDeck's words, and what uDeck would
+have let pass without a word: fields it ignores (`stat`, `tll`), row types it
+does not draw, what it cuts to the limits above, a card printed and then a run
+past `timeout`, files the run wrote into the plugin's own folder. It asks for
+no permission; it says what uDeck would ask. `UDECK_CACHE_DIR` is in a folder
+made for the run unless `--home <folder>` names one, whose
+`plugin-settings.json`, if there is one, gives the settings' values;
+`--lang` and `--reason` set `UDECK_LANG` and `UDECK_REFRESH_REASON`. It runs on
+a Mac only: uDeck's way of running a process is the Mac's.
+
+`udeck-plugin check --strict <folder>` holds the folder to every rule a plugin
+repository's CI does. Then let uDeck load it: put it in `~/.udeck/plugins/`,
+add it to a tab, and watch what it says. Use the ⟳ button to run it on demand.
 
 The four plugins in [`examples/`](../examples) are also uDeck's own test
 fixtures: `hello-card` uses every row type, `disk-space` is a real plugin with
