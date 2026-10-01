@@ -122,12 +122,26 @@ enum OfficialRules {
         } else {
             body = lines.dropFirst(2)
         }
-        let digest = SHA256.hash(data: Data(normalised(Array(body)).utf8))
-        if digest.map({ byte in String(byte, radix: 16).count == 1 ? "0\(String(byte, radix: 16))" : String(byte, radix: 16) })
-            .joined() != apacheSHA256 {
+        if !isApache(Array(body)) {
             report.error("16", path, "after the copyright line and a blank line, must hold the unmodified text of the "
                          + "Apache License, Version 2.0 -- copy it from the LICENSE at the top of this repository")
         }
+    }
+
+    /// Whether `lines` are the Apache License 2.0, as `normalised` reads them.
+    static func isApache(_ lines: [Substring.UnicodeScalarView]) -> Bool {
+        let digest = SHA256.hash(data: Data(normalised(lines).utf8))
+        return digest.map({ byte in String(byte, radix: 16).count == 1 ? "0\(String(byte, radix: 16))" : String(byte, radix: 16) })
+            .joined() == apacheSHA256
+    }
+
+    /// Whether the file `content` is the Apache License 2.0 and nothing else
+    /// — what the official repository's own LICENSE is, and what makes
+    /// `udeck-plugin new` give a plugin made there a LICENSE of its own.
+    static func isApache(_ content: [UInt8]) -> Bool {
+        guard StrictJSON.firstInvalidUTF8(content) == nil else { return false }
+        let text = String(decoding: content, as: UTF8.self)
+        return isApache(Array(text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false)))
     }
 
     /// `<holder>` from `Copyright <four digits> <holder>`, or nil.

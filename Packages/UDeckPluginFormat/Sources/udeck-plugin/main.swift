@@ -15,11 +15,15 @@ import Musl
 #endif
 import UDeckPluginCommand
 
-let status = Command.run(
+// `@Sendable`, so that neither closure belongs to the main actor, as anything
+// written at the top of this file otherwise does: `run` calls them from
+// wherever its work goes on, and the runtime says so when a closure of the
+// main actor is called anywhere else.
+let status = await Command.run(
     Array(CommandLine.arguments.dropFirst()),
     environment: ProcessInfo.processInfo.environment,
-    output: { print($0) },
-    errors: { message in
+    output: { @Sendable line in print(line) },
+    errors: { @Sendable message in
         let bytes = Array((message + "\n").utf8)
         _ = bytes.withUnsafeBytes { write(2, $0.baseAddress, $0.count) }
     }

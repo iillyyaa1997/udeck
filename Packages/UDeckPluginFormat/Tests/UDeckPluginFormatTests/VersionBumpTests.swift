@@ -205,7 +205,7 @@ struct VersionBumpTests {
     /// for one that is new. A plugin new on the branch, which the base does
     /// not list at all, still needs nothing.
     @Test("in a clone without blobs, rule 18 says it cannot compare, and a new plugin still needs nothing")
-    func bumpInABloblessClone() throws {
+    func bumpInABloblessClone() async throws {
         let repository = try TestRepository()
         try repository.git("config", "uploadpack.allowFilter", "true")
         try repository.git("checkout", "-q", "-b", "topic")
@@ -262,22 +262,22 @@ struct VersionBumpTests {
                     && "\(error)".hasSuffix("): it is not in this clone — fetch without a blob filter")
             }
         }
-        let command = CommandTests().run("check-repo", "--repo", clone.path, "--base", "origin/main", "--head", "HEAD")
+        let command = await CommandTests().run("check-repo", "--repo", clone.path, "--base", "origin/main", "--head", "HEAD")
         #expect(command.status == 1, "\(command.output)")
     }
 
     // MARK: - From the command line
 
     @Test("check-repo with --base and --head checks versions, and sign-offs as the official repository")
-    func baseAndHead() throws {
+    func baseAndHead() async throws {
         let repository = try TestRepository()
         let base = try repository.git("rev-parse", "HEAD")
         let head = try repository.commit(["plugins/sample/README.md": .text("# Changed\n")], message: "Change\n")
-        let official = CommandTests().run("check-repo", "--official", "--repo", repository.folder.path, "--base", base, "--head", head)
+        let official = await CommandTests().run("check-repo", "--official", "--repo", repository.folder.path, "--base", base, "--head", head)
         #expect(official.status == 1)
         #expect(official.output.filter { $0.hasSuffix("[rule 17]") }.count == 1)
         #expect(official.output.filter { $0.hasSuffix("[rule 18]") }.count == 1)
-        let strict = CommandTests().run("check-repo", "--strict", "--repo=\(repository.folder.path)", "--base=\(base)", "--head=\(head)")
+        let strict = await CommandTests().run("check-repo", "--strict", "--repo=\(repository.folder.path)", "--base=\(base)", "--head=\(head)")
         #expect(strict.output.filter { $0.hasSuffix("[rule 17]") }.isEmpty)
         #expect(strict.output.filter { $0.hasSuffix("[rule 18]") }.count == 1)
     }

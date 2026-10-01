@@ -209,6 +209,71 @@ public enum ContractFeatures {
         return used.filter { registry[$0] != nil }
     }
 
+    /// What a card a producer printed uses of the contract — which only a run
+    /// shows (`udeck-plugin run`): its fields, states, row types, the fields of
+    /// each row, icons, alignments and the fields of its actions. As for a
+    /// manifest, `null` is not used, and what the contract does not define is
+    /// left out.
+    static func used(byCard card: StrictJSON.Object,
+                     registry: [ContractFeature: ContractRelease] = registry) -> Set<ContractFeature> {
+        var used = Set<ContractFeature>()
+        func present(_ object: StrictJSON.Object?) -> [String] {
+            (object?.keys ?? []).filter { object?.first($0)?.isNull == false }
+        }
+        func state(_ value: StrictJSON.Value?) {
+            if let text = value?.string { used.insert(.cardState(text)) }
+        }
+        for field in present(card) { used.insert(.cardField(field)) }
+        state(card.first("state"))
+        for row in card.first("rows")?.array ?? [] {
+            guard let object = row.object, object.keys.count == 1, let kind = object.keys.first else { continue }
+            used.insert(.row(kind))
+            let body = object.first(kind)
+            switch kind {
+            case "kv":
+                if let items = body?.array, items.count > 2 { state(items[2]) }
+            case "list":
+                for item in body?.array ?? [] {
+                    for field in present(item.object) { used.insert(.rowField(row: "list", field: field)) }
+                    if let icon = item.object?.first("icon")?.string { used.insert(.listIcon(icon)) }
+                    state(item.object?.first("state"))
+                }
+            case "table":
+                for field in present(body?.object) { used.insert(.rowField(row: "table", field: field)) }
+                for column in body?.object?.first("columns")?.array ?? [] {
+                    for field in present(column.object) { used.insert(.rowField(row: "table.columns", field: field)) }
+                    if let align = column.object?.first("align")?.string { used.insert(.tableAlignment(align)) }
+                }
+            default:
+                for field in present(body?.object) { used.insert(.rowField(row: kind, field: field)) }
+                state(body?.object?.first("state"))
+            }
+        }
+        for action in card.first("actions")?.array ?? [] {
+            for field in present(action.object) { used.insert(.actionField(field)) }
+        }
+        return used.filter { registry[$0] != nil }
+    }
+
+    /// What `udeck-plugin run` says of a card that uses more than the
+    /// manifest's `minUDeck` promises: the same reckoning as rule 19, for what
+    /// only a run shows. Nil when the card asks nothing of uDeck that every
+    /// uDeck the plugin installs on has.
+    static func cardNeedsNewerUDeck(_ card: StrictJSON.Object, minUDeck declaredText: String?,
+                                    registry: [ContractFeature: ContractRelease] = registry) -> String? {
+        let needed = minimum(for: used(byCard: card, registry: registry), registry: registry)
+        guard let feature = needed.because else { return nil }
+        let because = "the card uses \(feature), which \(needed.release) brought"
+        if let declaredText, let declared = SemanticVersion(declaredText) {
+            guard !needed.release.isMet(by: declared) else { return nil }
+            return "\(because), and \"minUDeck\" is \(declared): an older uDeck would install the plugin and not "
+                + "draw that"
+        }
+        guard needed.release > readFrom(registry) else { return nil }
+        return "\(because), and the manifest has no \"minUDeck\": an older uDeck would install the plugin and not "
+            + "draw that"
+    }
+
     /// The lowest release that has all of `features`, and the feature that
     /// decides it — nil when that is the first release anyway.
     static func minimum(for features: Set<ContractFeature>, registry: [ContractFeature: ContractRelease] = registry)

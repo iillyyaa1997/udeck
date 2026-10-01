@@ -1,23 +1,36 @@
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
+import Foundation
+#endif
 import UDeckPluginFormat
 
 /// `udeck-plugin`: its arguments, what it prints, and how it exits.
 ///
 /// Arguments are read here, by hand, rather than through
-/// swift-argument-parser: two commands and five options do not need a
+/// swift-argument-parser: five commands and a dozen options do not need a
 /// dependency, and the binary a repository's CI downloads stays small.
 ///
 /// Exit status, as the Python check had it: 0 when there are no errors
 /// (warnings do not fail a check), 1 when there are, and 2 when nothing could
 /// be checked — a repository that is not one, a git that is not there, or
-/// arguments that make no sense. Two is never "checked and fine".
+/// arguments that make no sense. Two is never "checked and fine". The other
+/// commands keep to the same three: `new` and `link` are 0 when done, 1 when
+/// what they would make is in the way, 2 for a request that makes no sense;
+/// `run` is 0 when uDeck would draw the card, 1 when it would show a failure,
+/// and 2 when it would not run the plugin at all.
 public enum Command {
     public static let usage = """
         usage: udeck-plugin check [--strict] <folder>...
                udeck-plugin check-repo [--repo <path>] [--strict] [--official] [--base <rev> --head <rev>]
+               udeck-plugin new <id> [--name <name>] [--author <name>] [--description <text>]
+               udeck-plugin run <folder> [--home <folder>] [--lang <code>] [--reason interval|manual|launch]
+               udeck-plugin link <folder> [--home <folder>]
                udeck-plugin --version | --help
 
-        Checks uDeck plugins against the plugin repository format
-        (docs/plugin-repository.md in uDeck).
+        Checks, makes, runs and links uDeck plugins, by the plugin contract and the
+        plugin repository format (docs/plugin-api.md, docs/plugin-repository.md in
+        uDeck).
 
           check         a plugin folder, or a link to one: through git, as
                         committed, when it is committed in a working copy; from
@@ -37,17 +50,46 @@ public enum Command {
                         clone does not have it.
           --repo <path> the repository (default: the current folder)
 
+          new           a plugin that works and passes check --strict: in a plugin
+                        repository (udeck-plugins.json here or above) as
+                        plugins/<id>/, anywhere else as ./<id>/; with a LICENSE when
+                        the repository's own is the Apache License 2.0. --author
+                        defaults to git's user.name
+          run           the plugin's producer, once, as uDeck runs it (a Mac's
+                        command): its folder, uDeck's environment, its timeout and
+                        process group, the 1 MiB limit; then the card as uDeck reads
+                        it, how long it took, how it ended, all of its stderr, and
+                        what uDeck would have forgiven without a word
+          --home <folder>
+                        uDeck's folder: for run, where UDECK_CACHE_DIR is
+                        (<home>/cache/<id>) and the settings' values are read from
+                        (<home>/plugin-settings.json) -- default, a new folder for
+                        the run alone; for link, where the link goes
+                        (<home>/plugins/<id>) -- default ~/.udeck
+          --lang <code> UDECK_LANG for run (default: en)
+          --reason <why>
+                        UDECK_REFRESH_REASON for run (default: interval)
+          link          the folder into uDeck as <home>/plugins/<id>, a link, while
+                        you work on it: only for an id that is free, and never
+                        touching installed.json. rm the link to undo it
+
         Exit status: 0 no errors (warnings do not fail), 1 errors, 2 could not check.
+        new and link: 0 done, 1 in the way, 2 wrong request. run: 0 a card, 1 a
+        failure, 2 not run.
         """
 
     /// Runs `udeck-plugin` with `arguments`, the program's own name left out.
-    public static func run(_ arguments: [String], environment: [String: String],
-                           output: (String) -> Void, errors: (String) -> Void) -> Int32 {
+    /// `new`, `run` and `link` read a relative path from `currentDirectory`,
+    /// the process's own when nil; `check` and `check-repo` read theirs as
+    /// the process does, and say them as given.
+    public static func run(_ arguments: [String], environment: [String: String], currentDirectory: String? = nil,
+                           output: (String) -> Void, errors: (String) -> Void) async -> Int32 {
         guard let command = arguments.first else {
             errors(usage)
             return 2
         }
         let rest = Array(arguments.dropFirst())
+        let here = currentDirectory ?? FileManager.default.currentDirectoryPath
         switch command {
         case "--version", "-V", "version":
             output("udeck-plugin \(UDeckRelease.version)")
@@ -61,13 +103,26 @@ public enum Command {
         case "check-repo":
             RepositoryCheck.sweepTemporaryFolder()
             return checkRepository(rest, environment: environment, output: output, errors: errors)
-        case "new", "run", "link", "pin":
+        case "new":
+            return makePlugin(rest, environment: environment, here: here, output: output, errors: errors)
+        case "run":
+            RepositoryCheck.sweepTemporaryFolder()
+            return await runPlugin(rest, environment: environment, here: here, output: output, errors: errors)
+        case "link":
+            return linkPlugin(rest, environment: environment, here: here, output: output, errors: errors)
+        case "pin":
             errors("udeck-plugin \(command): not in this release")
             return 2
         default:
             errors("udeck-plugin: there is no command \"\(command)\"\n\n\(usage)")
             return 2
         }
+    }
+
+    /// `path`, read from `here` when it is relative.
+    static func absolute(_ path: String, from here: String) -> URL {
+        let full = path.hasPrefix("/") ? path : (here.hasSuffix("/") ? here : here + "/") + path
+        return URL(fileURLWithPath: full).standardizedFileURL
     }
 
     /// Options and what is left, read from `arguments`: `--name value`,

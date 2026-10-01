@@ -353,7 +353,7 @@ struct RepositoryCheckTests {
     /// clone does not hold is a check that could not be made — not a passport
     /// that is not JSON, nor a submodule.
     @Test("a passport that is not in the clone is a check that could not be made, in every layer")
-    func passportNotInTheClone() throws {
+    func passportNotInTheClone() async throws {
         let repository = try TestRepository()
         let blob = try repository.git("rev-parse", "HEAD:udeck-plugins.json")
         try FileManager.default.removeItem(at: repository.folder.appendingPathComponent(
@@ -365,7 +365,7 @@ struct RepositoryCheckTests {
             #expect { try repository.check(mode) } throws: { "\($0)" == said }
         }
         for flag in [[], ["--strict"], ["--official"]] {
-            let result = CommandTests().run(["check-repo", "--repo", repository.folder.path] + flag)
+            let result = await CommandTests().run(["check-repo", "--repo", repository.folder.path] + flag)
             #expect(result.status == 2, "\(flag)")
             #expect(result.output == ["could not check: \(said)"], "\(flag)")
         }
