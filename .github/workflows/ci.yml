@@ -42,6 +42,29 @@ jobs:
         working-directory: Packages/UDeckPluginFormat
         run: swift test --filter UDeckPluginFormatTimingTests
 
+      # Every test takes away the temporary folder it made — a
+      # `TemporaryDirectory`, kept alive for as long as the folder is used. One
+      # that let it go too early left the folder behind on every run, and
+      # 91,193 of them piled up on one Mac before anybody looked. A folder left
+      # here is that leak back.
+      - name: Check that the tests left no temporary folders behind
+        run: |
+          set -eu
+          # TMPDIR, and on a Mac the user's temporary folder, where Foundation
+          # puts them even when TMPDIR names another.
+          left=0
+          for dir in "${TMPDIR:-/tmp}" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"; do
+            if [ -z "$dir" ] || [ ! -d "$dir" ]; then continue; fi
+            found=$(find "$dir" -maxdepth 1 -name 'udeck-tests-*' | wc -l | tr -d ' ')
+            if [ "$found" -ne 0 ]; then
+              echo "the tests left $found udeck-tests-* folders in $dir:" >&2
+              find "$dir" -maxdepth 1 -name 'udeck-tests-*' | head -20 >&2
+              left=$((left + found))
+            fi
+          done
+          test "$left" -eq 0
+          echo "no udeck-tests-* folder left behind"
+
       # The lab in e2e/ drives real machines, and hosted runners have no nested
       # virtualisation — but its own tests need neither Tart nor a machine, and
       # they are the ones worth running everywhere: what they cover is the
@@ -59,29 +82,21 @@ jobs:
           "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest e2e/tests -q -p no:cacheprovider
 
       # The examples are documentation and test fixtures at once, so they are
-      # held to one shape: a manifest, at least one translation beside it, a
-      # README saying what the example is for, and an executable producer.
-      # Without this the shape is a convention, and a convention is whatever the
-      # last person to add an example happened to do.
-      - name: Check that the example plugins are all the same shape
+      # held to what any plugin repository's CI holds a plugin to — by the same
+      # command, `udeck-plugin check --strict`, rather than a list of shapes of
+      # this workflow's own: a manifest uDeck reads with no field the contract
+      # lacks, translations that parse, a README, a producer committed as
+      # executable. And with no warning either, so that a missing translation
+      # (rule 11) still fails here: an example is what a plugin should look like.
+      - name: Check the example plugins as a plugin repository's CI would
         run: |
           set -euo pipefail
-          for plugin in examples/*/; do
-            name=$(basename "$plugin")
-            test -f "$plugin/manifest.json" || { echo "$name: no manifest.json"; exit 1; }
-            python3 -c "import json; json.load(open('$plugin/manifest.json'))"
-            test -f "$plugin/README.md" || { echo "$name: no README.md"; exit 1; }
-            translations=$(ls "$plugin"manifest.*.json 2>/dev/null | wc -l)
-            test "$translations" -ge 1 || { echo "$name: no manifest.<lang>.json"; exit 1; }
-            for translation in "$plugin"manifest.*.json; do
-              python3 -c "import json; json.load(open('$translation'))"
-            done
-            run=$(python3 -c "import json; print(json.load(open('$plugin/manifest.json'))['run'][0])")
-            case "$run" in
-              ./*) test -x "$plugin${run#./}" || { echo "$name: $run is not executable"; exit 1; } ;;
-            esac
-            echo "$name: manifest, $translations translation(s), README, executable producer"
-          done
+          swift build --package-path Packages/UDeckPluginFormat --product udeck-plugin
+          bin=$(swift build --package-path Packages/UDeckPluginFormat --show-bin-path)
+          "$bin/udeck-plugin" check --strict examples/*/ | tee .build/examples-check.txt
+          examples=$(ls -d examples/*/ | wc -l | tr -d ' ')
+          clean=$(grep -c '^checked examples/.* at [0-9a-f]\{12\} strictly: 0 errors, 0 warnings$' .build/examples-check.txt || true)
+          test "$clean" -eq "$examples"
 
       # Whichever examples carry a Python suite, rather than a name that has
       # to be edited here every time the example set changes.
@@ -143,6 +158,25 @@ jobs:
       # there; the image has it.
       - name: Test
         run: swift test
+
+      # As on the Mac: every test takes away the temporary folder it made.
+      - name: Check that the tests left no temporary folders behind
+        run: |
+          set -eu
+          # TMPDIR, and on a Mac the user's temporary folder, where Foundation
+          # puts them even when TMPDIR names another.
+          left=0
+          for dir in "${TMPDIR:-/tmp}" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"; do
+            if [ -z "$dir" ] || [ ! -d "$dir" ]; then continue; fi
+            found=$(find "$dir" -maxdepth 1 -name 'udeck-tests-*' | wc -l | tr -d ' ')
+            if [ "$found" -ne 0 ]; then
+              echo "the tests left $found udeck-tests-* folders in $dir:" >&2
+              find "$dir" -maxdepth 1 -name 'udeck-tests-*' | head -20 >&2
+              left=$((left + found))
+            fi
+          done
+          test "$left" -eq 0
+          echo "no udeck-tests-* folder left behind"
 
       - name: Install the Static Linux SDK
         run: swift sdk install "$STATIC_SDK_URL" --checksum "$STATIC_SDK_CHECKSUM"
