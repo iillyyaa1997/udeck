@@ -477,7 +477,8 @@ struct RepositoryCheckTests {
 
     /// The paths in a folder are found by halving rather than by reading every
     /// path for every folder — and found exactly as before, by Swift's
-    /// comparison of characters, whatever the bytes.
+    /// comparison of their bytes — the same on every platform, whatever the
+    /// characters.
     @Test("a folder's entries are what comparing every path finds")
     func entriesFoundByHalving() {
         let names = ["a", "K", "\u{212A}", "k", ";", "\u{37E}", "`", "\u{1FEF}", "e\u{301}", "\u{E9}", "\u{301}", "/",
@@ -498,17 +499,22 @@ struct RepositoryCheckTests {
         }
         let tree = Tree(source: .disk(URL(fileURLWithPath: "/nonexistent"), as: "p"), entries: entries)
         let folders = [""] + names.map { "p/\($0)" } + names + ["p", "p/e\u{301}", "p/\u{212A}", "p/K"]
+        let slash = UInt8(ascii: "/")
         for folder in folders {
-            let prefix = folder.isEmpty ? "" : folder + "/"
+            let prefix = folder.isEmpty ? [] : Array(folder.utf8) + [slash]
             let children = tree.ordered.filter {
-                $0.path.hasPrefix(prefix) && !$0.path.dropFirst(prefix.count).contains("/") && $0.path != folder
+                $0.rawPath.starts(with: prefix) && $0.rawPath.count > prefix.count
+                    && !$0.rawPath.dropFirst(prefix.count).contains(slash)
             }
             #expect(tree.children(of: folder).map(\.rawPath) == children.map(\.rawPath), "children of \(folder.debugDescription)")
-            let under = tree.ordered.filter { $0.path.hasPrefix(folder + "/") }
+            let under = tree.ordered.filter { $0.rawPath.starts(with: Array(folder.utf8) + [slash]) }
             #expect(tree.under(folder).map(\.rawPath) == under.map(\.rawPath), "under \(folder.debugDescription)")
         }
-        #expect(tree.under("p/\u{212A}").count == tree.under("p/K").count && !tree.under("p/K").isEmpty,
-                "the Kelvin sign is K to Swift")
+        // The Kelvin sign is not K, to git or to the Python check; nor is a
+        // combining mark after a slash anything but a name of its own.
+        #expect(!tree.under("p/K").isEmpty && !tree.under("p/\u{212A}").isEmpty)
+        #expect(Set(tree.under("p/K").map(\.rawPath)).isDisjoint(with: tree.under("p/\u{212A}").map(\.rawPath)))
+        #expect(tree.children(of: "p").contains { $0.rawPath == Array("p/\u{301}".utf8) })
     }
 
     /// git refuses a repository another user owns; a CI container running as

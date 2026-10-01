@@ -69,32 +69,32 @@ final class Tree {
     }
 
     /// What is directly inside `folder` ("" for the top).
+    ///
+    /// Paths are compared as git stores them, byte for byte — as the Python
+    /// check compared them, code point for code point — and never as Swift
+    /// compares characters, which takes the Kelvin sign for `K` and a `/`
+    /// followed by a combining mark for no `/` at all, and gave Linux and a
+    /// Mac different answers for the same paths.
     func children(of folder: String) -> [TreeEntry] {
-        let prefix = folder.isEmpty ? "" : folder + "/"
-        return startingWith(prefix).filter {
-            $0.path.hasPrefix(prefix) && !$0.path.dropFirst(prefix.count).contains("/") && $0.path != folder
+        let prefix = folder.isEmpty ? [] : Array(folder.utf8) + [Self.slash]
+        return startingWith(prefix).filter { entry in
+            entry.rawPath.count > prefix.count && !entry.rawPath[prefix.count...].contains(Self.slash)
         }
     }
 
     /// Everything inside `folder`, at any depth.
     func under(_ folder: String) -> [TreeEntry] {
-        startingWith(folder + "/").filter { $0.path.hasPrefix(folder + "/") }
+        Array(startingWith(Array(folder.utf8) + [Self.slash]))
     }
 
-    /// The entries that can start with `prefix`, for the filters above to
-    /// decide on — found by halving, so that asking about each of a
+    static let slash = UInt8(ascii: "/")
+
+    /// The entries whose path starts with `prefix`, found by halving:
+    /// `ordered` is in the order of the paths' bytes, where the paths that
+    /// start with the same bytes stand together — so asking about each of a
     /// repository's thousand plugin folders does not read every path a
-    /// thousand times. `ordered` is in the order of the paths' bytes, where
-    /// the paths that start with the same bytes stand together; and a path
-    /// that starts with a run of ASCII characters, to Swift's comparison of
-    /// characters, starts with their bytes. A prefix of any other character
-    /// could be spelled with other bytes — `é` is one code point or two — and
-    /// so could three ASCII ones, which Unicode gives a second code point
-    /// each: `K` (the Kelvin sign), `;` and `` ` ``. Such a prefix gets every
-    /// entry.
-    private func startingWith(_ prefix: String) -> ArraySlice<TreeEntry> {
-        let bytes = Array(prefix.utf8)
-        guard bytes.allSatisfy({ $0 < 0x80 && !Self.spelledTwice.contains($0) }) else { return ordered[...] }
+    /// thousand times.
+    private func startingWith(_ prefix: [UInt8]) -> ArraySlice<TreeEntry> {
         func first(from start: Int, where isPast: (TreeEntry) -> Bool) -> Int {
             var low = start
             var high = ordered.count
@@ -104,13 +104,10 @@ final class Tree {
             }
             return low
         }
-        let start = first(from: 0) { !$0.rawPath.lexicographicallyPrecedes(bytes) }
-        let end = first(from: start) { !$0.rawPath.starts(with: bytes) }
+        let start = first(from: 0) { !$0.rawPath.lexicographicallyPrecedes(prefix) }
+        let end = first(from: start) { !$0.rawPath.starts(with: prefix) }
         return ordered[start ..< end]
     }
-
-    /// The ASCII characters another code point is canonically equivalent to.
-    static let spelledTwice: Set<UInt8> = [UInt8(ascii: "K"), UInt8(ascii: ";"), UInt8(ascii: "`")]
 
     /// Reads the contents of these files, once each. A file the commit lists
     /// and the clone does not hold — a partial clone leaves blobs out, and
