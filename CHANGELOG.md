@@ -33,7 +33,8 @@ for what that promises.
   cannot decode is rule 3 — and `restart`, which the contract does not
   describe, is rule 12 under `--strict`, as it was. Held to a frozen corpus of
   what the Python check said about 273 repositories: all 273 agree, three of
-  them as their divergence says.
+  them as their divergence says. A repository is checked in time proportional
+  to its plugin folders.
 
   Two rules are new. **Rule 18**: whenever anything in a plugin's folder
   changed, its `version` went up — against `--base`, the target branch's tip,

@@ -1337,11 +1337,14 @@ never the network. What they cover:
   long;
 * the repository check: the corpus of what the Python check said about 273
   repositories, replayed in every layer, and the words of every finding; rule
-  18 against a base, against the commit before, in a clone of one commit and
-  without a common history; rule 19 against a registry every part of the
-  contract is dated in; and git reading a repository whose configuration names
-  a clean filter, a partial clone's fetch over `ssh`, or another owner, without
-  running anything;
+  18 against a base, against the commit before, in a clone of one commit,
+  without a common history and in a clone without blobs; rule 19 against a
+  registry every part of the contract is dated in; git reading a repository
+  whose configuration names a clean filter, a partial clone's fetch over
+  `ssh`, or another owner, without running anything — and another owner's
+  plugin folder that holds files named like a bare repository's; and the time
+  a check takes, four times the plugin folders taking about four times as
+  long;
 * git hashing, against vectors made with `git hash-object` and `git mktree` —
   including one frozen copy of `examples/hello-card` from `f5a0ca3`, whose tree
   is `44fccaa893276f9d6ee963108fb0a66f59534351`;

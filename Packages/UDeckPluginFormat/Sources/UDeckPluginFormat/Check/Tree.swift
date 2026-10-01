@@ -71,13 +71,46 @@ final class Tree {
     /// What is directly inside `folder` ("" for the top).
     func children(of folder: String) -> [TreeEntry] {
         let prefix = folder.isEmpty ? "" : folder + "/"
-        return ordered.filter { $0.path.hasPrefix(prefix) && !$0.path.dropFirst(prefix.count).contains("/") && $0.path != folder }
+        return startingWith(prefix).filter {
+            $0.path.hasPrefix(prefix) && !$0.path.dropFirst(prefix.count).contains("/") && $0.path != folder
+        }
     }
 
     /// Everything inside `folder`, at any depth.
     func under(_ folder: String) -> [TreeEntry] {
-        ordered.filter { $0.path.hasPrefix(folder + "/") }
+        startingWith(folder + "/").filter { $0.path.hasPrefix(folder + "/") }
     }
+
+    /// The entries that can start with `prefix`, for the filters above to
+    /// decide on — found by halving, so that asking about each of a
+    /// repository's thousand plugin folders does not read every path a
+    /// thousand times. `ordered` is in the order of the paths' bytes, where
+    /// the paths that start with the same bytes stand together; and a path
+    /// that starts with a run of ASCII characters, to Swift's comparison of
+    /// characters, starts with their bytes. A prefix of any other character
+    /// could be spelled with other bytes — `é` is one code point or two — and
+    /// so could three ASCII ones, which Unicode gives a second code point
+    /// each: `K` (the Kelvin sign), `;` and `` ` ``. Such a prefix gets every
+    /// entry.
+    private func startingWith(_ prefix: String) -> ArraySlice<TreeEntry> {
+        let bytes = Array(prefix.utf8)
+        guard bytes.allSatisfy({ $0 < 0x80 && !Self.spelledTwice.contains($0) }) else { return ordered[...] }
+        func first(from start: Int, where isPast: (TreeEntry) -> Bool) -> Int {
+            var low = start
+            var high = ordered.count
+            while low < high {
+                let middle = (low + high) / 2
+                if isPast(ordered[middle]) { high = middle } else { low = middle + 1 }
+            }
+            return low
+        }
+        let start = first(from: 0) { !$0.rawPath.lexicographicallyPrecedes(bytes) }
+        let end = first(from: start) { !$0.rawPath.starts(with: bytes) }
+        return ordered[start ..< end]
+    }
+
+    /// The ASCII characters another code point is canonically equivalent to.
+    static let spelledTwice: Set<UInt8> = [UInt8(ascii: "K"), UInt8(ascii: ";"), UInt8(ascii: "`")]
 
     /// Reads the contents of these files, once each. A file the commit lists
     /// and the clone does not hold — a partial clone leaves blobs out, and

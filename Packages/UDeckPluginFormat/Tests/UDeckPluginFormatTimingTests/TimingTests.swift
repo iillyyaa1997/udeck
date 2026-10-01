@@ -92,6 +92,73 @@ struct TimingTests {
         #expect(large.first("k0064000") == nil)
     }
 
+    /// A repository of `count` plugin folders, each a manifest, a script and
+    /// a README, in one commit made by `git fast-import` — answering where.
+    static func repository(_ count: Int, in scratch: URL) throws -> URL {
+        let folder = scratch.appendingPathComponent("repository-\(count)", isDirectory: true)
+        var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("GIT_") }
+        environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        environment["GIT_CONFIG_NOSYSTEM"] = "1"
+        func git(_ arguments: [String], input: [UInt8] = []) throws {
+            let result = try Subprocess.run(["git", "-C", folder.path] + arguments, environment: environment, input: input)
+            guard result.status == 0 else {
+                throw CheckFailure("git \(arguments.first ?? ""): \(String(decoding: result.errors, as: UTF8.self))")
+            }
+        }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try git(["init", "-q", "-b", "main"])
+        var stream: [UInt8] = []
+        func data(_ text: String) { stream += Array("data \(text.utf8.count)\n\(text)\n".utf8) }
+        stream += Array("blob\nmark :1\n".utf8)
+        data("#!/bin/sh\necho '{}'\n")
+        stream += Array("blob\nmark :2\n".utf8)
+        data("# A plugin\n")
+        stream += Array("commit refs/heads/main\ncommitter Ada <ada@example.com> 1790000000 +0000\n".utf8)
+        data("Many plugins")
+        stream += Array("M 100644 inline udeck-plugins.json\n".utf8)
+        data(#"{"format": 1, "name": "Many"}"#)
+        for index in 0 ..< count {
+            let id = "p\(index)"
+            stream += Array("M 100755 :1 plugins/\(id)/run.sh\nM 100644 :2 plugins/\(id)/README.md\n".utf8)
+            stream += Array("M 100644 inline plugins/\(id)/manifest.json\n".utf8)
+            data(#"{"id": "\#(id)", "name": "P", "version": "1.0.0", "api": 1, "kind": "poll", "run": ["./run.sh"], "interval": 5, "timeout": 2}"#)
+        }
+        try git(["fast-import", "--quiet"], input: stream)
+        return folder
+    }
+
+    /// Each plugin folder's entries used to be found by reading every path in
+    /// the repository, three times over, so a repository of 8,000 plugins
+    /// took over twelve times as long to check as one of 2,000. They are found
+    /// by halving now: four times the plugins take about four times as long.
+    @Test("a repository is checked in time proportional to its plugin folders, not to their square")
+    func repositoryIsLinear() throws {
+        let scratch = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("udeck-timing-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let small = try Self.repository(1_000, in: scratch)
+        let large = try Self.repository(4_000, in: scratch)
+        var options = RepositoryCheck.Options(mode: .installable)
+        options.gitEnvironment["GIT_CEILING_DIRECTORIES"] = scratch.path
+        func check(_ folder: URL, _ count: Int) {
+            do {
+                let report = try RepositoryCheck.repository(folder.path, options: options)
+                #expect(report.pluginFolders == count)
+                #expect(report.findings.isEmpty, "\(report.findings.prefix(3))")
+            } catch {
+                Issue.record("\(error)")
+            }
+        }
+        var smallTime = Double.infinity
+        var largeTime = Double.infinity
+        for _ in 0 ..< 3 {
+            smallTime = min(smallTime, Self.fastest(1) { check(small, 1_000) })
+            largeTime = min(largeTime, Self.fastest(1) { check(large, 4_000) })
+        }
+        #expect(largeTime / smallTime < 6, "\(smallTime) s, then \(largeTime) s for four times as many plugins")
+        #expect(largeTime < 60, "\(largeTime) s for 4,000 plugins")
+    }
+
     /// The strict check asks a translation for every setting it translates;
     /// with fields found at once, four times the settings take about four
     /// times as long.

@@ -450,6 +450,42 @@ struct RepositoryCheckTests {
         #expect(UUID(uuidString: String(made.lastPathComponent.dropFirst("udeck-plugin-index-\(alive)-".count))) != nil)
     }
 
+    /// The paths in a folder are found by halving rather than by reading every
+    /// path for every folder — and found exactly as before, by Swift's
+    /// comparison of characters, whatever the bytes.
+    @Test("a folder's entries are what comparing every path finds")
+    func entriesFoundByHalving() {
+        let names = ["a", "K", "\u{212A}", "k", ";", "\u{37E}", "`", "\u{1FEF}", "e\u{301}", "\u{E9}", "\u{301}", "/",
+                     ".", "-", "0", "~", "\u{7F}", "\u{80}", "\u{FFFD}", "x\u{600}", "\u{1F600}", "zz"]
+        var paths = Set<[UInt8]>()
+        for first in names {
+            for second in names.prefix(12) {
+                paths.insert(Array("p/\(first)".utf8))
+                paths.insert(Array("p/\(first)/\(second)".utf8))
+                paths.insert(Array("\(first)/\(second)".utf8))
+                paths.insert(Array("p/\(first)\(second)".utf8))
+            }
+        }
+        paths.insert([0x70, 0x2F, 0xFF, 0x2F, 0x61]) // not UTF-8
+        paths.insert([0x70, 0x2F, 0xC3])
+        let entries = paths.map { raw in
+            TreeEntry(path: String(decoding: raw, as: UTF8.self), rawPath: raw, mode: TreeEntry.file, kind: .blob, id: "")
+        }
+        let tree = Tree(source: .disk(URL(fileURLWithPath: "/nonexistent"), as: "p"), entries: entries)
+        let folders = [""] + names.map { "p/\($0)" } + names + ["p", "p/e\u{301}", "p/\u{212A}", "p/K"]
+        for folder in folders {
+            let prefix = folder.isEmpty ? "" : folder + "/"
+            let children = tree.ordered.filter {
+                $0.path.hasPrefix(prefix) && !$0.path.dropFirst(prefix.count).contains("/") && $0.path != folder
+            }
+            #expect(tree.children(of: folder).map(\.rawPath) == children.map(\.rawPath), "children of \(folder.debugDescription)")
+            let under = tree.ordered.filter { $0.path.hasPrefix(folder + "/") }
+            #expect(tree.under(folder).map(\.rawPath) == under.map(\.rawPath), "under \(folder.debugDescription)")
+        }
+        #expect(tree.under("p/\u{212A}").count == tree.under("p/K").count && !tree.under("p/K").isEmpty,
+                "the Kelvin sign is K to Swift")
+    }
+
     /// git refuses a repository another user owns; a CI container running as
     /// root over a runner's checkout is one. The check opens that refusal for
     /// the one repository it reads, by the path git compares, and no other.

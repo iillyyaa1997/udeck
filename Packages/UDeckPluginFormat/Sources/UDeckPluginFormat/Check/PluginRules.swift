@@ -29,7 +29,7 @@ enum PluginRules {
             ListedEntry(path: String($0.path.dropFirst(folder.count + 1)), mode: $0.mode, sha: $0.id, size: $0.size)
         })
 
-        listingRules(folder, id: id, listing: listing, tree: tree, report: &report)
+        listingRules(folder, id: id, listing: listing, entries: entries, tree: tree, report: &report)
 
         // Rule 9: a pointer instead of the file.
         for entry in entries {
@@ -105,7 +105,8 @@ enum PluginRules {
 
     // MARK: - Rules 6, 7 and 8: uDeck's, from the listing
 
-    static func listingRules(_ folder: String, id: String, listing: PluginListing, tree: Tree,
+    /// `entries` is everything in the folder, as `tree.under(folder)` has it.
+    static func listingRules(_ folder: String, id: String, listing: PluginListing, entries: [TreeEntry], tree: Tree,
                              report: inout CheckReport) {
         // uDeck names paths `plugins/<id>/…`; here the folder may sit anywhere.
         let uDeckBase = "\(CommitListing.pluginsFolder)/\(id)"
@@ -174,8 +175,11 @@ enum PluginRules {
             }
         }
         // One finding for depth, at the first folder too deep: every file and
-        // folder below it is too deep for the same reason.
-        if let deepest = tree.ordered.first(where: { $0.kind == .tree && tooDeep.contains($0.path) }) ?? tooDeep.first.flatMap({ tree.entries[$0] }) {
+        // folder below it is too deep for the same reason. Each path too deep
+        // is one of the folder's own entries, so they are where to look.
+        let deep = Set(tooDeep)
+        if !deep.isEmpty,
+           let deepest = entries.first(where: { $0.kind == .tree && deep.contains($0.path) }) ?? tooDeep.first.flatMap({ tree.entries[$0] }) {
             let depth = deepest.path.dropFirst(folder.count + 1).split(separator: "/").count
             sizes.append(finding("8", deepest.path, "is nested \(depth) folders deep; at most \(RepositoryRules.maximumDepth)"))
         }
