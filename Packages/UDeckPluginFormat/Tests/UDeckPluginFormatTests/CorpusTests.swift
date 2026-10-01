@@ -175,8 +175,14 @@ struct CorpusTests {
     @Test("strict never passes what uDeck would refuse", arguments: Corpus.loaded?.cases ?? [])
     func strictHoldsWhatInstallableHolds(_ item: Corpus.Case) throws {
         let corpus = try corpus()
-        let installable = try CorpusReplay.run(item, of: corpus, in: TemporaryDirectory().url, mode: .installable)
-        let strict = try CorpusReplay.run(item, of: corpus, in: TemporaryDirectory().url, mode: .strict)
+        // Each folder held for as long as its check runs: `TemporaryDirectory().url`
+        // would let the folder go — and remove it — before the check made it
+        // again, leaving it behind for nobody to take away.
+        let first = TemporaryDirectory()
+        let second = TemporaryDirectory()
+        let installable = try CorpusReplay.run(item, of: corpus, in: first.url, mode: .installable)
+        let strict = try CorpusReplay.run(item, of: corpus, in: second.url, mode: .strict)
+        withExtendedLifetime((first, second)) {}
         if installable.exit != 0 { #expect(strict.exit == installable.exit, "installable \(installable), strict \(strict)") }
         Self.inWords(installable, item)
         Self.inWords(strict, item)
