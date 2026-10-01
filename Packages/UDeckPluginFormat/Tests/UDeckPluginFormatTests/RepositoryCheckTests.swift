@@ -80,9 +80,11 @@ struct RepositoryCheckTests {
     /// rule 3, not only an unknown field.
     @Test("the two places the Python check was wrong are right in every layer")
     func pythonsTwoMistakes() throws {
-        for mode in [CheckMode.installable, .strict] {
+        for (mode, said) in [(CheckMode.installable, "climbs out of the plugin folder"), (.strict, "leaves the plugin folder on its way")] {
             let climbing = try TestRepository([Self.manifest: try TestRepository.manifest(["run": ["sub/../../sample/run.sh"]])])
             #expect(try climbing.check(mode).keys == ["error 5 \(Self.manifest)"], "\(mode)")
+            #expect(try climbing.check(mode).findings.map(\.message) == ["\"run\" starts with \"sub/../../sample/run.sh\", which \(said)"],
+                    "\(mode)")
             let restart = try TestRepository([Self.manifest: try TestRepository.manifest(["restart": ["mode": "never"]])])
             #expect(try restart.check(mode).keys.contains("error 3 \(Self.manifest)"), "\(mode)")
         }

@@ -104,9 +104,18 @@ struct CommandTests {
         let strict = run("check", "--strict", sample + "/")
         #expect(strict.status == 1)
         #expect(strict.output.last == "checked \(sample) at \(head.prefix(12)) strictly: 1 error, 0 warnings")
-        let both = run("check", "--strict", sample, repository.temp.url.appendingPathComponent("absent").path)
+        let absent = repository.temp.url.appendingPathComponent("absent").path
+        let both = run("check", "--strict", sample, absent)
         #expect(both.status == 2, "one folder that could not be checked outweighs errors in another")
         #expect(both.output.count == 3)
+
+        // The worst of them, wherever it stands — not the last one's.
+        let clean = try TestRepository()
+        let fine = clean.folder.appendingPathComponent("plugins/sample").path
+        #expect(run("check", "--strict", fine).status == 0)
+        #expect(run("check", "--strict", sample, fine).status == 1, "errors, then a clean folder")
+        #expect(run("check", "--strict", fine, sample, fine).status == 1)
+        #expect(run("check", absent, fine).status == 2, "not checked, then a clean folder")
     }
 
     /// A run stopped by a signal leaves its index folder behind; the next run
