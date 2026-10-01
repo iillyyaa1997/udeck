@@ -94,14 +94,9 @@ public final class DeckModel {
         didSet { if panelIsVisible != oldValue { visibilityChanged() } }
     }
 
-    /// What uDeck tells a producer about how its card will be drawn.
-    ///
-    /// Always dark, because the panel is: it hangs over whatever the operator
-    /// has on screen, so its legibility cannot follow the system. Constant
-    /// rather than a variable nothing writes, which is what it was — and the
-    /// plugin contract now says the same thing instead of listing two values as
-    /// if they varied.
-    public let appearance: Appearance = .dark
+    /// What uDeck tells a producer about how its card will be drawn
+    /// (`Appearance.panel`: always dark, because the panel is).
+    public let appearance: Appearance = .panel
 
     /// Told after the operator changes a setting, so the shell can rebuild
     /// anything that was created with one.

@@ -105,6 +105,57 @@ struct FoundationFreeTests {
     }
     #endif
 
+    /// What a producer printed is trimmed before it is read as a card, and a
+    /// failure keeps its stderr trimmed: once with Foundation's
+    /// `trimmingCharacters(in: .whitespacesAndNewlines)`, now with `Blank`.
+    @Test("trimming is Foundation's, pinned")
+    func trimmedPinned() {
+        #expect(Blank.trimmed(" \n\t{\"rows\": []}\r\n\u{3000}") == "{\"rows\": []}")
+        #expect(Blank.trimmed("\u{FEFF}{}\u{200B}") == "\u{FEFF}{}", "a byte order mark stays, and is the card's to answer for")
+        #expect(Blank.trimmed(" a b ") == "a b")
+        #expect(Blank.trimmed("\u{85}\u{2028}") == "")
+    }
+
+    #if canImport(Darwin)
+    /// Every scalar there is, alone and around a word, and every awkward string.
+    @Test("on a Mac, trimming is exactly what trimming whitespace and newlines said")
+    func trimmedMatchesFoundation() {
+        var disagreements: [String] = []
+        for text in Self.awkward where Blank.trimmed(text) != text.trimmingCharacters(in: .whitespacesAndNewlines) {
+            disagreements.append(text.debugDescription)
+        }
+        for value in UInt32(0) ... 0x10FFFF {
+            guard let scalar = Unicode.Scalar(value) else { continue }
+            let alone = String(Character(scalar))
+            let around = alone + "x" + alone + "y" + alone
+            for text in [alone, around] where Blank.trimmed(text) != text.trimmingCharacters(in: .whitespacesAndNewlines) {
+                disagreements.append(String(value, radix: 16))
+            }
+        }
+        #expect(disagreements.isEmpty, "\(disagreements.prefix(20))")
+    }
+
+    /// A failure says how long a producer was given: "within 2s", "within 2.5s".
+    @Test("on a Mac, one decimal is exactly what String(format:) wrote")
+    func oneDecimalMatchesFormat() {
+        var values: [Double] = [0, -0.0, 0.05, 0.15, 0.25, 0.35, 0.45, 2.5, 2.45, 2.55, 1.05, 1e15 + 0.5, 1e300, -2.5,
+                                .infinity, -.infinity, .nan, .ulpOfOne, Double.greatestFiniteMagnitude, 0.049_999_999_999]
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        for _ in 0 ..< 20_000 {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            values.append(Double(seed >> 11) / Double(1 << 40))
+            values.append(Double((seed >> 20) % 100_000) / 1000 + 0.05)
+        }
+        var disagreements: [String] = []
+        for value in values where Seconds.oneDecimal(value) != String(format: "%.1f", value) {
+            disagreements.append("\(value): \(Seconds.oneDecimal(value)) against \(String(format: "%.1f", value))")
+        }
+        #expect(disagreements.isEmpty, "\(disagreements.prefix(10))")
+        #expect(Seconds.fixed(0.0049, places: 2) == String(format: "%.2f", 0.0049))
+        #expect(Seconds.fixed(3, places: 0) == "3")
+    }
+    #endif
+
     // MARK: - The passport, without JSONSerialization
 
     static let passports: [String] = {

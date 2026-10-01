@@ -1,5 +1,10 @@
-import Darwin
+#if canImport(Darwin)
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
 import Foundation
+#endif
+import Darwin
 
 /// A child started in a process group of its own, and everything that follows
 /// from owning that group.
@@ -25,23 +30,30 @@ import Foundation
 /// reaped only after the group has been cleaned up. Until then the group id
 /// cannot be recycled, and `kill(-pgid, …)` cannot possibly reach a stranger —
 /// which is the same hazard the old code spent a start-time identity check on.
-struct SpawnedProcess {
-    let pid: pid_t
+///
+/// Built for a Mac alone: on the Mac's `posix_spawn` with
+/// `POSIX_SPAWN_CLOEXEC_DEFAULT`, and its `sysctl` for the members of a group.
+/// uDeck runs a plugin with this, and `udeck-plugin run` runs it with the same
+/// code — which is why it is here, in the format's package, and why `run` is a
+/// Mac's command.
+public struct SpawnedProcess: Sendable {
+    public let pid: pid_t
 
-    /// The read ends. The caller owns them and closes them.
-    let standardOutput: FileHandle
-    let standardError: FileHandle
+    /// The read ends of the child's standard output and error. The caller owns
+    /// them and closes them.
+    public let standardOutput: Int32
+    public let standardError: Int32
 
     /// The child is its own group leader, so this is also its pid — kept as a
     /// separate name because everything below signals the *group*.
-    var processGroup: pid_t { pid }
+    public var processGroup: pid_t { pid }
 }
 
-enum SpawnError: Error, CustomStringConvertible {
+public enum SpawnError: Error, CustomStringConvertible {
     case pipeFailed(Int32)
     case spawnFailed(Int32)
 
-    var description: String {
+    public var description: String {
         switch self {
         case .pipeFailed(let code):
             "could not create a pipe: \(String(cString: strerror(code)))"
@@ -51,12 +63,12 @@ enum SpawnError: Error, CustomStringConvertible {
     }
 }
 
-enum ProcessGroup {
+public enum ProcessGroup {
     // MARK: - Starting
 
     /// Starts `executable` in a new process group, with stdout and stderr on
     /// pipes and stdin at `/dev/null`.
-    static func spawn(
+    public static func spawn(
         executable: URL,
         arguments: [String],
         workingDirectory: URL,
@@ -78,17 +90,13 @@ enum ProcessGroup {
             close(errFDs[0])
             throw error
         }
-        return SpawnedProcess(
-            pid: pid,
-            standardOutput: FileHandle(fileDescriptor: outFDs[0], closeOnDealloc: true),
-            standardError: FileHandle(fileDescriptor: errFDs[0], closeOnDealloc: true)
-        )
+        return SpawnedProcess(pid: pid, standardOutput: outFDs[0], standardError: errFDs[0])
     }
 
     /// Starts `executable` in a new process group with stdin, stdout and
     /// stderr all at `/dev/null`: a card's action, whose output nobody reads.
     /// Answers the pid, which is also the group's id.
-    static func spawnDiscardingOutput(
+    public static func spawnDiscardingOutput(
         executable: URL,
         arguments: [String],
         workingDirectory: URL,
@@ -188,7 +196,7 @@ enum ProcessGroup {
     ///
     /// Not reaping is deliberate — see the note on the zombie above. Call
     /// `reap` once the group has been dealt with.
-    static func waitForExit(pid: pid_t) -> Termination {
+    public static func waitForExit(pid: pid_t) -> Termination {
         var info = siginfo_t()
         while true {
             let result = waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT)
@@ -206,7 +214,7 @@ enum ProcessGroup {
 
     /// Collects the zombie. After this the group id may be recycled, so nothing
     /// may signal the group afterwards.
-    static func reap(pid: pid_t) {
+    public static func reap(pid: pid_t) {
         var status: Int32 = 0
         while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
     }
@@ -222,7 +230,7 @@ enum ProcessGroup {
     /// signalled while it is still running. What keeps it from making the group
     /// look busy after it has ended is that a reaped-later child is a zombie,
     /// and zombies are filtered here.
-    static func liveMembers(of group: pid_t) -> [pid_t] {
+    public static func liveMembers(of group: pid_t) -> [pid_t] {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PGRP, group]
         var size = 0
         guard sysctl(&mib, 4, nil, &size, nil, 0) == 0, size > 0 else { return [] }
@@ -248,7 +256,7 @@ enum ProcessGroup {
     /// from the deadline and output-cap watchers, and cancelled the escalation
     /// when the direct child died, so a child of the producer that ignored
     /// `SIGTERM` outlived the run and was never seen again.
-    static func terminate(
+    public static func terminate(
         group: pid_t,
         grace: TimeInterval,
         pollEvery: TimeInterval
@@ -274,14 +282,16 @@ enum ProcessGroup {
     /// the rest of the grace period — which is how a grace period turns into a
     /// busy wait, measured as a full core for three seconds.
     ///
+    /// The sleep is a detached task's, which a cancellation of this one does
+    /// not reach: awaiting another task's value waits for it, and does not
+    /// pass the cancellation on.
+    ///
     /// A grace period that stops when somebody loses interest is not a grace
     /// period: the escalation after it is what makes "and then not politely" true.
-    private static func sleepIgnoringCancellation(_ seconds: TimeInterval) async {
-        await withUnsafeContinuation { (continuation: UnsafeContinuation<Void, Never>) in
-            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) {
-                continuation.resume()
-            }
-        }
+    public static func sleepIgnoringCancellation(_ seconds: TimeInterval) async {
+        await Task.detached {
+            try? await Task.sleep(nanoseconds: Seconds.nanoseconds(seconds))
+        }.value
     }
 
     // MARK: - C string plumbing
@@ -298,3 +308,4 @@ enum ProcessGroup {
         return body(&pointers)
     }
 }
+#endif

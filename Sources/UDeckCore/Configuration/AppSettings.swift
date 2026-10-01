@@ -125,9 +125,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         collapseOnAppSwitch: Bool = true,
         defaultCardTTL: TimeInterval = 60,
         silentTTLMultiplier: Double = 3,
-        pluginExecutableSearchPath: [String] = [
-            "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
-        ],
+        pluginExecutableSearchPath: [String] = PluginEnvironment.defaultSearchPath,
         pollWhileCollapsed: Bool = false,
         textSize: CGFloat? = nil,
         language: Language? = nil,

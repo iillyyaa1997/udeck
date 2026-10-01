@@ -1,4 +1,8 @@
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
 import Foundation
+#endif
 
 /// The operator's answer to one plugin's request.
 public struct PluginGrant: Codable, Equatable, Sendable {

@@ -1,26 +1,10 @@
+#if canImport(Darwin)
+#if canImport(FoundationEssentials)
+import FoundationEssentials
+#else
 import Foundation
-
-/// How a child process ended.
-public enum Termination: Equatable, Sendable {
-    case exited(code: Int32)
-    case signalled(signal: Int32)
-
-    /// The host killed it: it outlived its deadline.
-    case timedOut(after: TimeInterval)
-
-    /// The host killed it: it printed more than it was allowed to.
-    case outputLimitExceeded(bytes: Int)
-
-    /// It never started.
-    case launchFailed(String)
-}
-
-public struct ProcessRunResult: Sendable {
-    public let standardOutput: Data
-    public let standardError: Data
-    public let termination: Termination
-    public let duration: TimeInterval
-}
+#endif
+import Darwin
 
 /// Runs a child process under a deadline the caller owns.
 ///
@@ -45,6 +29,9 @@ public struct ProcessRunResult: Sendable {
 ///   end — an orphaned grandchild the host could not reach — end-of-file never
 ///   arrives, and an unbounded read there would hang the host itself. Losing the
 ///   tail of a runaway producer's output is the right trade.
+///
+/// uDeck runs every producer with this, and `udeck-plugin run` runs one with it
+/// too: the same deadline, the same group, the same limit.
 public struct ProcessRunner: Sendable {
     /// Seconds between SIGTERM and SIGKILL when a process overruns. Enough for
     /// a well-behaved producer to clean up, short enough that a wedged one does
@@ -109,7 +96,7 @@ public struct ProcessRunner: Sendable {
         // fires it before anybody is waiting, and it is remembered.
         let ended = TerminationSignal()
         let natural = NaturalTermination()
-        Thread.detachNewThread {
+        SystemThread.detach {
             natural.record(ProcessGroup.waitForExit(pid: child.pid))
             ended.signal()
         }
@@ -169,19 +156,34 @@ public struct ProcessRunner: Sendable {
     }
 }
 
+extension ProcessRunner {
+    /// Runs a plugin's producer once, as uDeck runs it: `run[0]` as discovery
+    /// resolved it (`executable`), the rest of `run` as its arguments, in the
+    /// plugin's own folder, with `environment`, under the manifest's
+    /// `timeout`.
+    public func run(producerOf plugin: DiscoveredPlugin, manifest: PluginManifest, executable: URL,
+                    environment: [String: String]) async -> ProcessRunResult {
+        await run(
+            executable: executable,
+            arguments: Array(manifest.run.dropFirst()),
+            workingDirectory: plugin.directory,
+            environment: environment,
+            timeout: manifest.timeout ?? 0
+        )
+    }
+}
+
 /// How the child ended when nothing killed it, carried from the waiting thread.
 private final class NaturalTermination: @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = SystemLock()
     private var termination: Termination = .exited(code: 0)
 
     func record(_ value: Termination) {
-        lock.lock(); defer { lock.unlock() }
-        termination = value
+        lock.withLock { termination = value }
     }
 
     var value: Termination {
-        lock.lock(); defer { lock.unlock() }
-        return termination
+        lock.withLock { termination }
     }
 }
 
@@ -190,9 +192,9 @@ private final class NaturalTermination: @unchecked Sendable {
 /// The waiter may arrive after the signal has already fired, and must not
 /// block for something that has already happened; the signal may arrive with no
 /// waiter yet, and must be remembered. Both directions are what makes it usable
-/// before `Process.run()`.
+/// before the process is started.
 private final class TerminationSignal: @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = SystemLock()
     private var hasFired = false
     private var waiter: CheckedContinuation<Void, Never>?
 
@@ -224,31 +226,41 @@ private final class TerminationSignal: @unchecked Sendable {
 /// plugin that crashed — and telling an author "your plugin crashed" when in
 /// fact it ran too long would send them looking in the wrong place.
 private final class Outcome: @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = SystemLock()
     private var timedOutAfter: TimeInterval?
     private var overflowBytes: Int?
 
     func recordTimeout(after seconds: TimeInterval) {
-        lock.lock(); defer { lock.unlock() }
-        if timedOutAfter == nil && overflowBytes == nil { timedOutAfter = seconds }
+        lock.withLock {
+            if timedOutAfter == nil && overflowBytes == nil { timedOutAfter = seconds }
+        }
     }
 
     func recordOverflow(bytes: Int) {
-        lock.lock(); defer { lock.unlock() }
-        if timedOutAfter == nil && overflowBytes == nil { overflowBytes = bytes }
+        lock.withLock {
+            if timedOutAfter == nil && overflowBytes == nil { overflowBytes = bytes }
+        }
     }
 
     func resolve(natural: Termination) -> Termination {
-        lock.lock(); defer { lock.unlock() }
-        if let seconds = timedOutAfter { return .timedOut(after: seconds) }
-        if let bytes = overflowBytes { return .outputLimitExceeded(bytes: bytes) }
-        return natural
+        lock.withLock {
+            if let seconds = timedOutAfter { return .timedOut(after: seconds) }
+            if let bytes = overflowBytes { return .outputLimitExceeded(bytes: bytes) }
+            return natural
+        }
     }
 }
 
 /// Drains both pipes while the child runs, stopping at a byte cap.
+///
+/// On a thread of its own that waits in `poll` for either pipe to have
+/// something, reads what is there, and stops waiting on a pipe at its
+/// end-of-file — a pipe whose writers are all gone stays readable for ever,
+/// and reading it again and again is how a host spends a core on a producer
+/// that closed its output and went on with something slow. Both read ends
+/// belong to this collector, which closes them when it stops.
 private final class OutputCollector: @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = SystemLock()
     private var out = Data()
     private var err = Data()
     private var overflow: Int?
@@ -259,37 +271,33 @@ private final class OutputCollector: @unchecked Sendable {
     private var observed = 0
     private var stdoutAtEndOfFile = false
     private var stderrAtEndOfFile = false
+    private var stopRequested = false
+    private var stopped = false
     private let limit: Int
-    private var stdoutHandle: FileHandle?
-    private var stderrHandle: FileHandle?
+
+    /// How long one wait in `poll` lasts at most, in milliseconds: how soon the
+    /// reading thread sees that it has been asked to stop. Not how output is
+    /// read — `poll` answers the moment a pipe has something.
+    private static let pollMilliseconds: Int32 = 10
 
     init(limit: Int) { self.limit = limit }
 
-    var standardOutput: Data { lock.lock(); defer { lock.unlock() }; return out }
-    var standardError: Data { lock.lock(); defer { lock.unlock() }; return err }
-    var overflowBytes: Int? { lock.lock(); defer { lock.unlock() }; return overflow }
+    var standardOutput: Data { lock.withLock { out } }
+    var standardError: Data { lock.withLock { err } }
+    var overflowBytes: Int? { lock.withLock { overflow } }
 
     private var reachedEndOfFile: Bool {
-        lock.lock(); defer { lock.unlock() }
-        return stdoutAtEndOfFile && stderrAtEndOfFile
+        lock.withLock { stdoutAtEndOfFile && stderrAtEndOfFile }
     }
 
-    func attach(stdout: FileHandle, stderr: FileHandle) {
-        stdoutHandle = stdout
-        stderrHandle = stderr
-
-        stdout.readabilityHandler = { [weak self] handle in
-            self?.receive(handle.availableData, from: handle, isStandardOutput: true)
-        }
-        stderr.readabilityHandler = { [weak self] handle in
-            self?.receive(handle.availableData, from: handle, isStandardOutput: false)
-        }
+    func attach(stdout: Int32, stderr: Int32) {
+        SystemThread.detach { [self] in read(stdout: stdout, stderr: stderr) }
     }
 
     /// Stops reading, giving the pipes a bounded moment to reach end-of-file
     /// first so that the tail of a normal producer's output is not lost.
     /// Waits — without blocking a thread — for the pipes to reach end-of-file,
-    /// then stops reading.
+    /// then stops reading, and returns once both read ends are closed.
     ///
     /// `Task.sleep` rather than `Thread.sleep`: this runs on the cooperative
     /// pool, and several plugins finishing at once would otherwise each hold a
@@ -298,40 +306,57 @@ private final class OutputCollector: @unchecked Sendable {
     func finish(after grace: TimeInterval, pollEvery interval: TimeInterval) async {
         let deadline = Date().addingTimeInterval(grace)
         while !reachedEndOfFile && Date() < deadline {
-            // The readability handlers run on their own queue; this only has to
-            // wait long enough for them to observe the last bytes and the
-            // end-of-file that follows.
+            // The reading thread runs on its own; this only has to wait long
+            // enough for it to see the last bytes and the end-of-file after.
             try? await Task.sleep(nanoseconds: Seconds.nanoseconds(interval))
         }
-        stdoutHandle?.readabilityHandler = nil
-        stderrHandle?.readabilityHandler = nil
-        stdoutHandle = nil
-        stderrHandle = nil
+        lock.withLock { stopRequested = true }
+        // A few milliseconds at most — one wait in `poll`: the descriptors are
+        // this run's, and a run that returned with them open would be a leak
+        // counted a few thousand polls later.
+        while !lock.withLock({ stopped }) {
+            await ProcessGroup.sleepIgnoringCancellation(0.001)
+        }
     }
 
-    private func receive(_ data: Data, from handle: FileHandle, isStandardOutput: Bool) {
-        guard !data.isEmpty else {
-            // End of file: everyone holding the write end has closed it.
-            //
-            // The handler must come off *here*, not later. A dispatch read
-            // source stays permanently readable once the writer is gone, so
-            // leaving it installed re-invokes this as fast as the queue can
-            // dispatch — measured at one and a half million empty callbacks in
-            // a second and a half, a full core for the rest of the producer's
-            // life. And it is an ordinary shell idiom that gets you there:
-            // print the card, redirect stdout away, then do the slow part.
-            handle.readabilityHandler = nil
-
-            lock.lock()
-            // Recorded per handle rather than counted down. Counting made every
-            // spurious empty read look like another pipe closing, so one pipe
-            // spinning could drive the count to zero on its own and the drain
-            // below would stop waiting while the other was still open.
-            if isStandardOutput { stdoutAtEndOfFile = true } else { stderrAtEndOfFile = true }
-            lock.unlock()
-            return
+    private func read(stdout: Int32, stderr: Int32) {
+        var pipes = [pollfd(fd: stdout, events: Int16(POLLIN), revents: 0),
+                     pollfd(fd: stderr, events: Int16(POLLIN), revents: 0)]
+        var buffer = [UInt8](repeating: 0, count: 65536)
+        while !lock.withLock({ stopRequested }), pipes.contains(where: { $0.fd >= 0 }) {
+            let ready = poll(&pipes, nfds_t(pipes.count), Self.pollMilliseconds)
+            if ready < 0 {
+                if errno == EINTR { continue }
+                break
+            }
+            for index in pipes.indices where pipes[index].fd >= 0 && pipes[index].revents != 0 {
+                let count = buffer.withUnsafeMutableBytes { Darwin.read(pipes[index].fd, $0.baseAddress, $0.count) }
+                if count > 0 {
+                    receive(Data(buffer[..<count]), isStandardOutput: index == 0)
+                } else if count < 0 && (errno == EINTR || errno == EAGAIN) {
+                    continue
+                } else {
+                    // End of file: everyone holding the write end has closed
+                    // it — or a read that failed, which ends the pipe the same
+                    // way. Not waited on again.
+                    //
+                    // Recorded per pipe rather than counted down. Counting made
+                    // every spurious empty read look like another pipe closing,
+                    // so one pipe could drive the count to zero on its own and
+                    // the drain would stop waiting while the other was still open.
+                    lock.withLock {
+                        if index == 0 { stdoutAtEndOfFile = true } else { stderrAtEndOfFile = true }
+                    }
+                    pipes[index].fd = -1
+                }
+            }
         }
+        close(stdout)
+        close(stderr)
+        lock.withLock { stopped = true }
+    }
 
+    private func receive(_ data: Data, isStandardOutput: Bool) {
         lock.lock(); defer { lock.unlock() }
 
         // The cap has to bound what is *kept*, not only what is noticed. The
@@ -349,3 +374,4 @@ private final class OutputCollector: @unchecked Sendable {
         if observed > limit && overflow == nil { overflow = observed }
     }
 }
+#endif

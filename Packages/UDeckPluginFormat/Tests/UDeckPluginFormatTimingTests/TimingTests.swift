@@ -179,3 +179,26 @@ struct TimingTests {
         #expect(largeTime / smallTime < 6, "\(smallTime) s, then \(largeTime) s for four times as many settings")
     }
 }
+
+#if canImport(Darwin)
+/// How long the waits of running a plugin last — here, with the other tests
+/// that measure time, and not beside uDeck's test of its CPU.
+@Suite("Waiting while a plugin runs")
+struct RunningTimingTests {
+    /// The pause between a polite signal and the next look at the group: cut
+    /// short by a cancellation, a grace period becomes a busy wait, and
+    /// `SIGKILL` follows `SIGTERM` at once.
+    @Test("a pause a cancellation cannot cut short")
+    func pauseOutlastsCancellation() async {
+        let task = Task {
+            let started = Date()
+            await ProcessGroup.sleepIgnoringCancellation(0.3)
+            return Date().timeIntervalSince(started)
+        }
+        task.cancel()
+        let slept = await task.value
+        #expect(slept >= 0.25, "a cancelled task paused \(slept)s of 0.3s")
+        #expect(slept < 5, "a pause of 0.3s took \(slept)s")
+    }
+}
+#endif

@@ -28,27 +28,11 @@ public final class ActionProcesses: @unchecked Sendable {
 
     public init() {}
 
-    /// The environment a card's action runs in.
-    ///
-    /// Deliberately the same shape as a producer's: a known search path, a
-    /// UTF-8 locale, and nothing else carried over from however uDeck happened
-    /// to be started. The `UDECK_` variables in it are part of the plugin
-    /// contract, and the release registry `minUDeck` is worked out from dates
-    /// each of them (`ContractFeature.actionEnvironment`).
+    /// The environment a card's action runs in (`PluginEnvironment.action`),
+    /// with uDeck's own home folder and the temporary folder it was given.
     public static func environment(for id: PluginIdentifier, directory: URL?, searchPath: [String]) -> [String: String] {
-        var environment: [String: String] = [
-            "PATH": searchPath.joined(separator: ":"),
-            "HOME": NSHomeDirectory(),
-            "LANG": "en_US.UTF-8",
-            "LC_ALL": "en_US.UTF-8",
-            "UDECK_API": String(PluginAPI.current),
-            "UDECK_PLUGIN_ID": id.rawValue,
-        ]
-        if let directory {
-            environment["UDECK_PLUGIN_DIR"] = directory.path
-        }
-        if let tmp = ProcessInfo.processInfo.environment["TMPDIR"] { environment["TMPDIR"] = tmp }
-        return environment
+        PluginEnvironment.action(id: id, directory: directory, searchPath: searchPath, home: NSHomeDirectory(),
+                                 temporaryDirectory: ProcessInfo.processInfo.environment["TMPDIR"])
     }
 
     /// Starts an action of `plugin`: stdin, stdout and stderr at `/dev/null`,
