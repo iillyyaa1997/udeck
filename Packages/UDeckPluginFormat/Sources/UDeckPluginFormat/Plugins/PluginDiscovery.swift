@@ -225,7 +225,7 @@ public struct PluginDiscovery: Sendable {
         } catch {
             return DiscoveredPlugin(directory: directory, folderName: folderName,
                                     manifest: nil, executable: nil,
-                                    problems: [.malformedManifest(Self.describe(error, in: data))])
+                                    problems: [.malformedManifest(Self.describe(error, in: data, document: "the manifest"))])
         }
 
         let (translations, translationProblems) = loadTranslations(in: directory)
@@ -286,7 +286,8 @@ public struct PluginDiscovery: Sendable {
                 let decoded = try JSONDecoder().decode(ManifestTranslation.self, from: text ?? Data())
                 translations[code] = decoded
             } catch {
-                problems.append(.malformedTranslation(file: file, detail: Self.describe(error, in: text)))
+                let detail = Self.describe(error, in: text, document: "the translation")
+                problems.append(.malformedTranslation(file: file, detail: detail))
             }
         }
         return (translations, problems)
@@ -385,27 +386,35 @@ public struct PluginDiscovery: Sendable {
 
     /// A decoding error in terms a plugin author can act on: which field, and
     /// what was wrong with it — in the words of the JSON, never the names of
-    /// the Swift types it was being read into.
+    /// the Swift types it was being read into. `document` is what the whole
+    /// text is called where no field is to blame — "the manifest", "the
+    /// translation": a list where an object belongs is said of it, not of a
+    /// field with no name.
     ///
     /// `data`, when the caller still has it, is what the decoder read: a
     /// decoder that does not say which number it could not hold — outside
     /// Apple's own Foundation it attaches no reason at all — is answered from
     /// the text itself.
-    public static func describe(_ error: any Error, in data: Data? = nil) -> String {
+    public static func describe(_ error: any Error, in data: Data? = nil, document: String) -> String {
         guard let decoding = error as? DecodingError else { return "\(error)" }
         switch decoding {
         case .keyNotFound(let key, let context):
             return "\"\(field(context.codingPath + [key]))\" is required"
         case .typeMismatch(let type, let context):
             let found = found(in: context.debugDescription).map { ", not \($0)" } ?? ""
-            return "\"\(field(context.codingPath))\" must be \(kind(of: type))\(found)"
+            return "\(name(context.codingPath, document)) must be \(kind(of: type))\(found)"
         case .valueNotFound(let type, let context):
-            return "\"\(field(context.codingPath))\" must be \(kind(of: type)), not null"
+            return "\(name(context.codingPath, document)) must be \(kind(of: type)), not null"
         case .dataCorrupted(let context):
             return corrupted(context, in: data)
         @unknown default:
             return "\(error)"
         }
+    }
+
+    /// A field in quotes, or the whole document when the path is empty.
+    static func name(_ path: [any CodingKey], _ document: String) -> String {
+        path.isEmpty ? document : "\"\(field(path))\""
     }
 
     /// A field as a manifest spells it: `settings[0].type`, `window.minWidth`.

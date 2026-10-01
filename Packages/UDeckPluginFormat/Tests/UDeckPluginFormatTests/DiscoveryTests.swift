@@ -58,6 +58,17 @@ struct DiscoveryTests {
         #expect(detail.contains("run"))
     }
 
+    /// A manifest that is JSON and not an object is named as the manifest,
+    /// not as a field with no name.
+    @Test("a manifest that is a list is said to be one, in words")
+    func manifestOfTheWrongKind() {
+        let temp = TemporaryDirectory()
+        temp.writePlugin(folder: "listed", manifest: "[1, 2]")
+        #expect(discovery.scan(temp.plugins).first?.problems == [.malformedManifest("the manifest must be an object, not a list")])
+        #expect(discovery.scan(temp.plugins).first?.problems.first?.description
+                == "manifest.json is not valid: the manifest must be an object, not a list")
+    }
+
     @Test("the manifest id must match the folder it sits in")
     func idMustMatchFolder() {
         let temp = TemporaryDirectory()
@@ -152,13 +163,18 @@ struct DiscoveryMessageTests {
         (#"{"id":"x","name":"X","version":"1.0.0","api":true,"kind":"poll","run":["./r.sh"],"interval":5,"timeout":2}"#,
          #""api" must be a whole number, not true or false"#),
         ("not json", "is not valid JSON"),
+        // Where no field is to blame, the whole of it is named — not a field
+        // with no name, which used to read `""`.
+        ("[1, 2]", "the manifest must be an object, not a list"),
+        (#""x""#, "the manifest must be an object, not a string"),
+        ("null", "the manifest must be an object, not null"),
     ])
     func decodingErrorsInWords(_ manifest: String, _ said: String) {
         do {
             _ = try JSONDecoder().decode(PluginManifest.self, from: Data(manifest.utf8))
             Issue.record("\(manifest) decoded")
         } catch {
-            #expect(PluginDiscovery.describe(error, in: Data(manifest.utf8)) == said)
+            #expect(PluginDiscovery.describe(error, in: Data(manifest.utf8), document: "the manifest") == said)
         }
     }
 
@@ -176,8 +192,8 @@ struct DiscoveryMessageTests {
     func numberNamedFromTheText(_ text: String, _ said: String) {
         let error = DecodingError.dataCorrupted(DecodingError.Context(
             codingPath: [], debugDescription: "The given data was not valid JSON.", underlyingError: nil))
-        #expect(PluginDiscovery.describe(error, in: Data(text.utf8)) == said)
-        #expect(PluginDiscovery.describe(error) == "is not valid JSON", "without the text, nothing is guessed")
+        #expect(PluginDiscovery.describe(error, in: Data(text.utf8), document: "the manifest") == said)
+        #expect(PluginDiscovery.describe(error, document: "the manifest") == "is not valid JSON", "without the text, nothing is guessed")
     }
 
     /// Every one of these ends up in front of a plugin author who is trying to

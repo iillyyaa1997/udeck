@@ -188,7 +188,8 @@ public enum RepositoryRules {
         do {
             manifest = try JSONDecoder().decode(PluginManifest.self, from: data)
         } catch {
-            refusals.append(.manifestUnreadable(path: manifestPath, detail: PluginDiscovery.describe(error, in: data)))
+            let detail = PluginDiscovery.describe(error, in: data, document: "the manifest")
+            refusals.append(.manifestUnreadable(path: manifestPath, detail: detail))
             return Verdict(manifest: nil, refusals: refusals)
         }
         refusals += manifestRefusals(manifest, folder: folder, listing: listing, udeck: udeck)

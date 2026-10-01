@@ -135,6 +135,22 @@ struct RepositoryCheckTests {
         #expect(report.findings.count == 3, "\(report.findings)")
     }
 
+    /// A manifest that is JSON and no object at all is said to be what it is,
+    /// in uDeck's words when uDeck is the one refusing it — the manifest
+    /// named as such, not a field with no name.
+    @Test("a manifest that is a list or a string is named as the manifest, in every layer")
+    func manifestOfTheWrongKind() throws {
+        for (text, kind) in [("[1, 2]", "a list"), (#""x""#, "a string")] {
+            let repository = try TestRepository([Self.manifest: .text(text)])
+            #expect(try repository.check(.installable).findings.map(\.description) == [
+                "error: \(Self.manifest): is not a manifest uDeck can read: the manifest must be an object, not \(kind) [rule 3]",
+            ])
+            #expect(try repository.check(.strict).findings.map(\.description) == [
+                "error: \(Self.manifest): must be a JSON object [rule 3]",
+            ])
+        }
+    }
+
     /// Where JSONDecoder reads `4.0` as 4, the strict check wants a whole
     /// number written as one.
     @Test("strict JSON: a field twice, a byte order mark, a whole number written with a point")

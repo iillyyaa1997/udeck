@@ -175,6 +175,21 @@ struct PollExecutionTests {
                 "stderr belongs to the author and must be kept")
     }
 
+    /// Output that is JSON and no object at all is said as what it is — the
+    /// output named as such, not a field with no name, which used to read
+    /// `""`.
+    @Test("output that is a list or a string is named as the output")
+    func outputOfTheWrongKind() {
+        for (text, kind) in [(#""ok""#, "a string"), ("[1, 2]", "a list")] {
+            guard case .failure(let failure) = PollExecution(parsing: Data(text.utf8), diagnostics: "", now: Date()) else {
+                Issue.record("\(text) made a card"); continue
+            }
+            #expect(failure.reason == .unparsableOutput("the output must be an object, not \(kind)"))
+            #expect(failure.reason.description
+                    == "the producer's output is not a valid card: the output must be an object, not \(kind)")
+        }
+    }
+
     @Test("a producer that was never permitted is not run, and says why")
     func unpermittedPluginIsNotRun() async {
         let temp = TemporaryDirectory()

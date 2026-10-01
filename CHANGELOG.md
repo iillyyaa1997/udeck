@@ -59,7 +59,9 @@ for what that promises.
   `1.00000000000000000000001` is no format 1 — in time proportional to the
   text; and it has a limit, 64 KiB, past which uDeck refuses it unread, since
   its catalogue is read on the main thread. The words of every finding name
-  fields and kinds of JSON values, never a Swift type.
+  fields and kinds of JSON values, never a Swift type — and where no field is
+  to blame, the manifest, the translation or a producer's output, which uDeck
+  says the same way.
 
 - **uDeck installs plugins from the official repository, and says what it
   connects to.** Stage 1 of [docs/plugin-repository.md](docs/plugin-repository.md):

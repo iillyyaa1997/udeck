@@ -190,6 +190,20 @@ struct ManifestTranslationTests {
         #expect(found.problems.allSatisfy { !$0.isFatal })
     }
 
+    /// A translation that is JSON and not an object is named as the
+    /// translation — uDeck's words, which the operator reads in the plugin's
+    /// notes.
+    @Test("a translation that is a list is said to be one, in words")
+    func translationOfTheWrongKind() {
+        let temp = TemporaryDirectory()
+        let found = plugin(temp, extra: ["manifest.ru.json": "[1, 2]"])
+        #expect(found.isUsable)
+        #expect(found.problems == [.malformedTranslation(file: "manifest.ru.json",
+                                                         detail: "the translation must be an object, not a list")])
+        #expect(found.problems.first?.description == "manifest.ru.json is not valid and was ignored: the translation "
+                + "must be an object, not a list — the plugin still works in the language manifest.json is written in")
+    }
+
     @Test("a broken translation does not take the working ones with it")
     func oneBrokenLanguageDoesNotCostTheOthers() {
         let temp = TemporaryDirectory()
