@@ -51,7 +51,8 @@ jobs:
       # CPU time above.
       - name: Test how long the plugin format takes to read
         working-directory: Packages/UDeckPluginFormat
-        run: swift test --filter UDeckPluginFormatTimingTests
+        # One at a time, too: two timing tests side by side measure each other.
+        run: swift test --filter UDeckPluginFormatTimingTests --no-parallel
 
       # Every test takes away the temporary folder it made — a
       # `TemporaryDirectory`, kept alive for as long as the folder is used. One
@@ -168,7 +169,11 @@ jobs:
       # The corpus tests build a few hundred git repositories, so git has to be
       # there; the image has it.
       - name: Test
-        run: swift test
+        run: swift test --skip UDeckPluginFormatTimingTests
+
+      # The timing tests on their own and one at a time, as on the Mac.
+      - name: Test how long the plugin format takes to read
+        run: swift test --filter UDeckPluginFormatTimingTests --no-parallel
 
       # As on the Mac: every test takes away the temporary folder it made.
       - name: Check that the tests left no temporary folders behind

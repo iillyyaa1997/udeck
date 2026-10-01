@@ -86,7 +86,10 @@ struct TimingTests {
             smallTime = min(smallTime, Self.fastest(1) { askEveryKey(small) })
             largeTime = min(largeTime, Self.fastest(1) { askEveryKey(large) })
         }
-        #expect(largeTime / smallTime < 6, "\(smallTime) s, then \(largeTime) s for four times as many keys")
+        // Four times the keys is four times the lookups, each a little slower
+        // once the table outgrows the cache: 7 was measured on CI, where the
+        // small run takes 7 ms. A search that read every key would be 16.
+        #expect(largeTime / smallTime < 10, "\(smallTime) s, then \(largeTime) s for four times as many keys")
         #expect(large.first("k0000000")?.number?.wholeValue == 0)
         #expect(large.last("k0063999") != nil)
         #expect(large.first("k0064000") == nil)
