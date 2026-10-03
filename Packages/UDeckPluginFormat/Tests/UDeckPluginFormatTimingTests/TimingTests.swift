@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import UDeckPluginFormat
+import UDeckPluginFormatFixtures
 
 /// How long reading takes, as a function of how much there is to read.
 ///
@@ -184,6 +185,43 @@ struct TimingTests {
 }
 
 #if canImport(Darwin)
+/// Every Unicode scalar there is, against what Foundation answered for it — a
+/// million of them, a second of a core or more each, which is why they are
+/// here: beside uDeck's test of the CPU its own process spends, they were that
+/// test's CPU (FoundationFreeTests has the rest of these comparisons).
+@Suite("Foundation's answers, for every scalar")
+struct EveryScalarTests {
+    /// Against the two character sets the code used to trim with.
+    @Test("on a Mac, blank is exactly what trimming whitespace said, for every scalar")
+    func blankMatchesCharacterSets() {
+        var disagreements: [String] = []
+        for value in UInt32(0) ... 0x10FFFF {
+            guard let scalar = Unicode.Scalar(value) else { continue }
+            let text = String(Character(scalar))
+            if Blank.isBlank(text) != text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || Blank.isBlankOnOneLine(text) != text.trimmingCharacters(in: .whitespaces).isEmpty {
+                disagreements.append(String(value, radix: 16))
+            }
+        }
+        #expect(disagreements.isEmpty, "U+\(disagreements.prefix(20))")
+    }
+
+    /// Alone and around a word.
+    @Test("on a Mac, trimming is exactly what trimming whitespace and newlines said, for every scalar")
+    func trimmedMatchesFoundation() {
+        var disagreements: [String] = []
+        for value in UInt32(0) ... 0x10FFFF {
+            guard let scalar = Unicode.Scalar(value) else { continue }
+            let alone = String(Character(scalar))
+            let around = alone + "x" + alone + "y" + alone
+            for text in [alone, around] where Blank.trimmed(text) != text.trimmingCharacters(in: .whitespacesAndNewlines) {
+                disagreements.append(String(value, radix: 16))
+            }
+        }
+        #expect(disagreements.isEmpty, "\(disagreements.prefix(20))")
+    }
+}
+
 /// How long the waits of running a plugin last — here, with the other tests
 /// that measure time, and not beside uDeck's test of its CPU.
 @Suite("Waiting while a plugin runs")
@@ -202,6 +240,51 @@ struct RunningTimingTests {
         let slept = await task.value
         #expect(slept >= 0.25, "a cancelled task paused \(slept)s of 0.3s")
         #expect(slept < 5, "a pause of 0.3s took \(slept)s")
+    }
+
+    /// A plugin of the test's own, in `temp/plugins/<id>`.
+    static func plugin(_ temp: TemporaryDirectory, _ id: String, timeout: String, script: String) -> URL {
+        temp.writePlugin(folder: id, manifest: """
+            { "id": "\(id)", "name": "\(id)", "version": "1.0.0", "api": 1, "kind": "poll",
+              "run": ["./run.sh"], "interval": 5, "timeout": \(timeout) }
+            """, script: (name: "run.sh", body: "#!/bin/sh\n" + script + "\n", executable: true))
+    }
+
+    /// A child that left the group with `setsid` holds the pipes until the
+    /// test lets it go; the run waits the drain grace for their end and
+    /// returns, well inside the plugin's two-second timeout — not when the
+    /// child lets go, as it would if the wait for the reading thread had no
+    /// end and the thread stopped looking.
+    @Test("a grandchild that left the group and keeps the pipes does not hold the run")
+    func grandchildDoesNotHoldTheRun() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let scratch = temp.url.appendingPathComponent("scratch", isDirectory: true)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let folder = Self.plugin(temp, "escaper", timeout: "2", script: Escaper.script(in: scratch))
+        defer { Escaper.stop(in: scratch) }
+        let report = try await PluginTrial.run(folder, options: PluginTrial.Options(environment: [:]))
+        guard case .card = report.execution else { Issue.record("\(report.execution)"); return }
+        #expect(report.result.duration < 2, "the run took \(report.result.duration)s of a 2s timeout")
+        #expect(Escaper.verdict(in: scratch) == "closed")
+    }
+
+    /// The note is the run's own measure of itself, so its test is here: a
+    /// producer that sleeps 1.2 s of a 2 s timeout gets it, and one that
+    /// prints at once does not.
+    @Test("a run that took more than half of its timeout is said to")
+    func slowRunIsSaid() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let card = #"printf '{"rows": []}'"#
+        let slow = try await PluginTrial.run(Self.plugin(temp, "slow", timeout: "2", script: "sleep 1.2; " + card),
+                                             options: PluginTrial.Options(environment: [:]))
+        guard case .card = slow.execution else { Issue.record("\(slow.execution)"); return }
+        #expect(slow.notes.contains("the run took more than half of its 2.0 s timeout"), "\(slow.notes)")
+        let quick = try await PluginTrial.run(Self.plugin(temp, "quick", timeout: "2", script: card),
+                                              options: PluginTrial.Options(environment: [:]))
+        guard case .card = quick.execution else { Issue.record("\(quick.execution)"); return }
+        #expect(!quick.notes.contains { $0.hasPrefix("the run took more than half") }, "\(quick.notes)")
     }
 }
 #endif

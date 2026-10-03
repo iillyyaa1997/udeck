@@ -87,23 +87,10 @@ struct FoundationFreeTests {
         #expect(!Blank.isBlankOnOneLine("\u{2028}"))
     }
 
-    #if canImport(Darwin)
-    /// Every Unicode scalar there is, against the two character sets the code
-    /// used to trim with.
-    @Test("on a Mac, blank is exactly what trimming whitespace said, for every scalar")
-    func blankMatchesCharacterSets() {
-        var disagreements: [String] = []
-        for value in UInt32(0) ... 0x10FFFF {
-            guard let scalar = Unicode.Scalar(value) else { continue }
-            let text = String(Character(scalar))
-            if Blank.isBlank(text) != text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || Blank.isBlankOnOneLine(text) != text.trimmingCharacters(in: .whitespaces).isEmpty {
-                disagreements.append(String(value, radix: 16))
-            }
-        }
-        #expect(disagreements.isEmpty, "U+\(disagreements.prefix(20))")
-    }
-    #endif
+    // Every Unicode scalar against the character sets the code used to trim
+    // with is in UDeckPluginFormatTimingTests: a million scalars keep a core
+    // busy for a second, which a test beside uDeck's measure of its own CPU
+    // must not.
 
     /// What a producer printed is trimmed before it is read as a card, and a
     /// failure keeps its stderr trimmed: once with Foundation's
@@ -117,20 +104,13 @@ struct FoundationFreeTests {
     }
 
     #if canImport(Darwin)
-    /// Every scalar there is, alone and around a word, and every awkward string.
+    /// Every awkward string. Every scalar there is, alone and around a word,
+    /// is in UDeckPluginFormatTimingTests, for the CPU it takes.
     @Test("on a Mac, trimming is exactly what trimming whitespace and newlines said")
     func trimmedMatchesFoundation() {
         var disagreements: [String] = []
         for text in Self.awkward where Blank.trimmed(text) != text.trimmingCharacters(in: .whitespacesAndNewlines) {
             disagreements.append(text.debugDescription)
-        }
-        for value in UInt32(0) ... 0x10FFFF {
-            guard let scalar = Unicode.Scalar(value) else { continue }
-            let alone = String(Character(scalar))
-            let around = alone + "x" + alone + "y" + alone
-            for text in [alone, around] where Blank.trimmed(text) != text.trimmingCharacters(in: .whitespacesAndNewlines) {
-                disagreements.append(String(value, radix: 16))
-            }
         }
         #expect(disagreements.isEmpty, "\(disagreements.prefix(20))")
     }

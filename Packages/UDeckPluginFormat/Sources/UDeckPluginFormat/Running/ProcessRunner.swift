@@ -28,7 +28,9 @@ import Darwin
 /// * **Waiting for end-of-file is bounded.** If something still holds the write
 ///   end — an orphaned grandchild the host could not reach — end-of-file never
 ///   arrives, and an unbounded read there would hang the host itself. Losing the
-///   tail of a runaway producer's output is the right trade.
+///   tail of a runaway producer's output is the right trade. So is the wait for
+///   the reading thread to let go of the pipes after that: a grandchild that
+///   left the group with `setsid` holds them for as long as it likes.
 ///
 /// uDeck runs every producer with this, and `udeck-plugin run` runs one with it
 /// too: the same deadline, the same group, the same limit.
@@ -50,6 +52,11 @@ public struct ProcessRunner: Sendable {
     /// small enough not to matter, large enough not to spin.
     private static let limitCheckInterval: TimeInterval = 0.025
     private static let drainPollInterval: TimeInterval = 0.005
+
+    /// How long past the plugin's own timeout — the time it was given already
+    /// — a run waits at most for its reading thread to stop once asked. See
+    /// `OutputCollector.finish`.
+    static let stopMargin: TimeInterval = 0.5
 
     public init(
         terminationGrace: TimeInterval = 0.5,
@@ -145,13 +152,17 @@ public struct ProcessRunner: Sendable {
         )
         ProcessGroup.reap(pid: child.pid)
 
-        await collector.finish(after: drainGrace, pollEvery: Self.drainPollInterval)
+        await collector.finish(after: drainGrace, pollEvery: Self.drainPollInterval,
+                               stopWithin: max(timeout, 0) + Self.stopMargin)
 
+        let dropped = collector.dropped
         return ProcessRunResult(
             standardOutput: collector.standardOutput,
             standardError: collector.standardError,
             termination: outcome.resolve(natural: natural.value),
-            duration: Date().timeIntervalSince(started)
+            duration: Date().timeIntervalSince(started),
+            standardOutputDropped: dropped.output,
+            standardErrorDropped: dropped.error
         )
     }
 }
@@ -265,6 +276,12 @@ private final class OutputCollector: @unchecked Sendable {
     private var err = Data()
     private var overflow: Int?
 
+    /// What was dropped of each, past the limit: bytes the producer sent and
+    /// nobody keeps. Said by `udeck-plugin run`, so that "everything it wrote"
+    /// is never a megabyte of it.
+    private var outDropped = 0
+    private var errDropped = 0
+
     /// Every byte the producer sent, including the ones dropped. The number the
     /// operator is shown has to be the truth about the producer, not the size
     /// of the buffer that was allowed to hold it.
@@ -285,6 +302,7 @@ private final class OutputCollector: @unchecked Sendable {
     var standardOutput: Data { lock.withLock { out } }
     var standardError: Data { lock.withLock { err } }
     var overflowBytes: Int? { lock.withLock { overflow } }
+    var dropped: (output: Int, error: Int) { lock.withLock { (outDropped, errDropped) } }
 
     private var reachedEndOfFile: Bool {
         lock.withLock { stdoutAtEndOfFile && stderrAtEndOfFile }
@@ -297,13 +315,14 @@ private final class OutputCollector: @unchecked Sendable {
     /// Stops reading, giving the pipes a bounded moment to reach end-of-file
     /// first so that the tail of a normal producer's output is not lost.
     /// Waits — without blocking a thread — for the pipes to reach end-of-file,
-    /// then stops reading, and returns once both read ends are closed.
+    /// then stops reading, and returns once both read ends are closed, or once
+    /// `stopWithin` has passed with the reading thread still at them.
     ///
     /// `Task.sleep` rather than `Thread.sleep`: this runs on the cooperative
     /// pool, and several plugins finishing at once would otherwise each hold a
     /// pool thread doing nothing for up to the grace period, starving whatever
     /// else was queued.
-    func finish(after grace: TimeInterval, pollEvery interval: TimeInterval) async {
+    func finish(after grace: TimeInterval, pollEvery interval: TimeInterval, stopWithin limit: TimeInterval) async {
         let deadline = Date().addingTimeInterval(grace)
         while !reachedEndOfFile && Date() < deadline {
             // The reading thread runs on its own; this only has to wait long
@@ -311,10 +330,19 @@ private final class OutputCollector: @unchecked Sendable {
             try? await Task.sleep(nanoseconds: Seconds.nanoseconds(interval))
         }
         lock.withLock { stopRequested = true }
-        // A few milliseconds at most — one wait in `poll`: the descriptors are
-        // this run's, and a run that returned with them open would be a leak
+        // A few milliseconds — one wait in `poll`: the descriptors are this
+        // run's, and a run that returned with them open would be a leak
         // counted a few thousand polls later.
-        while !lock.withLock({ stopped }) {
+        //
+        // And never longer than `limit`. Only a reading thread that does not
+        // look at the request — or one the machine does not let run — gets
+        // there, and then nothing ends it but end-of-file: a grandchild that
+        // left the group (`setsid`) and kept the pipes would hold the run, and
+        // the plugin's next poll, for as long as it lives. Past the limit the
+        // run returns what was read, and the thread closes the descriptors
+        // whenever it does stop: late, not leaked.
+        let stopDeadline = Date().addingTimeInterval(limit)
+        while !lock.withLock({ stopped }) && Date() < stopDeadline {
             await ProcessGroup.sleepIgnoringCancellation(0.001)
         }
     }
@@ -366,10 +394,14 @@ private final class OutputCollector: @unchecked Sendable {
         // a megabyte could retain hundreds of them. Bytes past the allowance
         // are counted and dropped.
         observed += data.count
-        let allowance = limit - (out.count + err.count)
-        if allowance > 0 {
-            let kept = allowance >= data.count ? data : data.prefix(allowance)
-            if isStandardOutput { out.append(kept) } else { err.append(kept) }
+        let allowance = max(limit - (out.count + err.count), 0)
+        let kept = allowance >= data.count ? data : data.prefix(allowance)
+        if isStandardOutput {
+            out.append(kept)
+            outDropped += data.count - kept.count
+        } else {
+            err.append(kept)
+            errDropped += data.count - kept.count
         }
         if observed > limit && overflow == nil { overflow = observed }
     }

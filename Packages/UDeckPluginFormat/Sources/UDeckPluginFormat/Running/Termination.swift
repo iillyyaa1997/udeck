@@ -28,10 +28,19 @@ public struct ProcessRunResult: Sendable {
     public let termination: Termination
     public let duration: TimeInterval
 
-    public init(standardOutput: Data, standardError: Data, termination: Termination, duration: TimeInterval) {
+    /// Bytes of each the process wrote past the output limit, which the host
+    /// counted and did not keep: the limit holds standard output and standard
+    /// error together, so either can lose its tail to the other.
+    public let standardOutputDropped: Int
+    public let standardErrorDropped: Int
+
+    public init(standardOutput: Data, standardError: Data, termination: Termination, duration: TimeInterval,
+                standardOutputDropped: Int = 0, standardErrorDropped: Int = 0) {
         self.standardOutput = standardOutput
         self.standardError = standardError
         self.termination = termination
         self.duration = duration
+        self.standardOutputDropped = standardOutputDropped
+        self.standardErrorDropped = standardErrorDropped
     }
 }
