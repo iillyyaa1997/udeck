@@ -18,12 +18,16 @@ struct FolderSnapshot: Equatable {
     enum Entry: Equatable {
         case folder
         case file(blob: String, executable: Bool)
-        case link(String)
+        /// Where it points, by its bytes too.
+        case link([UInt8])
         case other
     }
 
-    /// Paths below the folder, `a/b.txt`, and what each is.
-    var entries: [String: Entry]
+    /// Paths below the folder, `a/b.txt`, and what each is — keyed by the
+    /// path's bytes, not by the path as a Swift string: strings compare by
+    /// what they mean, so a name spelt with `é` and one spelt with `e` and a
+    /// combining accent would be one key, and on Linux they are two files.
+    var entries: [[UInt8]: Entry]
 
     /// More than this many entries and the folder is not compared: a plugin
     /// folder is at most 200 files (rule 8).
@@ -32,7 +36,7 @@ struct FolderSnapshot: Equatable {
     /// The folder at `url`, or nil when it holds more than `maximumEntries`
     /// or cannot be read.
     static func of(_ url: URL) -> FolderSnapshot? {
-        var entries: [String: Entry] = [:]
+        var entries: [[UInt8]: Entry] = [:]
         var pending = [""]
         let manager = FileManager.default
         while let relative = pending.popLast() {
@@ -40,20 +44,21 @@ struct FolderSnapshot: Equatable {
             guard let names = try? manager.contentsOfDirectory(atPath: folder) else { return nil }
             for name in names {
                 let path = relative.isEmpty ? name : relative + "/" + name
+                let key = Array(path.utf8)
                 let full = folder + "/" + name
                 guard let attributes = try? manager.attributesOfItem(atPath: full) else { return nil }
                 switch attributes[.type] as? FileAttributeType {
                 case .typeDirectory?:
-                    entries[path] = .folder
+                    entries[key] = .folder
                     pending.append(path)
                 case .typeRegular?:
                     guard let blob = try? GitHash.blob(ofFileAt: URL(fileURLWithPath: full)) else { return nil }
                     let mode = GitHash.integer(attributes[.posixPermissions]) ?? 0
-                    entries[path] = .file(blob: blob, executable: mode & 0o111 != 0)
+                    entries[key] = .file(blob: blob, executable: mode & 0o111 != 0)
                 case .typeSymbolicLink?:
-                    entries[path] = .link((try? manager.destinationOfSymbolicLink(atPath: full)) ?? "")
+                    entries[key] = .link(Array(((try? manager.destinationOfSymbolicLink(atPath: full)) ?? "").utf8))
                 default:
-                    entries[path] = .other
+                    entries[key] = .other
                 }
                 if entries.count > maximumEntries { return nil }
             }
@@ -64,12 +69,12 @@ struct FolderSnapshot: Equatable {
     /// What is in `after` and not here, what is here and not in `after`, and
     /// what is in both and differs — each sorted by its bytes.
     func changes(to after: FolderSnapshot) -> (added: [String], removed: [String], changed: [String]) {
-        func sorted(_ paths: [String]) -> [String] {
-            paths.sorted { Array($0.utf8).lexicographicallyPrecedes(Array($1.utf8)) }
+        func sorted(_ paths: [[UInt8]]) -> [String] {
+            paths.sorted { $0.lexicographicallyPrecedes($1) }.map { String(decoding: $0, as: UTF8.self) }
         }
         let added = after.entries.keys.filter { entries[$0] == nil }
         let removed = entries.keys.filter { after.entries[$0] == nil }
         let changed = entries.keys.filter { path in after.entries[path].map { $0 != entries[path] } ?? false }
-        return (sorted(added), sorted(removed), sorted(changed))
+        return (sorted(Array(added)), sorted(Array(removed)), sorted(Array(changed)))
     }
 }

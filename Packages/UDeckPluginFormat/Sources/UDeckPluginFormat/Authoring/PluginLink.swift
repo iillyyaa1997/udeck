@@ -70,20 +70,25 @@ public enum PluginLink {
 
         let paths = UDeckPaths(root: home)
         if let source = try installedSource(of: id, in: paths) {
+            // What this release of uDeck has for it: Remove, beside the plugin
+            // in Settings. When uDeck can put a linked folder in an installed
+            // plugin's place itself, this says how.
             throw Refusal(description: "\(id.rawValue) is installed in uDeck from \(source); a link never takes the place "
-                          + "of a plugin uDeck installed. To work on it from \(target), replace the installed copy with "
-                          + "Link a folder… in uDeck's Settings", isUsage: false)
+                          + "of a plugin uDeck installed. To work on it from \(target) instead, remove the installed copy "
+                          + "first -- Remove, beside it under Plugins in uDeck's Settings -- and link again",
+                          isUsage: false)
         }
 
         let link = paths.plugins.appendingPathComponent(id.rawValue)
         if let attributes = try? FileManager.default.attributesOfItem(atPath: link.path) {
             if attributes[.type] as? FileAttributeType == .typeSymbolicLink {
-                if realPath(link.path) == target {
+                if let there = realPath(link.path), samePath(there, target) {
                     return Linked(link: link, target: target, wasThere: true)
                 }
                 let other = (try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) ?? "somewhere else"
                 throw Refusal(description: "\(link.path) is already a link, to \(other); take it away first "
-                              + "(rm \(link.path) -- that takes the link, never what it points at)", isUsage: false)
+                              + "(rm \(shellQuoted(link.path)) -- that takes the link, never what it points at)",
+                              isUsage: false)
             }
             throw Refusal(description: "\(link.path) is already there, a plugin folder uDeck did not install; move it "
                           + "out of the way first", isUsage: false)
@@ -110,8 +115,8 @@ public enum PluginLink {
         }
         let document = StrictJSON.parse(Array(bytes))
         guard let installed = document.value?.object?.first("plugins")?.object else {
-            throw Refusal(description: "\(file.path) is not the list of installed plugins uDeck writes "
-                          + (document.problems.first.map { "(it \($0))" } ?? "")
+            throw Refusal(description: "\(file.path) is not the list of installed plugins uDeck writes"
+                          + (document.problems.first.map { " (it \($0))" } ?? "")
                           + "; uDeck installs nothing while it is broken, and nothing was linked", isUsage: false)
         }
         guard let record = installed.first(id.rawValue) else { return nil }
@@ -128,5 +133,31 @@ public enum PluginLink {
         guard let resolved = realpath(path, nil) else { return nil }
         defer { free(resolved) }
         return String(cString: resolved)
+    }
+
+    /// Whether two resolved paths are one, byte for byte. Not `==`: Swift
+    /// compares strings by what they mean, so `café` spelt with `é` and with
+    /// `e` and a combining accent are one string — and on Linux they are two
+    /// folders. A Mac's `realpath` answers the name a folder has on disk,
+    /// however it was asked for, so the same folder resolves to the same bytes.
+    static func samePath(_ one: String, _ other: String) -> Bool {
+        one.utf8.elementsEqual(other.utf8)
+    }
+
+    /// `path` as one word for a POSIX shell: as it is when nothing in it means
+    /// anything to one, in single quotes otherwise — a quote inside written
+    /// `'\''` — so that a command the author copies from what the command
+    /// printed acts on that path and on nothing else.
+    public static func shellQuoted(_ path: String) -> String {
+        let plain = !path.isEmpty && path.utf8.allSatisfy { byte in
+            ASCII.isLowercaseLetterOrDigit(byte) || (UInt8(ascii: "A") ... UInt8(ascii: "Z")).contains(byte)
+                || "/._-+,:@%=".utf8.contains(byte)
+        }
+        if plain { return path }
+        var quoted = "'"
+        for scalar in path.unicodeScalars {
+            if scalar == "'" { quoted += "'\\''" } else { quoted.unicodeScalars.append(scalar) }
+        }
+        return quoted + "'"
     }
 }

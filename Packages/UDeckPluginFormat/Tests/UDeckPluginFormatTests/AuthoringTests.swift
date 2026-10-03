@@ -133,7 +133,7 @@ struct NewPluginTests {
         defer { withExtendedLifetime(temp) {} }
         let author = #"Ada "A. L." Lovelace \ Жуковская"#
         let name = #"Ω "quoted" \ name"#
-        let description = "Tabs\tand \"quotes\"; / slashes \\ too."
+        let description = "\"Quotes\"; / slashes \\ too, and no space\u{A0}that is not one."
         let made = await udeckPlugin(["new", "quoted", "--author", author, "--name", name, "--description", description],
                                      in: temp.url, home: temp.url)
         #expect(made.status == 0, "\(made.errors)")
@@ -190,6 +190,57 @@ struct NewPluginTests {
         let said = await udeckPlugin(arguments, in: temp.url, home: temp.url)
         #expect(said.status == 2, "\(arguments)")
         #expect(everything(in: temp.url).isEmpty, "\(arguments)")
+    }
+
+    /// A line break in the name used to reach the producer's first comment
+    /// and end it: what followed was a line of the script, and ran on every
+    /// poll. The text is refused now, and the script holds none of it anyway.
+    @Test("a name, a description or an author with a line break or a control character in it is refused, and nothing is written",
+          arguments: ["--name", "--description", "--author"],
+          ["Line one\ntouch INJECTED", "a\rb", "a\tb", "a\u{0}b", "a\u{1B}[31mb", "a\u{1F}b", "a\u{7F}b", "a\u{80}b",
+           "a\u{85}b", "a\u{9F}b", "a\u{2028}b", "a\u{2029}b"])
+    func notOneLine(_ option: String, _ text: String) async {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let arguments = ["new", "nl", "--author", "T", option, text].enumerated()
+            .filter { option != "--author" || ($0.offset != 2 && $0.offset != 3) }.map(\.element)
+        let said = await udeckPlugin(arguments, in: temp.url, home: temp.url)
+        #expect(said.status == 2, "\(arguments)")
+        #expect(said.errors.first == "udeck-plugin new: \(option == "--author" ? "the author" : option) is one line of text, "
+                + "with no line break or other control character in it", "\(said.errors)")
+        #expect(everything(in: temp.url).isEmpty, "\(arguments)")
+    }
+
+    @Test("what is one line is kept as given: spaces of every width, accents, punctuation")
+    func oneLineIsKept() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let text = "~ caf\u{E9} \u{A0}\u{202F}\u{2027}\u{3000}\u{A1} \"quoted\" `tick` $(not run); end"
+        let made = await udeckPlugin(["new", "kept", "--author", text, "--name", text, "--description", text],
+                                     in: temp.url, home: temp.url)
+        #expect(made.status == 0, "\(made.errors)")
+        let manifest = try JSONDecoder().decode(PluginManifest.self, from: Data(contentsOf: temp.url.appendingPathComponent("kept/manifest.json")))
+        #expect(manifest.name == text)
+        #expect(manifest.description == text)
+        #expect(manifest.author == text)
+    }
+
+    /// The producer is a shell script, and nothing the author typed is
+    /// written into it, not even into a comment: the id is its only word of
+    /// theirs, and an id is letters, digits and `. _ -`.
+    @Test("the producer new makes holds none of the name or the description")
+    func scriptHoldsNoText() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let name = "Name; touch INJECTED"
+        let description = "Description `touch INJECTED`"
+        let made = await udeckPlugin(["new", "quiet-one", "--author", "A", "--name", name, "--description", description],
+                                     in: temp.url, home: temp.url)
+        #expect(made.status == 0, "\(made.errors)")
+        let script = try String(contentsOf: temp.url.appendingPathComponent("quiet-one/quiet-one.sh"), encoding: .utf8)
+        #expect(!script.contains("INJECTED"), "\(script)")
+        #expect(script.hasPrefix("#!/bin/sh\n# quiet-one: a uDeck producer."), "\(script.prefix(80))")
+        #expect(try String(contentsOf: temp.url.appendingPathComponent("quiet-one/README.md"), encoding: .utf8).hasPrefix("# \(name)\n"))
     }
 }
 
@@ -282,7 +333,10 @@ struct LinkPluginTests {
         let replaced = await udeckPlugin(["link", folder.path, "--home", installed.path], in: temp.url, home: temp.url)
         #expect(replaced.status == 1)
         #expect(replaced.errors.first?.contains("greeter is installed in uDeck from github.com/o/r") == true, "\(replaced.errors)")
-        #expect(replaced.errors.first?.hasSuffix("replace the installed copy with Link a folder… in uDeck's Settings") == true)
+        #expect(replaced.errors.first?.hasSuffix("To work on it from \(PluginLink.realPath(folder.path) ?? "") instead, remove the "
+                                                 + "installed copy first -- Remove, beside it under Plugins in uDeck's "
+                                                 + "Settings -- and link again") == true, "\(replaced.errors)")
+        #expect(replaced.errors.first?.contains("Link a folder") == false, "a button this uDeck does not have")
         #expect(everything(in: installed) == ["installed.json"])
         #expect(try Data(contentsOf: installed.appendingPathComponent("installed.json")) == record)
 
@@ -290,8 +344,146 @@ struct LinkPluginTests {
         try Data("{ not json".utf8).write(to: installed.appendingPathComponent("installed.json"))
         let broken = await udeckPlugin(["link", folder.path, "--home", installed.path], in: temp.url, home: temp.url)
         #expect(broken.status == 1)
-        #expect(broken.errors.first?.contains("is not the list of installed plugins uDeck writes") == true, "\(broken.errors)")
+        #expect(broken.errors.first?.contains("is not the list of installed plugins uDeck writes (it ") == true, "\(broken.errors)")
         #expect(everything(in: installed) == ["installed.json"])
+
+        // JSON, and not that list: said without a gap where the reason would be.
+        try Data(#"{"format": 2, "items": {}}"#.utf8).write(to: installed.appendingPathComponent("installed.json"))
+        let notTheList = await udeckPlugin(["link", folder.path, "--home", installed.path], in: temp.url, home: temp.url)
+        #expect(notTheList.status == 1)
+        #expect(notTheList.errors.first == "udeck-plugin link: \(installed.appendingPathComponent("installed.json").path) is not "
+                + "the list of installed plugins uDeck writes; uDeck installs nothing while it is broken, and nothing was linked",
+                "\(notTheList.errors)")
+        #expect(everything(in: installed) == ["installed.json"])
+    }
+
+    /// What `link` prints to undo it is meant to be copied into a shell, so
+    /// it has to be the link's path to the shell too — a space or a quote in
+    /// uDeck's folder included.
+    @Test("the rm link prints is one the shell reads as the link's path, and nothing else")
+    func undoIsQuoted() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let folder = try await Self.made("greeter", in: temp, folder: "greeter-1")
+        let home = temp.url.appendingPathComponent("it's my home/.udeck", isDirectory: true)
+        let said = await udeckPlugin(["link", folder.path, "--home", home.path], in: temp.url, home: temp.url)
+        #expect(said.status == 0, "\(said.errors)")
+        let link = home.appendingPathComponent("plugins/greeter").path
+        let quoted = PluginLink.shellQuoted(link)
+        #expect(quoted == "'" + link.replacingOccurrences(of: "'", with: #"'\''"#) + "'")
+        #expect(said.output.contains("to undo it: rm \(quoted) (the link goes; the folder it points at stays as it is)"),
+                "\(said.output)")
+        #expect(try Self.shellReads(quoted) == [link])
+
+        // And the same when a link to another folder is in the way.
+        let other = try await Self.made("greeter", in: temp, folder: "greeter-2")
+        let refused = await udeckPlugin(["link", other.path, "--home", home.path], in: temp.url, home: temp.url)
+        #expect(refused.status == 1)
+        #expect(refused.errors.first?.contains("take it away first (rm \(quoted) -- that takes the link") == true, "\(refused.errors)")
+    }
+
+    /// The words `sh` makes of `text`, each ended by a NUL byte, which no
+    /// path holds.
+    static func shellReads(_ text: String) throws -> [String] {
+        let read = try Subprocess.run(["sh", "-c", "for word in " + text + "; do printf '%s\\000' \"$word\"; done"],
+                                      environment: ["PATH": "/usr/bin:/bin"])
+        #expect(read.status == 0)
+        return read.output.split(separator: 0, omittingEmptySubsequences: false).dropLast().map { String(decoding: $0, as: UTF8.self) }
+    }
+
+    @Test("a path is quoted for the shell only when it has to be, and always comes back as it was", arguments: [
+        "/plain/path-1.2_x+y,z:w@v%u=t", "/with space", "/it's", "/''", "/tab\there", "/new\nline", "/$HOME", "/`date`", "/a;b",
+        "/a*b?[c]", "/ünï cödé", "~", "/a\\b", "-n",
+    ])
+    func shellQuoting(_ path: String) throws {
+        let quoted = PluginLink.shellQuoted(path)
+        #expect(try Self.shellReads(quoted) == [path], "\(quoted)")
+        let plain = path.utf8.allSatisfy { "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._-+,:@%=".utf8.contains($0) }
+        #expect((quoted == path) == plain, "\(quoted)")
+    }
+
+    @Test("--home that is empty is wrong usage: it would be the current folder, and nothing is made there",
+          arguments: [["link", "work/greeter", "--home="], ["link", "work/greeter", "--home", ""],
+                      ["run", "work/greeter", "--home="], ["run", "work/greeter", "--home", ""]])
+    func emptyHome(_ arguments: [String]) async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        _ = try await Self.made("greeter", in: temp)
+        let before = everything(in: temp.url)
+        let said = await udeckPlugin(arguments, in: temp.url, home: temp.url)
+        #expect(said.status == 2, "\(arguments)")
+        #expect(said.errors.first?.hasPrefix("udeck-plugin \(arguments[0]): --home is uDeck's folder, and an empty one names none\n") == true,
+                "\(said.errors)")
+        #expect(everything(in: temp.url) == before, "\(arguments)")
+    }
+
+    /// uDeck reads `UDECK_HOME` before `~/.udeck`, and a link made anywhere
+    /// else is one it never looks at.
+    @Test("without --home, link goes where uDeck looks: UDECK_HOME when it is set, ~/.udeck when it is not")
+    func udeckHome() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let folder = try await Self.made("greeter", in: temp)
+        let target = try #require(PluginLink.realPath(folder.path))
+        let user = temp.url.appendingPathComponent("someone", isDirectory: true)
+        let cases: [(String, URL)] = [
+            (temp.url.appendingPathComponent("moved").path, temp.url.appendingPathComponent("moved")),
+            ("~/elsewhere", user.appendingPathComponent("elsewhere")),
+            ("~", user),
+            ("relative/udeck", temp.url.appendingPathComponent("relative/udeck")),
+            ("", user.appendingPathComponent(".udeck")),
+        ]
+        for (moved, expected) in cases {
+            let said = await udeckPlugin(["link", folder.path], in: temp.url, home: user, extra: ["UDECK_HOME": moved])
+            #expect(said.status == 0, "\(moved): \(said.errors)")
+            let link = expected.appendingPathComponent("plugins/greeter")
+            #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) == target, "\(moved)")
+            try? FileManager.default.removeItem(atPath: link.path)
+        }
+
+        // No HOME: an absolute UDECK_HOME is enough, and one that needs HOME is not.
+        var errors: [String] = []
+        let absolute = temp.url.appendingPathComponent("absolute")
+        let found = await Command.run(["link", folder.path], environment: ["UDECK_HOME": absolute.path],
+                                      currentDirectory: temp.url.path, output: { _ in }, errors: { errors.append($0) })
+        #expect(found == 0, "\(errors)")
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: absolute.appendingPathComponent("plugins/greeter").path)) == target)
+        let lost = await Command.run(["link", folder.path], environment: ["UDECK_HOME": "~/x"], currentDirectory: temp.url.path,
+                                     output: { _ in }, errors: { errors.append($0) })
+        #expect(lost == 2)
+        #expect(errors.last?.contains("UDECK_HOME") == true, "\(errors)")
+        #expect(!FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("~").path))
+    }
+
+    /// Swift calls two spellings of `café` one string; a file system that
+    /// keeps names as bytes — Linux's — calls them two folders.
+    @Test("one path is another only byte for byte")
+    func samePath() {
+        let composed = "/work/caf\u{E9}"
+        let decomposed = "/work/cafe\u{301}"
+        #expect(composed == decomposed, "Swift's == is what the comparison must not be")
+        #expect(!PluginLink.samePath(composed, decomposed))
+        #expect(PluginLink.samePath(composed, "/work/caf\u{E9}"))
+        #expect(!PluginLink.samePath("/work/a", "/work/a/"))
+    }
+
+    /// Where a file system keeps both spellings as two folders, a link to one
+    /// is not a link to the other. A Mac's does not keep them apart, and there
+    /// this has nothing to show.
+    @Test("a link to one spelling of a name is not a link to the other")
+    func twoSpellings() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let composed = try await Self.made("greeter", in: temp, folder: "caf\u{E9}")
+        let decomposed = temp.url.appendingPathComponent("work/cafe\u{301}")
+        guard (try? FileManager.default.copyItem(at: composed, to: decomposed)) != nil,
+              let one = PluginLink.realPath(composed.path), let other = PluginLink.realPath(decomposed.path),
+              !one.utf8.elementsEqual(other.utf8) else { return }
+        let home = temp.url.appendingPathComponent("udeck").path
+        #expect(await udeckPlugin(["link", composed.path, "--home", home], in: temp.url, home: temp.url).status == 0)
+        let second = await udeckPlugin(["link", decomposed.path, "--home", home], in: temp.url, home: temp.url)
+        #expect(second.status == 1, "\(second.output)")
+        #expect(second.errors.first?.contains("is already a link, to \(one)") == true, "\(second.errors)")
     }
 
     @Test("link refuses what is not a plugin folder")
@@ -489,6 +681,20 @@ struct FolderSnapshotTests {
         #expect(changes.changed == [".hidden", "a.txt", "sub/b.txt"])
         #expect(before.changes(to: before) == ([], [], []))
     }
+
+    /// Two spellings of one name are one Swift string and, on Linux, two
+    /// files: a producer that wrote the other one wrote a file.
+    @Test("paths, and where a link points, are compared byte for byte")
+    func bytes() {
+        let composed = Array("caf\u{E9}".utf8)
+        let decomposed = Array("cafe\u{301}".utf8)
+        let one = FolderSnapshot(entries: [composed: .file(blob: "b", executable: false), Array("link".utf8): .link(composed)])
+        let other = FolderSnapshot(entries: [decomposed: .file(blob: "b", executable: false), Array("link".utf8): .link(decomposed)])
+        let changes = one.changes(to: other)
+        #expect(changes.added == ["cafe\u{301}"] && changes.added.first?.unicodeScalars.count == 5)
+        #expect(changes.removed == ["caf\u{E9}"] && changes.removed.first?.unicodeScalars.count == 4)
+        #expect(changes.changed == ["link"])
+    }
 }
 
 @Suite("udeck-plugin run", .serialized)
@@ -667,6 +873,75 @@ struct RunPluginTests {
         #expect(said.output.contains("  | a diagnostic"))
     }
 
+    @Test("what uDeck notes against a plugin it runs all the same is said, and the run goes on")
+    func notesAgainstThePlugin() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let folder = Self.plugin(temp, "noted", script: #"printf '{"rows": []}'"#)
+        try Data("{ not json".utf8).write(to: folder.appendingPathComponent("manifest.ru.json"))
+        let problems = PluginDiscovery(searchPath: PluginEnvironment.defaultSearchPath).load(folder).problems
+        #expect(problems.count == 1 && problems.allSatisfy { !$0.isFatal }, "\(problems)")
+        let said = await udeckPlugin(["run", "plugins/noted"], in: temp.url, home: temp.url)
+        #expect(said.status == 0, "\(said.output)")
+        #expect(said.output.contains("note: uDeck notes against the plugin: \(problems[0])"), "\(said.output)")
+        #expect(said.output.contains { $0.hasPrefix("note: uDeck notes against the plugin: manifest.ru.json is not valid") })
+        #expect(said.output.last == "ran plugins/noted: a card, 0 warnings")
+    }
+
+    @Test("a run uDeck draws a card from is said to be slow past half of its timeout, and only then")
+    func slowness() {
+        let card = PollExecution.card(Card())
+        let said = "the run took more than half of its 2.0 s timeout"
+        #expect(PluginTrial.slowness(duration: 1.01, timeout: 2, execution: card) == said)
+        #expect(PluginTrial.slowness(duration: 1.9, timeout: 2, execution: card) == said)
+        #expect(PluginTrial.slowness(duration: 1, timeout: 2, execution: card) == nil)
+        #expect(PluginTrial.slowness(duration: 0.2, timeout: 2, execution: card) == nil)
+        #expect(PluginTrial.slowness(duration: 0.3, timeout: 0.5, execution: card) == "the run took more than half of its 0.5 s timeout")
+        #expect(PluginTrial.slowness(duration: 1.5, timeout: nil, execution: card) == nil)
+        let failure = PluginFailure(reason: .timedOut(after: 2))
+        #expect(PluginTrial.slowness(duration: 1.5, timeout: 2, execution: .failure(failure)) == nil,
+                "a failure is said as one, and not as slow")
+        #expect(PluginTrial.slowness(duration: 2.5, timeout: 2, execution: .lateCard(Card(), failure)) == nil)
+    }
+
+    @Test("output dropped past the limit is said, unless the run was stopped for it and its failure says so")
+    func droppedSaid() {
+        func result(_ termination: Termination, output: Int, error: Int) -> ProcessRunResult {
+            ProcessRunResult(standardOutput: Data(), standardError: Data(), termination: termination, duration: 0,
+                             standardOutputDropped: output, standardErrorDropped: error)
+        }
+        let start = "uDeck keeps 1000 bytes of a run's output, standard output and standard error together, and dropped the rest without a word: "
+        #expect(PluginTrial.dropped(from: result(.exited(code: 0), output: 0, error: 51), limit: 1000) == start + "51 bytes of standard error")
+        #expect(PluginTrial.dropped(from: result(.exited(code: 0), output: 1, error: 0), limit: 1000) == start + "1 byte of standard output")
+        #expect(PluginTrial.dropped(from: result(.exited(code: 3), output: 2, error: 3), limit: 1000)
+                == start + "2 bytes of standard output and 3 bytes of standard error")
+        #expect(PluginTrial.dropped(from: result(.exited(code: 0), output: 0, error: 0), limit: 1000) == nil)
+        #expect(PluginTrial.dropped(from: result(.outputLimitExceeded(bytes: 2000), output: 0, error: 1000), limit: 1000) == nil)
+    }
+
+    @Test("run says how much of each stream the limit dropped")
+    func droppedShown() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        Self.plugin(temp, "flood", script: #"printf '{"rows": []}'; head -c 1100000 /dev/zero | tr '\000' e >&2"#)
+        let said = await udeckPlugin(["run", "plugins/flood"], in: temp.url, home: temp.url)
+        let kept = (1 << 20) - 12
+        let line = try #require(said.output.first { $0.hasPrefix("stderr: ") }, "\(said.output.prefix(12))")
+        #expect(line.hasPrefix("stderr: \(kept) bytes, 1 line (and "), "\(line)")
+        #expect(line.hasSuffix(" bytes past the output limit, dropped):"), "\(line)")
+        let stopped = said.output.contains { $0.hasPrefix("ended: stopped by uDeck after") }
+        let warned = said.output.contains { $0.hasPrefix("warning: uDeck keeps 1048576 bytes of a run's output") }
+        // Stopped for it, or ended before uDeck looked: said one way or the other, never both, never neither.
+        #expect(stopped != warned, "\(said.output.filter { !$0.hasPrefix("  |") })")
+
+        Self.plugin(temp, "spill", script: #"/usr/bin/perl -e 'print "o" x 1100000'"#)
+        let spilt = await udeckPlugin(["run", "plugins/spill"], in: temp.url, home: temp.url)
+        let stdout = try #require(spilt.output.first { $0.hasPrefix("stdout: ") }, "\(spilt.output)")
+        #expect(stdout.hasPrefix("stdout: \(1 << 20) bytes (and "), "\(stdout)")
+        #expect(stdout.hasSuffix(" bytes past the output limit, dropped)"), "\(stdout)")
+        #expect(spilt.output.contains("stderr: nothing"))
+    }
+
     @Test("with --home, the settings' values are the ones kept there")
     func settingsFromHome() async throws {
         let temp = TemporaryDirectory()
@@ -691,7 +966,8 @@ struct RunPluginTests {
         try Data("{ broken".utf8).write(to: home.appendingPathComponent("plugin-settings.json"))
         let said = await udeckPlugin(["run", folder.path, "--home", home.path], in: temp.url, home: temp.url)
         #expect(said.status == 2)
-        #expect(said.output.first?.contains("could not read \(home.appendingPathComponent("plugin-settings.json").path)") == true, "\(said.output)")
+        #expect(said.errors.first?.contains("could not read \(home.appendingPathComponent("plugin-settings.json").path)") == true, "\(said.errors)")
+        #expect(said.output.isEmpty, "\(said.output)")
     }
 
     @Test("what uDeck would not run is not run")
@@ -709,8 +985,10 @@ struct RunPluginTests {
                                ("plugins/other-name", "they must match"), ("plugins/absent", "uDeck would not run it: ")] {
             let result = await udeckPlugin(["run", folder], in: temp.url, home: temp.url)
             #expect(result.status == 2, "\(folder)")
-            #expect(result.output.first?.hasPrefix("could not run \(folder): ") == true && result.output.first?.contains(said) == true,
-                    "\(folder): \(result.output)")
+            // On standard error, as new and link say why they did nothing.
+            #expect(result.errors.first?.hasPrefix("udeck-plugin run: could not run \(folder): ") == true
+                    && result.errors.first?.contains(said) == true, "\(folder): \(result.errors)")
+            #expect(result.output.isEmpty, "\(folder): \(result.output)")
             #expect(!FileManager.default.fileExists(atPath: temp.url.appendingPathComponent(folder + "/ran").path))
         }
     }

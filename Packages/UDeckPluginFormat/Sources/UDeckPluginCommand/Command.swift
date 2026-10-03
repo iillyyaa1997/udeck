@@ -17,7 +17,9 @@ import UDeckPluginFormat
 /// arguments that make no sense. Two is never "checked and fine". The other
 /// commands keep to the same three: `new` and `link` are 0 when done, 1 when
 /// what they would make is in the way, 2 for a request that makes no sense;
-/// `run` is 0 when uDeck would draw the card, 1 when it would show a failure,
+/// `run` is 0 when uDeck would draw the card and count the run a success, 1
+/// when it would count a failure — one it shows, or a card printed before a
+/// run past its timeout, which uDeck draws and counts a failure all the same —
 /// and 2 when it would not run the plugin at all.
 public enum Command {
     public static let usage = """
@@ -58,14 +60,16 @@ public enum Command {
           run           the plugin's producer, once, as uDeck runs it (a Mac's
                         command): its folder, uDeck's environment, its timeout and
                         process group, the 1 MiB limit; then the card as uDeck reads
-                        it, how long it took, how it ended, all of its stderr, and
-                        what uDeck would have forgiven without a word
+                        it, how long it took, how it ended, its stderr (what of it
+                        the limit kept, and how much it dropped), and what uDeck
+                        would have forgiven without a word
           --home <folder>
                         uDeck's folder: for run, where UDECK_CACHE_DIR is
                         (<home>/cache/<id>) and the settings' values are read from
                         (<home>/plugin-settings.json) -- default, a new folder for
                         the run alone; for link, where the link goes
-                        (<home>/plugins/<id>) -- default ~/.udeck
+                        (<home>/plugins/<id>) -- default, the folder uDeck uses:
+                        UDECK_HOME, else ~/.udeck
           --lang <code> UDECK_LANG for run (default: en)
           --reason <why>
                         UDECK_REFRESH_REASON for run (default: interval)
@@ -75,7 +79,8 @@ public enum Command {
 
         Exit status: 0 no errors (warnings do not fail), 1 errors, 2 could not check.
         new and link: 0 done, 1 in the way, 2 wrong request. run: 0 a card, 1 a
-        failure, 2 not run.
+        failure (a card printed before a run past its timeout is drawn, and is
+        one), 2 not run.
         """
 
     /// Runs `udeck-plugin` with `arguments`, the program's own name left out.

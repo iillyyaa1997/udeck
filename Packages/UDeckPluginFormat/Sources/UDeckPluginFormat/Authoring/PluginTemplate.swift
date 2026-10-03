@@ -117,7 +117,9 @@ public enum PluginTemplate {
 
         let name = request.name.map(Blank.trimmed) ?? name(from: id.rawValue)
         guard !name.isEmpty else { throw Refusal(description: "--name is blank", isUsage: true) }
+        guard isOneLine(name) else { throw notOneLine("--name") }
         let description = request.description.map(Blank.trimmed)
+        if let description, !isOneLine(description) { throw notOneLine("--description") }
         let producer = "\(id.rawValue).sh"
         var files: [(name: String, content: [UInt8], executable: Bool)] = [
             ("manifest.json", Array(manifest(id: id.rawValue, name: name, description: description ?? defaultDescription,
@@ -126,7 +128,7 @@ public enum PluginTemplate {
                                                       ? defaultRussianDescription : nil).utf8), false),
             ("README.md", Array(readme(name: name, description: description ?? defaultDescription, producer: producer,
                                        author: licence == nil ? nil : author).utf8), false),
-            (producer, Array(script(name: name).utf8), true),
+            (producer, Array(script(id: id.rawValue).utf8), true),
         ]
         if let licence { files.append(("LICENSE", licence, false)) }
 
@@ -155,7 +157,7 @@ public enum PluginTemplate {
                 return current
             }
             let parent = current.deletingLastPathComponent()
-            if parent.path == current.path { return nil }
+            if parent.path.utf8.elementsEqual(current.path.utf8) { return nil }
             current = parent
         }
     }
@@ -172,11 +174,29 @@ public enum PluginTemplate {
             let said = asked.flatMap { $0.status == 0 ? Blank.trimmed(String(decoding: $0.output, as: UTF8.self)) : nil }
             author = said?.isEmpty == false ? said : nil
         }
-        if let author, author.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7F || $0 == "\u{2028}" || $0 == "\u{2029}" }) {
-            throw Refusal(description: "the author is one line of text, with no line break or other control character in it",
-                          isUsage: true)
-        }
+        if let author, !isOneLine(author) { throw notOneLine("the author") }
         return author
+    }
+
+    /// Whether `text` is one line with nothing in it a terminal or an editor
+    /// acts on: no control character — C0, DEL or C1, which holds the line
+    /// break U+0085 — and neither of Unicode's line and paragraph separators.
+    ///
+    /// The name, the description and the author are the author's own words,
+    /// and `new` writes them into a manifest, a README and a LICENSE line, each
+    /// of which a line break would split. The contract itself says no more of
+    /// a manifest's `name` and `description` than that the operator sees them
+    /// (docs/plugin-api.md), so `check` holds nobody's manifest to this: it is
+    /// what `new` writes, not a rule of the format.
+    static func isOneLine(_ text: String) -> Bool {
+        !text.unicodeScalars.contains {
+            $0.value < 0x20 || (0x7F ... 0x9F).contains($0.value) || $0 == "\u{2028}" || $0 == "\u{2029}"
+        }
+    }
+
+    static func notOneLine(_ what: String) -> Refusal {
+        Refusal(description: "\(what) is one line of text, with no line break or other control character in it",
+                isUsage: true)
     }
 
     /// This year, where the command runs.
@@ -248,10 +268,15 @@ public enum PluginTemplate {
         return text
     }
 
-    static func script(name: String) -> String {
+    /// The producer. Named by its id, which is letters, digits and `. _ -`
+    /// alone, and holds none of the author's words: the name and the
+    /// description are the manifest's to keep, and text written into a shell
+    /// script — even into a comment there — is one line break away from being
+    /// a command.
+    static func script(id: String) -> String {
         """
         #!/bin/sh
-        # \(name): a uDeck producer. It prints one card, as JSON, on standard
+        # \(id): a uDeck producer. It prints one card, as JSON, on standard
         # output, and exits 0; anything else it has to say goes to standard error.
         #
         # Run it the way uDeck does, and see what uDeck makes of it:

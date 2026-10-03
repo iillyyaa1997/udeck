@@ -65,13 +65,18 @@ extension Command {
         } catch {
             return 2
         }
+        if let given = parsed.values["--home"], given.isEmpty {
+            errors("udeck-plugin link: \(emptyHome)\n\n\(usage)")
+            return 2
+        }
         let home: URL
         if let given = parsed.values["--home"] {
             home = absolute(given, from: here)
-        } else if let user = environment["HOME"], !user.isEmpty {
-            home = URL(fileURLWithPath: user).appendingPathComponent(".udeck", isDirectory: true)
+        } else if let found = udeckHome(environment: environment, here: here) {
+            home = found
         } else {
-            errors("udeck-plugin link: there is no HOME to find ~/.udeck in; say where uDeck's folder is with --home")
+            errors("udeck-plugin link: there is no HOME to find uDeck's folder in (~/.udeck, or a UDECK_HOME that "
+                   + "starts with ~); say where it is with --home")
             return 2
         }
         let linked: PluginLink.Linked
@@ -86,12 +91,33 @@ extension Command {
         }
         output(linked.wasThere ? "already linked: \(linked.link.path) -> \(linked.target)"
                                : "linked \(linked.link.path) -> \(linked.target)")
-        output("to undo it: rm \(linked.link.path) (the link goes; the folder it points at stays as it is)")
+        output("to undo it: rm \(PluginLink.shellQuoted(linked.link.path)) (the link goes; the folder it points at "
+               + "stays as it is)")
         if !PluginLink.udeckReadsLinks {
             output("note: this uDeck does not list a plugin through a link yet: it skips a link in its plugins folder, "
                    + "and lists the plugin once a release that reads links is installed")
         }
         return 0
+    }
+
+    /// Said of `--home=` and `--home ""`: read as a path, nothing is the
+    /// current folder, and a run or a link would make uDeck's folders in it.
+    static let emptyHome = "--home is uDeck's folder, and an empty one names none"
+
+    /// uDeck's folder, found the way uDeck finds it (`UDeckPaths.fromEnvironment`):
+    /// `UDECK_HOME` when it is set and not empty — `~` at its start is
+    /// `HOME`, and a relative one is read from `here` — and `~/.udeck`
+    /// otherwise. Nil when neither is there to read.
+    static func udeckHome(environment: [String: String], here: String) -> URL? {
+        let user = environment["HOME"].flatMap { $0.isEmpty ? nil : $0 }
+        if let moved = environment["UDECK_HOME"], !moved.isEmpty {
+            if moved == "~" || moved.hasPrefix("~/") {
+                guard let user else { return nil }
+                return absolute(user + String(moved.dropFirst()), from: here)
+            }
+            return absolute(moved, from: here)
+        }
+        return user.map { absolute($0, from: here).appendingPathComponent(".udeck", isDirectory: true) }
     }
 
     // MARK: - run
@@ -110,6 +136,7 @@ extension Command {
                 throw UsageError(message: "--reason is one of \(RefreshReason.allCases.map(\.rawValue).joined(separator: ", ")), not \"\(named)\"")
             }
             reason = known
+            if parsed.values["--home"]?.isEmpty == true { throw UsageError(message: emptyHome) }
             if let language = parsed.values["--lang"], language.isEmpty || !language.utf8.allSatisfy({
                 (UInt8(ascii: "a") ... UInt8(ascii: "z")).contains($0) || (UInt8(ascii: "A") ... UInt8(ascii: "Z")).contains($0)
                     || $0 == UInt8(ascii: "-")
@@ -131,10 +158,10 @@ extension Command {
         do {
             report = try await PluginTrial.run(folder, options: options)
         } catch let refusal as PluginTrial.Refusal {
-            output("could not run \(shown(folder, from: here)): \(refusal.description)")
+            errors("udeck-plugin run: could not run \(shown(folder, from: here)): \(refusal.description)")
             return 2
         } catch {
-            output("could not run \(shown(folder, from: here)): \(error)")
+            errors("udeck-plugin run: could not run \(shown(folder, from: here)): \(error)")
             return 2
         }
         return say(report, folder: shown(folder, from: here), output: output)
@@ -161,15 +188,16 @@ extension Command {
         let timeout = manifest.timeout.map { " of its \(Seconds.fixed($0, places: $0 == $0.rounded() ? 0 : 1)) s timeout" } ?? ""
         output("took \(Seconds.fixed(result.duration, places: 2)) s\(timeout)")
         output("ended: \(ending(result.termination))")
-        output("stdout: \(result.standardOutput.count) byte\(result.standardOutput.count == 1 ? "" : "s")")
+        output("stdout: \(bytes(result.standardOutput.count))\(dropped(result.standardOutputDropped))")
         if result.standardError.isEmpty {
-            output("stderr: nothing")
+            output(result.standardErrorDropped == 0 ? "stderr: nothing"
+                                                    : "stderr: nothing kept\(dropped(result.standardErrorDropped))")
         } else {
             let lines = String(decoding: result.standardError, as: UTF8.self)
                 .split(separator: "\n", omittingEmptySubsequences: false)
             let shown = lines.last == "" ? lines.dropLast() : lines[...]
-            output("stderr: \(result.standardError.count) byte\(result.standardError.count == 1 ? "" : "s"), "
-                   + "\(shown.count) line\(shown.count == 1 ? "" : "s"):")
+            output("stderr: \(bytes(result.standardError.count)), \(shown.count) line\(shown.count == 1 ? "" : "s")"
+                   + "\(dropped(result.standardErrorDropped)):")
             for line in shown { output("  | \(line)") }
         }
         let status: Int32
@@ -191,6 +219,15 @@ extension Command {
         let warnings = report.warnings.count
         output("ran \(folder): \(status == 0 ? "a card" : "a failure"), \(warnings) warning\(warnings == 1 ? "" : "s")")
         return status
+    }
+
+    static func bytes(_ count: Int) -> String {
+        "\(count) byte\(count == 1 ? "" : "s")"
+    }
+
+    /// What of a stream went past the output limit, after what was kept of it.
+    static func dropped(_ count: Int) -> String {
+        count == 0 ? "" : " (and \(bytes(count)) past the output limit, dropped)"
     }
 
     /// How a run ended, in a line.

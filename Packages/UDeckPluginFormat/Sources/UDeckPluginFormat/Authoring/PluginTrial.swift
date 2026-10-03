@@ -13,9 +13,10 @@ import Darwin
 /// folder, `ProcessRunner` runs it — its own process group, its `timeout`,
 /// `SIGTERM` and then `SIGKILL`, the 1 MiB limit — and `PollExecution` says
 /// what the run came to. What is added is only what uDeck keeps to itself:
-/// everything the producer wrote to stderr, how long it took, and what uDeck
-/// would have forgiven without a word (`CardReview`, and whether the run wrote
-/// into its own folder).
+/// what the producer wrote to stderr, and how much of it the limit dropped,
+/// how long it took, and what uDeck would have forgiven without a word
+/// (`CardReview`, output dropped at the limit, and whether the run wrote into
+/// its own folder).
 ///
 /// What uDeck asks the operator first is said, not asked: the run happens
 /// without a grant, which is the point of trying a plugin before installing it.
@@ -152,17 +153,40 @@ public enum PluginTrial {
                          + "producer wrote into it is not known")
         }
 
+        if let dropped = dropped(from: result, limit: options.runner.maximumOutputBytes) { warnings.append(dropped) }
+
         if case .card = execution, !result.standardError.isEmpty {
             notes.append("uDeck does not keep the standard error of a run that printed a card")
         }
-        if let timeout = manifest.timeout, timeout > 0, result.duration > timeout / 2,
-           case .card = execution {
-            notes.append("the run took more than half of its \(Seconds.fixed(timeout, places: 1)) s timeout")
+        if let slow = slowness(duration: result.duration, timeout: manifest.timeout, execution: execution) {
+            notes.append(slow)
         }
 
         return Report(plugin: plugin, manifest: manifest, home: home, homeIsTemporary: homeIsTemporary,
                       environment: environment, result: result, execution: execution, notes: notes,
                       warnings: warnings)
+    }
+
+    /// Said of a run uDeck drew a card from, and that took more than half of
+    /// its timeout to: on a machine busier than the author's, the rest of it
+    /// goes too.
+    static func slowness(duration: TimeInterval, timeout: TimeInterval?, execution: PollExecution) -> String? {
+        guard let timeout, timeout > 0, duration > timeout / 2, case .card = execution else { return nil }
+        return "the run took more than half of its \(Seconds.fixed(timeout, places: 1)) s timeout"
+    }
+
+    /// Said when output went past the limit and nobody said so: the producer
+    /// ended before uDeck's watch on the limit caught it, and uDeck kept the
+    /// first `limit` bytes of standard output and standard error together and
+    /// let the rest go without a word. A run that was stopped for it has its
+    /// failure say so instead.
+    static func dropped(from result: ProcessRunResult, limit: Int) -> String? {
+        guard result.standardOutputDropped + result.standardErrorDropped > 0 else { return nil }
+        if case .outputLimitExceeded = result.termination { return nil }
+        let parts = [(result.standardOutputDropped, "standard output"), (result.standardErrorDropped, "standard error")]
+            .filter { $0.0 > 0 }.map { "\($0.0) byte\($0.0 == 1 ? "" : "s") of \($0.1)" }
+        return "uDeck keeps \(limit) bytes of a run's output, standard output and standard error together, and "
+            + "dropped the rest without a word: \(parts.joined(separator: " and "))"
     }
 
     /// The values the operator chose for the plugin's settings, as uDeck keeps
