@@ -32,8 +32,20 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_ENV"
 
+      # As in ci.yml: uDeck's tests and the plugin format's in processes of
+      # their own, the timing tests one at a time — in one process the format's
+      # blocking tests starve the cooperative pool, and timing tests measure
+      # their neighbours.
       - name: Test
-        run: swift test
+        run: swift test --skip PluginFormatTests
+
+      - name: Test the plugin format
+        working-directory: Packages/UDeckPluginFormat
+        run: swift test --skip UDeckPluginFormatTimingTests
+
+      - name: Test how long the plugin format takes to read
+        working-directory: Packages/UDeckPluginFormat
+        run: swift test --filter UDeckPluginFormatTimingTests --no-parallel
 
       - name: Build the application bundle
         run: Scripts/make-app.sh

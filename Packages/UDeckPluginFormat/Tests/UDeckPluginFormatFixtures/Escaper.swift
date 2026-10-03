@@ -38,7 +38,7 @@ public enum Escaper {
         """
     }
 
-    /// Tells the child the run has returned, and waits — up to ten seconds; it
+    /// Tells the child the run has returned, and waits — up to five minutes; it
     /// answers within one of its 25 ms looks — for what its write found.
     public static func verdict(in scratch: URL) -> String? {
         FileManager.default.createFile(atPath: scratch.appendingPathComponent("returned").path, contents: nil)
@@ -50,7 +50,7 @@ public enum Escaper {
         return nil
     }
 
-    /// Lets the child go now rather than in ten seconds, and waits for its
+    /// Lets the child go now rather than in five minutes, and waits for its
     /// last word: for a test that stopped before it asked for the verdict, so
     /// that the child is not writing into `scratch` while the test's
     /// temporary folder is taken away. Not a signal by its pid, which could

@@ -91,6 +91,9 @@ enum Subprocess {
             throw CheckFailure("could not make a file in \(folder): \(String(cString: strerror(errno)))")
         }
         unlink(&template)
+        // Not for any other process started meanwhile: only the one it is
+        // dup2'd into, which clears the flag.
+        _ = fcntl(file, F_SETFD, FD_CLOEXEC)
         return file
     }
 

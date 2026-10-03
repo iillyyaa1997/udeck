@@ -81,6 +81,11 @@ public enum ProcessGroup {
             close(outFDs[0]); close(outFDs[1])
             throw SpawnError.pipeFailed(errno)
         }
+        // Close-on-exec, all four: a process anybody else starts meanwhile —
+        // a git of the check, a sh of a test — would otherwise inherit them and
+        // hold the producer's pipe open after the producer is gone. The
+        // producer gets its ends through dup2, which clears the flag.
+        for fd in outFDs + errFDs { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
         let pid: pid_t
         do {
             pid = try spawn(executable: executable, arguments: arguments, workingDirectory: workingDirectory,
