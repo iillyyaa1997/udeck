@@ -18,29 +18,36 @@ for what that promises.
   executable POSIX `sh` producer that builds its JSON safely, and, where the
   repository's own LICENSE is the Apache License 2.0, a LICENSE of the
   plugin's own, `Copyright <year> <author>` above that text. The author is
-  `--author` or git's `user.name`. `run <folder>` (a Mac's command) runs the
-  producer once with uDeck's own code — in its folder, with the environment
-  uDeck builds, under its `timeout`, in a process group of its own, with the
-  1 MiB limit, a uDeck folder of its own unless `--home` names one — and says
-  how it ended, how long it took, all of its standard error, the card as uDeck
-  reads it or the failure uDeck would show, and what uDeck would have let pass
+  `--author` or git's `user.name`; the author, `--name` and `--description`
+  are one line each, with no control character, and the producer holds none of
+  them. `run <folder>` (a Mac's command) runs the producer once with uDeck's
+  own code — in its folder, with the environment uDeck builds, under its
+  `timeout`, in a process group of its own, with the 1 MiB limit, a uDeck
+  folder of its own unless `--home` names one — and says how it ended, how
+  long it took, its standard error (all of it within the 1 MiB, which holds
+  both streams, and how much past that was dropped), the card as uDeck reads
+  it or the failure uDeck would show, and what uDeck would have let pass
   without a word: a field it ignores (`stat`, `tll`), a row type it does not
   draw, what it cuts at a limit, a card printed before a run past its
-  deadline, a file written into the plugin's own folder, a part of the card
-  newer than `minUDeck`. `link <folder>` puts a link, `~/.udeck/plugins/<id>`
-  → the folder, for an id nothing else has taken, and never touches
-  `installed.json`; this release of uDeck does not list a plugin through a
-  link yet, and says so. Running a producer moved into the plugin format's
-  package for it — the process group, the deadline, the output limit, the
-  environment, and what a run comes to — on the standard library,
-  FoundationEssentials and Darwin, and uDeck runs every plugin with it, as
-  before: its tests of running plugins are unchanged and pass.
-  `Scripts/new-plugin.sh` is gone, and the guides start from `udeck-plugin`
-  instead; the contract no longer offers `UDECK_HOME` as the way to keep a
-  plugin under version control, and says exactly which variables a card's
-  action gets. CI holds the examples to `udeck-plugin check --strict`, with no
-  warning, instead of a shape check of its own, and fails when the tests leave
-  a `udeck-tests-*` folder behind.
+  deadline, a file written into the plugin's own folder, output dropped at the
+  limit — and, once a release adds to what a card can hold, a part of the card
+  newer than `minUDeck`, which nothing in a card is yet. Its exit status is 0
+  for a card, 1 for a failure — a card printed before a run past its timeout
+  is one, as uDeck counts it — and 2 when uDeck would not run the plugin.
+  `link <folder>` puts a link, `<uDeck's folder>/plugins/<id>` → the folder —
+  `UDECK_HOME` or `~/.udeck`, as uDeck finds it, unless `--home` names another
+  — for an id nothing else has taken, and never touches `installed.json`; this
+  release of uDeck does not list a plugin through a link yet, and says so.
+  Running a producer moved into the plugin format's package for it — the
+  process group, the deadline, the output limit, the environment, and what a
+  run comes to — on the standard library, FoundationEssentials and Darwin, and
+  uDeck runs every plugin with it, as before: its tests of running plugins are
+  unchanged and pass. `Scripts/new-plugin.sh` is gone, and the guides start
+  from `udeck-plugin` instead; the contract no longer offers `UDECK_HOME` as
+  the way to keep a plugin under version control, and says exactly which
+  variables a card's action gets. CI holds the examples to `udeck-plugin check
+  --strict`, with no warning, instead of a shape check of its own, and fails
+  when the tests leave a `udeck-tests-*` folder behind.
 
 - **The plugin format is a package of its own, and `udeck-plugin` checks
   plugins with it, on a Mac and on Linux.** Stage 2 of

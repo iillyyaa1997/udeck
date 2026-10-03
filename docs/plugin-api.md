@@ -676,7 +676,9 @@ folder, with the environment above built the way uDeck builds it — every
 `UDECK_` variable, the search path, and of the shell's own only `HOME` and
 `TMPDIR`, as uDeck passes on its own — under `timeout`, in
 a process group of its own, with the output limit. Then it says how the run
-ended and how long it took, prints all of its standard error, the card as uDeck
+ended and how long it took, prints its standard error — all of it within the
+1 MiB uDeck keeps of a run's output, standard output and standard error
+together, and how much past that was dropped — the card as uDeck
 reads it or the failure uDeck would show, in uDeck's words, and what uDeck would
 have let pass without a word: fields it ignores (`stat`, `tll`), row types it
 does not draw, what it cuts to the limits above, a card printed and then a run

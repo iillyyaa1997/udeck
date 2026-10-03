@@ -505,9 +505,12 @@ no number yet, that is any version up to the smallest it can have — 0.5.1
 after 0.5.0. A higher one is the author's to set, and is left alone.
 
 What a producer *prints* — which row types its cards use — cannot be seen
-without running it, so the check does not see it; `udeck-plugin run` sees one
-card, and warns about any part of it newer than the declared `minUDeck` — or,
-with none declared, newer than the release that first reads `minUDeck`.
+without running it, so the check does not see it. `udeck-plugin run` sees one
+card, and reckons it the same way: a part of it newer than the declared
+`minUDeck` — or, with none declared, newer than the release that first reads
+`minUDeck` — is a warning. Every part of a card today came in uDeck 0.1.0,
+like the rest of the contract, so no card gets that warning yet; the first
+release that adds to what a card can hold is the first one it can say.
 
 > **Later — stage 5.** An older uDeck installs the newest version of the plugin
 > whose `minUDeck` it meets, from the repository's history, instead of refusing.

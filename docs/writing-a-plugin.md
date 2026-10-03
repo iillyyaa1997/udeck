@@ -56,14 +56,18 @@ udeck-plugin run my-first-plugin              # run it the way uDeck will
 **`run` runs it exactly as uDeck does** — the same code: in its own folder,
 with the environment uDeck builds, not your shell's, under its `timeout`, in a
 process group of its own, with the 1 MiB limit — and prints the card as uDeck
-reads it, how long the run took, how it ended, everything it wrote to standard
-error, and what uDeck would have forgiven without a word: a key it ignores
-(`stat` for `state`, `tll` for `ttl`), a row type it does not draw, what it
-cuts at a limit, a card printed and then a run past the deadline, a file
-written into the plugin's own folder. Its `UDECK_CACHE_DIR` is in a folder made
-for that one run; `--home <folder>` keeps one between runs, and `--lang` and
-`--reason` set `UDECK_LANG` and `UDECK_REFRESH_REASON`. Exit status 0 means
-uDeck would draw the card, 1 that it would show a failure.
+reads it, how long the run took, how it ended, what it wrote to standard error
+(all of it within the 1 MiB uDeck keeps of a run's output, standard output and
+standard error together, and how much past that was dropped), and what uDeck
+would have forgiven without a word: a key it ignores (`stat` for `state`, `tll`
+for `ttl`), a row type it does not draw, what it cuts at a limit, a card
+printed and then a run past the deadline, a file written into the plugin's own
+folder. Its `UDECK_CACHE_DIR` is in a folder made for that one run;
+`--home <folder>` keeps one between runs, and `--lang` and `--reason` set
+`UDECK_LANG` and `UDECK_REFRESH_REASON`. Exit status 0 means uDeck would draw
+the card and count the run a success; 1 that it would count a failure — one it
+shows, or a card printed before a run past its timeout, which uDeck draws and
+counts a failure all the same; 2 that uDeck would not run the plugin at all.
 
 Then put it where uDeck looks and add it to a tab:
 
@@ -76,10 +80,12 @@ it is already in the list. Change the text it prints in the copy there, wait,
 and watch the card change. That is the whole development loop. The ⟳ button on
 the card runs it on demand when the interval is too long to wait.
 
-`udeck-plugin link my-first-plugin` puts a link to the folder into
-`~/.udeck/plugins/` instead of a copy, so that the folder can stay where you
-work on it — in a repository, under git. It links only an id nothing else has
-taken, and it never touches what uDeck installed (`rm` the link to undo it).
+`udeck-plugin link my-first-plugin` puts a link to the folder into uDeck's
+plugins folder — `~/.udeck/plugins/`, or the one under `UDECK_HOME` when that
+is set, as uDeck finds it — instead of a copy, so that the folder can stay
+where you work on it: in a repository, under git. It links only an id nothing
+else has taken, and it never touches what uDeck installed (`rm` the link to
+undo it).
 **This release of uDeck does not list a plugin through a link yet**: it skips
 a link in its plugins folder. Until one that reads links, copy the folder.
 
@@ -243,8 +249,9 @@ change that.
 ## 9. What uDeck does when you misbehave
 
 Each of these shows a different, readable message on the card, so you find out
-by looking rather than by guessing — and `udeck-plugin run` says each the way
-uDeck would, before you install anything:
+by looking rather than by guessing — and `udeck-plugin run` says each but the
+last the way uDeck would, before you install anything. The last takes failing
+again and again, and `run` runs once:
 
 | What you did | What happens |
 |---|---|
