@@ -55,39 +55,44 @@ udeck-plugin run my-first-plugin              # run it the way uDeck will
 
 **`run` runs it exactly as uDeck does** — the same code: in its own folder,
 with the environment uDeck builds, not your shell's, under its `timeout`, in a
-process group of its own, with the 1 MiB limit — and prints the card as uDeck
-reads it, how long the run took, how it ended, what it wrote to standard error
-(all of it within the 1 MiB uDeck keeps of a run's output, standard output and
-standard error together, and how much past that was dropped), and what uDeck
-would have forgiven without a word: a key it ignores (`stat` for `state`, `tll`
-for `ttl`), a row type it does not draw, what it cuts at a limit, a card
-printed and then a run past the deadline, a file written into the plugin's own
-folder. Its `UDECK_CACHE_DIR` is in a folder made for that one run;
-`--home <folder>` keeps one between runs, and `--lang` and `--reason` set
-`UDECK_LANG` and `UDECK_REFRESH_REASON`. Exit status 0 means uDeck would draw
+process group of its own, with the 1 MiB limit on standard output — and prints
+the card as uDeck reads it, how long the run took, how it ended, what it wrote
+to standard error (the last 64 KiB of it, which is what uDeck keeps, and how
+much came before), and what uDeck would have forgiven without a word: a key it
+ignores (`stat` for `state`, `tll` for `ttl`), a row type it does not draw,
+what it cuts at a limit, a card printed and then a run past the deadline, a
+file written into the plugin's own folder. Its `UDECK_CACHE_DIR` is in a folder
+made for that one run; `--home <folder>` keeps one between runs — a uDeck
+folder, whose settings' values and search path it reads as uDeck does — and
+`--lang` and `--reason` set `UDECK_LANG` and `UDECK_REFRESH_REASON`. Exit status 0 means uDeck would draw
 the card and count the run a success; 1 that it would count a failure — one it
 shows, or a card printed before a run past its timeout, which uDeck draws and
 counts a failure all the same; 2 that uDeck would not run the plugin at all.
 
-Then put it where uDeck looks and add it to a tab:
+Then link it into uDeck and add it to a tab:
 
 ```sh
-cp -R my-first-plugin ~/.udeck/plugins/
+udeck-plugin link my-first-plugin
 ```
 
-**You do not have to tell uDeck about it** — the plugins folder is watched, so
-it is already in the list. Change the text it prints in the copy there, wait,
-and watch the card change. That is the whole development loop. The ⟳ button on
-the card runs it on demand when the interval is too long to wait.
+That puts a link to the folder into uDeck's plugins folder —
+`~/.udeck/plugins/my-first-plugin`, or the one under `UDECK_HOME` when that is
+set, as uDeck finds it — rather than a copy, so the folder stays where you work
+on it: in a repository, under git. **You do not have to tell uDeck about it** —
+the plugins folder is watched, and so is the folder a link leads to, so it is
+already in the list. Change the text it prints in your folder, wait, and watch
+the card change. That is the whole development loop. The ⟳ button on the card
+runs it on demand when the interval is too long to wait.
 
-`udeck-plugin link my-first-plugin` puts a link to the folder into uDeck's
-plugins folder — `~/.udeck/plugins/`, or the one under `UDECK_HOME` when that
-is set, as uDeck finds it — instead of a copy, so that the folder can stay
-where you work on it: in a repository, under git. It links only an id nothing
-else has taken, and it never touches what uDeck installed (`rm` the link to
-undo it).
-**This release of uDeck does not list a plugin through a link yet**: it skips
-a link in its plugins folder. Until one that reads links, copy the folder.
+`link` links only an id nothing else has taken, and it never touches what uDeck
+installed. Removing the plugin — **Remove** in uDeck's Settings, or `rm` of the
+link — takes the link and nothing else: uDeck never deletes, moves to the Trash
+or writes into the folder a link leads to. A linked folder can also keep a log
+of every run on disk; see [The run log](plugin-api.md#the-run-log). The rest of
+what a link does is in [Linked folders](plugin-api.md#linked-folders).
+
+A copy works too — `cp -R my-first-plugin ~/.udeck/plugins/` — and is watched
+the same way; it is just one more place to keep in step.
 
 ---
 
@@ -258,7 +263,7 @@ again and again, and `run` runs once:
 | Ran past `timeout` | killed, with the whole process group you started |
 | Exited non-zero | reported with the status |
 | Printed nothing, or not a card | reported, naming the field that would not parse |
-| Printed more than a megabyte | stopped; the first megabyte is kept |
+| Printed more than a megabyte on stdout | stopped; the first megabyte is kept |
 | Printed a card larger than uDeck draws | drawn up to the limit, with a row saying it was cut |
 | Kept failing | asked less often — doubling, capped at a minute, reset by the first good card |
 
@@ -281,7 +286,8 @@ it, not to wait.
 - [ ] Every setting has a `label`; the ones whose meaning is not obvious have
       `help`.
 - [ ] `permissions` lists everything you actually use, and nothing you do not.
-- [ ] Diagnostics go to stderr, never to stdout.
+- [ ] Diagnostics go to stderr, never to stdout — uDeck keeps the last 64 KiB
+      of each run's, and stderr never counts toward the limit on stdout.
 - [ ] It leaves no background children (uDeck ends the group, but a plugin that
       needs one is fighting the runtime).
 - [ ] If it holds anything the operator would miss, it is in

@@ -57,7 +57,8 @@ A working example of every row type lives in
 
 ## How a plugin is found
 
-uDeck looks in `~/.udeck/plugins/` for folders containing a `manifest.json`.
+uDeck looks in `~/.udeck/plugins/` for folders containing a `manifest.json`, and
+for links to such folders elsewhere ([linked folders](#linked-folders)).
 
 **The folder name must equal the manifest's `id`.** The folder name is what the
 operator sees, and the key under which their settings and permission decisions
@@ -80,10 +81,57 @@ suite runs against a throwaway directory. It is not the way to keep a plugin you
 are writing in a repository: it moves all of uDeck's state with it — layout,
 settings, grants, what was installed — and uDeck started from Finder or at login
 is not started from your shell, so it is not handed a variable set there. The
-way is a link, `~/.udeck/plugins/<id>` → your folder, which
-`udeck-plugin link <folder>` makes for an id nothing else has taken. This
-release of uDeck does not list a plugin through a link yet — see
-[Writing a plugin](writing-a-plugin.md#2-make-one-that-already-works).
+way is a link — a [linked folder](#linked-folders).
+
+### Linked folders
+
+A link in the plugins folder, `~/.udeck/plugins/<id>` → a folder somewhere
+else, is a plugin too: a folder you work on where it is — in a working copy,
+under git — and uDeck runs from there. `udeck-plugin link <folder>` makes one
+for an id nothing else has taken. Only uDeck itself puts a link in the place of
+a plugin it installed, after saying what goes — **Link a folder…**, which
+Settings does not show yet; until it does, **Remove** the installed copy and
+link again.
+
+* **The plugin is named after the link**, and its manifest's `id` has to be
+  that name, as a folder's has to be the folder's.
+* **The link is followed one step**, to a folder outside uDeck's own. A link
+  that leads nowhere, to a file, to another link, round in a circle, into
+  `~/.udeck` (the plugins folder, the caches, the logs) or to a folder that
+  holds `~/.udeck` is listed with that as its reason, and not run. Another
+  link written with a `/` or a `/.` at its end is still another link.
+* **What the folder holds is read as any plugin folder is.** A link *inside*
+  it is what it always was: a command that resolves out of the folder is
+  refused, for a linked folder as for any.
+* **It is watched where it leads.** Editing the manifest or the producer there
+  is noticed as it is in `~/.udeck/plugins`; pointing the link at another
+  folder, or taking it away, is noticed too, and the next read follows it to
+  where it leads now. A link that leads nowhere is read again with the plugins
+  folder — when anything in it changes, or on **Look again**. A working copy
+  is written into all the time — an editor saving, a build, `git` — and every
+  change in it is a read of the plugins folder, which runs nothing by itself:
+  only a plugin whose manifest, command or folder the read found changed
+  starts its interval again, with what it found; every other plugin, this one
+  too when nothing of it changed, runs when it was due.
+* **What runs is the folder that was read.** uDeck reads where the link leads
+  when it reads the plugins folder, and runs that folder until it reads again;
+  your permission decision is held to the manifest's `version` there, as for
+  any folder, so a link pointed at another folder with another version is
+  asked about again.
+* **Removing it removes the link**, and uDeck's own records of the plugin —
+  its permission decision, settings, windows, cache and run log — and nothing
+  else: the folder the link leads to is never deleted, never moved to the
+  Trash and never written into. **Install** or **Replace…** from a catalogue
+  over a linked plugin takes the link's place the same way: the link goes, the
+  folder stays.
+* **It is never in `installed.json`.** A linked folder is no install: there is
+  no source, no commit, nothing to verify. A link uDeck puts in the place of a
+  plugin it installed takes that plugin out of `installed.json` and goes in the
+  way **Replace…** puts a download there — the copy that was there deleted
+  when it is exactly what uDeck installed, moved to the Trash when it holds
+  anything of yours; its windows, settings and permission decision stay.
+* **It can keep a run log** — every run, on disk — while the run log is on:
+  see [The run log](#the-run-log).
 
 ---
 
@@ -154,9 +202,13 @@ uDeck loads such a manifest as it always has: refusing one now would break the
   plugin can ship its own executable without knowing where it was installed.
   A relative path that climbs out of the folder is refused.
 * `"/usr/bin/python3"` — an absolute path, used as given.
-* `"python3"` — a bare name, looked up on uDeck's configured search path
-  (`/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin`, `/bin`, `/usr/sbin`,
-  `/sbin` by default, changeable in settings).
+* `"python3"` — a bare name, looked up on uDeck's configured search path:
+  `/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin`, `/bin`, `/usr/sbin`,
+  `/sbin` by default. It is `pluginExecutableSearchPath` in `settings.json`, in
+  uDeck's folder — a list of folders, where an empty list is the default —
+  and is changed there, by hand, while uDeck is not running: Settings has no
+  field for it yet. `udeck-plugin run --home <uDeck folder>` reads it from
+  there too.
 
 The bare-name case deliberately does **not** use the `PATH` uDeck inherited.
 uDeck can be started from Finder, from a shell or by `launchd`, each with a
@@ -205,8 +257,14 @@ A `poll` plugin prints exactly one JSON object to standard output and exits.
 | `actions` | `[]` | Buttons. See [Actions](#actions). |
 | `ttl` | the host's default (60 s) | **How long this card can be trusted.** See below. |
 
-Anything printed to standard **error** is kept and shown to the operator as the
-plugin's diagnostics. Use it freely: it is where a producer explains itself.
+Anything printed to standard **error** is the producer explaining itself, and
+uDeck keeps it: the last 64 KiB of every run's — the end, which is where an
+error is — with the plugin's last run, whatever it came to, a card as much as a
+failure. Settings shows the end of it beside a failure, its last lines; for a
+[linked folder](#linked-folders) whose run log is on, every run's goes into the
+[run log](#the-run-log). It never counts toward the output limit and never
+stops a run: write as much as you need, knowing that only the end of a long one
+is kept.
 
 ### `ttl` is the most important field
 
@@ -378,10 +436,20 @@ variable should fall back to your declared default rather than crash.
 | `UDECK_PLUGIN_DIR` | Your plugin's folder. Also the working directory. |
 | `UDECK_CACHE_DIR` | A directory that is yours to write in. Created before each run. The only place you should write: see below. |
 | `UDECK_APPEARANCE` | `dark`. The panel hangs over whatever is on screen, so it does not follow the system appearance; the variable exists so that it can start to without breaking you. |
-| `UDECK_REFRESH_REASON` | `launch`, `interval` or `manual`. |
+| `UDECK_REFRESH_REASON` | `launch`, `interval` or `manual`: see below. |
 | `UDECK_LANG` | The language the panel is currently speaking, as a code: `en`, `ru`. Answer in it if you can, and fall back to whatever you write in if you cannot. |
 | `PATH` | uDeck's configured search path, not the one it inherited. |
 | `HOME`, `LANG`, `LC_ALL`, `TMPDIR` | `LANG` and `LC_ALL` are set to `en_US.UTF-8` so a producer can print UTF-8 without configuring a locale. |
+
+`UDECK_REFRESH_REASON` says why this run is happening. `interval` is your
+`interval` passing; `manual` is the operator asking — the panel opening, the
+⟳ button, **Refresh all**. `launch` is the first run of your plugin since uDeck
+started, whatever asked for it — and every run after it until one prints a card:
+a plugin that appears while uDeck runs (copied in, linked, installed) is told
+`launch` on its first run too, and a first run that fails, or times out before
+printing a card, does not use the word up — a card printed before the run went
+past its `timeout` is a card drawn, and does. So a producer that does its slow work at launch — warming a
+cache, a first full scan — is asked for it again until it has done it once.
 
 `UDECK_LANG` is the one to read, not `LANG`. `LANG` and `LC_ALL` are pinned to a
 UTF-8 locale on purpose — they are there so your runtime prints UTF-8 rather
@@ -586,7 +654,8 @@ lower one keeps working — that is what the number is for.
 ## Writing a producer that behaves
 
 * **Print one JSON object and nothing else on standard output.** Diagnostics go
-  to standard error, where uDeck keeps them for you.
+  to standard error, where uDeck keeps the end of them for you — the last
+  64 KiB of each run.
 * **Do not police your own deadline — uDeck does.** A stock macOS has neither
   `timeout` nor `gtimeout`, so a shell producer genuinely cannot. uDeck kills a
   run that overruns `timeout`, and kills whatever it started with it.
@@ -609,9 +678,11 @@ lower one keeps working — that is what the number is for.
   thousand times a day. Read small files; avoid walking large directories.
 * **Fail partially, not totally.** One unreadable file out of thirty should
   count as one unreadable file, not poison the card.
-* **Do not print more than a megabyte.** uDeck stops a producer that does, and
-  keeps only the first megabyte — the count it reports is what you actually
-  sent, the buffer is what it was willing to hold.
+* **Do not print more than a megabyte on standard output.** uDeck stops a
+  producer that does, and keeps only the first megabyte — the count it reports
+  is what you actually sent, the buffer is what it was willing to hold.
+  Standard error is not counted: it is never what stops a run, and uDeck keeps
+  its last 64 KiB.
 
 ### What uDeck does when a producer misbehaves
 
@@ -623,7 +694,7 @@ Each of these produces a different, readable message on the card:
 | Exited non-zero | `the producer exited with status 3` |
 | Printed nothing | `the producer printed nothing` |
 | Printed something that is not a card | the parse error, naming the field |
-| Printed too much | `the producer printed more than the 1048576-byte limit` |
+| Printed too much on standard output | `the producer printed more than the 1048576-byte limit` |
 | Could not be started | the reason it could not |
 | Was never permitted | which capability is missing |
 
@@ -694,25 +765,61 @@ udeck-plugin run ~/src/my-plugins/plugins/hello
 
 `udeck-plugin run` runs the producer with uDeck's own code: in the plugin's
 folder, with the environment above built the way uDeck builds it — every
-`UDECK_` variable, the search path, and of the shell's own only `HOME` and
-`TMPDIR`, as uDeck passes on its own — under `timeout`, in
-a process group of its own, with the output limit. Then it says how the run
-ended and how long it took, prints its standard error — all of it within the
-1 MiB uDeck keeps of a run's output, standard output and standard error
-together, and how much past that was dropped — the card as uDeck
+`UDECK_` variable, the search path, the account's home folder as `HOME` (as
+uDeck hands it: `CFFIXED_USER_HOME` when that is set, then the account's own,
+and the shell's `HOME` only for an account without one), and of the shell's
+own only `TMPDIR`, as uDeck passes on its own — under `timeout`, in a process
+group of its own, with the output limit. Then it says how the run
+ended and how long it took, prints its standard error — the last 64 KiB of it,
+which is what uDeck keeps, and how much came before — the card as uDeck
 reads it or the failure uDeck would show, in uDeck's words, and what uDeck would
 have let pass without a word: fields it ignores (`stat`, `tll`), row types it
-does not draw, what it cuts to the limits above, a card printed and then a run
-past `timeout`, files the run wrote into the plugin's own folder. It asks for
-no permission; it says what uDeck would ask. `UDECK_CACHE_DIR` is in a folder
-made for the run unless `--home <folder>` names one, whose
-`plugin-settings.json`, if there is one, gives the settings' values;
-`--lang` and `--reason` set `UDECK_LANG` and `UDECK_REFRESH_REASON`. It runs on
-a Mac only: uDeck's way of running a process is the Mac's.
+does not draw, what it cuts to the limits above, standard output dropped past
+the limit, a card printed and then a run past `timeout`, files the run wrote
+into the plugin's own folder. It asks for no permission; it says what uDeck
+would ask. `UDECK_CACHE_DIR` is in a folder made for the run unless
+`--home <folder>` names one — a uDeck folder — whose `plugin-settings.json`, if
+there is one, gives the settings' values and whose `settings.json` the search
+path; `--lang` and `--reason` set `UDECK_LANG` and `UDECK_REFRESH_REASON`. It
+runs on a Mac only: uDeck's way of running a process is the Mac's.
 
 `udeck-plugin check --strict <folder>` holds the folder to every rule a plugin
-repository's CI does. Then let uDeck load it: put it in `~/.udeck/plugins/`,
-add it to a tab, and watch what it says. Use the ⟳ button to run it on demand.
+repository's CI does. Then let uDeck load it: link it in
+(`udeck-plugin link <folder>`, a [linked folder](#linked-folders)), add it to a
+tab, and watch what it says. Use the ⟳ button to run it on demand.
+
+### The run log
+
+A linked folder can keep a log of every run, on disk: the plugin you are
+writing is the one whose run that went wrong an hour ago you want to read, and
+the panel keeps only the last one. It is for linked folders only — every other
+plugin keeps its last run in memory and nothing on disk — and it is off until
+you turn it on: `"linkedFolderRunLog": true` in `settings.json` in uDeck's
+folder, by hand, while uDeck is not running (Settings has no switch for it
+yet).
+
+* **Where:** `~/.udeck/logs/<id>.log` — under `UDECK_HOME` when that is set —
+  and never inside your folder: uDeck writes nothing into the folder a link
+  leads to, and a uDeck folder kept inside it gets no log.
+* **What:** one entry per run — when it started, why (`launch`, `interval`,
+  `manual`), how long it took, how it ended (exit status, signal, timeout,
+  output limit), what it came to (a card, a card and a failure, or the failure
+  in the card's words) — and below it the last 64 KiB of its standard error,
+  each line marked `  | `, with how much came before if anything did:
+
+  ```
+  2026-10-04T21:04:05+02:00 launch, 0.21 s: exit status 3; a failure: the producer exited with status 3
+    | Traceback (most recent call last):
+    |   ...
+  ```
+
+* **How big:** a file is turned over past 1 MiB — `<id>.log` becomes
+  `<id>.log.1`, replacing the one before — so a plugin's log is at most 2 MiB.
+* **When it goes:** **Remove** takes it, with the cache. A link taken away by
+  hand leaves it, and the plugin's runs go on into it when the link is back.
+
+A run that never happened — the plugin not permitted, not loadable — is not
+one: the card says why.
 
 The four plugins in [`examples/`](../examples) are also uDeck's own test
 fixtures: `hello-card` uses every row type, `disk-space` is a real plugin with

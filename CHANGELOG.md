@@ -10,6 +10,72 @@ for what that promises.
 
 ## [Unreleased]
 
+- **uDeck lists a plugin whose folder is a link: a linked folder.** A link in
+  the plugins folder, `<id>` → a folder outside uDeck's own, is a plugin named
+  after the link, read where it leads by the same rules as any folder, and
+  watched there: an edit in the author's working copy reaches the card as an
+  edit in `~/.udeck/plugins` always did, and a link pointed elsewhere or taken
+  away is noticed too. A change there starts again only the plugin it changed —
+  every other plugin's next run stays when it was due, where every read of the
+  plugins folder used to start every plugin's interval over — and hashes no
+  installed plugin. A link that leads nowhere, to a file, to another link (a
+  `/` or `/.` at the end of it included), round in a circle, into `~/.udeck` or
+  around it is listed with the reason and not run. Removing a linked plugin, or installing over it from a
+  catalogue, takes the link and nothing else — the folder it leads to is never
+  deleted, sent to the Trash or written into, `.env`, `installed.json` and
+  `cache/` look-alikes in it included — and a linked folder is never in
+  `installed.json`. uDeck can put a link in an installed plugin's place itself
+  (for **Link a folder…**, which Settings does not show yet): the plugin
+  quieted, the link swapped in the way **Replace…** swaps a
+  download, the copy it replaces deleted or sent to the Trash by the usual
+  rule — judged once the plugin is quiet, so a file saved into it meanwhile
+  sends it to the Trash — its record forgotten, its windows and decisions
+  kept, and a crash halfway finished or undone at the next launch.
+  `udeck-plugin link` stops saying uDeck skips a link, refuses a folder inside
+  uDeck's own or one that holds it, and — like uDeck — finds the home folder in
+  the account database rather than `HOME`, and reads `UDECK_HOME=~name/…` as
+  Foundation does: `CFFIXED_USER_HOME` when that is set, the account `name`'s
+  otherwise.
+
+- **Standard error no longer counts toward the 1 MiB limit, and its end is
+  kept.** The limit that stops a run is standard output's alone; a producer
+  explaining itself at length is never stopped for it. uDeck keeps the last
+  64 KiB of every run's standard error — the end, where an error is, cut on a
+  whole character — with the plugin's last run, a card's as much as a
+  failure's (it used to drop a good run's). Settings shows a failed run's last
+  lines, where it showed the first eight. `udeck-plugin run` keeps the same
+  tail and says how much came before it.
+
+- **A linked folder's run log.** With `"linkedFolderRunLog": true` in
+  `settings.json` (no switch in Settings yet), every run of a linked folder is
+  an entry in `<uDeck's folder>/logs/<id>.log` — when, why, how long, how it
+  ended, what it came to, and its standard error's tail — written off the main
+  thread, never inside the folder the link leads to, turned over at 1 MiB with
+  one older file kept, and taken away by **Remove**. One that cannot be written
+  says why in the system's words.
+
+- **`UDECK_REFRESH_REASON=launch`, as the contract promised.** The first run
+  of a plugin after uDeck starts — whatever asked for it — is `launch`, and so
+  is every run after it until one prints a card: a plugin added while uDeck
+  runs gets it on its first run, and a first run that fails, or times out
+  before printing a card, does not use it up.
+  Until now only `interval` and `manual` were ever sent.
+
+- **The catalogue is read away from the main thread.** Every manifest in it —
+  a file of somebody else's, read, hashed again and parsed strictly — used to
+  be read on the main actor at launch and after each refresh, as was the
+  manifest an install is checked by; now they are read on the cooperative pool,
+  and a debug build stops a reader that slips back. So are the installed
+  plugins hashed when the plugins folder is read, and at launch no record's
+  verification is written before the catalogue is read: `checkedAgainst` no
+  longer goes back to the install's own commit at every start.
+
+- **The search path is said where it is.** The contract promised it was
+  "changeable in settings"; it is `pluginExecutableSearchPath` in
+  `settings.json`, with no field in Settings yet, and says so.
+  `udeck-plugin run --home <uDeck folder>` now looks a bare command up on that
+  search path and hands it to the producer as `PATH`, as uDeck does.
+
 - **A plugin's name and description are one line each — rule 20.** In
   `manifest.json` and in every translation, `name` and `description` hold no
   control character (C0, DEL, C1, the tab and every line break among them) and
@@ -35,8 +101,8 @@ for what that promises.
   own code — in its folder, with the environment uDeck builds, under its
   `timeout`, in a process group of its own, with the 1 MiB limit, a uDeck
   folder of its own unless `--home` names one — and says how it ended, how
-  long it took, its standard error (all of it within the 1 MiB, which holds
-  both streams, and how much past that was dropped), the card as uDeck reads
+  long it took, its standard error (the end uDeck keeps of it, and how much
+  came before), the card as uDeck reads
   it or the failure uDeck would show, and what uDeck would have let pass
   without a word: a field it ignores (`stat`, `tll`), a row type it does not
   draw, what it cuts at a limit, a card printed before a run past its
@@ -47,8 +113,9 @@ for what that promises.
   is one, as uDeck counts it — and 2 when uDeck would not run the plugin.
   `link <folder>` puts a link, `<uDeck's folder>/plugins/<id>` → the folder —
   `UDECK_HOME` or `~/.udeck`, as uDeck finds it, unless `--home` names another
-  — for an id nothing else has taken, and never touches `installed.json`; this
-  release of uDeck does not list a plugin through a link yet, and says so.
+  — for an id nothing else has taken, and never touches `installed.json`.
+  `run` hands the producer the account's home folder as `HOME`, as uDeck does,
+  not the shell's.
   Running a producer moved into the plugin format's package for it — the
   process group, the deadline, the output limit, the environment, and what a
   run comes to — on the standard library, FoundationEssentials and Darwin, and

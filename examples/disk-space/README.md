@@ -127,7 +127,8 @@ operator nothing about which disk they are looking at.
 
 Exactly one JSON object on stdout, nothing else. Diagnostics — a setting that
 would not parse, a `df` line that would not parse, `df` failing outright — go to
-stderr and show up in the plugin's error log. The script never raises: an
+stderr, which uDeck keeps with the plugin's last run: Settings shows it beside a
+failed run, and a linked folder's run log has every run's. The script never raises: an
 unexpected failure still prints a valid `unknown` card carrying the exception,
 and exits 0.
 

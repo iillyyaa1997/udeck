@@ -59,15 +59,15 @@ udeck-plugin run my-plugin                        # run it as uDeck does, and se
 udeck-plugin link my-plugin                       # into your own uDeck's plugins folder, as a link
 ```
 
-([Writing a plugin](docs/writing-a-plugin.md) says what each does, and what this
-release of uDeck does not do with a link yet.) The plugins in `examples/` are
-uDeck's test fixtures as well as its documentation, and CI holds every one of
-them to `udeck-plugin check --strict` with no warning — so a new example is
-whatever passes that, not a shape this file has to describe. To try one, `run`
-it: that needs no install. A test never writes into your `~/.udeck` — one that
-needs a uDeck folder makes one of its own (`UDECK_HOME`, or `--home` for the
-command); `link` is for a plugin you work on, into your own uDeck, by your own
-hand.
+([Writing a plugin](docs/writing-a-plugin.md) says what each does, and [the
+contract](docs/plugin-api.md#linked-folders) what uDeck does with a link.) The
+plugins in `examples/` are uDeck's test fixtures as well as its documentation,
+and CI holds every one of them to `udeck-plugin check --strict` with no warning
+— so a new example is whatever passes that, not a shape this file has to
+describe. To try one, `run` it: that needs no install. A test never writes into
+your `~/.udeck` — one that needs a uDeck folder makes one of its own
+(`UDECK_HOME`, or `--home` for the command); `link` is for a plugin you work on,
+into your own uDeck, by your own hand.
 
 ## What a good change looks like
 
