@@ -1336,6 +1336,7 @@ guest's `~/.udeck` over SSH.
 | `plugins.window-survives-a-broken-manifest` | A placed plugin's manifest broken over SSH keeps its window in `layout.json`, which says what is wrong; fixed, the card comes back without being added again. |
 | `plugins.every-replacement-warns-first` | Over a folder with a `.env` put in over SSH — for **Reinstall**, also a line appended to `uptime.sh` — **Reinstall**, **Update** on the catalogue row, **Back to 1.0.0** and **Remove** each say first that the copy goes to the Trash; confirmed, each does what it says, and every `.env` is in the guest's Trash and no longer in the folder. |
 | `plugins.an-update-ends-a-running-action` | With the fixture card's **Hold** action running, **Update** ends it before it replaces the folder: the action wrote that it was ended and never that its folder changed under it, nothing of it runs afterwards, and 1.1.0 is in place. |
+| `plugins.linked-folder` | A plugin in a working copy outside `~/.udeck` — beside a `.git`, a `.env`, files named like `installed.json` and `cache/`, and a link — linked into `~/.udeck/plugins` is listed: placed and allowed, its card comes; its manifest changed in the working copy to run another producer, the card says that producer's word; polled every 5 s, with a file in the working copy touched every 3 s for 21 s and the panel open, it runs at least three times; after **Remove** the link is gone, uDeck's cache of it too, and the working copy is byte for byte as it was, its `.env` not in the Trash. |
 
 ### Unit tests
 

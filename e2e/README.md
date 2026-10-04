@@ -14,7 +14,7 @@ see the last section.
 > **Being built.** What exists today: the command, its pre-flight and report,
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, a self-check, the builds a check needs, a fake GitHub for
-> the plugin catalogue, and forty-two checks of uDeck itself in five groups
+> the plugin catalogue, and forty-five checks of uDeck itself in five groups
 > (`e2e/run.sh --list`). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
 > itself as it ships, and by itself again once an operator who switched that off
@@ -25,9 +25,10 @@ see the last section.
 > it was opened — with its wrong-chord control and a check that the combination
 > dies with uDeck. `login`: "Open at Login", through a restart and an update, and
 > switched off. `settings`: two changes made in uDeck's own window, and whether
-> they hold across a restart. `plugins`: the thirteen checks of
+> they hold across a restart. `plugins`: the sixteen checks of
 > docs/plugin-repository.md — the catalogue, installing, updating, earlier
-> versions, removing, and each refusal — against a fake GitHub in the guest.
+> versions, removing, each refusal, and a linked folder — against a fake GitHub
+> in the guest.
 
 ## Running it
 
@@ -1173,7 +1174,7 @@ problem.
 
 ### Plugins from a repository
 
-Thirteen checks, one per row of the table in docs/plugin-repository.md ("The
+Sixteen checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"). None of them talks to github.com. A fake GitHub runs inside the
 guest (`e2e/guest/fake-github.py`, the guest's own Python and the standard
 library only, on `127.0.0.1:8766`), answering the part of the API uDeck uses —
@@ -1213,8 +1214,14 @@ window it has, not how windows are made. Consent is given where the operator
 gives it, on the card (`consent.<id>.allow`). A file changed on disk and a
 manifest broken and mended are changed over SSH, because that is what "changed
 on disk" means. One value is left in `plugin-settings.json` before a removal,
-so that the removal has something there to take away. Every install, update,
-earlier version, removal and switch is a click.
+so that the removal has something there to take away. A linked folder
+(`plugins.linked-folder`) is a working copy the lab makes outside `~/.udeck`
+and links in by hand while uDeck is not running, as `udeck-plugin link` would;
+a file in it is touched over SSH every few seconds while the plugin's own count
+of its runs is read before and after; its removal is a click, and what it
+leaves of the working copy is read over SSH before and after, every name and
+every byte. Every install, update, earlier
+version, removal and switch is a click.
 
 ## Reading the result
 

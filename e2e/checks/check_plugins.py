@@ -1,6 +1,6 @@
 """Plugins from a repository: the catalogue, installing, updating, removing — and saying no.
 
-Fifteen checks, one per row of the table in docs/plugin-repository.md ("The
+Sixteen checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"), and all of them against the same two things: a release build of
 this checkout, and a fake GitHub served inside the guest
 (`plugin_repository.FakeGitHub`, `e2e/guest/fake-github.py`) whose content is
@@ -94,6 +94,24 @@ ARRIVED_DIFFERENT = "arrived different from what the repository lists"
 # What the fixture's card says, row by row (e2e/fixtures/plugin-repository/*/plugins/uptime/uptime.sh).
 RUNS = "runs since install"
 VERSION_ROW = "version"
+
+# A linked folder: a plugin of the lab's own, in a working copy outside ~/.udeck,
+# linked into the plugins folder (plugins.linked-folder). Its card says the same
+# two rows as the fixture's, so that it is read the same way.
+LINKED_CARD = "linked-card"
+WORK = "~/udeck-e2e-work"
+
+# The working copy written into while the panel is open, as an editor or a build
+# writes into one: a file touched every TOUCH_EVERY seconds, TOUCHES times, with
+# the plugin polled every TOUCHED_INTERVAL seconds — longer than the touches are
+# apart. Each touch reads the plugins folder again; a uDeck that starts every
+# interval over on each read runs it not once meanwhile, and one that leaves an
+# unchanged plugin's interval alone runs it about every TOUCHED_INTERVAL seconds:
+# four times in the 21 s, and at least MINIMUM_RUNS_WHILE_TOUCHED on a busy guest.
+TOUCHES = 7
+TOUCH_EVERY = 3
+TOUCHED_INTERVAL = 5
+MINIMUM_RUNS_WHILE_TOUCHED = 3
 
 
 # --- The checks -------------------------------------------------------------------------
@@ -804,6 +822,102 @@ def check_an_update_ends_a_running_action(machine, check_dir, lab):
         scene.close()
 
 
+def check_linked_folder(machine, check_dir, lab):
+    """A link in `~/.udeck/plugins` to a working copy elsewhere is a plugin: its card comes, an edit there reaches it, writing into it does not stop its polls, and **Remove** takes the link alone.
+
+    The lab makes a plugin of its own in `~/udeck-e2e-work/linked-card` — a
+    working copy beside a `.git`, a `.env` with a token of its own, files named
+    like uDeck's `installed.json` and `cache/`, and a link inside it — and links
+    it in while uDeck is not running, as `udeck-plugin link` would. Placed on an
+    empty tab and allowed, its card has to come and say `first`. Then the
+    manifest *in the working copy* is changed to run another producer, which
+    says `second`: only a uDeck that watches where the link leads reads the
+    manifest again, so the card saying `second` is the watch working, not just
+    the next run. Then, the panel still open and the plugin polled every
+    `TOUCHED_INTERVAL` seconds, a file in the working copy is touched every
+    `TOUCH_EVERY` seconds for `TOUCHES` touches: the plugin's own count of its
+    runs, in uDeck's cache of it, has to go up by `MINIMUM_RUNS_WHILE_TOUCHED`
+    at least. Then **Remove**, and the oracle is the disk: the link gone,
+    uDeck's own cache of the plugin gone, and the working copy — every name,
+    every byte, the link inside it — exactly as it was, and its `.env` not in
+    the Trash.
+
+    **Red for**: a uDeck that skips a link (no card), that does not watch the
+    folder a link leads to (the card keeps saying `first`), that starts a
+    plugin's interval over on every change in the working copy (no run while
+    it is touched), or whose removal goes through the link (the working copy
+    changed, emptied or in the Trash).
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
+    try:
+        token = _a_working_copy(machine)
+        machine.ssh.run(
+            f"mkdir -p {UDECK_HOME}/plugins && ln -s {WORK}/{LINKED_CARD} {UDECK_HOME}/plugins/{LINKED_CARD}",
+            "linking the working copy into uDeck",
+        )
+        _place(scene, LINKED_CARD)
+        card = _allow_and_read_the_card(scene, LINKED_CARD, "through the link")
+        expect(card.get(VERSION_ROW) == "first", f"{LINKED_CARD}'s card, through the link, says {card}, not version first")
+
+        _write_into_the_working_copy(machine, "run2.sh", _card_script("second"), executable=True)
+        _write_into_the_working_copy(machine, "manifest.json", _linked_manifest("./run2.sh"))
+        # Open, so that the plugin is polled: a panel out of sight runs nothing.
+        _open_the_panel(machine, "opening the panel after the edit")
+        card = _read_the_card(scene, LINKED_CARD, "after the edit", lambda card: card.get(VERSION_ROW) == "second")
+        expect(card.get(VERSION_ROW) == "second", f"after its manifest was changed in the working copy, the card says {card}")
+
+        _write_into_the_working_copy(machine, "manifest.json", _linked_manifest("./run2.sh", interval=TOUCHED_INTERVAL))
+        before = _runs_counted(machine, "before the touches")
+        machine.ssh.run(
+            f"for i in $(seq {TOUCHES}); do touch {WORK}/{LINKED_CARD}/touched; sleep {TOUCH_EVERY}; done",
+            "touching the working copy while the panel is open",
+            seconds=TOUCHES * TOUCH_EVERY + 60,
+        )
+        after = _runs_counted(machine, "after the touches")
+        # Still open, or the count says nothing: a panel out of sight polls nothing.
+        _panel_texts(machine, "reading the panel after the touches")
+        try:
+            (check_dir / "runs-while-touched.txt").write_text(
+                f"interval {TOUCHED_INTERVAL} s, touched every {TOUCH_EVERY} s {TOUCHES} times: runs {before} -> {after}\n"
+            )
+        except OSError:
+            pass
+        expect(
+            after - before >= MINIMUM_RUNS_WHILE_TOUCHED,
+            f"polled every {TOUCHED_INTERVAL} s, the plugin ran {after - before} times while its working copy was "
+            f"touched every {TOUCH_EVERY} s for {TOUCHES * TOUCH_EVERY} s",
+        )
+        _put_the_panel_away(machine, "after the edit")
+
+        before = _fingerprint(machine, "before the removal")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        _press(machine, f"plugin.{LINKED_CARD}.remove", "pressing Remove")
+        _press(machine, f"plugin.{LINKED_CARD}.confirm", "confirming the removal")
+        link = f"{UDECK_HOME}/plugins/{LINKED_CARD}"
+        gone = _wait_for_disk(machine, lambda: machine.ssh.ask(f"test -L {link} || test -e {link}", "looking for the link").returncode != 0,
+                              OPERATION_SECONDS)  # fmt: skip
+        _keep_the_pane(machine, check_dir, lab, "after-the-removal.txt")
+        expect(gone, f"after Remove, {link} is still there")
+        after = _fingerprint(machine, "after the removal")
+        try:
+            (check_dir / "working-copy-before.txt").write_text(before)
+            (check_dir / "working-copy-after.txt").write_text(after)
+        except OSError:
+            pass
+        expect(after == before, f"Remove changed the working copy the link led to; before:\n{before[:600]}\nafter:\n{after[:600]}")
+        looked = machine.ssh.ask(f"grep -rl {token} ~/.Trash", "looking in the Trash")
+        if looked.returncode > 1:
+            raise LabError("looking in the Trash", f"the guest's Trash could not be read: {looked.stderr.strip()!r}")
+        expect(not looked.stdout.split(), f"the working copy's .env is in the Trash after Remove: {looked.stdout.split()}")
+        expect(not _exists(machine, f"{UDECK_HOME}/cache/{LINKED_CARD}"), f"after Remove, uDeck's cache/{LINKED_CARD} is still there")
+        expect(
+            LINKED_CARD not in ((_read_json(machine, INSTALLED) or {}).get("plugins") or {}),
+            f"a linked folder is in installed.json: {_read_json(machine, INSTALLED)!r}",
+        )
+    finally:
+        scene.close()
+
+
 # --- What the checks share ------------------------------------------------------------------
 
 
@@ -1174,6 +1288,72 @@ def _read_the_card(scene, plugin, label, ready):
     if not ready(card):
         raise CheckFailed(f"{plugin}'s card {label} never said it had run: the panel says {texts}")
     return card
+
+
+def _linked_manifest(run, interval=2):
+    """The manifest of the lab's linked plugin, running `run` every `interval` seconds. It asks for `exec: sysctl`, as the fixture does, so that its card asks for consent."""
+    return json.dumps({
+        "id": LINKED_CARD, "name": "Linked card", "version": "1.0.0", "api": 1, "kind": "poll",
+        "run": [run], "interval": interval, "timeout": 1, "permissions": {"exec": ["sysctl"]},
+    }, indent=1)  # fmt: skip
+
+
+def _runs_counted(machine, step):
+    """How many times the linked plugin has run, as it counts them in uDeck's cache of it (`_card_script`)."""
+    said = machine.ssh.ask(f"cat {UDECK_HOME}/cache/{LINKED_CARD}/runs", f"reading the linked plugin's count of its runs {step}")
+    try:
+        return int(said.stdout.strip())
+    except ValueError:
+        raise CheckFailed(f"the linked plugin's count of its runs {step} is {said.stdout.strip()!r}: {said.stderr.strip()!r}") from None
+
+
+def _card_script(version):
+    """A producer whose card says, like the fixture's, how many times it ran — counted in its cache, uDeck's — and `version`."""
+    return (
+        "#!/bin/sh\n"
+        'count=$(( $(cat "$UDECK_CACHE_DIR/runs" 2>/dev/null || echo 0) + 1 ))\n'
+        'echo "$count" > "$UDECK_CACHE_DIR/runs"\n'
+        f"printf '{{\"rows\": [{{\"kv\": [\"{RUNS}\", \"%s\"]}}, {{\"kv\": [\"{VERSION_ROW}\", \"{version}\"]}}]}}' \"$count\"\n"
+    )
+
+
+def _a_working_copy(machine):
+    """The lab's plugin in `WORK`, with what a working copy holds beside it: the `.env`'s token."""
+    step = "making a working copy outside ~/.udeck"
+    token = f"TOKEN={uuid.uuid4().hex}"
+    folder = f"{WORK}/{LINKED_CARD}"
+    machine.ssh.run(
+        f"rm -rf {WORK} && mkdir -p {folder}/.git {folder}/cache/{LINKED_CARD} && "
+        f"printf 'ref: refs/heads/main\\n' > {folder}/.git/HEAD && "
+        f"printf '%s\\n' {token} > {folder}/.env && "
+        f"printf '{{\"version\": 1, \"plugins\": {{}}}}' > {folder}/installed.json && "
+        f"printf 'kept' > {folder}/cache/{LINKED_CARD}/state && "
+        f"ln -s run.sh {folder}/latest",
+        step,
+    )
+    _write_into_the_working_copy(machine, "manifest.json", _linked_manifest("./run.sh"))
+    _write_into_the_working_copy(machine, "run.sh", _card_script("first"), executable=True)
+    return token
+
+
+def _write_into_the_working_copy(machine, name, text, executable=False):
+    """A file of the working copy written whole, as an editor saves one: beside it, then moved over it."""
+    path = f"{WORK}/{LINKED_CARD}/{name}"
+    mode = f" && chmod 755 {path}.new" if executable else ""
+    machine.ssh.run(f"printf %s {shlex.quote(text)} > {path}.new{mode} && mv {path}.new {path}", f"writing {name} in the working copy")
+
+
+def _fingerprint(machine, step):
+    """Every name in the working copy, what each link says, and every file's hash: the same text is the same folder."""
+    folder = f"{WORK}/{LINKED_CARD}"
+    said = machine.ssh.ask(
+        f"cd {folder} && find . -print | LC_ALL=C sort && find . -type l -exec readlink {{}} \\; && "
+        "find . -type f -exec shasum -a 256 {} + | LC_ALL=C sort",
+        f"reading the working copy {step}",
+    )
+    if said.returncode != 0 or not said.stdout.strip():
+        raise CheckFailed(f"the working copy {step} could not be read — is it gone? {said.stderr.strip()!r}")
+    return said.stdout
 
 
 def _windows_of(layout, plugin):

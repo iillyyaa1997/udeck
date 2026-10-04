@@ -83,6 +83,37 @@ def test_the_remove_warning_the_check_waits_for_is_uDecks_own_words():
     assert checks.TRASH_WARNING.format(id="\\(id)") in english
 
 
+def test_every_check_has_its_row_in_the_table_and_every_row_its_check():
+    """docs/plugin-repository.md ("The lab's checks") and check_plugins.py name the same checks."""
+    table = (Path(__file__).resolve().parents[2] / "docs" / "plugin-repository.md").read_text()
+    section = table.split("### The lab's checks", 1)[1].split("\n### ", 1)[0]
+    rows = sorted(line.split("`")[1] for line in section.splitlines() if line.startswith("| `plugins."))
+    defined = sorted("plugins." + name.removeprefix("check_").replace("_", "-") for name in dir(checks) if name.startswith("check_"))
+    assert rows == defined
+
+
+def test_the_linked_plugin_asks_and_says_what_the_check_reads():
+    """plugins.linked-folder reads the linked card as it reads the fixture's: it asks for consent, and says the two rows."""
+    manifest = json.loads(checks._linked_manifest("./run.sh"))
+    assert manifest["id"] == checks.LINKED_CARD and manifest["run"] == ["./run.sh"]
+    assert manifest["permissions"] == {"exec": ["sysctl"]}
+    assert manifest["timeout"] < manifest["interval"]
+    script = checks._card_script("first")
+    assert script.startswith("#!/bin/sh\n")
+    assert f'"{checks.RUNS}"' in script and f'"{checks.VERSION_ROW}", "first"' in script
+    assert '"$UDECK_CACHE_DIR/runs"' in script, "counted in uDeck's cache, never in the working copy"
+
+
+def test_the_working_copy_is_touched_more_often_than_the_plugin_is_polled():
+    """plugins.linked-folder's touches come faster than the plugin's interval, and the runs it asks for fit in the time."""
+    touched = json.loads(checks._linked_manifest("./run2.sh", interval=checks.TOUCHED_INTERVAL))
+    assert touched["interval"] == checks.TOUCHED_INTERVAL > checks.TOUCH_EVERY
+    assert touched["timeout"] < touched["interval"]
+    window = checks.TOUCHES * checks.TOUCH_EVERY
+    assert checks.MINIMUM_RUNS_WHILE_TOUCHED < window // checks.TOUCHED_INTERVAL
+    assert json.loads(checks._linked_manifest("./run.sh"))["interval"] == 2
+
+
 def _record(**changes):
     commit, tree = "a" * 40, "b" * 40
     record = {
