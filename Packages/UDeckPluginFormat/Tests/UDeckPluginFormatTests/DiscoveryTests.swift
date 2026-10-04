@@ -301,3 +301,246 @@ struct ContainmentTests {
         #expect(problem == .executableOutsidePluginFolder(command: "./tools/refresh"))
     }
 }
+
+/// A link in the plugins folder: a folder an author works on somewhere else.
+/// uDeck follows it one step, to a folder outside its own, and reads what is
+/// there as it reads any folder; anything else is listed, with the reason.
+@Suite("Linked folders")
+struct LinkedFolderTests {
+    /// uDeck's folder in `temp/udeck`, and folders of the author's own in
+    /// `temp/work` — outside it, as a working copy is.
+    struct Place {
+        let temp = TemporaryDirectory()
+        var paths: UDeckPaths { UDeckPaths(root: temp.url.appendingPathComponent("udeck", isDirectory: true)) }
+        var work: URL { temp.url.appendingPathComponent("work", isDirectory: true) }
+
+        init() {
+            try? FileManager.default.createDirectory(at: paths.plugins, withIntermediateDirectories: true)
+            try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        }
+
+        /// A plugin folder `work/<folder>` whose manifest says `id`.
+        @discardableResult
+        func folder(_ folder: String, id: String) -> URL {
+            let directory = work.appendingPathComponent(folder, isDirectory: true)
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? Data("""
+                { "id": "\(id)", "name": "\(id)", "version": "1.0.0", "api": 1, "kind": "poll",
+                  "run": ["./run.sh"], "interval": 5, "timeout": 2 }
+                """.utf8).write(to: directory.appendingPathComponent("manifest.json"))
+            let script = directory.appendingPathComponent("run.sh")
+            try? Data("#!/bin/sh\nprintf '{}'\n".utf8).write(to: script)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+            return directory
+        }
+
+        func link(_ name: String, to destination: String) throws {
+            try FileManager.default.createSymbolicLink(atPath: paths.plugins.appendingPathComponent(name).path,
+                                                       withDestinationPath: destination)
+        }
+
+        func scan() -> [DiscoveredPlugin] {
+            PluginDiscovery(searchPath: ["/usr/bin", "/bin"]).scan(paths)
+        }
+    }
+
+    @Test("a link to a folder outside uDeck's own is a plugin, named after the link, run from where it leads")
+    func followed() throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        let folder = place.folder("greeter-working-copy", id: "greeter")
+        try place.link("greeter", to: folder.path)
+        let found = place.scan()
+        #expect(found.count == 1)
+        let plugin = try #require(found.first)
+        let target = try #require(PluginLink.realPath(folder.path))
+        #expect(plugin.folderName == "greeter")
+        #expect(plugin.isUsable, "\(plugin.problems)")
+        #expect(plugin.isLinked)
+        #expect(plugin.linkedAt.map { PluginLink.realPath($0.deletingLastPathComponent().path) } == PluginLink.realPath(place.paths.plugins.path))
+        #expect(plugin.linkedAt?.lastPathComponent == "greeter")
+        #expect(plugin.directory.path == target, "where it leads, resolved")
+        #expect(plugin.executable.flatMap { PluginLink.realPath($0.path) } == target + "/run.sh")
+        // The folder itself, read as a plugin folder of its own, is the same plugin but for the name.
+        #expect(PluginDiscovery(searchPath: ["/usr/bin", "/bin"]).load(folder).problems
+                == [.identifierMismatch(declared: "greeter", folder: "greeter-working-copy")])
+    }
+
+    @Test("a link written relative to the plugins folder is followed from there")
+    func relative() throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        place.folder("greeter", id: "greeter")
+        try place.link("greeter", to: "../../work/greeter")
+        let plugin = try #require(place.scan().first)
+        #expect(plugin.isUsable, "\(plugin.problems)")
+        #expect(plugin.directory.path == PluginLink.realPath(place.work.appendingPathComponent("greeter").path))
+    }
+
+    @Test("the id is the link's name: a manifest that says another is the mismatch any folder gets")
+    func idIsTheLinksName() throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        let folder = place.folder("greeter", id: "greeter")
+        try place.link("hello", to: folder.path)
+        let plugin = try #require(place.scan().first)
+        #expect(plugin.folderName == "hello")
+        #expect(plugin.problems == [.identifierMismatch(declared: "greeter", folder: "hello")])
+        #expect(!plugin.isUsable)
+    }
+
+    /// What the link leads to is a plugin folder like any: a link inside it
+    /// that a command would leave it through is refused, as it always was.
+    @Test("inside the folder a link leads to, a command that leaves it is refused as in any folder")
+    func linksInside() throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        let folder = place.work.appendingPathComponent("sneaky", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("""
+            { "id": "sneaky", "name": "Sneaky", "version": "1.0.0", "api": 1, "kind": "poll",
+              "run": ["./bin/sh"], "interval": 5, "timeout": 2 }
+            """.utf8).write(to: folder.appendingPathComponent("manifest.json"))
+        try FileManager.default.createSymbolicLink(atPath: folder.appendingPathComponent("bin").path, withDestinationPath: "/bin")
+        try place.link("sneaky", to: folder.path)
+        let plugin = try #require(place.scan().first)
+        #expect(plugin.isLinked)
+        #expect(plugin.problems == [.executableOutsidePluginFolder(command: "./bin/sh")])
+    }
+
+    @Test("a link that leads nowhere, to a file, to another link, round in a circle, into or around uDeck's folder is listed with the reason")
+    func refused() throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        let file = place.work.appendingPathComponent("a-file")
+        try Data("x".utf8).write(to: file)
+        let real = place.folder("real", id: "real")
+        try FileManager.default.createSymbolicLink(atPath: place.work.appendingPathComponent("hop").path, withDestinationPath: real.path)
+        try FileManager.default.createSymbolicLink(atPath: place.work.appendingPathComponent("loop-a").path,
+                                                   withDestinationPath: place.work.appendingPathComponent("loop-b").path)
+        try FileManager.default.createSymbolicLink(atPath: place.work.appendingPathComponent("loop-b").path,
+                                                   withDestinationPath: place.work.appendingPathComponent("loop-a").path)
+        let cache = place.paths.cache.appendingPathComponent("someone", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let inPlugins = place.paths.plugins.appendingPathComponent(".beside", isDirectory: true)
+        try FileManager.default.createDirectory(at: inPlugins, withIntermediateDirectories: true)
+
+        let gone = place.work.appendingPathComponent("gone").path
+        let hop = place.work.appendingPathComponent("hop").path
+        let circle = place.work.appendingPathComponent("loop-a").path + "/x"
+        let cases: [(String, String, LinkRefusal)] = [
+            ("nowhere", gone, .leadsNowhere(gone)),
+            ("to-a-file", file.path, .notAFolder(file.path)),
+            ("to-a-link", hop, .toALink(hop)),
+            // One slash later, or a `.` name, it is still `hop` the
+            // destination names, and `lstat` would go through it.
+            ("to-a-link-slash", hop + "/", .toALink(hop + "/")),
+            ("to-a-link-slashes", hop + "//", .toALink(hop + "//")),
+            ("to-a-link-dot", hop + "/.", .toALink(hop + "/.")),
+            ("to-a-link-dot-slash", hop + "/./", .toALink(hop + "/./")),
+            ("to-itself", "to-itself", .toALink("to-itself")),
+            ("to-itself-slash", "to-itself-slash/", .toALink("to-itself-slash/")),
+            ("in-a-circle", circle, .circle(circle)),
+            ("into-the-cache", cache.path, .insideUDeck(cache.path)),
+            ("into-plugins", ".beside", .insideUDeck(".beside")),
+            ("to-plugins", ".", .insideUDeck(".")),
+            ("to-udeck", "..", .insideUDeck("..")),
+            ("around-udeck", place.temp.url.path, .holdsUDeck(place.temp.url.path)),
+            ("to-the-root", "/", .holdsUDeck("/")),
+        ]
+        for (name, destination, _) in cases { try place.link(name, to: destination) }
+        let found = place.scan()
+        #expect(found.map(\.folderName) == cases.map(\.0).sorted(), "every link listed, none skipped")
+        for (name, _, refusal) in cases {
+            let plugin = try #require(found.first { $0.folderName == name })
+            #expect(plugin.problems == [.linkNotFollowed(refusal)], "\(name)")
+            #expect(!plugin.isUsable && plugin.manifest == nil, "\(name)")
+            #expect(plugin.isLinked && plugin.directory == plugin.linkedAt, "\(name): nothing it leads to is read")
+        }
+        #expect(DiscoveryProblem.linkNotFollowed(.leadsNowhere(gone)).description
+                == "this is a link to \(gone), which is not there — moved, renamed, or on a disk that is not connected")
+    }
+
+    /// The slash and `.` taken off a destination to ask what it names are
+    /// taken off a folder's too, which is followed as written.
+    @Test("a folder written with a slash or a dot at its end is followed")
+    func folderWithASlash() throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        let folder = place.folder("greeter", id: "greeter")
+        try place.link("greeter", to: folder.path + "/./")
+        let plugin = try #require(place.scan().first)
+        #expect(plugin.isUsable, "\(plugin.problems)")
+        #expect(plugin.directory.path == PluginLink.realPath(folder.path))
+        #expect(PluginDiscovery.lastNameItself("/") == "/")
+        #expect(PluginDiscovery.lastNameItself("/./") == "/")
+        #expect(PluginDiscovery.lastNameItself("a/..") == "a/..")
+        #expect(PluginDiscovery.lastNameItself("a/b.") == "a/b.")
+        #expect(PluginDiscovery.lastNameItself("caf\u{E9}/.//") == "caf\u{E9}")
+    }
+
+    /// Whether a destination is absolute is its first byte: `/` with a
+    /// combining mark after it is one Character, which is not `/`, and read
+    /// that way it was looked for inside the plugins folder.
+    @Test("a destination that starts with a slash is absolute, whatever follows the slash")
+    func absoluteByItsFirstByte() throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        let destination = "/\u{301}nowhere-at-the-root"
+        #expect(!FileManager.default.fileExists(atPath: destination))
+        // Where it would be looked for if it were relative: a folder is there.
+        try FileManager.default.createDirectory(at: place.paths.plugins.appendingPathComponent("\u{301}nowhere-at-the-root"),
+                                                withIntermediateDirectories: true)
+        let link = place.paths.plugins.appendingPathComponent("mark")
+        try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: destination)
+        #expect(PluginDiscovery.follow(link, udeckFolder: place.paths.root) == .failure(.leadsNowhere(destination)))
+    }
+
+    /// Asked of the disk each time: a link an author points at another
+    /// folder is another plugin folder from the next read on.
+    @Test("a link pointed elsewhere is read where it leads now")
+    func repointed() throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        let first = place.folder("first", id: "greeter")
+        let second = place.folder("second", id: "greeter")
+        try place.link("greeter", to: first.path)
+        #expect(place.scan().first?.directory.path == PluginLink.realPath(first.path))
+        try FileManager.default.removeItem(atPath: place.paths.plugins.appendingPathComponent("greeter").path)
+        try place.link("greeter", to: second.path)
+        #expect(place.scan().first?.directory.path == PluginLink.realPath(second.path))
+        #expect(FileManager.default.fileExists(atPath: first.appendingPathComponent("manifest.json").path))
+    }
+
+    @Test("a link udeck-plugin link makes is one uDeck lists")
+    func linkMakesAPlugin() async throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        let folder = place.folder("greeter", id: "greeter")
+        let said = await udeckPlugin(["link", folder.path, "--home", place.paths.root.path], in: place.temp.url, home: place.temp.url)
+        #expect(said.status == 0, "\(said.errors)")
+        let plugin = try #require(place.scan().first)
+        #expect(plugin.isUsable && plugin.isLinked, "\(plugin.problems)")
+    }
+
+    @Test("link refuses a folder inside uDeck's own, or one that holds it, as discovery would not follow it")
+    func linkRefusesUDecksOwn() async throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        let inside = place.paths.root.appendingPathComponent("mine/greeter", isDirectory: true)
+        try FileManager.default.createDirectory(at: inside.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: place.folder("greeter", id: "greeter"), to: inside)
+        let refused = await udeckPlugin(["link", inside.path, "--home", place.paths.root.path], in: place.temp.url, home: place.temp.url)
+        #expect(refused.status == 2)
+        #expect(refused.errors.first?.contains("is inside uDeck's own folder") == true, "\(refused.errors)")
+
+        try Data("""
+            { "id": "around", "name": "around", "version": "1.0.0", "api": 1, "kind": "poll",
+              "run": ["./run.sh"], "interval": 5, "timeout": 2 }
+            """.utf8).write(to: place.temp.url.appendingPathComponent("manifest.json"))
+        let around = await udeckPlugin(["link", place.temp.url.path, "--home", place.paths.root.path], in: place.temp.url, home: place.temp.url)
+        #expect(around.status == 2)
+        #expect(around.errors.first?.contains("holds uDeck's own folder") == true, "\(around.errors)")
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: place.paths.plugins.path)) ?? []).isEmpty)
+    }
+}

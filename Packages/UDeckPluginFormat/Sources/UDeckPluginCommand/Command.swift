@@ -60,17 +60,19 @@ public enum Command {
                         defaults to git's user.name
           run           the plugin's producer, once, as uDeck runs it (a Mac's
                         command): its folder, uDeck's environment, its timeout and
-                        process group, the 1 MiB limit; then the card as uDeck reads
-                        it, how long it took, how it ended, its stderr (what of it
-                        the limit kept, and how much it dropped), and what uDeck
-                        would have forgiven without a word
+                        process group, the 1 MiB limit on stdout; then the card as
+                        uDeck reads it, how long it took, how it ended, its stderr
+                        (the last 64 KiB, as uDeck keeps it, and how much came
+                        before), and what uDeck would have forgiven without a word
           --home <folder>
                         uDeck's folder: for run, where UDECK_CACHE_DIR is
-                        (<home>/cache/<id>) and the settings' values are read from
-                        (<home>/plugin-settings.json) -- default, a new folder for
-                        the run alone; for link, where the link goes
+                        (<home>/cache/<id>), the settings' values are read from
+                        (<home>/plugin-settings.json) and the search path
+                        (pluginExecutableSearchPath in <home>/settings.json) --
+                        default, a new folder for the run alone and the default
+                        search path; for link, where the link goes
                         (<home>/plugins/<id>) -- default, the folder uDeck uses:
-                        UDECK_HOME, else ~/.udeck
+                        UDECK_HOME, else ~/.udeck of the account's home folder
           --lang <code> UDECK_LANG for run (default: en)
           --reason <why>
                         UDECK_REFRESH_REASON for run (default: interval)
@@ -87,8 +89,12 @@ public enum Command {
     /// Runs `udeck-plugin` with `arguments`, the program's own name left out.
     /// `new`, `run` and `link` read a relative path from `currentDirectory`,
     /// the process's own when nil; `check` and `check-repo` read theirs as
-    /// the process does, and say them as given.
+    /// the process does, and say them as given. `homes` is where the
+    /// accounts' home folders are — the machine's own account database but
+    /// in tests — from which `link` finds uDeck's folder as uDeck does, and
+    /// `run` the `HOME` uDeck hands a producer.
     public static func run(_ arguments: [String], environment: [String: String], currentDirectory: String? = nil,
+                           homes: UserHomes = .system,
                            output: (String) -> Void, errors: (String) -> Void) async -> Int32 {
         guard let command = arguments.first else {
             errors(usage)
@@ -113,9 +119,9 @@ public enum Command {
             return makePlugin(rest, environment: environment, here: here, output: output, errors: errors)
         case "run":
             RepositoryCheck.sweepTemporaryFolder()
-            return await runPlugin(rest, environment: environment, here: here, output: output, errors: errors)
+            return await runPlugin(rest, environment: environment, here: here, homes: homes, output: output, errors: errors)
         case "link":
-            return linkPlugin(rest, environment: environment, here: here, output: output, errors: errors)
+            return linkPlugin(rest, environment: environment, here: here, homes: homes, output: output, errors: errors)
         case "pin":
             errors("udeck-plugin \(command): not in this release")
             return 2

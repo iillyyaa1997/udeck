@@ -72,6 +72,20 @@ public struct UDeckPaths: Sendable, Equatable {
     /// it, so the folder watcher never sees a half-written plugin.
     public var staging: URL { root.appendingPathComponent("staging", isDirectory: true) }
 
+    /// The run logs of linked folders, while the run log is switched on:
+    /// `logs/<id>.log`, and the one before it, `logs/<id>.log.1`. Not under
+    /// `cache/`, which is the plugins' own to write in.
+    public var logs: URL { root.appendingPathComponent("logs", isDirectory: true) }
+
+    public func log(forPlugin id: PluginIdentifier) -> URL {
+        logs.appendingPathComponent("\(id.rawValue).log")
+    }
+
+    /// The log before the one being written, kept when it was turned over.
+    public func previousLog(forPlugin id: PluginIdentifier) -> URL {
+        logs.appendingPathComponent("\(id.rawValue).log.1")
+    }
+
     /// Directories uDeck creates on first launch. Creating them is the caller's
     /// job so that read-only code paths never have a filesystem side effect.
     public var directoriesToCreate: [URL] { [root, plugins, cache] }

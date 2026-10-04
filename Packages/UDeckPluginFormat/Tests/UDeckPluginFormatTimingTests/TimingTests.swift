@@ -269,6 +269,39 @@ struct RunningTimingTests {
         #expect(Escaper.verdict(in: scratch) == "closed")
     }
 
+    /// The pipes are read to their end after the producer exits, for a
+    /// moment: whatever still holds them may still be writing. Here a child
+    /// that left the group writes the card only after the producer is gone,
+    /// and the run has to wait for it. Here and not with the other tests of a
+    /// run: the child writes a fifth of a second after the producer is gone,
+    /// and a machine slower than the run's wait lets the card go.
+    @Test("what arrives on the pipes after the producer exits, before they end, is read")
+    func readToTheEnd() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        var runner = ProcessRunner()
+        // Room for a busy machine: the child writes within a fifth of a second
+        // and the run waits up to ten for the pipes to end. How soon it stops
+        // waiting is not asked here: beside the tests that start git by the
+        // hundred, a process one of them starts can hold the pipes a while.
+        runner.drainGrace = 10
+        let late = Self.plugin(temp, "late", timeout: "2", script: #"""
+            /usr/bin/perl -e '
+                use POSIX ();
+                defined(my $pid = fork()) or exit 3;
+                exit 0 if $pid;
+                POSIX::setsid() or exit 4;
+                select(undef, undef, undef, 0.2);
+                syswrite(STDOUT, "{\"rows\": [{\"text\": \"late\"}]}");
+                syswrite(STDERR, "said late\n");
+            '
+            """#)
+        let said = try await PluginTrial.run(late, options: PluginTrial.Options(environment: [:], runner: runner))
+        guard case .card(let card) = said.execution else { Issue.record("\(said.execution)"); return }
+        #expect(card.rows.count == 1)
+        #expect(said.result.standardError == Data("said late\n".utf8))
+    }
+
     /// The note is the run's own measure of itself, so its test is here: a
     /// producer that sleeps 1.2 s of a 2 s timeout gets it, and one that
     /// prints at once does not.

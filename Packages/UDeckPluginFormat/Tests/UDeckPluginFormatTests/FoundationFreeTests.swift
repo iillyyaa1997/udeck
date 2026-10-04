@@ -352,7 +352,7 @@ struct FoundationFreeTests {
 
     // MARK: - Listing a plugins folder
 
-    @Test("a dot-folder and a link to a folder are not plugins")
+    @Test("a dot-folder is not a plugin, and a link to a folder in the plugins folder is one that is not followed")
     func hiddenAndLinkedFolders() throws {
         let temp = TemporaryDirectory()
         let manifest = #"{ "id": "real", "name": "Real", "version": "1.0.0", "api": 1, "kind": "poll", "run": ["./run.sh"], "interval": 5, "timeout": 2 }"#
@@ -363,7 +363,9 @@ struct FoundationFreeTests {
                                                    withDestinationURL: temp.plugins.appendingPathComponent("real"))
         try Data("not a folder".utf8).write(to: temp.plugins.appendingPathComponent("stray"))
         let found = PluginDiscovery(searchPath: []).scan(temp.plugins)
-        #expect(found.map(\.folderName) == ["real"])
+        #expect(found.map(\.folderName) == ["linked", "real"])
+        #expect(found.first?.problems == [.linkNotFollowed(.insideUDeck(temp.plugins.appendingPathComponent("real").path))],
+                "a link to a folder beside it, in uDeck's own folder: \(found.first?.problems ?? [])")
     }
 
     #if canImport(Darwin)

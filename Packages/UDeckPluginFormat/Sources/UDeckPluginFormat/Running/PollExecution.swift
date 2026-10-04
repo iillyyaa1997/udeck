@@ -53,8 +53,11 @@ public struct PluginFailure: Equatable, Sendable {
     }
 
     public var reason: Reason
-    /// Whatever the producer wrote to stderr, trimmed. Shown in the plugin's log
-    /// rather than on the card: it is for the author, not for the glance.
+    /// What the producer wrote to stderr — the tail of it the run kept
+    /// (`ProcessRunner.standardErrorTail`) — trimmed. Shown in Settings beside
+    /// the failure rather than on the card: it is for the author, not for the
+    /// glance. uDeck keeps the stderr of a run that printed a card too, with
+    /// the plugin's last run (`PluginRun`, in uDeck).
     public var diagnostics: String
     public var occurredAt: Date
 

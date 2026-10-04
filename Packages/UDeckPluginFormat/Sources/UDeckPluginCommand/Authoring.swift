@@ -51,7 +51,7 @@ extension Command {
 
     // MARK: - link
 
-    static func linkPlugin(_ arguments: [String], environment: [String: String], here: String,
+    static func linkPlugin(_ arguments: [String], environment: [String: String], here: String, homes: UserHomes,
                            output: (String) -> Void, errors: (String) -> Void) -> Int32 {
         let parsed: Parsed
         do {
@@ -72,12 +72,14 @@ extension Command {
         let home: URL
         if let given = parsed.values["--home"] {
             home = absolute(given, from: here)
-        } else if let found = udeckHome(environment: environment, here: here) {
-            home = found
         } else {
-            errors("udeck-plugin link: there is no HOME to find uDeck's folder in (~/.udeck, or a UDECK_HOME that "
-                   + "starts with ~); say where it is with --home")
-            return 2
+            switch udeckHome(environment: environment, here: here, homes: homes) {
+            case .success(let found):
+                home = found
+            case .failure(let lost):
+                errors("udeck-plugin link: \(lost.description); say where uDeck's folder is with --home")
+                return 2
+            }
         }
         let linked: PluginLink.Linked
         do {
@@ -93,10 +95,6 @@ extension Command {
                                : "linked \(linked.link.path) -> \(linked.target)")
         output("to undo it: rm \(PluginLink.shellQuoted(linked.link.path)) (the link goes; the folder it points at "
                + "stays as it is)")
-        if !PluginLink.udeckReadsLinks {
-            output("note: this uDeck does not list a plugin through a link yet: it skips a link in its plugins folder, "
-                   + "and lists the plugin once a release that reads links is installed")
-        }
         return 0
     }
 
@@ -104,25 +102,56 @@ extension Command {
     /// current folder, and a run or a link would make uDeck's folders in it.
     static let emptyHome = "--home is uDeck's folder, and an empty one names none"
 
+    /// Why uDeck's folder could not be found.
+    struct HomeNotFound: Error, CustomStringConvertible {
+        var description: String
+    }
+
     /// uDeck's folder, found the way uDeck finds it (`UDeckPaths.fromEnvironment`):
-    /// `UDECK_HOME` when it is set and not empty — `~` at its start is
-    /// `HOME`, and a relative one is read from `here` — and `~/.udeck`
-    /// otherwise. Nil when neither is there to read.
-    static func udeckHome(environment: [String: String], here: String) -> URL? {
-        let user = environment["HOME"].flatMap { $0.isEmpty ? nil : $0 }
-        if let moved = environment["UDECK_HOME"], !moved.isEmpty {
-            if moved == "~" || moved.hasPrefix("~/") {
-                guard let user else { return nil }
-                return absolute(user + String(moved.dropFirst()), from: here)
+    /// `UDECK_HOME` when it is set and not empty, and `~/.udeck` otherwise.
+    ///
+    /// The home folder is the account's, as uDeck's Foundation answers it
+    /// (`NSHomeDirectory()`, `UserHomes.account(in:)`): `CFFIXED_USER_HOME`
+    /// when it is set, which Foundation reads first, then the account
+    /// database — and `HOME` only when the database has no entry for the
+    /// account, as Foundation falls back to it. Not `HOME` first: a shell
+    /// started with another `HOME` — `sudo -E`, a test, a script — would link
+    /// into a folder uDeck never reads.
+    ///
+    /// `~` at the start of `UDECK_HOME` is that home, and `~name` the home
+    /// `NSString.expandingTildeInPath` reads for it — `CFFIXED_USER_HOME` when
+    /// it is set, the account `name`'s otherwise
+    /// (`UserHomes.account(named:in:)`); a relative one is read from `here`.
+    static func udeckHome(environment: [String: String], here: String, homes: UserHomes) -> Result<URL, HomeNotFound> {
+        let mine = homes.account(in: environment)
+        guard let moved = UserHomes.given("UDECK_HOME", in: environment) else {
+            guard let mine else {
+                return .failure(HomeNotFound(description: "the account has no home folder to find ~/.udeck in"))
             }
-            return absolute(moved, from: here)
+            return .success(absolute(mine, from: here).appendingPathComponent(".udeck", isDirectory: true))
         }
-        return user.map { absolute($0, from: here).appendingPathComponent(".udeck", isDirectory: true) }
+        guard moved.utf8.first == UInt8(ascii: "~") else { return .success(absolute(moved, from: here)) }
+        let bytes = Array(moved.utf8)
+        let slash = bytes.firstIndex(of: UInt8(ascii: "/")) ?? bytes.count
+        let user = String(decoding: bytes[1 ..< slash], as: UTF8.self)
+        let rest = String(decoding: bytes[slash...], as: UTF8.self)
+        if user.isEmpty {
+            guard let mine else {
+                return .failure(HomeNotFound(description: "UDECK_HOME is \(moved), and the account has no home folder for "
+                                             + "its ~"))
+            }
+            return .success(absolute(mine + rest, from: here))
+        }
+        guard let theirs = homes.account(named: user, in: environment) else {
+            return .failure(HomeNotFound(description: "UDECK_HOME is \(moved), and this machine has no account \(user) "
+                                         + "for its ~\(user)"))
+        }
+        return .success(absolute(theirs + rest, from: here))
     }
 
     // MARK: - run
 
-    static func runPlugin(_ arguments: [String], environment: [String: String], here: String,
+    static func runPlugin(_ arguments: [String], environment: [String: String], here: String, homes: UserHomes,
                           output: (String) -> Void, errors: (String) -> Void) async -> Int32 {
         let parsed: Parsed
         let reason: RefreshReason
@@ -153,7 +182,7 @@ extension Command {
         let folder = absolute(parsed.operands[0], from: here)
         let options = PluginTrial.Options(home: parsed.values["--home"].map { absolute($0, from: here) },
                                           language: parsed.values["--lang"] ?? "en", reason: reason,
-                                          environment: environment)
+                                          environment: environment, homes: homes)
         let report: PluginTrial.Report
         do {
             report = try await PluginTrial.run(folder, options: options)
@@ -166,7 +195,7 @@ extension Command {
         }
         return say(report, folder: shown(folder, from: here), output: output)
         #else
-        _ = reason
+        _ = (reason, homes)
         errors("udeck-plugin run: runs a plugin the way uDeck runs it, which takes a Mac: uDeck and the plugins it "
                + "runs are macOS programs, and so is the code that runs them. check, check-repo and new work here")
         return 2
@@ -187,17 +216,17 @@ extension Command {
                + "PATH=\(report.environment["PATH"] ?? "")")
         let timeout = manifest.timeout.map { " of its \(Seconds.fixed($0, places: $0 == $0.rounded() ? 0 : 1)) s timeout" } ?? ""
         output("took \(Seconds.fixed(result.duration, places: 2)) s\(timeout)")
-        output("ended: \(ending(result.termination))")
+        output("ended: \(result.termination.summary)")
         output("stdout: \(bytes(result.standardOutput.count))\(dropped(result.standardOutputDropped))")
         if result.standardError.isEmpty {
             output(result.standardErrorDropped == 0 ? "stderr: nothing"
-                                                    : "stderr: nothing kept\(dropped(result.standardErrorDropped))")
+                                                    : "stderr: nothing kept\(droppedBefore(result.standardErrorDropped))")
         } else {
             let lines = String(decoding: result.standardError, as: UTF8.self)
                 .split(separator: "\n", omittingEmptySubsequences: false)
             let shown = lines.last == "" ? lines.dropLast() : lines[...]
             output("stderr: \(bytes(result.standardError.count)), \(shown.count) line\(shown.count == 1 ? "" : "s")"
-                   + "\(dropped(result.standardErrorDropped)):")
+                   + "\(droppedBefore(result.standardErrorDropped)):")
             for line in shown { output("  | \(line)") }
         }
         let status: Int32
@@ -225,20 +254,16 @@ extension Command {
         "\(count) byte\(count == 1 ? "" : "s")"
     }
 
-    /// What of a stream went past the output limit, after what was kept of it.
+    /// What of standard output went past the output limit, after what was
+    /// kept of it.
     static func dropped(_ count: Int) -> String {
         count == 0 ? "" : " (and \(bytes(count)) past the output limit, dropped)"
     }
 
-    /// How a run ended, in a line.
-    static func ending(_ termination: Termination) -> String {
-        switch termination {
-        case .exited(let code): "exit status \(code)"
-        case .signalled(let signal): "killed by signal \(signal)"
-        case .timedOut(let seconds): "stopped by uDeck after \(Seconds.fixed(seconds, places: seconds == seconds.rounded() ? 0 : 1)) s, its timeout"
-        case .outputLimitExceeded(let bytes): "stopped by uDeck after \(bytes) bytes of output, past its limit"
-        case .launchFailed(let detail): "never started: \(detail)"
-        }
+    /// What of standard error came before the tail uDeck keeps of it, after
+    /// what was kept.
+    static func droppedBefore(_ count: Int) -> String {
+        count == 0 ? "" : " (its end: the \(bytes(count)) before it, dropped)"
     }
 
     /// The card as uDeck holds it, as indented JSON with its keys in order.

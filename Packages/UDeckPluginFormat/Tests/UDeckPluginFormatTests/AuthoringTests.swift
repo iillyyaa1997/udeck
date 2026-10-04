@@ -13,10 +13,12 @@ struct Said {
 
 /// `udeck-plugin` started in `here`, with nothing of this machine's own in its
 /// environment: git reads no configuration but `gitConfig`, and `HOME` is a
-/// folder of the test's own — so neither `new` nor `link` can reach the
-/// operator's git settings or uDeck folder, whatever a test gets wrong.
+/// folder of the test's own — and so is the account's home folder, which is
+/// where `link` looks for uDeck's (`homes`, `home` unless the test names
+/// others) — so neither `new` nor `link` can reach the operator's git
+/// settings or uDeck folder, whatever a test gets wrong.
 func udeckPlugin(_ arguments: [String], in here: URL, home: URL, gitConfig: String = "/dev/null",
-                 extra: [String: String] = [:]) async -> Said {
+                 extra: [String: String] = [:], homes: UserHomes? = nil) async -> Said {
     var output: [String] = []
     var errors: [String] = []
     let environment = [
@@ -26,8 +28,18 @@ func udeckPlugin(_ arguments: [String], in here: URL, home: URL, gitConfig: Stri
         "GIT_CONFIG_GLOBAL": gitConfig,
     ].merging(extra) { _, new in new }
     let status = await Command.run(arguments, environment: environment, currentDirectory: here.path,
-                                   output: { output.append($0) }, errors: { errors.append($0) })
+                                   homes: homes ?? .only(home), output: { output.append($0) }, errors: { errors.append($0) })
     return Said(status: status, output: output, errors: errors)
+}
+
+extension UserHomes {
+    /// One account, whose home is `home`, and no other: what a test hands
+    /// `udeck-plugin` instead of the machine's account database.
+    static func only(_ home: URL?, others: [String: URL] = [:]) -> UserHomes {
+        let path = home?.path
+        let named = others.mapValues(\.path)
+        return UserHomes(current: { path }, named: { named[$0] })
+    }
 }
 
 /// Everything in `folder`, every level, by path.
@@ -276,25 +288,65 @@ struct LinkPluginTests {
         #expect(said.output.first?.hasPrefix("linked ") == true && said.output.first?.hasSuffix("/udeck/plugins/greeter -> \(target)") == true,
                 "\(said.output)")
         #expect(said.output.contains { $0.hasPrefix("to undo it: rm ") })
-        #expect(said.output.contains { $0.hasPrefix("note: this uDeck does not list a plugin through a link yet") } == !PluginLink.udeckReadsLinks)
+        #expect(!said.output.contains { $0.hasPrefix("note: ") }, "uDeck lists a plugin through a link: \(said.output)")
+        #expect(PluginLink.udeckReadsLinks)
     }
 
-    @Test("without --home, link goes into ~/.udeck of the HOME it is given")
+    /// uDeck finds its folder in the account's home folder, as Foundation's
+    /// `NSHomeDirectory()` does — not in `HOME`, which a shell can set to
+    /// anything — and `link` has to put the link where uDeck will look.
+    @Test("without --home, link goes into ~/.udeck of the account's home folder, not of HOME")
     func defaultHome() async throws {
         let temp = TemporaryDirectory()
         defer { withExtendedLifetime(temp) {} }
         let folder = try await Self.made("greeter", in: temp)
         let user = temp.url.appendingPathComponent("someone", isDirectory: true)
-        let said = await udeckPlugin(["link", folder.path], in: temp.url, home: user)
+        let shell = temp.url.appendingPathComponent("elsewhere", isDirectory: true)
+        let said = await udeckPlugin(["link", folder.path], in: temp.url, home: shell, homes: .only(user))
         #expect(said.status == 0, "\(said.errors)")
         let link = user.appendingPathComponent(".udeck/plugins/greeter")
         #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path) == PluginLink.realPath(folder.path))
+        #expect(!FileManager.default.fileExists(atPath: shell.path), "HOME is not where uDeck looks")
+
+        // An account the database has no home for: HOME, as Foundation falls back to it.
+        try FileManager.default.removeItem(at: link)
+        let fallback = await udeckPlugin(["link", folder.path], in: temp.url, home: shell, homes: .only(nil))
+        #expect(fallback.status == 0, "\(fallback.errors)")
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: shell.appendingPathComponent(".udeck/plugins/greeter").path))
+                == PluginLink.realPath(folder.path))
+
+        // And CFFIXED_USER_HOME before either, which Foundation reads first.
+        let fixed = temp.url.appendingPathComponent("fixed", isDirectory: true)
+        let pinned = await udeckPlugin(["link", folder.path], in: temp.url, home: shell, extra: ["CFFIXED_USER_HOME": fixed.path],
+                                       homes: .only(user))
+        #expect(pinned.status == 0, "\(pinned.errors)")
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: fixed.appendingPathComponent(".udeck/plugins/greeter").path))
+                == PluginLink.realPath(folder.path))
 
         var nowhere: [String] = []
         let status = await Command.run(["link", folder.path], environment: ["PATH": "/usr/bin:/bin"], currentDirectory: temp.url.path,
-                                       output: { _ in }, errors: { nowhere.append($0) })
-        #expect(status == 2, "no HOME and no --home: nowhere to link to")
-        #expect(nowhere.first?.contains("--home") == true)
+                                       homes: .only(nil), output: { _ in }, errors: { nowhere.append($0) })
+        #expect(status == 2, "no home folder, no HOME and no --home: nowhere to link to")
+        #expect(nowhere.first?.contains("--home") == true, "\(nowhere)")
+    }
+
+    /// What `link` reads the account database with, against what uDeck's
+    /// Foundation answers on the same machine for the same account.
+    @Test("the account's home folder is the one Foundation gives uDeck")
+    func accountHome() throws {
+        let mine = try #require(UserHomes.system.current())
+        #expect(mine.hasPrefix("/"))
+        #expect(UserHomes.system.named("") == nil)
+        #expect(UserHomes.system.named("no-such-account-\(UUID().uuidString.prefix(8).lowercased())") == nil)
+        #if canImport(Darwin)
+        if ProcessInfo.processInfo.environment["CFFIXED_USER_HOME"] == nil {
+            #expect(mine == NSHomeDirectory())
+            #expect(UserHomes.system.account(in: ProcessInfo.processInfo.environment) == NSHomeDirectory())
+            #expect(UserHomes.system.account(in: ["HOME": "/elsewhere"]) == NSHomeDirectory(), "HOME only without an entry")
+            #expect(UserHomes.system.named(NSUserName()) == NSHomeDirectory())
+            #expect(("~\(NSUserName())/deck" as NSString).expandingTildeInPath == mine + "/deck")
+        }
+        #endif
     }
 
     @Test("the same link again changes nothing; another folder, a folder of one's own, an installed plugin are refused")
@@ -426,30 +478,59 @@ struct LinkPluginTests {
         let folder = try await Self.made("greeter", in: temp)
         let target = try #require(PluginLink.realPath(folder.path))
         let user = temp.url.appendingPathComponent("someone", isDirectory: true)
+        let other = temp.url.appendingPathComponent("other's home", isDirectory: true)
+        let homes = UserHomes.only(user, others: ["other": other])
         let cases: [(String, URL)] = [
             (temp.url.appendingPathComponent("moved").path, temp.url.appendingPathComponent("moved")),
             ("~/elsewhere", user.appendingPathComponent("elsewhere")),
             ("~", user),
+            ("~other/deck", other.appendingPathComponent("deck")),
+            ("~other", other),
             ("relative/udeck", temp.url.appendingPathComponent("relative/udeck")),
             ("", user.appendingPathComponent(".udeck")),
         ]
         for (moved, expected) in cases {
-            let said = await udeckPlugin(["link", folder.path], in: temp.url, home: user, extra: ["UDECK_HOME": moved])
+            let said = await udeckPlugin(["link", folder.path], in: temp.url, home: user, extra: ["UDECK_HOME": moved], homes: homes)
             #expect(said.status == 0, "\(moved): \(said.errors)")
             let link = expected.appendingPathComponent("plugins/greeter")
             #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) == target, "\(moved)")
             try? FileManager.default.removeItem(atPath: link.path)
         }
 
-        // No HOME: an absolute UDECK_HOME is enough, and one that needs HOME is not.
+        // ~name of an account there is not: nothing is linked, and nothing is
+        // made where a folder literally named ~nobody would be.
+        let stranger = await udeckPlugin(["link", folder.path], in: temp.url, home: user, extra: ["UDECK_HOME": "~nobody/deck"],
+                                         homes: homes)
+        #expect(stranger.status == 2)
+        #expect(stranger.errors.first == "udeck-plugin link: UDECK_HOME is ~nobody/deck, and this machine has no account "
+                + "nobody for its ~nobody; say where uDeck's folder is with --home", "\(stranger.errors)")
+        #expect(!FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("~nobody").path))
+
+        // CFFIXED_USER_HOME is every account's home to Foundation's ~name, as
+        // it is the running account's: swift-foundation's
+        // homeDirectoryPath(forUser:) reads it before the account database.
+        let fixed = temp.url.appendingPathComponent("fixed", isDirectory: true)
+        for moved in ["~other/deck", "~nobody/deck", "~/deck"] {
+            let said = await udeckPlugin(["link", folder.path], in: temp.url, home: user,
+                                         extra: ["UDECK_HOME": moved, "CFFIXED_USER_HOME": fixed.path], homes: homes)
+            #expect(said.status == 0, "\(moved): \(said.errors)")
+            let link = fixed.appendingPathComponent("deck/plugins/greeter")
+            #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) == target, "\(moved)")
+            try? FileManager.default.removeItem(atPath: link.path)
+        }
+        #expect(!FileManager.default.fileExists(atPath: other.appendingPathComponent("deck/plugins/greeter").path))
+        #expect(homes.account(named: "other", in: ["CFFIXED_USER_HOME": ""]) == other.path, "an empty one is not set")
+
+        // No home folder: an absolute UDECK_HOME is enough, and one that needs one is not.
         var errors: [String] = []
         let absolute = temp.url.appendingPathComponent("absolute")
         let found = await Command.run(["link", folder.path], environment: ["UDECK_HOME": absolute.path],
-                                      currentDirectory: temp.url.path, output: { _ in }, errors: { errors.append($0) })
+                                      currentDirectory: temp.url.path, homes: .only(nil), output: { _ in },
+                                      errors: { errors.append($0) })
         #expect(found == 0, "\(errors)")
         #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: absolute.appendingPathComponent("plugins/greeter").path)) == target)
         let lost = await Command.run(["link", folder.path], environment: ["UDECK_HOME": "~/x"], currentDirectory: temp.url.path,
-                                     output: { _ in }, errors: { errors.append($0) })
+                                     homes: .only(nil), output: { _ in }, errors: { errors.append($0) })
         #expect(lost == 2)
         #expect(errors.last?.contains("UDECK_HOME") == true, "\(errors)")
         #expect(!FileManager.default.fileExists(atPath: temp.url.appendingPathComponent("~").path))
@@ -720,9 +801,11 @@ struct RunPluginTests {
             printf '{"rows": [{"text": "ok"}]}'
             """)
         let home = temp.url.appendingPathComponent("udeck", isDirectory: true)
+        let account = temp.url.appendingPathComponent("someone", isDirectory: true)
         let report = try await PluginTrial.run(folder, options: PluginTrial.Options(
             home: home, language: "ru", reason: .manual,
-            environment: ["HOME": "/Users/nobody-at-all", "TMPDIR": "/private/tmp/somewhere/", "SECRET": "leaked"]))
+            environment: ["HOME": "/Users/nobody-at-all", "TMPDIR": "/private/tmp/somewhere/", "SECRET": "leaked"],
+            homes: .only(account)))
         guard case .card = report.execution else { Issue.record("\(report.execution)"); return }
         #expect(!report.homeIsTemporary)
 
@@ -740,7 +823,7 @@ struct RunPluginTests {
         #expect(handed["UDECK_APPEARANCE"] == "dark")
         #expect(handed["UDECK_API"] == "1")
         #expect(handed["PATH"] == PluginEnvironment.defaultSearchPath.joined(separator: ":"))
-        #expect(handed["HOME"] == "/Users/nobody-at-all")
+        #expect(handed["HOME"] == account.path, "the account's, as uDeck hands it, not the shell's")
         #expect(handed["TMPDIR"] == "/private/tmp/somewhere/")
         #expect(handed["LANG"] == "en_US.UTF-8")
         #expect(handed["LC_ALL"] == "en_US.UTF-8")
@@ -751,6 +834,38 @@ struct RunPluginTests {
         #expect(handed["SECRET"] == nil)
         let directory = try String(contentsOf: cache.appendingPathComponent("pwd.txt"), encoding: .utf8)
         #expect(directory == (PluginLink.realPath(folder.path) ?? "") + "\n")
+    }
+
+    /// uDeck hands a producer `NSHomeDirectory()` as `HOME`: the account's
+    /// home folder, not whatever `HOME` the shell that started uDeck had. A
+    /// run that handed the shell's would try a producer in a home uDeck
+    /// never gives it.
+    @Test("run hands the producer the account's home folder as HOME, as uDeck does, and the shell's only without one")
+    func homeIsTheAccounts() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let folder = Self.plugin(temp, "home", script: #"printf '{"rows": [{"text": "%s"}]}' "$HOME""#)
+        let account = temp.url.appendingPathComponent("someone", isDirectory: true).path
+        let fixed = temp.url.appendingPathComponent("fixed", isDirectory: true).path
+        let cases: [([String: String], UserHomes, String)] = [
+            (["HOME": "/shell"], .only(URL(fileURLWithPath: account)), account),
+            (["HOME": "/shell", "CFFIXED_USER_HOME": fixed], .only(URL(fileURLWithPath: account)), fixed),
+            (["HOME": "/shell", "CFFIXED_USER_HOME": ""], .only(URL(fileURLWithPath: account)), account),
+            (["HOME": "/shell"], .only(nil), "/shell"),
+            ([:], .only(nil), "/var/empty"),
+        ]
+        for (environment, homes, expected) in cases {
+            let report = try await PluginTrial.run(folder, options: PluginTrial.Options(environment: environment, homes: homes))
+            #expect(report.environment["HOME"] == expected, "\(environment)")
+            guard case .card(let card) = report.execution else { Issue.record("\(report.execution)"); continue }
+            #expect(card.rows == [.text(expected)], "\(environment)")
+        }
+
+        // Through the command, as an author runs it.
+        let said = await udeckPlugin(["run", folder.path], in: temp.url, home: URL(fileURLWithPath: "/shell"),
+                                     homes: .only(URL(fileURLWithPath: account)))
+        #expect(said.status == 0, "\(said.errors)")
+        #expect(said.output.contains { $0.contains("\"text\" : \"\(account)\"") }, "\(said.output)")
     }
 
     /// The plugin `new` makes is the first one an author runs: it has to draw
@@ -859,7 +974,7 @@ struct RunPluginTests {
         ])
     }
 
-    @Test("what it asks before running, and the stderr of a good run uDeck drops, are said too")
+    @Test("what it asks before running, and where the stderr of a good run goes, are said too")
     func notes() async throws {
         let temp = TemporaryDirectory()
         defer { withExtendedLifetime(temp) {} }
@@ -869,7 +984,10 @@ struct RunPluginTests {
         #expect(said.status == 0)
         #expect(said.output.contains("note: uDeck asks before it first runs the plugin, and again for every new version: "
                                      + "may it read files matching ~/x, run sysctl? This run did not ask"), "\(said.output)")
-        #expect(said.output.contains("note: uDeck does not keep the standard error of a run that printed a card"))
+        #expect(said.output.contains("note: uDeck keeps the standard error of a run that printed a card, as of any run, "
+                                     + "and writes it into the plugin's run log when the plugin is a linked folder and the "
+                                     + "run log is on (logs/asking.log in uDeck's folder); Settings shows the standard "
+                                     + "error of a failed run only"), "\(said.output)")
         #expect(said.output.contains("  | a diagnostic"))
     }
 
@@ -904,35 +1022,35 @@ struct RunPluginTests {
         #expect(PluginTrial.slowness(duration: 2.5, timeout: 2, execution: .lateCard(Card(), failure)) == nil)
     }
 
-    @Test("output dropped past the limit is said, unless the run was stopped for it and its failure says so")
+    @Test("standard output dropped past the limit is said, unless the run was stopped for it and its failure says so")
     func droppedSaid() {
         func result(_ termination: Termination, output: Int, error: Int) -> ProcessRunResult {
             ProcessRunResult(standardOutput: Data(), standardError: Data(), termination: termination, duration: 0,
                              standardOutputDropped: output, standardErrorDropped: error)
         }
-        let start = "uDeck keeps 1000 bytes of a run's output, standard output and standard error together, and dropped the rest without a word: "
-        #expect(PluginTrial.dropped(from: result(.exited(code: 0), output: 0, error: 51), limit: 1000) == start + "51 bytes of standard error")
-        #expect(PluginTrial.dropped(from: result(.exited(code: 0), output: 1, error: 0), limit: 1000) == start + "1 byte of standard output")
-        #expect(PluginTrial.dropped(from: result(.exited(code: 3), output: 2, error: 3), limit: 1000)
-                == start + "2 bytes of standard output and 3 bytes of standard error")
+        let start = "uDeck keeps 1000 bytes of a run's standard output, and dropped the rest without a word: "
+        #expect(PluginTrial.dropped(from: result(.exited(code: 0), output: 1, error: 0), limit: 1000) == start + "1 byte")
+        #expect(PluginTrial.dropped(from: result(.exited(code: 3), output: 2, error: 3), limit: 1000) == start + "2 bytes")
+        #expect(PluginTrial.dropped(from: result(.exited(code: 0), output: 0, error: 51), limit: 1000) == nil,
+                "standard error has no limit to go past: what came before its tail is a note")
         #expect(PluginTrial.dropped(from: result(.exited(code: 0), output: 0, error: 0), limit: 1000) == nil)
-        #expect(PluginTrial.dropped(from: result(.outputLimitExceeded(bytes: 2000), output: 0, error: 1000), limit: 1000) == nil)
+        #expect(PluginTrial.dropped(from: result(.outputLimitExceeded(bytes: 2000), output: 1000, error: 0), limit: 1000) == nil)
     }
 
-    @Test("run says how much of each stream the limit dropped")
+    @Test("run says how much of standard output the limit dropped, and how much of standard error came before its tail")
     func droppedShown() async throws {
         let temp = TemporaryDirectory()
         defer { withExtendedLifetime(temp) {} }
         Self.plugin(temp, "flood", script: #"printf '{"rows": []}'; head -c 1100000 /dev/zero | tr '\000' e >&2"#)
         let said = await udeckPlugin(["run", "plugins/flood"], in: temp.url, home: temp.url)
-        let kept = (1 << 20) - 12
-        let line = try #require(said.output.first { $0.hasPrefix("stderr: ") }, "\(said.output.prefix(12))")
-        #expect(line.hasPrefix("stderr: \(kept) bytes, 1 line (and "), "\(line)")
-        #expect(line.hasSuffix(" bytes past the output limit, dropped):"), "\(line)")
-        let stopped = said.output.contains { $0.hasPrefix("ended: stopped by uDeck after") }
-        let warned = said.output.contains { $0.hasPrefix("warning: uDeck keeps 1048576 bytes of a run's output") }
-        // Stopped for it, or ended before uDeck looked: said one way or the other, never both, never neither.
-        #expect(stopped != warned, "\(said.output.filter { !$0.hasPrefix("  |") })")
+        let kept = ProcessRunner.defaultStandardErrorTail
+        #expect(said.status == 0, "a megabyte of standard error stops nothing: \(said.output.filter { !$0.hasPrefix("  |") })")
+        #expect(said.output.contains("stderr: \(kept) bytes, 1 line (its end: the \(1_100_000 - kept) bytes before it, dropped):"),
+                "\(said.output.filter { !$0.hasPrefix("  |") })")
+        #expect(said.output.contains("note: uDeck keeps the last \(kept) bytes of a run's standard error; the "
+                                     + "\(1_100_000 - kept) before them were not kept"))
+        #expect(said.output.contains("ended: exit status 0"))
+        #expect(!said.output.contains { $0.hasPrefix("warning: uDeck keeps") })
 
         Self.plugin(temp, "spill", script: #"/usr/bin/perl -e 'print "o" x 1100000'"#)
         let spilt = await udeckPlugin(["run", "plugins/spill"], in: temp.url, home: temp.url)
@@ -968,6 +1086,66 @@ struct RunPluginTests {
         #expect(said.status == 2)
         #expect(said.errors.first?.contains("could not read \(home.appendingPathComponent("plugin-settings.json").path)") == true, "\(said.errors)")
         #expect(said.output.isEmpty, "\(said.output)")
+    }
+
+    /// uDeck looks up a bare command on the search path in its settings file;
+    /// a run given uDeck's folder looks it up there too, and finds — or does
+    /// not find — what uDeck would.
+    @Test("with --home, a bare command is looked up on the search path uDeck's settings give, and PATH is it")
+    func searchPathFromHome() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let tools = temp.url.appendingPathComponent("tools", isDirectory: true)
+        try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
+        let greet = tools.appendingPathComponent("greet-from-tools")
+        try Data("#!/bin/sh\nprintf '{\"rows\": [{\"text\": \"%s\"}]}' \"$PATH\"\n".utf8).write(to: greet)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: greet.path)
+        let folder = temp.writePlugin(folder: "bare", manifest: """
+            { "id": "bare", "name": "bare", "version": "1.0.0", "api": 1, "kind": "poll",
+              "run": ["greet-from-tools"], "interval": 5, "timeout": 2 }
+            """)
+        let home = temp.url.appendingPathComponent("udeck", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let path = [tools.path, "/usr/bin", "/bin"]
+        let settings = home.appendingPathComponent("settings.json")
+        try JSONSerialization.data(withJSONObject: ["version": 1, "pluginExecutableSearchPath": path]).write(to: settings)
+
+        let found = try await PluginTrial.run(folder, options: PluginTrial.Options(home: home, environment: [:]))
+        guard case .card(let card) = found.execution else { Issue.record("\(found.execution)"); return }
+        #expect(card.rows == [.text(path.joined(separator: ":"))], "the producer's PATH is the same search path")
+        #expect(found.environment["PATH"] == path.joined(separator: ":"))
+
+        // Not given uDeck's folder, the run has the default, and the command is not on it.
+        do {
+            _ = try await PluginTrial.run(folder, options: PluginTrial.Options(environment: [:]))
+            Issue.record("a command only the settings' search path has was found without them")
+        } catch let refusal as PluginTrial.Refusal {
+            #expect(refusal.description.contains("greet-from-tools was not found on \(PluginEnvironment.defaultSearchPath.joined(separator: ":"))"),
+                    "\(refusal.description)")
+        }
+
+        // An empty list, or none, is the default, as uDeck reads it.
+        for written in [#"{"pluginExecutableSearchPath": []}"#, #"{"version": 1}"#] {
+            try Data(written.utf8).write(to: settings)
+            #expect(PluginTrial.searchPath(in: UDeckPaths(root: home)) == .notThere, "\(written)")
+        }
+
+        // A file uDeck cannot read: the default, and a note that says why.
+        try Data(#"{"pluginExecutableSearchPath": "/usr/bin"}"#.utf8).write(to: settings)
+        let said = await udeckPlugin(["run", folder.path, "--home", home.path], in: temp.url, home: temp.url)
+        #expect(said.status == 2, "\(said.output)")
+        try Data("#!/bin/sh\nprintf '{\"rows\": []}'\n".utf8).write(to: greet)
+        try Data(#"{"pluginExecutableSearchPath": 7}"#.utf8).write(to: settings)
+        let local = temp.writePlugin(folder: "local", manifest: """
+            { "id": "local", "name": "local", "version": "1.0.0", "api": 1, "kind": "poll",
+              "run": ["./run.sh"], "interval": 5, "timeout": 2 }
+            """, script: (name: "run.sh", body: "#!/bin/sh\nprintf '{\"rows\": []}'\n", executable: true))
+        let noted = await udeckPlugin(["run", local.path, "--home", home.path], in: temp.url, home: temp.url)
+        #expect(noted.status == 0, "\(noted.output)")
+        #expect(noted.output.contains { $0.hasPrefix("note: \(settings.path) is not a settings file uDeck can read: ") && $0.hasSuffix(
+            "; this run looked up commands on the default search path, as uDeck does while its settings cannot be read") },
+                "\(noted.output)")
+        #expect(noted.output.contains { $0.hasSuffix("PATH=\(PluginEnvironment.defaultSearchPath.joined(separator: ":"))") })
     }
 
     @Test("what uDeck would not run is not run")

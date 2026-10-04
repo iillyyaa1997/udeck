@@ -32,6 +32,11 @@ import Darwin
 ///   the reading thread to let go of the pipes after that: a grandchild that
 ///   left the group with `setsid` holds them for as long as it likes.
 ///
+/// * **Only standard output is limited.** It is the card, and a producer that
+///   prints more than uDeck will ever read is stopped. Standard error is the
+///   producer explaining itself: it never stops a run, and the end of it is
+///   kept — `standardErrorTail` bytes — because that is where the error is.
+///
 /// uDeck runs every producer with this, and `udeck-plugin run` runs one with it
 /// too: the same deadline, the same group, the same limit.
 public struct ProcessRunner: Sendable {
@@ -44,8 +49,19 @@ public struct ProcessRunner: Sendable {
     /// pipes to reach end-of-file.
     public var drainGrace: TimeInterval
 
-    /// Most a single run may print before the host stops it.
+    /// Most a single run may print on standard output before the host stops
+    /// it. Standard error does not count: see `standardErrorTail`.
     public var maximumOutputBytes: Int
+
+    /// How much of a run's standard error is kept: its last this many bytes.
+    /// What came before them is counted (`standardErrorDropped`) and let go.
+    public var standardErrorTail: Int
+
+    /// 64 KiB: about a thousand lines of a traceback, which is far more than
+    /// any one failure needs — and its end, which is where the error is. Small
+    /// enough to keep one for every plugin, beside its last card, and to write
+    /// whole into a run log for every run.
+    public static let defaultStandardErrorTail = 64 << 10
 
     /// How often the output cap is checked, and how finely the drain waits for
     /// end-of-file. Both are measurement resolutions rather than preferences:
@@ -61,11 +77,13 @@ public struct ProcessRunner: Sendable {
     public init(
         terminationGrace: TimeInterval = 0.5,
         drainGrace: TimeInterval = 0.5,
-        maximumOutputBytes: Int = 1 << 20
+        maximumOutputBytes: Int = 1 << 20,
+        standardErrorTail: Int = ProcessRunner.defaultStandardErrorTail
     ) {
         self.terminationGrace = terminationGrace
         self.drainGrace = drainGrace
         self.maximumOutputBytes = maximumOutputBytes
+        self.standardErrorTail = standardErrorTail
     }
 
     public func run(
@@ -76,7 +94,7 @@ public struct ProcessRunner: Sendable {
         timeout: TimeInterval
     ) async -> ProcessRunResult {
         let started = Date()
-        let collector = OutputCollector(limit: maximumOutputBytes)
+        let collector = OutputCollector(limit: maximumOutputBytes, errorTail: standardErrorTail)
 
         let child: SpawnedProcess
         do {
@@ -123,6 +141,8 @@ public struct ProcessRunner: Sendable {
         // A separate watcher for the output cap, for the same reason a deadline
         // is needed at all: a producer in a `while true: print` loop never ends
         // on its own, and would otherwise be held only by the (longer) timeout.
+        // Standard output's cap: one in the same loop on standard error is held
+        // by the timeout, and costs nothing kept past its tail meanwhile.
         let limitWatcher = Task {
             while !Task.isCancelled {
                 if let overflow = collector.overflowBytes {
@@ -262,7 +282,8 @@ private final class Outcome: @unchecked Sendable {
     }
 }
 
-/// Drains both pipes while the child runs, stopping at a byte cap.
+/// Drains both pipes while the child runs: standard output up to a byte cap,
+/// standard error's last `errorTail` bytes.
 ///
 /// On a thread of its own that waits in `poll` for either pipe to have
 /// something, reads what is there, and stops waiting on a pipe at its
@@ -276,28 +297,33 @@ private final class OutputCollector: @unchecked Sendable {
     private var err = Data()
     private var overflow: Int?
 
-    /// What was dropped of each, past the limit: bytes the producer sent and
-    /// nobody keeps. Said by `udeck-plugin run`, so that "everything it wrote"
-    /// is never a megabyte of it.
+    /// What was dropped of each: standard output's bytes past the limit, and
+    /// standard error's before its tail — bytes the producer sent and nobody
+    /// keeps. Said by `udeck-plugin run`, so that "everything it wrote" is
+    /// never only the part that was kept.
     private var outDropped = 0
     private var errDropped = 0
 
-    /// Every byte the producer sent, including the ones dropped. The number the
-    /// operator is shown has to be the truth about the producer, not the size
-    /// of the buffer that was allowed to hold it.
+    /// Every byte the producer sent to standard output, including the ones
+    /// dropped. The number the operator is shown has to be the truth about the
+    /// producer, not the size of the buffer that was allowed to hold it.
     private var observed = 0
     private var stdoutAtEndOfFile = false
     private var stderrAtEndOfFile = false
     private var stopRequested = false
     private var stopped = false
     private let limit: Int
+    private let errorTail: Int
 
     /// How long one wait in `poll` lasts at most, in milliseconds: how soon the
     /// reading thread sees that it has been asked to stop. Not how output is
     /// read — `poll` answers the moment a pipe has something.
     private static let pollMilliseconds: Int32 = 10
 
-    init(limit: Int) { self.limit = limit }
+    init(limit: Int, errorTail: Int) {
+        self.limit = limit
+        self.errorTail = max(errorTail, 0)
+    }
 
     var standardOutput: Data { lock.withLock { out } }
     var standardError: Data { lock.withLock { err } }
@@ -387,23 +413,45 @@ private final class OutputCollector: @unchecked Sendable {
     private func receive(_ data: Data, isStandardOutput: Bool) {
         lock.lock(); defer { lock.unlock() }
 
+        guard isStandardOutput else {
+            keepTail(of: data)
+            return
+        }
         // The cap has to bound what is *kept*, not only what is noticed. The
         // watcher that stops an overrunning producer looks every 25 ms and then
         // waits out a termination grace, and a producer writing as fast as the
         // pipe allows keeps arriving throughout — so a run nominally limited to
         // a megabyte could retain hundreds of them. Bytes past the allowance
         // are counted and dropped.
+        //
+        // Standard output alone. Standard error used to share the megabyte, and
+        // a producer that explained itself at length — a traceback in a loop,
+        // a chatty library — was stopped for it, or cut its own card short.
         observed += data.count
-        let allowance = max(limit - (out.count + err.count), 0)
+        let allowance = max(limit - out.count, 0)
         let kept = allowance >= data.count ? data : data.prefix(allowance)
-        if isStandardOutput {
-            out.append(kept)
-            outDropped += data.count - kept.count
-        } else {
-            err.append(kept)
-            errDropped += data.count - kept.count
-        }
+        out.append(kept)
+        outDropped += data.count - kept.count
         if observed > limit && overflow == nil { overflow = observed }
+    }
+
+    /// Standard error, kept as its last `errorTail` bytes: the end is where a
+    /// producer says what went wrong, after whatever it printed on the way.
+    ///
+    /// A cut lands on the start of a character — at most three bytes later,
+    /// the most one UTF-8 character carries after its first — so that the text
+    /// kept does not open on half of one.
+    private func keepTail(of data: Data) {
+        err.append(data)
+        guard err.count > errorTail else { return }
+        var cut = err.count - errorTail
+        var continuations = 0
+        while continuations < 3, cut < err.count, err[err.startIndex + cut] & 0xC0 == 0x80 {
+            cut += 1
+            continuations += 1
+        }
+        errDropped += cut
+        err = Data(err[(err.startIndex + cut)...])
     }
 }
 #endif

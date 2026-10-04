@@ -380,8 +380,8 @@ struct PollExecutionTests {
             Issue.record("expected the output limit, got \(result.termination)"); return
         }
         #expect(bytes > runner.maximumOutputBytes)
-        #expect(result.standardOutput.count + result.standardError.count <= runner.maximumOutputBytes,
-                "uDeck kept \(result.standardOutput.count + result.standardError.count) bytes of a \(runner.maximumOutputBytes) limit")
+        #expect(result.standardOutput.count <= runner.maximumOutputBytes,
+                "uDeck kept \(result.standardOutput.count) bytes of a \(runner.maximumOutputBytes) limit")
     }
 
     /// The old cleanup ran only from the deadline and output-cap watchers, and

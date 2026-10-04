@@ -21,7 +21,9 @@ struct CommandTests {
     func run(_ arguments: [String]) async -> Run {
         var output: [String] = []
         var errors: [String] = []
-        let status = await Command.run(arguments, environment: ProcessInfo.processInfo.environment,
+        // No account's home folder: nothing run here may find the operator's
+        // uDeck folder through it.
+        let status = await Command.run(arguments, environment: ProcessInfo.processInfo.environment, homes: .only(nil),
                                        output: { output.append($0) }, errors: { errors.append($0) })
         return Run(status: status, output: output, errors: errors)
     }

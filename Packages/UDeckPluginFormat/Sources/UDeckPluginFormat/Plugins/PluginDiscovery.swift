@@ -3,6 +3,58 @@ import FoundationEssentials
 #else
 import Foundation
 #endif
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
+
+/// Why uDeck does not follow a link in its plugins folder.
+///
+/// A link there is a folder an author works on somewhere else
+/// (`udeck-plugin link`), and it is followed to that folder and nowhere
+/// else: one step, to a folder outside uDeck's own.
+public enum LinkRefusal: Error, Equatable, Sendable, CustomStringConvertible {
+    /// It points at nothing: the folder was moved, renamed or is on a volume
+    /// that is not mounted.
+    case leadsNowhere(String)
+    /// It points at something that is not a folder.
+    case notAFolder(String)
+    /// It points at another link. One step only: a chain is somebody's
+    /// arrangement uDeck cannot tell the end of, and a link to itself is one.
+    case toALink(String)
+    /// Following it goes round in a circle somewhere on the way.
+    case circle(String)
+    /// It leads into uDeck's own folder — its plugins, its caches, its logs —
+    /// where uDeck writes and deletes, and a plugin's folder must never be one
+    /// of those.
+    case insideUDeck(String)
+    /// It leads to a folder that holds uDeck's own.
+    case holdsUDeck(String)
+    /// Where it points could not be read.
+    case unreadable(String)
+
+    public var description: String {
+        switch self {
+        case .leadsNowhere(let destination):
+            "a link to \(destination), which is not there — moved, renamed, or on a disk that is not connected"
+        case .notAFolder(let destination):
+            "a link to \(destination), which is not a folder; a link here has to lead to a plugin folder"
+        case .toALink(let destination):
+            "a link to \(destination), which is itself a link; link the plugin folder itself"
+        case .circle(let destination):
+            "a link to \(destination), and following it goes round in a circle"
+        case .insideUDeck(let destination):
+            "a link to \(destination), inside uDeck's own folder, where uDeck writes and deletes; link a folder of your own"
+        case .holdsUDeck(let destination):
+            "a link to \(destination), which holds uDeck's own folder; link the plugin folder itself"
+        case .unreadable(let detail):
+            "a link whose target could not be read: \(detail)"
+        }
+    }
+}
 
 /// Something that stops a folder from being a usable plugin.
 public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertible {
@@ -16,6 +68,9 @@ public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertibl
     case executableOutsidePluginFolder(command: String)
     case executableNotExecutable(String)
     case malformedTranslation(file: String, detail: String)
+
+    /// The entry in the plugins folder is a link uDeck does not follow.
+    case linkNotFollowed(LinkRefusal)
 
     /// `version` is not `MAJOR.MINOR.PATCH`. A note, never a refusal: the
     /// contract allowed any string before repositories gave versions a meaning,
@@ -55,6 +110,8 @@ public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertibl
             "version \"\(version)\" is not MAJOR.MINOR.PATCH — fine for a folder of your own, required to publish it in a repository"
         case .minUDeckNotComparable(let text):
             "minUDeck \"\(text)\" is not MAJOR.MINOR.PATCH, so no uDeck release can be held to it and it was ignored — required to publish it in a repository"
+        case .linkNotFollowed(let refusal):
+            "this is \(refusal)"
         }
     }
 
@@ -79,8 +136,25 @@ public enum DiscoveryProblem: Error, Equatable, Sendable, CustomStringConvertibl
 /// that silently does not appear is a support question; a plugin that appears
 /// with a legible reason next to it is a five-second fix.
 public struct DiscoveredPlugin: Sendable, Equatable, Identifiable {
+    /// Where the plugin's files are. For a linked folder, the folder the link
+    /// led to when the plugins folder was read — with every link on the way
+    /// resolved, so that what runs is the folder that was read, whatever the
+    /// link is pointed at meanwhile, until the folder is read again.
     public let directory: URL
+    /// Its name in the plugins folder, which its manifest's id has to be: for
+    /// a linked folder, the link's name, whatever the folder it leads to is
+    /// called.
     public let folderName: String
+
+    /// The link in the plugins folder, `<home>/plugins/<id>`, when the plugin
+    /// is a linked folder — an author's working copy, put there by
+    /// `udeck-plugin link` or **Link a folder…** — and nil for a folder that
+    /// is there itself. Removing or replacing a linked plugin acts on this
+    /// link alone, never on `directory`.
+    public let linkedAt: URL?
+
+    /// Whether this is a linked folder.
+    public var isLinked: Bool { linkedAt != nil }
     /// The manifest as the author wrote it. Everything uDeck *acts* on — what
     /// it runs, what it is allowed to do — is read from here and never from a
     /// translation.
@@ -109,7 +183,8 @@ public struct DiscoveredPlugin: Sendable, Equatable, Identifiable {
         manifest: PluginManifest?,
         executable: URL?,
         problems: [DiscoveryProblem],
-        translations: [String: ManifestTranslation] = [:]
+        translations: [String: ManifestTranslation] = [:],
+        linkedAt: URL? = nil
     ) {
         self.directory = directory
         self.folderName = folderName
@@ -117,6 +192,7 @@ public struct DiscoveredPlugin: Sendable, Equatable, Identifiable {
         self.executable = executable
         self.problems = problems
         self.translations = translations
+        self.linkedAt = linkedAt
     }
 
     /// The manifest as the operator should read it.
@@ -158,9 +234,27 @@ public struct PluginDiscovery: Sendable {
     /// every type that owns a discovery to give up `Sendable` too.
     private var fileManager: FileManager { .default }
 
-    /// Scans the plugins directory. A missing directory is an empty result, not
-    /// an error: it is the normal state of a fresh install.
+    /// Scans the plugins directory of uDeck's folder. A missing directory is an
+    /// empty result, not an error: it is the normal state of a fresh install.
+    ///
+    /// A folder in it is a plugin, and so is a link in it to a folder
+    /// somewhere else — a linked folder (`udeck-plugin link`) — named after
+    /// the link. A link is followed one step, to a folder outside uDeck's own
+    /// (`LinkRefusal` says what else it can be, and the plugin is listed with
+    /// that as its problem). What the folder it leads to holds is read by the
+    /// same rules as any folder: a link *inside* it is what it always was — a
+    /// command that resolves out of the folder is refused.
+    public func scan(_ paths: UDeckPaths) -> [DiscoveredPlugin] {
+        scan(paths.plugins, udeckFolder: paths.root)
+    }
+
+    /// `scan(_:)` of the plugins folder `pluginsDirectory`, whose uDeck folder
+    /// — which a link may not lead into — is the folder above it.
     public func scan(_ pluginsDirectory: URL) -> [DiscoveredPlugin] {
+        scan(pluginsDirectory, udeckFolder: pluginsDirectory.deletingLastPathComponent())
+    }
+
+    private func scan(_ pluginsDirectory: URL, udeckFolder: URL) -> [DiscoveredPlugin] {
         let entries: [URL]
         do {
             entries = try visibleEntries(of: pluginsDirectory)
@@ -169,9 +263,23 @@ public struct PluginDiscovery: Sendable {
         }
 
         return entries
-            .filter(isFolder)
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-            .map(load)
+            .compactMap { entry -> DiscoveredPlugin? in
+                switch kind(of: entry) {
+                case .typeDirectory?:
+                    return load(entry)
+                case .typeSymbolicLink?:
+                    switch Self.follow(entry, udeckFolder: udeckFolder) {
+                    case .success(let target):
+                        return load(target, named: entry.lastPathComponent, linkedAt: entry)
+                    case .failure(let refusal):
+                        return DiscoveredPlugin(directory: entry, folderName: entry.lastPathComponent, manifest: nil,
+                                                executable: nil, problems: [.linkNotFollowed(refusal)], linkedAt: entry)
+                    }
+                default:
+                    return nil
+                }
+            }
     }
 
     /// What is in `directory`, less what the platform calls hidden.
@@ -191,23 +299,91 @@ public struct PluginDiscovery: Sendable {
         #endif
     }
 
-    /// Whether `url` is a folder itself — a link to one is not.
-    private func isFolder(_ url: URL) -> Bool {
-        #if canImport(FoundationEssentials)
-        return (try? fileManager.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType == .typeDirectory
-        #else
-        return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-        #endif
+    /// What `url` is itself — a link, not what it leads to.
+    private func kind(of url: URL) -> FileAttributeType? {
+        (try? fileManager.attributesOfItem(atPath: url.path))?[.type] as? FileAttributeType
+    }
+
+    /// The folder a link in the plugins folder leads to, as an absolute path
+    /// with every link on the way resolved — or why it is not followed.
+    ///
+    /// Asked of the disk each time the plugins folder is read: a link an
+    /// author points elsewhere is a different plugin folder from then on.
+    public static func follow(_ link: URL, udeckFolder: URL) -> Result<URL, LinkRefusal> {
+        let manager = FileManager.default
+        let destination: String
+        do {
+            destination = try manager.destinationOfSymbolicLink(atPath: link.path)
+        } catch {
+            return .failure(.unreadable(explain(error)))
+        }
+        // As the system reads it: a relative destination from the folder the
+        // link is in. Absolute by its first byte: `/` and a combining mark
+        // after it are one Character, and still an absolute path.
+        let pointed = destination.utf8.first == UInt8(ascii: "/")
+            ? destination
+            : link.deletingLastPathComponent().path + "/" + destination
+        // What the destination names itself, asked of its last name as
+        // written: `hop/` and `hop/.` are `hop` — a link — and `lstat` with
+        // the slash still on follows it to whatever it leads to.
+        let found: FileAttributeType?
+        do {
+            found = try manager.attributesOfItem(atPath: Self.lastNameItself(pointed))[.type] as? FileAttributeType
+        } catch {
+            return .failure(FilePaths.real(pointed).failed == ELOOP ? .circle(destination) : .leadsNowhere(destination))
+        }
+        switch found {
+        case .typeSymbolicLink?:
+            return .failure(.toALink(destination))
+        case .typeDirectory?:
+            break
+        default:
+            return .failure(.notAFolder(destination))
+        }
+        let resolved = FilePaths.real(pointed)
+        guard let target = resolved.path else {
+            return .failure(resolved.failed == ELOOP ? .circle(destination) : .leadsNowhere(destination))
+        }
+        if let home = FilePaths.real(udeckFolder.path).path {
+            if FilePaths.contains(home, target) { return .failure(.insideUDeck(destination)) }
+            if FilePaths.contains(target, home) { return .failure(.holdsUDeck(destination)) }
+        }
+        return .success(URL(fileURLWithPath: target, isDirectory: true))
+    }
+
+    /// `path` without the slashes and `.` names at its end — `hop/`, `hop//`,
+    /// `hop/.`, `hop/./` are all `hop` — so that `lstat` looks at the last name
+    /// itself rather than through it. `/` stays `/`. By bytes: the names
+    /// taken off are ASCII, and what is left is the path as it was written.
+    static func lastNameItself(_ path: String) -> String {
+        let slash = UInt8(ascii: "/"), dot = UInt8(ascii: ".")
+        var bytes = Array(path.utf8)
+        while bytes.count > 1 {
+            if bytes.last == slash {
+                bytes.removeLast()
+            } else if bytes.last == dot, bytes[bytes.count - 2] == slash {
+                bytes.removeLast()
+            } else {
+                break
+            }
+        }
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     /// Loads one plugin folder.
     public func load(_ directory: URL) -> DiscoveredPlugin {
-        let folderName = directory.lastPathComponent
+        load(directory, named: directory.lastPathComponent, linkedAt: nil)
+    }
+
+    /// Loads the plugin folder `directory` under the name `folderName` it has
+    /// in the plugins folder — a link's, when `linkedAt` is the link that led
+    /// there.
+    public func load(_ directory: URL, named folderName: String, linkedAt: URL?) -> DiscoveredPlugin {
         let manifestURL = directory.appendingPathComponent(Self.manifestFilename)
 
         guard fileManager.fileExists(atPath: manifestURL.path) else {
             return DiscoveredPlugin(directory: directory, folderName: folderName,
-                                    manifest: nil, executable: nil, problems: [.missingManifest])
+                                    manifest: nil, executable: nil, problems: [.missingManifest], linkedAt: linkedAt)
         }
 
         let data: Data
@@ -216,7 +392,7 @@ public struct PluginDiscovery: Sendable {
         } catch {
             return DiscoveredPlugin(directory: directory, folderName: folderName,
                                     manifest: nil, executable: nil,
-                                    problems: [.unreadableManifest(Self.explain(error))])
+                                    problems: [.unreadableManifest(Self.explain(error))], linkedAt: linkedAt)
         }
 
         let manifest: PluginManifest
@@ -225,7 +401,8 @@ public struct PluginDiscovery: Sendable {
         } catch {
             return DiscoveredPlugin(directory: directory, folderName: folderName,
                                     manifest: nil, executable: nil,
-                                    problems: [.malformedManifest(Self.describe(error, in: data, document: "the manifest"))])
+                                    problems: [.malformedManifest(Self.describe(error, in: data, document: "the manifest"))],
+                                    linkedAt: linkedAt)
         }
 
         let (translations, translationProblems) = loadTranslations(in: directory)
@@ -247,12 +424,12 @@ public struct PluginDiscovery: Sendable {
         case .success(let url):
             return DiscoveredPlugin(directory: directory, folderName: folderName,
                                     manifest: manifest, executable: url, problems: problems,
-                                    translations: translations)
+                                    translations: translations, linkedAt: linkedAt)
         case .failure(let problem):
             problems.append(problem)
             return DiscoveredPlugin(directory: directory, folderName: folderName,
                                     manifest: manifest, executable: nil, problems: problems,
-                                    translations: translations)
+                                    translations: translations, linkedAt: linkedAt)
         }
     }
 

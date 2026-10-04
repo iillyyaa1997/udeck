@@ -36,22 +36,24 @@ struct ProcessRunnerTests {
         #expect(verdict == "closed", "the grandchild found its pipe \(verdict ?? "never written to")")
     }
 
-    /// The limit holds standard output and standard error together, and what
-    /// goes past it is counted, by stream, where it was dropped.
-    @Test("what the limit drops is counted, by stream")
+    /// The limit is standard output's alone, and what goes past it is
+    /// counted where it was dropped; standard error keeps its tail.
+    @Test("what the limit drops of standard output, and what standard error keeps of its end, are counted")
     func droppedCounted() async throws {
         let temp = TemporaryDirectory()
         defer { withExtendedLifetime(temp) {} }
         var runner = ProcessRunner()
         runner.maximumOutputBytes = 1000
-        // One write of 1,500 bytes, so that however soon the producer is
-        // stopped for it, every byte was sent.
-        let flood = Self.plugin(temp, "flood", script: #"printf '{"rows": []}'; /usr/bin/perl -e 'syswrite(STDERR, "e" x 1500) == 1500 or exit 1'"#)
+        runner.standardErrorTail = 1000
+        // One write of 1,500 bytes of each, so that however soon the producer
+        // is stopped, every byte was sent.
+        let flood = Self.plugin(temp, "flood", script: #"printf '{"rows": []}'; /usr/bin/perl -e 'syswrite(STDERR, "a" x 500 . "e" x 1000) == 1500 or exit 1'"#)
         let flooded = try await PluginTrial.run(flood, options: PluginTrial.Options(environment: [:], runner: runner))
+        #expect(flooded.result.termination == .exited(code: 0), "standard error is no output the limit stops a run for")
         #expect(flooded.result.standardOutput == Data(#"{"rows": []}"#.utf8))
-        #expect(flooded.result.standardError == Data(repeating: UInt8(ascii: "e"), count: 988))
+        #expect(flooded.result.standardError == Data(repeating: UInt8(ascii: "e"), count: 1000), "its end, not its beginning")
         #expect(flooded.result.standardOutputDropped == 0)
-        #expect(flooded.result.standardErrorDropped == 512)
+        #expect(flooded.result.standardErrorDropped == 500)
 
         // And standard output's own tail, when it is what goes past.
         let spill = Self.plugin(temp, "spill", script: #"/usr/bin/perl -e 'syswrite(STDOUT, "o" x 1500) == 1500 or exit 1'"#)
@@ -59,6 +61,48 @@ struct ProcessRunnerTests {
         #expect(spilt.result.standardOutput == Data(repeating: UInt8(ascii: "o"), count: 1000))
         #expect(spilt.result.standardOutputDropped == 500)
         #expect(spilt.result.standardError.isEmpty && spilt.result.standardErrorDropped == 0)
+    }
+
+    /// A producer that writes megabytes to standard error is a producer
+    /// explaining itself at length: it is not stopped for it, its card is
+    /// drawn, and uDeck holds no more of it than the tail. Written over a
+    /// third of a second, so that the watch on the output limit — which looks
+    /// every 25 ms — sees it many times past the limit while it runs.
+    @Test("a flood of standard error neither stops the run nor is held past its tail")
+    func standardErrorFlood() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        var runner = ProcessRunner()
+        runner.maximumOutputBytes = 4096
+        let chatty = Self.plugin(temp, "chatty", script: #"/usr/bin/perl -e 'for (1 .. 32) { syswrite(STDERR, "e" x 65535 . "\n"); select(undef, undef, undef, 0.01) }'; printf '{"rows": [{"text": "said"}]}'"#)
+        let said = try await PluginTrial.run(chatty, options: PluginTrial.Options(environment: [:], runner: runner))
+        #expect(said.result.termination == .exited(code: 0))
+        guard case .card(let card) = said.execution else { Issue.record("\(said.execution)"); return }
+        #expect(card.rows.count == 1)
+        #expect(said.result.standardError.count == ProcessRunner.defaultStandardErrorTail)
+        #expect(said.result.standardErrorDropped == 32 * 65536 - ProcessRunner.defaultStandardErrorTail)
+        #expect(said.result.standardError.last == UInt8(ascii: "\n"))
+    }
+
+    /// A tail cut in the middle of a character would open on half of one, and
+    /// the text shown would start with a replacement mark: the cut moves to
+    /// where the next character starts.
+    @Test("the tail of standard error starts on a whole character", arguments: [
+        ("é", 999, 998), ("€", 1000, 999), ("😀", 1003, 1000), ("a", 1000, 1000),
+    ])
+    func tailOnACharacter(_ character: String, _ tail: Int, _ kept: Int) async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        var runner = ProcessRunner()
+        runner.standardErrorTail = tail
+        let bytes = Array(character.utf8)
+        let hex = bytes.map { String($0, radix: 16) }.map { "\\x" + $0 }.joined()
+        let wide = Self.plugin(temp, "wide", script: "/usr/bin/perl -e 'syswrite(STDERR, \"\(hex)\" x 1000)'; printf '{\"rows\": []}'")
+        let said = try await PluginTrial.run(wide, options: PluginTrial.Options(environment: [:], runner: runner))
+        #expect(said.result.standardError.count == kept, "\(character)")
+        #expect(said.result.standardErrorDropped == 1000 * bytes.count - kept, "\(character)")
+        let text = String(decoding: said.result.standardError, as: UTF8.self)
+        #expect(text == String(repeating: character, count: kept / bytes.count), "\(character)")
     }
 }
 #endif
