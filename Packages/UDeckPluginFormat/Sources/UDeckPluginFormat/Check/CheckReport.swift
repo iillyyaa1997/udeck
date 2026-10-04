@@ -8,7 +8,8 @@
 ///   and LFS pointers from rule 9. A repository that passes this installs.
 /// * **Strict** — also what makes a plugin hard to review or likely to break,
 ///   which uDeck only ignores: rules 2, the archive attributes of 9, 10–13,
-///   `minUDeck` against what the plugin uses (19), unknown fields in the
+///   `minUDeck` against what the plugin uses (19), a name and a description
+///   of one line each (20), unknown fields in the
 ///   passport, and JSON read strictly — no field twice, no byte order mark, a
 ///   whole number written as one.
 /// * **Official** — also the official repository's own rules: 14–16, and 17,
@@ -71,6 +72,8 @@ public enum CheckRule {
     public static let versionBump = "18"
     /// `minUDeck` is not below what the plugin uses.
     public static let minimumUDeck = "19"
+    /// A name and a description are one line each.
+    public static let oneLine = "20"
 }
 
 /// Everything a check found, and what it looked at.

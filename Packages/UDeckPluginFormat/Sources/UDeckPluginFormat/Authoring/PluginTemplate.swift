@@ -178,20 +178,15 @@ public enum PluginTemplate {
         return author
     }
 
-    /// Whether `text` is one line with nothing in it a terminal or an editor
-    /// acts on: no control character — C0, DEL or C1, which holds the line
-    /// break U+0085 — and neither of Unicode's line and paragraph separators.
+    /// Whether `text` is one line (`OneLine`).
     ///
     /// The name, the description and the author are the author's own words,
     /// and `new` writes them into a manifest, a README and a LICENSE line, each
-    /// of which a line break would split. The contract itself says no more of
-    /// a manifest's `name` and `description` than that the operator sees them
-    /// (docs/plugin-api.md), so `check` holds nobody's manifest to this: it is
-    /// what `new` writes, not a rule of the format.
+    /// of which a line break would split. A manifest's `name` and
+    /// `description` are held to the same by `check --strict` (rule 20); the
+    /// author is held to it here, where it becomes a LICENSE line.
     static func isOneLine(_ text: String) -> Bool {
-        !text.unicodeScalars.contains {
-            $0.value < 0x20 || (0x7F ... 0x9F).contains($0.value) || $0 == "\u{2028}" || $0 == "\u{2029}"
-        }
+        OneLine.firstBreak(in: text) == nil
     }
 
     static func notOneLine(_ what: String) -> Refusal {

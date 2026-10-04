@@ -54,6 +54,34 @@ enum Blank {
     }
 }
 
+/// One line of text with nothing in it a terminal or an editor acts on: no
+/// control character — C0, DEL or C1, which holds the line break U+0085 — and
+/// neither of Unicode's line and paragraph separators. A tab is a control
+/// character too.
+///
+/// What a plugin's name and description are (rule 20 of
+/// docs/plugin-repository.md), and what `new` takes from its author.
+enum OneLine {
+    static func breaks(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.value < 0x20 || (0x7F ... 0x9F).contains(scalar.value) || scalar.value == 0x2028 || scalar.value == 0x2029
+    }
+
+    /// The first character that keeps `text` from being one line, if any.
+    static func firstBreak(in text: some StringProtocol) -> Unicode.Scalar? {
+        text.unicodeScalars.first(where: breaks)
+    }
+
+    /// `U+000A, a line break`, for a message.
+    static func describe(_ scalar: Unicode.Scalar) -> String {
+        let digits = String(scalar.value, radix: 16, uppercase: true)
+        let code = "U+" + String(repeating: "0", count: max(0, 4 - digits.count)) + digits
+        switch scalar.value {
+        case 0x0A ... 0x0D, 0x85, 0x2028, 0x2029: return code + ", a line break"
+        default: return code + ", a control character"
+        }
+    }
+}
+
 /// What Python calls white space — `str.isspace()`, and so what `str.strip()`
 /// takes away and what `\s` matches in a pattern. The official repository's
 /// rules were written in Python and read a licence line and a name with it, so

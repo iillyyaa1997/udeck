@@ -10,6 +10,17 @@ for what that promises.
 
 ## [Unreleased]
 
+- **A plugin's name and description are one line each — rule 20.** In
+  `manifest.json` and in every translation, `name` and `description` hold no
+  control character (C0, DEL, C1, the tab and every line break among them) and
+  neither U+2028 nor U+2029: they are what a catalogue row, the plugin list and
+  the consent sheet show on one line, and an escape sequence in them acts on
+  the terminal that prints them. The contract says so (docs/plugin-api.md,
+  "One line"), `check --strict` and `--official` call it an error naming the
+  character, and `new` refuses such a `--name` or `--description` by the same
+  test. uDeck itself loads such a manifest as it always has — the `api: 1`
+  promise holds it to that.
+
 - **`udeck-plugin new`, `run` and `link`: the commands an author works with.**
   `new <id>` makes a plugin that already works and passes `check --strict`:
   inside a plugin repository (`udeck-plugins.json` in the folder or above it)

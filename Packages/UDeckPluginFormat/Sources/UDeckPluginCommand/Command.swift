@@ -41,8 +41,9 @@ public enum Command {
 
           (no flag)     what uDeck refuses to install: the passport, rules 1, 3-8,
                         and LFS pointers (9)
-          --strict      also rules 2, 9 (archive attributes), 10-13 and 19
-                        (minUDeck), and JSON read strictly
+          --strict      also rules 2, 9 (archive attributes), 10-13, 19
+                        (minUDeck) and 20 (a name and a description of one line
+                        each), and JSON read strictly
           --official    also the official repository's rules 14-16, and 17 (sign-offs)
                         with --base and --head; implies --strict
           --base <rev>  the target branch's tip, and --head <rev> the commit to

@@ -116,7 +116,7 @@ release of uDeck does not list a plugin through a link yet — see
 | Field | Required | Meaning |
 |---|---|---|
 | `id` | yes | Lowercase letters, digits and `- _ .`, 1–64 characters, matching the folder name. |
-| `name` | yes | What the operator sees. |
+| `name` | yes | What the operator sees. One line: no line break, tab or other control character — see [One line](#one-line). |
 | `version` | yes | Your plugin's version, as `MAJOR.MINOR.PATCH` — see [Versions](#versions). Changing it re-asks the permission question — see [Permissions](#permissions). |
 | `api` | yes | The contract version this plugin is written against. Currently `1`. |
 | `minUDeck` | no | The oldest uDeck release that has everything your plugin uses, as `MAJOR.MINOR.PATCH` — see [Versions](#versions). Absent means any uDeck that speaks your `api`. |
@@ -124,10 +124,29 @@ release of uDeck does not list a plugin through a link yet — see
 | `run` | yes | The command, as an argument vector. Never a shell string. |
 | `interval` | for `poll` | Seconds between runs. At least **1** — a producer is a whole process, and asking for one more often than that is a busy loop rather than a poll. |
 | `timeout` | for `poll` | Seconds a single run may take. At least **0.05**, and shorter than `interval`. |
-| `description`, `author`, `homepage` | no | Shown to the operator. |
+| `description` | no | Shown to the operator. One line, as `name` is. |
+| `author`, `homepage` | no | Shown to the operator. |
 | `permissions` | no | What the plugin needs. See [Permissions](#permissions). |
 | `settings` | no | Values the operator can change, which uDeck renders a settings screen for. |
 | `window` | no | Size hints in grid cells: `defaultWidth`/`minWidth` in columns (1–12), `defaultHeight`/`minHeight` in row units (1–24). A height past 24 is refused rather than quietly drawn as 24. |
+
+### One line
+
+`name` and `description` — in `manifest.json` and in every translation — are
+one line of text each: no control character (U+0000–U+001F, which holds the
+tab and the line feed; DEL, U+007F; U+0080–U+009F, which holds the line break
+U+0085), and neither U+2028 LINE SEPARATOR nor U+2029 PARAGRAPH SEPARATOR.
+They are what the operator reads in a catalogue row, in the plugin list and in
+the sheet that asks whether to allow you; a line break splits the line they
+sit on, and an escape sequence acts on the terminal that prints them — a CI
+log, `udeck-plugin` itself. Every other character is yours: any script,
+punctuation, emoji, spaces of every width.
+
+The repository check holds a plugin to this under `--strict` — rule 20 in
+[What a folder may contain](plugin-repository.md#what-a-folder-may-contain) —
+and `udeck-plugin new` refuses a `--name` or a `--description` that breaks it.
+uDeck loads such a manifest as it always has: refusing one now would break the
+[`api: 1` promise](#versioning).
 
 ### How `run` is resolved
 
@@ -455,6 +474,8 @@ Rules, all of which follow from that one:
   language its manifest is written in.
 - **A language uDeck does not speak yet is still kept.** Ship `manifest.ja.json`
   today and it starts being used the day uDeck learns Japanese.
+- **A translated `name` and `description` are one line each**, as the
+  manifest's are — see [One line](#one-line).
 
 ---
 

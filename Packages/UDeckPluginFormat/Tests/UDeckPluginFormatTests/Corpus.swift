@@ -402,7 +402,8 @@ enum CorpusReplay {
     /// release that first reads the field can have, and nothing a plugin uses
     /// came after 0.1.0. Once that release
     /// has its number, a case declaring it or less gets rule 19's warning,
-    /// and it is listed here.
+    /// and it is listed here. Rule 20 finds a line break or a control
+    /// character in no name or description the corpus holds.
     static let newRules: [String: Set<String>] = [:]
 
     /// What the Swift check must say of a case, as the corpus records it.

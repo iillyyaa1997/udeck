@@ -5,7 +5,7 @@ import Foundation
 #endif
 
 /// The rules for one plugin folder: 3–13 of docs/plugin-repository.md, 14–16
-/// for the official repository, and 19.
+/// for the official repository, 19 and 20.
 ///
 /// What uDeck refuses is decided by uDeck's own code — `RepositoryRules`, the
 /// rules a catalogue row and an install run — so that "the check passes" and
@@ -61,7 +61,7 @@ enum PluginRules {
         if translations.isEmpty {
             report.warning("11", folder, "has no manifest.<lang>.json; the plugin will show in English only")
         }
-        var translated: [StrictJSON.Object] = []
+        var translated: [(path: String, object: StrictJSON.Object)] = []
         for entry in translations {
             guard let content = tree.content(entry) else { continue } // larger than rule 8 allows, and said there
             let document = StrictJSON.parse(content)
@@ -70,7 +70,7 @@ enum PluginRules {
             for problem in ManifestShape.translationProblems(of: value, manifest: manifest.decoded) {
                 report.error("12", entry.path, problem)
             }
-            if let object = value.object { translated.append(object) }
+            if let object = value.object { translated.append((entry.path, object)) }
         }
 
         // Rule 13.
@@ -82,15 +82,33 @@ enum PluginRules {
         }
 
         // Rule 19.
+        let manifestPath = folder + "/" + PluginDiscovery.manifestFilename
         if let object = manifest.object {
-            ContractFeatures.checkMinimumUDeck(object, translations: translated,
-                                               path: folder + "/" + PluginDiscovery.manifestFilename, report: &report)
+            ContractFeatures.checkMinimumUDeck(object, translations: translated.map(\.object), path: manifestPath,
+                                               report: &report)
         }
+
+        // Rule 20.
+        if let object = manifest.object { oneLine(object, path: manifestPath, report: &report) }
+        for translation in translated { oneLine(translation.object, path: translation.path, report: &report) }
 
         guard mode.official else { return }
         OfficialRules.textOnly(folder, entries: entries, tree: tree, report: &report)
         let author = OfficialRules.author(manifest.object, folder: folder, report: &report)
         OfficialRules.licence(folder, entry: top["LICENSE"], author: author, tree: tree, report: &report)
+    }
+
+    /// Rule 20, for a manifest or a translation: the name and the description
+    /// the operator reads in a catalogue row, the plugin list and the consent
+    /// sheet are one line each. uDeck takes a manifest that breaks
+    /// it as it always has — refusing one now would break the `api: 1`
+    /// promise — so this is the strict check's alone.
+    static func oneLine(_ object: StrictJSON.Object, path: String, report: inout CheckReport) {
+        for field in ["name", "description"] {
+            guard let text = object.last(field)?.string, let scalar = OneLine.firstBreak(in: text) else { continue }
+            report.error(CheckRule.oneLine, path, "\"\(field)\" holds \(OneLine.describe(scalar)); a name and a "
+                         + "description are one line each, with no line break or other control character")
+        }
     }
 
     /// Rule 9, for one path: what `.gitattributes` sets that changes an archive.

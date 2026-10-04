@@ -192,6 +192,55 @@ struct RepositoryCheckTests {
         #expect(try repository.check(.installable).findings.isEmpty, "uDeck loads it, as it always has")
     }
 
+    // MARK: - Rule 20: a name and a description of one line each
+
+    static let translation = "plugins/sample/manifest.ru.json"
+
+    /// The four places rule 20 reads, each holding `text`: the manifest's
+    /// name and description, and a translation's.
+    static func oneLinePlaces(_ text: String) throws -> [(path: String, field: String, file: TestRepository.File)] {
+        var places: [(path: String, field: String, file: TestRepository.File)] = []
+        for field in ["name", "description"] {
+            places.append((Self.manifest, field, try TestRepository.manifest([field: text])))
+            places.append((Self.translation, field, .bytes(try JSONSerialization.data(withJSONObject: [field: text]))))
+        }
+        return places
+    }
+
+    /// Every kind of character the rule refuses, at both ends of each range:
+    /// a C0 control (a tab among them), DEL, a C1 control (the line break
+    /// U+0085 among them), and Unicode's line and paragraph separators.
+    @Test("a line break or a control character in a name or a description is rule 20, strictly", arguments: [
+        "\t", "\n", "\r", "\u{0}", "\u{1B}", "\u{1F}", "\u{7F}", "\u{80}", "\u{85}", "\u{9F}", "\u{2028}", "\u{2029}",
+    ])
+    func notOneLine(_ character: String) throws {
+        let scalar = try #require(character.unicodeScalars.first)
+        let kind = [0x0A, 0x0B, 0x0C, 0x0D, 0x85, 0x2028, 0x2029].contains(scalar.value) ? "a line break" : "a control character"
+        for (path, field, file) in try Self.oneLinePlaces("Disk\(character)space") {
+            let repository = try TestRepository([path: file])
+            #expect(try repository.check(.installable).findings.isEmpty, "uDeck takes it, as it always has: \(path) \(field)")
+            let strict = try repository.check(.strict)
+            #expect(strict.findings.map(\.description) == [
+                "error: \(path): \"\(field)\" holds U+\(String(format: "%04X", scalar.value)), \(kind); a name and a "
+                    + "description are one line each, with no line break or other control character [rule 20]",
+            ], "\(path) \(field)")
+            #expect(try repository.check(.official).keys.contains("error 20 \(path)"), "\(path) \(field)")
+        }
+    }
+
+    /// What sits next to the refused characters is one line: a space, a
+    /// tilde, a no-break space, the first character past C1, a hyphenation
+    /// point, a direction mark, an ideographic space, and text past ASCII.
+    @Test("a name or a description of one line passes rule 20, whatever it is written in", arguments: [
+        " ", "~", "\u{A0}", "\u{A1}", "\u{2027}", "\u{202A}", "\u{3000}", "Диск", "💾",
+    ])
+    func oneLine(_ character: String) throws {
+        for (path, field, file) in try Self.oneLinePlaces("Disk\(character)space") {
+            let strict = try TestRepository([path: file]).check(.strict)
+            #expect(strict.findings.isEmpty, "\(path) \(field): \(strict.findings)")
+        }
+    }
+
     /// Said as what it is, once — not also as a licence that is not Apache's,
     /// which it is, from the line after the copyright on.
     @Test("a licence without its blank line is said to be exactly that")

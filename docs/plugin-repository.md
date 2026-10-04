@@ -178,6 +178,7 @@ used to accept, and a repository's CI is under no such promise.
 | 13 | An executable file contains no carriage return (`\r`). | — | error |
 | 18 | Whenever anything in a plugin's folder changed, its `version` went up. | — | error, given a base to compare with |
 | 19 | `minUDeck` is not below the uDeck release that has everything the plugin uses. | — | error; a `minUDeck` that does nothing is a warning |
+| 20 | `name` and `description`, in `manifest.json` and in every translation, are one line each: no control character (C0, DEL, C1) and neither U+2028 nor U+2029. | — | error |
 
 Why each of the less obvious ones:
 
@@ -230,6 +231,13 @@ Why each of the less obvious ones:
   it meets it — and the check says it can go. Declared higher than the plugin
   needs, it is the author's call: something changed in how uDeck behaves that
   no part of the contract names, and the check leaves it alone.
+* **One line (20).** A name and a description are what a catalogue row, the
+  plugin list and the consent sheet show, each on its line; a line break
+  splits it, and an escape sequence acts on whatever terminal prints the name
+  — a CI log, `udeck-plugin` itself. uDeck loads such a manifest as it always
+  has — the `api: 1` promise holds it to that — so the check is what keeps one
+  out of a repository. The characters are listed in
+  [One line](plugin-api.md#one-line).
 
 ### The check
 
@@ -240,7 +248,7 @@ Three layers, each the one before and more:
 | Flags | Rules | Meaning |
 |---|---|---|
 | none | the passport, 1, 3–8, LFS pointers (9) | uDeck will install it — decided by the code uDeck runs when it lists a catalogue and installs |
-| `--strict` | also 2, the attributes of 9, 10–13, 19, fields the passport does not define, and JSON read strictly: no field twice, no byte order mark, a whole number written as one | the rule for any repository's CI |
+| `--strict` | also 2, the attributes of 9, 10–13, 19, 20, fields the passport does not define, and JSON read strictly: no field twice, no byte order mark, a whole number written as one | the rule for any repository's CI |
 | `--official` | also 14–16, and 17 with `--base` and `--head` | the official repository |
 
 `--base <target branch's tip> --head <commit>` adds rule 18, in any layer, and
@@ -1345,12 +1353,13 @@ never the network. What they cover:
   repositories, replayed in every layer, and the words of every finding; rule
   18 against a base, against the commit before, in a clone of one commit,
   without a common history and in a clone without blobs; rule 19 against a
-  registry every part of the contract is dated in; git reading a repository
-  whose configuration names a clean filter, a partial clone's fetch over
-  `ssh`, or another owner, without running anything — and another owner's
-  plugin folder that holds files named like a bare repository's; and the time
-  a check takes, four times the plugin folders taking about four times as
-  long;
+  registry every part of the contract is dated in; rule 20 against every kind
+  of character it refuses, at both ends of each range, and the ones beside
+  them; git reading a repository whose configuration names a clean filter, a
+  partial clone's fetch over `ssh`, or another owner, without running anything
+  — and another owner's plugin folder that holds files named like a bare
+  repository's; and the time a check takes, four times the plugin folders
+  taking about four times as long;
 * git hashing, against vectors made with `git hash-object` and `git mktree` —
   including one frozen copy of `examples/hello-card` from `f5a0ca3`, whose tree
   is `44fccaa893276f9d6ee963108fb0a66f59534351`;
