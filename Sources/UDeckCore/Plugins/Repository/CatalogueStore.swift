@@ -169,11 +169,24 @@ public struct CatalogueStore: Sendable {
 
     /// A stored blob — read back and hashed again, so a file changed on disk
     /// is a miss rather than an answer.
+    ///
+    /// Never on the main thread: a blob is a manifest of somebody else's, of
+    /// any size the rules allow, and reading and hashing it there holds the
+    /// panel. uDeck reads blobs through `Catalogue.read` and `manifest(of:)`,
+    /// which run on the cooperative pool; a build that keeps assertions stops
+    /// a caller that slips back onto the main thread.
     public func blob(_ sha: String) -> Data? {
+        assert(!Thread.isMainThread, "a catalogue blob was read and hashed on the main thread")
         guard GitHash.isObjectID(sha),
               let data = try? Data(contentsOf: blobs.appendingPathComponent(sha)),
               GitHash.blob(data) == sha else { return nil }
         return data
+    }
+
+    /// The manifest of a plugin folder of a listing, from the blob store,
+    /// away from the main thread (`blob`).
+    public func manifest(of folder: PluginListing) async -> Data? {
+        folder.file(at: PluginDiscovery.manifestFilename).flatMap { blob($0.sha) }
     }
 
     @discardableResult

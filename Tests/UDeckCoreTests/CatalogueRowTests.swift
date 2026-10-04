@@ -143,4 +143,24 @@ struct CatalogueRowTests {
         try store.save(CatalogueState())
         #expect(Catalogue.load(from: store, address: .official, udeck: udeck, language: "en") == nil)
     }
+
+    /// The panel's actor asks, as uDeck does, and the reading — every
+    /// manifest read from disk, hashed again and parsed — happens on the
+    /// cooperative pool: `CatalogueStore.blob` stops a debug build that
+    /// reads one on the main thread.
+    @MainActor
+    @Test("asked from the main actor, the catalogue and a manifest are read and hashed away from the main thread")
+    func readOffTheMainThread() async throws {
+        let temp = TemporaryDirectory()
+        let store = CatalogueStore(paths: temp.paths)
+        let repository = FakeRepository.withUptime()
+        try store.save(repository.listing)
+        for path in ["udeck-plugins.json", "plugins/uptime/manifest.json"] { try store.save(blob: repository.data(at: path)!) }
+        try store.save(CatalogueState(head: repository.commit))
+
+        let catalogue = await Catalogue.read(from: store, address: .official, udeck: udeck, language: "en")
+        #expect(catalogue?.entries.map(\.id) == ["uptime"])
+        let manifest = await store.manifest(of: repository.plugin("uptime"))
+        #expect(manifest == repository.data(at: "plugins/uptime/manifest.json"))
+    }
 }

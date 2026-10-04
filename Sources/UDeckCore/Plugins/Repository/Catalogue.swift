@@ -59,6 +59,24 @@ public struct Catalogue: Equatable, Sendable {
 
     public func entry(_ id: String) -> CatalogueEntry? { entries.first { $0.id == id } }
 
+    /// `load`, away from the main thread: what uDeck calls.
+    ///
+    /// A catalogue is every manifest a repository has — files of somebody
+    /// else's, of any size up to the rules' limit — each read from disk,
+    /// hashed again and parsed strictly. On the main thread that is the panel
+    /// and Settings standing still while it happens, for a reason the
+    /// operator cannot see. `nonisolated` and `async`, so it runs on the
+    /// cooperative pool whoever awaits it; `CatalogueStore.blob` holds every
+    /// path that reads one to that (an assertion, in builds that keep them).
+    public static func read(
+        from store: CatalogueStore,
+        address: RepositoryAddress,
+        udeck: SemanticVersion?,
+        language: String
+    ) async -> Catalogue? {
+        load(from: store, address: address, udeck: udeck, language: language)
+    }
+
     /// The catalogue as the cache holds it, or nil when there is nothing to
     /// show yet. This is what makes it appear at once when Settings opens,
     /// before any request answers.

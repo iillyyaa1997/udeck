@@ -1257,11 +1257,13 @@ private struct PluginRow: View {
             Text(strings(.pluginLastFailure(reason: failure.reason.description)))
                 .font(.caption).foregroundStyle(.orange)
             if !failure.diagnostics.isEmpty {
-                Text(failure.diagnostics)
+                // The end of it, where the error is (`ShownStandardError`):
+                // a line limit here kept the start of a traceback and cut the
+                // exception off.
+                Text(ShownStandardError.end(of: failure.diagnostics))
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
-                    .lineLimit(8)
             }
         }
     }

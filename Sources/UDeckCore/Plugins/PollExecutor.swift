@@ -34,22 +34,43 @@ public struct PollExecutor: Sendable {
         language: String,
         now: Date = Date()
     ) async -> PollExecution {
+        await attempt(plugin: plugin, grant: grant, enabled: enabled, settings: settings, paths: paths,
+                      searchPath: searchPath, appearance: appearance, reason: reason, language: language, now: now)
+            .execution
+    }
+
+    /// `poll`, and the run it took when one happened — how it ended, how long
+    /// it took, the tail of its standard error — which uDeck keeps with the
+    /// plugin's last run whatever it came to, a card included.
+    public func attempt(
+        plugin: DiscoveredPlugin,
+        grant: PluginGrant?,
+        enabled: Bool,
+        settings: PluginSettings,
+        paths: UDeckPaths,
+        searchPath: [String],
+        appearance: Appearance,
+        reason: RefreshReason,
+        language: String,
+        now: Date = Date()
+    ) async -> PollAttempt {
         // `isUsable` rather than "no problems at all": a translation that will
         // not parse is a note against the plugin, not a reason to refuse to run
         // it. See `DiscoveryProblem.isFatal`.
         guard let manifest = plugin.manifest, let executable = plugin.executable, plugin.isUsable else {
-            return .failure(PluginFailure(reason: .notLoadable(plugin.problems.filter(\.isFatal)),
-                                          occurredAt: now))
+            return PollAttempt(execution: .failure(PluginFailure(reason: .notLoadable(plugin.problems.filter(\.isFatal)),
+                                                                 occurredAt: now)), run: nil)
         }
 
         let decision = PermissionGate.launchDecision(for: manifest, grant: grant, enabled: enabled)
         guard decision.isAllowed else {
-            return .failure(PluginFailure(reason: .notPermitted(decision), occurredAt: now))
+            return PollAttempt(execution: .failure(PluginFailure(reason: .notPermitted(decision), occurredAt: now)),
+                               run: nil)
         }
 
         guard manifest.kind == .poll else {
-            return .failure(PluginFailure(reason: .notLoadable([.manifest(.residentNotSupportedYet)]),
-                                          occurredAt: now))
+            return PollAttempt(execution: .failure(PluginFailure(reason: .notLoadable([.manifest(.residentNotSupportedYet)]),
+                                                                 occurredAt: now)), run: nil)
         }
 
         let cacheDirectory = paths.makeCache(forPlugin: manifest.id)
@@ -63,7 +84,9 @@ public struct PollExecutor: Sendable {
             reason: reason,
             language: language
         ))
-        return PollExecution(result: result, now: now)
+        let execution = PollExecution(result: result, now: now)
+        return PollAttempt(execution: execution,
+                           run: PluginRun(result: result, execution: execution, startedAt: now, reason: reason))
     }
 
     /// The environment a producer runs in (`PluginEnvironment.producer`),

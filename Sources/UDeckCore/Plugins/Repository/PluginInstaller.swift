@@ -105,21 +105,29 @@ public struct InstallRequest: Codable, Equatable, Sendable {
 public struct InstallIntent: Codable, Equatable, Sendable {
     public enum Operation: String, Codable, Sendable {
         case install, update, earlier, reinstall, replace, remove
+        /// A link to a folder of the operator's put in the place of what was
+        /// there (`PluginInstaller.link`). A uDeck from before it cannot read
+        /// the journal, and sends the whole staging folder to the Trash.
+        case link
     }
 
     public var operation: Operation
     public var id: String
-    /// The record written if it succeeds. Absent for a removal.
+    /// The record written if it succeeds. Absent for a removal and a link.
     public var record: InstalledRecord?
     /// Whether the copy this one replaces — or removes — is the operator's: a
     /// folder of their own, or one they changed. Those go to the Trash.
     public var oldCopyIsOperators: Bool
+    /// For a link: the folder it leads to, every link on the way resolved.
+    public var linkTarget: String?
 
-    public init(operation: Operation, id: String, record: InstalledRecord?, oldCopyIsOperators: Bool) {
+    public init(operation: Operation, id: String, record: InstalledRecord?, oldCopyIsOperators: Bool,
+                linkTarget: String? = nil) {
         self.operation = operation
         self.id = id
         self.record = record
         self.oldCopyIsOperators = oldCopyIsOperators
+        self.linkTarget = linkTarget
     }
 
     static let filename = "intent.json"
@@ -175,6 +183,8 @@ public enum RecoveredOperation: Equatable, Sendable {
     case removalFinished(id: String)
     /// The folder was still there: the removal never started.
     case removalNeverStarted(id: String)
+    /// The link was in place and the record not yet forgotten: it is.
+    case linked(id: String)
     /// A staging folder with no journal: nothing of the operator's was in it yet.
     case discarded(directory: String)
     /// Something could not be finished — `installed.json` would not parse, or
@@ -550,8 +560,19 @@ public struct PluginInstaller: Sendable {
 
     /// Step 9: the copy that lost. Deleted — or to the Trash when it was the
     /// operator's: uDeck never destroys something it did not put there.
+    ///
+    /// A link — a linked folder's, moved out of `plugins/` by a removal, by a
+    /// swap or by another link put in its place — is unlinked, and that is
+    /// all: never followed, never sent to the Trash, never deleted through.
+    /// What it leads to is the author's working copy, and stays exactly as it
+    /// is.
     private func dispose(_ old: URL?, operators: Bool) {
-        guard let old, fileManager.fileExists(atPath: old.path) else { return }
+        guard let old else { return }
+        if Self.isLink(old) {
+            unlink(old.path)
+            return
+        }
+        guard fileManager.fileExists(atPath: old.path) else { return }
         if operators {
             do {
                 try trash.discard(old)
@@ -588,6 +609,10 @@ public struct PluginInstaller: Sendable {
     }
 
     /// `beginRemoval(_:once:)` for a caller that has quieted the plugin itself.
+    ///
+    /// A linked folder's removal moves the link, and only the link: staging is
+    /// on the same volume as `plugins/`, so the move is one rename of the
+    /// entry, which never follows it.
     public func beginRemoval(_ id: PluginIdentifier) throws -> Removal {
         let records = try loadRecords()
         let live = paths.plugins.appendingPathComponent(id.rawValue, isDirectory: true)
@@ -619,6 +644,8 @@ public struct PluginInstaller: Sendable {
         try? fileManager.removeItem(at: removal.directory)
     }
 
+    /// The record, the cache and the run log of a plugin being removed —
+    /// everything uDeck kept about it in its own folder.
     private func forgetRecordAndCache(_ id: String) throws {
         var records = try loadRecords()
         if records.plugins.removeValue(forKey: id) != nil {
@@ -626,7 +653,79 @@ public struct PluginInstaller: Sendable {
         }
         if let identifier = PluginIdentifier(rawValue: id) {
             try? fileManager.removeItem(at: paths.cache(forPlugin: identifier))
+            RunLog(paths: paths).remove(for: identifier)
         }
+    }
+
+    // MARK: - A linked folder in a plugin's place
+
+    /// Puts a link to `candidate`'s folder at `plugins/<id>`, in the place of
+    /// what is there — a plugin uDeck installed, a folder of the operator's
+    /// own, another link — once `quiet` says nothing of the plugin is running:
+    /// **Link a folder…** over a plugin, after uDeck has said what goes.
+    ///
+    /// The way **Replace…** goes, step for step: a journal in staging; the
+    /// link swapped into place in one step, so that at no moment is there no
+    /// `plugins/<id>`; the copy it replaces deleted — or moved to the Trash
+    /// when it holds anything of the operator's (`OperatorsWork`), and only
+    /// unlinked when it was a link. Then the record goes from
+    /// `installed.json`: a linked folder is no install, and is never in it.
+    /// Its grants, settings, windows and cache stay, as they do across a
+    /// **Replace…**: the grant is held to the linked manifest's version as to
+    /// any other.
+    ///
+    /// Nothing is ever written into the folder the link leads to.
+    ///
+    /// What goes where is judged once the plugin is quiet, as for **Replace…**
+    /// and **Remove**: the wait can be as long as the plugin's timeout, and a
+    /// file the operator saves into the copy meanwhile is theirs all the same.
+    public func link(_ candidate: PluginLink.Candidate, once quiet: @Sendable () async -> Bool) async throws {
+        // A records file that will not parse stops it before anything is
+        // quieted, as it stops an install before anything is downloaded.
+        _ = try loadRecords()
+        guard await quiet() else { throw InstallError.stillRunning(id: candidate.id.rawValue) }
+        try link(candidate)
+    }
+
+    /// `link(_:once:)` for a caller that has quieted the plugin itself.
+    public func link(_ candidate: PluginLink.Candidate) throws {
+        var records = try loadRecords()
+        let id = candidate.id.rawValue
+        let live = paths.plugins.appendingPathComponent(id, isDirectory: true)
+        let liveExists = folderIsTaken(id)
+        let operators = OperatorsWork.goesToTrash(id, in: paths, record: records.plugins[id])
+        let directory = paths.staging.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let staged = directory.appendingPathComponent(id, isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            try write(InstallIntent(operation: .link, id: id, record: nil, oldCopyIsOperators: operators,
+                                    linkTarget: candidate.target), in: directory)
+            try fileManager.createSymbolicLink(atPath: staged.path, withDestinationPath: candidate.target)
+            try fileManager.createDirectory(at: paths.plugins, withIntermediateDirectories: true)
+        } catch {
+            abandon(at: directory)
+            throw InstallError.cannotWrite("\(error)")
+        }
+        if liveExists {
+            do {
+                try spellExactly(id)
+            } catch {
+                abandon(at: directory)
+                throw error
+            }
+        }
+        let displaced = try swap(staged, into: live, liveExists: liveExists, staging: directory, id: id)
+        if records.plugins.removeValue(forKey: id) != nil {
+            do {
+                try self.records.save(records)
+            } catch {
+                // The link is in place and the record is not forgotten: the
+                // journal stays, and the next launch forgets it.
+                throw InstallError.cannotWrite("\(error)")
+            }
+        }
+        dispose(displaced, operators: operators)
+        try? fileManager.removeItem(at: directory)
     }
 
     // MARK: - Recovering from a crash halfway
@@ -683,11 +782,30 @@ public struct PluginInstaller: Sendable {
         let inStaging = directory.appendingPathComponent(id, isDirectory: true)
         let displaced = directory.appendingPathComponent("displaced", isDirectory: true)
             .appendingPathComponent(id, isDirectory: true)
-        let liveExists = fileManager.fileExists(atPath: live.path)
+        let liveExists = Self.entryExists(live)
         // The tree uDeck last recorded for this id, read before anything here
         // changes the record: an old copy that still hashes to it is uDeck's.
         let recorded = (try? loadRecords())?.plugins[id]?.tree
         let known = [recorded, intent.record?.tree].compactMap { $0 }
+
+        // A link put in a plugin's place: in place when `plugins/<id>` is a
+        // link to the folder the journal names — then the record is
+        // forgotten and the copy it replaced goes as the journal said; never
+        // swapped otherwise, and what follows puts an old copy moved aside
+        // back and unlinks the link made in staging.
+        if intent.operation == .link, Self.isLink(live), let target = intent.linkTarget,
+           let there = FilePaths.real(live.path).path, PluginLink.samePath(there, target) {
+            do {
+                var records = try loadRecords()
+                if records.plugins.removeValue(forKey: id) != nil { try self.records.save(records) }
+            } catch {
+                return .leftForLater(id: id, reason: "\(error)")
+            }
+            disposeRecovered(inStaging, known: known, operators: intent.oldCopyIsOperators)
+            disposeRecovered(displaced, known: known, operators: intent.oldCopyIsOperators)
+            try? fileManager.removeItem(at: directory)
+            return .linked(id: id)
+        }
 
         if intent.operation == .remove {
             guard !liveExists else {
@@ -708,7 +826,9 @@ public struct PluginInstaller: Sendable {
             return .removalFinished(id: id)
         }
 
-        let tree = liveExists ? (try? GitHash.tree(ofDirectoryAt: live)) ?? nil : nil
+        // A link at `plugins/<id>` is a linked folder, never the copy an install
+        // put there: its tree is the author's, and no record is written for it.
+        let tree = liveExists && !Self.isLink(live) ? (try? GitHash.tree(ofDirectoryAt: live)) ?? nil : nil
         if let record = intent.record, tree == record.tree {
             do {
                 var records = try loadRecords()
@@ -740,6 +860,8 @@ public struct PluginInstaller: Sendable {
                 } catch {
                     return .leftForLater(id: id, reason: "putting the old copy back: \(error.localizedDescription)")
                 }
+            } else if Self.isLink(displaced) {
+                dispose(displaced, operators: false)
             } else {
                 do {
                     try trash.discard(displaced)
@@ -759,11 +881,16 @@ public struct PluginInstaller: Sendable {
         // and the swap it would precede never began: only the raw host's files
         // are in it, whole or in part — which hash to nothing, so they are
         // deleted when nothing the hash does not see is among them.
-        if intent.record == nil, fileManager.fileExists(atPath: inStaging.path),
+        //
+        // Not for a link's journal: what is under the id there is the link
+        // made in staging — unlinked — or, when the link has been pointed
+        // elsewhere since the swap, the copy it replaced, which goes as the
+        // journal said.
+        if intent.operation != .link, intent.record == nil, fileManager.fileExists(atPath: inStaging.path),
            GitHash.unhashed(inDirectoryAt: inStaging).isEmpty {
             try? fileManager.removeItem(at: inStaging)
         } else {
-            disposeRecovered(inStaging, known: known, operators: false)
+            disposeRecovered(inStaging, known: known, operators: intent.operation == .link && intent.oldCopyIsOperators)
         }
         try? fileManager.removeItem(at: directory)
         return .neverSwapped(id: id)
@@ -772,7 +899,9 @@ public struct PluginInstaller: Sendable {
     /// A copy a crash left in staging: deleted only when it is provably
     /// uDeck's own — it hashes to one of the `known` trees and holds nothing
     /// the hash does not see — and the journal did not call it the operator's;
-    /// to the Trash otherwise.
+    /// to the Trash otherwise. A link is only unlinked (`dispose`), whatever
+    /// the journal or the rule says; one that leads nowhere goes with the
+    /// staging folder.
     private func disposeRecovered(_ folder: URL, known: [String], operators: Bool) {
         guard fileManager.fileExists(atPath: folder.path) else { return }
         dispose(folder, operators: operators || OperatorsWork.isAtStake(in: folder, knownTrees: known))
@@ -792,7 +921,20 @@ public struct PluginInstaller: Sendable {
     }
 
     public static func folderIsTaken(_ id: String, in paths: UDeckPaths) -> Bool {
-        FileManager.default.fileExists(atPath: paths.plugins.appendingPathComponent(id, isDirectory: true).path)
+        entryExists(paths.plugins.appendingPathComponent(id, isDirectory: true))
+    }
+
+    /// Whether anything is at `url` itself: a link that leads nowhere is
+    /// something there, which a move into its place would fail on.
+    static func entryExists(_ url: URL) -> Bool {
+        var status = stat()
+        return lstat(url.path, &status) == 0
+    }
+
+    /// Whether `url` is a link itself, wherever it leads.
+    public static func isLink(_ url: URL) -> Bool {
+        var status = stat()
+        return lstat(url.path, &status) == 0 && status.st_mode & S_IFMT == S_IFLNK
     }
 
     private func write(_ intent: InstallIntent, in directory: URL) throws {
@@ -878,9 +1020,11 @@ public enum OperatorsWork {
 
     /// Whether replacing or removing `plugins/<id>` now would send something
     /// of the operator's to the Trash: there is a folder there, asked as the
-    /// swap will find it, and it holds something of theirs.
+    /// swap will find it, and it holds something of theirs. Never for a link:
+    /// a linked folder's link goes, and what it leads to stays where it is.
     public static func goesToTrash(_ id: String, in paths: UDeckPaths, record: InstalledRecord?) -> Bool {
-        guard PluginInstaller.folderIsTaken(id, in: paths) else { return false }
-        return isAtStake(in: paths.plugins.appendingPathComponent(id, isDirectory: true), record: record)
+        let live = paths.plugins.appendingPathComponent(id, isDirectory: true)
+        guard PluginInstaller.folderIsTaken(id, in: paths), !PluginInstaller.isLink(live) else { return false }
+        return isAtStake(in: live, record: record)
     }
 }

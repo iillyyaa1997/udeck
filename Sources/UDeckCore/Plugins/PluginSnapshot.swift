@@ -54,18 +54,47 @@ public struct PluginSnapshot: Equatable, Sendable {
     /// cheap and the operator wants to see it recover the moment it does.
     public var consecutiveFailures: Int
 
+    /// The plugin's last run, whatever it came to — a card as much as a
+    /// failure — with the tail of its standard error: what the author reads
+    /// when a card is wrong without failing. In memory only, like the card.
+    public var lastRun: PluginRun?
+
     public init(
         pluginID: PluginIdentifier,
         card: Card? = nil,
         cardProducedAt: Date? = nil,
         failure: PluginFailure? = nil,
-        consecutiveFailures: Int = 0
+        consecutiveFailures: Int = 0,
+        lastRun: PluginRun? = nil
     ) {
         self.pluginID = pluginID
         self.card = card
         self.cardProducedAt = cardProducedAt
         self.failure = failure
         self.consecutiveFailures = consecutiveFailures
+        self.lastRun = lastRun
+    }
+
+    /// The reason the plugin's next run is given, from the one its caller
+    /// had: `launch` until it has drawn a card since uDeck started
+    /// (`RefreshReason.of`).
+    public func reason(for requested: RefreshReason) -> RefreshReason {
+        RefreshReason.of(requested, hasSpoken: cardProducedAt != nil)
+    }
+
+    /// What one attempt came to: its card or its failure, and the run it took
+    /// when one happened.
+    public mutating func record(_ attempt: PollAttempt, at date: Date) {
+        if let run = attempt.run { lastRun = run }
+        switch attempt.execution {
+        case .card(let card):
+            record(card: card, at: date)
+        case .lateCard(let card, let failure):
+            record(card: card, at: date)
+            record(failure: failure)
+        case .failure(let failure):
+            record(failure: failure)
+        }
     }
 
     public mutating func record(card: Card, at date: Date) {

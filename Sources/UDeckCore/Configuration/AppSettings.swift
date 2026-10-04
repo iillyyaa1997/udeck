@@ -113,6 +113,19 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// The catalogue switch as it stands.
     public var readsOfficialCatalogue: Bool { officialCatalogue ?? true }
 
+    /// Whether every run of a linked folder is written into its run log
+    /// (`RunLog`, `<uDeck folder>/logs/<id>.log`), or `nil` for the shipped
+    /// answer, which is no.
+    ///
+    /// Off until the author asks: a log is a file that grows on every run, and
+    /// a linked folder that is only linked — not being worked on — has no use
+    /// for one. Only linked folders ever have one; every other plugin keeps its
+    /// last run in memory, and nothing on disk.
+    public var linkedFolderRunLog: Bool?
+
+    /// The run log switch as it stands.
+    public var writesLinkedFolderRunLog: Bool { linkedFolderRunLog ?? false }
+
     public init(
         version: Int = 1,
         density: Density = .normal,
@@ -129,7 +142,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         pollWhileCollapsed: Bool = false,
         textSize: CGFloat? = nil,
         language: Language? = nil,
-        officialCatalogue: Bool? = nil
+        officialCatalogue: Bool? = nil,
+        linkedFolderRunLog: Bool? = nil
     ) {
         self.version = version
         self.density = density
@@ -147,6 +161,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.textSize = textSize
         self.language = language
         self.officialCatalogue = officialCatalogue
+        self.linkedFolderRunLog = linkedFolderRunLog
     }
 
     /// How big the text actually is.
@@ -346,6 +361,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         language = (try c.decodeIfPresent(String.self, forKey: .language)).flatMap(Language.init(rawValue:))
         textSize = try c.decodeIfPresent(CGFloat.self, forKey: .textSize)
         officialCatalogue = try c.decodeIfPresent(Bool.self, forKey: .officialCatalogue)
+        linkedFolderRunLog = try c.decodeIfPresent(Bool.self, forKey: .linkedFolderRunLog)
     }
 
     /// These settings with `glass` and `ink` brought into line with the look

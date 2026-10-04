@@ -60,6 +60,18 @@ public final class DeckModel {
     /// Card actions that are running, each in a process group of its own, so
     /// that quieting a plugin can end the ones that outlast the wait.
     let actionProcesses = ActionProcesses()
+    /// Writes linked folders' run logs, off the main thread, one entry after
+    /// another (`RunLog`).
+    let runLogs = RunLogWriter()
+    /// Which read of the catalogue is the latest asked for: a read that ends
+    /// after a later one began is not shown over it (`reloadCatalogue`).
+    @ObservationIgnored var catalogueReads = 0
+    /// Whether the catalogue has been read since launch — nil or not. Until it
+    /// has, no record's verification is written again (`Reverification.Head`).
+    @ObservationIgnored var catalogueWasRead = false
+    /// Which hashing of the installed plugins is the latest asked for: one that
+    /// ends after a later one began is not applied over it (`reverify`).
+    @ObservationIgnored var reverifications = 0
 
     /// Problems worth showing the operator: a settings file that would not
     /// parse, a layout that could not be written, a plugin whose windows had to
@@ -111,6 +123,8 @@ public final class DeckModel {
     let paths: UDeckPaths
     private let executor: PollExecutor
     private var pollTasks: [String: Task<Void, Never>] = [:]
+    /// What each running loop was started with (`PollLoops`).
+    private var pollLoops: [String: PollLoop] = [:]
 
     /// The refresh started by the most recent reveal.
     ///
@@ -193,17 +207,24 @@ public final class DeckModel {
                 forgetEverythingElse(about: identifier)
             }
         }
-        catalogue = Catalogue.load(from: store, address: provider.address, udeck: udeck,
-                                   language: strings.language.rawValue)
-
         for directory in paths.directoriesToCreate {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
 
-        folderWatcher = PluginFolderWatcher { [weak self] in
-            self?.discoverPlugins()
+        folderWatcher = PluginFolderWatcher { [weak self] changes in
+            self?.discoverPlugins(after: changes)
         }
         folderWatcher?.start(watching: paths.plugins)
+
+        // The catalogue as the cache holds it, read away from the main thread
+        // (`Catalogue.read`): Settings shows it a moment after launch rather
+        // than the panel waiting on every manifest in it first. Then the
+        // installed plugins are checked against its head: the read of the
+        // plugins folder at launch, before it, writes no verification.
+        Task { [weak self] in
+            await self?.reloadCatalogue()
+            self?.reverify()
+        }
     }
 
     // MARK: - Plugins
@@ -215,10 +236,26 @@ public final class DeckModel {
     /// thing that can fail quietly and a button is a thing the operator can
     /// press when they suspect it has.
     public func discoverPlugins() {
-        plugins = discovery.scan(paths.plugins)
+        discoverPlugins(after: nil)
+    }
+
+    /// Re-reads the plugins folder after `changes` the watcher saw — nil for a
+    /// read nobody watched for. A change only in a folder a link leads to — a
+    /// working copy, written into all the time — hashes no installed plugin
+    /// (`WatchedFolders.rehashes(after:)`), and starts no loop again whose
+    /// plugin is as it was (`PollLoops`).
+    func discoverPlugins(after changes: Set<FolderChange>?) {
+        // Set only when it changed: a working copy is written into all the
+        // time, and a read that finds the same plugins redraws nothing — and
+        // the hashing below then lands as one change, not a second one.
+        let scanned = discovery.scan(paths)
+        if scanned != plugins { plugins = scanned }
         DeckLog.plugins.debug(
             "read the plugins folder: \(self.plugins.count, privacy: .public) found"
         )
+        // Where linked plugins lead now: a link pointed elsewhere since the
+        // last read is watched where it points.
+        folderWatcher?.watch(WatchedFolders.linked(plugins))
 
         // Windows are never removed because a plugin is missing: a window
         // whose plugin is not here stays and says so (`PluginPresence`).
@@ -228,7 +265,7 @@ public final class DeckModel {
             layout.removeWindows(gone)
             saveLayout()
         }
-        reverify()
+        if WatchedFolders.rehashes(after: changes) { reverify() }
         restartPolling()
         onPluginsChanged?()
     }
@@ -278,25 +315,32 @@ public final class DeckModel {
         if panelIsVisible {
             refreshAll(reason: .manual)
         }
-        restartPolling()
+        // Every loop afresh: each plugin has just run, and runs next an
+        // interval from now.
+        restartPolling(again: true)
     }
 
-    public func restartPolling() {
-        for (_, task) in pollTasks { task.cancel() }
-        pollTasks.removeAll()
-        if !panelIsVisible && !settings.pollWhileCollapsed { refreshTask?.cancel() }
-
-        guard panelIsVisible || settings.pollWhileCollapsed else { return }
-
-        for plugin in plugins {
-            guard let manifest = plugin.manifest, manifest.kind == .poll,
-                  !pluginRuns.isQuiet(manifest.id.rawValue),
-                  placedPluginIDs.contains(manifest.id),
-                  launchDecision(for: manifest.id).isAllowed,
-                  let interval = manifest.interval, interval > 0
-            else { continue }
-
-            pollTasks[manifest.id.rawValue] = Task { [weak self] in
+    /// Starts and ends poll loops as the plugins, the layout, the decisions and
+    /// the panel now say — starting again only the loops whose plugin or
+    /// decision changed (`PollLoops`): every other plugin's next run is when it
+    /// was due. `again` starts every loop afresh.
+    public func restartPolling(again: Bool = false) {
+        let polling = panelIsVisible || settings.pollWhileCollapsed
+        if !polling { refreshTask?.cancel() }
+        let pluginRuns = self.pluginRuns
+        let wanted = PollLoops.wanted(plugins, placed: placedPluginIDs, grants: grants, settings: pluginSettings,
+                                      polling: polling, isQuiet: { pluginRuns.isQuiet($0) })
+        let plan = PollLoops.plan(running: pollLoops, wanted: wanted, again: again)
+        for id in plan.stop {
+            pollTasks[id]?.cancel()
+            pollTasks[id] = nil
+            pollLoops[id] = nil
+        }
+        for id in plan.start.sorted() {
+            guard let loop = wanted[id], let manifest = loop.plugin.manifest, let interval = manifest.interval else { continue }
+            let plugin = loop.plugin
+            pollLoops[id] = loop
+            pollTasks[id] = Task { [weak self] in
                 while !Task.isCancelled {
                     // Re-read the failure count each time round rather than
                     // capturing it: the wait after this sleep depends on how the
@@ -314,6 +358,7 @@ public final class DeckModel {
     func stopPolling(_ id: PluginIdentifier) {
         pollTasks[id.rawValue]?.cancel()
         pollTasks[id.rawValue] = nil
+        pollLoops[id.rawValue] = nil
     }
 
     /// How long to wait before polling this plugin again.
@@ -362,10 +407,13 @@ public final class DeckModel {
         Task { await poll(plugin, reason: .manual) }
     }
 
-    private func poll(_ plugin: DiscoveredPlugin, reason: RefreshReason) async {
+    private func poll(_ plugin: DiscoveredPlugin, reason requested: RefreshReason) async {
         guard let id = plugin.manifest?.id, pluginRuns.begin(id.rawValue) else { return }
         defer { pluginRuns.end(id.rawValue) }
-        let outcome = await executor.poll(
+        // `launch` until the plugin has drawn a card since uDeck started,
+        // whatever asked for the run (`RefreshReason.of`).
+        let reason = snapshot(for: id).reason(for: requested)
+        let attempt = await executor.attempt(
             plugin: plugin,
             grant: grants[id],
             enabled: pluginSettings.isEnabled(id),
@@ -383,16 +431,20 @@ public final class DeckModel {
         // snapshot captured earlier would drop its card and undercount its
         // failures.
         var snapshot = snapshots[id.rawValue] ?? PluginSnapshot(pluginID: id)
-        switch outcome {
-        case .card(let card):
-            snapshot.record(card: card, at: Date())
-        case .lateCard(let card, let failure):
-            snapshot.record(card: card, at: Date())
-            snapshot.record(failure: failure)
-        case .failure(let failure):
-            snapshot.record(failure: failure)
-        }
+        snapshot.record(attempt, at: Date())
         snapshots[id.rawValue] = snapshot
+        if let run = attempt.run { log(run, of: plugin, id: id) }
+    }
+
+    /// A linked folder's run, into its run log while the run log is on:
+    /// `<uDeck folder>/logs/<id>.log`, written off the main thread, never
+    /// inside the folder the link leads to.
+    private func log(_ run: PluginRun, of plugin: DiscoveredPlugin, id: PluginIdentifier) {
+        guard RunLog.takes(plugin, settings: settings) else { return }
+        runLogs.write(run, for: id, linkTarget: plugin.directory, to: RunLog(paths: paths)) { error, _ in
+            guard let error else { return }
+            DeckLog.plugins.error("the run log of \(id.rawValue, privacy: .public): \(String(describing: error), privacy: .public)")
+        }
     }
 
     // MARK: - Layout editing

@@ -149,14 +149,22 @@ extension DeckModel {
                                               installedCommits: installed.commits)
         DeckLog.plugins.info("the official catalogue: \(String(describing: outcome), privacy: .public)")
         catalogueState = catalogueStore.state()
-        reloadCatalogue()
+        await reloadCatalogue()
         reverify()
     }
 
-    /// The catalogue as the cache holds it now.
-    func reloadCatalogue() {
-        catalogue = Catalogue.load(from: catalogueStore, address: provider.address, udeck: udeck,
-                                   language: strings.language.rawValue)
+    /// The catalogue as the cache holds it now, read away from the main thread
+    /// (`Catalogue.read`). Two reads can overlap — the one at launch and a
+    /// refresh's — and only the one asked for last is shown, whichever ends
+    /// first.
+    func reloadCatalogue() async {
+        catalogueReads += 1
+        let read = catalogueReads
+        let loaded = await Catalogue.read(from: catalogueStore, address: provider.address, udeck: udeck,
+                                          language: strings.language.rawValue)
+        guard read == catalogueReads else { return }
+        catalogue = loaded
+        catalogueWasRead = true
     }
 
     // MARK: - What the rows show
@@ -217,31 +225,30 @@ extension DeckModel {
 
     // MARK: - Verification
 
-    /// Recomputes every record's verification from what its folder hashes to
-    /// now, and writes it back only when it changed. Never trusted from the
+    /// Recomputes where every plugin folder stands, and every record's
+    /// verification, from what its folder hashes to now — and writes a record
+    /// back only when it changed (`Reverification`). Never trusted from the
     /// file: nothing, least of all a consent decision, is decided on it.
+    ///
+    /// The folders are hashed away from the main thread, and what that comes
+    /// to is applied when it is done — unless the plugins folder was read, or
+    /// the records loaded, again meanwhile: then the later hashing applies.
+    /// Until the catalogue has been read, no verification is written.
     func reverify() {
-        var next: [String: PluginStanding] = [:]
-        var changed = false
-        let now = Date()
-        for plugin in plugins {
-            let id = plugin.folderName
-            guard let record = installed.plugins[id] else {
-                next[id] = .folderOfYourOwn
-                continue
+        reverifications += 1
+        let asked = reverifications
+        let plugins = self.plugins
+        let folders = Reverification.folders(of: plugins, installed: installed)
+        Task {
+            let trees = await Reverification.trees(of: folders)
+            guard asked == reverifications else { return }
+            let found = Reverification.of(plugins, installed: installed, trees: trees,
+                                          head: catalogueWasRead ? .read(catalogue?.commit) : .notReadYet, now: Date())
+            if found.standings != standings { standings = found.standings }
+            if let records = found.records, installedProblem == nil {
+                installed = records
+                save(JSONFileStore<InstalledPlugins>(url: paths.installedFile), installed, named: "installed plugins")
             }
-            let tree = (try? GitHash.tree(ofDirectoryAt: plugin.directory)) ?? nil
-            next[id] = PluginStanding.of(record: record, folderExists: true, treeOnDisk: tree)
-            let found = record.verification(treeOnDisk: tree, headCommit: catalogue?.commit, now: now)
-            if !found.saysTheSame(as: record.verification) {
-                installed.plugins[id]?.verification = found
-                changed = true
-            }
-        }
-        for id in installed.plugins.keys where next[id] == nil { next[id] = .missing }
-        standings = next
-        if changed, installedProblem == nil {
-            save(JSONFileStore<InstalledPlugins>(url: paths.installedFile), installed, named: "installed plugins")
         }
     }
 
@@ -286,7 +293,7 @@ extension DeckModel {
         let operation: InstallRequest.Operation =
             installed.plugins[id] != nil ? .update : (folderExists(id) ? .replace : .install)
         run(operation, id: id, commit: catalogue.commit, folder: entry.listing,
-            version: entry.manifest?.version ?? "", manifest: manifestData(entry))
+            version: entry.manifest?.version ?? "")
     }
 
     /// **Update**, or **Switch to** a version the repository went back to: the
@@ -294,7 +301,7 @@ extension DeckModel {
     public func update(_ id: String) {
         guard let catalogue, let entry = catalogue.entry(id) else { return }
         run(.update, id: id, commit: catalogue.commit, folder: entry.listing,
-            version: entry.manifest?.version ?? "", manifest: manifestData(entry))
+            version: entry.manifest?.version ?? "")
     }
 
     /// **Reinstall**: what the record says was installed, put back — over a
@@ -335,10 +342,6 @@ extension DeckModel {
         }
     }
 
-    private func manifestData(_ entry: CatalogueEntry) -> Data? {
-        entry.listing.file(at: PluginDiscovery.manifestFilename).flatMap { catalogueStore.blob($0.sha) }
-    }
-
     /// An operation at a commit that is not the head: its listing from the
     /// cache, or one request for it.
     private func runAtCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String) {
@@ -354,9 +357,8 @@ extension DeckModel {
                 guard let folder = listing.plugins[id] else {
                     throw InstallError.refused([.noManifest(path: "plugins/\(id)/manifest.json")])
                 }
-                let manifest = folder.file(at: PluginDiscovery.manifestFilename).flatMap { catalogueStore.blob($0.sha) }
                 busyPlugin = nil
-                run(operation, id: id, commit: commit, folder: folder, version: version, manifest: manifest)
+                run(operation, id: id, commit: commit, folder: folder, version: version)
             } catch {
                 operationProblems[id] = OperationProblem(error)
                 busyPlugin = nil
@@ -366,13 +368,16 @@ extension DeckModel {
         }
     }
 
+    /// One install, update, reinstall or earlier version of `id`, at `commit`.
+    /// The manifest the catalogue row was checked by is read again from the
+    /// blob store — off the main thread (`CatalogueStore.manifest(of:)`) — and
+    /// every rule checked against it before a file is requested.
     private func run(
         _ operation: InstallRequest.Operation,
         id: String,
         commit: String,
         folder: PluginListing,
-        version: String,
-        manifest: Data?
+        version: String
     ) {
         guard settings.readsOfficialCatalogue, busyPlugin == nil,
               let identifier = PluginIdentifier(rawValue: id) else { return }
@@ -388,6 +393,7 @@ extension DeckModel {
             commit: commit, folder: folder, version: version, headCommit: catalogue?.commit
         )
         let installer = self.installer
+        let store = catalogueStore
         Task {
             defer {
                 busyPlugin = nil
@@ -396,6 +402,7 @@ extension DeckModel {
             }
             do {
                 DeckLog.plugins.info("\(operation.rawValue, privacy: .public) \(id, privacy: .public) at \(commit, privacy: .public)")
+                let manifest = await store.manifest(of: folder)
                 let staged = try await installer.stage(request, manifest: manifest)
                 defer { resume(identifier) }
                 let record = try await installer.commit(staged, once: { await self.quiet(identifier) })
@@ -433,6 +440,9 @@ extension DeckModel {
             do {
                 let removal = try await installer.beginRemoval(identifier, once: { await self.quiet(identifier) })
                 forgetEverythingElse(about: identifier)
+                // The plugin's last run may still be on its way into its run
+                // log; the log goes after it, not before it is made again.
+                await runLogs.drain()
                 try installer.finishRemoval(removal)
                 DeckLog.plugins.info("removed \(id, privacy: .public)")
             } catch {
@@ -464,7 +474,107 @@ extension DeckModel {
         histories[id.rawValue] = nil
     }
 
+    // MARK: - Linked folders
+
+    /// A linked plugin's link and where it leads, as the plugins folder was
+    /// last read — what **Linked** beside the plugin says (`target` nil when
+    /// the link is not followed, and the plugin says why).
+    public struct LinkedFolder: Equatable, Sendable {
+        /// `<uDeck folder>/plugins/<id>`.
+        public var link: URL
+        /// The folder it leads to, every link on the way resolved.
+        public var target: URL?
+    }
+
+    /// `id`'s link, when its folder in `plugins/` is one; nil for a folder that
+    /// is there itself.
+    public func linkedFolder(_ id: String) -> LinkedFolder? {
+        guard let plugin = plugins.first(where: { $0.folderName == id }), let link = plugin.linkedAt else { return nil }
+        return LinkedFolder(link: link, target: plugin.directory == link ? nil : plugin.directory)
+    }
+
+    /// What **Link a folder…** came to.
+    public enum FolderLinking: Equatable, Sendable {
+        /// `<uDeck folder>/plugins/<id>` is a link to `target` now.
+        case linked(id: String, target: String)
+        /// It already was.
+        case alreadyLinked(id: String, target: String)
+        /// Something is at `id`: a plugin uDeck installed, a folder of the
+        /// operator's own, a link elsewhere. Nothing was done; asked again with
+        /// `replacing`, after the operator has read what goes — `toTrash` when
+        /// what is there goes to the Trash (`OperatorsWork`), rather than being
+        /// deleted as uDeck's own copy, or unlinked as a link.
+        case needsConfirmation(id: String, occupant: PluginLink.Occupant, toTrash: Bool)
+        /// Nothing was linked, and why.
+        case refused(String)
+    }
+
+    /// **Link a folder…**: `folder` — an author's working copy — into uDeck as
+    /// a link named after its manifest's id, `<uDeck folder>/plugins/<id>`.
+    ///
+    /// A free id is linked at once, as `udeck-plugin link` links it. An id that
+    /// is taken is linked only when asked again with `replacing` — linking over
+    /// an installed plugin is uDeck's to do, with a warning (`FolderLinking`)
+    /// — and then the way **Replace…** goes (`PluginInstaller.link`): the
+    /// plugin quieted, the link swapped into place, what it replaces deleted,
+    /// sent to the Trash or unlinked, and its record forgotten. Its windows,
+    /// settings and permission decision stay; the decision is held to the
+    /// linked manifest's version, as to any.
+    public func linkFolder(_ folder: URL, replacing: Bool = false) async -> FolderLinking {
+        guard busyPlugin == nil else {
+            return .refused("another plugin is being installed, updated, removed or linked; try again in a moment")
+        }
+        let candidate: PluginLink.Candidate
+        let occupant: PluginLink.Occupant
+        do {
+            candidate = try PluginLink.candidate(folder, home: paths.root)
+            occupant = try PluginLink.occupant(for: candidate, in: paths)
+        } catch {
+            return .refused("\(error)")
+        }
+        let id = candidate.id.rawValue
+        switch occupant {
+        case .nothing:
+            do {
+                try PluginLink.place(candidate, in: paths)
+            } catch {
+                return .refused("\(error)")
+            }
+            discoverPlugins()
+            return .linked(id: id, target: candidate.target)
+        case .link(_, sameFolder: true):
+            return .alreadyLinked(id: id, target: candidate.target)
+        case .link, .installed, .folderOfYourOwn:
+            guard replacing else {
+                return .needsConfirmation(id: id, occupant: occupant, toTrash: operatorsWorkGoesToTrash(id))
+            }
+        }
+        guard installedProblem == nil else {
+            return .refused("installed.json cannot be read, and uDeck replaces no plugin while it cannot: "
+                            + (installedProblem ?? ""))
+        }
+        busyPlugin = id
+        operationProblems[id] = nil
+        defer { busyPlugin = nil }
+        let installer = self.installer
+        do {
+            defer { resume(candidate.id) }
+            try await installer.link(candidate, once: { await self.quiet(candidate.id) })
+        } catch {
+            operationProblems[id] = OperationProblem(error)
+            reloadInstalled()
+            discoverPlugins()
+            return .refused("\(error)")
+        }
+        DeckLog.plugins.info("linked \(id, privacy: .public) to \(candidate.target, privacy: .public)")
+        reloadInstalled()
+        discoverPlugins()
+        return .linked(id: id, target: candidate.target)
+    }
+
     func reloadInstalled() {
+        // A hashing begun against the records before these is not applied.
+        reverifications += 1
         do {
             installed = try JSONFileStore<InstalledPlugins>(url: paths.installedFile).load() ?? InstalledPlugins()
             installedProblem = nil
