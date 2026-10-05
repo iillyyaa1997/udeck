@@ -41,6 +41,13 @@ struct CardBodyView: View {
             }
             .opacity(contentOpacity)
 
+            // A run that failed while these values are still fresh is said
+            // here at once, under them, and goes with the next good run
+            // (Q128); its whole standard error is in Settings.
+            if let failed = model.failureOnAFreshCard(for: pluginID) {
+                failedRun(failed)
+            }
+
             if !card.actions.isEmpty {
                 actions
             }
@@ -52,6 +59,24 @@ struct CardBodyView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private func failedRun(_ failed: FailureOnAFreshCard) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(strings(.cardLastRunFailed(at: Clock.text(failed.failedAt, strings), reason: failed.reason)))
+                .font(theme.chipFont)
+                .foregroundStyle(theme.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("card.\(pluginID.rawValue).lastRunFailed")
+            Text(strings(.cardShowingValuesFrom(Clock.text(failed.valuesFrom, strings))))
+                .font(theme.chipFont)
+                .foregroundStyle(theme.dim)
+                .accessibilityIdentifier("card.\(pluginID.rawValue).valuesFrom")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(theme.warn.opacity(0.16)))
     }
 
     // MARK: - Rows

@@ -250,4 +250,72 @@ struct ShownStandardErrorTests {
         #expect(shown.count == ShownStandardError.characters + 2)
         #expect(ShownStandardError.end(of: "") == "")
     }
+
+    @Test("exactly as many lines as are shown are shown whole, with nothing said to be left out")
+    func exactlyTheLines() {
+        let eight = (1 ... ShownStandardError.lines).map { "line \($0)" }.joined(separator: "\n")
+        #expect(ShownStandardError.end(of: eight) == eight)
+        let nine = (0 ... ShownStandardError.lines).map { "line \($0)" }.joined(separator: "\n")
+        #expect(ShownStandardError.end(of: nine) == "…\n" + eight)
+    }
+}
+
+@Suite("The panel coming into sight and going away")
+struct VisibilityTests {
+    let plugins = [plugin("linked", linkedTo: "/work/linked"), plugin("disk")]
+    var loops: [String: PollLoop] {
+        PollLoops.wanted(plugins, placed: identifiers("linked", "disk"), grants: PermissionGrants(),
+                         settings: PluginSettings(), polling: true, isQuiet: { _ in false })
+    }
+
+    @Test("shown: every plugin runs now and every loop starts afresh after it")
+    func shown() {
+        let change = PollLoops.visibilityChanged(nowVisible: true)
+        #expect(change == PollLoops.VisibilityChange(refresh: true, again: true))
+        #expect(PollLoops.plan(running: loops, wanted: loops, again: change.again).start == ["linked", "disk"])
+    }
+
+    /// Polling while the panel is away, hiding it starts nothing again: a
+    /// loop with a long interval used to wait it whole once more after every
+    /// close, and with the panel opened and closed by the pointer it ran
+    /// late every time.
+    @Test("hidden: nothing runs, and a loop that goes on while the panel is away keeps its rhythm")
+    func hidden() {
+        let change = PollLoops.visibilityChanged(nowVisible: false)
+        #expect(change == PollLoops.VisibilityChange(refresh: false, again: false))
+        #expect(PollLoops.plan(running: loops, wanted: loops, again: change.again) == PollLoops.Plan())
+    }
+}
+
+@Suite("Where a watch of linked folders stands")
+struct WatchRememberedTests {
+    @Test("the folders are held as watched only when their stream was made; otherwise the next read asks again")
+    func remembered() {
+        #expect(WatchedFolders.remembered(["/work/a", "/work/b"], streamMade: true) == ["/work/a", "/work/b"])
+        #expect(WatchedFolders.remembered(["/work/a"], streamMade: false) == [])
+        #expect(WatchedFolders.remembered([], streamMade: false) == [], "nothing to watch is no stream, and no failure")
+    }
+}
+
+@Suite("A hashing nobody will apply")
+struct ReverificationCancelTests {
+    /// The hashing is cancelled during its first folder — as a later read
+    /// of the plugins folder cancels the one before it — and hashes no other.
+    @Test("a cancelled hashing stops at the next folder, and comes to nothing")
+    func stopsWhenCancelled() async {
+        let folders = ["a", "b", "c"].reduce(into: [String: URL]()) { $0[$1] = URL(fileURLWithPath: "/nowhere/\($1)") }
+        let hashed = Counter()
+        let task = Task {
+            await Reverification.trees(of: folders) { _ in
+                hashed.add()
+                withUnsafeCurrentTask { $0?.cancel() }
+                return "tree"
+            }
+        }
+        #expect(await task.value == nil)
+        #expect(hashed.value == 1, "hashed \(hashed.value) folders after it was cancelled")
+
+        let whole = await Reverification.trees(of: folders) { _ in "tree" }
+        #expect(whole == ["a": "tree", "b": "tree", "c": "tree"], "not cancelled, every folder")
+    }
 }

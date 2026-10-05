@@ -129,7 +129,22 @@ struct English: Vocabulary {
         case .pluginLess: "Less"
         case .pluginSettings: "Settings"
         case .pluginEverySeconds(let seconds): "every \(seconds) s"
-        case .pluginLastFailure(let reason): "Last failure: \(reason)"
+        case .pluginLastFailure(let reason): "Last failure: \(self(.failureReason(reason)))"
+        case .failureReason(let reason):
+            // The words `udeck-plugin run` prints, which are the format's own.
+            reason.description
+        case .pluginLastRun(let at, let reason, let duration, let result):
+            "Last run \(at), \(Self.why(reason)), \(Seconds.fixed(duration, places: 2)) s: " + {
+                switch result {
+                case .card: "a card"
+                case .lateCard(let failure): "a card, and a failure: \(self(.failureReason(failure)))"
+                case .failure(let failure): "a failure: \(self(.failureReason(failure)))"
+                }
+            }()
+        case .pluginStandardErrorEnd: "The end of its standard error:"
+        case .pluginStandardErrorNothing: "Nothing on standard error."
+        case .pluginStandardErrorBefore(let bytes):
+            bytes == 1 ? "(1 byte came before what uDeck kept)" : "(\(bytes) bytes came before what uDeck kept)"
         case .permissionsAsksNothing: "Asks for nothing"
         case .permissionsAsksTo: "This plugin asks to:"
         case .permissionsDeclared: "declared"
@@ -199,12 +214,17 @@ struct English: Vocabulary {
         case .catalogueWorking: "Working…"
         case .catalogueReplaceConfirm(let id, let path):
             "A folder of your own named \(id) is in \(path). Installing moves it to the Trash and puts the repository's \(id) in its place."
+        case .catalogueReplaceLinkConfirm(let id, let target):
+            "\(id) here is a link to \(target). Installing takes the link away — the folder it leads to stays exactly as it is — and puts the repository's \(id) in its place."
         case .catalogueUpdateOverChanges(let id, let version):
             "Your changes to \(id) will be moved to the Trash and replaced with \(version)."
         case .catalogueRemoveConfirm(let id):
             "Remove \(id)? Its folder and its cache are deleted, and your permission decision, its settings and every window of it on every tab go with them."
         case .catalogueRemoveOwnConfirm(let id):
             "Remove \(id)? Its folder is moved to the Trash — it may be your only copy — and its cache, your permission decision, its settings and every window of it go."
+        case .catalogueRemoveLinkConfirm(let id, let target):
+            "Remove the link \(id)? Only the link goes: the folder it leads to, \(target), stays exactly as it is. What uDeck kept of the plugin goes with the link — its cache and run log, your permission decision, its settings and every window of it."
+        case .catalogueLinkedHere(let id): "\(id) is linked here, to a folder of your own"
         case .catalogueRefusal(let refusal): refusal.message
         case .catalogueFileUnreachable(let path, let reason):
             "\(path) could not be fetched: \(reason); nothing was installed."
@@ -220,6 +240,80 @@ struct English: Vocabulary {
         case .pluginMarkMissing: "Missing"
         case .pluginFrom(let source, let commit): "From \(source) at \(commit)"
         case .pluginPinned: "Kept at this version — newer ones are still shown"
+        case .pluginMarkLinked: "Linked"
+        case .pluginLinkedTo(let path): "A link to \(path): uDeck runs the plugin from there"
+        case .pluginLinkNotFollowed(let destination): "A link to \(destination), which uDeck does not follow"
+        case .linkFolder: "Link a folder…"
+        case .linkFolderPanelMessage:
+            "Choose a plugin's folder — the one with manifest.json in it. uDeck links it in and runs it where it is."
+        case .linkFolderLink: "Link"
+        case .linkFolderLinked(let id, let target): "Linked \(id) to \(target)."
+        case .linkFolderAlready(let id, let target): "\(id) is already linked to \(target)."
+        case .linkFolderOverInstalled(let id, let source, let folder, let toTrash):
+            toTrash
+                ? "\(id) is installed from \(source), and its copy holds changes of yours. Linking \(folder) in its place moves that copy to the Trash; its windows, settings and your permission decision stay."
+                : "\(id) is installed from \(source). Linking \(folder) in its place deletes the installed copy — it is exactly what uDeck installed — and keeps its windows, settings and your permission decision."
+        case .linkFolderOverOwn(let id, let path, let folder, let toTrash):
+            toTrash
+                ? "A folder of your own named \(id) is in \(path). Linking \(folder) in its place moves that folder to the Trash."
+                : "A folder named \(id) is in \(path). Linking \(folder) in its place deletes it."
+        case .linkFolderOverLink(let id, let destination, let folder):
+            "\(id) is a link to \(destination) now. Linking points it at \(folder) instead; the folder it leads to now stays exactly as it is."
+        case .linkFolderRefused(let refusal): Self.linkRefusal(refusal)
+        case .runLogSwitch: "Keep a run log for linked folders"
+        case .runLogHelp(let path):
+            "Every run of a linked plugin — when, why, how it ended, how long it took, the end of its standard error — goes into \(path)/<id>.log, at most 2 MB a plugin. Other plugins keep only their last run, in memory."
+        case .runLogShow: "Show the logs"
+        case .searchPathTitle: "Where to look for commands"
+        case .searchPathHelp:
+            "A command written without a path (python3) is looked for in these folders, in this order. uDeck does not take PATH from your terminal. A change counts from the next run; nothing needs restarting."
+        case .searchPathAdd: "Add a folder…"
+        case .searchPathPanelMessage: "Choose a folder for uDeck to look for commands in."
+        case .searchPathPanelAdd: "Add"
+        case .searchPathRemove: "Remove the folder"
+        case .searchPathKeepOne: "At least one folder stays: without one, no command is found."
+        case .searchPathUp: "Move up"
+        case .searchPathDown: "Move down"
+        case .searchPathRestore: "Restore the defaults"
+        case .searchPathStanding(let standing):
+            switch standing {
+            case .lookedIn: "looked in"
+            case .notThere: "not there now"
+            case .notAFolder: "not a folder"
+            case .notAFullPath: "not looked in: not a full path from /"
+            }
+        case .commandTitle: "The udeck-plugin command"
+        case .commandInstall: "Install command"
+        case .commandRemove: "Remove command"
+        case .commandInstalled(let path):
+            "Installed: \(path) leads to the copy inside this uDeck, and updates with it."
+        case .commandNotInstalled(let path):
+            "Not installed. Install command puts a link at \(path) to the copy inside uDeck — no administrator password — and it updates with uDeck."
+        case .commandOtherCopy(let path, let target):
+            "\(path) leads to another copy of uDeck: \(target). Install command points it at this one."
+        case .commandForeign(let path, let what):
+            "\(path) is there already, and is not uDeck's — " + {
+                switch what {
+                case .file: "a file"
+                case .folder: "a folder"
+                case .link(let destination): "a link to \(destination)"
+                }
+            }() + ". uDeck leaves it as it is; move it away to install the command."
+        case .commandNoHelper:
+            "This copy of uDeck has no command inside it — a development build. The application Scripts/make-app.sh builds has it."
+        case .commandNotLasting(let place):
+            switch place {
+            case .lasting: "This copy of uDeck stays where it is."
+            case .translocated:
+                "macOS runs this uDeck from a temporary copy — it was opened where it was downloaded — so a link to its command would lead nowhere once uDeck quits. Move uDeck to Applications first, open it from there, and install the command then."
+            case .diskImage(let volume):
+                "This uDeck runs from the disk image \(volume), so a link to its command would lead nowhere once the image is ejected. Move uDeck to Applications first, open it from there, and install the command then."
+            }
+        case .commandOnPath(let folder): "Your shell looks in \(folder): type udeck-plugin in a new terminal window."
+        case .commandNotOnPath(let folder, let shell, let file):
+            "Your shell (\(shell)) does not look in \(folder). Add this line to \(file), then open a new terminal window:"
+        case .commandPathUnknown(let folder): "Could not tell whether your shell looks in \(folder)."
+        case .commandCouldNot(let reason): "It did not work: \(reason)"
         case .historyTitle(let name): "Earlier versions of \(name)"
         case .historyReading: "Reading the plugin's history…"
         case .historyNone: "The history has no versions of this plugin."
@@ -296,6 +390,9 @@ struct English: Vocabulary {
         case .cardDragToMove: "Drag to move this window"
         case .cardDragToResize: "Drag to resize, in whole cells"
         case .cardOwnDrawing: "PLUGIN'S OWN DRAWING"
+        case .cardLastRunFailed(let at, let reason): "Last run failed at \(at): \(self(.failureReason(reason)))"
+        case .cardShowingValuesFrom(let time): "showing values from \(time)"
+        case .cardLastRunFailedDot: "The last run failed"
         case .cardKindNotDrawn(let kind): "\"\(kind)\" is not drawn by this version of uDeck"
         case .cardUnsupportedRow(let kind):
             "this plugin sent a \"\(kind)\" row, which this version of uDeck does not draw"
@@ -317,7 +414,6 @@ struct English: Vocabulary {
         case .tabClose: "Close tab"
         case .tabClickAgainToRename: "Click again to rename"
         case .tabShowThis: "Show this tab"
-        case .controlDensity(let name): "Density: \(name)"
         case .controlRefresh: "Refresh everything now"
         case .controlSettings: "Settings"
         case .controlSendAway: "Send the panel away"
@@ -337,6 +433,41 @@ struct English: Vocabulary {
         case .unitPoints(let value): "\(value) pt"
         case .unitSeconds(let value): String(format: "%.1f s", value)
         case .unitPercent(let value): "\(value) %"
+        }
+    }
+
+    /// Why a run happened, as a sentence about it says it.
+    static func why(_ reason: RefreshReason) -> String {
+        switch reason {
+        case .launch: "at launch"
+        case .interval: "on its interval"
+        case .manual: "asked for"
+        }
+    }
+
+    /// Why **Link a folder…** linked nothing.
+    static func linkRefusal(_ refusal: FolderLinkRefusal) -> String {
+        switch refusal {
+        case .busy: "Another plugin is being installed, updated, removed or linked; try again in a moment."
+        case .recordsBroken(let reason):
+            "installed.json cannot be read, so uDeck replaces no plugin until it can: \(reason)"
+        case .failed(let reason): "The folder could not be linked: \(reason)"
+        case .folder(let reason):
+            switch reason {
+            case .notThere(let folder): "\(folder) is not there."
+            case .notAFolder(let folder): "\(folder) is not a folder: choose the plugin's folder, the one with manifest.json in it."
+            case .insideUDeck(let folder, let udeck):
+                "\(folder) is inside uDeck's own folder, \(udeck), where uDeck writes and deletes. Link a folder of your own."
+            case .holdsUDeck(let folder, let udeck): "\(folder) holds uDeck's own folder, \(udeck). Choose the plugin's folder itself."
+            case .noManifest(let folder): "\(folder) has no manifest.json, so it is not a plugin's folder."
+            case .manifestUnreadable(let manifest, let detail):
+                "\(manifest) is not a manifest uDeck can read: \(detail). The link is named after its id."
+            case .recordsUnreadable(let file, let detail):
+                "\(file) cannot be read, so whether the plugin is installed is not known; nothing was linked"
+                    + (detail.map { " (\($0))" } ?? "") + "."
+            case .taken(let link): "\(link) is taken."
+            case .cannotLink(let link, let detail): "\(link) could not be made: \(detail)"
+            }
         }
     }
 }

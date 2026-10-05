@@ -75,12 +75,22 @@ public final class PluginFolderWatcher {
     /// starting that stream again only when the list changed. Nothing is
     /// created here: a folder a link leads to is the author's, and only ever
     /// read.
+    ///
+    /// A stream that could not be made leaves nothing held as watched
+    /// (`WatchedFolders.remembered`), so the next read of the plugins folder
+    /// asks for it again rather than taking the same list for watched.
     public func watch(_ folders: [URL]) {
         let paths = folders.map(\.path)
-        guard paths != watched else { return }
+        // By bytes, as everything that compares a path here.
+        guard !paths.map({ Array($0.utf8) }).elementsEqual(watched.map({ Array($0.utf8) })) else { return }
         Self.end(linkedStream)
         linkedStream = paths.isEmpty ? nil : Self.stream(paths, for: self, seen: .linkedFolder)
-        watched = paths
+        if linkedStream == nil, !paths.isEmpty {
+            DeckLog.plugins.error(
+                "the folders linked plugins lead to could not be watched (\(paths.joined(separator: ", "), privacy: .public)); asked again on the next read"
+            )
+        }
+        watched = WatchedFolders.remembered(paths, streamMade: linkedStream != nil)
     }
 
     /// A stream of `paths` whose events say `seen`, on the main queue.

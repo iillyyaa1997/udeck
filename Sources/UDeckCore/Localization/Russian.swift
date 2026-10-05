@@ -138,7 +138,19 @@ struct Russian: Vocabulary {
         case .pluginLess: "Свернуть"
         case .pluginSettings: "Настройки"
         case .pluginEverySeconds(let seconds): "каждые \(seconds) с"
-        case .pluginLastFailure(let reason): "Последний сбой: \(reason)"
+        case .pluginLastFailure(let reason): "Последний сбой: \(self(.failureReason(reason)))"
+        case .failureReason(let reason): Self.failure(reason, say: self)
+        case .pluginLastRun(let at, let reason, let duration, let result):
+            "Последний запуск \(at), \(Self.why(reason)), \(Self.seconds(duration, places: 2)) с: " + {
+                switch result {
+                case .card: "карточка"
+                case .lateCard(let failure): "карточка и сбой: \(self(.failureReason(failure)))"
+                case .failure(let failure): "сбой: \(self(.failureReason(failure)))"
+                }
+            }()
+        case .pluginStandardErrorEnd: "Конец его stderr:"
+        case .pluginStandardErrorNothing: "В stderr ничего."
+        case .pluginStandardErrorBefore(let bytes): "(до того, что сохранил uDeck, было ещё \(bytes) Б)"
         case .permissionsAsksNothing: "Ничего не просит"
         case .permissionsAsksTo: "Этот плагин просит:"
         case .permissionsDeclared: "заявлено"
@@ -207,12 +219,17 @@ struct Russian: Vocabulary {
         case .catalogueWorking: "Выполняется…"
         case .catalogueReplaceConfirm(let id, let path):
             "В \(path) лежит ваша собственная папка \(id). Установка переместит её в Корзину и поставит на её место \(id) из репозитория."
+        case .catalogueReplaceLinkConfirm(let id, let target):
+            "\(id) здесь — ссылка на \(target). Установка уберёт ссылку — папка, куда она ведёт, останется ровно как есть — и поставит на её место \(id) из репозитория."
         case .catalogueUpdateOverChanges(let id, let version):
             "Ваши изменения в \(id) будут перемещены в Корзину и заменены версией \(version)."
         case .catalogueRemoveConfirm(let id):
             "Удалить \(id)? Его папка и кэш удаляются, а вместе с ними уходят ваше решение о разрешениях, его настройки и все его окна на всех вкладках."
         case .catalogueRemoveOwnConfirm(let id):
             "Удалить \(id)? Его папка переместится в Корзину — возможно, это ваша единственная копия, — а кэш, решение о разрешениях, настройки и все его окна уйдут."
+        case .catalogueRemoveLinkConfirm(let id, let target):
+            "Убрать ссылку \(id)? Уйдёт только ссылка: папка, куда она ведёт, \(target), останется ровно как есть. Вместе со ссылкой уйдёт то, что uDeck хранил о плагине, — кэш и лог запусков, ваше решение о разрешениях, его настройки и все его окна."
+        case .catalogueLinkedHere(let id): "\(id) подключён здесь ссылкой на вашу папку"
         case .catalogueRefusal(let refusal): Self.refusal(refusal)
         case .catalogueFileUnreachable(let path, let reason):
             "\(path) не удалось скачать: \(reason); ничего не установлено."
@@ -228,6 +245,80 @@ struct Russian: Vocabulary {
         case .pluginMarkMissing: "Папки нет"
         case .pluginFrom(let source, let commit): "Из \(source), коммит \(commit)"
         case .pluginPinned: "Оставлен на этой версии — о новых всё равно сообщается"
+        case .pluginMarkLinked: "Связанная папка"
+        case .pluginLinkedTo(let path): "Ссылка на \(path): uDeck запускает плагин оттуда"
+        case .pluginLinkNotFollowed(let destination): "Ссылка на \(destination), по которой uDeck не идёт"
+        case .linkFolder: "Связать папку…"
+        case .linkFolderPanelMessage:
+            "Выберите папку плагина — ту, где лежит manifest.json. uDeck подключит её ссылкой и будет запускать прямо оттуда."
+        case .linkFolderLink: "Связать"
+        case .linkFolderLinked(let id, let target): "\(id) связан с \(target)."
+        case .linkFolderAlready(let id, let target): "\(id) уже связан с \(target)."
+        case .linkFolderOverInstalled(let id, let source, let folder, let toTrash):
+            toTrash
+                ? "\(id) установлен из \(source), и в его копии есть ваши изменения. Если связать на его месте \(folder), эта копия переместится в Корзину; его окна, настройки и ваше решение о разрешениях останутся."
+                : "\(id) установлен из \(source). Если связать на его месте \(folder), установленная копия удалится — это ровно то, что ставил uDeck, — а его окна, настройки и ваше решение о разрешениях останутся."
+        case .linkFolderOverOwn(let id, let path, let folder, let toTrash):
+            toTrash
+                ? "В \(path) лежит ваша собственная папка \(id). Если связать на её месте \(folder), она переместится в Корзину."
+                : "В \(path) лежит папка \(id). Если связать на её месте \(folder), она удалится."
+        case .linkFolderOverLink(let id, let destination, let folder):
+            "\(id) сейчас — ссылка на \(destination). Связывание направит её на \(folder); папка, куда она ведёт сейчас, останется ровно как есть."
+        case .linkFolderRefused(let refusal): Self.linkRefusal(refusal)
+        case .runLogSwitch: "Вести лог запусков связанных папок"
+        case .runLogHelp(let path):
+            "Каждый запуск связанного плагина — когда, почему, чем кончился, сколько шёл, конец его stderr — пишется в \(path)/<id>.log, не больше 2 МБ на плагин. Остальные плагины помнят только последний запуск, и только в памяти."
+        case .runLogShow: "Показать логи"
+        case .searchPathTitle: "Где искать команды"
+        case .searchPathHelp:
+            "Команду без пути (python3) uDeck ищет в этих папках по порядку. PATH из терминала он не берёт. Изменение действует со следующего запуска, перезапускать ничего не нужно."
+        case .searchPathAdd: "Добавить папку…"
+        case .searchPathPanelMessage: "Выберите папку, в которой uDeck будет искать команды."
+        case .searchPathPanelAdd: "Добавить"
+        case .searchPathRemove: "Убрать папку"
+        case .searchPathKeepOne: "Хотя бы одна папка должна остаться: без неё ни одна команда не найдётся."
+        case .searchPathUp: "Выше"
+        case .searchPathDown: "Ниже"
+        case .searchPathRestore: "Вернуть как было"
+        case .searchPathStanding(let standing):
+            switch standing {
+            case .lookedIn: "здесь ищет"
+            case .notThere: "сейчас её нет"
+            case .notAFolder: "это не папка"
+            case .notAFullPath: "здесь не ищет: путь не от /"
+            }
+        case .commandTitle: "Команда udeck-plugin"
+        case .commandInstall: "Установить команду"
+        case .commandRemove: "Удалить команду"
+        case .commandInstalled(let path):
+            "Установлена: \(path) ведёт в копию внутри этого uDeck и обновляется вместе с ним."
+        case .commandNotInstalled(let path):
+            "Не установлена. «Установить команду» положит в \(path) ссылку на копию внутри uDeck — без пароля администратора — и она будет обновляться вместе с uDeck."
+        case .commandOtherCopy(let path, let target):
+            "\(path) ведёт в другую копию uDeck: \(target). «Установить команду» направит её на эту."
+        case .commandForeign(let path, let what):
+            "\(path) уже есть, и это не uDeck — " + {
+                switch what {
+                case .file: "файл"
+                case .folder: "папка"
+                case .link(let destination): "ссылка на \(destination)"
+                }
+            }() + ". uDeck его не трогает; чтобы установить команду, уберите его."
+        case .commandNoHelper:
+            "В этой копии uDeck нет команды — это сборка для разработки. Она есть в приложении, которое собирает Scripts/make-app.sh."
+        case .commandNotLasting(let place):
+            switch place {
+            case .lasting: "Этот uDeck остаётся там, где лежит."
+            case .translocated:
+                "macOS запустил этот uDeck из временной копии — его открыли прямо там, куда он скачался, — и ссылка на его команду перестанет куда-либо вести, как только uDeck закроется. Сначала перенесите uDeck в Программы, откройте его оттуда и тогда установите команду."
+            case .diskImage(let volume):
+                "Этот uDeck запущен с образа диска \(volume), и ссылка на его команду перестанет куда-либо вести, когда образ извлекут. Сначала перенесите uDeck в Программы, откройте его оттуда и тогда установите команду."
+            }
+        case .commandOnPath(let folder): "Ваша оболочка ищет в \(folder): наберите udeck-plugin в новом окне терминала."
+        case .commandNotOnPath(let folder, let shell, let file):
+            "Ваша оболочка (\(shell)) не ищет в \(folder). Допишите эту строку в \(file) и откройте новое окно терминала:"
+        case .commandPathUnknown(let folder): "Не удалось понять, ищет ли ваша оболочка в \(folder)."
+        case .commandCouldNot(let reason): "Не получилось: \(reason)"
         case .historyTitle(let name): "Прежние версии \(name)"
         case .historyReading: "Читаю историю плагина…"
         case .historyNone: "В истории нет версий этого плагина."
@@ -314,6 +405,9 @@ struct Russian: Vocabulary {
         case .cardDragToMove: "Тяните, чтобы переместить это окно"
         case .cardDragToResize: "Тяните, чтобы изменить размер — по целым ячейкам"
         case .cardOwnDrawing: "СОБСТВЕННЫЙ РИСУНОК ПЛАГИНА"
+        case .cardLastRunFailed(let at, let reason): "Последний запуск в \(at) упал: \(self(.failureReason(reason)))"
+        case .cardShowingValuesFrom(let time): "показаны значения из \(time)"
+        case .cardLastRunFailedDot: "Последний запуск упал"
         case .cardKindNotDrawn(let kind): "«\(kind)» эта версия uDeck не рисует"
         case .cardUnsupportedRow(let kind):
             "плагин прислал строку «\(kind)», которую эта версия uDeck не рисует"
@@ -335,7 +429,6 @@ struct Russian: Vocabulary {
         case .tabClose: "Закрыть вкладку"
         case .tabClickAgainToRename: "Нажмите ещё раз, чтобы переименовать"
         case .tabShowThis: "Показать эту вкладку"
-        case .controlDensity(let name): "Плотность: \(name)"
         case .controlRefresh: "Обновить всё сейчас"
         case .controlSettings: "Настройки"
         case .controlSendAway: "Убрать панель"
@@ -360,6 +453,76 @@ struct Russian: Vocabulary {
 }
 
 extension Russian {
+    /// Секунды с `places` знаками после запятой — как их пишут по-русски.
+    static func seconds(_ value: Double, places: Int) -> String {
+        Seconds.fixed(value, places: places).replacingOccurrences(of: ".", with: ",")
+    }
+
+    /// Почему запуск не удался — по-русски, с тем, что пришло вместе с
+    /// причиной: кодом, сигналом, секундами. Что написала сама система или
+    /// плагин (почему не запустилась программа, чем вывод не карточка),
+    /// повторяется как есть.
+    static func failure(_ reason: PluginFailure.Reason, say: Russian) -> String {
+        switch reason {
+        case .timedOut(let after):
+            let shown = after == after.rounded() ? String(Int(after)) : seconds(after, places: 1)
+            return "программа плагина не ответила за \(shown) с и была остановлена"
+        case .exited(let code): return "программа плагина завершилась с кодом \(code)"
+        case .signalled(let signal): return "программу плагина убил сигнал \(signal)"
+        case .launchFailed(let detail): return "программа плагина не запустилась: \(detail)"
+        case .outputLimitExceeded(let bytes):
+            return "программа плагина напечатала больше предела в \(bytes) Б и была остановлена"
+        case .emptyOutput: return "программа плагина ничего не напечатала"
+        case .unparsableOutput(let detail): return "то, что напечатала программа плагина, — не карточка: \(detail)"
+        case .notPermitted(let decision):
+            switch decision {
+            case .allowed: return "разрешён"
+            case .disabled: return "выключен"
+            case .awaitingDecision(let pending):
+                return "ждёт вашего решения: \(pending.map { say($0.summaryPhrase) }.joined(separator: ", "))"
+            case .refused(let denied):
+                return "нужно то, в чём вы отказали: \(denied.map { say($0.summaryPhrase) }.joined(separator: ", "))"
+            }
+        case .notLoadable(let problems):
+            return "плагин не загружается: " + problems.map(\.description).joined(separator: "; ")
+        }
+    }
+
+    /// Почему был запуск — как это говорится во фразе о нём.
+    static func why(_ reason: RefreshReason) -> String {
+        switch reason {
+        case .launch: "при запуске uDeck"
+        case .interval: "по интервалу"
+        case .manual: "по запросу"
+        }
+    }
+
+    /// Почему «Связать папку…» ничего не связала.
+    static func linkRefusal(_ refusal: FolderLinkRefusal) -> String {
+        switch refusal {
+        case .busy: "Сейчас устанавливается, обновляется, удаляется или связывается другой плагин; попробуйте через минуту."
+        case .recordsBroken(let reason):
+            "installed.json не читается, поэтому uDeck не заменяет ни один плагин, пока это не исправлено: \(reason)"
+        case .failed(let reason): "Связать папку не удалось: \(reason)"
+        case .folder(let reason):
+            switch reason {
+            case .notThere(let folder): "Папки \(folder) нет."
+            case .notAFolder(let folder): "\(folder) — не папка: выберите папку плагина, ту, где лежит manifest.json."
+            case .insideUDeck(let folder, let udeck):
+                "\(folder) лежит внутри папки самого uDeck, \(udeck), где uDeck пишет и удаляет. Свяжите свою папку."
+            case .holdsUDeck(let folder, let udeck): "В \(folder) лежит папка самого uDeck, \(udeck). Выберите саму папку плагина."
+            case .noManifest(let folder): "В \(folder) нет manifest.json — это не папка плагина."
+            case .manifestUnreadable(let manifest, let detail):
+                "\(manifest) uDeck прочитать не может: \(detail). Ссылка называется по id из него."
+            case .recordsUnreadable(let file, let detail):
+                "\(file) не читается, поэтому неясно, установлен ли плагин; ничего не связано"
+                    + (detail.map { " (\($0))" } ?? "") + "."
+            case .taken(let link): "\(link) уже занято."
+            case .cannotLink(let link, let detail): "\(link) создать не удалось: \(detail)"
+            }
+        }
+    }
+
     /// Каждый отказ называет плагин, что не так и что это исправит.
     static func refusal(_ refusal: RepositoryRefusal) -> String {
         func size(_ bytes: Int) -> String { ByteCount.text(bytes, kilo: "КБ", mega: "МБ", unit: "Б", separator: ",") }

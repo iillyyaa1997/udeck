@@ -1133,6 +1133,9 @@ private struct PluginSettingsSection: View {
                 }
             ))
 
+            // For somebody writing a plugin: every run of a linked one on disk.
+            RunLogControls(model: model)
+
             HStack {
                 Text(model.pluginsDirectoryDisplayPath)
                     .font(.system(.caption, design: .monospaced))
@@ -1141,6 +1144,8 @@ private struct PluginSettingsSection: View {
                 Button(strings(.pluginsOpenFolder)) { model.revealPluginsDirectory() }
                 Button(strings(.pluginsLookAgain)) { model.discoverPlugins() }
             }
+
+            LinkFolderControls(model: model)
 
             if model.plugins.isEmpty {
                 Text(strings(.pluginsNothingInstalled))
@@ -1168,6 +1173,10 @@ private struct PluginSettingsSection: View {
             )))
                 .font(.caption).foregroundStyle(.secondary)
         }
+
+        SearchPathSection(model: model)
+
+        CommandSection(model: model)
 
         CatalogueSection(model: model)
     }
@@ -1199,6 +1208,7 @@ private struct PluginRow: View {
                     .labelsHidden()
                 }
                 Button(expanded ? strings(.pluginLess) : strings(.pluginMore)) { expanded.toggle() }
+                    .accessibilityIdentifier("plugin.\(plugin.folderName).more")
             }
 
             if !plugin.problems.isEmpty {
@@ -1253,17 +1263,52 @@ private struct PluginRow: View {
         }
 
         let snapshot = model.snapshot(for: manifest.id)
-        if let failure = snapshot.failure {
-            Text(strings(.pluginLastFailure(reason: failure.reason.description)))
+        if let run = snapshot.lastRun {
+            lastRun(run, of: manifest.id)
+        }
+        // A failure no run came to — the plugin not permitted, not loadable —
+        // is said on its own: the last run above, if any, is an older one.
+        if let failure = snapshot.failure,
+           snapshot.lastRun.map({ $0.result != .failure(failure.reason) && $0.result != .lateCard(failure.reason) }) ?? true {
+            Text(strings(.pluginLastFailure(reason: failure.reason)))
                 .font(.caption).foregroundStyle(.orange)
+                .accessibilityIdentifier("plugin.\(manifest.id).lastFailure")
             if !failure.diagnostics.isEmpty {
-                // The end of it, where the error is (`ShownStandardError`):
-                // a line limit here kept the start of a traceback and cut the
-                // exception off.
                 Text(ShownStandardError.end(of: failure.diagnostics))
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+            }
+        }
+    }
+
+    /// The plugin's last run, whatever it came to — a card as much as a
+    /// failure — and the end of its standard error, where the error is
+    /// (`ShownStandardError`): what an author reads when a card is wrong
+    /// without failing, and when it fails.
+    @ViewBuilder
+    private func lastRun(_ run: PluginRun, of id: PluginIdentifier) -> some View {
+        Text(strings(.pluginLastRun(at: Clock.withSeconds(run.startedAt, strings), reason: run.reason,
+                                    duration: run.duration, result: run.result)))
+            .font(.caption)
+            .foregroundStyle(run.result == .card ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("plugin.\(id).lastRun")
+        if run.standardError.isEmpty {
+            Text(strings(.pluginStandardErrorNothing))
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("plugin.\(id).stderr")
+        } else {
+            Text(strings(.pluginStandardErrorEnd)).font(.caption).foregroundStyle(.secondary)
+            Text(ShownStandardError.end(of: run.standardError))
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("plugin.\(id).stderr")
+            if run.standardErrorDropped > 0 {
+                Text(strings(.pluginStandardErrorBefore(bytes: run.standardErrorDropped)))
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
@@ -1295,8 +1340,9 @@ private struct PluginRow: View {
                     }
                 }
                 HStack {
-                    Button(strings(.actionAllow)) { model.decidePermissions(for: manifest.id, allow: true) }
-                    Button(strings(.actionDecline)) { model.decidePermissions(for: manifest.id, allow: false) }
+                    // What the list above shows is what Allow grants (`ShownPlace.allows`).
+                    Button(strings(.actionAllow)) { model.decidePermissions(for: manifest.id, allow: true, shown: requested) }
+                    Button(strings(.actionDecline)) { model.decidePermissions(for: manifest.id, allow: false, shown: requested) }
                 }
                 .padding(.top, 2)
             }

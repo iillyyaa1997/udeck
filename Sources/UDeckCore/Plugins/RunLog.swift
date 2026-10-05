@@ -163,6 +163,19 @@ public struct RunLog: Sendable {
         }
     }
 
+    /// Whether any plugin's run log is on disk — what **Show the logs** in
+    /// Settings needs to be worth pressing: a file `<id>.log` or `<id>.log.1`
+    /// in the logs folder, a file and not a link.
+    public static func anyWritten(in paths: UDeckPaths) -> Bool {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: paths.logs.path)) ?? []
+        return names.contains { name in
+            let bytes = Array(name.utf8)
+            let isLog = bytes.reversed().starts(with: Array(".log".utf8).reversed())
+                || bytes.reversed().starts(with: Array(".log.1".utf8).reversed())
+            return isLog && kind(paths.logs.appendingPathComponent(name).path) == S_IFREG
+        }
+    }
+
     /// What is at `path` itself — not what a link there leads to — as the
     /// `S_IFMT` bits of its mode, or nil when nothing is.
     static func kind(_ path: String) -> mode_t? {

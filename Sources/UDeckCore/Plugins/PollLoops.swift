@@ -76,6 +76,24 @@ public enum PollLoops {
         }
     }
 
+    /// What the panel coming into sight, or going out of it, does.
+    public struct VisibilityChange: Equatable, Sendable {
+        /// Every placed plugin runs once, now.
+        public var refresh: Bool
+        /// Every loop starts afresh (`plan(running:wanted:again:)`).
+        public var again: Bool
+    }
+
+    /// Shown, every placed plugin runs at once, and every loop starts afresh
+    /// after it: each plugin has just run, and runs next an interval from now.
+    /// Hidden, nothing runs — and nothing starts afresh: a loop that goes on
+    /// while the panel is away (polling while collapsed) has not just run, and
+    /// started again it would wait its whole interval once more, on every
+    /// close; one that stops does not need to be told.
+    public static func visibilityChanged(nowVisible: Bool) -> VisibilityChange {
+        VisibilityChange(refresh: nowVisible, again: nowVisible)
+    }
+
     /// Stops what is not wanted as it runs, and starts what is wanted and not
     /// running so. `again` starts every wanted loop afresh — what the panel
     /// coming into sight does, right after it ran every plugin once.

@@ -114,13 +114,21 @@ struct CatalogueRowView: View {
     @Environment(\.strings) private var strings
     @Environment(\.openURL) private var openURL
     @State private var details = false
-    @State private var confirming = false
-    /// The version **Update** or **Switch to** was pressed for, over a copy
-    /// changed on disk: what the warning names before anything is replaced.
-    @State private var updatingOverChanges: String?
-    /// The same for **Reinstall** on a row whose folder was missing: something
-    /// may have been put at its place since the row was drawn.
-    @State private var reinstallingOverChanges: String?
+    /// The warning up on this row — what it said, and the button it goes
+    /// with. Its button is held to it: pressed when the plugin's place no
+    /// longer is what it says, it says what is there now instead
+    /// (`ShownPlace`).
+    @State private var confirming: Confirmation?
+
+    /// **Install** or **Replace…** over a link or a folder of the operator's,
+    /// **Update** or **Switch to** over a copy holding their changes, and
+    /// **Reinstall** over something put where a missing plugin's folder was.
+    enum Action: Equatable { case install, update, reinstall }
+
+    struct Confirmation: Equatable {
+        var shown: ShownPlace.Place
+        var then: Action
+    }
 
     private var id: String { entry.id }
     private var manifest: PluginManifest? { entry.manifest(in: strings.language.rawValue) }
@@ -160,24 +168,8 @@ struct CatalogueRowView: View {
                 }
             }
             stateLine
-            if confirming, case .folderOfYourOwn = state {
-                confirmation(strings(.catalogueReplaceConfirm(id: id, path: model.pluginsDirectoryDisplayPath)),
-                             button: strings(.catalogueReplace), identifier: "catalogue.\(id).confirm") {
-                    model.install(id)
-                }
-            }
-            if let version = updatingOverChanges {
-                confirmation(strings(.catalogueUpdateOverChanges(id: id, version: version)),
-                             button: strings(.catalogueUpdate), identifier: "catalogue.\(id).confirm") {
-                    model.update(id)
-                }
-            }
-            if let version = reinstallingOverChanges {
-                confirmation(strings(.catalogueUpdateOverChanges(id: id, version: version)),
-                             button: strings(.catalogueReinstall(version: version)),
-                             identifier: "catalogue.\(id).confirm") {
-                    model.reinstall(id)
-                }
+            if let confirming {
+                confirmation(confirming)
             }
             if let problem = model.operationProblems[id] {
                 ProblemText(problem: problem).accessibilityIdentifier("catalogue.\(id).problem")
@@ -206,28 +198,30 @@ struct CatalogueRowView: View {
         } else {
             switch state {
             case .notInstalled:
-                Button(strings(.catalogueInstall)) { model.install(id) }
+                // Nothing was there when the row was drawn: anything put there
+                // since is warned of first, as **Replace…** warns of it.
+                Button(strings(.catalogueInstall)) { press(.install) }
                     .disabled(model.busyPlugin != nil)
                     .accessibilityIdentifier("catalogue.\(id).install")
             case .folderOfYourOwn:
-                Button(strings(.catalogueReplace)) { confirming = true }
+                Button(strings(.catalogueReplace)) { press(.install) }
                     .disabled(model.busyPlugin != nil)
                     .accessibilityIdentifier("catalogue.\(id).replace")
             case .installed(let offer):
                 switch offer {
                 case .newer, .changedStill:
-                    Button(strings(.catalogueUpdate)) { update(offer) }
+                    Button(strings(.catalogueUpdate)) { press(.update) }
                         .disabled(model.busyPlugin != nil)
                         .accessibilityIdentifier("catalogue.\(id).update")
                 case .older(let version):
-                    Button(strings(.catalogueSwitchTo(version: version))) { update(offer) }
+                    Button(strings(.catalogueSwitchTo(version: version))) { press(.update) }
                         .disabled(model.busyPlugin != nil)
                         .accessibilityIdentifier("catalogue.\(id).update")
                 default:
                     EmptyView()
                 }
             case .missing:
-                Button(strings(.windowReinstall)) { reinstall() }
+                Button(strings(.windowReinstall)) { press(.reinstall) }
                     .disabled(model.busyPlugin != nil)
                     .accessibilityIdentifier("catalogue.\(id).reinstall")
             case .cannotInstall:
@@ -238,26 +232,23 @@ struct CatalogueRowView: View {
         }
     }
 
-    /// **Reinstall** of a plugin whose folder was missing: the rule is asked
-    /// of the disk when the button is pressed, as every other button that
-    /// replaces a folder asks it — a folder put there since the row was drawn
-    /// is replaced, and goes to the Trash, only after the warning.
-    private func reinstall() {
-        if model.operatorsWorkGoesToTrash(id), let version = model.installed.plugins[id]?.version {
-            reinstallingOverChanges = version
-        } else {
-            model.reinstall(id)
+    /// A press of the row's button, or of its warning's (`shown`): what is
+    /// there is asked of the disk now, by the rule the installer decides the
+    /// Trash by — the work at once, or the warning first. A folder put at a
+    /// missing plugin's place since the row was drawn is replaced, and goes
+    /// to the Trash, only after the warning; and the warning's button acts on
+    /// what the warning said or says what is there now (`ShownPlace`).
+    private func press(_ action: Action, shown: ShownPlace.Place? = nil) {
+        let came: ShownPlace.Press
+        switch action {
+        case .install: came = model.install(id, shown: shown)
+        case .update: came = model.update(id, shown: shown)
+        case .reinstall: came = model.reinstall(id, shown: shown)
         }
-    }
-
-    /// **Update** or **Switch to**: at once, or — over a copy holding
-    /// something of the operator's — only after saying that it goes to the
-    /// Trash, as the same button on the installed plugin's row does.
-    private func update(_ offer: UpdateOffer) {
-        if let version = offer.versionReplacingChanges(operatorsWork: model.operatorsWorkGoesToTrash(id)) {
-            updatingOverChanges = version
+        if case .ask(let now) = came {
+            confirming = Confirmation(shown: now, then: action)
         } else {
-            model.update(id)
+            confirming = nil
         }
     }
 
@@ -285,30 +276,38 @@ struct CatalogueRowView: View {
         switch state {
         case .notInstalled: nil
         case .cannotInstall(let refusal): strings(.catalogueRefusal(refusal))
-        case .folderOfYourOwn: strings(.catalogueOwnFolder(id: id))
+        case .folderOfYourOwn: model.linkedFolder(id) == nil ? strings(.catalogueOwnFolder(id: id)) : strings(.catalogueLinkedHere(id: id))
         case .missing: strings(.catalogueMissing(id: id, path: model.pluginsDirectoryDisplayPath))
         case .installed(let offer): OfferText.text(offer, strings)
         }
     }
 
-    private func confirmation(_ text: String, button: String, identifier: String,
-                              action: @escaping () -> Void) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+    private func confirmation(_ confirmation: Confirmation) -> some View {
+        let shown = confirmation.shown
+        let version = shown.arriving ?? ""
+        let text: String
+        let button: String
+        switch confirmation.then {
+        case .install:
+            // A link there goes, and the folder it leads to stays; a folder
+            // of the operator's own goes to the Trash (`PlaceWarning`).
+            text = strings(PlaceWarning.replacement(id: id, path: model.pluginsDirectoryDisplayPath,
+                                                    link: shown.link.map { model.displayPath($0) }))
+            button = strings(.catalogueReplace)
+        case .update:
+            text = strings(.catalogueUpdateOverChanges(id: id, version: version))
+            button = strings(.catalogueUpdate)
+        case .reinstall:
+            text = strings(.catalogueUpdateOverChanges(id: id, version: version))
+            button = strings(.catalogueReinstall(version: version))
+        }
+        return VStack(alignment: .leading, spacing: 5) {
             Text(text).font(.caption).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("catalogue.\(id).confirmText")
             HStack {
-                Button(button, role: .destructive) {
-                    confirming = false
-                    updatingOverChanges = nil
-                    reinstallingOverChanges = nil
-                    action()
-                }
-                .accessibilityIdentifier(identifier)
-                Button(strings(.actionCancel)) {
-                    confirming = false
-                    updatingOverChanges = nil
-                    reinstallingOverChanges = nil
-                }
+                Button(button, role: .destructive) { press(confirmation.then, shown: shown) }
+                    .accessibilityIdentifier("catalogue.\(id).confirm")
+                Button(strings(.actionCancel)) { self.confirming = nil }
             }
         }
         .padding(8)
@@ -330,16 +329,19 @@ struct InstalledRepositoryControls: View {
     @State private var confirming: Confirmation?
     @State private var showingHistory = false
 
-    enum Confirmation: Equatable {
-        /// **Remove**; `own` when something of the operator's goes to the Trash.
-        case remove(own: Bool)
-        /// A button that replaces the folder, pressed over a copy holding
-        /// something of the operator's: the version it is replaced with, and
-        /// what the confirmation then does.
-        case overChanges(version: String, then: Replacement)
+    /// The warning up on this row: what it said, and the button it goes
+    /// with. Its button is held to it (`ShownPlace`).
+    struct Confirmation: Equatable {
+        /// What is at the plugin's place, and the version that comes —
+        /// none for **Remove**: of a link only the link goes, something of
+        /// the operator's goes to the Trash.
+        var shown: ShownPlace.Place
+        var then: Action
     }
 
-    enum Replacement: Equatable { case update, reinstall, backTo }
+    /// **Remove**, or a button that replaces the folder — pressed over a copy
+    /// holding something of the operator's.
+    enum Action: Equatable { case remove, update, reinstall, backTo }
 
     private var record: InstalledRecord? { model.installed.plugins[id] }
     private var standing: PluginStanding { model.standing(of: id) }
@@ -386,6 +388,23 @@ struct InstalledRepositoryControls: View {
     }
 
     @ViewBuilder private var mark: some View {
+        if let linked = model.linkedFolder(id) {
+            // A linked folder (Q125): no install, nothing to verify — the mark
+            // says it is a link, and where it leads.
+            Label(strings(.pluginMarkLinked), systemImage: "link")
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("plugin.\(id).mark")
+            Text(linked.target == nil ? strings(.pluginLinkNotFollowed(destination: linked.destination))
+                                      : strings(.pluginLinkedTo(path: model.displayPath(linked.leadsTo))))
+                .font(.caption).foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .accessibilityIdentifier("plugin.\(id).linkedTo")
+        } else {
+            standingMark
+        }
+    }
+
+    @ViewBuilder private var standingMark: some View {
         switch standing {
         case .verified:
             Label(strings(.pluginMarkVerified), systemImage: "checkmark.seal.fill")
@@ -415,26 +434,18 @@ struct InstalledRepositoryControls: View {
             }
             if let offer, offer.isWaiting || isOlder(offer) {
                 Button(isOlder(offer) ? strings(.catalogueSwitchTo(version: olderVersion(offer))) : strings(.catalogueUpdate)) {
-                    if let version = offer.versionReplacingChanges(operatorsWork: model.operatorsWorkGoesToTrash(id)) {
-                        confirming = .overChanges(version: version, then: .update)
-                    } else {
-                        model.update(id)
-                    }
+                    press(.update)
                 }
                 .disabled(busy)
                 .accessibilityIdentifier("plugin.\(id).update")
             }
             if let record, standing.offersReinstall(readsCatalogue: model.settings.readsOfficialCatalogue) {
-                Button(strings(.catalogueReinstall(version: record.version))) {
-                    replace(.reinstall, version: record.version)
-                }
+                Button(strings(.catalogueReinstall(version: record.version))) { press(.reinstall) }
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).reinstall")
             }
             if let previous = record?.previous, model.settings.readsOfficialCatalogue {
-                Button(strings(.catalogueBackTo(version: previous.version))) {
-                    replace(.backTo, version: previous.version)
-                }
+                Button(strings(.catalogueBackTo(version: previous.version))) { press(.backTo) }
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).backTo")
             }
@@ -446,31 +457,31 @@ struct InstalledRepositoryControls: View {
                 .disabled(busy && !showingHistory)
                 .accessibilityIdentifier("plugin.\(id).earlier")
             }
-            Button(strings(.catalogueRemove), role: .destructive) {
-                confirming = .remove(own: model.operatorsWorkGoesToTrash(id))
-            }
+            Button(strings(.catalogueRemove), role: .destructive) { press(.remove) }
                 .disabled(busy)
                 .accessibilityIdentifier("plugin.\(id).remove")
         }
         .font(.caption)
     }
 
-    /// **Reinstall** or **Back to**: at once, or — when the copy it replaces
-    /// holds something of the operator's — only after saying that it goes to
-    /// the Trash, by the rule the installer decides the Trash by.
-    private func replace(_ replacement: Replacement, version: String) {
-        if model.operatorsWorkGoesToTrash(id) {
-            confirming = .overChanges(version: version, then: replacement)
-        } else {
-            perform(replacement)
+    /// A press of the row's button, or of its warning's (`shown`): **Remove**
+    /// always warns first; **Update**, **Switch to**, **Reinstall** and
+    /// **Back to** act at once, or — when the copy they replace holds
+    /// something of the operator's — only after saying that it goes to the
+    /// Trash, by the rule the installer decides the Trash by. A warning's
+    /// button acts on what the warning said, or says what is there now.
+    private func press(_ action: Action, shown: ShownPlace.Place? = nil) {
+        let came: ShownPlace.Press
+        switch action {
+        case .remove: came = model.remove(id, shown: shown)
+        case .update: came = model.update(id, shown: shown)
+        case .reinstall: came = model.reinstall(id, shown: shown)
+        case .backTo: came = model.backToPrevious(id, shown: shown)
         }
-    }
-
-    private func perform(_ replacement: Replacement) {
-        switch replacement {
-        case .update: model.update(id)
-        case .reinstall: model.reinstall(id)
-        case .backTo: model.backToPrevious(id)
+        if case .ask(let now) = came {
+            confirming = Confirmation(shown: now, then: action)
+        } else {
+            confirming = nil
         }
     }
 
@@ -482,34 +493,33 @@ struct InstalledRepositoryControls: View {
         if case .older(let version) = offer { version } else { "" }
     }
 
-    private func confirmation(_ kind: Confirmation) -> some View {
+    private func confirmation(_ confirmation: Confirmation) -> some View {
+        let shown = confirmation.shown
+        let version = shown.arriving ?? ""
         let text: String
         let button: String
-        switch kind {
-        case .remove(let own):
-            text = own ? strings(.catalogueRemoveOwnConfirm(id: id)) : strings(.catalogueRemoveConfirm(id: id))
+        switch confirmation.then {
+        case .remove:
+            text = strings(PlaceWarning.removal(id: id, link: shown.link.map { model.displayPath($0) },
+                                                toTrash: shown.fate == .toTrash))
             button = strings(.catalogueRemove)
-        case .overChanges(let version, let replacement):
+        case .update:
             text = strings(.catalogueUpdateOverChanges(id: id, version: version))
-            switch replacement {
-            case .update: button = strings(.catalogueUpdate)
-            case .reinstall: button = strings(.catalogueReinstall(version: version))
-            case .backTo: button = strings(.catalogueBackTo(version: version))
-            }
+            button = strings(.catalogueUpdate)
+        case .reinstall:
+            text = strings(.catalogueUpdateOverChanges(id: id, version: version))
+            button = strings(.catalogueReinstall(version: version))
+        case .backTo:
+            text = strings(.catalogueUpdateOverChanges(id: id, version: version))
+            button = strings(.catalogueBackTo(version: version))
         }
         return VStack(alignment: .leading, spacing: 5) {
             Text(text).font(.caption).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("plugin.\(id).confirmText")
             HStack {
-                Button(button, role: .destructive) {
-                    confirming = nil
-                    switch kind {
-                    case .remove: model.remove(id)
-                    case .overChanges(_, let replacement): perform(replacement)
-                    }
-                }
-                .accessibilityIdentifier("plugin.\(id).confirm")
-                Button(strings(.actionCancel)) { confirming = nil }
+                Button(button, role: .destructive) { press(confirmation.then, shown: shown) }
+                    .accessibilityIdentifier("plugin.\(id).confirm")
+                Button(strings(.actionCancel)) { self.confirming = nil }
             }
         }
         .padding(8)
@@ -524,8 +534,9 @@ struct HistoryList: View {
     var installedCommit: String?
     @Environment(\.strings) private var strings
     /// The version **Install this version** was pressed for over a copy
-    /// holding something of the operator's: what the warning names first.
-    @State private var confirming: PluginHistory.Line?
+    /// holding something of the operator's, and what the warning said of it:
+    /// its button is held to that (`ShownPlace`).
+    @State private var confirming: (line: PluginHistory.Line, shown: ShownPlace.Place)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -547,8 +558,8 @@ struct HistoryList: View {
                 ForEach(history.lines, id: \.commit) { line in
                     row(line)
                 }
-                if let line = confirming {
-                    confirmation(line)
+                if let confirming {
+                    confirmation(confirming.line, shown: confirming.shown)
                 }
             }
         }
@@ -582,11 +593,7 @@ struct HistoryList: View {
                 Button(strings(.historyInstall)) {
                     // The same warning as **Update** and **Back to**, by the
                     // same rule: something of the operator's goes to the Trash.
-                    if model.operatorsWorkGoesToTrash(id) {
-                        confirming = line
-                    } else {
-                        model.installEarlier(id, line: line)
-                    }
+                    install(line)
                 }
                     .disabled(model.busyPlugin != nil)
                     .accessibilityIdentifier("plugin.\(id).history.\(line.version).install")
@@ -595,16 +602,21 @@ struct HistoryList: View {
         .font(.callout)
     }
 
-    private func confirmation(_ line: PluginHistory.Line) -> some View {
+    private func install(_ line: PluginHistory.Line, shown: ShownPlace.Place? = nil) {
+        if case .ask(let now) = model.installEarlier(id, line: line, shown: shown) {
+            confirming = (line, now)
+        } else {
+            confirming = nil
+        }
+    }
+
+    private func confirmation(_ line: PluginHistory.Line, shown: ShownPlace.Place) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(strings(.catalogueUpdateOverChanges(id: id, version: line.version)))
+            Text(strings(.catalogueUpdateOverChanges(id: id, version: shown.arriving ?? line.version)))
                 .font(.caption).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("plugin.\(id).history.confirmText")
             HStack {
-                Button(strings(.historyInstall), role: .destructive) {
-                    confirming = nil
-                    model.installEarlier(id, line: line)
-                }
+                Button(strings(.historyInstall), role: .destructive) { install(line, shown: shown) }
                 .accessibilityIdentifier("plugin.\(id).history.confirm")
                 Button(strings(.actionCancel)) { confirming = nil }
             }
@@ -695,6 +707,19 @@ struct ProblemText: View {
 
 /// A time as a row says it: `14:02` today, with the date on any other day.
 enum Clock {
+    /// The same, to the second: when a run started.
+    static func withSeconds(_ date: Date, _ strings: Strings) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: strings.language.rawValue)
+        formatter.timeZone = .current
+        if Calendar.current.isDateInToday(date) {
+            formatter.dateFormat = "HH:mm:ss"
+        } else {
+            formatter.setLocalizedDateFormatFromTemplate("dMMM HH:mm:ss")
+        }
+        return formatter.string(from: date)
+    }
+
     static func text(_ date: Date, _ strings: Strings) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: strings.language.rawValue)

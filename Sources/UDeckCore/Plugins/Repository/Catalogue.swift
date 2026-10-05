@@ -151,24 +151,6 @@ public enum UpdateOffer: Equatable, Sendable {
         }
     }
 
-    /// The version **Update** or **Switch to** would put in place, when the
-    /// copy it replaces holds something of the operator's — so the button says
-    /// first that it goes to the Trash: *"Your changes to uptime will be moved
-    /// to the Trash and replaced with 1.3.0."* Nil when there is nothing of the
-    /// operator's to warn about, or nothing offered.
-    ///
-    /// `operatorsWork` is `OperatorsWork.goesToTrash` — the rule the installer
-    /// decides the Trash by — and not the row's mark: a `.env` put into the
-    /// folder leaves it **Verified** and still goes to the Trash. One rule for
-    /// every place the button is, the catalogue's row as much as the installed
-    /// plugin's.
-    public func versionReplacingChanges(operatorsWork: Bool) -> String? {
-        guard operatorsWork else { return nil }
-        switch self {
-        case .newer(let version), .changedStill(let version), .older(let version): return version
-        case .current, .cannotRun, .goneFromRepository: return nil
-        }
-    }
 
     /// Compares an installed record with the head's entry for the same id.
     public static func of(_ record: InstalledRecord, head entry: CatalogueEntry?) -> UpdateOffer {

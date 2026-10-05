@@ -37,6 +37,20 @@ public struct CardPresentation: Equatable, Sendable {
     }
 }
 
+/// A run that failed while the card before it is still fresh: when, why, and
+/// when the values the card still shows are from (`PluginSnapshot.failureOnAFreshCard`).
+public struct FailureOnAFreshCard: Equatable, Sendable {
+    public var failedAt: Date
+    public var reason: PluginFailure.Reason
+    public var valuesFrom: Date
+
+    public init(failedAt: Date, reason: PluginFailure.Reason, valuesFrom: Date) {
+        self.failedAt = failedAt
+        self.reason = reason
+        self.valuesFrom = valuesFrom
+    }
+}
+
 /// Everything the host knows about one plugin's output.
 public struct PluginSnapshot: Equatable, Sendable {
     public let pluginID: PluginIdentifier
@@ -107,6 +121,28 @@ public struct PluginSnapshot: Equatable, Sendable {
     public mutating func record(failure: PluginFailure) {
         self.failure = failure
         self.consecutiveFailures += 1
+    }
+
+    /// What a card that is still fresh says of a run that failed after it —
+    /// its last run, which ran and did not print a card, or printed one and
+    /// then ran past its timeout — or nil when there is nothing to say: the
+    /// card is not fresh (a stale card says it itself, and a silent one shows
+    /// no values), there is no card, the last attempt did not fail, or nothing
+    /// ran — a plugin not permitted or not loadable has its window say so
+    /// instead of a card.
+    ///
+    /// Said at once, on the card, because the values on it are still within
+    /// their `ttl`: without it a producer that just broke looked healthy until
+    /// its card went stale. It goes with the next run that prints a card.
+    public func failureOnAFreshCard(now: Date = Date(), defaultTTL: TimeInterval,
+                                    silentMultiplier: Double) -> FailureOnAFreshCard? {
+        guard let failure, let lastRun, let valuesFrom = cardProducedAt else { return nil }
+        // The failure on record is the one the last run came to — not one an
+        // attempt that ran nothing recorded after it.
+        guard lastRun.result == .failure(failure.reason) || lastRun.result == .lateCard(failure.reason) else { return nil }
+        guard presentation(now: now, defaultTTL: defaultTTL, silentMultiplier: silentMultiplier).freshness == .fresh
+        else { return nil }
+        return FailureOnAFreshCard(failedAt: failure.occurredAt, reason: failure.reason, valuesFrom: valuesFrom)
     }
 
     /// Decides what to draw.

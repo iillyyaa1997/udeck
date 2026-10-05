@@ -283,6 +283,27 @@ struct LinkedFolderInstallerTests {
         #expect(stagingIsEmpty())
     }
 
+    /// A records file that will not parse stops a link before anything is
+    /// quieted, as it stops an install before anything is downloaded: there
+    /// is no going ahead, and the plugin is not stopped for nothing.
+    @Test("a records file that will not parse stops a link before the plugin is quieted")
+    func brokenRecordsStopBeforeQuiet() async throws {
+        let folder = try workingCopy()
+        try FileManager.default.createDirectory(at: paths.root, withIntermediateDirectories: true)
+        try Data("{ not json".utf8).write(to: paths.installedFile)
+        let quieted = Counter()
+        let i = installer(trash: TestTrash(in: udeck.url))
+        do {
+            try await i.link(try candidate(folder), once: { quieted.add(); return true })
+            Issue.record("linked with installed.json broken")
+        } catch let error as InstallError {
+            guard case .recordsBroken = error else { Issue.record("\(error)"); return }
+        }
+        #expect(quieted.value == 0, "the plugin was quieted for a link that could not go ahead")
+        #expect(!PluginInstaller.folderIsTaken("uptime", in: paths))
+        #expect(stagingIsEmpty())
+    }
+
     // MARK: - A crash halfway
 
     func journal(_ folder: URL, oldCopyIsOperators: Bool = false) throws -> URL {
@@ -548,6 +569,10 @@ struct RunLogTests {
         }
         #expect(RunLog.Refusal.because(CocoaError(.fileWriteUnknown)) == CocoaError(.fileWriteUnknown).localizedDescription,
                 "an error with no errno under it is said in its own words")
+        // An error that is itself the system's: its code is the errno.
+        #expect(RunLog.Refusal.because(NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))) == "Permission denied")
+        #expect(NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES)).localizedDescription != "Permission denied",
+                "the premise: Foundation's own words for it are others")
     }
 
     /// Asked from the main actor, as the panel asks: the entry is written on

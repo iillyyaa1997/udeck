@@ -61,7 +61,7 @@ struct LocalizationTests {
         .pluginsInstalled, .pluginsOpenFolder, .pluginsLookAgain, .pluginsNothingInstalled,
         .pluginsStaleness(seconds: 60, multiplier: 3), .pluginEnabled, .pluginMore,
         .pluginLess, .pluginSettings, .pluginEverySeconds(30),
-        .pluginLastFailure(reason: "exit 1"), .permissionsAsksNothing, .permissionsAsksTo,
+        .pluginLastFailure(reason: .exited(code: 1)), .permissionsAsksNothing, .permissionsAsksTo,
         .permissionsDeclared, .permissionsDeclaredHelp,
         .permissionsPluginAsksTo(name: "disk-space"), .permissionsUnsandboxed,
         .permissionsAllowAndRun,
@@ -99,6 +99,55 @@ struct LocalizationTests {
         .windowNotInPluginsFolder(id: "uptime", path: "~/.udeck/plugins"), .windowWillNotRun(id: "uptime"),
         .windowReinstall,
 
+        .pluginLastRun(at: "21:04:05", reason: .interval, duration: 0.21, result: .card),
+        .pluginLastRun(at: "21:04:05", reason: .launch, duration: 0.21, result: .failure(.exited(code: 3))),
+        .pluginLastRun(at: "21:04:05", reason: .manual, duration: 2, result: .lateCard(.timedOut(after: 2))),
+        .failureReason(.timedOut(after: 2)), .failureReason(.timedOut(after: 0.5)), .failureReason(.exited(code: 3)),
+        .failureReason(.signalled(signal: 9)), .failureReason(.launchFailed("No such file or directory")),
+        .failureReason(.outputLimitExceeded(bytes: 1_048_576)), .failureReason(.emptyOutput),
+        .failureReason(.unparsableOutput("\"rows\" is required")), .failureReason(.notPermitted(.allowed)),
+        .failureReason(.notPermitted(.disabled)), .failureReason(.notPermitted(.awaitingDecision(pending: [.exec("git")]))),
+        .failureReason(.notPermitted(.refused(denied: [.screen]))), .failureReason(.notLoadable([.missingManifest])),
+        .pluginStandardErrorEnd, .pluginStandardErrorNothing, .pluginStandardErrorBefore(bytes: 1834),
+        .catalogueReplaceLinkConfirm(id: "uptime", target: "~/src/uptime"),
+        .catalogueRemoveLinkConfirm(id: "uptime", target: "~/src/uptime"), .catalogueLinkedHere(id: "uptime"),
+        .pluginMarkLinked, .pluginLinkedTo(path: "~/src/uptime"), .pluginLinkNotFollowed(destination: "../gone"),
+        .linkFolder, .linkFolderPanelMessage, .linkFolderLink,
+        .linkFolderLinked(id: "uptime", target: "~/src/uptime"), .linkFolderAlready(id: "uptime", target: "~/src/uptime"),
+        .linkFolderOverInstalled(id: "uptime", source: "github.com/o/r", folder: "~/src/uptime", toTrash: false),
+        .linkFolderOverInstalled(id: "uptime", source: "github.com/o/r", folder: "~/src/uptime", toTrash: true),
+        .linkFolderOverOwn(id: "uptime", path: "~/.udeck/plugins", folder: "~/src/uptime", toTrash: true),
+        .linkFolderOverOwn(id: "uptime", path: "~/.udeck/plugins", folder: "~/src/uptime", toTrash: false),
+        .linkFolderOverLink(id: "uptime", destination: "/work/old", folder: "~/src/uptime"),
+        .linkFolderRefused(.busy), .linkFolderRefused(.recordsBroken("not JSON")), .linkFolderRefused(.failed("disk full")),
+        .linkFolderRefused(.folder(.notThere(folder: "/x/uptime"))),
+        .linkFolderRefused(.folder(.notAFolder(folder: "/x/uptime.zip"))),
+        .linkFolderRefused(.folder(.insideUDeck(folder: "/u/.udeck/mine", udeck: "/u/.udeck"))),
+        .linkFolderRefused(.folder(.holdsUDeck(folder: "/u", udeck: "/u/.udeck"))),
+        .linkFolderRefused(.folder(.noManifest(folder: "/x/uptime"))),
+        .linkFolderRefused(.folder(.manifestUnreadable(manifest: "/x/uptime/manifest.json", detail: "\"run\" is required"))),
+        .linkFolderRefused(.folder(.recordsUnreadable(file: "/u/.udeck/installed.json", detail: "it ends early"))),
+        .linkFolderRefused(.folder(.taken(link: "/u/.udeck/plugins/uptime"))),
+        .linkFolderRefused(.folder(.cannotLink(link: "/u/.udeck/plugins/uptime", detail: "read-only"))),
+        .runLogSwitch, .runLogHelp(path: "~/.udeck/logs"), .runLogShow,
+        .searchPathTitle, .searchPathHelp, .searchPathAdd, .searchPathPanelMessage, .searchPathPanelAdd,
+        .searchPathRemove, .searchPathKeepOne, .searchPathUp, .searchPathDown, .searchPathRestore,
+        .searchPathStanding(.lookedIn), .searchPathStanding(.notThere), .searchPathStanding(.notAFolder),
+        .searchPathStanding(.notAFullPath),
+        .commandTitle, .commandInstall, .commandRemove, .commandInstalled(path: "~/.local/bin/udeck-plugin"),
+        .commandNotInstalled(path: "~/.local/bin/udeck-plugin"),
+        .commandOtherCopy(path: "~/.local/bin/udeck-plugin", target: "/Old/uDeck.app/Contents/Helpers/udeck-plugin"),
+        .commandForeign(path: "~/.local/bin/udeck-plugin", what: .file),
+        .commandForeign(path: "~/.local/bin/udeck-plugin", what: .folder),
+        .commandForeign(path: "~/.local/bin/udeck-plugin", what: .link(to: "/opt/other/udeck-plugin")),
+        .commandNoHelper, .commandOnPath(folder: "~/.local/bin"),
+        .commandNotLasting(.lasting), .commandNotLasting(.translocated),
+        .commandNotLasting(.diskImage(volume: "/Volumes/uDeck")),
+        .commandNotOnPath(folder: "~/.local/bin", shell: "zsh", file: "~/.zshrc"),
+        .commandPathUnknown(folder: "~/.local/bin"), .commandCouldNot(reason: "read-only"),
+        .cardLastRunFailed(at: "21:04", reason: .exited(code: 3)), .cardShowingValuesFrom("21:03"),
+        .cardLastRunFailedDot,
+
         .capabilityRead(glob: "~/notes/*"), .capabilityWrite(glob: "/tmp/*"),
         .capabilityExec(command: "git"), .capabilityNetwork(host: "example.com"),
         .capabilityScreen, .capabilitySecret(name: "token"),
@@ -114,7 +163,7 @@ struct LocalizationTests {
         .islandNothingPlaced, .islandWorstState("warn"),
 
         .tabName, .tabAdd, .tabRename, .tabClose, .tabClickAgainToRename, .tabShowThis,
-        .controlDensity(name: "Normal"), .controlRefresh, .controlSettings, .controlSendAway,
+        .controlRefresh, .controlSettings, .controlSendAway,
 
         .actionSave, .actionUse, .actionDelete, .actionAllow, .actionDecline,
         .actionRun, .actionCancel, .actionClear,
@@ -131,7 +180,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 229,
+        #expect(Self.all.count == 312,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
@@ -195,12 +244,11 @@ struct LocalizationTests {
         #expect(strings(.permissionsPluginAsksTo(name: "disk-space")).contains("disk-space"))
         #expect(strings(.emptyNoPluginsBody(path: "~/.udeck/plugins")).contains("~/.udeck/plugins"))
         #expect(strings(.cardUnsupportedRow(kind: "sankey")).contains("sankey"))
-        #expect(strings(.pluginLastFailure(reason: "exit 1")).contains("exit 1"))
+        #expect(strings(.pluginLastFailure(reason: .exited(code: 1))).contains(strings(.failureReason(.exited(code: 1)))))
         #expect(strings(.islandWorstState("warn")).contains("warn"))
         // The path is the actionable half of this one: "some copy of uDeck is not
         // installed" leaves the reader to guess which window they are looking at.
         #expect(strings(.generalNotInstalled("/x/.build/debug")).contains("/x/.build/debug"))
-        #expect(strings(.controlDensity(name: "Normal")).contains("Normal"))
     }
 
     /// The repository's sentences carry what the operator acts on: the version,
@@ -227,6 +275,111 @@ struct LocalizationTests {
                 && different.contains("5d6e7f8"))
         let large = strings(.catalogueRefusal(.tooLarge(id: "uptime", bytes: 14 * 1024 * 1024, files: 312)))
         #expect(large.contains("14") && large.contains("312") && large.contains("200"))
+    }
+
+    /// What C2b's sentences carry is what the operator acts on: the folder, the
+    /// time, the line to add — and what goes where: of a link, only the link.
+    @Test("linked folders, the run log, the last run, the search path and the command say what they carry",
+          arguments: Language.allCases)
+    func plugInSentencesSurvive(language: Language) {
+        let strings = Strings(language)
+        let trash = language == .russian ? "Корзин" : "Trash"
+
+        let removeLink = strings(.catalogueRemoveLinkConfirm(id: "uptime", target: "~/src/uptime"))
+        #expect(removeLink.contains("uptime") && removeLink.contains("~/src/uptime") && !removeLink.contains(trash))
+        #expect(removeLink.contains(language == .russian ? "только ссылка" : "Only the link goes"))
+        let replaceLink = strings(.catalogueReplaceLinkConfirm(id: "uptime", target: "~/src/uptime"))
+        #expect(replaceLink.contains("~/src/uptime") && !replaceLink.contains(trash))
+
+        let overInstalled = strings(.linkFolderOverInstalled(id: "uptime", source: "github.com/o/r", folder: "~/src/uptime",
+                                                             toTrash: false))
+        #expect(overInstalled.contains("github.com/o/r") && overInstalled.contains("~/src/uptime") && !overInstalled.contains(trash))
+        #expect(strings(.linkFolderOverInstalled(id: "uptime", source: "github.com/o/r", folder: "~/src/uptime", toTrash: true))
+            .contains(trash))
+        #expect(strings(.linkFolderOverOwn(id: "uptime", path: "~/.udeck/plugins", folder: "~/src/uptime", toTrash: true))
+            .contains(trash))
+        #expect(!strings(.linkFolderOverOwn(id: "uptime", path: "~/.udeck/plugins", folder: "~/src/uptime", toTrash: false))
+            .contains(trash))
+        let overLink = strings(.linkFolderOverLink(id: "uptime", destination: "/work/old", folder: "~/src/uptime"))
+        #expect(overLink.contains("/work/old") && overLink.contains("~/src/uptime") && !overLink.contains(trash))
+        #expect(strings(.pluginLinkedTo(path: "~/src/uptime")).contains("~/src/uptime"))
+        #expect(strings(.linkFolderLinked(id: "uptime", target: "~/src/uptime")).contains("~/src/uptime"))
+        #expect(strings(.linkFolderRefused(.folder(.noManifest(folder: "/x/uptime")))).contains("/x/uptime"))
+        #expect(strings(.linkFolderRefused(.folder(.manifestUnreadable(manifest: "/x/m.json", detail: "\"run\" is required"))))
+            .contains("\"run\" is required"))
+
+        let ran = strings(.pluginLastRun(at: "21:04:05", reason: .interval, duration: 0.21,
+                                         result: .failure(.exited(code: 3))))
+        let exited = strings(.failureReason(.exited(code: 3)))
+        #expect(ran.contains("21:04:05") && ran.contains(language == .russian ? "0,21 с" : "0.21 s") && ran.contains(exited))
+        #expect(strings(.pluginStandardErrorBefore(bytes: 1834)).contains("1834"))
+        let failed = strings(.cardLastRunFailed(at: "21:04", reason: .exited(code: 3)))
+        #expect(failed.contains("21:04") && failed.contains(exited))
+        let late = strings(.pluginLastRun(at: "21:04:05", reason: .manual, duration: 2, result: .lateCard(.timedOut(after: 2))))
+        #expect(late.contains(strings(.failureReason(.timedOut(after: 2)))))
+        let notLasting = strings(.commandNotLasting(.diskImage(volume: "/Volumes/uDeck 0.5")))
+        #expect(notLasting.contains("/Volumes/uDeck 0.5") && notLasting.contains(language == .russian ? "Программы" : "Applications"))
+        #expect(strings(.commandNotLasting(.translocated)).contains(language == .russian ? "Программы" : "Applications"))
+        #expect(strings(.cardShowingValuesFrom("21:03")).contains("21:03"))
+
+        #expect(strings(.runLogHelp(path: "~/.udeck/logs")).contains("~/.udeck/logs/<id>.log"))
+        #expect(strings(.searchPathHelp).contains("PATH") && strings(.searchPathHelp).contains("python3"))
+        let notOnPath = strings(.commandNotOnPath(folder: "~/.local/bin", shell: "zsh", file: "~/.zshrc"))
+        #expect(notOnPath.contains("~/.local/bin") && notOnPath.contains("zsh") && notOnPath.contains("~/.zshrc"))
+        #expect(strings(.commandOtherCopy(path: "~/.local/bin/udeck-plugin", target: "/Old/uDeck.app"))
+            .contains("/Old/uDeck.app"))
+        #expect(strings(.commandForeign(path: "~/.local/bin/udeck-plugin", what: .link(to: "/opt/x")))
+            .contains("/opt/x"))
+    }
+
+    /// Why a run failed is said in the operator's language, on the card and in
+    /// Settings, with what it carries — the status, the signal, the seconds as
+    /// the language writes them. English says the words `udeck-plugin run`
+    /// prints. What the system or the plugin wrote is quoted as it was.
+    @Test("why a run failed is said in each language, with what it carries", arguments: Language.allCases)
+    func failureReasons(language: Language) {
+        let strings = Strings(language)
+        let reasons: [PluginFailure.Reason] = [
+            .timedOut(after: 2), .timedOut(after: 0.5), .exited(code: 3), .signalled(signal: 9),
+            .launchFailed("No such file or directory"), .outputLimitExceeded(bytes: 1_048_576), .emptyOutput,
+            .unparsableOutput("\"rows\" is required"), .notPermitted(.allowed), .notPermitted(.disabled),
+            .notPermitted(.awaitingDecision(pending: [.exec("git")])), .notPermitted(.refused(denied: [.screen])),
+            .notLoadable([.missingManifest]),
+        ]
+        for reason in reasons {
+            let said = strings(.failureReason(reason))
+            if language == .english {
+                #expect(said == reason.description, "English is what udeck-plugin run prints")
+            } else {
+                #expect(said != reason.description && !said.contains("the producer"), "\(reason) is English in \(language)")
+            }
+            #expect(strings(.pluginLastFailure(reason: reason)).contains(said))
+            #expect(strings(.cardLastRunFailed(at: "21:04", reason: reason)).contains(said))
+            #expect(strings(.pluginLastRun(at: "21:04:05", reason: .interval, duration: 1, result: .failure(reason))).contains(said))
+        }
+        #expect(strings(.failureReason(.exited(code: 3))).contains("3"))
+        #expect(strings(.failureReason(.signalled(signal: 9))).contains("9"))
+        #expect(strings(.failureReason(.outputLimitExceeded(bytes: 1_048_576))).contains("1048576"))
+        #expect(strings(.failureReason(.timedOut(after: 0.5))).contains(language == .russian ? "0,5 с" : "0.5s"))
+        #expect(strings(.failureReason(.timedOut(after: 2))).contains(language == .russian ? "2 с" : "2s"))
+        #expect(strings(.failureReason(.launchFailed("No such file or directory"))).contains("No such file or directory"))
+        #expect(strings(.failureReason(.unparsableOutput("\"rows\" is required"))).contains("\"rows\" is required"))
+        #expect(strings(.failureReason(.notPermitted(.awaitingDecision(pending: [.exec("git")]))))
+            .contains(strings(.capabilityExec(command: "git"))))
+        #expect(strings(.failureReason(.notPermitted(.refused(denied: [.screen])))).contains(strings(.capabilityScreen)))
+        #expect(strings(.pluginLastRun(at: "21:04:05", reason: .interval, duration: 0.01, result: .card))
+            .contains(language == .russian ? "0,01 с" : "0.01 s"))
+    }
+
+    /// What came before the kept stderr is said as the contract says it:
+    /// bytes that came before what uDeck kept — not before the lines shown,
+    /// which are the end of what was kept.
+    @Test("the bytes before the kept standard error are said as the contract says them")
+    func bytesBeforeWhatWasKept() {
+        let english = Strings(.english)
+        #expect(english(.pluginStandardErrorBefore(bytes: 1834)) == "(1834 bytes came before what uDeck kept)")
+        #expect(english(.pluginStandardErrorBefore(bytes: 1)) == "(1 byte came before what uDeck kept)")
+        #expect(Strings(.russian)(.pluginStandardErrorBefore(bytes: 1834)) == "(до того, что сохранил uDeck, было ещё 1834 Б)")
     }
 
     /// Where docs/plugin-repository.md gives the words, uDeck says exactly them.

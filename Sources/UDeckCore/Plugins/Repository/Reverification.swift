@@ -51,13 +51,23 @@ public struct Reverification: Equatable, Sendable {
     /// Each folder's tree, hashed as git would — nil for one that would not
     /// hash. `nonisolated` and `async`: it runs on the cooperative pool
     /// whoever awaits it, so the panel's actor never hashes a plugin's files.
+    ///
+    /// Nil when the task it runs in is cancelled, which it asks before each
+    /// folder: a hashing that a later read of the plugins folder has made
+    /// pointless — its result would not be applied — stops at the next folder
+    /// rather than hashing every installed plugin to the end, and a folder
+    /// written into on every run no longer piles whole hashings up on the
+    /// pool, one per read.
     public static func trees(
         of folders: [String: URL],
         hash: @Sendable (URL) -> String? = { Reverification.tree($0) }
-    ) async -> [String: String?] {
+    ) async -> [String: String?]? {
         var trees: [String: String?] = [:]
-        for (id, folder) in folders { trees[id] = .some(hash(folder)) }
-        return trees
+        for (id, folder) in folders {
+            if Task.isCancelled { return nil }
+            trees[id] = .some(hash(folder))
+        }
+        return Task.isCancelled ? nil : trees
     }
 
     /// `folder`'s tree, as git hashes it.

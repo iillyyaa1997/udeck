@@ -159,7 +159,24 @@ public enum Phrase: Sendable, Equatable {
     case pluginLess
     case pluginSettings
     case pluginEverySeconds(Int)
-    case pluginLastFailure(reason: String)
+    case pluginLastFailure(reason: PluginFailure.Reason)
+
+    /// Why a run failed, in the operator's language: each reason a run can
+    /// fail for, with what it carries — the status, the signal, the seconds
+    /// written as the language writes them. What a plugin or the system
+    /// wrote, quoted in it (a launch error, why the output is not a card), is
+    /// repeated as it was given.
+    case failureReason(PluginFailure.Reason)
+
+    /// A plugin's last run, whatever it came to: when (`at`, already
+    /// formatted), why, how long (`duration`, in seconds), and what it came
+    /// to. Under it, the end of its standard error.
+    case pluginLastRun(at: String, reason: RefreshReason, duration: TimeInterval, result: PluginRun.Result)
+    case pluginStandardErrorEnd
+    case pluginStandardErrorNothing
+    /// How many bytes of the run's standard error came before what uDeck
+    /// kept of it, and were not kept.
+    case pluginStandardErrorBefore(bytes: Int)
     case permissionsAsksNothing
     case permissionsAsksTo
     case permissionsDeclared
@@ -223,11 +240,16 @@ public enum Phrase: Sendable, Equatable {
     case catalogueRemove
     case catalogueWorking
 
-    /// What a confirmation says before anything goes.
+    /// What a confirmation says before anything goes (`PlaceWarning`): of a
+    /// link, that only the link goes and the folder it leads to stays.
     case catalogueReplaceConfirm(id: String, path: String)
+    case catalogueReplaceLinkConfirm(id: String, target: String)
     case catalogueUpdateOverChanges(id: String, version: String)
     case catalogueRemoveConfirm(id: String)
     case catalogueRemoveOwnConfirm(id: String)
+    case catalogueRemoveLinkConfirm(id: String, target: String)
+    /// A catalogue row whose id is linked here, to a folder of the operator's.
+    case catalogueLinkedHere(id: String)
 
     /// Every refusal names the plugin, what is wrong, and what would fix it.
     case catalogueRefusal(RepositoryRefusal)
@@ -244,6 +266,62 @@ public enum Phrase: Sendable, Equatable {
     case pluginMarkMissing
     case pluginFrom(source: String, commit: String)
     case pluginPinned
+
+    /// A linked folder (Q125): its mark, and where its link leads — or that
+    /// uDeck does not follow it, and why is said above.
+    case pluginMarkLinked
+    case pluginLinkedTo(path: String)
+    case pluginLinkNotFollowed(destination: String)
+
+    /// **Link a folder…** (Q126): the button, the folder panel, what it came
+    /// to, and what it says first when the id is taken (`PlaceWarning`).
+    case linkFolder
+    case linkFolderPanelMessage
+    case linkFolderLink
+    case linkFolderLinked(id: String, target: String)
+    case linkFolderAlready(id: String, target: String)
+    case linkFolderOverInstalled(id: String, source: String, folder: String, toTrash: Bool)
+    case linkFolderOverOwn(id: String, path: String, folder: String, toTrash: Bool)
+    case linkFolderOverLink(id: String, destination: String, folder: String)
+    case linkFolderRefused(FolderLinkRefusal)
+
+    /// The run log of linked folders (Q127): its switch, what it does, and
+    /// the button that shows the logs.
+    case runLogSwitch
+    case runLogHelp(path: String)
+    case runLogShow
+
+    /// **Where to look for commands** (Q142): the folders a bare command is
+    /// looked up in.
+    case searchPathTitle
+    case searchPathHelp
+    case searchPathAdd
+    case searchPathPanelMessage
+    case searchPathPanelAdd
+    case searchPathRemove
+    case searchPathKeepOne
+    case searchPathUp
+    case searchPathDown
+    case searchPathRestore
+    case searchPathStanding(SearchPathList.Standing)
+
+    /// **Install command** (Q129): `udeck-plugin` from inside uDeck, linked
+    /// into `~/.local/bin`.
+    case commandTitle
+    case commandInstall
+    case commandRemove
+    case commandInstalled(path: String)
+    case commandNotInstalled(path: String)
+    case commandOtherCopy(path: String, target: String)
+    case commandForeign(path: String, what: CommandInstall.Foreign)
+    case commandNoHelper
+    /// This uDeck runs from where it will not stay (`BundlePlace`): no link
+    /// is made to it.
+    case commandNotLasting(BundlePlace)
+    case commandOnPath(folder: String)
+    case commandNotOnPath(folder: String, shell: String, file: String)
+    case commandPathUnknown(folder: String)
+    case commandCouldNot(reason: String)
 
     /// Earlier versions, from the folder's history.
     case historyTitle(name: String)
@@ -369,6 +447,13 @@ public enum Phrase: Sendable, Equatable {
     case cardDragToMove
     case cardDragToResize
     case cardOwnDrawing
+
+    /// A run that failed while the card is still fresh (Q128): one line with
+    /// when and why, one with when the values shown are from, and the amber
+    /// dot's name for VoiceOver.
+    case cardLastRunFailed(at: String, reason: PluginFailure.Reason)
+    case cardShowingValuesFrom(String)
+    case cardLastRunFailedDot
     case cardKindNotDrawn(kind: String)
     case cardUnsupportedRow(kind: String)
     case emptyNoPlugins
@@ -389,7 +474,6 @@ public enum Phrase: Sendable, Equatable {
     case tabClose
     case tabClickAgainToRename
     case tabShowThis
-    case controlDensity(name: String)
     case controlRefresh
     case controlSettings
     case controlSendAway

@@ -27,6 +27,16 @@ public enum WatchedFolders {
         return folders
     }
 
+    /// What the watcher holds as watched after asking for a stream of `paths`:
+    /// those paths when the stream was made — or there was nothing to watch —
+    /// and none when it was not. So a stream that could not be made is asked
+    /// for again on the next read of the plugins folder, rather than that read
+    /// finding the same list, taking it for watched, and the working copy's
+    /// edits going unnoticed until the links changed.
+    public static func remembered(_ paths: [String], streamMade: Bool) -> [String] {
+        streamMade || paths.isEmpty ? paths : []
+    }
+
     /// Whether a read of the plugins folder after `changes` hashes the plugins
     /// uDeck installed again (`Reverification`) — nil being a read nobody
     /// watched for: at launch, **Look again**, after an install.

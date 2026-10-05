@@ -22,8 +22,9 @@ struct DeckWindowView: View {
 
     @State private var isHovering = false
     /// **Reinstall** was pressed over a folder holding something of the
-    /// operator's: the warning is up, and the next press reinstalls.
-    @State private var confirmingReinstall = false
+    /// operator's: the warning is up, saying this, and the next press
+    /// reinstalls while it is still what is there (`ShownPlace`).
+    @State private var confirmingReinstall: ShownPlace.Place?
 
     private var manifest: PluginManifest? { model.displayManifest(withID: window.pluginID) }
     private var presentation: CardPresentation { model.presentation(for: window.pluginID) }
@@ -67,8 +68,27 @@ struct DeckWindowView: View {
 
     // MARK: - Header
 
+    /// A run that failed while the card is still fresh, when the card is what
+    /// the window shows: the dot by the name says so at once (Q128), and the
+    /// card's own line says when and why (`CardBodyView`).
+    private var failureOnTheCard: FailureOnAFreshCard? {
+        guard case .present = model.presence(of: window.pluginID),
+              case .allowed = model.launchDecision(for: window.pluginID),
+              presentation.card != nil else { return nil }
+        return model.failureOnAFreshCard(for: window.pluginID)
+    }
+
     private var header: some View {
         HStack(spacing: 8) {
+            if failureOnTheCard != nil {
+                Circle()
+                    .fill(theme.warn)
+                    .frame(width: 7, height: 7)
+                    .accessibilityElement()
+                    .accessibilityLabel(strings(.cardLastRunFailedDot))
+                    .accessibilityIdentifier("card.\(window.pluginID.rawValue).failedDot")
+                    .help(strings(.cardLastRunFailedDot))
+            }
             Text(window.title ?? presentation.card?.title ?? manifest?.name ?? window.pluginID.rawValue)
                 .font(theme.titleFont)
                 .foregroundStyle(theme.text)
@@ -152,23 +172,21 @@ struct DeckWindowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            if confirmingReinstall, let version = model.installed.plugins[window.pluginID.rawValue]?.version {
+            if let shown = confirmingReinstall {
                 // The same warning, by the same rule, as every other button
                 // that replaces a folder: something of the operator's goes to
                 // the Trash (`OperatorsWork`).
-                note(strings(.catalogueUpdateOverChanges(id: window.pluginID.rawValue, version: version)),
+                note(strings(.catalogueUpdateOverChanges(id: window.pluginID.rawValue, version: shown.arriving ?? "")),
                      tint: theme.warn)
             }
             HStack(spacing: 8) {
                 if reinstallable {
                     Button(strings(.windowReinstall)) {
                         shell.onInteract()
-                        let id = window.pluginID.rawValue
-                        if !confirmingReinstall, model.operatorsWorkGoesToTrash(id) {
-                            confirmingReinstall = true
+                        if case .ask(let now) = model.reinstall(window.pluginID.rawValue, shown: confirmingReinstall) {
+                            confirmingReinstall = now
                         } else {
-                            confirmingReinstall = false
-                            model.reinstall(id)
+                            confirmingReinstall = nil
                         }
                     }
                     .buttonStyle(GhostButtonStyle(theme: theme))

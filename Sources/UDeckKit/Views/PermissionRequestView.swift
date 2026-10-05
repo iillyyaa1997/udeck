@@ -49,7 +49,7 @@ struct PermissionRequestView: View {
             HStack(spacing: 7) {
                 Button(strings(.permissionsAllowAndRun)) {
                     shell.onInteract()
-                    model.decidePermissions(for: pluginID, allow: true)
+                    model.decidePermissions(for: pluginID, allow: true, shown: pending)
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
                 // Identifiers, not titles, for whatever drives the panel from
@@ -59,7 +59,7 @@ struct PermissionRequestView: View {
 
                 Button(strings(.actionDecline)) {
                     shell.onInteract()
-                    model.decidePermissions(for: pluginID, allow: false)
+                    model.decidePermissions(for: pluginID, allow: false, shown: pending)
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
                 .accessibilityIdentifier("consent.\(pluginID.rawValue).decline")

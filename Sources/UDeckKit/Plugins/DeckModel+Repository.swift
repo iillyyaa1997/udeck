@@ -174,13 +174,15 @@ extension DeckModel {
         standings[id] ?? .folderOfYourOwn
     }
 
-    /// Whether replacing or removing `id`'s folder now would send something of
-    /// the operator's to the Trash — asked of the disk when a button is
+    /// What a button that takes `id`'s place would do to what is there now,
+    /// and the version that comes — asked of the disk when the button is
     /// pressed, by the rule the installer decides the Trash by
-    /// (`OperatorsWork`), so that the warning is shown whenever that happens
-    /// and not only when the row says **Modified locally**.
-    public func operatorsWorkGoesToTrash(_ id: String) -> Bool {
-        OperatorsWork.goesToTrash(id, in: paths, record: installed.plugins[id])
+    /// (`OperatorsWork`), so that the warning is shown whenever something of
+    /// the operator's goes and not only when the row says **Modified
+    /// locally**. What the warning says, and what its button is held to
+    /// (`ShownPlace`).
+    public func place(of id: String, arriving: String?) -> ShownPlace.Place {
+        ShownPlace.Place.now(id, in: paths, record: installed.plugins[id], arriving: arriving)
     }
 
     /// Whether a window's plugin is here to run.
@@ -239,8 +241,11 @@ extension DeckModel {
         let asked = reverifications
         let plugins = self.plugins
         let folders = Reverification.folders(of: plugins, installed: installed)
-        Task {
-            let trees = await Reverification.trees(of: folders)
+        // The hashing before this one would not be applied: it stops at its
+        // next folder rather than hashing every installed plugin for nothing.
+        reverifyTask?.cancel()
+        reverifyTask = Task {
+            guard let trees = await Reverification.trees(of: folders) else { return }
             guard asked == reverifications else { return }
             let found = Reverification.of(plugins, installed: installed, trees: trees,
                                           head: catalogueWasRead ? .read(catalogue?.commit) : .notReadYet, now: Date())
@@ -285,42 +290,72 @@ extension DeckModel {
 
     // MARK: - Install, update, earlier versions
 
-    /// **Install** — or **Replace…** over a folder of the operator's own — at
-    /// the commit the catalogue was built from, whatever the repository has
-    /// done since: what the operator saw is what they get.
-    public func install(_ id: String) {
-        guard let catalogue, let entry = catalogue.entry(id) else { return }
+    // Every button below takes what its warning showed (`shown`, nil for a
+    // press nothing was shown before) and goes ahead only when that is what is
+    // there now; otherwise it answers the warning of what is there now and
+    // does nothing (`ShownPlace.press`). The first press of each is the same
+    // call with nothing shown: the warning, or the work at once.
+
+    /// **Install** — or **Replace…** over a folder of the operator's own or a
+    /// link — at the commit the catalogue was built from, whatever the
+    /// repository has done since: what the operator saw is what they get.
+    @discardableResult
+    public func install(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
+        guard let catalogue, let entry = catalogue.entry(id) else { return .goAhead }
+        let version = entry.manifest?.version ?? ""
+        if case .ask(let now) = ShownPlace.press(.install, shown: shown, now: place(of: id, arriving: version)) {
+            return .ask(now)
+        }
         let operation: InstallRequest.Operation =
             installed.plugins[id] != nil ? .update : (folderExists(id) ? .replace : .install)
-        run(operation, id: id, commit: catalogue.commit, folder: entry.listing,
-            version: entry.manifest?.version ?? "")
+        run(operation, id: id, commit: catalogue.commit, folder: entry.listing, version: version)
+        return .goAhead
     }
 
     /// **Update**, or **Switch to** a version the repository went back to: the
     /// plugin at the head.
-    public func update(_ id: String) {
-        guard let catalogue, let entry = catalogue.entry(id) else { return }
-        run(.update, id: id, commit: catalogue.commit, folder: entry.listing,
-            version: entry.manifest?.version ?? "")
+    @discardableResult
+    public func update(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
+        guard let catalogue, let entry = catalogue.entry(id) else { return .goAhead }
+        let version = entry.manifest?.version ?? ""
+        if case .ask(let now) = ShownPlace.press(.replaceCopy, shown: shown, now: place(of: id, arriving: version)) {
+            return .ask(now)
+        }
+        run(.update, id: id, commit: catalogue.commit, folder: entry.listing, version: version)
+        return .goAhead
     }
 
     /// **Reinstall**: what the record says was installed, put back — over a
     /// copy changed on disk, which goes to the Trash, or where it has gone.
     /// A download, so not while **Official catalogue** is off.
-    public func reinstall(_ id: String) {
-        guard settings.readsOfficialCatalogue, let record = installed.plugins[id] else { return }
-        runAtCommit(.reinstall, id: id, commit: record.commit, version: record.version)
+    @discardableResult
+    public func reinstall(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
+        guard settings.readsOfficialCatalogue, let record = installed.plugins[id] else { return .goAhead }
+        return atCommit(.reinstall, id: id, commit: record.commit, version: record.version, shown: shown)
     }
 
     /// **Back to** the copy this one replaced.
-    public func backToPrevious(_ id: String) {
-        guard let previous = installed.plugins[id]?.previous else { return }
-        runAtCommit(.earlier, id: id, commit: previous.commit, version: previous.version)
+    @discardableResult
+    public func backToPrevious(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
+        guard let previous = installed.plugins[id]?.previous else { return .goAhead }
+        return atCommit(.earlier, id: id, commit: previous.commit, version: previous.version, shown: shown)
     }
 
     /// An earlier version, chosen from history: installed and marked pinned.
-    public func installEarlier(_ id: String, line: PluginHistory.Line) {
-        runAtCommit(.earlier, id: id, commit: line.commit, version: line.version)
+    @discardableResult
+    public func installEarlier(_ id: String, line: PluginHistory.Line, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
+        atCommit(.earlier, id: id, commit: line.commit, version: line.version, shown: shown)
+    }
+
+    /// A copy replaced by `version` at `commit`, once what its warning showed
+    /// is what is there.
+    private func atCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
+                          shown: ShownPlace.Place?) -> ShownPlace.Press {
+        if case .ask(let now) = ShownPlace.press(.replaceCopy, shown: shown, now: place(of: id, arriving: version)) {
+            return .ask(now)
+        }
+        runAtCommit(operation, id: id, commit: commit, version: version)
+        return .goAhead
     }
 
     /// Reads a plugin's earlier versions from its folder's history.
@@ -424,12 +459,18 @@ extension DeckModel {
     /// values and whether it was switched off, its record, every window of it on
     /// every tab, and its last card. Its catalogue data stays: it belongs to the
     /// repository. A folder of the operator's own — or one they changed — goes
-    /// to the Trash rather than being deleted.
-    public func remove(_ id: String) {
-        guard busyPlugin == nil, let identifier = PluginIdentifier(rawValue: id) else { return }
+    /// to the Trash rather than being deleted. Always after a warning: the
+    /// first press (`shown` nil) answers it, and only the press on a warning
+    /// that says what is there now removes anything.
+    @discardableResult
+    public func remove(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
+        if case .ask(let now) = ShownPlace.press(.remove, shown: shown, now: place(of: id, arriving: nil)) {
+            return .ask(now)
+        }
+        guard busyPlugin == nil, let identifier = PluginIdentifier(rawValue: id) else { return .goAhead }
         guard installedProblem == nil else {
             operationProblems[id] = .recordsBroken(installedProblem ?? "")
-            return
+            return .goAhead
         }
         busyPlugin = id
         operationProblems[id] = nil
@@ -444,6 +485,7 @@ extension DeckModel {
                 // log; the log goes after it, not before it is made again.
                 await runLogs.drain()
                 try installer.finishRemoval(removal)
+                refreshRunLogsWritten()
                 DeckLog.plugins.info("removed \(id, privacy: .public)")
             } catch {
                 operationProblems[id] = OperationProblem(error)
@@ -451,6 +493,7 @@ extension DeckModel {
             reloadInstalled()
             discoverPlugins()
         }
+        return .goAhead
     }
 
     /// The parts of a removal that live in uDeck's own stores: the permission
@@ -484,13 +527,20 @@ extension DeckModel {
         public var link: URL
         /// The folder it leads to, every link on the way resolved.
         public var target: URL?
+        /// What the link says, as it is written.
+        public var destination: String
+
+        /// Where it leads, as a row and a warning say it: the folder, or what
+        /// the link says when uDeck does not follow it.
+        public var leadsTo: String { target?.path ?? destination }
     }
 
     /// `id`'s link, when its folder in `plugins/` is one; nil for a folder that
     /// is there itself.
     public func linkedFolder(_ id: String) -> LinkedFolder? {
         guard let plugin = plugins.first(where: { $0.folderName == id }), let link = plugin.linkedAt else { return nil }
-        return LinkedFolder(link: link, target: plugin.directory == link ? nil : plugin.directory)
+        let destination = (try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) ?? link.path
+        return LinkedFolder(link: link, target: plugin.directory == link ? nil : plugin.directory, destination: destination)
     }
 
     /// What **Link a folder…** came to.
@@ -499,60 +549,65 @@ extension DeckModel {
         case linked(id: String, target: String)
         /// It already was.
         case alreadyLinked(id: String, target: String)
-        /// Something is at `id`: a plugin uDeck installed, a folder of the
-        /// operator's own, a link elsewhere. Nothing was done; asked again with
-        /// `replacing`, after the operator has read what goes — `toTrash` when
-        /// what is there goes to the Trash (`OperatorsWork`), rather than being
-        /// deleted as uDeck's own copy, or unlinked as a link.
-        case needsConfirmation(id: String, occupant: PluginLink.Occupant, toTrash: Bool)
-        /// Nothing was linked, and why.
-        case refused(String)
+        /// Something is at the id: a plugin uDeck installed, a folder of the
+        /// operator's own, a link elsewhere — what the warning says, and
+        /// whether it goes to the Trash (`OperatorsWork`) rather than being
+        /// deleted as uDeck's own copy, or unlinked as a link. Nothing was
+        /// done; asked again with this as `confirmed` once the operator has
+        /// read it, and done then only if it is still what is there.
+        case needsConfirmation(ShownPlace.Linking)
+        /// Nothing was linked, and why. When the installer said no — the
+        /// plugin would not end, the disk — its row says that too
+        /// (`operationProblems`).
+        case refused(FolderLinkRefusal)
     }
 
     /// **Link a folder…**: `folder` — an author's working copy — into uDeck as
     /// a link named after its manifest's id, `<uDeck folder>/plugins/<id>`.
     ///
     /// A free id is linked at once, as `udeck-plugin link` links it. An id that
-    /// is taken is linked only when asked again with `replacing` — linking over
-    /// an installed plugin is uDeck's to do, with a warning (`FolderLinking`)
-    /// — and then the way **Replace…** goes (`PluginInstaller.link`): the
-    /// plugin quieted, the link swapped into place, what it replaces deleted,
-    /// sent to the Trash or unlinked, and its record forgotten. Its windows,
-    /// settings and permission decision stay; the decision is held to the
-    /// linked manifest's version, as to any.
-    public func linkFolder(_ folder: URL, replacing: Bool = false) async -> FolderLinking {
-        guard busyPlugin == nil else {
-            return .refused("another plugin is being installed, updated, removed or linked; try again in a moment")
-        }
+    /// is taken is linked only when asked again with the warning the operator
+    /// read as `confirmed`, and only while that warning still says what is
+    /// there — the same id, the same thing at it, the same answer about the
+    /// Trash (`ShownPlace.linking`); anything else, and the answer is the
+    /// warning of what is there now. Linking over an installed plugin is
+    /// uDeck's to do, with a warning (`FolderLinking`), and goes the way
+    /// **Replace…** goes (`PluginInstaller.link`): the plugin quieted, the link
+    /// swapped into place, what it replaces deleted, sent to the Trash or
+    /// unlinked, and its record forgotten. Its windows, settings and permission
+    /// decision stay; the decision is held to the linked manifest's version,
+    /// as to any.
+    public func linkFolder(_ folder: URL, confirmed: ShownPlace.Linking? = nil) async -> FolderLinking {
+        guard busyPlugin == nil else { return .refused(.busy) }
         let candidate: PluginLink.Candidate
-        let occupant: PluginLink.Occupant
+        let now: ShownPlace.Linking
         do {
-            candidate = try PluginLink.candidate(folder, home: paths.root)
-            occupant = try PluginLink.occupant(for: candidate, in: paths)
+            (candidate, now) = try ShownPlace.Linking.now(folder, in: paths, installed: installed)
+        } catch let refusal as PluginLink.Refusal {
+            return .refused(.folder(refusal.reason))
         } catch {
-            return .refused("\(error)")
+            return .refused(.failed("\(error)"))
         }
         let id = candidate.id.rawValue
-        switch occupant {
-        case .nothing:
+        switch ShownPlace.linking(confirmed: confirmed, now: now) {
+        case .linkAtOnce:
             do {
                 try PluginLink.place(candidate, in: paths)
+            } catch let refusal as PluginLink.Refusal {
+                return .refused(.folder(refusal.reason))
             } catch {
-                return .refused("\(error)")
+                return .refused(.failed("\(error)"))
             }
             discoverPlugins()
             return .linked(id: id, target: candidate.target)
-        case .link(_, sameFolder: true):
+        case .alreadyLinked:
             return .alreadyLinked(id: id, target: candidate.target)
-        case .link, .installed, .folderOfYourOwn:
-            guard replacing else {
-                return .needsConfirmation(id: id, occupant: occupant, toTrash: operatorsWorkGoesToTrash(id))
-            }
+        case .ask(let shown):
+            return .needsConfirmation(shown)
+        case .replace:
+            break
         }
-        guard installedProblem == nil else {
-            return .refused("installed.json cannot be read, and uDeck replaces no plugin while it cannot: "
-                            + (installedProblem ?? ""))
-        }
+        guard installedProblem == nil else { return .refused(.recordsBroken(installedProblem ?? "")) }
         busyPlugin = id
         operationProblems[id] = nil
         defer { busyPlugin = nil }
@@ -564,7 +619,8 @@ extension DeckModel {
             operationProblems[id] = OperationProblem(error)
             reloadInstalled()
             discoverPlugins()
-            return .refused("\(error)")
+            if case InstallError.recordsBroken(let reason) = error { return .refused(.recordsBroken(reason)) }
+            return .refused(.failed("\(error)"))
         }
         DeckLog.plugins.info("linked \(id, privacy: .public) to \(candidate.target, privacy: .public)")
         reloadInstalled()
@@ -573,8 +629,10 @@ extension DeckModel {
     }
 
     func reloadInstalled() {
-        // A hashing begun against the records before these is not applied.
+        // A hashing begun against the records before these is not applied,
+        // and stops at its next folder.
         reverifications += 1
+        reverifyTask?.cancel()
         do {
             installed = try JSONFileStore<InstalledPlugins>(url: paths.installedFile).load() ?? InstalledPlugins()
             installedProblem = nil

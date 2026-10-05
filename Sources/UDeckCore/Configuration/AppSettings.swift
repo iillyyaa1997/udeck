@@ -66,6 +66,11 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// shell: uDeck can be started from Finder, from a terminal or by launchd,
     /// and a plugin that works from one and not the others is a bug that is
     /// very hard to see.
+    ///
+    /// Settings → Plugins → **Where to look for commands** edits it
+    /// (`SearchPathList`), and a run reads it when it starts, so a change
+    /// counts from the next run. Only its folders written from `/` are looked
+    /// in (`PluginEnvironment.lookedIn`).
     public var pluginExecutableSearchPath: [String]
 
     /// Keep polling producers while the panel is out of sight.
@@ -115,7 +120,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
     /// Whether every run of a linked folder is written into its run log
     /// (`RunLog`, `<uDeck folder>/logs/<id>.log`), or `nil` for the shipped
-    /// answer, which is no.
+    /// answer, which is no. The switch under Settings → Plugins, **Keep a run
+    /// log for linked folders**.
     ///
     /// Off until the author asks: a log is a file that grows on every run, and
     /// a linked folder that is only linked — not being worked on — has no use
@@ -260,9 +266,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
 
         result.defaultCardTTL = clamp(result.defaultCardTTL, 1 ... Seconds.ceiling)
         result.silentTTLMultiplier = min(max(result.silentTTLMultiplier.isFinite ? result.silentTTLMultiplier : 3, 1), 100)
-        if result.pluginExecutableSearchPath.isEmpty {
-            result.pluginExecutableSearchPath = AppSettings().pluginExecutableSearchPath
-        }
+        // A search path with no folder that is looked in — empty, or only
+        // folders not written from `/` — finds nothing: the default instead,
+        // as `udeck-plugin run` reads it (`PluginEnvironment.effective`).
+        result.pluginExecutableSearchPath = PluginEnvironment.effective(result.pluginExecutableSearchPath)
         return result
     }
 

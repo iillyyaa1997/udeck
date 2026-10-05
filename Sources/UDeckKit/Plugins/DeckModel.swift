@@ -72,6 +72,26 @@ public final class DeckModel {
     /// Which hashing of the installed plugins is the latest asked for: one that
     /// ends after a later one began is not applied over it (`reverify`).
     @ObservationIgnored var reverifications = 0
+    /// The hashing running now, cancelled when a later one is asked for: it
+    /// stops at its next folder rather than hashing to the end for nothing.
+    @ObservationIgnored var reverifyTask: Task<Void, Never>?
+
+    // MARK: - The udeck-plugin command (DeckModel+Command.swift)
+
+    /// What is at `~/.local/bin/udeck-plugin`, as last asked.
+    public internal(set) var commandState: CommandInstall.State = .notInstalled
+    /// Whether the operator's shell finds the command, as last asked of it.
+    public internal(set) var shellFindsCommand: ShellFinding = .notAsked
+    /// What the last **Install command** or **Remove command** came to, when
+    /// it did not work.
+    public internal(set) var commandProblem: CommandInstall.Refusal?
+
+    /// Whether a run log is on disk — what **Show the logs** waits for. Kept
+    /// rather than asked of the disk where it is drawn: the pane is drawn again
+    /// only when something it reads changes, and a file appearing is not that
+    /// (measured in the lab on 2026-10-05: the log was written and the button
+    /// never came, .build/e2e/20261005-003355Z, plugins.run-log-switch).
+    public internal(set) var runLogsWritten = false
 
     /// Problems worth showing the operator: a settings file that would not
     /// parse, a layout that could not be written, a plugin whose windows had to
@@ -292,6 +312,16 @@ public final class DeckModel {
         )
     }
 
+    /// A run that failed while `id`'s card is still fresh — what the card says
+    /// at once, by the dot beside its name and one line (Q128) — or nil.
+    public func failureOnAFreshCard(for id: PluginIdentifier, now: Date = Date()) -> FailureOnAFreshCard? {
+        snapshot(for: id).failureOnAFreshCard(
+            now: now,
+            defaultTTL: settings.defaultCardTTL,
+            silentMultiplier: settings.silentTTLMultiplier
+        )
+    }
+
     public func launchDecision(for id: PluginIdentifier) -> LaunchDecision {
         guard let manifest = plugin(withID: id)?.manifest else { return .disabled }
         return PermissionGate.launchDecision(
@@ -312,12 +342,14 @@ public final class DeckModel {
     }
 
     private func visibilityChanged() {
-        if panelIsVisible {
+        // Shown: every plugin runs now, and every loop afresh after it. Hidden:
+        // nothing runs, and a loop polling while the panel is away keeps its
+        // rhythm (`PollLoops.visibilityChanged`).
+        let change = PollLoops.visibilityChanged(nowVisible: panelIsVisible)
+        if change.refresh {
             refreshAll(reason: .manual)
         }
-        // Every loop afresh: each plugin has just run, and runs next an
-        // interval from now.
-        restartPolling(again: true)
+        restartPolling(again: change.again)
     }
 
     /// Starts and ends poll loops as the plugins, the layout, the decisions and
@@ -441,8 +473,14 @@ public final class DeckModel {
     /// inside the folder the link leads to.
     private func log(_ run: PluginRun, of plugin: DiscoveredPlugin, id: PluginIdentifier) {
         guard RunLog.takes(plugin, settings: settings) else { return }
-        runLogs.write(run, for: id, linkTarget: plugin.directory, to: RunLog(paths: paths)) { error, _ in
-            guard let error else { return }
+        runLogs.write(run, for: id, linkTarget: plugin.directory, to: RunLog(paths: paths)) { [weak self] error, _ in
+            guard let error else {
+                // **Show the logs** is offered from the first entry on.
+                Task { @MainActor in
+                    if self?.runLogsWritten == false { self?.runLogsWritten = true }
+                }
+                return
+            }
             DeckLog.plugins.error("the run log of \(id.rawValue, privacy: .public): \(String(describing: error), privacy: .public)")
         }
     }
@@ -580,8 +618,19 @@ public final class DeckModel {
     /// Partial answers are not offered: a plugin either runs with everything it
     /// declared or does not run. Anything else would be a promise the host
     /// cannot keep — see `CapabilityEnforcement`.
-    public func decidePermissions(for id: PluginIdentifier, allow: Bool) {
+    ///
+    /// `shown` is what the card or Settings listed when the button was
+    /// pressed. **Allow** grants what the manifest asks for now, and only
+    /// when that is nothing the operator was not shown (`ShownPlace.allows`):
+    /// otherwise nothing is recorded, and the card asks about what is asked
+    /// for now.
+    public func decidePermissions(for id: PluginIdentifier, allow: Bool, shown: [Capability]) {
         guard let manifest = plugin(withID: id)?.manifest else { return }
+        if allow, !ShownPlace.allows(shown: shown, requested: manifest.permissions.capabilities, grant: grants[id],
+                                     version: manifest.version) {
+            DeckLog.plugins.info("\(id.rawValue, privacy: .public) asks for more than was shown; asked again, nothing granted")
+            return
+        }
         let requested = Set(manifest.permissions.capabilities)
         grants[id] = PluginGrant(
             granted: allow ? requested : [],
@@ -664,6 +713,50 @@ public final class DeckModel {
     public func revealPluginsDirectory() {
         try? FileManager.default.createDirectory(at: paths.plugins, withIntermediateDirectories: true)
         NSWorkspace.shared.activateFileViewerSelecting([paths.plugins])
+    }
+
+    /// A path as the operator writes it: the home folder as `~`.
+    public func displayPath(_ path: String) -> String {
+        SearchPathList.shown(path, home: NSHomeDirectory())
+    }
+
+    // MARK: - The run log
+
+    /// **Keep a run log for linked folders** (`AppSettings.linkedFolderRunLog`).
+    public func setLinkedFolderRunLog(_ on: Bool) {
+        var changed = settings
+        changed.linkedFolderRunLog = on
+        update(settings: changed)
+    }
+
+    /// Asks the disk again whether there is a run log to show
+    /// (`runLogsWritten`): when the pane appears, and after a removal.
+    public func refreshRunLogsWritten() {
+        let written = RunLog.anyWritten(in: paths)
+        if written != runLogsWritten { runLogsWritten = written }
+    }
+
+    /// The logs folder, as the operator writes it.
+    public var runLogsDisplayPath: String { displayPath(paths.logs.path) }
+
+    /// **Show the logs**: the logs folder, in Finder.
+    public func revealRunLogs() {
+        NSWorkspace.shared.open(paths.logs)
+    }
+
+    // MARK: - Where to look for commands
+
+    /// A new search path — every change the field makes — written like every
+    /// other setting, and read by the next run.
+    public func setSearchPath(_ folders: [String]) {
+        var changed = settings
+        changed.pluginExecutableSearchPath = folders
+        update(settings: changed)
+        // A plugin's command is found when the plugins folder is read: read
+        // it again, so that a command found in another folder now is the one
+        // its next run runs — a plugin whose command changed starts its loop
+        // again with it (`PollLoops`), every other keeps its rhythm.
+        discoverPlugins()
     }
 
     // MARK: - Persistence
