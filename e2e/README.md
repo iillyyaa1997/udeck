@@ -14,7 +14,7 @@ see the last section.
 > **Being built.** What exists today: the command, its pre-flight and report,
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, a self-check, the builds a check needs, a fake GitHub for
-> the plugin catalogue, and forty-five checks of uDeck itself in five groups
+> the plugin catalogue, and fifty-one checks of uDeck itself in five groups
 > (`e2e/run.sh --list`). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
 > itself as it ships, and by itself again once an operator who switched that off
@@ -25,10 +25,12 @@ see the last section.
 > it was opened — with its wrong-chord control and a check that the combination
 > dies with uDeck. `login`: "Open at Login", through a restart and an update, and
 > switched off. `settings`: two changes made in uDeck's own window, and whether
-> they hold across a restart. `plugins`: the sixteen checks of
+> they hold across a restart. `plugins`: the twenty-two checks of
 > docs/plugin-repository.md — the catalogue, installing, updating, earlier
-> versions, removing, each refusal, and a linked folder — against a fake GitHub
-> in the guest.
+> versions, removing, each refusal, a linked folder, and what Settings offers
+> somebody writing a plugin: Link a folder…, the run log's switch, a failed run
+> on a fresh card, Install command, Where to look for commands, and all of it
+> in Russian — against a fake GitHub in the guest.
 
 ## Running it
 
@@ -1174,7 +1176,7 @@ problem.
 
 ### Plugins from a repository
 
-Sixteen checks, one per row of the table in docs/plugin-repository.md ("The
+Twenty-two checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"). None of them talks to github.com. A fake GitHub runs inside the
 guest (`e2e/guest/fake-github.py`, the guest's own Python and the standard
 library only, on `127.0.0.1:8766`), answering the part of the API uDeck uses —
@@ -1222,6 +1224,40 @@ of its runs is read before and after; its removal is a click, and what it
 leaves of the working copy is read over SSH before and after, every name and
 every byte. Every install, update, earlier
 version, removal and switch is a click.
+
+**What Settings offers somebody writing a plugin**, one check each, every one a
+row of the same table:
+
+* `plugins.link-a-folder` presses **Link a folder…** and chooses the folder in
+  the system's own folder panel the way a person types one: ⌘⇧G, the path,
+  Return, Return — sent from inside the guest through System Events
+  (`ui.choose_folder`), as every chord the lab makes is, since a chord over VNC
+  does not survive the trip. Then the oracle is the disk: where
+  `plugins/<id>` leads, `installed.json`, the working copy before and after.
+  The working copy's id is changed under the warning over SSH (`sed` on its
+  `manifest.json`, the original kept beside the copy and put back), so that
+  **Link** on a warning that no longer says what is there is seen to warn
+  again and change nothing.
+* `plugins.run-log-switch` clicks the switch and reads `settings.json` and
+  `~/.udeck/logs/<id>.log` over SSH.
+* `plugins.failed-run-on-a-fresh-card` makes its plugin fail by putting a file
+  into its folder over SSH, and reads the panel's walk for the dot
+  (`card.<id>.failedDot`) and its texts for the line; then Settings, under
+  **More**. The same walk says which of the panel's own buttons are there, by
+  their identifiers (`panel.refresh`, `panel.settings`, `panel.sendAway`,
+  `panel.fullscreen`).
+* `plugins.install-command` runs `codesign --verify --deep --strict` on the
+  installed bundle and the command through the link, `--help` and
+  `--version`, inside the guest; the guest's zsh is what Settings asks about
+  `~/.local/bin`. A file of the lab's own put at the command's place is taken
+  away again at the end.
+* `plugins.search-path-field` writes two folders of commands over SSH, adds
+  them through the field and its folder panel, and reads which one the card
+  ran.
+* `plugins.screens-in-russian` sets uDeck — not the guest — to Russian in
+  `settings.json` before it starts, reaches Settings by its Russian menu item
+  and window title (`ui.RUSSIAN`), and keeps a screenshot of every part the
+  others check, in Russian, for a person to read.
 
 ## Reading the result
 

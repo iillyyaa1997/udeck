@@ -399,3 +399,26 @@ def test_a_control_that_is_no_longer_on_the_screen_after_the_click_says_so():
     screen = ui.opening(machine, "opening the settings")
     with pytest.raises(LabError, match="no control there at all"):
         ui.press(machine, screen.switch(config.THE_SWITCH), "turning the switch off", seconds=5)
+
+
+def test_a_value_of_several_lines_is_walked_on_one_line():
+    """A plugin's stderr, under More, is a value of several lines; the walk prints each control on one line."""
+    script = ui._IDENTIFIED
+    assert 'set text item delimiters to {return & linefeed, linefeed, return}' in script
+    assert f'set text item delimiters to "{ui.LINE_BREAK}"' in script
+    assert script.count("return my oneLine(") == 2, "a list's text and a single value both"
+    row = f"5|AXStaticText||plugin.flaky.stderr||Traceback{ui.LINE_BREAK}ValueError: told to fail||233;400;|300;26;"
+    (control,) = ui.controls(row)
+    assert ui.says(control) == f"Traceback{ui.LINE_BREAK}ValueError: told to fail"
+
+
+def test_the_settings_window_is_reached_by_its_russian_names_when_uDeck_speaks_russian():
+    assert ui.RUSSIAN.code == "ru"
+    assert ui.RUSSIAN.settings_item == "Настройки…" and ui.RUSSIAN.settings_window == "Настройки uDeck"
+
+
+def test_a_folder_is_chosen_by_typing_its_path_into_go_to_folder():
+    script = ui._applescript(ui._CHOOSE_FOLDER, process=ui.PROCESS, path="/Users/admin/udeck-e2e-work/it's mine")
+    assert 'keystroke "g" using {command down, shift down}' in script
+    assert 'keystroke "/Users/admin/udeck-e2e-work/it\'s mine"' in script
+    assert script.count("key code 36") == 2, "Return to go there, Return for the panel's own button"

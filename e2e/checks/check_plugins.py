@@ -1,6 +1,6 @@
 """Plugins from a repository: the catalogue, installing, updating, removing — and saying no.
 
-Sixteen checks, one per row of the table in docs/plugin-repository.md ("The
+Twenty-two checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"), and all of them against the same two things: a release build of
 this checkout, and a fake GitHub served inside the guest
 (`plugin_repository.FakeGitHub`, `e2e/guest/fake-github.py`) whose content is
@@ -27,10 +27,15 @@ and the tab is empty but for it. The consent is given where the operator gives
 it, on the card in the panel. A file changed on disk, and a manifest broken and
 mended, are changed over SSH, because that is what "changed on disk" means.
 Nothing else is written into the guest: every install, update, removal and
-switch is a click.
+switch is a click. The plugins the lab writes itself — linked working copies
+outside `~/.udeck`, folders of commands — are written over SSH, as an author
+writes them, and linked in by hand where the check is not about linking; a
+folder chosen in Settings is chosen in the system's folder panel, by typing its
+path (`ui.choose_folder`).
 """
 
 import json
+import re
 import shlex
 import uuid
 
@@ -112,6 +117,80 @@ TOUCHES = 7
 TOUCH_EVERY = 3
 TOUCHED_INTERVAL = 5
 MINIMUM_RUNS_WHILE_TOUCHED = 3
+
+# What Settings says of a linked folder and of removing it (English.swift:
+# pluginMarkLinked, catalogueRemoveLinkConfirm).
+LINKED_MARK = "Linked"
+ONLY_THE_LINK = "Only the link goes"
+
+# Link a folder… (plugins.link-a-folder): a working copy linked through Settings,
+# with an id nothing has, and one with uptime's id over the installed uptime.
+LINK_ME = "link-me"
+UPTIME_WORK = "uptime-work"
+# English.swift: linkFolderLinked, linkFolderOverInstalled (toTrash: false),
+# linkFolderOverLink.
+LINKED_TO = "Linked {id} to "
+OVER_THE_INSTALLED = "{id} is installed from github.com/{repository}. Linking "
+DELETES_THE_COPY = "deletes the installed copy"
+OVER_A_LINK = "{id} is a link to "
+
+# The run log (plugins.run-log-switch): a linked plugin that says something on
+# standard error every run, polled every RUN_LOG_INTERVAL seconds, and how many
+# entries its log has to have once the switch is on.
+LOGGED = "logged"
+LOGGED_SAYS = "said on standard error"
+RUN_LOG_INTERVAL = 2
+RUN_LOG_ENTRIES = 2
+RUN_LOG_SECONDS = 30
+
+# A failed run on a fresh card (plugins.failed-run-on-a-fresh-card): a linked
+# plugin whose card lasts FLAKY_TTL seconds, polled every FLAKY_INTERVAL, that
+# fails while a file named FAIL is in its folder (English.swift:
+# cardLastRunFailed, cardShowingValuesFrom).
+FLAKY = "flaky"
+FAIL = "fail"
+FLAKY_TTL = 300
+FLAKY_INTERVAL = 3
+FLAKY_SAYS = "ValueError: told to fail"
+LAST_RUN_FAILED = "Last run failed at "
+EXITED_3 = "the producer exited with status 3"
+VALUES_FROM = "showing values from "
+# The panel's own buttons (WorkspaceView.swift: controls) — and no density
+# button among them since 2026-10-05: density is set in Settings → Look.
+PANEL_BUTTONS = ("panel.fullscreen", "panel.refresh", "panel.sendAway", "panel.settings")
+
+# Install command (plugins.install-command): where the link goes in the guest,
+# what it leads to, and what the command says.
+COMMAND_LINK = "~/.local/bin/udeck-plugin"
+COMMAND_IN_THE_BUNDLE = f"{app.GUEST_APPLICATIONS}/{app.APP}/Contents/Helpers/udeck-plugin"
+COMMAND_USAGE = "usage: udeck-plugin check"
+# English.swift: commandNotInstalled, commandInstalled, commandForeign.
+NOT_INSTALLED = "Not installed."
+INSTALLED_COMMAND = "Installed: "
+NOT_UDECKS = "is there already, and is not uDeck's"
+# What the guest's zsh is told to add (ShellPath.advice), or that it finds it.
+ZSH_LINE = 'export PATH="$HOME/.local/bin:$PATH"'
+SHELL_SAYS = ("Your shell looks in ", "Your shell (zsh) does not look in ")
+
+# Where to look for commands (plugins.search-path-field): a plugin whose command
+# is a bare name, found in either of two folders of the lab's own, each of which
+# says which one it is.
+GREETER = "greeter"
+GREET = "lab-greet"
+TOOLS = "~/udeck-e2e-tools"
+
+# The same, in uDeck's Russian (Russian.swift: cardLastRunFailed, pluginMarkLinked,
+# catalogueRemoveLinkConfirm, linkFolderOverInstalled, commandInstalled), for
+# plugins.screens-in-russian.
+RU_LAST_RUN_FAILED = "Последний запуск в "
+# Why it failed, in Russian too (Russian.swift: failure): the card's line and
+# Settings' last run, its seconds with a comma.
+RU_EXITED_3 = "программа плагина завершилась с кодом 3"
+RU_A_FAILURE = "сбой: "
+RU_LINKED_MARK = "Связанная папка"
+RU_ONLY_THE_LINK = "Уйдёт только ссылка"
+RU_OVER_THE_INSTALLED = f"{UPTIME} установлен из github.com/{config.PLUGINS_REPOSITORY}"
+RU_INSTALLED_COMMAND = "Установлена: "
 
 
 # --- The checks -------------------------------------------------------------------------
@@ -825,6 +904,9 @@ def check_an_update_ends_a_running_action(machine, check_dir, lab):
 def check_linked_folder(machine, check_dir, lab):
     """A link in `~/.udeck/plugins` to a working copy elsewhere is a plugin: its card comes, an edit there reaches it, writing into it does not stop its polls, and **Remove** takes the link alone.
 
+    In Settings its row is marked **Linked** and says where the link leads, and
+    **Remove** says first that only the link goes (Q125).
+
     The lab makes a plugin of its own in `~/udeck-e2e-work/linked-card` — a
     working copy beside a `.git`, a `.env` with a token of its own, files named
     like uDeck's `installed.json` and `cache/`, and a link inside it — and links
@@ -845,8 +927,9 @@ def check_linked_folder(machine, check_dir, lab):
     **Red for**: a uDeck that skips a link (no card), that does not watch the
     folder a link leads to (the card keeps saying `first`), that starts a
     plugin's interval over on every change in the working copy (no run while
-    it is touched), or whose removal goes through the link (the working copy
-    changed, emptied or in the Trash).
+    it is touched), that does not say a plugin is linked or warns of a folder
+    deleted where only a link goes, or whose removal goes through the link (the
+    working copy changed, emptied or in the Trash).
     """
     scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
     try:
@@ -891,7 +974,22 @@ def check_linked_folder(machine, check_dir, lab):
 
         before = _fingerprint(machine, "before the removal")
         ui.plugins_pane(machine, "opening Settings → Plugins")
+        # Settings says it is a link and where it leads (Q125), and Remove says
+        # first that only the link goes.
+        mark = _wait_until(machine, f"plugin.{LINKED_CARD}.mark", lambda said: said == LINKED_MARK, NOTICED_SECONDS)
+        leads = ui.reads(machine, f"plugin.{LINKED_CARD}.linkedTo", "reading where the link leads")
+        _keep_the_pane(machine, check_dir, lab, "the-linked-row.txt")
+        expect(mark == LINKED_MARK, f"the linked plugin's row is marked {mark!r}, not {LINKED_MARK!r}")
+        expect(leads is not None and leads.endswith(f"{WORK.removeprefix('~/')}/{LINKED_CARD}: uDeck runs the plugin from there"),
+               f"the linked plugin's row says it leads to {leads!r}")
         _press(machine, f"plugin.{LINKED_CARD}.remove", "pressing Remove")
+        warning = _wait_until(machine, f"plugin.{LINKED_CARD}.confirmText", bool, NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "the-warning-before-removing-the-link.txt")
+        expect(
+            warning is not None and ONLY_THE_LINK in warning and f"{WORK.removeprefix('~/')}/{LINKED_CARD}" in warning
+            and "Trash" not in warning,
+            f"before removing a link, Remove said {warning!r}; it has to say {ONLY_THE_LINK!r}, name the folder, and not the Trash",
+        )
         _press(machine, f"plugin.{LINKED_CARD}.confirm", "confirming the removal")
         link = f"{UDECK_HOME}/plugins/{LINKED_CARD}"
         gone = _wait_for_disk(machine, lambda: machine.ssh.ask(f"test -L {link} || test -e {link}", "looking for the link").returncode != 0,
@@ -915,6 +1013,453 @@ def check_linked_folder(machine, check_dir, lab):
             f"a linked folder is in installed.json: {_read_json(machine, INSTALLED)!r}",
         )
     finally:
+        scene.close()
+
+
+def check_link_a_folder(machine, check_dir, lab):
+    """**Link a folder…** links a free id at once, and over an installed plugin only after it says what becomes of the copy.
+
+    Driven the way a person drives it: the button in Settings → Plugins opens
+    the system's folder panel, and the folder is chosen in it by typing its
+    path (`ui.choose_folder`). First a working copy whose id nothing has:
+    linked at once, and the row says **Linked**. Then one with `uptime`'s id,
+    over the `uptime` installed from the catalogue a moment before: nothing
+    happens until the warning has said that the installed copy is deleted —
+    it is exactly what uDeck installed. The warning is held to what it said:
+    the working copy's id changed to `link-me` while it is up, **Link** warns of
+    `link-me` — a link elsewhere now — and touches neither; the id back to
+    `uptime`, **Link** warns of `uptime` again. Once that is confirmed,
+    `plugins/uptime` is a link to the working copy, `installed.json` no longer
+    has `uptime`, and the working copy is byte for byte as it was.
+
+    **Red for**: a Settings with no way to link a folder, a link made over an
+    installed plugin without a word, a warning that says something else than
+    what is done, a confirmation that acts on an id it did not name, and a link
+    that writes into the folder it leads to.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        free = f"{WORK}/{LINK_ME}"
+        _a_plugin_folder(machine, free, _manifest(LINK_ME, "./run.sh"), {"run.sh": _card_script("free")})
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        chosen = _link_through_settings(scene, free, "a free id")
+        said = _wait_until(machine, "plugins.linkFolder.outcome", lambda said: bool(said), NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "after-linking-a-free-id.txt")
+        expect(said is not None and said.startswith(LINKED_TO.format(id=LINK_ME)),
+               f"Link a folder… on {chosen} said {said!r}, not {LINKED_TO.format(id=LINK_ME)!r}…")
+        expect(_link_leads(machine, LINK_ME) == chosen,
+               f"after Link a folder…, plugins/{LINK_ME} leads to {_link_leads(machine, LINK_ME)!r}, not {chosen!r}")
+        mark = _wait_until(machine, f"plugin.{LINK_ME}.mark", lambda said: said == LINKED_MARK, NOTICED_SECONDS)
+        expect(mark == LINKED_MARK, f"the plugin linked through Settings is marked {mark!r}")
+
+        _install(scene, UPTIME, pane_open=True)
+        installed = _installed_tree(machine)
+        over = f"{WORK}/{UPTIME_WORK}"
+        machine.ssh.run(f"rm -rf {over} && mkdir -p {WORK} && cp -R {UDECK_HOME}/plugins/{UPTIME} {over} && "
+                        f"printf 'TOKEN={uuid.uuid4().hex}\\n' > {over}/.env", "making a working copy of uptime")
+        before = _fingerprint(machine, "before the link over uptime", folder=over)
+        chosen = _link_through_settings(scene, over, "over the installed uptime")
+        warning = _wait_until(machine, "plugins.linkFolder.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "the-warning-before-linking-over-uptime.txt")
+        expect(
+            warning is not None and OVER_THE_INSTALLED.format(id=UPTIME, repository=config.PLUGINS_REPOSITORY) in warning
+            and DELETES_THE_COPY in warning,
+            f"Link a folder… over the installed {UPTIME} said {warning!r} first; it has to say "
+            f"{OVER_THE_INSTALLED.format(id=UPTIME, repository=config.PLUGINS_REPOSITORY)!r}… {DELETES_THE_COPY!r}",
+        )
+        expect(_link_leads(machine, UPTIME) is None and _installed_tree(machine) == installed,
+               "the installed uptime changed before the warning was confirmed")
+
+        # The warning is held to what it said (ShownPlace): the id changed under it.
+        free_leads = _link_leads(machine, LINK_ME)
+        manifest = f"{over}/manifest.json"
+        kept = f"{WORK}/{UPTIME_WORK}-manifest.json"
+        machine.ssh.run(f"cp {manifest} {kept} && sed -i '' 's/\"id\": *\"{UPTIME}\"/\"id\": \"{LINK_ME}\"/' {manifest} "
+                        f"&& grep -q '\"{LINK_ME}\"' {manifest}", f"changing the working copy's id to {LINK_ME}")
+        _press(machine, "plugins.linkFolder.confirm", f"pressing Link on the warning about {UPTIME}, the id now {LINK_ME}")
+        again = _wait_until(machine, "plugins.linkFolder.confirmText",
+                            lambda said: bool(said) and said.startswith(OVER_A_LINK.format(id=LINK_ME)), NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "the-warning-after-the-id-changed.txt")
+        expect(again is not None and again.startswith(OVER_A_LINK.format(id=LINK_ME)),
+               f"Link pressed on the warning about {UPTIME}, the id {LINK_ME} now, said {again!r}; it has to warn of "
+               f"{OVER_A_LINK.format(id=LINK_ME)!r}…")
+        expect(_link_leads(machine, LINK_ME) == free_leads and _link_leads(machine, UPTIME) is None
+               and _installed_tree(machine) == installed,
+               f"Link on a warning that no longer said what was there changed something: plugins/{LINK_ME} leads to "
+               f"{_link_leads(machine, LINK_ME)!r}, plugins/{UPTIME} to {_link_leads(machine, UPTIME)!r}")
+        machine.ssh.run(f"cp {kept} {manifest} && rm -f {kept}", f"putting the working copy's id back to {UPTIME}")
+        _press(machine, "plugins.linkFolder.confirm", f"pressing Link on the warning about {LINK_ME}, the id {UPTIME} again")
+        warning = _wait_until(machine, "plugins.linkFolder.confirmText",
+                              lambda said: bool(said) and said.startswith(f"{UPTIME} is installed"), NOTICED_SECONDS)
+        expect(warning is not None and DELETES_THE_COPY in warning, f"with the id back, the warning says {warning!r}")
+        expect(_link_leads(machine, UPTIME) is None and _installed_tree(machine) == installed,
+               "the installed uptime changed before the warning about it was confirmed")
+
+        _press(machine, "plugins.linkFolder.confirm", "confirming the link over uptime")
+        linked = _wait_for_disk(machine, lambda: _link_leads(machine, UPTIME) == chosen, OPERATION_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "after-linking-over-uptime.txt")
+        expect(linked, f"after the link over uptime was confirmed, plugins/{UPTIME} leads to {_link_leads(machine, UPTIME)!r}")
+        expect(UPTIME not in ((_read_json(machine, INSTALLED) or {}).get("plugins") or {}),
+               f"a linked folder is in installed.json: {_read_json(machine, INSTALLED)!r}")
+        after = _fingerprint(machine, "after the link over uptime", folder=over)
+        expect(after == before, f"linking changed the working copy:\n{before[:600]}\nafter:\n{after[:600]}")
+    finally:
+        scene.close()
+
+
+def check_run_log_switch(machine, check_dir, lab):
+    """**Keep a run log for linked folders**, switched on in Settings, writes every run of a linked plugin into `logs/<id>.log`.
+
+    A linked plugin of the lab's own says something on standard error every
+    run. Placed, allowed, run: with the switch as uDeck ships it there is no
+    log. Switched on in Settings → Plugins — which `settings.json` has to say —
+    and polled with the panel open, its log has entries, each saying how the run
+    ended and what it came to, with the stderr under it; and **Show the logs**
+    is offered.
+
+    **Red for**: no switch, a switch that writes nothing, a log written while it
+    is off, an entry without the run's stderr.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
+    try:
+        folder = f"{WORK}/{LOGGED}"
+        _a_plugin_folder(machine, folder, _manifest(LOGGED, "./run.sh", interval=RUN_LOG_INTERVAL),
+                         {"run.sh": _card_script("logged", stderr=LOGGED_SAYS)})
+        _link_by_hand(machine, folder, LOGGED)
+        _place(scene, LOGGED)
+        _allow_and_read_the_card(scene, LOGGED, "before the switch")
+        log = f"{UDECK_HOME}/logs/{LOGGED}.log"
+        expect(not _exists(machine, log), f"with the run log off, as uDeck ships, {log} was written")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        switch = ui.find(machine, "plugins.runLog", "finding the run log's switch")
+        if switch is None:
+            raise CheckFailed("Settings → Plugins has no run log switch (plugins.runLog)")
+        machine.click(*switch.middle, "switching the run log on")
+        saved = app.wait_for_settings(machine, "reading settings.json", lambda said: (said or {}).get("linkedFolderRunLog") is True)
+        expect((saved or {}).get("linkedFolderRunLog") is True, f"after the switch, settings.json says {saved!r}")
+        _open_the_panel(machine, "opening the panel, so that the plugin runs")
+        written = _wait_for_disk(machine, lambda: len(_log_entries(machine, log)) >= RUN_LOG_ENTRIES, RUN_LOG_SECONDS)
+        _put_the_panel_away(machine, "after the runs")
+        text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
+        try:
+            (check_dir / f"{LOGGED}.log").write_text(text)
+        except OSError:
+            pass
+        entries = _log_entries(machine, log)
+        expect(written, f"{RUN_LOG_SECONDS}s after the switch, {log} has {len(entries)} entries: {text[:400]!r}")
+        expect(all(" s: exit status 0; a card" in entry for entry in entries), f"the entries are {entries}")
+        expect(f"  | {LOGGED_SAYS}" in text, f"the run log does not carry the run's stderr: {text[:400]!r}")
+        ui.plugins_pane(machine, "opening Settings → Plugins again")
+        shown = ui.wait_for(machine, "plugins.runLog.show", "waiting for Show the logs", seconds=NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "the-run-log-switched-on.txt")
+        expect(shown is not None, "with a run log written, Settings offers no Show the logs")
+    except NotThere as error:
+        raise CheckFailed(f"Settings does not offer Show the logs once a run log is written: {error.reason}") from None
+    finally:
+        scene.close()
+
+
+def check_failed_run_on_a_fresh_card(machine, check_dir, lab):
+    """A run that fails while the card is fresh is said on the card at once — the dot and one line — and gone after the next good run.
+
+    A linked plugin of the lab's own whose card lasts `FLAKY_TTL` seconds, and
+    which fails — exit 3, a line on stderr — while a file named `fail` is in
+    its folder. Placed, allowed, its card is read; then `fail` is put there with
+    the panel open, and within a few runs the card, its values still shown,
+    has the dot beside its name and the line "Last run failed at …: the producer
+    exited with status 3" and "showing values from …". Settings → Plugins, under
+    **More**, says the same last run and the end of its stderr. `fail` taken
+    away, the panel opened again runs it, and the dot and the line are gone.
+    The panel in the screenshot has its own four buttons — refresh, Settings,
+    send away, fill the screen — and no density button.
+
+    **Red for**: a card that looks healthy while its producer fails, a dot or a
+    line that stays after the plugin recovers, Settings without the stderr, and
+    a panel with a button it should not have or without one it should.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
+    try:
+        folder = f"{WORK}/{FLAKY}"
+        _a_plugin_folder(machine, folder, _manifest(FLAKY, "./run.sh", interval=FLAKY_INTERVAL),
+                         {"run.sh": _card_script("steady", ttl=FLAKY_TTL, fail_when=FAIL, says=FLAKY_SAYS)})
+        _link_by_hand(machine, folder, FLAKY)
+        _place(scene, FLAKY)
+        _allow_and_read_the_card(scene, FLAKY, "before it fails")
+
+        _open_the_panel(machine, "opening the panel before the failure")
+        machine.ssh.run(f"touch {folder}/{FAIL}", "making the plugin fail")
+        failed = _wait_for_the_card(machine, lambda found, texts: found.get(f"card.{FLAKY}.failedDot") is not None
+                                    and any(text.startswith(LAST_RUN_FAILED) for text in texts), CARD_SECONDS)
+        machine.screenshot(check_dir, "the failed run on the fresh card")
+        dump, texts = failed
+        _keep(check_dir, "the-card-with-the-failed-run.txt", dump + "\n---\n" + "\n".join(texts))
+        line = next((text for text in texts if text.startswith(LAST_RUN_FAILED)), None)
+        expect(_identified(dump, f"card.{FLAKY}.failedDot"), f"the fresh card of a plugin that failed has no dot: {texts}")
+        expect(line is not None and line.endswith(EXITED_3), f"the fresh card says {line!r} of the failed run: {texts}")
+        expect(any(text.startswith(VALUES_FROM) for text in texts), f"the card does not say when its values are from: {texts}")
+        expect(RUNS in texts, f"the card's values are gone while it is still fresh: {texts}")
+        buttons = tuple(sorted(row.identifier for row in ui.controls(dump) if row.identifier.startswith("panel.")))
+        expect(buttons == PANEL_BUTTONS, f"the panel's own buttons are {buttons}, not {PANEL_BUTTONS} — no density button")
+
+        _put_the_panel_away(machine, "after the failure")
+        ui.plugins_pane(machine, "opening Settings → Plugins on the failed run")
+        _press(machine, f"plugin.{FLAKY}.more", "opening More beside the plugin")
+        last = _wait_until(machine, f"plugin.{FLAKY}.lastRun", lambda said: bool(said), NOTICED_SECONDS)
+        stderr = ui.reads(machine, f"plugin.{FLAKY}.stderr", "reading the end of its stderr")
+        _keep_the_pane(machine, check_dir, lab, "settings-on-the-failed-run.txt")
+        expect(last is not None and last.startswith("Last run ") and last.endswith(f"a failure: {EXITED_3}"),
+               f"Settings says of the last run {last!r}")
+        expect(stderr is not None and FLAKY_SAYS in stderr, f"Settings shows the end of its stderr as {stderr!r}")
+
+        machine.ssh.run(f"rm -f {folder}/{FAIL}", "letting the plugin recover")
+        _open_the_panel(machine, "opening the panel after the recovery")
+        recovered = _wait_for_the_card(machine, lambda found, texts: found.get(f"card.{FLAKY}.failedDot") is None
+                                       and not any(text.startswith(LAST_RUN_FAILED) for text in texts) and RUNS in texts,
+                                       CARD_SECONDS, expect_it=False)
+        machine.screenshot(check_dir, "the card after the next good run")
+        dump, texts = recovered
+        _keep(check_dir, "the-card-after-the-recovery.txt", dump + "\n---\n" + "\n".join(texts))
+        expect(not _identified(dump, f"card.{FLAKY}.failedDot")
+               and not any(text.startswith(LAST_RUN_FAILED) for text in texts),
+               f"after a good run, the card still says the run failed: {texts}")
+        _put_the_panel_away(machine, "after the recovery")
+    finally:
+        scene.close()
+
+
+def check_install_command(machine, check_dir, lab):
+    """**Install command** links `~/.local/bin/udeck-plugin` to the command inside uDeck.app, which runs; **Remove command** takes the link alone.
+
+    The command travels inside the bundle (`Contents/Helpers/udeck-plugin`,
+    Scripts/make-app.sh), and the bundle's signature covers it: `codesign
+    --verify --deep --strict` in the guest. Settings → Plugins says it is not
+    installed; **Install command** makes the link — no password asked, the
+    folder made — and `~/.local/bin/udeck-plugin --help` and `--version` run
+    and answer; the row says it is installed, and what the guest's shell
+    makes of `~/.local/bin`. **Remove command** takes the link and leaves the
+    command in the bundle. A file of somebody else's put at that place is
+    said to be there, and no button offers to replace it.
+
+    **Red for**: a bundle without the command or with a broken seal, a link
+    that leads elsewhere or does not run, a removal that takes more than the
+    link, and anything of somebody else's replaced.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        verified = machine.ssh.ask(f"codesign --verify --deep --strict --verbose=2 {app.GUEST_APPLICATIONS}/{app.APP}",
+                                   "verifying the bundle's signature in the guest")
+        _keep(check_dir, "codesign.txt", verified.stdout + verified.stderr)
+        expect(verified.returncode == 0, f"the bundle's signature does not hold: {verified.stderr.strip()[-400:]!r}")
+        expect(machine.ssh.ask(f"test -x {COMMAND_IN_THE_BUNDLE}", "looking for the command in the bundle").returncode == 0,
+               f"the bundle has no {COMMAND_IN_THE_BUNDLE}")
+        machine.ssh.run(f"rm -rf ~/.local/bin/udeck-plugin", "making sure nothing is at the command's place")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        state = _wait_until(machine, "command.state", lambda said: bool(said), NOTICED_SECONDS)
+        expect(state is not None and state.startswith(NOT_INSTALLED), f"before Install command, the row says {state!r}")
+        _press(machine, "command.install", "pressing Install command")
+        made = _wait_for_disk(machine, lambda: _link_leads(machine, None, path=COMMAND_LINK, resolve=False) == COMMAND_IN_THE_BUNDLE,
+                              OPERATION_SECONDS)
+        expect(made, f"after Install command, {COMMAND_LINK} leads to {_link_leads(machine, None, path=COMMAND_LINK, resolve=False)!r}")
+        helped = machine.ssh.ask(f"{COMMAND_LINK} --help", "running the command through the link")
+        version = machine.ssh.ask(f"{COMMAND_LINK} --version", "asking the command its version")
+        _keep(check_dir, "the-command-runs.txt", f"$ {COMMAND_LINK} --help -> {helped.returncode}\n{helped.stdout}\n"
+              f"$ {COMMAND_LINK} --version -> {version.returncode}\n{version.stdout}{version.stderr}")
+        expect(helped.returncode == 0 and helped.stdout.startswith(COMMAND_USAGE),
+               f"{COMMAND_LINK} --help ended {helped.returncode}: {helped.stdout[:200]!r} {helped.stderr[:200]!r}")
+        expect(version.returncode == 0 and version.stdout.startswith("udeck-plugin "),
+               f"{COMMAND_LINK} --version said {version.stdout!r}")
+        state = _wait_until(machine, "command.state", lambda said: bool(said) and said.startswith(INSTALLED_COMMAND), NOTICED_SECONDS)
+        shell = _wait_until(machine, "command.shell", lambda said: bool(said), NOTICED_SECONDS)
+        line = ui.reads(machine, "command.line", "reading the line the shell is told to add")
+        _keep_the_pane(machine, check_dir, lab, "the-command-installed.txt")
+        expect(state is not None and state.startswith(INSTALLED_COMMAND), f"after Install command, the row says {state!r}")
+        expect(shell is not None and shell.startswith(SHELL_SAYS), f"what the shell finds is said as {shell!r}")
+        if shell is not None and shell.startswith(SHELL_SAYS[1]):
+            expect(line == ZSH_LINE, f"the guest's zsh is told to add {line!r}, not {ZSH_LINE!r}")
+
+        _press(machine, "command.remove", "pressing Remove command")
+        gone = _wait_for_disk(machine, lambda: not _exists(machine, COMMAND_LINK) and not machine.ssh.ask(
+            f"test -L {COMMAND_LINK}", "looking for the link").returncode == 0, OPERATION_SECONDS)
+        expect(gone, f"after Remove command, {COMMAND_LINK} is still there")
+        expect(machine.ssh.ask(f"test -x {COMMAND_IN_THE_BUNDLE}", "looking in the bundle").returncode == 0,
+               "Remove command took the command out of the bundle")
+
+        machine.ssh.run(f"printf '#!/bin/sh\\necho mine\\n' > {COMMAND_LINK} && chmod 755 {COMMAND_LINK}",
+                        "putting a command of somebody else's at that place")
+        ui.click(machine, "section.general", "leaving Plugins")
+        ui.plugins_pane(machine, "opening Settings → Plugins on somebody else's file")
+        state = _wait_until(machine, "command.state", lambda said: bool(said) and NOT_UDECKS in said, NOTICED_SECONDS)
+        dump = _keep_the_pane(machine, check_dir, lab, "somebody-elses-command.txt")
+        expect(state is not None and NOT_UDECKS in state, f"over a file of somebody else's, the row says {state!r}")
+        expect(ui.element(dump, "command.install") is None, "Install command is offered over a file of somebody else's")
+        mine = machine.ssh.ask(f"cat {COMMAND_LINK}", "reading somebody else's file").stdout
+        expect(mine == "#!/bin/sh\necho mine\n", f"somebody else's file was changed: {mine!r}")
+    finally:
+        try:
+            machine.ssh.ask(f"rm -f {COMMAND_LINK}", "taking the lab's file away")
+        except LabError:
+            pass
+        scene.close()
+
+
+def check_search_path_field(machine, check_dir, lab):
+    """**Where to look for commands** changes where a bare command is found, from the next run and without a restart.
+
+    A linked plugin of the lab's own runs `lab-greet`, a bare name found in
+    neither of the default folders: its window says it will not run. Two
+    folders of the lab's own each hold a `lab-greet` that says which folder it
+    is. Added in Settings — **＋ Add a folder…**, the folder chosen in the
+    system's panel — the first is at the top of the list, `settings.json` has
+    it, and the card, allowed, says `a`; the second added is above it, and the
+    card says `b`; moved down with **↓**, `a` again. **Restore the defaults**
+    puts the default list back.
+
+    **Red for**: a field that does not change what runs, a change that needs a
+    restart, and a list that is not what settings.json says.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
+    try:
+        step = "making the lab's two folders of commands"
+        machine.ssh.run(f"rm -rf {TOOLS} && mkdir -p {TOOLS}/a {TOOLS}/b", step)
+        for which in ("a", "b"):
+            _write_file(machine, f"{TOOLS}/{which}/{GREET}", _card_script(which), executable=True)
+        folder = f"{WORK}/{GREETER}"
+        _a_plugin_folder(machine, folder, _manifest(GREETER, GREET), {})
+        _link_by_hand(machine, folder, GREETER)
+        _place(scene, GREETER)
+        _open_the_panel(machine, "opening the panel on a command not found")
+        missing = _wait_until(machine, f"window.{GREETER}.missing", lambda text: text is not None, NOTICED_SECONDS,
+                              window=ui.PANEL, present=True)
+        texts = _panel_texts(machine, "reading the panel with the command not found")
+        machine.screenshot(check_dir, "the command not found")
+        _keep(check_dir, "the-command-not-found.txt", "\n".join(texts))
+        expect(missing is not None and any(f"{GREET} was not found on" in text for text in texts),
+               f"with {GREET} on no folder of the search path, the window says {texts}")
+        _put_the_panel_away(machine, "before Settings")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        first = _add_a_folder(scene, f"{TOOLS}/a", "the first folder")
+        saved = app.wait_for_settings(machine, "reading settings.json", lambda said: ((said or {}).get("pluginExecutableSearchPath") or [""])[0] == first)
+        expect(((saved or {}).get("pluginExecutableSearchPath") or [""])[0] == first,
+               f"after the folder was added, settings.json says {saved!r}")
+        dump = _keep_the_pane(machine, check_dir, lab, "the-first-folder-added.txt")
+        shown = [ui.says(ui.element(dump, f"searchPath.folder.{index}")) for index in range(2)]
+        expect(shown[0].endswith("udeck-e2e-tools/a") and shown[1] == "/usr/local/bin",
+               f"the list's first two folders read {shown}")
+        card = _allow_and_read_the_card(scene, GREETER, "with the first folder added")
+        expect(card.get(VERSION_ROW) == "a", f"with {first} first, the card says {card}")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins again")
+        second = _add_a_folder(scene, f"{TOOLS}/b", "the second folder")
+        _keep_the_pane(machine, check_dir, lab, "both-folders-added.txt")
+        _open_the_panel(machine, "opening the panel with the second folder first")
+        card = _read_the_card(scene, GREETER, "with the second folder first", lambda card: card.get(VERSION_ROW) == "b")
+        expect(card.get(VERSION_ROW) == "b", f"with {second} first, the card says {card}")
+        _put_the_panel_away(machine, "before moving it down")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins to move it")
+        _press(machine, "searchPath.row.0", "choosing the first folder")
+        _press(machine, "searchPath.down", "moving it down")
+        saved = app.wait_for_settings(machine, "reading settings.json", lambda said: ((said or {}).get("pluginExecutableSearchPath") or [""])[:2] == [first, second])
+        expect(((saved or {}).get("pluginExecutableSearchPath") or [])[:2] == [first, second],
+               f"after ↓, settings.json says {saved!r}")
+        _open_the_panel(machine, "opening the panel with the first folder first again")
+        card = _read_the_card(scene, GREETER, "with the first folder first again", lambda card: card.get(VERSION_ROW) == "a")
+        expect(card.get(VERSION_ROW) == "a", f"with {first} moved back to the top, the card says {card}")
+        _put_the_panel_away(machine, "before restoring the defaults")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins to restore the defaults")
+        _press(machine, "searchPath.restore", "pressing Restore the defaults")
+        saved = app.wait_for_settings(machine, "reading settings.json", lambda said: first not in ((said or {}).get("pluginExecutableSearchPath") or [first]))
+        _keep_the_pane(machine, check_dir, lab, "the-defaults-restored.txt")
+        expect(first not in ((saved or {}).get("pluginExecutableSearchPath") or [first])
+               and second not in ((saved or {}).get("pluginExecutableSearchPath") or [second]),
+               f"after Restore the defaults, settings.json says {saved!r}")
+    finally:
+        scene.close()
+
+
+def check_screens_in_russian(machine, check_dir, lab):
+    """Every new part of Settings → Plugins and the failed run on a card, with uDeck in Russian.
+
+    uDeck is set to Russian before it starts (`language` in `settings.json`,
+    the guest stays English), and the lab walks what C2b added and keeps a
+    screenshot of each — for a person to read: the **Linked** row and the
+    warning before removing a link, **Link a folder…** over an installed plugin
+    and its warning, the run log switch, **Where to look for commands**,
+    **Install command**, the last run under **More**, and a failed run on a
+    fresh card. Each is found by its identifier, and its words are uDeck's
+    Russian ones (Russian.swift) — why the run failed too, on the card and in
+    the last run, whose seconds are written with a comma; nothing is confirmed.
+
+    **Red for**: a part that is not there in Russian, or that says it in
+    English.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
+    ru = ui.RUSSIAN
+    window = ru.settings_window
+    try:
+        machine.ssh.run(f"mkdir -p {UDECK_HOME}", "making uDeck's folder")
+        _write(machine, SETTINGS, {"language": ru.code}, "setting uDeck's language to Russian")
+        folder = f"{WORK}/{FLAKY}"
+        _a_plugin_folder(machine, folder, _manifest(FLAKY, "./run.sh", interval=FLAKY_INTERVAL),
+                         {"run.sh": _card_script("steady", ttl=FLAKY_TTL, fail_when=FAIL, says=FLAKY_SAYS)})
+        _link_by_hand(machine, folder, FLAKY)
+        _place(scene, FLAKY)
+        _allow_and_read_the_card(scene, FLAKY, "in Russian")
+        _open_the_panel(machine, "opening the panel before the failure")
+        machine.ssh.run(f"touch {folder}/{FAIL}", "making the plugin fail")
+        dump, texts = _wait_for_the_card(machine, lambda found, texts: found.get(f"card.{FLAKY}.failedDot") is not None
+                                         and any(text.startswith(RU_LAST_RUN_FAILED) for text in texts), CARD_SECONDS)
+        machine.screenshot(check_dir, "ru — a failed run on a fresh card")
+        _keep(check_dir, "ru-card.txt", "\n".join(texts))
+        line = next((text for text in texts if text.startswith(RU_LAST_RUN_FAILED)), None)
+        expect(line is not None and line.endswith(RU_EXITED_3), f"the card in Russian says {line!r} of the failed run: {texts}")
+        _put_the_panel_away(machine, "after the failure")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins in Russian", language=ru)
+        _the_catalogue_read(scene, since=0, commit="c1")
+        # The catalogue first: it is at the foot of the pane, and everything
+        # opened above it — More, a warning — pushes its buttons further down.
+        _install(scene, UPTIME, pane_open=True, window=window)
+        over = f"{WORK}/{UPTIME_WORK}"
+        machine.ssh.run(f"rm -rf {over} && cp -R {UDECK_HOME}/plugins/{UPTIME} {over}", "making a working copy of uptime")
+        _link_through_settings(scene, over, "over the installed uptime, in Russian", window=window)
+        warning = _wait_until(machine, "plugins.linkFolder.confirmText", lambda said: bool(said), NOTICED_SECONDS, window=window)
+        _keep_the_pane(machine, check_dir, lab, "ru-the-warning-before-linking-over-uptime.txt", window=window)
+        expect(warning is not None and RU_OVER_THE_INSTALLED in warning, f"Link a folder… in Russian says {warning!r}")
+        _press(machine, "plugins.linkFolder.cancel", "leaving it as it is", window=window)
+
+        mark = _wait_until(machine, f"plugin.{FLAKY}.mark", lambda said: said == RU_LINKED_MARK, NOTICED_SECONDS, window=window)
+        expect(mark == RU_LINKED_MARK, f"the linked row is marked {mark!r} in Russian")
+        _press(machine, f"plugin.{FLAKY}.more", "opening More", window=window)
+        last = _wait_until(machine, f"plugin.{FLAKY}.lastRun", lambda said: bool(said), NOTICED_SECONDS, window=window)
+        _keep_the_pane(machine, check_dir, lab, "ru-plugins-pane.txt", window=window)
+        expect(last is not None and RU_A_FAILURE + RU_EXITED_3 in last and re.search(r"\d+,\d\d с", last) is not None
+               and "the producer" not in last, f"the last run in Russian says {last!r}")
+        _press(machine, f"plugin.{FLAKY}.remove", "pressing Remove", window=window)
+        warning = _wait_until(machine, f"plugin.{FLAKY}.confirmText", lambda said: bool(said), NOTICED_SECONDS, window=window)
+        _keep_the_pane(machine, check_dir, lab, "ru-the-warning-before-removing-the-link.txt", window=window)
+        expect(warning is not None and RU_ONLY_THE_LINK in warning, f"the warning in Russian says {warning!r}")
+
+        machine.ssh.run("rm -rf ~/.local/bin/udeck-plugin", "making sure nothing is at the command's place")
+        _press(machine, "command.install", "pressing Install command", window=window)
+        state = _wait_until(machine, "command.state", lambda said: bool(said) and said.startswith(RU_INSTALLED_COMMAND),
+                            NOTICED_SECONDS, window=window)
+        _wait_until(machine, "command.shell", lambda said: bool(said), NOTICED_SECONDS, window=window)
+        dump = _keep_the_pane(machine, check_dir, lab, "ru-search-path-and-the-command.txt", window=window)
+        expect(state is not None and state.startswith(RU_INSTALLED_COMMAND), f"the command's row in Russian says {state!r}")
+        for part in ("plugins.runLog", "plugins.linkFolder", "searchPath.row.0", "searchPath.add", "searchPath.restore"):
+            expect(ui.element(dump, part) is not None, f"Settings → Plugins in Russian has no {part}")
+        _press(machine, "command.remove", "pressing Remove command", window=window)
+    finally:
+        try:
+            machine.ssh.ask("rm -f ~/.local/bin/udeck-plugin", "taking the command away")
+        except LabError:
+            pass
         scene.close()
 
 
@@ -1080,9 +1625,9 @@ def _exists(machine, path, step="looking in ~/.udeck"):
     return machine.ssh.ask(f"test -e {path}", step).returncode == 0
 
 
-def _keep_the_pane(machine, check_dir, lab, name):
+def _keep_the_pane(machine, check_dir, lab, name, window=ui.SETTINGS_WINDOW):
     """The settings window's walk, kept beside the report, and returned."""
-    dump = _read_the_screen(machine, "reading Settings → Plugins")
+    dump = _read_the_screen(machine, "reading Settings → Plugins", window)
     try:
         (check_dir / name).write_text(dump)
     except OSError as error:
@@ -1091,23 +1636,23 @@ def _keep_the_pane(machine, check_dir, lab, name):
     return dump
 
 
-def _install(scene, plugin, pane_open=False):
+def _install(scene, plugin, pane_open=False, window=ui.SETTINGS_WINDOW):
     """**Install** pressed on a catalogue row: the record it left, and uDeck's requests from the click on."""
     machine = scene.machine
     if not pane_open:
         ui.plugins_pane(machine, "opening Settings → Plugins")
     before = _count(scene)
-    record = _operate(scene, f"catalogue.{plugin}.install", f"installing {plugin}", lambda r: r is not None, plugin)
+    record = _operate(scene, f"catalogue.{plugin}.install", f"installing {plugin}", lambda r: r is not None, plugin, window)
     asked = _since(scene, before, "reading the fake's log")
     if record is None:
-        problem = ui.reads(machine, f"catalogue.{plugin}.problem", "reading why it was not installed")
+        problem = ui.reads(machine, f"catalogue.{plugin}.problem", "reading why it was not installed", window)
         raise CheckFailed(f"Install on {plugin} put nothing in installed.json within {OPERATION_SECONDS}s; the row says {problem!r}; uDeck asked {described(asked)}")
     return record, asked
 
 
-def _operate(scene, identifier, what, done, plugin=UPTIME):
+def _operate(scene, identifier, what, done, plugin=UPTIME, window=ui.SETTINGS_WINDOW):
     """A button pressed, and `installed.json`'s record of `plugin` once `done` says it is what the press was for."""
-    _press(scene.machine, identifier, what)
+    _press(scene.machine, identifier, what, window)
     record = None
     deadline = scene.machine.clock() + OPERATION_SECONDS
     while True:
@@ -1292,8 +1837,13 @@ def _read_the_card(scene, plugin, label, ready):
 
 def _linked_manifest(run, interval=2):
     """The manifest of the lab's linked plugin, running `run` every `interval` seconds. It asks for `exec: sysctl`, as the fixture does, so that its card asks for consent."""
+    return _manifest(LINKED_CARD, run, interval)
+
+
+def _manifest(plugin, run, interval=2):
+    """The manifest of a plugin of the lab's own, `plugin`, running `run` every `interval` seconds, asking for `exec: sysctl`."""
     return json.dumps({
-        "id": LINKED_CARD, "name": "Linked card", "version": "1.0.0", "api": 1, "kind": "poll",
+        "id": plugin, "name": plugin.replace("-", " ").capitalize(), "version": "1.0.0", "api": 1, "kind": "poll",
         "run": [run], "interval": interval, "timeout": 1, "permissions": {"exec": ["sysctl"]},
     }, indent=1)  # fmt: skip
 
@@ -1307,13 +1857,26 @@ def _runs_counted(machine, step):
         raise CheckFailed(f"the linked plugin's count of its runs {step} is {said.stdout.strip()!r}: {said.stderr.strip()!r}") from None
 
 
-def _card_script(version):
-    """A producer whose card says, like the fixture's, how many times it ran — counted in its cache, uDeck's — and `version`."""
+def _card_script(version, stderr=None, ttl=None, fail_when=None, says=None):
+    """A producer whose card says, like the fixture's, how many times it ran — counted in its cache, uDeck's — and `version`.
+
+    `stderr` is a line it says on standard error every run; `ttl`, how long its
+    card lasts; `fail_when`, a file whose presence in its folder makes it fail
+    instead — `says` on standard error, and exit 3.
+    """
+    failing = (
+        f'if [ -f "$UDECK_PLUGIN_DIR/{fail_when}" ]; then echo {shlex.quote(says or "failing")} >&2; exit 3; fi\n'
+        if fail_when else ""
+    )
+    saying = f"echo {shlex.quote(stderr)} >&2\n" if stderr else ""
+    lasting = f", \"ttl\": {ttl}" if ttl else ""
     return (
         "#!/bin/sh\n"
-        'count=$(( $(cat "$UDECK_CACHE_DIR/runs" 2>/dev/null || echo 0) + 1 ))\n'
+        + failing
+        + 'count=$(( $(cat "$UDECK_CACHE_DIR/runs" 2>/dev/null || echo 0) + 1 ))\n'
         'echo "$count" > "$UDECK_CACHE_DIR/runs"\n'
-        f"printf '{{\"rows\": [{{\"kv\": [\"{RUNS}\", \"%s\"]}}, {{\"kv\": [\"{VERSION_ROW}\", \"{version}\"]}}]}}' \"$count\"\n"
+        + saying
+        + f"printf '{{\"rows\": [{{\"kv\": [\"{RUNS}\", \"%s\"]}}, {{\"kv\": [\"{VERSION_ROW}\", \"{version}\"]}}]{lasting}}}' \"$count\"\n"
     )
 
 
@@ -1343,9 +1906,8 @@ def _write_into_the_working_copy(machine, name, text, executable=False):
     machine.ssh.run(f"printf %s {shlex.quote(text)} > {path}.new{mode} && mv {path}.new {path}", f"writing {name} in the working copy")
 
 
-def _fingerprint(machine, step):
+def _fingerprint(machine, step, folder=f"{WORK}/{LINKED_CARD}"):
     """Every name in the working copy, what each link says, and every file's hash: the same text is the same folder."""
-    folder = f"{WORK}/{LINKED_CARD}"
     said = machine.ssh.ask(
         f"cd {folder} && find . -print | LC_ALL=C sort && find . -type l -exec readlink {{}} \\; && "
         "find . -type f -exec shasum -a 256 {} + | LC_ALL=C sort",
@@ -1369,3 +1931,106 @@ def _windows_of(layout, plugin):
 def _the_window(machine, plugin, step):
     windows = _windows_of(_read_json(machine, LAYOUT, step), plugin)
     return windows[0] if len(windows) == 1 else windows
+
+
+def _a_plugin_folder(machine, folder, manifest, scripts):
+    """A plugin folder of the lab's own at `folder`, made anew: its manifest, and each script executable."""
+    machine.ssh.run(f"rm -rf {folder} && mkdir -p {folder}", f"making {folder}")
+    _write_file(machine, f"{folder}/manifest.json", manifest)
+    for name, text in scripts.items():
+        _write_file(machine, f"{folder}/{name}", text, executable=True)
+
+
+def _write_file(machine, path, text, executable=False):
+    """A file written whole, as an editor saves one: beside it, then moved over it."""
+    mode = f" && chmod 755 {path}.new" if executable else ""
+    machine.ssh.run(f"printf %s {shlex.quote(text)} > {path}.new{mode} && mv {path}.new {path}", f"writing {path}")
+
+
+def _link_by_hand(machine, folder, plugin):
+    """`folder` linked into the plugins folder as `plugin`, the way `udeck-plugin link` makes the link."""
+    machine.ssh.run(f"mkdir -p {UDECK_HOME}/plugins && ln -s \"$(cd {folder} && pwd -P)\" {UDECK_HOME}/plugins/{plugin}",
+                    f"linking {folder} into uDeck by hand")
+
+
+def _guest_path(machine, folder, step):
+    """`folder` as an absolute path in the guest, every link on the way resolved — what the panel is given."""
+    said = machine.ssh.run(f"cd {folder} && pwd -P", step).stdout.strip()
+    if not said.startswith("/"):
+        raise LabError(step, f"{folder} is not a folder in the guest: {said!r}")
+    return said
+
+
+def _choose_through(scene, button, folder, label, window=ui.SETTINGS_WINDOW):
+    """`button` pressed, and `folder` chosen in the folder panel it opens: the path chosen, as the guest spells it."""
+    machine = scene.machine
+    path = _guest_path(machine, folder, f"finding {folder}: {label}")
+    _press(machine, button, f"pressing {button}: {label}", window)
+    machine.sleep(config.SETTLE_SECONDS)
+    machine.screenshot(scene.check_dir, f"the folder panel: {label}")
+    try:
+        (scene.check_dir / f"windows-{label.replace(' ', '-')}.txt").write_text("\n".join(ui.windows(machine, "reading uDeck's windows")))
+    except (OSError, LabError):
+        pass
+    ui.choose_folder(machine, path, f"choosing {path} in the folder panel: {label}")
+    machine.sleep(config.SETTLE_SECONDS)
+    return path
+
+
+def _link_through_settings(scene, folder, label, window=ui.SETTINGS_WINDOW):
+    """**Link a folder…** on `folder`: the path chosen."""
+    return _choose_through(scene, "plugins.linkFolder", folder, label, window)
+
+
+def _add_a_folder(scene, folder, label):
+    """**＋ Add a folder…** under Where to look for commands, on `folder`: the path chosen."""
+    return _choose_through(scene, "searchPath.add", folder, label)
+
+
+def _link_leads(machine, plugin, path=None, resolve=True):
+    """Where the link `plugins/<plugin>` — or `path` — leads, as it says it; None when it is not a link."""
+    at = path or f"{UDECK_HOME}/plugins/{plugin}"
+    said = machine.ssh.ask(f"test -L {at} && readlink {at}", f"reading the link {at}")
+    return said.stdout.strip() if said.returncode == 0 and said.stdout.strip() else None
+
+
+def _installed_tree(machine):
+    """The installed `uptime` as its files and their hashes, or None when it is not a folder."""
+    folder = f"{UDECK_HOME}/plugins/{UPTIME}"
+    if machine.ssh.ask(f"test -d {folder} && ! test -L {folder}", "looking at the installed uptime").returncode != 0:
+        return None
+    return _fingerprint(machine, "reading the installed uptime", folder=folder)
+
+
+def _wait_for_the_card(machine, ready, seconds, expect_it=True):
+    """The panel's identified walk and its texts once `ready(found, texts)` says so — or as they last were."""
+    deadline = machine.clock() + seconds
+    while True:
+        try:
+            dump = ui.identified(machine, "reading the panel", ui.PANEL, depth=ui.MAX_DEPTH)
+            texts = _panel_texts(machine, "reading the panel's texts")
+        except LabError:
+            _open_the_panel(machine, "opening the panel again")
+            dump = ui.identified(machine, "reading the panel", ui.PANEL, depth=ui.MAX_DEPTH)
+            texts = _panel_texts(machine, "reading the panel's texts")
+        found = {row.identifier: row for row in ui.controls(dump) if row.identifier}
+        if ready(found, texts) or machine.clock() >= deadline:
+            return dump, texts
+        machine.sleep(1)
+
+
+def _identified(dump, identifier):
+    return ui.element(dump, identifier) is not None
+
+
+def _keep(check_dir, name, text):
+    try:
+        (check_dir / name).write_text(text)
+    except OSError:
+        pass
+
+
+def _log_entries(machine, log):
+    """The entries of a run log: its lines that are not a run's stderr under one."""
+    text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
+    return [line for line in text.splitlines() if line and not line.startswith("  ")]

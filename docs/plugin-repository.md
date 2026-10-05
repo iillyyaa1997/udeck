@@ -1012,7 +1012,20 @@ silently:
 **Over a folder of your own**, the row offers **Replace…**, which says what
 will happen: *"A folder of your own named uptime is in ~/.udeck/plugins.
 Installing moves it to the Trash and puts the repository's uptime in its
-place."*
+place."* **Over a linked folder** — a link to a working copy — it says that only
+the link goes: *"uptime here is a link to ~/src/uptime. Installing takes the
+link away — the folder it leads to stays exactly as it is — and puts the
+repository's uptime in its place."*
+
+**Link a folder…** in Settings puts a link to a working copy where something
+already is only after it has said what becomes of it, by the same rule: over
+a plugin uDeck installed, *"uptime is installed from
+github.com/iillyyaa1997/udeck-plugins. Linking ~/src/uptime in its place
+deletes the installed copy — it is exactly what uDeck installed — and keeps its
+windows, settings and your permission decision."* (or that the copy, holding
+changes of yours, goes to the Trash); over a folder of your own, that it goes
+to the Trash; over another link, that the link is pointed at the new folder and
+the one it led to stays as it is.
 
 > **Later — stages 3 and 4.** Over a copy from another source, a branch or a
 > pull request, the same confirmation names both sources, and the Settings row
@@ -1082,7 +1095,24 @@ whose plugin will not run), and **Remove** — and, when it says yes, shows
 *"Your changes to uptime will be moved to the Trash and replaced with 1.0.0."*
 (for **Remove**, that the folder goes to the Trash) before anything happens.
 The rule is `OperatorsWork` in UDeckCore, and the installer decides the Trash
-by the same function.
+by the same function. A linked folder's link never goes to the Trash — it is
+unlinked, and the folder it leads to is not touched — so **Remove** on a linked
+plugin says that instead: *"Remove the link uptime? Only the link goes: the
+folder it leads to, ~/src/uptime, stays exactly as it is."* Which warning a
+button shows is `PlaceWarning` in UDeckCore, tested there.
+
+A warning's button acts on what the warning said, and on nothing else. It
+carries what was shown — what is at the plugin's place (a link and where it
+leads, the operator's work, uDeck's own copy, nothing) and the version that
+comes — and when it is pressed, the disk and the catalogue are asked again: if
+anything differs, byte for byte, nothing is done and the warning says what is
+there now (or, when nothing there needs a warning any more, the button does
+what it does unwarned). **Link a folder…** holds its warning the same way, to
+the id the manifest gives, what is at that id and whether it goes to the
+Trash: a manifest whose id is changed while the warning is up gets a warning
+of its own before anything of the new id is touched. **Install** on a row that
+said nothing is there warns first of a folder or a link put there since. The
+rule is `ShownPlace` in UDeckCore, tested there.
 
 ### Earlier versions
 
@@ -1336,7 +1366,13 @@ guest's `~/.udeck` over SSH.
 | `plugins.window-survives-a-broken-manifest` | A placed plugin's manifest broken over SSH keeps its window in `layout.json`, which says what is wrong; fixed, the card comes back without being added again. |
 | `plugins.every-replacement-warns-first` | Over a folder with a `.env` put in over SSH — for **Reinstall**, also a line appended to `uptime.sh` — **Reinstall**, **Update** on the catalogue row, **Back to 1.0.0** and **Remove** each say first that the copy goes to the Trash; confirmed, each does what it says, and every `.env` is in the guest's Trash and no longer in the folder. |
 | `plugins.an-update-ends-a-running-action` | With the fixture card's **Hold** action running, **Update** ends it before it replaces the folder: the action wrote that it was ended and never that its folder changed under it, nothing of it runs afterwards, and 1.1.0 is in place. |
-| `plugins.linked-folder` | A plugin in a working copy outside `~/.udeck` — beside a `.git`, a `.env`, files named like `installed.json` and `cache/`, and a link — linked into `~/.udeck/plugins` is listed: placed and allowed, its card comes; its manifest changed in the working copy to run another producer, the card says that producer's word; polled every 5 s, with a file in the working copy touched every 3 s for 21 s and the panel open, it runs at least three times; after **Remove** the link is gone, uDeck's cache of it too, and the working copy is byte for byte as it was, its `.env` not in the Trash. |
+| `plugins.linked-folder` | A plugin in a working copy outside `~/.udeck` — beside a `.git`, a `.env`, files named like `installed.json` and `cache/`, and a link — linked into `~/.udeck/plugins` is listed: placed and allowed, its card comes; its manifest changed in the working copy to run another producer, the card says that producer's word; polled every 5 s, with a file in the working copy touched every 3 s for 21 s and the panel open, it runs at least three times; in Settings its row is marked **Linked** and says where the link leads, and **Remove** says first that only the link goes and names the folder, with no word of the Trash; after it the link is gone, uDeck's cache of it too, and the working copy is byte for byte as it was, its `.env` not in the Trash. |
+| `plugins.link-a-folder` | **Link a folder…** in Settings → Plugins, the folder chosen in the system's folder panel by typing its path (⌘⇧G): a working copy whose id nothing has is linked at once — the outcome says *Linked <id> to …*, `plugins/<id>` leads to the folder, the row says **Linked**; one with `uptime`'s id, over the `uptime` just installed from the catalogue, first says *"uptime is installed from github.com/iillyyaa1997/udeck-plugins. Linking … deletes the installed copy"* and changes nothing; the working copy's id changed to `link-me` while that warning is up, **Link** warns of `link-me` — *"link-me is a link to …"* — and changes nothing, and with the id back to `uptime` it warns of `uptime` again; confirmed, `plugins/uptime` leads to the working copy, `installed.json` has no `uptime`, and the working copy is byte for byte as it was. |
+| `plugins.run-log-switch` | A linked plugin that says a line on stderr every run: with the switch as shipped, no `logs/<id>.log`; **Keep a run log for linked folders** switched on in Settings — `settings.json` says `linkedFolderRunLog: true` — and the panel open, the log has at least two entries, each *exit status 0; a card*, with the stderr line under it, and **Show the logs** is offered. |
+| `plugins.failed-run-on-a-fresh-card` | A linked plugin whose card lasts 300 s fails (exit 3, a line on stderr) while a file is in its folder: with the panel open, the fresh card keeps its values and gets the amber dot by its name and the lines *Last run failed at …: the producer exited with status 3* and *showing values from …*; Settings → Plugins, under **More**, says *Last run … a failure: …* and the end of its stderr; the file taken away and the panel opened again, the dot and the line are gone. The panel's own buttons are refresh, Settings, send away and fill the screen — no density button. |
+| `plugins.install-command` | The bundle carries `Contents/Helpers/udeck-plugin` and `codesign --verify --deep --strict` holds in the guest; the row says it is not installed; **Install command** makes `~/.local/bin/udeck-plugin` a link to it, and `--help` and `--version` run through the link; the row says it is installed and what the guest's zsh makes of `~/.local/bin` (the line to add, when it does not look there); **Remove command** takes the link and leaves the command in the bundle; a file of somebody else's at that place is said, left as it is, and not offered **Install command**. |
+| `plugins.search-path-field` | A linked plugin running the bare `lab-greet`, on no folder of the default list: its window says it was not found. **＋ Add a folder…** (the folder chosen in the panel) puts a folder of the lab's at the top of **Where to look for commands** and in `settings.json`, and the card, allowed, says that folder's word; a second folder added says its word; **↓** on it, the first folder's word again — each from the next run, without a restart; **Restore the defaults** puts the default list back in `settings.json`. |
+| `plugins.screens-in-russian` | With uDeck in Russian (`language` in `settings.json`), a failed run on a fresh card, the **Linked** row and its Remove warning, **Link a folder…** over the installed `uptime` and its warning, the last run under **More**, the run log switch, **Where to look for commands** and **Install command** are each there and say uDeck's Russian words — why the run failed too, *программа плагина завершилась с кодом 3*, with the last run's seconds written with a comma; a screenshot of each is kept for a person to read. |
 
 ### Unit tests
 
@@ -1386,7 +1422,19 @@ never the network. What they cover:
 * the rate-limit state: blocking, resetting, the reserve for unrequested
   refreshes;
 * `installed.json`: reading and writing, and the status computation;
-* which windows the layout keeps.
+* which windows the layout keeps;
+* what Settings → Plugins decides before it draws: which warning **Remove**,
+  **Replace…** and **Link a folder…** show over a link, the operator's work
+  and uDeck's own copy (`PlaceWarning`); what **Where to look for commands**
+  does to the list and says of each folder (`SearchPathList`); **Install
+  command** on a bundle and a `~/.local/bin` of the test's own — installed,
+  another copy's link, somebody else's file left alone — and a shell of the
+  test's own asked for its `PATH` (`CommandInstall`, `ShellPath`) — a file put
+  at the command's place between the look and the rename, and in place of the
+  link before Remove takes it, left there and said; where uDeck runs from
+  (`BundlePlace`); when a warning's button acts and when it says what is there
+  now instead (`ShownPlace`); and when a failed run is said on a fresh card
+  (`PluginSnapshot.failureOnAFreshCard`).
 
 ---
 

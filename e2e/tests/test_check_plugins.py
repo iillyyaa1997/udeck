@@ -8,6 +8,7 @@ missing, a window moved, a catalogue that fetched one file more.
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -205,3 +206,84 @@ def test_a_control_says_its_value_its_title_or_its_description():
     assert ui.says(ui.element(dump, "plugin.uptime.mark")) == "Verified"
     assert ui.says(ui.element(dump, "plugin.x.mark")) == "Modified locally"
     assert ui.element(dump, "nothing") is None and ui.says(None) == ""
+
+
+def _source(*parts):
+    return (Path(__file__).resolve().parents[2].joinpath(*parts)).read_text()
+
+
+def test_the_words_the_c2b_checks_wait_for_are_uDecks_own():
+    """What the checks of Linked, Link a folder…, the failed run, the command and the search path read, in English.swift."""
+    english = _source("Sources", "UDeckCore", "Localization", "English.swift")
+    assert f'case .pluginMarkLinked: "{checks.LINKED_MARK}"' in english
+    assert checks.ONLY_THE_LINK in english
+    assert checks.LINKED_TO.format(id="\\(id)") + "\\(target)." in english
+    assert checks.OVER_THE_INSTALLED.format(id="uptime", repository="o/r") == "uptime is installed from github.com/o/r. Linking "
+    assert '"\\(id) is installed from \\(source). Linking \\(folder) in its place ' + checks.DELETES_THE_COPY in english
+    assert f'"{checks.LAST_RUN_FAILED}\\(at): \\(self(.failureReason(reason)))"' in english
+    assert '"\\(id) is a link to \\(destination) now.' in english and checks.OVER_A_LINK.format(id="\\(id)") in english
+    assert f'"{checks.VALUES_FROM}\\(time)"' in english
+    assert f'"{checks.NOT_INSTALLED} Install command puts' in english
+    assert f'"{checks.INSTALLED_COMMAND}\\(path) leads' in english
+    assert checks.NOT_UDECKS in english
+    assert f'"{checks.SHELL_SAYS[0]}\\(folder)' in english
+    assert '"Your shell (\\(shell)) does not look in \\(folder).' in english
+    assert checks.EXITED_3.replace("3", "\\(code)") in _source(
+        "Packages", "UDeckPluginFormat", "Sources", "UDeckPluginFormat", "Running", "PollExecution.swift")
+
+
+def test_the_russian_words_are_uDecks_own():
+    russian = _source("Sources", "UDeckCore", "Localization", "Russian.swift")
+    assert f'"{checks.RU_LAST_RUN_FAILED}\\(at) упал' in russian
+    assert f'"{checks.RU_EXITED_3.replace("3", "")}\\(code)"' in russian
+    assert f'"{checks.RU_A_FAILURE}\\(self(.failureReason(failure)))"' in russian
+    assert f'case .pluginMarkLinked: "{checks.RU_LINKED_MARK}"' in russian
+    assert checks.RU_ONLY_THE_LINK in russian
+    assert '"\\(id) установлен из \\(source).' in russian
+    assert checks.RU_OVER_THE_INSTALLED == f"uptime установлен из github.com/{checks.config.PLUGINS_REPOSITORY}"
+    assert f'"{checks.RU_INSTALLED_COMMAND}\\(path)' in russian
+    assert f'"{ui.RUSSIAN.settings_item}"' in russian and f'"{ui.RUSSIAN.settings_window}"' in russian
+
+
+def test_the_panel_buttons_the_check_expects_are_the_panels_own():
+    """plugins.failed-run-on-a-fresh-card reads the panel's buttons by the identifiers WorkspaceView gives them."""
+    workspace = _source("Sources", "UDeckKit", "Views", "WorkspaceView.swift")
+    assert sorted(re.findall(r'identifier: "(panel\.[A-Za-z]+)"', workspace)) == list(checks.PANEL_BUTTONS)
+    assert "rectangle.compress.vertical" not in workspace and "controlDensity" not in workspace
+
+
+def test_the_command_is_where_the_bundle_and_uDeck_put_it():
+    """plugins.install-command looks for the command where make-app.sh puts it and CommandInstall links to."""
+    assert checks.COMMAND_IN_THE_BUNDLE == "/Applications/uDeck.app/Contents/Helpers/udeck-plugin"
+    assert 'cp "$COMMAND" "$APP/Contents/Helpers/udeck-plugin"' in _source("Scripts", "make-app.sh")
+    command = _source("Sources", "UDeckCore", "Command", "CommandInstall.swift")
+    assert 'static let inBundle = "Contents/Helpers/udeck-plugin"' in command
+    assert 'case "zsh": return ("~/.zshrc", #"' + checks.ZSH_LINE + '"#)' in command
+    assert checks.COMMAND_LINK == "~/.local/bin/udeck-plugin"
+    assert checks.COMMAND_USAGE in _source("Packages", "UDeckPluginFormat", "Sources", "UDeckPluginCommand", "Command.swift")
+
+
+def test_the_flaky_plugin_fails_only_while_the_file_is_there_and_its_card_outlives_the_wait():
+    script = checks._card_script("steady", ttl=checks.FLAKY_TTL, fail_when=checks.FAIL, says=checks.FLAKY_SAYS)
+    first, failing = script.splitlines()[:2]
+    assert first == "#!/bin/sh"
+    assert failing == f'if [ -f "$UDECK_PLUGIN_DIR/{checks.FAIL}" ]; then echo \'{checks.FLAKY_SAYS}\' >&2; exit 3; fi'
+    assert f'"ttl": {checks.FLAKY_TTL}' in script
+    # Fresh for the whole of the check's waits: the card is read, then the
+    # failure waited for, then Settings, all well inside the card's ttl.
+    assert checks.FLAKY_INTERVAL * 3 + checks.CARD_SECONDS * 2 + checks.NOTICED_SECONDS < checks.FLAKY_TTL
+    manifest = json.loads(checks._manifest(checks.FLAKY, "./run.sh", interval=checks.FLAKY_INTERVAL))
+    assert manifest["timeout"] < manifest["interval"] == checks.FLAKY_INTERVAL
+
+
+def test_the_logged_plugin_says_something_on_stderr_and_runs_often_enough():
+    script = checks._card_script("logged", stderr=checks.LOGGED_SAYS)
+    assert f"echo '{checks.LOGGED_SAYS}' >&2" in script
+    assert checks.RUN_LOG_INTERVAL * (checks.RUN_LOG_ENTRIES + 1) < checks.RUN_LOG_SECONDS
+
+
+def test_the_greeter_runs_a_bare_name_and_each_folder_says_which_it_is():
+    manifest = json.loads(checks._manifest(checks.GREETER, checks.GREET))
+    assert manifest["run"] == [checks.GREET] and "/" not in checks.GREET
+    for which in ("a", "b"):
+        assert f'"{checks.VERSION_ROW}", "{which}"' in checks._card_script(which)

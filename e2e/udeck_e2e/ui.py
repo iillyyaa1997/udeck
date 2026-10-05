@@ -329,7 +329,23 @@ return report as text
 # for the rest; and it stops at `%(depth)d`, because the pane is flat — every
 # row of it is a child of one scroll area — and asking a leaf for children it
 # does not have is the same tenth of a second each. The lines are `_TREE`'s.
+#
+# A value of several lines — the end of a plugin's standard error, under More —
+# is printed on one, each line break as `⏎` (`LINE_BREAK`): the line that
+# describes a control is one line, and `controls` refuses one that is not.
+LINE_BREAK = "⏎"
+
 _IDENTIFIED = """
+on oneLine(t)
+  set saved to text item delimiters
+  set text item delimiters to {return & linefeed, linefeed, return}
+  set parts to text items of t
+  set text item delimiters to "⏎"
+  set t to parts as text
+  set text item delimiters to saved
+  return t
+end oneLine
+
 on txt(v)
   if v is missing value then return ""
   try
@@ -338,9 +354,9 @@ on txt(v)
       repeat with one in v
         set t to t & (one as text) & ";"
       end repeat
-      return t
+      return my oneLine(t)
     end if
-    return v as text
+    return my oneLine(v as text)
   on error
     return "?"
   end try
@@ -603,7 +619,7 @@ def guest_language(machine: Any, step: str) -> str:
 
 
 def open_settings_and_wait(machine: Any, step: str, item: str = "Settings…",
-                           seconds: float = config.UI_APPEAR_SECONDS) -> None:
+                           seconds: float = config.UI_APPEAR_SECONDS, window: str = SETTINGS_WINDOW) -> None:
     """The settings window, opened and there — pressing the menu item again if it is not.
 
     The press is one shot, and it is made moments after uDeck was launched: a
@@ -622,15 +638,18 @@ def open_settings_and_wait(machine: Any, step: str, item: str = "Settings…",
     answers with and the titles its menu does offer, so that what a person reads
     is a lab that cannot reach the screen rather than a uDeck that would not
     open it.
+
+    `window` is the window's title, translated too: a check that runs uDeck in
+    another language names both (`RUSSIAN`).
     """
     deadline = machine.clock() + seconds
     last = ""
     while True:
         try:
             open_settings(machine, step, item)
-            if SETTINGS_WINDOW in windows(machine, step):
+            if window in windows(machine, step):
                 return
-            last = f"'{SETTINGS_WINDOW}' is not among uDeck's windows"
+            last = f"'{window}' is not among uDeck's windows"
         except LabError as error:
             last = error.reason
         if machine.clock() >= deadline:
@@ -917,17 +936,18 @@ return ((item 1 of p) as text) & "," & ((item 2 of p) as text) & "," & ((item 1 
 """
 
 
-def place_settings(machine: Any, step: str, frame: tuple[int, int, int, int] = SETTINGS_FRAME) -> Element:
+def place_settings(machine: Any, step: str, frame: tuple[int, int, int, int] = SETTINGS_FRAME,
+                   window: str = SETTINGS_WINDOW) -> Element:
     """The settings window moved and sized to `frame`, and where it says it ended up."""
     x, y, width, height = frame
     script = _PLACE % {
         "process": _applescript("%(p)s", p=PROCESS),
-        "window": _applescript("%(w)s", w=SETTINGS_WINDOW),
+        "window": _applescript("%(w)s", w=window),
         "x": x, "y": y, "width": width, "height": height,
     }  # fmt: skip
     answer = ask(machine, script, step)
     try:
-        placed = parse_element(SETTINGS_WINDOW, answer)
+        placed = parse_element(window, answer)
     except ValueError as error:
         raise LabError(step, str(error)) from None
     if placed is None:
@@ -939,7 +959,7 @@ def place_settings(machine: Any, step: str, frame: tuple[int, int, int, int] = S
 PLUGINS_CLICKS = 3
 
 
-def plugins_pane(machine: Any, step: str) -> Element:
+def plugins_pane(machine: Any, step: str, language: "Language | None" = None) -> Element:
     """The settings window, open on Plugins and placed so that its long scroll fits.
 
     **The section is clicked again when the first click did not take.** Measured
@@ -950,19 +970,67 @@ def plugins_pane(machine: Any, step: str) -> Element:
     chooses a row in it. A pane that never comes is still the lab's failure,
     after `PLUGINS_CLICKS` clicks: every one of them landed on the row the
     accessibility API placed.
+
+    `language` is uDeck's when it is not English (`RUSSIAN`): the menu item and
+    the window's title are translated, and every identifier is not.
     """
-    open_settings_and_wait(machine, step)
-    wait_for(machine, f"section.{PLUGINS}", f"{step}: waiting for the settings window")
+    item, window = (language.settings_item, language.settings_window) if language else ("Settings…", SETTINGS_WINDOW)
+    open_settings_and_wait(machine, step, item=item, window=window)
+    wait_for(machine, f"section.{PLUGINS}", f"{step}: waiting for the settings window", window)
     for attempt in range(1, PLUGINS_CLICKS + 1):
-        click(machine, f"section.{PLUGINS}", f"{step}: choosing {PLUGINS.capitalize()}")
+        click(machine, f"section.{PLUGINS}", f"{step}: choosing {PLUGINS.capitalize()}", window)
         try:
-            wait_for(machine, "catalogue.enabled", f"{step}: waiting for the Plugins section",
+            wait_for(machine, "catalogue.enabled", f"{step}: waiting for the Plugins section", window,
                      seconds=config.UI_CHANGE_SECONDS)  # fmt: skip
             break
         except NotThere:
             if attempt == PLUGINS_CLICKS:
                 raise
-    return place_settings(machine, step)
+    return place_settings(machine, step, window=window)
+
+
+@dataclass(frozen=True)
+class Language:
+    """uDeck in a language other than the guest's English: the two translated names the lab reaches the settings window by."""
+
+    code: str
+    settings_item: str
+    settings_window: str
+
+
+# uDeck's own words for them, in Russian.swift: `menuSettings` and `settingsWindowTitle`.
+RUSSIAN = Language(code="ru", settings_item="Настройки…", settings_window="Настройки uDeck")
+
+
+# --- The system's folder panel ------------------------------------------------------
+
+_CHOOSE_FOLDER = """
+tell application "System Events" to tell process %(process)s
+  set frontmost to true
+  keystroke "g" using {command down, shift down}
+  delay 1.5
+  keystroke %(path)s
+  delay 1
+  key code 36
+  delay 2
+  key code 36
+end tell
+return "chosen"
+"""
+
+
+def choose_folder(machine: Any, path: str, step: str) -> None:
+    """In the folder panel uDeck has open, `path` chosen the way a person types one.
+
+    ⌘⇧G opens the panel's "Go to the folder" field, the path is typed into it,
+    Return goes there, and Return again presses the panel's own default button,
+    which chooses the folder it is in. All of it from inside the guest through
+    System Events, as every chord here is made (`panel.press_the_chord`): a chord
+    over VNC does not survive the trip. What the panel did is for the caller to
+    read back — the link made, the folder in the list — never this function's to
+    assume.
+    """
+    ask(machine, _applescript(_CHOOSE_FOLDER, process=PROCESS, path=path), step, seconds=config.UI_APPEAR_SECONDS)
 
 
 def element(dump: str, identifier: str, step: str = "reading the screen") -> Element | None:
