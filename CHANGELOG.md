@@ -10,6 +10,91 @@ for what that promises.
 
 ## [Unreleased]
 
+- **Settings → Plugins for somebody writing a plugin.** A linked plugin's row
+  is marked **Linked** and says where its link leads (or that uDeck does not
+  follow it), and **Remove** on it says first that only the link goes — the
+  folder it leads to stays exactly as it is — as **Replace…** on a catalogue
+  row over it does. **Link a folder…** links a working copy chosen in the
+  system's folder panel: an id nothing has at once, and over a plugin uDeck
+  installed, a folder of your own or another link only after it has said what
+  becomes of what is there — deleted when it is exactly what uDeck installed,
+  to the Trash when it holds anything of yours, a link pointed elsewhere — and
+  a folder that is no plugin's is refused in so many words. **Keep a run log
+  for linked folders** is a switch now, with **Show the logs** once there is
+  one. Under **More**, every plugin says its last run whatever it came to —
+  when, why, how long, a card or a failure — and the end of its standard
+  error, its last eight lines and at most 800 characters of them, with how
+  many bytes came before the 64 KiB uDeck keeps. Every text is in English and
+  in Russian — why a run failed too, on the card and in Settings, with its
+  seconds written the language's way.
+
+- **A warning's button does what the warning said, or says what is there
+  now.** **Remove**, **Replace…**, **Update**, **Switch to**, **Reinstall**,
+  **Back to**, **Install this version** and **Link a folder…** carry what
+  their warning showed — the id, what is at its place, whether it goes to the
+  Trash, the version that comes — and, pressed after any of it changed, do
+  nothing and warn of what is there now. **Link a folder…** shown over one
+  plugin, its manifest's id changed to another before **Link** was pressed,
+  used to put the link in the other's place and send its copy to the Trash
+  without a word. **Install** on a row that said nothing was there warns first
+  of a folder put there since. **Allow** grants nothing the consent card or
+  Settings did not list: a manifest that asks for one command more while the
+  question is up is asked about again.
+
+- **No density button on the panel.** Density is set in Settings → Look, as it
+  always could be.
+
+- **A failed run is said on a card that is still fresh.** A run that fails —
+  or prints its card and runs past its `timeout` — while the card before it is
+  within its `ttl` puts an amber dot by the card's name and a line under its
+  values: *Last run failed at 21:04: the producer exited with status 3*,
+  *showing values from 21:03*. It goes with the next run that prints a card;
+  a card past its `ttl` says it as before, and the whole standard error is in
+  Settings. A card used to look healthy until it went stale.
+
+- **Where to look for commands, in Settings.** The folders a bare command in
+  a manifest — `"run": ["python3", …]` — is looked up in are a list under
+  Settings → Plugins: **＋ Add a folder…** (first in the list), **−**, **↑**,
+  **↓** and **Restore the defaults**, written to `settings.json` at once and
+  read by the next run, with no restart. The last folder looked in cannot be
+  removed. Only folders written from `/` are looked in, by uDeck and by
+  `udeck-plugin run`, and handed to a producer in `PATH`: `bin` or `~/bin`
+  written by hand would be read from two different folders by uDeck and by
+  the producer's shell, and nothing expands `~` there; the list says so of
+  such a folder, and of one that is not there now. A list with no folder
+  written from `/` is the default, as an empty one was.
+
+- **`udeck-plugin` inside uDeck.app, and Install command.**
+  `Scripts/make-app.sh` builds the command from the same checkout and puts it
+  in the bundle at `Contents/Helpers/udeck-plugin`, signed before the bundle
+  that seals it, and verifies the whole bundle deep and strict. Settings →
+  Plugins → **Install command** links `~/.local/bin/udeck-plugin` to it — the
+  account's own folder, no administrator password — so the command is
+  whichever uDeck is installed and updates with it; it says whether the
+  shell's `PATH` has `~/.local/bin` (asked of the shell itself) and, when it
+  does not, the line to add and where, without touching the shell's files. A
+  link to another copy of uDeck's command is pointed at this one; anything
+  else at that place is said and never replaced — also when it appears
+  between uDeck looking and the link going in, which is one step that fails
+  rather than replace it — and a uDeck opened where it was downloaded, or on
+  its disk image, makes no link to a copy that will go: move it to
+  Applications first. **Remove command** takes the link alone.
+
+- **Paths read by their bytes, everywhere a command is resolved.** Whether a
+  manifest's `run[0]` is a path from `/`, a path in the plugin's folder or a
+  bare name, and whether a path stays inside the folder, were answered by
+  Swift's `Character` — a `/` with a combining mark after it is one, which is
+  not `/` — and so was what Linux calls a hidden name in the plugins folder,
+  whether `udeck-plugin` reads an argument as absolute, and the folder name
+  `check` prints. They are read by bytes now, as the system reads them.
+
+- **Quieter in the background.** Hiding the panel while plugins keep running
+  no longer starts every plugin's interval over; a hashing of the installed
+  plugins made pointless by a later read of the plugins folder stops at its
+  next folder instead of running to the end; and when the folders linked
+  plugins lead to cannot be watched, uDeck says so in its log and asks again
+  on the next read, where it used to take them for watched.
+
 - **uDeck lists a plugin whose folder is a link: a linked folder.** A link in
   the plugins folder, `<id>` → a folder outside uDeck's own, is a plugin named
   after the link, read where it leads by the same rules as any folder, and
@@ -25,7 +110,7 @@ for what that promises.
   deleted, sent to the Trash or written into, `.env`, `installed.json` and
   `cache/` look-alikes in it included — and a linked folder is never in
   `installed.json`. uDeck can put a link in an installed plugin's place itself
-  (for **Link a folder…**, which Settings does not show yet): the plugin
+  (**Link a folder…** in Settings, above): the plugin
   quieted, the link swapped in the way **Replace…** swaps a
   download, the copy it replaces deleted or sent to the Trash by the usual
   rule — judged once the plugin is quiet, so a file saved into it meanwhile
@@ -42,12 +127,13 @@ for what that promises.
   explaining itself at length is never stopped for it. uDeck keeps the last
   64 KiB of every run's standard error — the end, where an error is, cut on a
   whole character — with the plugin's last run, a card's as much as a
-  failure's (it used to drop a good run's). Settings shows a failed run's last
-  lines, where it showed the first eight. `udeck-plugin run` keeps the same
-  tail and says how much came before it.
+  failure's (it used to drop a good run's). Settings shows the last run's last
+  lines, a good one's too, where it showed a failed run's first eight.
+  `udeck-plugin run` keeps the same tail and says how much came before it.
 
-- **A linked folder's run log.** With `"linkedFolderRunLog": true` in
-  `settings.json` (no switch in Settings yet), every run of a linked folder is
+- **A linked folder's run log.** With **Keep a run log for linked folders**
+  on in Settings → Plugins (`"linkedFolderRunLog": true` in `settings.json`),
+  every run of a linked folder is
   an entry in `<uDeck's folder>/logs/<id>.log` — when, why, how long, how it
   ended, what it came to, and its standard error's tail — written off the main
   thread, never inside the folder the link leads to, turned over at 1 MiB with
@@ -72,7 +158,8 @@ for what that promises.
 
 - **The search path is said where it is.** The contract promised it was
   "changeable in settings"; it is `pluginExecutableSearchPath` in
-  `settings.json`, with no field in Settings yet, and says so.
+  `settings.json`, which **Where to look for commands** in Settings sets
+  (above), and says so.
   `udeck-plugin run --home <uDeck folder>` now looks a bare command up on that
   search path and hands it to the producer as `PATH`, as uDeck does.
 
@@ -113,7 +200,9 @@ for what that promises.
   is one, as uDeck counts it — and 2 when uDeck would not run the plugin.
   `link <folder>` puts a link, `<uDeck's folder>/plugins/<id>` → the folder —
   `UDECK_HOME` or `~/.udeck`, as uDeck finds it, unless `--home` names another
-  — for an id nothing else has taken, and never touches `installed.json`.
+  — for an id nothing else has taken, and never touches `installed.json`; over
+  a plugin uDeck installed it names **Link a folder…** in Settings, which says
+  first what happens to the installed copy.
   `run` hands the producer the account's home folder as `HOME`, as uDeck does,
   not the shell's.
   Running a producer moved into the plugin format's package for it — the

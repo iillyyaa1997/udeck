@@ -49,7 +49,10 @@ you build still runs on macOS 14, where it falls back to a blur.
 A plugin is not a change to uDeck: it is a folder, and the official ones live in
 [`udeck-plugins`](https://github.com/iillyyaa1997/udeck-plugins), which has a
 CONTRIBUTING of its own. What both repositories hold a plugin to is the
-`udeck-plugin` command, built from `Packages/UDeckPluginFormat` here:
+`udeck-plugin` command, built from `Packages/UDeckPluginFormat` here — or, in a
+uDeck.app built by `Scripts/make-app.sh`, the copy inside it
+(`Contents/Helpers/udeck-plugin`), which **Install command** under Settings →
+Plugins links into `~/.local/bin`:
 
 ```sh
 swift build -c release --package-path Packages/UDeckPluginFormat --product udeck-plugin
@@ -60,7 +63,9 @@ udeck-plugin link my-plugin                       # into your own uDeck's plugin
 ```
 
 ([Writing a plugin](docs/writing-a-plugin.md) says what each does, and [the
-contract](docs/plugin-api.md#linked-folders) what uDeck does with a link.) The
+contract](docs/plugin-api.md#linked-folders) what uDeck does with a link —
+**Link a folder…** in Settings makes the same link, and over an installed
+plugin too, after a warning.) The
 plugins in `examples/` are uDeck's test fixtures as well as its documentation,
 and CI holds every one of them to `udeck-plugin check --strict` with no warning
 — so a new example is whatever passes that, not a shape this file has to

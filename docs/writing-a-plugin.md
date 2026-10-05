@@ -27,8 +27,12 @@ uDeck plugin.
 
 ## 2. Make one that already works
 
-`udeck-plugin` is the command for writing plugins, built from this repository
-(macOS and Linux; `run` takes a Mac):
+`udeck-plugin` is the command for writing plugins. It comes inside uDeck.app:
+**Install command** under Settings → Plugins links `~/.local/bin/udeck-plugin`
+to that copy — no administrator password — so it is the version of your uDeck
+and updates with it, and Settings says the line to add to your shell's startup
+file if your shell does not look in `~/.local/bin`. Or build it from this
+repository (macOS and Linux; `run` takes a Mac):
 
 ```sh
 swift build -c release --package-path Packages/UDeckPluginFormat --product udeck-plugin
@@ -75,6 +79,7 @@ Then link it into uDeck and add it to a tab:
 udeck-plugin link my-first-plugin
 ```
 
+— or press **Link a folder…** under Settings → Plugins and choose the folder.
 That puts a link to the folder into uDeck's plugins folder —
 `~/.udeck/plugins/my-first-plugin`, or the one under `UDECK_HOME` when that is
 set, as uDeck finds it — rather than a copy, so the folder stays where you work
@@ -85,11 +90,18 @@ the card change. That is the whole development loop. The ⟳ button on the card
 runs it on demand when the interval is too long to wait.
 
 `link` links only an id nothing else has taken, and it never touches what uDeck
-installed. Removing the plugin — **Remove** in uDeck's Settings, or `rm` of the
-link — takes the link and nothing else: uDeck never deletes, moves to the Trash
-or writes into the folder a link leads to. A linked folder can also keep a log
-of every run on disk; see [The run log](plugin-api.md#the-run-log). The rest of
-what a link does is in [Linked folders](plugin-api.md#linked-folders).
+installed; **Link a folder…** in Settings links over a plugin uDeck installed
+too, after it has said what becomes of the installed copy. Its row in Settings
+is marked **Linked**, with where the link leads. Removing the plugin —
+**Remove** in uDeck's Settings, which says first that only the link goes, or
+`rm` of the link — takes the link and nothing else: uDeck never deletes, moves
+to the Trash or writes into the folder a link leads to. Under **More** beside
+it, Settings shows its last run — how it ended, how long it took — and the end
+of its standard error, a good run's as much as a failed one's; a run that fails
+while its card is still fresh puts an amber dot and a line on the card itself.
+A linked folder can also keep a log of every run on disk — **Keep a run log
+for linked folders** in Settings; see [The run log](plugin-api.md#the-run-log).
+The rest of what a link does is in [Linked folders](plugin-api.md#linked-folders).
 
 A copy works too — `cp -R my-first-plugin ~/.udeck/plugins/` — and is watched
 the same way; it is just one more place to keep in step.

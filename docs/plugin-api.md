@@ -88,13 +88,21 @@ way is a link — a [linked folder](#linked-folders).
 A link in the plugins folder, `~/.udeck/plugins/<id>` → a folder somewhere
 else, is a plugin too: a folder you work on where it is — in a working copy,
 under git — and uDeck runs from there. `udeck-plugin link <folder>` makes one
-for an id nothing else has taken. Only uDeck itself puts a link in the place of
-a plugin it installed, after saying what goes — **Link a folder…**, which
-Settings does not show yet; until it does, **Remove** the installed copy and
-link again.
+for an id nothing else has taken, and so does **Link a folder…** in Settings →
+Plugins, the folder chosen in the system's folder panel. Only uDeck itself puts
+a link where something already is — a plugin it installed, a folder of your
+own, another link — with **Link a folder…**, and only after it has said what
+becomes of what is there: deleted when it is exactly what uDeck installed,
+moved to the Trash when it holds anything of yours, a link pointed at your
+folder instead. A folder that is no plugin's — no manifest, one uDeck cannot
+read, inside `~/.udeck` or around it — is refused, and the refusal says which.
 
 * **The plugin is named after the link**, and its manifest's `id` has to be
   that name, as a folder's has to be the folder's.
+* **Settings says it is linked.** Its row under Settings → Plugins is marked
+  **Linked** and says where the link leads — or that uDeck does not follow it,
+  with the reason above it — instead of **Verified** or **A folder of your
+  own**, and **Remove** on it says first that only the link goes.
 * **The link is followed one step**, to a folder outside uDeck's own. A link
   that leads nowhere, to a file, to another link, round in a circle, into
   `~/.udeck` (the plugins folder, the caches, the logs) or to a folder that
@@ -204,11 +212,16 @@ uDeck loads such a manifest as it always has: refusing one now would break the
 * `"/usr/bin/python3"` — an absolute path, used as given.
 * `"python3"` — a bare name, looked up on uDeck's configured search path:
   `/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin`, `/bin`, `/usr/sbin`,
-  `/sbin` by default. It is `pluginExecutableSearchPath` in `settings.json`, in
-  uDeck's folder — a list of folders, where an empty list is the default —
-  and is changed there, by hand, while uDeck is not running: Settings has no
-  field for it yet. `udeck-plugin run --home <uDeck folder>` reads it from
-  there too.
+  `/sbin` by default. It is **Where to look for commands** under Settings →
+  Plugins: add a folder (it goes first), remove one, move one up or down, or
+  restore the defaults — from the next run, with no restart. It is kept as
+  `pluginExecutableSearchPath` in `settings.json` in uDeck's folder, and
+  `udeck-plugin run --home <uDeck folder>` reads it from there too. Only a
+  folder written from `/` is looked in, and handed to your producer in `PATH`:
+  `bin` or `~/bin` written into the file by hand is not — uDeck and your
+  producer's shell would read it from two different folders, and nothing
+  expands a `~` there — and Settings says so beside it. A list with no folder
+  written from `/`, an empty one too, is the default.
 
 The bare-name case deliberately does **not** use the `PATH` uDeck inherited.
 uDeck can be started from Finder, from a shell or by `launchd`, each with a
@@ -260,7 +273,9 @@ A `poll` plugin prints exactly one JSON object to standard output and exits.
 Anything printed to standard **error** is the producer explaining itself, and
 uDeck keeps it: the last 64 KiB of every run's — the end, which is where an
 error is — with the plugin's last run, whatever it came to, a card as much as a
-failure. Settings shows the end of it beside a failure, its last lines; for a
+failure. Settings shows the end of the last run's beside the plugin, under
+**More**, whatever the run came to — its last eight lines, and at most 800
+characters of them, with how many bytes came before what uDeck kept; for a
 [linked folder](#linked-folders) whose run log is on, every run's goes into the
 [run log](#the-run-log). It never counts toward the output limit and never
 stops a run: write as much as you need, knowing that only the end of a long one
@@ -284,6 +299,15 @@ were current is how a real outage hides inside a green signal.
 | The values are still there, dimmed, with the time they were produced. | The values are gone. Only when they last existed is shown. |
 
 So: set `ttl` to roughly how long your data stays true, not to your `interval`.
+
+**A run that fails while the card is still within its `ttl` is said on the card
+at once.** The values stay — they are still current enough to show — and an
+amber dot goes beside the card's name, with one line under the values: *Last
+run failed at 21:04: the producer exited with status 3* and *showing values
+from 21:03*. A card printed before a run went past its `timeout` says it too,
+its values from that run. It goes with the next run that prints a card; the
+whole standard error of the run is in Settings. Past `ttl`, the card says it as
+the table above does.
 
 And the corollary for your own producer: **idle is not broken.** If there is
 genuinely nothing happening, say so calmly — `"state": "ok"` with a row that
@@ -586,7 +610,10 @@ reads when deciding whether to trust your plugin at all, and an understated one
 is a good reason not to.
 
 Changing your plugin's `version` re-opens the question, so an update that starts
-asking for more cannot inherit an answer given to an earlier version.
+asking for more cannot inherit an answer given to an earlier version. And what
+the operator agrees to is what they were shown: a manifest that asks for more
+while the question is on the screen — a linked folder you are editing, say — is
+asked about again when **Allow** is pressed, and nothing is granted until it is.
 
 `screen` needs macOS Accessibility and is **not implemented in this version.**
 
@@ -655,7 +682,8 @@ lower one keeps working — that is what the number is for.
 
 * **Print one JSON object and nothing else on standard output.** Diagnostics go
   to standard error, where uDeck keeps the end of them for you — the last
-  64 KiB of each run.
+  64 KiB of each run — and Settings shows the end of the last run's beside your
+  plugin, under **More**, a good run's as much as a failed one's.
 * **Do not police your own deadline — uDeck does.** A stock macOS has neither
   `timeout` nor `gtimeout`, so a shell producer genuinely cannot. uDeck kills a
   run that overruns `timeout`, and kills whatever it started with it.
@@ -783,10 +811,23 @@ there is one, gives the settings' values and whose `settings.json` the search
 path; `--lang` and `--reason` set `UDECK_LANG` and `UDECK_REFRESH_REASON`. It
 runs on a Mac only: uDeck's way of running a process is the Mac's.
 
+`udeck-plugin` comes with uDeck: **Install command** under Settings → Plugins
+links `~/.local/bin/udeck-plugin` to the copy inside uDeck.app — no
+administrator password — so it is the version of the uDeck you have and
+updates with it. Settings says whether your shell looks in `~/.local/bin`, and
+the line to add to its startup file when it does not. A development build has
+no copy inside it; build the command from this repository instead (see
+[writing-a-plugin.md](writing-a-plugin.md)). A uDeck that will not stay where
+it is makes no link and says so: one opened where it was downloaded, which
+macOS runs from a temporary copy (App Translocation), and one opened on its
+disk image under `/Volumes`. Move uDeck to Applications first and open it from
+there; an update keeps it there, and the link keeps leading to it.
+
 `udeck-plugin check --strict <folder>` holds the folder to every rule a plugin
 repository's CI does. Then let uDeck load it: link it in
-(`udeck-plugin link <folder>`, a [linked folder](#linked-folders)), add it to a
-tab, and watch what it says. Use the ⟳ button to run it on demand.
+(`udeck-plugin link <folder>`, or **Link a folder…** in Settings → Plugins — a
+[linked folder](#linked-folders)), add it to a tab, and watch what it says.
+Use the ⟳ button to run it on demand.
 
 ### The run log
 
@@ -794,9 +835,10 @@ A linked folder can keep a log of every run, on disk: the plugin you are
 writing is the one whose run that went wrong an hour ago you want to read, and
 the panel keeps only the last one. It is for linked folders only — every other
 plugin keeps its last run in memory and nothing on disk — and it is off until
-you turn it on: `"linkedFolderRunLog": true` in `settings.json` in uDeck's
-folder, by hand, while uDeck is not running (Settings has no switch for it
-yet).
+you turn it on: **Keep a run log for linked folders** under Settings → Plugins,
+kept as `"linkedFolderRunLog": true` in `settings.json` in uDeck's folder.
+**Show the logs**, beside the switch once there is a log, opens the logs folder
+in Finder.
 
 * **Where:** `~/.udeck/logs/<id>.log` — under `UDECK_HOME` when that is set —
   and never inside your folder: uDeck writes nothing into the folder a link

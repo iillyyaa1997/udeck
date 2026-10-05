@@ -110,9 +110,13 @@ udeck-plugin check --strict my-first-plugin
 udeck-plugin run my-first-plugin
 ```
 
-`udeck-plugin` is built from this repository —
+`udeck-plugin` comes inside uDeck.app: **Install command** under Settings →
+Plugins links it into `~/.local/bin` — no administrator password — and it
+updates with uDeck. It is also built from this repository —
 `swift build -c release --package-path Packages/UDeckPluginFormat --product udeck-plugin` —
-and **[Writing a plugin](docs/writing-a-plugin.md)** goes on from there.
+and **[Writing a plugin](docs/writing-a-plugin.md)** goes on from there: a
+plugin you work on is linked in — `udeck-plugin link`, or **Link a folder…**
+in Settings — and runs from where it is.
 
 `~/.udeck` can be moved with the `UDECK_HOME` environment variable.
 
