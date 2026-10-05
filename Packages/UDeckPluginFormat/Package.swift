@@ -24,8 +24,12 @@ let package = Package(
         // the same way. Nothing ships them.
         .library(name: "UDeckPluginFormatFixtures", targets: ["UDeckPluginFormatFixtures"]),
 
-        // The command authors and repositories' CI run: `check` and
-        // `check-repo` for now. Not released yet (stage 2, wave D).
+        // The command authors and repositories' CI run: `check`, `check-repo`,
+        // `new`, `run` and `link`. It travels inside uDeck.app
+        // (Contents/Helpers, put there by Scripts/make-app.sh), and Install
+        // command in uDeck's Settings links ~/.local/bin to it. Archives of
+        // its own for macOS and Linux, a container image and `pin` come with
+        // stage 2's wave D.
         .executable(name: "udeck-plugin", targets: ["udeck-plugin"]),
 
         // What the command does, for the tests that run it — here and from

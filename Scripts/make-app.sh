@@ -43,6 +43,13 @@
 # so an unpacked copy on this Mac could take the release's login item merely by
 # being launched. It is unpacked inside the test machine and nowhere else.
 #
+# The bundle carries the udeck-plugin command too, at Contents/Helpers/udeck-plugin,
+# built from the same checkout and signed with the bundle: Settings → Plugins →
+# "Install command" links it into ~/.local/bin, so the command a person types is
+# whichever uDeck they have, and updates with it. Contents/Helpers rather than
+# Contents/MacOS: a tool in MacOS is taken for the application itself — by
+# Bundle.main, which would hand it uDeck's Info.plist, and by macOS.
+#
 # Without --sign the bundle is ad-hoc signed. That is enough for the machine it
 # was built on and not enough for anyone else: macOS will refuse a downloaded
 # ad-hoc copy on first launch, and the person opening it has to right-click and
@@ -129,14 +136,19 @@ else
     APP="$OUT/uDeck.app"
     BUILT="./.build/release/uDeck"
 fi
+# The command, built beside the application from the plugin format's package,
+# which the application's own package links by path.
+COMMAND="$(dirname "$BUILT")/udeck-plugin"
 PLIST="Sources/uDeck/Support/Info.plist"
 VERSION="${SET_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")}"
 
 echo "==> Building uDeck $VERSION for $CONFIG"
 if [ "$CONFIG" = "debug" ]; then
     swift build
+    swift build --product udeck-plugin
 else
     swift build -c release
+    swift build -c release --product udeck-plugin
 fi
 
 echo "==> Assembling $APP"
@@ -158,8 +170,9 @@ if [ "$MAKE_ZIP" = "1" ]; then
     trap 'rm -rf "$APP"; exit 143' TERM
 fi
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 cp "$BUILT" "$APP/Contents/MacOS/uDeck"
+cp "$COMMAND" "$APP/Contents/Helpers/udeck-plugin"
 cp "$PLIST" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
@@ -275,11 +288,18 @@ if [ -d "$SPARKLE" ]; then
     codesign "${SIGN_FLAGS[@]}" "$SPARKLE/Versions/B"
     codesign "${SIGN_FLAGS[@]}" "$SPARKLE"
 fi
+# The command, before the bundle that holds it, for the same reason: signing
+# the bundle seals a hash of it. Signed alone it is its own code, with its own
+# identifier, and runs through the link in ~/.local/bin as it does in place.
+codesign "${SIGN_FLAGS[@]}" "$APP/Contents/Helpers/udeck-plugin"
 # Not `--deep`: it would re-sign the framework's contents in its own order and
 # undo the inside-out pass above. Apple documents `--deep` as unsuitable for
 # signing an application for distribution, and this is why.
 codesign "${SIGN_FLAGS[@]}" "$APP"
-codesign --verify --verbose=2 "$APP"
+# Verified deep and strict, though: every nested piece — the command, Sparkle
+# and its helpers — has to hold its own seal, and the bundle's has to cover
+# them as they are.
+codesign --verify --deep --strict --verbose=2 "$APP"
 
 if [ "$IDENTITY" = "-" ]; then
     cat <<'WARNING'

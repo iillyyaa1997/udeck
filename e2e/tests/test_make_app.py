@@ -40,8 +40,10 @@ def checkout(tmp_path):
     shutil.copy(REPO / "Sources" / "uDeck" / "Support" / "Info.plist", support / "Info.plist")
     built = tmp_path / ".build" / "release"
     built.mkdir(parents=True)
-    # A real Mach-O, so that codesign has something it can actually sign.
+    # Real Mach-Os, so that codesign has something it can actually sign: the
+    # application, and the udeck-plugin command that travels inside it.
     shutil.copy("/bin/echo", built / "uDeck")
+    shutil.copy("/bin/echo", built / "udeck-plugin")
     stubs = tmp_path / "stubs"
     stubs.mkdir()
     (stubs / "swift").write_text("#!/bin/sh\nexit 0\n")
@@ -84,6 +86,35 @@ def test_a_lab_build_lands_where_it_was_told_carries_both_versions_and_leaves_on
     assert plist["NSAppTransportSecurity"] == {"NSAllowsLocalNetworking": True}
     # A lab build is the released application, identifier and all.
     assert plist["CFBundleIdentifier"] == "place.unicorns.udeck"
+
+
+def test_the_command_travels_inside_the_bundle_signed_with_it(checkout):
+    """Settings' Install command links ~/.local/bin/udeck-plugin to Contents/Helpers/udeck-plugin.
+
+    So the bundle has to carry it there, executable, and signed before the
+    bundle that seals it — the script's own `codesign --verify --deep --strict`
+    is what says the seals hold, and the log says it ran.
+    """
+    done = make_app(checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99", "--zip")
+    assert done.returncode == 0, done.stdout + done.stderr
+    with zipfile.ZipFile(checkout / "lab-builds" / "uDeck-9.9.9.zip") as archive:
+        info = archive.getinfo("uDeck.app/Contents/Helpers/udeck-plugin")
+        mode = info.external_attr >> 16
+        assert mode & 0o111, oct(mode)
+        assert "uDeck.app/Contents/MacOS/udeck-plugin" not in archive.namelist()
+    script = (checkout / "Scripts" / "make-app.sh").read_text()
+    signed = script.index('codesign "${SIGN_FLAGS[@]}" "$APP/Contents/Helpers/udeck-plugin"')
+    assert signed < script.index('codesign "${SIGN_FLAGS[@]}" "$APP"\n'), "the command is signed before the bundle"
+    assert 'codesign --verify --deep --strict --verbose=2 "$APP"' in script
+    assert "satisfies its Designated Requirement" in done.stderr or "valid on disk" in done.stderr, done.stderr
+
+
+def test_a_build_without_the_command_is_refused_and_leaves_no_bundle(checkout):
+    (checkout / ".build" / "release" / "udeck-plugin").unlink()
+    done = make_app(checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99", "--zip")
+    assert done.returncode != 0
+    assert not (checkout / "lab-builds" / "uDeck.app").exists()
+    assert not (checkout / "lab-builds" / "uDeck-9.9.9.zip").exists()
 
 
 def test_a_lab_build_looks_for_updates_by_itself_exactly_as_the_release_does(checkout):
