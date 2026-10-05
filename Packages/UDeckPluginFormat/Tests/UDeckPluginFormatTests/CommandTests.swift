@@ -160,7 +160,7 @@ struct CommandPathTests {
     @Test("a path whose first byte is / is absolute, whatever follows the slash")
     func absoluteByItsFirstByte() {
         let path = "/\u{301}x/plugin"
-        #expect(Array(path).first != Character("/"), "the premise: one Character holds the slash")
+        #expect(Array(path).first != Optional(Character("/")), "the premise: one Character holds the slash")
         #expect(Command.absolute(path, from: "/somewhere/else").path == path)
         #expect(Command.absolute("plugin", from: "/somewhere/else").path == "/somewhere/else/plugin")
         #expect(Command.absolute("plugin", from: "/somewhere/else/").path == "/somewhere/else/plugin")
@@ -168,7 +168,7 @@ struct CommandPathTests {
 
     @Test("check names a folder without the / at its end, even when the / is inside one Character")
     func summaryWithoutTheSlash() {
-        #expect(Array("x\u{600}/").last != Character("/"), "the premise: one Character holds the slash")
+        #expect(Array("x\u{600}/").last != Optional(Character("/")), "the premise: one Character holds the slash")
         #expect(Command.shownWithoutSlash("x\u{600}/") == "x\u{600}")
         #expect(Command.shownWithoutSlash("plugins/hello/") == "plugins/hello")
         #expect(Command.shownWithoutSlash("plugins/hello") == "plugins/hello")

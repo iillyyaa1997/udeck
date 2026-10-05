@@ -619,7 +619,7 @@ struct ByteReadingTests {
     /// leaves such names out.
     @Test("a name is hidden by its first byte")
     func hiddenByItsFirstByte() {
-        #expect(Array(".\u{301}x").first != Character("."), "the premise: one Character holds the dot")
+        #expect(Array(".\u{301}x").first != Optional(Character(".")), "the premise: one Character holds the dot")
         #expect(FilePaths.isHiddenName(".\u{301}x"))
         #expect(FilePaths.isHiddenName(".git"))
         #expect(!FilePaths.isHiddenName("x.") && !FilePaths.isHiddenName("") && !FilePaths.isHiddenName("\u{301}.x"))
