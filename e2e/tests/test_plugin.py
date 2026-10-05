@@ -78,6 +78,20 @@ class Lab:
             time.sleep(0.01)
         raise AssertionError(f"{event!r} never happened; timeline: {self.timeline}")
 
+    def wait_until_warmed(self, label, seconds=10):
+        """Block until the thread warming `label` has ended — not only logged its boot.
+
+        The boot is in the timeline a moment before that thread says the machine
+        is up, and a check that ends in that moment hands the next one a machine
+        still warming, which it then waits for: under load, "up in 40s, waited 20s
+        for it" (2026-10-05)."""
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if not any(thread.name == f"warming-{label}" and thread.is_alive() for thread in threading.enumerate()):
+                return True
+            time.sleep(0.01)
+        raise AssertionError(f"the machine for {label!r} was still warming after {seconds}s")
+
     def factory(self, **kwargs):
         machine = FakeMachine(self, **kwargs)
         self.machines.append(machine)
@@ -922,12 +936,23 @@ def test_a_machine_that_comes_back_later_in_the_run_is_never_started_ahead(lab):
 
 
 def test_a_machine_that_was_ready_in_time_is_reported_without_a_wait(lab):
+    """Ready in time is made certain rather than hoped for: the first check ends
+    only once the thread warming the next machine has ended. Its boot in the
+    timeline is not that — the thread still has to say the machine is up — and a
+    check that ended in between had the next one wait for it, which a loaded host
+    made happen (2026-10-05)."""
     import itertools
 
-    lab.write("check_pair.py", TWO_CHECKS % "pair.beta boot")
+    lab.write("check_pair.py",
+              "def check_alpha(machine):\n"
+              "    machine.lab.wait_for('pair.beta boot')\n"
+              "    machine.lab.wait_until_warmed('pair.beta')\n"
+              "\n"
+              "def check_beta(machine): pass\n")
     code, out = lab.run(jobs=2, clock=itertools.count(0, 10).__next__)
     assert code == 0, out
     assert re.search(r"was started ahead \(up in \d+s\)", out), out
+    assert "waited" not in out, out
 
 
 def test_a_check_that_waited_for_its_machine_is_told_how_long(lab):
