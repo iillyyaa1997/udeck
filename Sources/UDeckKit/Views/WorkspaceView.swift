@@ -113,34 +113,35 @@ struct WorkspaceView: View {
 
     // MARK: - Controls
 
+    /// The panel's own buttons. Density is not one of them: it is set in
+    /// Settings → Look, and a button that only stepped through it was taken
+    /// off the panel (the operator, 2026-10-05). Each carries an identifier,
+    /// so the lab reads which are there.
     private var controls: some View {
         HStack(spacing: 5) {
-            iconButton("rectangle.compress.vertical", help: strings(.controlDensity(name: strings(model.settings.density.namePhrase)))) {
-                var settings = model.settings
-                settings.density = nextDensity(after: settings.density)
-                model.update(settings: settings)
-            }
-            iconButton("arrow.clockwise", help: strings(.controlRefresh)) {
+            iconButton("arrow.clockwise", help: strings(.controlRefresh), identifier: "panel.refresh") {
                 model.refreshAll(reason: .manual)
             }
-            iconButton("gearshape", help: strings(.controlSettings)) {
+            iconButton("gearshape", help: strings(.controlSettings), identifier: "panel.settings") {
                 shell.onOpenSettings()
             }
-            iconButton("chevron.up", help: strings(.controlSendAway)) {
+            iconButton("chevron.up", help: strings(.controlSendAway), identifier: "panel.sendAway") {
                 shell.onCollapse()
             }
             iconButton(
                 shell.phase == .fullscreen
                     ? "arrow.down.right.and.arrow.up.left"
                     : "arrow.up.left.and.arrow.down.right",
-                help: shell.phase == .fullscreen ? "Back to the working size" : "Fill the screen"
+                help: shell.phase == .fullscreen ? "Back to the working size" : "Fill the screen",
+                identifier: "panel.fullscreen"
             ) {
                 shell.onToggleFullscreen()
             }
         }
     }
 
-    private func iconButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(_ symbol: String, help: String, identifier: String,
+                            action: @escaping () -> Void) -> some View {
         Button {
             shell.onInteract()
             action()
@@ -154,12 +155,7 @@ struct WorkspaceView: View {
         }
         .buttonStyle(.plain)
         .help(help)
-    }
-
-    private func nextDensity(after density: Density) -> Density {
-        let all = Density.allCases
-        let index = all.firstIndex(of: density) ?? 0
-        return all[(index + 1) % all.count]
+        .accessibilityIdentifier(identifier)
     }
 
     // MARK: - Content
