@@ -50,7 +50,42 @@ public enum FilePaths {
         let folder = Array(folder.utf8)
         let path = Array(path.utf8)
         if path == folder { return true }
-        let prefix = folder.last == UInt8(ascii: "/") ? folder : folder + [UInt8(ascii: "/")]
-        return path.starts(with: prefix)
+        return isInside(folder, path)
     }
+
+    /// Whether `path` is inside `folder` — below it, and not `folder` itself.
+    public static func isInside(_ folder: String, _ path: String) -> Bool {
+        isInside(Array(folder.utf8), Array(path.utf8))
+    }
+
+    private static func isInside(_ folder: [UInt8], _ path: [UInt8]) -> Bool {
+        let prefix = folder.last == slash ? folder : folder + [slash]
+        return path.count > prefix.count && path.starts(with: prefix)
+    }
+
+    /// Whether `path` is absolute: whether its first byte is `/`. A `/` with a
+    /// combining mark after it is one Swift `Character`, which is not `/` —
+    /// and still the root of an absolute path to the system.
+    public static func isAbsolute(_ path: String) -> Bool {
+        path.utf8.first == slash
+    }
+
+    /// Whether `path` has a `/` anywhere in it: whether it names a place
+    /// rather than a bare name to be looked up.
+    public static func hasSeparator(_ path: String) -> Bool {
+        path.utf8.contains(slash)
+    }
+
+    /// Whether `path` ends with a `/`.
+    public static func endsWithSeparator(_ path: String) -> Bool {
+        path.utf8.last == slash
+    }
+
+    /// Whether a name in a folder is hidden as Linux means it: whether its
+    /// first byte is `.`.
+    public static func isHiddenName(_ name: String) -> Bool {
+        name.utf8.first == UInt8(ascii: ".")
+    }
+
+    private static let slash = UInt8(ascii: "/")
 }

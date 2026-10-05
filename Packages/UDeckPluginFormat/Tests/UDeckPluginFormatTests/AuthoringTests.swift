@@ -385,10 +385,10 @@ struct LinkPluginTests {
         let replaced = await udeckPlugin(["link", folder.path, "--home", installed.path], in: temp.url, home: temp.url)
         #expect(replaced.status == 1)
         #expect(replaced.errors.first?.contains("greeter is installed in uDeck from github.com/o/r") == true, "\(replaced.errors)")
-        #expect(replaced.errors.first?.hasSuffix("To work on it from \(PluginLink.realPath(folder.path) ?? "") instead, remove the "
-                                                 + "installed copy first -- Remove, beside it under Plugins in uDeck's "
-                                                 + "Settings -- and link again") == true, "\(replaced.errors)")
-        #expect(replaced.errors.first?.contains("Link a folder") == false, "a button this uDeck does not have")
+        #expect(replaced.errors.first?.hasSuffix("To work on it from \(PluginLink.realPath(folder.path) ?? "") instead, link it "
+                                                 + "from uDeck itself -- Link a folder..., under Plugins in uDeck's "
+                                                 + "Settings, which says first what happens to the installed copy") == true,
+                "\(replaced.errors)")
         #expect(everything(in: installed) == ["installed.json"])
         #expect(try Data(contentsOf: installed.appendingPathComponent("installed.json")) == record)
 
@@ -565,6 +565,78 @@ struct LinkPluginTests {
         let second = await udeckPlugin(["link", decomposed.path, "--home", home], in: temp.url, home: temp.url)
         #expect(second.status == 1, "\(second.output)")
         #expect(second.errors.first?.contains("is already a link, to \(one)") == true, "\(second.errors)")
+    }
+
+    /// uDeck's **Link a folder…** says a refusal in the operator's language
+    /// from what it is about (`Refusal.Reason`), not from the command's
+    /// sentence: each refusal has to carry its own reason, and the paths it
+    /// names.
+    @Test("every refusal carries what it is about, and the paths it names")
+    func refusalReasons() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let home = temp.url.appendingPathComponent("udeck", isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let udeck = try #require(PluginLink.realPath(home.path))
+        func reason(_ folder: URL, home: URL? = nil) -> PluginLink.Refusal.Reason? {
+            do {
+                _ = try PluginLink.link(folder, home: home ?? temp.url.appendingPathComponent("udeck"))
+                return nil
+            } catch let refusal as PluginLink.Refusal {
+                return refusal.reason
+            } catch {
+                return nil
+            }
+        }
+        let absent = temp.url.appendingPathComponent("absent")
+        #expect(reason(absent) == .notThere(folder: absent.path))
+        let file = temp.url.appendingPathComponent("file")
+        try Data("x".utf8).write(to: file)
+        #expect(reason(file) == .notAFolder(folder: file.path))
+        let empty = temp.url.appendingPathComponent("empty", isDirectory: true)
+        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        #expect(reason(empty) == .noManifest(folder: empty.path))
+        let broken = temp.url.appendingPathComponent("broken", isDirectory: true)
+        try FileManager.default.createDirectory(at: broken, withIntermediateDirectories: true)
+        try Data(#"{"id": "Not An Id"}"#.utf8).write(to: broken.appendingPathComponent("manifest.json"))
+        guard case .manifestUnreadable(let manifest, let detail)? = reason(broken) else {
+            Issue.record("\(String(describing: reason(broken)))"); return
+        }
+        #expect(manifest == (PluginLink.realPath(broken.path) ?? "") + "/manifest.json" && !detail.isEmpty)
+        let inside = home.appendingPathComponent("mine", isDirectory: true)
+        try FileManager.default.createDirectory(at: inside, withIntermediateDirectories: true)
+        #expect(reason(inside) == .insideUDeck(folder: inside.path, udeck: udeck))
+        #expect(reason(temp.url) == .holdsUDeck(folder: temp.url.path, udeck: udeck))
+
+        let folder = try await Self.made("greeter", in: temp, folder: "greeter-1")
+        let other = try await Self.made("greeter", in: temp, folder: "greeter-2")
+        _ = try PluginLink.link(folder, home: home)
+        let link = home.appendingPathComponent("plugins/greeter").path
+        #expect(reason(other) == .taken(link: link), "another link")
+        let own = temp.url.appendingPathComponent("own", isDirectory: true)
+        try FileManager.default.createDirectory(at: own.appendingPathComponent("plugins/greeter"), withIntermediateDirectories: true)
+        #expect(reason(folder, home: own) == .taken(link: own.appendingPathComponent("plugins/greeter").path),
+                "a folder of one's own")
+        let installed = temp.url.appendingPathComponent("installed", isDirectory: true)
+        try FileManager.default.createDirectory(at: installed, withIntermediateDirectories: true)
+        let records = installed.appendingPathComponent("installed.json")
+        try Data(#"{"version": 1, "plugins": {"greeter": {"source": "official"}}}"#.utf8).write(to: records)
+        #expect(reason(folder, home: installed) == .taken(link: installed.appendingPathComponent("plugins/greeter").path),
+                "an installed plugin")
+        try Data(#"{"format": 2}"#.utf8).write(to: records)
+        #expect(reason(folder, home: installed) == .recordsUnreadable(file: records.path, detail: nil))
+        try Data("{ not json".utf8).write(to: records)
+        guard case .recordsUnreadable(let file, let why?)? = reason(folder, home: installed) else {
+            Issue.record("\(String(describing: reason(folder, home: installed)))"); return
+        }
+        #expect(file == records.path && why.hasPrefix("it "))
+        let blocked = temp.url.appendingPathComponent("blocked", isDirectory: true)
+        try FileManager.default.createDirectory(at: blocked, withIntermediateDirectories: true)
+        try Data("not a folder".utf8).write(to: blocked.appendingPathComponent("plugins"))
+        guard case .cannotLink(let where_, let because)? = reason(folder, home: blocked) else {
+            Issue.record("\(String(describing: reason(folder, home: blocked)))"); return
+        }
+        #expect(where_ == blocked.appendingPathComponent("plugins/greeter").path && !because.isEmpty)
     }
 
     @Test("link refuses what is not a plugin folder")
@@ -984,10 +1056,10 @@ struct RunPluginTests {
         #expect(said.status == 0)
         #expect(said.output.contains("note: uDeck asks before it first runs the plugin, and again for every new version: "
                                      + "may it read files matching ~/x, run sysctl? This run did not ask"), "\(said.output)")
-        #expect(said.output.contains("note: uDeck keeps the standard error of a run that printed a card, as of any run, "
-                                     + "and writes it into the plugin's run log when the plugin is a linked folder and the "
-                                     + "run log is on (logs/asking.log in uDeck's folder); Settings shows the standard "
-                                     + "error of a failed run only"), "\(said.output)")
+        #expect(said.output.contains("note: uDeck keeps the standard error of a run that printed a card, as of any run: "
+                                     + "Settings shows the end of the last run's beside the plugin, under More, and the run "
+                                     + "log takes every run's when the plugin is a linked folder and the run log is on "
+                                     + "(logs/asking.log in uDeck's folder)"), "\(said.output)")
         #expect(said.output.contains("  | a diagnostic"))
     }
 
@@ -1124,11 +1196,24 @@ struct RunPluginTests {
                     "\(refusal.description)")
         }
 
-        // An empty list, or none, is the default, as uDeck reads it.
-        for written in [#"{"pluginExecutableSearchPath": []}"#, #"{"version": 1}"#] {
+        // An empty list, or none, or one with no folder written from `/`, is the
+        // default, as uDeck reads it.
+        for written in [#"{"pluginExecutableSearchPath": []}"#, #"{"version": 1}"#,
+                        #"{"pluginExecutableSearchPath": ["bin", "~/bin"]}"#] {
             try Data(written.utf8).write(to: settings)
             #expect(PluginTrial.searchPath(in: UDeckPaths(root: home)) == .notThere, "\(written)")
         }
+
+        // A folder not written from `/` is looked in by neither, nor handed to
+        // the producer in PATH — and the run says so.
+        try JSONSerialization.data(withJSONObject: ["pluginExecutableSearchPath": ["tools", tools.path, "~/bin", "/bin"]])
+            .write(to: settings)
+        let skipping = await udeckPlugin(["run", folder.path, "--home", home.path], in: temp.url, home: temp.url)
+        #expect(skipping.status == 0, "\(skipping.output) \(skipping.errors)")
+        #expect(skipping.output.contains("note: the search path in \(settings.path) names tools, ~/bin, not written as a full "
+                                         + "path from /, and uDeck looks in no such folder: neither did this run, nor did it "
+                                         + "hand it to the producer in PATH"), "\(skipping.output)")
+        #expect(skipping.output.contains { $0.hasSuffix("PATH=\(tools.path):/bin") }, "\(skipping.output)")
 
         // A file uDeck cannot read: the default, and a note that says why.
         try Data(#"{"pluginExecutableSearchPath": "/usr/bin"}"#.utf8).write(to: settings)

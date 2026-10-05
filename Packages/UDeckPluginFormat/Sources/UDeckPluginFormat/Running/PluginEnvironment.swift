@@ -49,6 +49,26 @@ public enum PluginEnvironment {
         "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
     ]
 
+    /// The folders of a configured search path that are looked in, in its
+    /// order: those written as a full path, from `/` (`FilePaths.isAbsolute`).
+    ///
+    /// A folder written any other way — `bin`, `~/bin` — is not looked in,
+    /// and is not handed to a producer in its `PATH` either: relative, it
+    /// would be read from uDeck's own working folder by uDeck and from the
+    /// plugin's folder by the producer's shell — two different folders, and
+    /// neither the one meant — and nothing expands a `~` in `PATH`. Settings
+    /// adds only full paths, and says of one written otherwise by hand that it
+    /// is not looked in.
+    public static func lookedIn(_ searchPath: [String]) -> [String] {
+        searchPath.filter(FilePaths.isAbsolute)
+    }
+
+    /// The search path a configured one comes to: itself, or the default when
+    /// none of its folders is looked in — an empty list among them.
+    public static func effective(_ configured: [String]) -> [String] {
+        lookedIn(configured).isEmpty ? defaultSearchPath : configured
+    }
+
     /// The environment a producer runs in.
     public static func producer(
         manifest: PluginManifest,
@@ -63,7 +83,7 @@ public enum PluginEnvironment {
         temporaryDirectory: String?
     ) -> [String: String] {
         var environment: [String: String] = [
-            "PATH": searchPath.joined(separator: ":"),
+            "PATH": lookedIn(searchPath).joined(separator: ":"),
             "HOME": home,
             // Producers print human text; without a UTF-8 locale a runtime can
             // fall back to ASCII and mangle everything non-Latin.
@@ -105,7 +125,7 @@ public enum PluginEnvironment {
         temporaryDirectory: String?
     ) -> [String: String] {
         var environment: [String: String] = [
-            "PATH": searchPath.joined(separator: ":"),
+            "PATH": lookedIn(searchPath).joined(separator: ":"),
             "HOME": home,
             "LANG": "en_US.UTF-8",
             "LC_ALL": "en_US.UTF-8",

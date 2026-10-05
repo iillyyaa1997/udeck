@@ -68,7 +68,9 @@ public enum Command {
                         uDeck's folder: for run, where UDECK_CACHE_DIR is
                         (<home>/cache/<id>), the settings' values are read from
                         (<home>/plugin-settings.json) and the search path
-                        (pluginExecutableSearchPath in <home>/settings.json) --
+                        (pluginExecutableSearchPath in <home>/settings.json,
+                        which uDeck's Settings sets under Plugins, Where to look
+                        for commands; only folders written from / count) --
                         default, a new folder for the run alone and the default
                         search path; for link, where the link goes
                         (<home>/plugins/<id>) -- default, the folder uDeck uses:
@@ -78,7 +80,10 @@ public enum Command {
                         UDECK_REFRESH_REASON for run (default: interval)
           link          the folder into uDeck as <home>/plugins/<id>, a link, while
                         you work on it: only for an id that is free, and never
-                        touching installed.json. rm the link to undo it
+                        touching installed.json. rm the link to undo it. Over a
+                        plugin uDeck installed, uDeck's own Link a folder... does
+                        it, under Plugins in its Settings, and says first what
+                        happens to the installed copy
 
         Exit status: 0 no errors (warnings do not fail), 1 errors, 2 could not check.
         new and link: 0 done, 1 in the way, 2 wrong request. run: 0 a card, 1 a
@@ -131,9 +136,11 @@ public enum Command {
         }
     }
 
-    /// `path`, read from `here` when it is relative.
+    /// `path`, read from `here` when it is relative — which is told by its
+    /// first byte (`FilePaths.isAbsolute`): `/` with a combining mark after it
+    /// is one Character, which is not `/`, and the path is still absolute.
     static func absolute(_ path: String, from here: String) -> URL {
-        let full = path.hasPrefix("/") ? path : (here.hasSuffix("/") ? here : here + "/") + path
+        let full = FilePaths.isAbsolute(path) ? path : (FilePaths.endsWithSeparator(here) ? here : here + "/") + path
         return URL(fileURLWithPath: full).standardizedFileURL
     }
 
@@ -207,7 +214,7 @@ public enum Command {
             do {
                 let report = try RepositoryCheck.folder(folder, options: options)
                 let place = report.commit.map { "at \($0.prefix(12))" } ?? "on disk"
-                let shown = folder.count > 1 && folder.hasSuffix("/") ? String(folder.dropLast()) : folder
+                let shown = shownWithoutSlash(folder)
                 status = max(status, say(report, summary: "checked \(shown) \(place)", mode: options.mode, output: output))
             } catch {
                 output("could not check \(folder): \(error)")
@@ -249,6 +256,15 @@ public enum Command {
             output("could not check: \(error)")
             return 2
         }
+    }
+
+    /// A folder as the summary line names it: as given, less the one `/` at
+    /// its end — by bytes, so that a name whose last `Character` holds the
+    /// slash with something before it is still read as ending in one.
+    static func shownWithoutSlash(_ folder: String) -> String {
+        let bytes = Array(folder.utf8)
+        guard bytes.count > 1, FilePaths.endsWithSeparator(folder) else { return folder }
+        return String(decoding: bytes.dropLast(), as: UTF8.self)
     }
 
     /// Prints the findings and the line that sums them up, and answers the

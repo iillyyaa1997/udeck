@@ -41,10 +41,38 @@ public enum PluginLink {
 
     /// Why nothing was linked. `isUsage` when the folder is not one to link
     /// — no manifest, nothing uDeck could read — rather than the id being
-    /// taken.
+    /// taken. `description` is the command's sentence; `reason` is what it
+    /// says, for uDeck's **Link a folder…**, which says it in the operator's
+    /// language.
     public struct Refusal: Error, CustomStringConvertible {
         public var description: String
         public var isUsage: Bool
+        public var reason: Reason
+
+        /// What a refusal is about, with the paths and words it names.
+        public enum Reason: Equatable, Sendable {
+            /// Nothing is at the folder given.
+            case notThere(folder: String)
+            /// What is there is not a folder.
+            case notAFolder(folder: String)
+            /// The folder is inside uDeck's own folder `udeck`.
+            case insideUDeck(folder: String, udeck: String)
+            /// The folder holds uDeck's own folder `udeck`.
+            case holdsUDeck(folder: String, udeck: String)
+            /// The folder has no manifest to read.
+            case noManifest(folder: String)
+            /// Its manifest is not one uDeck can read, and why.
+            case manifestUnreadable(manifest: String, detail: String)
+            /// `installed.json` could not be read, or is not the list uDeck
+            /// writes: whether the id is installed is not known.
+            case recordsUnreadable(file: String, detail: String?)
+            /// The id is taken — by a plugin uDeck installed, a folder of
+            /// one's own, another link — for the command, which links only a
+            /// free one.
+            case taken(link: String)
+            /// The link could not be made, in the system's words.
+            case cannotLink(link: String, detail: String)
+        }
     }
 
     /// A folder that can be linked: the id its manifest gives, which the link
@@ -71,10 +99,10 @@ public enum PluginLink {
     /// Reads `folder` as a folder to link into the uDeck folder `home`.
     public static func candidate(_ folder: URL, home: URL) throws -> Candidate {
         guard let target = realPath(folder.path) else {
-            throw Refusal(description: "\(folder.path) is not there", isUsage: true)
+            throw Refusal(description: "\(folder.path) is not there", isUsage: true, reason: .notThere(folder: folder.path))
         }
         guard (try? FileManager.default.attributesOfItem(atPath: target))?[.type] as? FileAttributeType == .typeDirectory else {
-            throw Refusal(description: "\(folder.path) is not a folder", isUsage: true)
+            throw Refusal(description: "\(folder.path) is not a folder", isUsage: true, reason: .notAFolder(folder: folder.path))
         }
         // What discovery would not follow, refused before anything is made:
         // uDeck writes and deletes in its own folder, and a plugin's folder
@@ -82,24 +110,26 @@ public enum PluginLink {
         if let udeck = realPath(home.path) {
             if FilePaths.contains(udeck, target) {
                 throw Refusal(description: "\(folder.path) is inside uDeck's own folder \(udeck), where uDeck writes and "
-                              + "deletes; link a folder of your own", isUsage: true)
+                              + "deletes; link a folder of your own", isUsage: true,
+                              reason: .insideUDeck(folder: folder.path, udeck: udeck))
             }
             if FilePaths.contains(target, udeck) {
                 throw Refusal(description: "\(folder.path) holds uDeck's own folder \(udeck); link the plugin folder "
-                              + "itself", isUsage: true)
+                              + "itself", isUsage: true, reason: .holdsUDeck(folder: folder.path, udeck: udeck))
             }
         }
         let manifestURL = URL(fileURLWithPath: target).appendingPathComponent(PluginDiscovery.manifestFilename)
         guard let data = try? Data(contentsOf: manifestURL) else {
             throw Refusal(description: "\(folder.path) has no \(PluginDiscovery.manifestFilename) to read, so it is not "
-                          + "a plugin folder", isUsage: true)
+                          + "a plugin folder", isUsage: true, reason: .noManifest(folder: folder.path))
         }
         do {
             return Candidate(id: try JSONDecoder().decode(PluginManifest.self, from: data).id, target: target)
         } catch {
-            throw Refusal(description: "\(manifestURL.path) is not a manifest uDeck can read: "
-                          + PluginDiscovery.describe(error, in: data, document: "the manifest")
-                          + "; the link is named after its id", isUsage: true)
+            let detail = PluginDiscovery.describe(error, in: data, document: "the manifest")
+            throw Refusal(description: "\(manifestURL.path) is not a manifest uDeck can read: \(detail)"
+                          + "; the link is named after its id", isUsage: true,
+                          reason: .manifestUnreadable(manifest: manifestURL.path, detail: detail))
         }
     }
 
@@ -125,7 +155,8 @@ public enum PluginLink {
             try FileManager.default.createDirectory(at: paths.plugins, withIntermediateDirectories: true)
             try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: candidate.target)
         } catch {
-            throw Refusal(description: "could not link \(link.path): \(error)", isUsage: false)
+            throw Refusal(description: "could not link \(link.path): \(error)", isUsage: false,
+                          reason: .cannotLink(link: link.path, detail: "\(error)"))
         }
         return link
     }
@@ -142,22 +173,23 @@ public enum PluginLink {
         case .nothing:
             break
         case .installed(let source):
-            // What this release of uDeck has for it: Remove, beside the plugin
-            // in Settings. Putting a link in an installed plugin's place is
-            // uDeck's own to do, where it can say what goes to the Trash.
-            throw Refusal(description: "\(id.rawValue) is installed in uDeck from \(source); a link never takes the place "
-                          + "of a plugin uDeck installed. To work on it from \(target) instead, remove the installed copy "
-                          + "first -- Remove, beside it under Plugins in uDeck's Settings -- and link again",
-                          isUsage: false)
+            // Putting a link in an installed plugin's place is uDeck's own to
+            // do, where it can say first what happens to the installed copy:
+            // Link a folder…, under Plugins in its Settings.
+            throw Refusal(description: "\(id.rawValue) is installed in uDeck from \(source); a link from here never takes "
+                          + "the place of a plugin uDeck installed. To work on it from \(target) instead, link it from "
+                          + "uDeck itself -- Link a folder..., under Plugins in uDeck's Settings, which says first what "
+                          + "happens to the installed copy",
+                          isUsage: false, reason: .taken(link: link.path))
         case .link(_, sameFolder: true):
             return Linked(link: link, target: target, wasThere: true)
         case .link(let destination, sameFolder: false):
             throw Refusal(description: "\(link.path) is already a link, to \(destination); take it away first "
                           + "(rm \(shellQuoted(link.path)) -- that takes the link, never what it points at)",
-                          isUsage: false)
+                          isUsage: false, reason: .taken(link: link.path))
         case .folderOfYourOwn:
             throw Refusal(description: "\(link.path) is already there, a plugin folder uDeck did not install; move it "
-                          + "out of the way first", isUsage: false)
+                          + "out of the way first", isUsage: false, reason: .taken(link: link.path))
         }
         try place(candidate, in: paths)
         return Linked(link: link, target: target, wasThere: false)
@@ -171,13 +203,14 @@ public enum PluginLink {
         guard FileManager.default.fileExists(atPath: file.path) else { return nil }
         guard let bytes = try? Data(contentsOf: file) else {
             throw Refusal(description: "could not read \(file.path), so whether \(id.rawValue) is installed is not "
-                          + "known; nothing was linked", isUsage: false)
+                          + "known; nothing was linked", isUsage: false, reason: .recordsUnreadable(file: file.path, detail: nil))
         }
         let document = StrictJSON.parse(Array(bytes))
         guard let installed = document.value?.object?.first("plugins")?.object else {
             throw Refusal(description: "\(file.path) is not the list of installed plugins uDeck writes"
                           + (document.problems.first.map { " (it \($0))" } ?? "")
-                          + "; uDeck installs nothing while it is broken, and nothing was linked", isUsage: false)
+                          + "; uDeck installs nothing while it is broken, and nothing was linked", isUsage: false,
+                          reason: .recordsUnreadable(file: file.path, detail: document.problems.first.map { "it \($0)" }))
         }
         guard let record = installed.first(id.rawValue) else { return nil }
         let repository = record.object?.first("repository")?.object

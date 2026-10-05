@@ -544,3 +544,118 @@ struct LinkedFolderTests {
         #expect(((try? FileManager.default.contentsOfDirectory(atPath: place.paths.plugins.path)) ?? []).isEmpty)
     }
 }
+
+/// A command, a path in a plugin's folder and a name in the plugins folder are
+/// read by their bytes, as the system reads them: a `/` or a `.` with a
+/// combining mark after it is one Swift `Character`, which is not `/` or `.`,
+/// and a mark that goes before what follows it (U+0600) makes the `/` after it
+/// part of one too. Read by the Character, each of these was another command.
+@Suite("Commands and names read by their bytes")
+struct ByteReadingTests {
+    /// A plugin folder with an executable `tool` at `relative` inside it.
+    func folder(with relative: String, in temp: TemporaryDirectory) throws -> URL {
+        let directory = temp.url.appendingPathComponent("plugins/bytes", isDirectory: true)
+        let tool = directory.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: tool.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("#!/bin/sh\necho '{}'\n".utf8).write(to: tool)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+        return directory
+    }
+
+    @Test("a command whose first byte is / is a path from the root, whatever follows the slash")
+    func absoluteByItsFirstByte() throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let directory = try folder(with: "tool", in: temp)
+        let command = "/\u{301}nowhere-at-the-root"
+        #expect(!FileManager.default.fileExists(atPath: command))
+        let resolved = PluginDiscovery(searchPath: ["/usr/bin", "/bin"]).resolveExecutable(command, in: directory)
+        #expect(resolved == .failure(.executableMissing(path: command)), "read as a bare name, it was looked up on the search path")
+    }
+
+    @Test("a command with a / in it is a path in the plugin's folder, even when the / is inside one Character")
+    func separatorByItsByte() throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let name = "a\u{600}/tool"
+        #expect(!name.contains(Character("/")), "the premise: one Character holds the slash")
+        let directory = try folder(with: name, in: temp)
+        let resolved = PluginDiscovery(searchPath: ["/usr/bin", "/bin"]).resolveExecutable(name, in: directory)
+        guard case .success(let url) = resolved else { Issue.record("\(resolved)"); return }
+        #expect(url.lastPathComponent == "tool")
+    }
+
+    @Test("a path is inside the plugin's folder by its bytes, even when the folder's / is one Character with what follows")
+    func insideByItsBytes() throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let name = "\u{301}x/tool"
+        let directory = try folder(with: name, in: temp)
+        let root = directory.standardizedFileURL.resolvingSymlinksInPath().path
+        #expect(!Array(root + "/" + name).starts(with: Array(root + "/")),
+                "the premise: by the Character, it is not under the folder")
+        let resolved = PluginDiscovery(searchPath: ["/usr/bin", "/bin"]).resolveExecutable(name, in: directory)
+        guard case .success(let url) = resolved else { Issue.record("read by the Character, it was outside: \(resolved)"); return }
+        #expect(url.lastPathComponent == "tool")
+        // And outside is still outside.
+        #expect(FilePaths.isInside(root, root + "-sibling/tool") == false)
+        #expect(FilePaths.isInside(root, root) == false)
+        #expect(FilePaths.isInside(root, root + "/tool"))
+    }
+
+    /// A folder written with a `/` at its end is still that folder, and not
+    /// inside itself: what is below it starts after the slash.
+    @Test("a folder is not inside itself, a / at the end of either or both")
+    func notInsideItself() {
+        #expect(!FilePaths.isInside("/a", "/a/"))
+        #expect(!FilePaths.isInside("/a/", "/a/"))
+        #expect(!FilePaths.isInside("/a/", "/a"))
+        #expect(FilePaths.isInside("/a/", "/a/b") && FilePaths.isInside("/a", "/a/b"))
+        #expect(!FilePaths.isInside("/a", "/ab"))
+    }
+
+    /// What Linux calls hidden — the name alone, on the build without
+    /// Foundation's resource values, where the plugins folder's listing
+    /// leaves such names out.
+    @Test("a name is hidden by its first byte")
+    func hiddenByItsFirstByte() {
+        #expect(Array(".\u{301}x").first != Character("."), "the premise: one Character holds the dot")
+        #expect(FilePaths.isHiddenName(".\u{301}x"))
+        #expect(FilePaths.isHiddenName(".git"))
+        #expect(!FilePaths.isHiddenName("x.") && !FilePaths.isHiddenName("") && !FilePaths.isHiddenName("\u{301}.x"))
+    }
+
+    /// A folder of the search path written otherwise than from `/` — `bin`,
+    /// `~/bin` — would be read from uDeck's working folder by uDeck and from
+    /// the plugin's folder by its shell, and nothing expands a `~` there:
+    /// neither looks in it.
+    @Test("only folders written from / are looked in, and handed over in PATH")
+    func searchPathFromTheRoot() throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        let tools = temp.url.appendingPathComponent("tools", isDirectory: true)
+        let directory = try folder(with: "tool", in: temp)
+        try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
+        let greet = tools.appendingPathComponent("greet-from-tools")
+        try Data("#!/bin/sh\n".utf8).write(to: greet)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: greet.path)
+        // The same folder, written relative to this process's own working folder.
+        let here = FileManager.default.currentDirectoryPath
+        let relative = String(repeating: "../", count: here.split(separator: "/").count) + String(tools.path.dropFirst())
+        #expect(FileManager.default.fileExists(atPath: URL(fileURLWithPath: relative).appendingPathComponent("greet-from-tools").path),
+                "the premise: read from the working folder, it is the folder")
+
+        let relativeOnly = PluginDiscovery(searchPath: [relative, "/usr/bin"]).resolveExecutable("greet-from-tools", in: directory)
+        #expect(relativeOnly == .failure(.executableNotOnSearchPath(command: "greet-from-tools", searchPath: ["/usr/bin"])))
+        let absolute = PluginDiscovery(searchPath: [relative, tools.path]).resolveExecutable("greet-from-tools", in: directory)
+        #expect((try? absolute.get())?.lastPathComponent == "greet-from-tools")
+
+        #expect(PluginEnvironment.lookedIn(["bin", "/usr/bin", "~/bin", "", "/\u{301}x"]) == ["/usr/bin", "/\u{301}x"])
+        #expect(PluginEnvironment.effective(["bin", "~/bin"]) == PluginEnvironment.defaultSearchPath)
+        #expect(PluginEnvironment.effective([]) == PluginEnvironment.defaultSearchPath)
+        #expect(PluginEnvironment.effective(["bin", "/opt/x"]) == ["bin", "/opt/x"])
+        let action = PluginEnvironment.action(id: PluginIdentifier(rawValue: "bytes")!, directory: directory,
+                                              searchPath: ["bin", "/usr/bin", "~/bin", "/bin"], home: "/h", temporaryDirectory: nil)
+        #expect(action["PATH"] == "/usr/bin:/bin")
+    }
+}

@@ -223,8 +223,10 @@ public struct PluginDiscovery: Sendable {
     /// The running uDeck's version this discovery holds manifests to.
     public var udeckVersion: SemanticVersion? { udeck }
 
+    /// `searchPath` is the configured one: only its folders written as a
+    /// full path are looked in (`PluginEnvironment.lookedIn`).
     public init(searchPath: [String], udeck: SemanticVersion? = nil) {
-        self.searchPath = searchPath
+        self.searchPath = PluginEnvironment.lookedIn(searchPath)
         self.udeck = udeck
     }
 
@@ -287,11 +289,13 @@ public struct PluginDiscovery: Sendable {
     /// On a Mac that is Foundation's answer, as it always was: a name starting
     /// with `.`, and anything flagged hidden. Without Foundation's resource
     /// values — the Linux build — it is the name alone, which is all Linux
-    /// means by hidden.
+    /// means by hidden: its first byte (`FilePaths.isHiddenName`), as `ls`
+    /// reads it, and not its first `Character` — `.` with a combining mark
+    /// after it is one, and the name still hidden.
     private func visibleEntries(of directory: URL) throws -> [URL] {
         #if canImport(FoundationEssentials)
         return try fileManager.contentsOfDirectory(atPath: directory.path)
-            .filter { !$0.hasPrefix(".") }
+            .filter { !FilePaths.isHiddenName($0) }
             .map { directory.appendingPathComponent($0) }
         #else
         return try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey],
@@ -522,11 +526,16 @@ public struct PluginDiscovery: Sendable {
             return .success(url.standardizedFileURL)
         }
 
-        if command.hasPrefix("/") {
+        // Which of the three a command is, and whether a path stays in the
+        // folder, by bytes (`FilePaths`): `/` with a combining mark after it
+        // is one Character, which is not `/`, and to the system it is still a
+        // slash — a command read as a bare name, or a path as outside its
+        // folder, by the Character was a different command.
+        if FilePaths.isAbsolute(command) {
             return check(URL(fileURLWithPath: command)) ?? .failure(.executableMissing(path: command))
         }
 
-        if command.contains("/") {
+        if FilePaths.hasSeparator(command) {
             // A relative path must stay inside the plugin's folder: `../../ssh`
             // would let a manifest reach anywhere on disk while still looking
             // like a self-contained plugin.
@@ -538,7 +547,7 @@ public struct PluginDiscovery: Sendable {
             let resolved = directory.appendingPathComponent(command)
                 .standardizedFileURL.resolvingSymlinksInPath()
             let root = directory.standardizedFileURL.resolvingSymlinksInPath()
-            guard resolved.path.hasPrefix(root.path + "/") else {
+            guard FilePaths.isInside(root.path, resolved.path) else {
                 return .failure(.executableOutsidePluginFolder(command: command))
             }
             return check(resolved) ?? .failure(.executableMissing(path: resolved.path))

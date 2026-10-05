@@ -280,7 +280,7 @@ extension Command {
     static func shown(_ url: URL, from here: String) -> String {
         let base = URL(fileURLWithPath: here).standardizedFileURL.path
         let path = url.path
-        let prefix = base.hasSuffix("/") ? base : base + "/"
+        let prefix = FilePaths.endsWithSeparator(base) ? base : base + "/"
         if path.utf8.starts(with: prefix.utf8), path.utf8.count > prefix.utf8.count {
             return String(decoding: path.utf8.dropFirst(prefix.utf8.count), as: UTF8.self)
         }

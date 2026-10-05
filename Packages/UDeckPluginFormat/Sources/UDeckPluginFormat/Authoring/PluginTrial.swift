@@ -82,7 +82,14 @@ public enum PluginTrial {
         var searchPathNote: String?
         if let home = options.home {
             switch Self.searchPath(in: UDeckPaths(root: home)) {
-            case .read(let path): searchPath = path
+            case .read(let path):
+                searchPath = path
+                let skipped = path.filter { !FilePaths.isAbsolute($0) }
+                if !skipped.isEmpty {
+                    searchPathNote = "the search path in \(UDeckPaths(root: home).settingsFile.path) names "
+                        + skipped.joined(separator: ", ") + ", not written as a full path from /, and uDeck looks "
+                        + "in no such folder: neither did this run, nor did it hand it to the producer in PATH"
+                }
             case .notThere: break
             case .unreadable(let note): searchPathNote = note
             }
@@ -178,10 +185,10 @@ public enum PluginTrial {
         }
 
         if case .card = execution, !result.standardError.isEmpty {
-            notes.append("uDeck keeps the standard error of a run that printed a card, as of any run, and writes it into "
-                         + "the plugin's run log when the plugin is a linked folder and the run log is on "
-                         + "(logs/\(manifest.id.rawValue).log in uDeck's folder); Settings shows the standard error of a "
-                         + "failed run only")
+            notes.append("uDeck keeps the standard error of a run that printed a card, as of any run: Settings shows "
+                         + "the end of the last run's beside the plugin, under More, and the run log takes every run's "
+                         + "when the plugin is a linked folder and the run log is on "
+                         + "(logs/\(manifest.id.rawValue).log in uDeck's folder)")
         }
         if let slow = slowness(duration: result.duration, timeout: manifest.timeout, execution: execution) {
             notes.append(slow)
@@ -227,7 +234,8 @@ public enum PluginTrial {
     enum SearchPath: Equatable {
         /// `pluginExecutableSearchPath` in `settings.json`, as uDeck reads it.
         case read([String])
-        /// No file, or no such key in it, or an empty list: uDeck's default.
+        /// No file, or no such key in it, or a list with no folder written as
+        /// a full path, an empty one too: uDeck's default.
         case notThere
         /// A file uDeck could not read either: uDeck runs plugins with the
         /// default while it is broken, and so does the run. Said as a note.
@@ -236,7 +244,8 @@ public enum PluginTrial {
 
     /// The search path uDeck runs plugins with, from `settings.json` in its
     /// folder — the one place uDeck keeps it — read as uDeck reads that key:
-    /// a list of folders, and the default when it is absent or empty.
+    /// a list of folders, and the default when it is absent, empty, or names
+    /// no folder written as a full path (`PluginEnvironment.effective`).
     ///
     /// Only that key is read. uDeck reads the whole file, and a value of the
     /// wrong type anywhere in it sends every setting back to its default, the
@@ -255,7 +264,7 @@ public enum PluginTrial {
         }
         do {
             let path = try JSONDecoder().decode(Settings.self, from: data).pluginExecutableSearchPath ?? []
-            return path.isEmpty ? .notThere : .read(path)
+            return PluginEnvironment.lookedIn(path).isEmpty ? .notThere : .read(path)
         } catch {
             return .unreadable("\(file.path) is not a settings file uDeck can read: "
                                + PluginDiscovery.describe(error, in: data, document: "the file")
