@@ -818,10 +818,13 @@ updates with it. Settings says whether your shell looks in `~/.local/bin`, and
 the line to add to its startup file when it does not. A development build has
 no copy inside it; build the command from this repository instead (see
 [writing-a-plugin.md](writing-a-plugin.md)). A uDeck that will not stay where
-it is makes no link and says so: one opened where it was downloaded, which
-macOS runs from a temporary copy (App Translocation), and one opened on its
-disk image under `/Volumes`. Move uDeck to Applications first and open it from
-there; an update keeps it there, and the link keeps leading to it.
+it is makes no link and offers no **Install command**, and says why instead:
+one opened where it was downloaded, which macOS runs from a temporary copy
+(App Translocation), and one opened on its disk image under `/Volumes`. Move
+uDeck to Applications first and open it from there; an update keeps it there,
+and the link keeps leading to it. Without uDeck — on Linux, in CI — every
+release carries the command as archives for macOS and Linux and as a container
+image ([docs/plugin-repository.md](plugin-repository.md#where-the-command-comes-from)).
 
 `udeck-plugin check --strict <folder>` holds the folder to every rule a plugin
 repository's CI does. Then let uDeck load it: link it in

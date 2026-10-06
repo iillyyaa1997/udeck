@@ -10,6 +10,52 @@ for what that promises.
 
 ## [Unreleased]
 
+- **`udeck-plugin` without uDeck.** Every release carries the command for
+  whoever has no uDeck to take it from: `udeck-plugin-X.Y.Z-macos-universal.tar.gz`
+  (arm64 and x86_64 in one binary, signed as the copy inside uDeck.app),
+  `-linux-x86_64` and `-linux-aarch64` (static musl, stripped — nothing else
+  to install), `SHA256SUMS` over them, and the container image
+  `ghcr.io/iillyyaa1997/udeck-plugin` for linux/amd64 and linux/arm64 — Alpine
+  with git, for a plugin repository's CI on GitHub Actions or GitLab CI —
+  whose digest is in the release's notes and in `udeck-plugin-image.txt`. The
+  command says the release's version, and a release whose command says another
+  is not made. Everything goes out in the one `gh release create` that
+  publishes the app, since a published release takes no asset afterwards; the
+  image is pushed just before it, once each platform's copy has checked the
+  examples and a repository made inside it. CI makes the same archives and the
+  same image on every push, runs them, and publishes nothing — a change to the
+  release is proved before a tag needs it. `Scripts/make-cli.sh` makes all of
+  it, for both.
+
+- **Every button that takes a link away says so first.** **Update**, **Switch
+  to**, **Reinstall**, **Back to** and **Install this version** over a plugin
+  whose place holds a link — one put there while the warning about the copy was
+  up included — say first that only the link goes and the folder it leads to
+  stays, as **Replace…** says it; they used to take the link away without a
+  word. And they are held to the copy that comes, not only its version: a
+  repository that published another tree under the version the warning named
+  gets the warning again rather than an install of what nobody was shown.
+
+- **Install command takes away only its own link.** Putting the link in place
+  over another uDeck's, it puts back anything of somebody else's that appeared
+  meanwhile — and now also reads what that putting back took out of the place:
+  something written there in between stays, beside it, and Settings says
+  where, instead of being deleted unread. Where the command cannot be linked —
+  a uDeck run from its download or its disk image, or a development build —
+  the button is not offered at all, rather than shown greyed out under the
+  line that says why.
+
+- **Link a folder… names both folders the same way.** Over a link, its warning
+  wrote the folder chosen as `~/…` and the folder the link leads to as
+  `/Users/…`; both are written from the home folder now.
+
+- **A plugin that will not load says in Russian that its details are English.**
+  Why a manifest or a folder is refused is said in the plugin check's own words
+  — those `udeck-plugin check` prints and a plugin's row in Settings shows —
+  which are English; in Russian the sentence now says so, *плагин не
+  загружается (подробности по-английски, словами проверки плагина): …*, rather
+  than trailing off into English unexplained.
+
 - **Settings → Plugins for somebody writing a plugin.** A linked plugin's row
   is marked **Linked** and says where its link leads (or that uDeck does not
   follow it), and **Remove** on it says first that only the link goes — the

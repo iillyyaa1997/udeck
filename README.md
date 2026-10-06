@@ -112,11 +112,47 @@ udeck-plugin run my-first-plugin
 
 `udeck-plugin` comes inside uDeck.app: **Install command** under Settings →
 Plugins links it into `~/.local/bin` — no administrator password — and it
-updates with uDeck. It is also built from this repository —
-`swift build -c release --package-path Packages/UDeckPluginFormat --product udeck-plugin` —
-and **[Writing a plugin](docs/writing-a-plugin.md)** goes on from there: a
-plugin you work on is linked in — `udeck-plugin link`, or **Link a folder…**
-in Settings — and runs from where it is.
+updates with uDeck. **[Writing a plugin](docs/writing-a-plugin.md)** goes on
+from there: a plugin you work on is linked in — `udeck-plugin link`, or **Link
+a folder…** in Settings — and runs from where it is.
+
+Without uDeck — on Linux, or on a Mac that does not run it — take the command
+from a [release](https://github.com/iillyyaa1997/udeck/releases): from the one
+after 0.5.0 on, each carries it for macOS (arm64 and x86_64 in one binary) and
+for Linux (x86_64 and aarch64, static: nothing else to install), and
+`SHA256SUMS` over them. Check the archive before you run what is in it:
+
+```sh
+version=X.Y.Z            # the release, without its v
+platform=linux-x86_64    # or linux-aarch64, macos-universal
+base=https://github.com/iillyyaa1997/udeck/releases/download/v$version
+curl -fsSLO "$base/udeck-plugin-$version-$platform.tar.gz"
+curl -fsSLO "$base/SHA256SUMS"
+grep " udeck-plugin-$version-$platform.tar.gz\$" SHA256SUMS | sha256sum -c -   # on a Mac: shasum -a 256 -c -
+tar -xzf "udeck-plugin-$version-$platform.tar.gz"
+"udeck-plugin-$version-$platform/udeck-plugin" --version
+```
+
+Downloaded with `curl` it runs as it is. A copy a browser downloaded on a Mac
+carries the quarantine mark, and macOS will not run an ad-hoc signed command
+that has it until the mark is taken off (`xattr -d com.apple.quarantine
+udeck-plugin`) — the same signing story as the application's, below.
+
+In a plugin repository's CI, use the container image
+`ghcr.io/iillyyaa1997/udeck-plugin` (linux/amd64, linux/arm64), **by the digest
+the release names** — in its notes and in `udeck-plugin-image.txt` — not by its
+tag:
+
+```sh
+docker run --rm --network none -v "$PWD:/repo:ro" \
+  ghcr.io/iillyyaa1997/udeck-plugin@sha256:<digest> \
+  udeck-plugin check-repo --repo /repo --strict
+```
+
+What is in each asset, and how a repository will pin one release, is in
+[docs/plugin-repository.md](docs/plugin-repository.md#where-the-command-comes-from).
+It also builds from this repository:
+`swift build -c release --package-path Packages/UDeckPluginFormat --product udeck-plugin`.
 
 `~/.udeck` can be moved with the `UDECK_HOME` environment variable.
 
@@ -184,6 +220,11 @@ reach the network whenever it likes — see [Security](SECURITY.md).
 A release is a tag. `v0.2.0` on `main` builds, tests, signs and publishes the
 archive and the update feed; the version in the tag has to match the one in
 `Info.plist` or the release fails rather than shipping two different numbers.
+The same release carries `udeck-plugin` — its archives, `SHA256SUMS`, and the
+container image's digest, the image pushed to ghcr.io just before — all in one
+`gh release create`, since a published release here can take no asset
+afterwards. CI makes every one of them on each push, runs the image on both
+of its platforms, and publishes nothing.
 
 ## What it costs to leave running
 

@@ -283,6 +283,49 @@ folder linked into uDeck's plugins folder is such a link. Exit status: 0 when
 there are no errors (warnings do not fail the check), 1 when there are, 2 when
 nothing could be checked.
 
+#### Where the command comes from
+
+The command a repository's CI runs is published with uDeck, in the same
+release and under the same version — `udeck-plugin --version` says the
+release's number, and a release whose command says another is not made. Every
+release from the one after 0.5.0 carries, besides uDeck itself:
+
+| Asset | What it is |
+|---|---|
+| `udeck-plugin-X.Y.Z-macos-universal.tar.gz` | arm64 and x86_64 in one binary, signed as the copy inside uDeck.app (ad-hoc, hardened runtime) — for a Mac without uDeck, and a macOS runner |
+| `udeck-plugin-X.Y.Z-linux-x86_64.tar.gz`, `-linux-aarch64.tar.gz` | a static musl binary, stripped: no dynamic loader, no shared library — any Linux of its architecture runs it with nothing installed |
+| `SHA256SUMS` | the sha256 of the three archives and of the file below |
+| `udeck-plugin-image.txt` | the container image: `image=ghcr.io/iillyyaa1997/udeck-plugin`, `tag=vX.Y.Z`, `digest=sha256:…` (of the index), `platforms=linux/amd64,linux/arm64` — the digest is also the first thing in the release's notes |
+
+Each archive is one folder, `udeck-plugin-X.Y.Z-<platform>/`, with the
+command, `LICENSE` and `NOTICE`. The image is Alpine, pinned by digest, with
+git and the same static binary at `/usr/local/bin/udeck-plugin`, and no
+`ENTRYPOINT`: GitLab CI hands a job's script to the image's shell, and the
+check starts git. Pull it by its digest — a tag can be moved, a digest cannot:
+
+```sh
+docker run --rm --network none -v "$PWD:/repo:ro" \
+  ghcr.io/iillyyaa1997/udeck-plugin@sha256:<digest from udeck-plugin-image.txt> \
+  udeck-plugin check-repo --repo /repo --strict
+```
+
+Read-only and without a network is how it is meant to run: the check needs
+neither, and opens git's `safe.directory` for the mounted repository itself.
+
+Everything is made by `Scripts/make-cli.sh` and published by `release.yml` in
+the one `gh release create` that publishes the app — uDeck's releases are
+immutable, so a release cannot take an asset afterwards — with the image
+pushed before it, from the same archives, once both platforms' copies have
+run `--version`, `check` and `check-repo` on the examples. `ci.yml` makes the
+same archives and the same image on every push, runs them, and publishes
+nothing.
+
+> **Later — stage 2.** A plugin repository pins one release in a lock file
+> read from its base — the version, the archives' sha256, the image's digest —
+> and `udeck-plugin pin` writes it; the template repository's GitHub workflow
+> and GitLab CI read it, the GitLab one with a variable for a mirror of the
+> image (the digest says what, the variable only where from).
+
 **What git is told, and what it is not.** Git runs with nobody's global or
 system configuration and no `GIT_` variable inherited. A repository's own
 configuration is still read — and it names programs git runs in more places
@@ -363,8 +406,18 @@ pull request has it. That rests on the review below.
 > uses, and the script is deleted rather than kept alongside: two
 > implementations of one set of rules drift, which is exactly what happened to
 > the bash check in uDeck's own CI. With it the official repository gets rules
-> 18 and 19 — the version check and `minUDeck` — which the script does not
-> have.
+> 18, 19 and 20 — the version check, `minUDeck` and one-line names — which the
+> script does not have.
+>
+> What is there already: every uDeck release from the one after 0.5.0 carries
+> the command itself ([Where the command comes from](#where-the-command-comes-from)).
+> What comes next: a lock file in the repository — `udeck-plugin`'s version,
+> the sha256 of its Linux archives and the image's digest — read from the
+> base, as the script is read now, so that a pull request cannot choose the
+> check that judges it; `udeck-plugin pin`, which writes that file for a
+> release on GitHub and GitLab alike; and `validate` running the pinned binary
+> beside the script, failing when the two disagree, until they have agreed
+> long enough for the script to go.
 
 **Branch protection is what "Verified" rests on.** On `main`: a pull request
 is required, with no exception for administrators; `validate` must pass; force
@@ -1098,19 +1151,26 @@ The rule is `OperatorsWork` in UDeckCore, and the installer decides the Trash
 by the same function. A linked folder's link never goes to the Trash — it is
 unlinked, and the folder it leads to is not touched — so **Remove** on a linked
 plugin says that instead: *"Remove the link uptime? Only the link goes: the
-folder it leads to, ~/src/uptime, stays exactly as it is."* Which warning a
-button shows is `PlaceWarning` in UDeckCore, tested there.
+folder it leads to, ~/src/uptime, stays exactly as it is."* Every other button
+that would take a link away says first that only the link goes, as
+**Replace…** says it — **Update**, **Switch to**, **Reinstall**, **Back to**
+and **Install this version** too, a link put where the copy was while the
+warning about the copy was up included. Which warning a button shows is
+`PlaceWarning` in UDeckCore, tested there.
 
 A warning's button acts on what the warning said, and on nothing else. It
 carries what was shown — what is at the plugin's place (a link and where it
-leads, the operator's work, uDeck's own copy, nothing) and the version that
-comes — and when it is pressed, the disk and the catalogue are asked again: if
-anything differs, byte for byte, nothing is done and the warning says what is
-there now (or, when nothing there needs a warning any more, the button does
-what it does unwarned). **Link a folder…** holds its warning the same way, to
-the id the manifest gives, what is at that id and whether it goes to the
-Trash: a manifest whose id is changed while the warning is up gets a warning
-of its own before anything of the new id is touched. **Install** on a row that
+leads, the operator's work, uDeck's own copy, nothing), the version that comes,
+and which copy of it: the plugin folder's tree at the catalogue's head for
+**Install** and **Update**, the commit for a button that installs at a commit,
+since a version is only what a manifest says and a repository can publish
+another tree under the same one — and when it is pressed, the disk and the
+catalogue are asked again: if anything differs, byte for byte, nothing is done
+and the warning says what is there now (or, when nothing there needs a warning
+any more, the button does what it does unwarned). **Link a folder…** holds its
+warning the same way, to the id the manifest gives, what is at that id and
+whether it goes to the Trash: a manifest whose id is changed while the warning
+is up gets a warning of its own before anything of the new id is touched. **Install** on a row that
 said nothing is there warns first of a folder or a link put there since. The
 rule is `ShownPlace` in UDeckCore, tested there.
 
@@ -1372,7 +1432,7 @@ guest's `~/.udeck` over SSH.
 | `plugins.failed-run-on-a-fresh-card` | A linked plugin whose card lasts 300 s fails (exit 3, a line on stderr) while a file is in its folder: with the panel open, the fresh card keeps its values and gets the amber dot by its name and the lines *Last run failed at …: the producer exited with status 3* and *showing values from …*; Settings → Plugins, under **More**, says *Last run … a failure: …* and the end of its stderr; the file taken away and the panel opened again, the dot and the line are gone. The panel's own buttons are refresh, Settings, send away and fill the screen — no density button. |
 | `plugins.install-command` | The bundle carries `Contents/Helpers/udeck-plugin` and `codesign --verify --deep --strict` holds in the guest; the row says it is not installed; **Install command** makes `~/.local/bin/udeck-plugin` a link to it, and `--help` and `--version` run through the link; the row says it is installed and what the guest's zsh makes of `~/.local/bin` (the line to add, when it does not look there); **Remove command** takes the link and leaves the command in the bundle; a file of somebody else's at that place is said, left as it is, and not offered **Install command**. |
 | `plugins.search-path-field` | A linked plugin running the bare `lab-greet`, on no folder of the default list: its window says it was not found. **＋ Add a folder…** (the folder chosen in the panel) puts a folder of the lab's at the top of **Where to look for commands** and in `settings.json`, and the card, allowed, says that folder's word; a second folder added says its word; **↓** on it, the first folder's word again — each from the next run, without a restart; **Restore the defaults** puts the default list back in `settings.json`. |
-| `plugins.screens-in-russian` | With uDeck in Russian (`language` in `settings.json`), a failed run on a fresh card, the **Linked** row and its Remove warning, **Link a folder…** over the installed `uptime` and its warning, the last run under **More**, the run log switch, **Where to look for commands** and **Install command** are each there and say uDeck's Russian words — why the run failed too, *программа плагина завершилась с кодом 3*, with the last run's seconds written with a comma; a screenshot of each is kept for a person to read. |
+| `plugins.screens-in-russian` | With uDeck in Russian (`language` in `settings.json`), a failed run on a fresh card, the **Linked** row and its Remove warning, **Link a folder…** over the installed `uptime` and its warning, the last run under **More**, the run log switch, **Where to look for commands** and **Install command** are each there and say uDeck's Russian words — why the run failed too, *программа плагина завершилась с кодом 3*, with the last run's seconds written with a comma; **Link a folder…** over a link writes both folders from `~`; **Update** over a link put where the installed `uptime` was says first *uptime здесь — ссылка на ~/…* and leaves the link until that is confirmed; a screenshot of each is kept for a person to read. |
 
 ### Unit tests
 
@@ -1424,17 +1484,26 @@ never the network. What they cover:
 * `installed.json`: reading and writing, and the status computation;
 * which windows the layout keeps;
 * what Settings → Plugins decides before it draws: which warning **Remove**,
-  **Replace…** and **Link a folder…** show over a link, the operator's work
-  and uDeck's own copy (`PlaceWarning`); what **Where to look for commands**
-  does to the list and says of each folder (`SearchPathList`); **Install
-  command** on a bundle and a `~/.local/bin` of the test's own — installed,
-  another copy's link, somebody else's file left alone — and a shell of the
-  test's own asked for its `PATH` (`CommandInstall`, `ShellPath`) — a file put
-  at the command's place between the look and the rename, and in place of the
-  link before Remove takes it, left there and said; where uDeck runs from
+  **Replace…**, **Update**, **Reinstall**, **Back to**, **Install this
+  version** and **Link a folder…** show over a link, the operator's work and
+  uDeck's own copy, every folder in it written from `~` (`PlaceWarning`); what
+  **Where to look for commands** does to the list and says of each folder
+  (`SearchPathList`); **Install command** on a bundle and a `~/.local/bin` of
+  the test's own — installed, another copy's link, somebody else's file left
+  alone — and a shell of the test's own asked for its `PATH` (`CommandInstall`,
+  `ShellPath`) — a file put at the command's place between the look and the
+  rename, in place of the link before Remove takes it, and between the
+  exchange and the exchange back, left there and said; which of its buttons is
+  offered where (`CommandInstall.buttons`); where uDeck runs from
   (`BundlePlace`); when a warning's button acts and when it says what is there
-  now instead (`ShownPlace`); and when a failed run is said on a fresh card
-  (`PluginSnapshot.failureOnAFreshCard`).
+  now instead — another version, another copy of the same version, a link put
+  in the copy's place (`ShownPlace`); and when a failed run is said on a fresh
+  card (`PluginSnapshot.failureOnAFreshCard`).
+* what `Scripts/make-cli.sh` makes and refuses, and what `release.yml` may do
+  and in which order, in the lab's own tests (`e2e/tests/test_make_cli.py`):
+  the archives and their names, the signature of the Mac's, a static and
+  stripped binary for Linux, `SHA256SUMS`, the image run on both platforms
+  before anything is pushed, and the one `gh release create`.
 
 ---
 
@@ -1503,8 +1572,9 @@ owner sets the branch protection.
 
 * **Stage 2 — one validator and a template.** The rules move into a Swift
   library, `UDeckPluginFormat`, that builds on macOS and Linux; the
-  `udeck-plugin` command (`check`, `check-repo`, `new`, `run`) is shipped as a
-  release asset and a container image; uDeck links the same library; CI
+  `udeck-plugin` command (`check`, `check-repo`, `new`, `run`) is shipped as
+  release assets and a container image (built: [Where the command comes
+  from](#where-the-command-comes-from)); uDeck links the same library; CI
   templates for GitHub Actions and GitLab CI, with a variable for a mirror of
   the image; the version-bump and `minUDeck` checks; a template repository
   anyone can start from; a plugin folder that is a link to a working copy, for

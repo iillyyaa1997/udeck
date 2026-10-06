@@ -31,7 +31,10 @@ uDeck plugin.
 **Install command** under Settings → Plugins links `~/.local/bin/udeck-plugin`
 to that copy — no administrator password — so it is the version of your uDeck
 and updates with it, and Settings says the line to add to your shell's startup
-file if your shell does not look in `~/.local/bin`. Or build it from this
+file if your shell does not look in `~/.local/bin`. Without uDeck, take it
+from a release — an archive for macOS (arm64 and x86_64 in one) or for Linux
+(x86_64, aarch64), checked against the release's `SHA256SUMS`, as the
+[README](../README.md#installing-plugins) shows. Or build it from this
 repository (macOS and Linux; `run` takes a Mac):
 
 ```sh
