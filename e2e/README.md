@@ -1257,7 +1257,9 @@ row of the same table:
 * `plugins.screens-in-russian` sets uDeck — not the guest — to Russian in
   `settings.json` before it starts, reaches Settings by its Russian menu item
   and window title (`ui.RUSSIAN`), and keeps a screenshot of every part the
-  others check, in Russian, for a person to read.
+  others check, in Russian, for a person to read — and of two warnings over a
+  link: **Link a folder…** over the linked `flaky`, and **Update** over a link
+  put by hand where the installed `uptime` was.
 
 ## Reading the result
 

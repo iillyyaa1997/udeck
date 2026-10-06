@@ -191,6 +191,11 @@ RU_LINKED_MARK = "Связанная папка"
 RU_ONLY_THE_LINK = "Уйдёт только ссылка"
 RU_OVER_THE_INSTALLED = f"{UPTIME} установлен из github.com/{config.PLUGINS_REPOSITORY}"
 RU_INSTALLED_COMMAND = "Установлена: "
+# Link a folder… over a link, and Update over a link (Russian.swift:
+# linkFolderOverLink, catalogueReplaceLinkConfirm): where a link leads is
+# written from ~, as the folder chosen is.
+RU_OVER_A_LINK = "{id} сейчас — ссылка на ~/"
+RU_REPLACING_A_LINK = "{id} здесь — ссылка на ~/"
 
 
 # --- The checks -------------------------------------------------------------------------
@@ -1395,8 +1400,15 @@ def check_screens_in_russian(machine, check_dir, lab):
     Russian ones (Russian.swift) — why the run failed too, on the card and in
     the last run, whose seconds are written with a comma; nothing is confirmed.
 
+    Then two warnings C2b2's review changed: **Link a folder…** over a link,
+    which names the folder chosen and the folder the link leads to both from
+    `~`; and **Update** over a link put where the installed `uptime` was, which
+    says first that only the link goes, as **Replace…** says it — it used to
+    take the link away without a word.
+
     **Red for**: a part that is not there in Russian, or that says it in
-    English.
+    English; a warning that writes a folder as `/Users/…`; **Update** over a
+    link without that warning.
     """
     scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
     ru = ui.RUSSIAN
@@ -1455,6 +1467,39 @@ def check_screens_in_russian(machine, check_dir, lab):
         for part in ("plugins.runLog", "plugins.linkFolder", "searchPath.row.0", "searchPath.add", "searchPath.restore"):
             expect(ui.element(dump, part) is not None, f"Settings → Plugins in Russian has no {part}")
         _press(machine, "command.remove", "pressing Remove command", window=window)
+
+        # Link a folder… over a link: a second working copy with flaky's id,
+        # over the link to the first. Both folders are written from ~.
+        again = f"{WORK}/{FLAKY}-again"
+        machine.ssh.run(f"rm -rf {again} && cp -R {folder} {again} && rm -f {again}/{FAIL}",
+                        "making a second working copy of flaky")  # fmt: skip
+        _link_through_settings(scene, again, "over the link flaky, in Russian", window=window)
+        over_a_link = RU_OVER_A_LINK.format(id=FLAKY)
+        warning = _wait_until(machine, "plugins.linkFolder.confirmText",
+                              lambda said: bool(said) and said.startswith(over_a_link), NOTICED_SECONDS, window=window)  # fmt: skip
+        _keep_the_pane(machine, check_dir, lab, "ru-the-warning-before-linking-over-a-link.txt", window=window)
+        expect(warning is not None and warning.startswith(over_a_link) and "/Users/" not in warning,
+               f"Link a folder… over a link in Russian says {warning!r}; both folders have to be written from ~")
+        _press(machine, "plugins.linkFolder.cancel", "leaving the link as it is", window=window)
+
+        # Update over a link: uptime's copy replaced by a link to a working
+        # copy by hand, its update offered, Update pressed — the warning first.
+        machine.ssh.run(f"rm -rf {UDECK_HOME}/plugins/{UPTIME} && ln -s {over} {UDECK_HOME}/plugins/{UPTIME}",
+                        "putting a link where uptime's copy was")  # fmt: skip
+        scene.github.tell("moving main to c2", main="c2")
+        _press(machine, "catalogue.checkNow", "pressing Check now", window=window)
+        offered = _wait_until(machine, f"plugin.{UPTIME}.update", lambda said: said is not None, OPERATION_SECONDS,
+                              window=window, present=True)  # fmt: skip
+        expect(offered is not None, f"with main at c2, {UPTIME}'s row offers no Update")
+        if offered is not None:
+            _press(machine, f"plugin.{UPTIME}.update", "pressing Update over the link", window=window)
+            replacing = RU_REPLACING_A_LINK.format(id=UPTIME)
+            warning = _wait_until(machine, f"plugin.{UPTIME}.confirmText",
+                                  lambda said: bool(said) and said.startswith(replacing), NOTICED_SECONDS, window=window)  # fmt: skip
+            _keep_the_pane(machine, check_dir, lab, "ru-the-warning-before-updating-over-a-link.txt", window=window)
+            expect(warning is not None and warning.startswith(replacing) and "/Users/" not in warning,
+                   f"Update over a link in Russian says {warning!r} first; it has to say {replacing!r}…")
+            expect(_link_leads(machine, UPTIME) is not None, "Update over a link took the link away before its warning was confirmed")
     finally:
         try:
             machine.ssh.ask("rm -f ~/.local/bin/udeck-plugin", "taking the command away")
