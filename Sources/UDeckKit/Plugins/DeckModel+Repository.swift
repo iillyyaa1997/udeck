@@ -181,8 +181,8 @@ extension DeckModel {
     /// the operator's goes and not only when the row says **Modified
     /// locally**. What the warning says, and what its button is held to
     /// (`ShownPlace`).
-    public func place(of id: String, arriving: String?) -> ShownPlace.Place {
-        ShownPlace.Place.now(id, in: paths, record: installed.plugins[id], arriving: arriving)
+    public func place(of id: String, arriving: String?, copy: String? = nil) -> ShownPlace.Place {
+        ShownPlace.Place.now(id, in: paths, record: installed.plugins[id], arriving: arriving, copy: copy)
     }
 
     /// Whether a window's plugin is here to run.
@@ -303,7 +303,8 @@ extension DeckModel {
     public func install(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
         guard let catalogue, let entry = catalogue.entry(id) else { return .goAhead }
         let version = entry.manifest?.version ?? ""
-        if case .ask(let now) = ShownPlace.press(.install, shown: shown, now: place(of: id, arriving: version)) {
+        let there = place(of: id, arriving: version, copy: entry.listing.tree)
+        if case .ask(let now) = ShownPlace.press(.install, shown: shown, now: there) {
             return .ask(now)
         }
         let operation: InstallRequest.Operation =
@@ -318,7 +319,8 @@ extension DeckModel {
     public func update(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
         guard let catalogue, let entry = catalogue.entry(id) else { return .goAhead }
         let version = entry.manifest?.version ?? ""
-        if case .ask(let now) = ShownPlace.press(.replaceCopy, shown: shown, now: place(of: id, arriving: version)) {
+        let there = place(of: id, arriving: version, copy: entry.listing.tree)
+        if case .ask(let now) = ShownPlace.press(.replaceCopy, shown: shown, now: there) {
             return .ask(now)
         }
         run(.update, id: id, commit: catalogue.commit, folder: entry.listing, version: version)
@@ -348,10 +350,12 @@ extension DeckModel {
     }
 
     /// A copy replaced by `version` at `commit`, once what its warning showed
-    /// is what is there.
+    /// is what is there — and the commit it named is the one the files come
+    /// from.
     private func atCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
                           shown: ShownPlace.Place?) -> ShownPlace.Press {
-        if case .ask(let now) = ShownPlace.press(.replaceCopy, shown: shown, now: place(of: id, arriving: version)) {
+        let there = place(of: id, arriving: version, copy: commit)
+        if case .ask(let now) = ShownPlace.press(.replaceCopy, shown: shown, now: there) {
             return .ask(now)
         }
         runAtCommit(operation, id: id, commit: commit, version: version)

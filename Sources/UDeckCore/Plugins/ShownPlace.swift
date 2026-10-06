@@ -91,8 +91,8 @@ public enum ShownPlace {
     // MARK: - Remove, Install, Replace…, Update, Reinstall, Back to
 
     /// What a button that takes an installed plugin's place does to what is
-    /// at `plugins/<id>` — and the version that comes in its place — as its
-    /// warning says it.
+    /// at `plugins/<id>` — and the version and copy that come in its place —
+    /// as its warning says it.
     public struct Place: Equatable, Sendable {
         /// What becomes of what is at `plugins/<id>`, by the installer's own
         /// rule (`OperatorsWork`, `PluginInstaller.isLink`).
@@ -111,10 +111,19 @@ public enum ShownPlace {
         public var fate: Fate
         /// The version that comes in its place; nil for **Remove**.
         public var arriving: String?
+        /// Which copy of that version comes, by the name git gives its
+        /// files: the plugin folder's tree at the catalogue's head for
+        /// **Install** and **Update** — the head moves on with every merge,
+        /// the folder only when it changed — and the commit the files are
+        /// taken from for a button that installs at a commit. Nil for
+        /// **Remove**. A version is only what a manifest says: the repository
+        /// can publish another tree under the one the warning named.
+        public var copy: String?
 
-        public init(fate: Fate, arriving: String?) {
+        public init(fate: Fate, arriving: String?, copy: String? = nil) {
             self.fate = fate
             self.arriving = arriving
+            self.copy = copy
         }
 
         /// Where the link leads, when a link is what is there.
@@ -123,17 +132,21 @@ public enum ShownPlace {
         }
 
         /// What a button that takes `plugins/<id>` would do now, with
-        /// `record` the plugin's record as uDeck holds it.
-        public static func now(_ id: String, in paths: UDeckPaths, record: InstalledRecord?, arriving: String?) -> Place {
+        /// `record` the plugin's record as uDeck holds it, and `arriving`
+        /// and `copy` what the button would put there.
+        public static func now(_ id: String, in paths: UDeckPaths, record: InstalledRecord?, arriving: String?,
+                               copy: String? = nil) -> Place {
             let live = paths.plugins.appendingPathComponent(id, isDirectory: true)
-            guard PluginInstaller.folderIsTaken(id, in: paths) else { return Place(fate: .nothing, arriving: arriving) }
+            guard PluginInstaller.folderIsTaken(id, in: paths) else {
+                return Place(fate: .nothing, arriving: arriving, copy: copy)
+            }
             if PluginInstaller.isLink(live) {
                 let leadsTo = FilePaths.real(live.path).path
                     ?? (try? FileManager.default.destinationOfSymbolicLink(atPath: live.path)) ?? live.path
-                return Place(fate: .linkGoes(leadsTo: leadsTo), arriving: arriving)
+                return Place(fate: .linkGoes(leadsTo: leadsTo), arriving: arriving, copy: copy)
             }
             return Place(fate: OperatorsWork.goesToTrash(id, in: paths, record: record) ? .toTrash : .deleted,
-                         arriving: arriving)
+                         arriving: arriving, copy: copy)
         }
     }
 
@@ -146,7 +159,8 @@ public enum ShownPlace {
         case install
         /// **Update**, **Switch to**, **Reinstall**, **Back to** and an
         /// earlier version: first over a copy holding something of the
-        /// operator's.
+        /// operator's, or over a link — one put where the copy was while
+        /// the warning was up included: the link goes, not the copy.
         case replaceCopy
     }
 
@@ -162,8 +176,7 @@ public enum ShownPlace {
     public static func warns(_ button: Button, of now: Place) -> Bool {
         switch button {
         case .remove: true
-        case .install: now.fate == .toTrash || now.link != nil
-        case .replaceCopy: now.fate == .toTrash
+        case .install, .replaceCopy: now.fate == .toTrash || now.link != nil
         }
     }
 
@@ -177,9 +190,10 @@ public enum ShownPlace {
         return warns(button, of: now) ? .ask(now) : .goAhead
     }
 
-    /// Whether the warning `shown` says what is there `now`, byte for byte.
+    /// Whether the warning `shown` says what is there `now`, and names the
+    /// copy that comes now, byte for byte.
     public static func holds(_ shown: Place, now: Place) -> Bool {
-        guard same(shown.arriving, now.arriving) else { return false }
+        guard same(shown.arriving, now.arriving), same(shown.copy, now.copy) else { return false }
         switch (shown.fate, now.fate) {
         case (.nothing, .nothing), (.toTrash, .toTrash), (.deleted, .deleted): return true
         case (.linkGoes(let one), .linkGoes(let other)): return same(one, other)

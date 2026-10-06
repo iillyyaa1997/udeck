@@ -175,8 +175,9 @@ struct DeckWindowView: View {
             if let shown = confirmingReinstall {
                 // The same warning, by the same rule, as every other button
                 // that replaces a folder: something of the operator's goes to
-                // the Trash (`OperatorsWork`).
-                note(strings(.catalogueUpdateOverChanges(id: window.pluginID.rawValue, version: shown.arriving ?? "")),
+                // the Trash (`OperatorsWork`); of a link, only the link.
+                note(strings(PlaceWarning.replacingCopy(id: window.pluginID.rawValue, version: shown.arriving ?? "",
+                                                        link: shown.link.map { model.displayPath($0) })),
                      tint: theme.warn)
             }
             HStack(spacing: 8) {

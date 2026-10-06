@@ -95,9 +95,10 @@ struct LinkFolderControls: View {
             line(strings(.linkFolderAlready(id: id, target: model.displayPath(target))), trouble: false)
         case .needsConfirmation(let shown):
             if let folder = pending,
-               let warning = PlaceWarning.linking(id: shown.id, folder: model.displayPath(folder.path),
+               let warning = PlaceWarning.linking(id: shown.id, folder: folder.path,
                                                   occupant: shown.occupant, toTrash: shown.toTrash,
-                                                  path: model.pluginsDirectoryDisplayPath) {
+                                                  path: model.pluginsDirectoryDisplayPath,
+                                                  shown: { model.displayPath($0) }) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(strings(warning)).font(.caption).fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("plugins.linkFolder.confirmText")
@@ -290,12 +291,13 @@ struct CommandSection: View {
         SettingsBlock(strings(.commandTitle)) {
             let path = model.commandDisplayPath
             let command = model.command
-            let canInstall = command.helper != nil && command.place == .lasting
+            let buttons = command.buttons(for: model.commandState)
             if command.helper == nil {
                 note(strings(.commandNoHelper), trouble: true, identifier: "command.noHelper")
             } else if command.place != .lasting {
-                // Said before the button is pressed, and the button is not
-                // offered: a link to this copy would lead nowhere once it goes.
+                // Said instead of the button, which is not offered
+                // (`CommandInstall.buttons`): a link to this copy would lead
+                // nowhere once it goes.
                 note(strings(.commandNotLasting(command.place)), trouble: true, identifier: "command.notLasting")
             }
             switch model.commandState {
@@ -310,20 +312,13 @@ struct CommandSection: View {
                 note(strings(.commandForeign(path: path, what: what)), trouble: true, identifier: "command.state")
             }
             HStack(spacing: 8) {
-                switch model.commandState {
-                case .notInstalled, .otherCopy:
+                if buttons.contains(.install) {
                     Button(strings(.commandInstall)) { model.installCommand() }
-                        .disabled(!canInstall)
                         .accessibilityIdentifier("command.install")
-                default:
-                    EmptyView()
                 }
-                switch model.commandState {
-                case .installed, .otherCopy:
+                if buttons.contains(.remove) {
                     Button(strings(.commandRemove)) { model.removeCommand() }
                         .accessibilityIdentifier("command.remove")
-                default:
-                    EmptyView()
                 }
             }
             if let problem = model.commandProblem {

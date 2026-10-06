@@ -28,10 +28,39 @@ struct PlaceWarningTests {
                 == .catalogueReplaceConfirm(id: "uptime", path: "~/.udeck/plugins"))
     }
 
+    @Test("Update, Reinstall, Back to, Install this version: over a link only the link goes, as Replace… says; over changes, the Trash")
+    func replacingCopy() {
+        #expect(PlaceWarning.replacingCopy(id: "uptime", version: "1.3.0", link: "~/work/uptime")
+                == PlaceWarning.replacement(id: "uptime", path: "~/.udeck/plugins", link: "~/work/uptime"))
+        #expect(PlaceWarning.replacingCopy(id: "uptime", version: "1.3.0", link: "~/work/uptime")
+                == .catalogueReplaceLinkConfirm(id: "uptime", target: "~/work/uptime"))
+        #expect(PlaceWarning.replacingCopy(id: "uptime", version: "1.3.0", link: nil)
+                == .catalogueUpdateOverChanges(id: "uptime", version: "1.3.0"))
+    }
+
+    /// C2b2's review: the warning named the folder chosen as `~/…` and the
+    /// folder an existing link leads to as `/Users/…` — one sentence, two
+    /// ways of writing a path.
+    @Test("Link a folder…: the folder and where a link there leads are written the same way")
+    func linkingWritesBothPathsAlike() {
+        let shown = { (path: String) in SearchPathList.shown(path, home: "/Users/a") }
+        #expect(PlaceWarning.linking(id: "uptime", folder: "/Users/a/work/uptime",
+                                     occupant: .link(destination: "/Users/a/work/old", sameFolder: false),
+                                     toTrash: false, path: "~/.udeck/plugins", shown: shown)
+                == .linkFolderOverLink(id: "uptime", destination: "~/work/old", folder: "~/work/uptime"))
+        #expect(PlaceWarning.linking(id: "uptime", folder: "/Users/a/work/uptime", occupant: .folderOfYourOwn,
+                                     toTrash: true, path: "~/.udeck/plugins", shown: shown)
+                == .linkFolderOverOwn(id: "uptime", path: "~/.udeck/plugins", folder: "~/work/uptime", toTrash: true))
+        #expect(PlaceWarning.linking(id: "uptime", folder: "/Users/a/work/uptime", occupant: .installed(source: "github.com/o/r"),
+                                     toTrash: false, path: "~/.udeck/plugins", shown: shown)
+                == .linkFolderOverInstalled(id: "uptime", source: "github.com/o/r", folder: "~/work/uptime", toTrash: false))
+    }
+
     @Test("Link a folder… says what becomes of what is at the id, and nothing when the id is free or already this folder")
     func linking() {
         func said(_ occupant: PluginLink.Occupant, toTrash: Bool = false) -> Phrase? {
-            PlaceWarning.linking(id: "uptime", folder: "/work/uptime", occupant: occupant, toTrash: toTrash, path: "~/.udeck/plugins")
+            PlaceWarning.linking(id: "uptime", folder: "/work/uptime", occupant: occupant, toTrash: toTrash, path: "~/.udeck/plugins",
+                                 shown: { $0 })
         }
         #expect(said(.nothing) == nil)
         #expect(said(.link(destination: "/work/uptime", sameFolder: true)) == nil)
@@ -447,6 +476,94 @@ struct CommandInstallTests {
         #expect(throws: CommandInstall.Refusal.foreign(.file)) { try place.install(from: bundle, renames: renames).remove() }
         #expect(try Data(contentsOf: link) == Self.mine)
         #expect(try place.names() == [CommandInstall.name], "nothing left beside it")
+    }
+
+    /// C2b2's review: a file put in place of another uDeck's link before the
+    /// exchange is put back by a second exchange — and that one takes out of
+    /// the place whatever is there by then. Something put there between the
+    /// two exchanges was deleted unread; it stays now, and the refusal says
+    /// where it is.
+    @Test("what the exchange back takes out of the place is deleted only when it is the link made here")
+    func appearedBetweenTheExchanges() throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        try place.install(from: try place.bundle("uDeck old.app")).install()
+        let link = place.folder.appendingPathComponent(CommandInstall.name)
+        let theirs = Data("#!/bin/sh\necho theirs\n".utf8)
+        let calls = Calls()
+        let renames = FolderRenames(exchange: { from, to in
+            switch calls.next() {
+            case 1:
+                // Before the first exchange: another uDeck's link replaced by a file.
+                try? FileManager.default.removeItem(at: to)
+                try? Self.mine.write(to: to)
+            case 2:
+                // Before the exchange back: the link made here replaced by another file.
+                try? FileManager.default.removeItem(at: to)
+                try? theirs.write(to: to)
+            default:
+                break
+            }
+            return FolderRenames.system.exchange(from, to)
+        }, exclusive: FolderRenames.system.exclusive)
+        let command = place.install(from: try place.bundle(), renames: renames)
+        do {
+            try command.install()
+            Issue.record("installed over two files of somebody else's")
+        } catch let refusal as CommandInstall.Refusal {
+            guard case .cannotWrite(let said) = refusal else {
+                Issue.record("refused with \(refusal), not with where the second file is")
+                return
+            }
+            let beside = try place.names().filter { $0 != CommandInstall.name }
+            #expect(beside.count == 1, "the second file kept beside the place: \(beside)")
+            if let name = beside.first {
+                #expect(try Data(contentsOf: place.folder.appendingPathComponent(name)) == theirs)
+                #expect(said.contains(place.folder.appendingPathComponent(name).path), "the refusal says where it is: \(said)")
+            }
+        }
+        #expect(try Data(contentsOf: link) == Self.mine, "the first file is back at the place")
+        #expect(calls.count == 2)
+    }
+
+    /// Counts the calls it is asked about, for a test that acts on the second.
+    final class Calls: @unchecked Sendable {
+        private let lock = NSLock()
+        private var made = 0
+
+        func next() -> Int {
+            lock.withLock {
+                made += 1
+                return made
+            }
+        }
+
+        var count: Int { lock.withLock { made } }
+    }
+
+    /// The button is not offered where it can only be refused: the line
+    /// above it says why (C2b2's review: a comment said "not offered" of a
+    /// button shown greyed out).
+    @Test("Install is offered only by a uDeck with the command inside it, where it stays; Remove over a uDeck's link from anywhere")
+    func buttons() throws {
+        let place = Place()
+        defer { withExtendedLifetime(place) {} }
+        let bundle = try place.bundle()
+        let lasting = place.install(from: bundle)
+        #expect(lasting.buttons(for: .notInstalled) == [.install])
+        #expect(lasting.buttons(for: .otherCopy(target: "/Old/uDeck.app/Contents/Helpers/udeck-plugin")) == [.install, .remove])
+        #expect(lasting.buttons(for: .installed) == [.remove])
+        #expect(lasting.buttons(for: .foreign(.file)).isEmpty)
+        #expect(lasting.buttons(for: .foreign(.link(to: "/opt/x"))).isEmpty)
+        for where_ in [BundlePlace.translocated, .diskImage(volume: "/Volumes/uDeck")] {
+            let passing = place.install(from: bundle, place: where_)
+            #expect(passing.buttons(for: .notInstalled).isEmpty, "\(where_)")
+            #expect(passing.buttons(for: .otherCopy(target: "/Old/uDeck.app/Contents/Helpers/udeck-plugin")) == [.remove])
+            #expect(passing.buttons(for: .installed) == [.remove])
+        }
+        let development = place.install(from: nil)
+        #expect(development.buttons(for: .notInstalled).isEmpty, "a development build has no command to link")
+        #expect(development.buttons(for: .otherCopy(target: "/Old/uDeck.app/Contents/Helpers/udeck-plugin")) == [.remove])
     }
 
     @Test("a uDeck's command is told by where it is in a bundle, by bytes")

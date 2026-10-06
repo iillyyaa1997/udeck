@@ -295,10 +295,10 @@ struct CatalogueRowView: View {
                                                     link: shown.link.map { model.displayPath($0) }))
             button = strings(.catalogueReplace)
         case .update:
-            text = strings(.catalogueUpdateOverChanges(id: id, version: version))
+            text = strings(PlaceWarning.replacingCopy(id: id, version: version, link: shown.link.map { model.displayPath($0) }))
             button = strings(.catalogueUpdate)
         case .reinstall:
-            text = strings(.catalogueUpdateOverChanges(id: id, version: version))
+            text = strings(PlaceWarning.replacingCopy(id: id, version: version, link: shown.link.map { model.displayPath($0) }))
             button = strings(.catalogueReinstall(version: version))
         }
         return VStack(alignment: .leading, spacing: 5) {
@@ -503,14 +503,16 @@ struct InstalledRepositoryControls: View {
             text = strings(PlaceWarning.removal(id: id, link: shown.link.map { model.displayPath($0) },
                                                 toTrash: shown.fate == .toTrash))
             button = strings(.catalogueRemove)
+        // Over the operator's changes, the Trash; over a link — one put there
+        // while this row was up, too — only the link goes.
         case .update:
-            text = strings(.catalogueUpdateOverChanges(id: id, version: version))
+            text = strings(PlaceWarning.replacingCopy(id: id, version: version, link: shown.link.map { model.displayPath($0) }))
             button = strings(.catalogueUpdate)
         case .reinstall:
-            text = strings(.catalogueUpdateOverChanges(id: id, version: version))
+            text = strings(PlaceWarning.replacingCopy(id: id, version: version, link: shown.link.map { model.displayPath($0) }))
             button = strings(.catalogueReinstall(version: version))
         case .backTo:
-            text = strings(.catalogueUpdateOverChanges(id: id, version: version))
+            text = strings(PlaceWarning.replacingCopy(id: id, version: version, link: shown.link.map { model.displayPath($0) }))
             button = strings(.catalogueBackTo(version: version))
         }
         return VStack(alignment: .leading, spacing: 5) {
@@ -612,7 +614,8 @@ struct HistoryList: View {
 
     private func confirmation(_ line: PluginHistory.Line, shown: ShownPlace.Place) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(strings(.catalogueUpdateOverChanges(id: id, version: shown.arriving ?? line.version)))
+            Text(strings(PlaceWarning.replacingCopy(id: id, version: shown.arriving ?? line.version,
+                                                    link: shown.link.map { model.displayPath($0) })))
                 .font(.caption).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("plugin.\(id).history.confirmText")
             HStack {

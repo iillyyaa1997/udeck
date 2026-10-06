@@ -120,10 +120,14 @@ struct ShownPlaceTests {
         let installer = installer(repository, trash: TestTrash(in: udeck.url))
         #expect(ShownPlace.Place.now("uptime", in: paths, record: nil, arriving: "1.0.0")
                 == ShownPlace.Place(fate: .nothing, arriving: "1.0.0"))
+        #expect(ShownPlace.Place.now("uptime", in: paths, record: nil, arriving: "1.0.0", copy: "4b825dc")
+                == ShownPlace.Place(fate: .nothing, arriving: "1.0.0", copy: "4b825dc"), "the copy that comes, as told")
 
         try await install("uptime", from: repository, with: installer)
         let record = try installer.loadRecords().plugins["uptime"]
         #expect(ShownPlace.Place.now("uptime", in: paths, record: record, arriving: nil).fate == .deleted)
+        #expect(ShownPlace.Place.now("uptime", in: paths, record: record, arriving: "1.0.0", copy: "c1").copy == "c1",
+                "over uDeck's own copy, the copy that comes as told")
         try Data("TOKEN=mine\n".utf8).write(to: live("uptime").appendingPathComponent(".env"))
         #expect(ShownPlace.Place.now("uptime", in: paths, record: record, arriving: nil).fate == .toTrash)
         #expect(ShownPlace.Place.now("uptime", in: paths, record: nil, arriving: nil).fate == .toTrash,
@@ -134,6 +138,8 @@ struct ShownPlaceTests {
         try FileManager.default.createSymbolicLink(atPath: live("uptime").path, withDestinationPath: folder.path)
         #expect(ShownPlace.Place.now("uptime", in: paths, record: nil, arriving: nil).fate
                 == .linkGoes(leadsTo: FilePaths.real(folder.path).path!))
+        #expect(ShownPlace.Place.now("uptime", in: paths, record: nil, arriving: "1.0.0", copy: "c1").copy == "c1",
+                "over a link, the copy that comes as told")
         try FileManager.default.removeItem(at: live("uptime"))
         try FileManager.default.createSymbolicLink(atPath: live("uptime").path, withDestinationPath: "../gone")
         #expect(ShownPlace.Place.now("uptime", in: paths, record: nil, arriving: nil).fate == .linkGoes(leadsTo: "../gone"),
@@ -216,5 +222,45 @@ struct ShownPlaceTests {
                                   now: ShownPlace.Place(fate: .linkGoes(leadsTo: "/cafe\u{301}"), arriving: nil)))
         #expect(!ShownPlace.holds(ShownPlace.Place(fate: .toTrash, arriving: nil), now: ShownPlace.Place(fate: .deleted, arriving: nil)))
         #expect(!ShownPlace.holds(ShownPlace.Place(fate: .toTrash, arriving: nil), now: ShownPlace.Place(fate: .toTrash, arriving: "1.0.0")))
+    }
+
+    /// C2b2's review: **Reinstall** on a missing `uptime` warned of a folder
+    /// put there, and while the warning was up the folder became a link to a
+    /// working copy; the warning's button took the link away without a word
+    /// about it. The folder it led to stayed — nothing was lost — but the
+    /// warning had not said what the press did.
+    @Test("Update, Reinstall, Back to: over a link, first the warning that only the link goes — one that appeared under another warning too")
+    func replaceCopyOverALink() {
+        let shown = ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: "a1")
+        let link = ShownPlace.Place(fate: .linkGoes(leadsTo: "/w/uptime"), arriving: "1.3.0", copy: "a1")
+        #expect(ShownPlace.press(.replaceCopy, shown: shown, now: link) == .ask(link),
+                "a link put where the copy was is warned of, not taken away")
+        #expect(ShownPlace.press(.replaceCopy, shown: nil, now: link) == .ask(link), "a first press over a link warns")
+        #expect(ShownPlace.press(.replaceCopy, shown: link, now: link) == .goAhead)
+        #expect(ShownPlace.press(.replaceCopy, shown: link,
+                                 now: ShownPlace.Place(fate: .linkGoes(leadsTo: "/w/other"), arriving: "1.3.0", copy: "a1"))
+                != .goAhead, "a link to another folder is another warning")
+    }
+
+    /// C2b2's review: **Update** warned "your changes go to the Trash and
+    /// 1.3.0 comes", the repository then published another tree under the
+    /// same 1.3.0, and the warning's button installed a tree nobody had been
+    /// shown. A version is what a manifest says; the copy is what comes.
+    @Test("Update, Reinstall, Back to: held to the copy that comes — the same version from another tree or commit is a warning again")
+    func replaceCopyHeldToTheCopy() {
+        let shown = ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: "1111111111111111111111111111111111111111")
+        let another = ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: "2222222222222222222222222222222222222222")
+        #expect(ShownPlace.press(.replaceCopy, shown: shown, now: another) == .ask(another),
+                "the same version, another copy: the warning again, nothing replaced")
+        #expect(ShownPlace.press(.replaceCopy, shown: another, now: another) == .goAhead)
+        #expect(ShownPlace.press(.install, shown: ShownPlace.Place(fate: .linkGoes(leadsTo: "/w"), arriving: "1.3.0", copy: "t1"),
+                                 now: ShownPlace.Place(fate: .linkGoes(leadsTo: "/w"), arriving: "1.3.0", copy: "t2"))
+                == .ask(ShownPlace.Place(fate: .linkGoes(leadsTo: "/w"), arriving: "1.3.0", copy: "t2")), "Replace… too")
+        #expect(!ShownPlace.holds(ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: "caf\u{E9}"),
+                                  now: ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: "cafe\u{301}")), "by bytes")
+        #expect(!ShownPlace.holds(ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: nil),
+                                  now: ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: "a1")))
+        #expect(ShownPlace.holds(ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: "a1"),
+                                 now: ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: "a1")))
     }
 }

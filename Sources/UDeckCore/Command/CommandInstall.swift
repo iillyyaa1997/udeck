@@ -116,6 +116,29 @@ public struct CommandInstall: Sendable {
         return Self.isACommandInABundle(destination) ? .otherCopy(target: destination) : .foreign(.link(to: destination))
     }
 
+    /// A button Settings offers for the command.
+    public enum Button: Equatable, Sendable {
+        case install
+        case remove
+    }
+
+    /// The buttons for what is at the command's place (`state`): **Install**
+    /// where nothing or another uDeck's link is, and only from a uDeck that
+    /// can make a link that lasts — one with the command inside it, running
+    /// where it stays (`BundlePlace`); **Remove** over a uDeck's link, this
+    /// one's or another's, from wherever this uDeck runs. A button that
+    /// could only be pressed to be told no is not offered: the line above
+    /// the buttons says why, and what to do about it.
+    public func buttons(for state: State) -> [Button] {
+        let canInstall = helper != nil && place == .lasting
+        switch state {
+        case .notInstalled: return canInstall ? [.install] : []
+        case .otherCopy: return canInstall ? [.install, .remove] : [.remove]
+        case .installed: return [.remove]
+        case .foreign: return []
+        }
+    }
+
     /// Why the command was not installed or removed.
     public enum Refusal: Error, Equatable, CustomStringConvertible {
         /// This uDeck has no command inside it.
@@ -150,7 +173,9 @@ public struct CommandInstall: Sendable {
     /// was, a rename that fails rather than replace anything
     /// (`RENAME_EXCL`); over another uDeck's link, an exchange (`RENAME_SWAP`),
     /// after which what came out of the place is read — and put back, and
-    /// said, unless it is a link to a uDeck's command.
+    /// said, unless it is a link to a uDeck's command. Whatever the exchange
+    /// back takes out of the place is read in its turn, and deleted only
+    /// when it is the link made here.
     public func install() throws {
         guard let helper else { throw Refusal.noHelper }
         guard place == .lasting else { throw Refusal.temporaryPlace(place) }
@@ -203,6 +228,14 @@ public struct CommandInstall: Sendable {
                     guard renames.exchange(beside, link) == 0 else {
                         throw Refusal.cannotWrite("\(link.path) changed while the link was put in place; what was "
                                                   + "there is at \(beside.path) now — move it back to \(link.path)")
+                    }
+                    // What the exchange back took out of the place is read
+                    // too: the link made here, unless something was put at
+                    // the place between the two exchanges — and then that is
+                    // somebody's as well, and stays where it is now.
+                    guard state(of: beside) == .installed else {
+                        throw Refusal.cannotWrite("\(link.path) changed twice while the link was put in place; what "
+                                                  + "was put there meanwhile is at \(beside.path) now")
                     }
                     unlink(beside.path)
                     throw Refusal.foreign(what)
