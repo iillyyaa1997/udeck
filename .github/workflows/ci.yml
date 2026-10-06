@@ -121,6 +121,21 @@ jobs:
             python3 -m unittest discover -s "$plugin" -p 'test_*.py' -v
           done
 
+      # What a release publishes for a Mac — udeck-plugin for arm64 and x86_64
+      # in one binary, signed as the copy inside uDeck.app — made on every
+      # push, by the script release.yml runs, and published nowhere: a change
+      # to either is proved here before a tag needs it.
+      - name: Make the udeck-plugin archive for macOS, as a release does
+        run: Scripts/make-cli.sh macos --out release-cli
+
+      - name: Keep it for the release's dry run
+        uses: actions/upload-artifact@v4
+        with:
+          name: udeck-plugin-macos
+          path: release-cli/udeck-plugin-*-macos-universal.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
   # The plugin format has to build and pass its tests on Linux as well: it is
   # what the repository check will be built from (stage 2), and a plugin
   # repository's CI runs on Linux. Nothing else in this repository is built
@@ -198,33 +213,24 @@ jobs:
         run: swift sdk install "$STATIC_SDK_URL" --checksum "$STATIC_SDK_CHECKSUM"
 
       # A static musl binary runs on any Linux of its architecture, with
-      # nothing installed — what a repository's CI downloads and runs.
-      # `--build-system native`: with Swift 6.4.0's default build system a
-      # static Swift standard library with Foundation fails to link on Linux
-      # (swiftlang/swift-build#1764). If this step fails on one architecture,
+      # nothing installed — what a repository's CI downloads and runs. Built,
+      # stripped, held to being static and archived by the script release.yml
+      # runs (`--build-system native` is in it, and why); the log says its
+      # size as linked and stripped. If this step fails on one architecture,
       # that is the finding: the SDK does not build for it at this release.
-      - name: Build udeck-plugin as a static musl binary
-        run: |
-          swift build -c release --build-system native \
-            --swift-sdk "${{ matrix.arch }}-swift-linux-musl" --product udeck-plugin
+      - name: Make the udeck-plugin archive for Linux, as a release does
+        working-directory: .
+        run: Scripts/make-cli.sh linux --arch "${{ matrix.arch }}" --out release-cli
 
-      - name: Check that the binary is static and runs
+      # What runs here is what the archive holds — the stripped binary a
+      # release publishes, unpacked as a repository's CI unpacks it.
+      - name: Check that the archived binary runs
         run: |
           set -eu
-          bin=$(swift build -c release --build-system native \
-            --swift-sdk "${{ matrix.arch }}-swift-linux-musl" --show-bin-path)
-          binary="$bin/udeck-plugin"
+          unpacked="$(mktemp -d)"
+          tar -xzf ../../release-cli/udeck-plugin-*-linux-${{ matrix.arch }}.tar.gz -C "$unpacked"
+          binary="$(echo "$unpacked"/udeck-plugin-*/udeck-plugin)"
           ls -l "$binary"
-          readelf -h "$binary" | grep 'Machine:'
-          if readelf -l "$binary" | grep -q 'INTERP'; then
-            echo "udeck-plugin asks for a dynamic loader; it is not a static binary" >&2
-            exit 1
-          fi
-          if readelf -d "$binary" | grep -q 'NEEDED'; then
-            echo "udeck-plugin needs shared libraries; it is not a static binary" >&2
-            readelf -d "$binary" | grep 'NEEDED' >&2
-            exit 1
-          fi
           "$binary" --version | tee out.txt
           grep -q '^udeck-plugin [0-9]*\.[0-9]*\.[0-9]*$' out.txt
           # With nothing to do it says how to use it and exits 2, "could not check".
@@ -260,3 +266,60 @@ jobs:
           cat out.txt
           test "$status" -eq 1
           grep -q '^error: plugins/hello-card/manifest.json: the folder changed.*\[rule 18\]$' out.txt
+
+      - name: Keep the archive for the image and the release's dry run
+        uses: actions/upload-artifact@v4
+        with:
+          name: udeck-plugin-linux-${{ matrix.arch }}
+          path: release-cli/udeck-plugin-*-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # The image a release pushes to ghcr.io, built here on every push from the
+  # archives above and run on both of its platforms — and never pushed: no
+  # registry login, no write to packages. release.yml runs the same script,
+  # with the push.
+  udeck-plugin-image:
+    name: udeck-plugin image, built and run, not published
+    needs: plugin-format-linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Take the Linux archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: udeck-plugin-linux-*
+          path: release-cli
+          merge-multiple: true
+
+      - name: Build the image for linux/amd64 and linux/arm64, and run each
+        run: Scripts/make-cli.sh image --out release-cli
+
+  # What a tag would publish besides the app: the three archives under one
+  # version, and SHA256SUMS over them, written and checked as release.yml's
+  # last job writes them.
+  release-assets:
+    name: The release's udeck-plugin assets, not published
+    needs: [build-and-test, plugin-format-linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Take the archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: udeck-plugin-*
+          path: release-cli
+          merge-multiple: true
+
+      - name: Write and check SHA256SUMS, as a release does
+        run: |
+          Scripts/make-cli.sh sums --out release-cli
+          ls -l release-cli

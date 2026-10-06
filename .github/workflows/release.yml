@@ -1,19 +1,35 @@
 name: Release
 
 # A tag is the whole trigger. Everything a release consists of — the built app,
-# the archive, the signature over it and the feed that points at it — is made
-# here, so that a release is never a sequence somebody has to remember.
+# the archive, the signature over it and the feed that points at it, and
+# udeck-plugin for whoever has no uDeck to take it from: its archives for macOS
+# and Linux, their checksums, and the container image a plugin repository's CI
+# pulls — is made here, so that a release is never a sequence somebody has to
+# remember.
+#
+# Immutable releases are on for this repository: once published, a release's
+# assets can be neither replaced nor added to. So every asset is made first,
+# in jobs of their own, and the last job publishes them all in one `gh release
+# create`. The image is pushed before that, by digest, and the digest is one of
+# the assets — what a plugin repository's lock file will pin.
+#
+# ci.yml makes the same archives and the same image on every push with the
+# same script, Scripts/make-cli.sh, and publishes nothing: what a tag adds is
+# the registry login, `--push`, and `gh release create`.
 on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: write
+# Nothing, unless a job asks: only the image job may write packages, and only
+# the job that publishes may write the repository's releases.
+permissions: {}
 
 jobs:
-  release:
-    name: Build, sign and publish
+  app:
+    name: Build, test and sign the application
     runs-on: macos-26
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -86,16 +102,169 @@ jobs:
           echo "--- appcast ---"
           cat release/appcast.xml
 
+      # Into release-cli/, never release/: generate_appcast reads that folder
+      # whole, and would offer an archive there to Sparkle as an update.
+      - name: Make the udeck-plugin archive for macOS
+        run: Scripts/make-cli.sh macos --version "$version" --out release-cli
+
+      - name: Keep the application for the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: app
+          path: |
+            release/uDeck-${{ env.version }}.zip
+            release/appcast.xml
+          if-no-files-found: error
+
+      - name: Keep the udeck-plugin archive for the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: udeck-plugin-macos
+          path: release-cli/udeck-plugin-${{ env.version }}-macos-universal.tar.gz
+          if-no-files-found: error
+
+  # The static musl binary, built with exactly the toolchain and Static Linux
+  # SDK ci.yml proves on every push (a test holds the two files to one pin),
+  # on a runner of each architecture: the binary is run to say its version,
+  # which has to be the tag's.
+  command-linux:
+    name: udeck-plugin for Linux (${{ matrix.arch }})
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    container: swift:6.4.0-noble@sha256:64bab762bc73a3fda6d9ebc559258bd6d7660c10a705bb25ecacad2f99d066f9
+    env:
+      STATIC_SDK_URL: https://download.swift.org/swift-6.4.0-release/static-sdk/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz
+      STATIC_SDK_CHECKSUM: 47d2fd89eebfdf9eb4d536b6710414297f755c17926cdebc4742c08982b40a9e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the Static Linux SDK
+        run: swift sdk install "$STATIC_SDK_URL" --checksum "$STATIC_SDK_CHECKSUM"
+
+      - name: Make the udeck-plugin archive for Linux
+        run: Scripts/make-cli.sh linux --arch "${{ matrix.arch }}" --version "${GITHUB_REF_NAME#v}" --out release-cli
+
+      - name: Keep it for the image and the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: udeck-plugin-linux-${{ matrix.arch }}
+          path: release-cli/udeck-plugin-*-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  # Pushed only once everything else is made and the app's tests have passed,
+  # so that a failing release leaves no image behind it; and before the
+  # release is created, so that its digest can be one of the release's assets.
+  # The only job that may write packages, and it holds no other secret.
+  image:
+    name: Publish the udeck-plugin image
+    needs: [app, command-linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Take the Linux archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: udeck-plugin-linux-*
+          path: release-cli
+          merge-multiple: true
+
+      - name: Log in to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+      # Built and run on both platforms first, exactly as ci.yml does on every
+      # push; pushed only then — to ghcr.io/iillyyaa1997/udeck-plugin, the
+      # script's one name for it — as one index for linux/amd64 and
+      # linux/arm64, tagged with the release's tag. A package GitHub has not
+      # seen before is made private: making it public is a step for its owner
+      # on GitHub, once, after the first release (no API can).
+      - name: Build, run, and push the image
+        run: Scripts/make-cli.sh image --version "${GITHUB_REF_NAME#v}" --out release-cli --push --revision "$GITHUB_SHA"
+
+      - name: Log out of ghcr.io
+        if: always()
+        run: docker logout ghcr.io
+
+      - name: Keep the image's digest for the release
+        uses: actions/upload-artifact@v4
+        with:
+          name: udeck-plugin-image
+          path: release-cli/udeck-plugin-image.txt
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: [app, command-linux, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Take the application
+        uses: actions/download-artifact@v4
+        with:
+          name: app
+          path: release
+
+      - name: Take udeck-plugin's archives and the image's digest
+        uses: actions/download-artifact@v4
+        with:
+          pattern: udeck-plugin-*
+          path: release-cli
+          merge-multiple: true
+
+      - name: Write SHA256SUMS
+        run: Scripts/make-cli.sh sums --version "${GITHUB_REF_NAME#v}" --out release-cli
+
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          digest=$(sed -n 's/^digest=\(sha256:[0-9a-f]\{64\}\)$/\1/p' release-cli/udeck-plugin-image.txt)
+          image=$(sed -n 's/^image=//p' release-cli/udeck-plugin-image.txt)
+          test -n "$digest" && test -n "$image"
+          # Said first in the notes, ahead of what GitHub generates: the
+          # image by its digest, which is what a repository's CI pins.
+          notes=$(printf '%s\n' \
+            "**udeck-plugin** for a plugin repository's CI — the image, pulled by its digest:" \
+            "" \
+            "    $image@$digest" \
+            "" \
+            "linux/amd64 and linux/arm64. The archives below — macOS (universal), Linux x86_64 and aarch64 — are checked against SHA256SUMS.")
           # The appcast is an asset of the release rather than a page on a site:
           # `releases/latest/download/appcast.xml` is a stable URL that needs no
-          # hosting, no Pages setup and no second place to keep in sync.
+          # hosting, no Pages setup and no second place to keep in sync. Every
+          # asset in this one call: once published, the release cannot take
+          # another.
           gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
             --title "uDeck $version" \
+            --notes "$notes" \
             --generate-notes \
             "release/uDeck-$version.zip" \
-            release/appcast.xml
+            release/appcast.xml \
+            "release-cli/udeck-plugin-$version-macos-universal.tar.gz" \
+            "release-cli/udeck-plugin-$version-linux-x86_64.tar.gz" \
+            "release-cli/udeck-plugin-$version-linux-aarch64.tar.gz" \
+            release-cli/udeck-plugin-image.txt \
+            release-cli/SHA256SUMS

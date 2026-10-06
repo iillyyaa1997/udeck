@@ -269,13 +269,20 @@ def test_the_options_that_would_leave_a_lab_build_lying_about_are_refused(checko
 MAY_READ_THE_CHECKOUT = {"test_panel.py", "test_check_updates.py", "test_check_plugins.py"}
 
 
+# The files that run a script of the repository's, each only against a toy
+# checkout in a temporary directory it copied the script into: this one, and
+# test_make_cli.py for Scripts/make-cli.sh.
+RUN_A_SCRIPT_IN_A_TOY_CHECKOUT = {"test_make_app.py", "test_make_cli.py"}
+
+
 def test_this_is_the_only_file_that_runs_anything_in_the_repository():
     """Running the real script from a test can build in the checkout and empty dist/.
 
     It happened: a mutation that disabled one of the script's refusals let a test
     in tests/test_builds.py build for real and take dist/uDeck.app with it
     (2026-09-17). Here the script only ever runs against a toy checkout in a
-    temporary directory.
+    temporary directory — and so does Scripts/make-cli.sh in test_make_cli.py,
+    the one other file allowed to run a script of the repository's.
 
     So: no other test file may reach the repository — `parents[2]` from tests/ is
     its root — except the few that only *read* a file there, and those may not
@@ -284,7 +291,7 @@ def test_this_is_the_only_file_that_runs_anything_in_the_repository():
     from existing.
     """
     for path in sorted(Path(__file__).parent.glob("test_*.py")):
-        if path.name == Path(__file__).name:
+        if path.name in RUN_A_SCRIPT_IN_A_TOY_CHECKOUT:
             continue
         text = path.read_text()
         if "parents[2]" not in text:
