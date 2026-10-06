@@ -484,7 +484,12 @@ extension Russian {
                 return "нужно то, в чём вы отказали: \(denied.map { say($0.summaryPhrase) }.joined(separator: ", "))"
             }
         case .notLoadable(let problems):
-            return "плагин не загружается: " + problems.map(\.description).joined(separator: "; ")
+            // Что не так с манифестом или папкой, говорится словами проверки
+            // формата — теми же, что печатает udeck-plugin check и что стоит в
+            // строке плагина в Настройках, — а они по-английски. Сказано
+            // прямо, а не оставлено английским хвостом без объяснения.
+            return "плагин не загружается (подробности по-английски, словами проверки плагина): "
+                + problems.map(\.description).joined(separator: "; ")
         }
     }
 

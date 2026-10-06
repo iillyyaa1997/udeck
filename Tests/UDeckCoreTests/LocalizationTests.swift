@@ -371,6 +371,21 @@ struct LocalizationTests {
             .contains(language == .russian ? "0,01 с" : "0.01 s"))
     }
 
+    /// What is wrong with a manifest or a folder is said in the format's own
+    /// words — what `udeck-plugin check` prints and what a plugin's row in
+    /// Settings shows — and those are English. In Russian the sentence says
+    /// so, rather than trailing off into English unexplained (C2b2's review).
+    @Test("a plugin that will not load: Russian says its details are in English, and quotes them whole")
+    func notLoadableDetails() {
+        let problems: [DiscoveryProblem] = [.manifest(.residentNotSupportedYet), .missingManifest]
+        let details = problems.map(\.description).joined(separator: "; ")
+        #expect(Strings(.english)(.failureReason(.notLoadable(problems))) == details)
+        let russian = Strings(.russian)(.failureReason(.notLoadable(problems)))
+        #expect(russian.hasPrefix("плагин не загружается (подробности по-английски"))
+        #expect(russian.hasSuffix(": " + details), "every detail, as the check says it")
+        #expect(Strings(.russian)(.cardLastRunFailed(at: "21:04", reason: .notLoadable(problems))).contains("по-английски"))
+    }
+
     /// What came before the kept stderr is said as the contract says it:
     /// bytes that came before what uDeck kept — not before the lines shown,
     /// which are the end of what was kept.
