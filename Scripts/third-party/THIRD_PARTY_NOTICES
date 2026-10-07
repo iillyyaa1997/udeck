@@ -9,19 +9,25 @@ under the licences named. Which copy holds what:
     CryptoKit of macOS itself, which are not in it; of what follows it holds
     only swift-crypto's Crypto module (1), which on a Mac hands its work to
     CryptoKit;
-  * the archives for Linux (static musl, x86_64 and aarch64) hold all of 1-9:
+  * the archives for Linux (static musl, x86_64 and aarch64) hold all of 1-10:
     the binary is static, so everything it runs is in the one file;
-  * the container image holds the Linux binary, so 1-9, and Alpine Linux's
-    packages besides: every one of them, its version, its licence and the
-    aports commit it was built from (where its source is), is listed in
+  * the container image holds the Linux binary, so 1-10, and Alpine Linux's
+    packages besides — the programs the command starts, and what they need:
+    every one of them, its version, its licence and the aports commit it was
+    built from (where its source is), is listed in
     /usr/share/licenses/udeck-plugin/ALPINE-PACKAGES, made from the image's own
     package records when the image is built.
 
 What each build links was read from the binaries of udeck-plugin 0.5.0: the
 strings of the stripped static Linux binary, and the load commands and symbols
-of the macOS one. swift-asn1, which Packages/UDeckPluginFormat/Package.resolved
-also names, is a dependency of swift-crypto's other products and no part of
-udeck-plugin.
+of the macOS one. Of the C that swift-foundation compiles into
+FoundationEssentials (its _FoundationCShims), the Linux binary holds uuid.c —
+its format strings are there, and UUID() calls it — which is under a licence
+of its own (10), and platform_shims.c, string_shims.c and the Unicode tables
+of CFUniCharBitmapData.inc.h — all 56 tables are there, byte for byte — which
+are swift-foundation's, under its licence (4). swift-asn1, which
+Packages/UDeckPluginFormat/Package.resolved also names, is a dependency of
+swift-crypto's other products and no part of udeck-plugin.
 
 The Apache License 2.0 is in LICENSE, beside this file.
 
@@ -70,6 +76,13 @@ Components
 9. mimalloc, the memory allocator the Static Linux SDK links
    https://github.com/microsoft/mimalloc
    MIT, in [F]. Linux and the image.
+
+10. uuid.c, the UUID generator in swift-foundation's _FoundationCShims
+    (swift-6.4.0-RELEASE), Copyright (c) 2004 Apple Computer, Inc.
+    https://github.com/swiftlang/swift-foundation/blob/swift-6.4.0-RELEASE/Sources/_FoundationCShims/uuid.c
+    A BSD licence of three clauses, in its own words in [G] — not swift-
+    foundation's Apache License with the Runtime Library Exception, which
+    covers the rest of 4. Linux and the image.
 
 
 
@@ -508,3 +521,40 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+
+
+[G] uuid.c
+----------
+The notice at the top of swift-foundation's Sources/_FoundationCShims/uuid.c,
+at swift-6.4.0-RELEASE.
+
+Copyright (c) 2004 Apple Computer, Inc. All rights reserved.
+
+%Begin-Header%
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, and the entire permission notice in its entirety,
+   including the disclaimer of warranties.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+3. The name of the author may not be used to endorse or promote
+   products derived from this software without specific prior
+   written permission.
+
+THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE, ALL OF
+WHICH ARE HEREBY DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
+OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
+USE OF THIS SOFTWARE, EVEN IF NOT ADVISED OF THE POSSIBILITY OF SUCH
+DAMAGE.
+%End-Header%
