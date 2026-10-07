@@ -10,6 +10,23 @@ for what that promises.
 
 ## [Unreleased]
 
+- **`udeck-plugin pin` and the lock file.** A plugin repository names the one
+  release of `udeck-plugin` its CI runs in `.github/udeck-plugin.lock`, on
+  GitHub and on GitLab alike: the version, the sha256 of the three archives
+  and the image's digest, five `key=value` lines and nothing else, read from
+  the base of each change so that a pull request cannot choose the check that
+  judges it. `udeck-plugin pin` writes it from a release's `SHA256SUMS` and
+  `udeck-plugin-image.txt` — the latest, or `--version X.Y.Z` — once the two
+  agree, and `pin --check` exits 1 when the file is not what its release has.
+  Releases are GitHub's unless `UDECK_PLUGIN_DOWNLOAD_BASE` names another
+  place laid out the same way (`https://` or `file://`, never plain `http://`);
+  they are read with the system's curl, which takes its proxy from
+  `HTTPS_PROXY` and `NO_PROXY`. A release from before the command was
+  published — 0.5.0 and earlier — is said to be one. The specification gives
+  the shell reading a CI runs, with `sed` and never `source`, and a test holds
+  it to the command's own on a corpus of good and bad files. The image now
+  holds curl too, for `pin`.
+
 - **`udeck-plugin` without uDeck.** Every release carries the command for
   whoever has no uDeck to take it from: `udeck-plugin-X.Y.Z-macos-universal.tar.gz`
   (arm64 and x86_64 in one binary, signed as the copy inside uDeck.app),
@@ -28,7 +45,8 @@ for what that promises.
   and the release's notes, and publishes nothing — a change to the release is
   proved before a tag needs it. `Scripts/make-cli.sh` makes all of it, for
   both. Each archive carries `THIRD_PARTY_NOTICES`, the licences of what else
-  the command is made of (Swift's runtime and Foundation, swift-crypto and its
+  the command is made of (Swift's runtime and Foundation — swift-foundation's
+  uuid.c, under a licence of its own, among it — swift-crypto and its
   BoringSSL, LLVM's libc++, musl, fts, mimalloc), and holds nothing of the Mac
   it was made on — no extended attribute, no AppleDouble `._` file; the image
   lists every Alpine package in it with its licence and where its source is,

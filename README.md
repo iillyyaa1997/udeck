@@ -152,13 +152,21 @@ docker run --rm --network none -v "$PWD:/repo:ro" \
 ```
 
 Run it on a checkout with history. Rule 18 — a changed plugin's version goes
-up — compares HEAD with the commit before it, and a CI's default checkout has
-only HEAD: there the rule is not checked, the check says so in a warning, and
-it exits 0. On GitHub Actions give `actions/checkout` `fetch-depth: 0`; on
-GitLab CI set the variable `GIT_DEPTH: "0"`; or name both commits with `--base`
-and `--head`.
+up — compares HEAD with the commit before it. `actions/checkout` fetches only
+HEAD unless told otherwise: there the rule is not checked, the check says so in
+a warning, and it exits 0. GitLab CI fetches a new project's last 20 commits,
+enough while the commit to compare with is among them. Give `actions/checkout`
+`fetch-depth: 0`, and set `GIT_DEPTH: "0"` in GitLab CI. `--base` and `--head`
+name the commits to compare when the clone holds them — the target branch's
+tip, for a pull request — and do not stand in for the history: a `--base` the
+clone lacks makes the check exit 2.
 
-What is in each asset, and how a repository will pin one release, is in
+A plugin repository pins the one release its CI runs in
+`.github/udeck-plugin.lock` — its version, the sha256 of its archives and the
+image's digest, read from the base of each change — and `udeck-plugin pin`
+writes it, from the latest release or `--version X.Y.Z`; `pin --check` says
+whether it is what its release has. What is in each asset, the lock file, and
+how a CI reads it with nothing but `sed`, are in
 [docs/plugin-repository.md](docs/plugin-repository.md#where-the-command-comes-from).
 It also builds from this repository:
 `swift build -c release --package-path Packages/UDeckPluginFormat --product udeck-plugin`.
