@@ -7,6 +7,8 @@
 #
 #   * check and check-repo read a repository through git, which they start as
 #     `/usr/bin/env git` — so git, and env at that path, have to be here;
+#   * pin reads a release through curl, started the same way: a GitLab job on
+#     a runner that reaches GitHub only through a proxy pins with this image;
 #   * GitLab CI runs a job's script with the image's own shell, and GitHub
 #     Actions keeps a `container:` job's image alive with `tail` — both need a
 #     shell and its tools;
@@ -18,9 +20,13 @@
 # be moved to another build.
 FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
-# Git from Alpine's repository for that release, as it is when the image is
-# built: its security fixes reach the next release's image, and which git an
-# image holds is in the log of the job that built it (`git --version`).
+# Git and curl from Alpine's repository for that release, as they are when the
+# image is built: their security fixes reach the next release's image, and
+# which git and curl an image holds is in the log of the job that built it
+# (`git --version`, `curl --version`). Git already brings libcurl; curl adds
+# only itself, under the curl licence libcurl is under (Alpine v3.24's main
+# index, 2026-10-07). Every package either brings is in Alpine's main
+# repository, where the aports links below point.
 #
 # Git, BusyBox and others here are GPL, and an image is a copy of them: beside
 # the command's own licences goes the list of every Alpine package in the
@@ -31,7 +37,7 @@ FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4c
 # holds rather than of what some image once held.
 RUN <<'SH'
 set -eu -o pipefail
-apk add --no-cache git
+apk add --no-cache git curl
 mkdir -p /usr/share/licenses/udeck-plugin
 awk '
     function line() {

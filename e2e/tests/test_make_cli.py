@@ -52,8 +52,14 @@ def checkout(tmp_path):
         shutil.copy(REPO / name, root / name)
     (root / "Scripts" / "third-party").mkdir()
     shutil.copy(REPO / "Scripts" / "third-party" / "THIRD_PARTY_NOTICES", root / "Scripts" / "third-party")
-    for example in ("first", "second"):
-        (root / "examples" / example).mkdir(parents=True)
+    # Two examples, one of them hello-card: the image's check-repo script copies
+    # it into a repository it makes, and adds a line to its README.
+    (root / "examples" / "first").mkdir(parents=True)
+    (root / "examples" / "hello-card").mkdir(parents=True)
+    (root / "examples" / "hello-card" / "README.md").write_text("# Hello card\n")
+    (root / "examples" / "hello-card" / "manifest.json").write_text('{"id": "hello-card"}\n')
+    (root / "Sources" / "uDeck" / "Support").mkdir(parents=True)
+    shutil.copy(REPO / "Sources" / "uDeck" / "Support" / "Info.plist", root / "Sources" / "uDeck" / "Support")
     (root / "stubs").mkdir()
     (tmp_path / "tmp").mkdir()
     return root
@@ -299,6 +305,8 @@ def test_requests_that_make_no_sense_are_refused_with_how_to_ask(checkout):
         (["sums", "--out", ""], "--out needs a directory"),
         (["image", "--what"], "unknown option"),
         (["publish"], "unknown command"),
+        (["version", "--out", "x"], "Usage:"),
+        (["sums", "--version", ""], "--version is empty"),
         ([], "Usage:"),
     ):
         done = make_cli(checkout, *args)
@@ -418,6 +426,13 @@ def test_notes_name_the_image_by_its_digest_first(checkout):
         (image_file() + f"digest={OTHER}\n", "udeck-plugin-image.txt says"),
         (image_file(version="9.9.8"), "is of v9.9.8; this release is 9.9.9"),
         (None, "no udeck-plugin-image.txt"),
+        # Byte for byte (D1b's review: `$(cat file)` drops every line break
+        # at a file's end, and three more or none at all passed).
+        (image_file() + "\n\n\n", "udeck-plugin-image.txt says"),
+        (image_file() + "\n", "not, byte for byte"),
+        (image_file()[:-1], "udeck-plugin-image.txt says"),
+        (image_file().replace("\n", "\r\n"), "no line tag=vX.Y.Z"),
+        (image_file() + "source=x\n", "udeck-plugin-image.txt says"),
     ],
 )
 def test_notes_refuse_an_image_file_that_is_not_what_push_writes(checkout, text, said):
@@ -471,6 +486,25 @@ if [ "$1" = run ]; then
     case "$*" in
         *"--privileged"*) exit 0 ;;
     esac
+    # A script the image's shell runs — check-repo on a repository made in
+    # it, pin on a release on its disk — runs here, as written, against a
+    # udeck-plugin that answers as the image's would (or, told so, does not),
+    # each in a /tmp of its own as each container has: what the script holds
+    # the command to is held here too.
+    case " $* " in
+        *" sh -eu -c "*)
+            while [ "$1" != "-c" ]; do shift; done
+            script="$2"
+            shift 2
+            sandbox="$(mktemp -d "$DOCKER_SANDBOX/run.XXXXXX")"
+            mkdir -p "$sandbox/tmp"
+            # Only a path the script names itself — after a space, a quote, an
+            # = or file:// — so that a checkout under a /tmp/ of its own is
+            # left as it is.
+            script="$(printf '%s\n' "$script" | sed -E -e "s#(^|[ \"'=])/examples#\\1$PWD/examples#g" \
+                -e "s#(^|[ \"'=]|file://)/tmp/#\\1$sandbox/tmp/#g")"
+            PATH="$IMAGE_FAKES:$PATH" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 exec sh -eu -c "$script" "$@" ;;
+    esac
     platform=""
     previous=""
     for arg in "$@"; do
@@ -484,16 +518,79 @@ if [ "$1" = run ]; then
         *"cd /usr/share/licenses/udeck-plugin"*) exit "${FAKE_NO_NOTICES:-0}" ;;
         *"udeck-plugin --version"*) echo "udeck-plugin $says" ;;
         *"udeck-plugin --help"*) echo "usage: udeck-plugin check [--strict] <folder>..." ;;
-        *"git --version"*) echo "git version 2.52.0" ;;
+        *"git --version"*)
+            echo "git version 2.52.0"
+            case "$*" in *"curl --version"*) [ "${FAKE_NO_CURL:-0}" = 1 ] && exit 127 ;; esac ;;
         *"check --strict /udeck/examples"*)
             echo "checked /udeck/examples/first/ at 0123456789ab strictly: 0 errors, 0 warnings"
-            [ "${FAKE_ONE_EXAMPLE:-0}" = 1 ] || echo "checked /udeck/examples/second/ at 0123456789ab strictly: 0 errors, 0 warnings" ;;
-        *"check-repo"*) exit "${FAKE_CHECK_REPO:-0}" ;;
+            [ "${FAKE_ONE_EXAMPLE:-0}" = 1 ] || echo "checked /udeck/examples/hello-card/ at 0123456789ab strictly: 0 errors, 0 warnings" ;;
     esac
     exit 0
 fi
 exit 0
 """.replace("sha256:BUILT", BUILT)
+
+# udeck-plugin as the image's answers the two scripts check_image runs in it —
+# or, told so by FAKE_RULE18, FAKE_PIN or FAKE_PIN_CHECK, does not.
+IMAGE_UDECK_PLUGIN = r"""#!/bin/sh
+command="$1"
+shift
+case "$command" in
+check-repo)
+    strict=0
+    repo=""
+    while [ $# -gt 0 ]; do
+        case "$1" in --strict) strict=1 ;; --repo) repo="$2"; shift ;; esac
+        shift
+    done
+    how=""
+    [ "$strict" = 1 ] && how=" strictly"
+    if [ "$(git -C "$repo" rev-list --count HEAD)" -gt 1 ] && [ "${FAKE_RULE18:-}" != silent ]; then
+        echo "error: plugins/hello-card/manifest.json: the folder changed; its version 1.0.0 did not go up [rule 18]"
+        echo "checked 1 plugin folder at 0123456789ab$how: 1 error, 0 warnings"
+        exit 1
+    fi
+    echo "checked 1 plugin folder at 0123456789ab$how: 0 errors, 0 warnings" ;;
+pin)
+    repo=""
+    version=""
+    check=0
+    while [ $# -gt 0 ]; do
+        case "$1" in --repo) repo="$2"; shift ;; --version) version="$2"; shift ;; --check) check=1 ;; esac
+        shift
+    done
+    lock="$repo/.github/udeck-plugin.lock"
+    [ -n "$version" ] || version="$(sed -n 's/^version=//p' "$lock")"
+    release="${UDECK_PLUGIN_DOWNLOAD_BASE#file://}/v$version"
+    expected="$(mktemp)"
+    {
+        echo "version=$version"
+        for platform in macos-universal linux-x86_64 linux-aarch64; do
+            sum="$(awk -v name="udeck-plugin-$version-$platform.tar.gz" '$2 == name { print $1 }' "$release/SHA256SUMS")"
+            [ "${FAKE_PIN:-}" = wrong ] && sum="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            echo "$platform=$sum"
+        done
+        echo "image=$(sed -n 's/^digest=//p' "$release/udeck-plugin-image.txt")"
+    } > "$expected"
+    if [ "$check" = 0 ]; then
+        mkdir -p "$repo/.github"
+        cat "$expected" > "$lock"
+    elif [ "${FAKE_PIN_CHECK:-}" != pass ] && ! cmp -s "$lock" "$expected"; then
+        echo "  image: $(sed -n 's/^image=//p' "$lock") here, $(sed -n 's/^image=//p' "$expected") in the release"
+        rm -f "$expected"
+        exit 1
+    fi
+    rm -f "$expected" ;;
+*) exit 2 ;;
+esac
+"""
+
+# sha256sum, which a Mac may not have, as the image's BusyBox prints it.
+IMAGE_SHA256SUM = """#!/bin/sh
+exec python3 -I -c 'import hashlib, sys
+for name in sys.argv[1:]:
+    print(hashlib.sha256(open(name, "rb").read()).hexdigest() + "  " + name)' "$@"
+"""
 
 LABEL = (
     "Apache-2.0 AND Apache-2.0 WITH Swift-exception AND Apache-2.0 WITH LLVM-exception AND MIT AND BSD-3-Clause"
@@ -506,6 +603,9 @@ LABEL = (
 def image(checkout):
     """Docker stubbed — every call logged — on an x86_64 machine, with the two Linux archives."""
     executable(checkout / "stubs" / "docker", DOCKER)
+    executable(checkout / "image-fakes" / "udeck-plugin", IMAGE_UDECK_PLUGIN)
+    executable(checkout / "image-fakes" / "sha256sum", IMAGE_SHA256SUM)
+    (checkout / "sandbox").mkdir()
     executable(checkout / "stubs" / "uname", '#!/bin/sh\ncase "$1" in -s) echo Linux ;; -m) echo x86_64 ;; esac\n')
     out = checkout / "out"
     for arch in ("x86_64", "aarch64"):
@@ -522,7 +622,8 @@ def image(checkout):
 def run_docker(checkout, *args, **env):
     log = checkout / "docker.log"
     log.unlink(missing_ok=True)
-    done = make_cli(checkout, *args, DOCKER_LOG=str(log), DOCKER_SEEN=str(checkout / "seen"), **env)
+    done = make_cli(checkout, *args, DOCKER_LOG=str(log), DOCKER_SEEN=str(checkout / "seen"),
+                    DOCKER_SANDBOX=str(checkout / "sandbox"), IMAGE_FAKES=str(checkout / "image-fakes"), **env)
     calls = log.read_text().splitlines() if log.exists() else []
     return done, calls
 
@@ -584,7 +685,13 @@ def test_an_image_is_built_once_pushed_to_the_jobs_registry_and_run_from_it_by_i
         ({"FAKE_MEDIA": "application/vnd.docker.distribution.manifest.list.v2+json"}, "is not an OCI image index"),
         ({"FAKE_ARM64_SAYS": "9.9.8"}, "in the image (linux/arm64) udeck-plugin says"),
         ({"FAKE_ONE_EXAMPLE": "1"}, "1 of 2 examples checked clean"),
-        ({"FAKE_CHECK_REPO": "1"}, "check-repo on a repository made in the image"),
+        # The image's own scripts, held to what they check (D1b's review: the
+        # rule-18 check could be taken out of the script, and every test
+        # stayed green).
+        ({"FAKE_RULE18": "silent"}, "check-repo on a repository made in the image did not say what it should (linux/amd64)"),
+        ({"FAKE_PIN": "wrong"}, "pin in the image did not pin a release on its disk as it should (linux/amd64)"),
+        ({"FAKE_PIN_CHECK": "pass"}, "pin in the image did not pin a release on its disk as it should (linux/amd64)"),
+        ({"FAKE_NO_CURL": "1"}, "no shell, git, curl or /tmp in the image (linux/amd64)"),
         ({"FAKE_LICENSE": "GPL-3.0-only"}, 'under "GPL-3.0-only", which its licenses label does not name'),
         ({"FAKE_NO_NOTICES": "1"}, "lacks its licences, its notices or the list of its Alpine packages"),
     ],
@@ -647,6 +754,13 @@ def test_push_refuses_what_did_not_run_or_did_not_arrive_and_writes_no_image_fil
     assert not (image / "out" / "udeck-plugin-image.txt").exists()
 
 
+def test_push_refuses_a_staged_file_with_a_line_break_more(image):
+    staged(image, image_file(STAGE) + "\n")
+    done, calls = run_docker(image, "push", "--version", VERSION, "--out", "out")
+    assert done.returncode == 1 and "udeck-plugin-staged.txt says" in done.stderr
+    assert calls == [] and not (image / "out" / "udeck-plugin-image.txt").exists()
+
+
 def test_push_without_an_image_that_ran_does_nothing(image):
     done, calls = run_docker(image, "push", "--out", "out")
     assert done.returncode == 1 and "no udeck-plugin-staged.txt" in done.stderr
@@ -656,7 +770,7 @@ def test_push_without_an_image_that_ran_does_nothing(image):
 def test_the_image_and_what_builds_it_are_pinned_by_digest_and_say_where_they_come_from():
     dockerfile = (REPO / "Scripts" / "udeck-plugin.Dockerfile").read_text()
     assert re.search(r"^FROM alpine:[0-9.]+@sha256:[0-9a-f]{64}$", dockerfile, re.M), "the base by digest"
-    assert re.search(r"^apk add --no-cache git$", dockerfile, re.M), "check and check-repo start git"
+    assert re.search(r"^apk add --no-cache git curl$", dockerfile, re.M), "check and check-repo start git, pin curl"
     assert not re.search(r"^ENTRYPOINT", dockerfile, re.M), "GitLab CI hands the job's script to the image's shell"
     for label in ('source="https://github.com/iillyyaa1997/udeck"', 'version="${VERSION}"', 'licenses="${LICENSES}"'):
         assert f"org.opencontainers.image.{label}" in dockerfile
@@ -665,6 +779,59 @@ def test_the_image_and_what_builds_it_are_pinned_by_digest_and_say_where_they_co
     script = (REPO / "Scripts" / "make-cli.sh").read_text()
     for name in ("BUILDKIT", "BINFMT"):
         assert re.search(rf'^{name}="[a-z/]+:[A-Za-z0-9.-]+@sha256:[0-9a-f]{{64}}"$', script, re.M), name
+
+
+def test_the_list_of_alpine_packages_names_each_with_its_licence_and_its_source_in_main():
+    """The awk program the Dockerfile writes ALPINE-PACKAGES with, run here on
+    two records of /lib/apk/db/installed. Every package the image holds is
+    from Alpine's main repository (v3.24's index, 2026-10-07: git and curl and
+    all they bring), so the link is to aports' main/ — a link to community/
+    would send whoever wants a GPL package's source to nothing (D1b's review:
+    that change passed every test).
+    """
+    dockerfile = (REPO / "Scripts" / "udeck-plugin.Dockerfile").read_text()
+    program = re.search(r"^awk '\n(.*?)\n' /lib/apk/db/installed", dockerfile, re.M | re.S).group(1)
+    installed = (
+        "C:Q1abc=\nP:git\nV:2.54.0-r0\nA:x86_64\nL:GPL-2.0-only\no:git\nc:0123456789abcdef\n\n"
+        "C:Q1def=\nP:libcurl\nV:8.22.0-r0\nL:curl\no:curl\nc:fedcba9876543210\n"
+    )
+    done = subprocess.run(["awk", program], input=installed, capture_output=True, text=True, check=True)
+    assert done.stdout.splitlines() == [
+        "git 2.54.0-r0 | GPL-2.0-only | https://gitlab.alpinelinux.org/alpine/aports/-/tree/0123456789abcdef/main/git",
+        "libcurl 8.22.0-r0 | curl | https://gitlab.alpinelinux.org/alpine/aports/-/tree/fedcba9876543210/main/curl",
+    ]
+
+
+def test_version_is_what_the_app_says_read_without_a_mac():
+    """What CI passes as --version: CFBundleShortVersionString, read with sed
+    where a Linux job has no PlistBuddy — and the same as plistlib reads it."""
+    import plistlib
+
+    done = make_cli(REPO, "version")
+    assert done.returncode == 0, done.stderr
+    app = plistlib.loads((REPO / "Sources" / "uDeck" / "Support" / "Info.plist").read_bytes())
+    assert done.stdout == app["CFBundleShortVersionString"] + "\n"
+
+
+@pytest.mark.parametrize(
+    ("change", "said"),
+    [
+        (("<string>0.5.0</string>", "<string>0.5</string>"), 'is "0.5", not X.Y.Z'),
+        (("<string>0.5.0</string>", "<string>v0.5.0</string>"), "not X.Y.Z"),
+        (("<key>CFBundleShortVersionString</key>", "<key>CFBundleVersionString</key>"), "0 times, not once"),
+        (("<key>CFBundleVersion</key>", "<key>CFBundleShortVersionString</key>"), "2 times, not once"),
+    ],
+)
+def test_version_refuses_an_info_plist_it_cannot_read_one_number_from(checkout, change, said):
+    plist = checkout / "Sources" / "uDeck" / "Support" / "Info.plist"
+    text = plist.read_text()
+    version = re.search(r"<key>CFBundleShortVersionString</key>\s*<string>([^<]*)</string>", text).group(1)
+    old, new = change
+    plist.write_text(text.replace(old.replace("0.5.0", version), new.replace("0.5.0", version)))
+    done = make_cli(checkout, "version")
+    assert done.returncode == 1, done.stdout
+    assert said.replace("0.5.0", version) in done.stderr
+    assert done.stdout == ""
 
 
 def test_the_notices_name_every_package_the_command_is_built_with():
@@ -676,6 +843,10 @@ def test_the_notices_name_every_package_the_command_is_built_with():
             assert f"swift-crypto {pin['state']['version']} (revision {pin['state']['revision']})" in notices
     for component in ("musl", "mimalloc", "fts", "BoringSSL", "libdispatch", "swift-foundation", "libc++"):
         assert component in notices, component
+    # swift-foundation's uuid.c is under a licence of its own, and its notice
+    # has to travel with the binary (D1b's review).
+    assert "10. uuid.c" in notices and "Copyright (c) 2004 Apple Computer, Inc." in notices
+    assert "Redistributions in binary form must reproduce the above copyright" in notices.split("[G] uuid.c")[1]
 
 
 # --- the workflows ------------------------------------------------------------------------------
@@ -760,15 +931,67 @@ def test_ci_makes_what_a_release_publishes_on_every_push_and_publishes_nothing()
     assert "make-cli.sh macos" in blocks["build-and-test"]
     assert "make-cli.sh linux" in blocks["plugin-format-linux"]
     assert "make-cli.sh image" in blocks["udeck-plugin-image"]
-    assert "make-cli.sh push --out release-cli --repository localhost:5000/iillyyaa1997/udeck-plugin" in blocks["udeck-plugin-image"]
+    assert "--out release-cli --repository localhost:5001/iillyyaa1997/udeck-plugin" in blocks["udeck-plugin-image"]
     assert "make-cli.sh sums" in blocks["release-assets"] and "make-cli.sh notes" in blocks["release-assets"]
     assert needs(blocks["release-assets"]) == {"build-and-test", "plugin-format-linux", "udeck-plugin-image"}
-    for forbidden in ("--push", "docker login", "gh release", ": write"):
+    for forbidden in ("--push", "gh release", ": write"):
         assert forbidden not in text, forbidden
+    # The one login: to the job's own second registry, never to ghcr.io.
+    logins = re.findall(r"docker login (\S+)", text)
+    assert logins == ["localhost:5001"], logins
     for line in text.splitlines():
         if "make-cli.sh " in line and not line.strip().startswith("#"):
             assert "ghcr.io" not in line, line
     assert re.search(r"^permissions:\n  contents: read\n", text, re.M), "the token reads, and that is all"
+
+
+def test_ci_copies_the_image_to_a_second_registry_that_asks_for_a_login_and_logs_out_whatever_happened():
+    """D1b's review: the dry run copied within one registry and without a
+    login, where a release copies between two and with one."""
+    block = jobs(workflow("ci.yml"))["udeck-plugin-image"]
+    found = steps(block)
+    named = [re.search(r"name: (.*)", step).group(1) if "name:" in step else step.split("\n")[0].strip() for step in found]
+    start = next(i for i, step in enumerate(found) if "docker run -d --name second-registry" in step)
+    image = next(i for i, step in enumerate(found) if "make-cli.sh image" in step)
+    login = next(i for i, step in enumerate(found) if "docker login" in step)
+    push = next(i for i, step in enumerate(found) if "make-cli.sh push" in step)
+    logout = next(i for i, step in enumerate(found) if "docker logout" in step)
+    assert image < start < login and push == login + 1 and logout == push + 1, named
+    assert "if: always()" in found[logout]
+    assert "--repository localhost:5001/iillyyaa1997/udeck-plugin" in found[push]
+    second = found[start]
+    service = re.search(r"image: (registry:\S+)", block).group(1)
+    assert service in second, "the second registry is the service's image, by the same digest"
+    assert "-p 5001:5000" in second and "REGISTRY_AUTH=htpasswd" in second
+    assert "openssl rand" in second and "::add-mask::" in second, "a password of this run's own, masked"
+    assert "htpasswd -Bbn" in second
+    assert "--password-stdin" in found[login]
+
+
+def test_every_make_cli_call_in_ci_says_the_version_a_tag_would():
+    text = workflow("ci.yml")
+    calls = [line for line in text.splitlines() if re.search(r"Scripts/make-cli\.sh (macos|linux|image|push|sums|notes)", line)]
+    assert len(calls) == 6, calls
+    for call in calls:
+        assert '--version "$(Scripts/make-cli.sh version)"' in call, call
+    assert '--revision "$GITHUB_SHA"' in next(call for call in calls if "make-cli.sh image" in call)
+
+
+def test_ci_pins_the_release_it_made_and_reads_the_pin_with_the_reader_in_the_docs():
+    block = jobs(workflow("ci.yml"))["release-assets"]
+    step = next(step for step in steps(block) if "pin --repo" in step)
+    assert 'command="$RUNNER_TEMP/udeck-plugin-$version-linux-x86_64/udeck-plugin"' in step, "the static command from its archive"
+    for said in ('"$command" pin --repo "$repo"\n', '"$command" pin --repo "$repo" --check\n',
+                 '"$command" pin --repo "$repo" --check --version latest\n', "read_udeck_plugin_lock", "sha256sum -c -",
+                 "test \"$status\" -eq 1"):
+        assert said in step, said
+    docs = (REPO / "docs" / "plugin-repository.md").read_text()
+    assert docs.count("\n<!-- lock-reader -->\n```sh\n") == 1 and docs.count("\n```\n<!-- /lock-reader -->\n") == 1
+
+
+def test_the_cla_action_is_pinned_by_its_commit():
+    uses = re.findall(r"^\s+(?:- )?uses: (.*)$", workflow("cla.yml"), re.M)
+    assert uses == ["contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1"], uses
 
 
 def steps(block):

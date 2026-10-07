@@ -12,6 +12,11 @@ concurrency:
 # Reading the repository is all any job here does with the token. Actions are
 # pinned by commit, the version beside each, and no checkout keeps the token in
 # .git/config, as in release.yml.
+#
+# Every Scripts/make-cli.sh call says --version as release.yml's do, with the
+# version a tag of this commit would have to name — `make-cli.sh version`, the
+# app's CFBundleShortVersionString — so that every check a release makes of
+# the number runs here first.
 permissions:
   contents: read
 
@@ -134,7 +139,7 @@ jobs:
       # push, by the script release.yml runs, and published nowhere: a change
       # to either is proved here before a tag needs it.
       - name: Make the udeck-plugin archive for macOS, as a release does
-        run: Scripts/make-cli.sh macos --out release-cli
+        run: Scripts/make-cli.sh macos --version "$(Scripts/make-cli.sh version)" --out release-cli
 
       - name: Keep it for the release's dry run
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -230,7 +235,7 @@ jobs:
       # that is the finding: the SDK does not build for it at this release.
       - name: Make the udeck-plugin archive for Linux, as a release does
         working-directory: .
-        run: Scripts/make-cli.sh linux --arch "${{ matrix.arch }}" --out release-cli
+        run: Scripts/make-cli.sh linux --arch "${{ matrix.arch }}" --version "$(Scripts/make-cli.sh version)" --out release-cli
 
       # What runs here is what the archive holds — the stripped binary a
       # release publishes, unpacked as a repository's CI unpacks it.
@@ -288,10 +293,12 @@ jobs:
   # The image a release pushes to ghcr.io, made here on every push from the
   # archives above the way a release makes it, all the way: built once and
   # pushed to the job's own registry, pulled from it by its digest and run on
-  # both platforms, then copied by that digest — as a release copies it to
-  # ghcr.io — to a second name in the same registry, read back, and written
-  # into udeck-plugin-image.txt. Nothing leaves the runner: no registry login,
-  # no write to packages.
+  # both platforms, then copied by that digest to a second registry — one that
+  # asks for a login, as ghcr.io does, so that the blobs travel from one
+  # registry to another and the copy goes with a credential — read back, and
+  # written into udeck-plugin-image.txt. Nothing leaves the runner: the second
+  # registry is a container of the job's, its password made here for this run
+  # alone, and nothing writes to packages.
   udeck-plugin-image:
     name: udeck-plugin image, built, run and copied, not published
     needs: plugin-format-linux
@@ -315,10 +322,45 @@ jobs:
           merge-multiple: true
 
       - name: Build the image, and run it from the job's registry on both platforms
-        run: Scripts/make-cli.sh image --out release-cli
+        run: Scripts/make-cli.sh image --version "$(Scripts/make-cli.sh version)" --out release-cli --revision "$GITHUB_SHA"
 
-      - name: Copy the image that ran, as a release pushes it
-        run: Scripts/make-cli.sh push --out release-cli --repository localhost:5000/iillyyaa1997/udeck-plugin
+      # registry:2 as the service above, by the same digest, on :5001 and with
+      # htpasswd: a password of this run's own — openssl's, masked in the log —
+      # and the bcrypt the registry asks for, by htpasswd (apache2-utils, which
+      # the runner's Apache brings).
+      - name: Start a second registry, which asks for a login
+        run: |
+          set -euo pipefail
+          auth="$RUNNER_TEMP/second-registry"
+          mkdir -p "$auth"
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          printf '%s' "$password" > "$auth/password"
+          htpasswd -Bbn ci "$password" > "$auth/htpasswd"
+          docker run -d --name second-registry -p 5001:5000 -v "$auth/htpasswd:/auth/htpasswd:ro" \
+            -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=udeck-ci \
+            -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
+            registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+          # Up, and asking: 401 without a login.
+          for _ in $(seq 30); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5001/v2/ || true)"
+            [ "$code" = 401 ] && exit 0
+            sleep 1
+          done
+          echo "the second registry did not come up asking for a login (last answer: $code)" >&2
+          exit 1
+
+      # Logged in just for the copy, and out again whatever it did — as a
+      # release logs in to ghcr.io.
+      - name: Log in to the second registry
+        run: docker login localhost:5001 --username ci --password-stdin < "$RUNNER_TEMP/second-registry/password"
+
+      - name: Copy the image that ran to the second registry, as a release pushes it
+        run: Scripts/make-cli.sh push --version "$(Scripts/make-cli.sh version)" --out release-cli --repository localhost:5001/iillyyaa1997/udeck-plugin
+
+      - name: Log out of the second registry
+        if: always()
+        run: docker logout localhost:5001
 
       - name: Keep the image's file for the release's dry run
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -330,7 +372,8 @@ jobs:
 
   # What a tag would publish besides the app: the three archives under one
   # version, the image's file, SHA256SUMS over the four and the notes, written
-  # and checked by the commands release.yml's last job runs.
+  # and checked by the commands release.yml's last job runs. Then the release
+  # is pinned as a plugin repository pins one, and the pin read as its CI will.
   release-assets:
     name: The release's udeck-plugin assets, not published
     needs: [build-and-test, plugin-format-linux, udeck-plugin-image]
@@ -350,8 +393,52 @@ jobs:
 
       - name: Write and check SHA256SUMS, as a release does
         run: |
-          Scripts/make-cli.sh sums --out release-cli --repository localhost:5000/iillyyaa1997/udeck-plugin
+          Scripts/make-cli.sh sums --version "$(Scripts/make-cli.sh version)" --out release-cli --repository localhost:5001/iillyyaa1997/udeck-plugin
           ls -l release-cli
 
       - name: Write the notes, as a release does
-        run: Scripts/make-cli.sh notes --out release-cli --repository localhost:5000/iillyyaa1997/udeck-plugin
+        run: Scripts/make-cli.sh notes --version "$(Scripts/make-cli.sh version)" --out release-cli --repository localhost:5001/iillyyaa1997/udeck-plugin
+
+      # The release above, laid out on disk as GitHub lays out its releases,
+      # pinned by the static Linux command from its own archive with the
+      # runner's curl; the lock file then read by the shell reader in
+      # docs/plugin-repository.md — what a plugin repository's CI runs — and
+      # the archive checked against the sum it read; and a lock file one sum
+      # off is a failed --check, not a quiet pass.
+      - name: Pin the release as a plugin repository does, and read the pin as its CI will
+        run: |
+          set -euo pipefail
+          version="$(Scripts/make-cli.sh version)"
+          releases="$RUNNER_TEMP/releases"
+          mkdir -p "$releases/download/v$version" "$releases/latest/download"
+          cp release-cli/SHA256SUMS release-cli/udeck-plugin-image.txt release-cli/udeck-plugin-*.tar.gz "$releases/download/v$version/"
+          cp release-cli/udeck-plugin-image.txt "$releases/latest/download/"
+          tar -xzf "release-cli/udeck-plugin-$version-linux-x86_64.tar.gz" -C "$RUNNER_TEMP"
+          command="$RUNNER_TEMP/udeck-plugin-$version-linux-x86_64/udeck-plugin"
+          repo="$RUNNER_TEMP/plugins-repository"
+          mkdir -p "$repo"
+          printf '{"format": 1, "name": "Pinned in CI"}\n' > "$repo/udeck-plugins.json"
+          export UDECK_PLUGIN_DOWNLOAD_BASE="file://$releases/download"
+          "$command" pin --repo "$repo"
+          "$command" pin --repo "$repo" --check
+          "$command" pin --repo "$repo" --check --version latest
+          awk '/^<!-- \/lock-reader -->$/ { inside = 0 } inside && !/^```/ { print } /^<!-- lock-reader -->$/ { inside = 1 }' \
+            docs/plugin-repository.md > "$RUNNER_TEMP/read-lock.sh"
+          sh -eu -c '
+            . "$1"
+            read_udeck_plugin_lock "$2"
+            test "$version" = "$4"
+            cd "$3/download/v$version"
+            echo "$linux_x86_64  udeck-plugin-$version-linux-x86_64.tar.gz" | sha256sum -c -
+            echo "$linux_aarch64  udeck-plugin-$version-linux-aarch64.tar.gz" | sha256sum -c -
+            echo "$macos_universal  udeck-plugin-$version-macos-universal.tar.gz" | sha256sum -c -
+            grep -qx "digest=$image" udeck-plugin-image.txt
+          ' sh "$RUNNER_TEMP/read-lock.sh" "$repo/.github/udeck-plugin.lock" "$releases" "$version"
+          lock="$repo/.github/udeck-plugin.lock"
+          first="$(sed -n 's/^linux-x86_64=\(.\).*/\1/p' "$lock")"
+          if [ "$first" = 0 ]; then other=1; else other=0; fi
+          sed "s/^linux-x86_64=./linux-x86_64=$other/" "$lock" > "$RUNNER_TEMP/changed.lock"
+          cp "$RUNNER_TEMP/changed.lock" "$lock"
+          status=0
+          "$command" pin --repo "$repo" --check || status=$?
+          test "$status" -eq 1

@@ -10,6 +10,7 @@
 #         Scripts/make-cli.sh push [--version X.Y.Z] [--out DIR] [--stage REGISTRY/NAME] [--repository REGISTRY/NAME]
 #         Scripts/make-cli.sh sums [--version X.Y.Z] [--out DIR] [--repository REGISTRY/NAME]
 #         Scripts/make-cli.sh notes [--version X.Y.Z] [--out DIR] [--repository REGISTRY/NAME]
+#         Scripts/make-cli.sh version
 #
 # One script for both places that make them. release.yml runs it at a tag and
 # publishes what it made; ci.yml runs the same commands on every push and
@@ -24,7 +25,10 @@
 # runs the binary it made and refuses to go on unless it says exactly
 # "udeck-plugin <version>": the number in an archive's name, the image's tag
 # and what the command says of itself are one number, held to the tag. Without
-# --version the binary's own answer is taken, as CI does.
+# --version the binary's own answer is taken. CI passes what `version` prints —
+# the app's CFBundleShortVersionString, which release.yml holds a tag to — so
+# that every check a tag makes of the number runs on every push, and a command
+# that says another number than the app fails there rather than at the tag.
 #
 # --out (default .build/cli) is where archives go and where the commands after
 # them find them. Relative paths are read from the repository's root, wherever
@@ -56,12 +60,14 @@
 # image exporter, OCI media types, one index of both platforms — and the digest
 # BuildKit reports for that index is required. The index is then read back
 # from the registry, and each platform's image is pulled from it by that digest
-# and run before anything else happens: --version, --help, and check and
+# and run before anything else happens: --version, --help, check and
 # check-repo on the examples, with the checkout mounted read-only and no
-# network, as a repository's CI runs it. arm64 runs under QEMU on an amd64
-# runner (or amd64 on an arm64 one): the binary itself is proved natively by
-# the Linux build job, and what the image adds — Alpine's git, a shell, /tmp —
-# is what emulation runs here. What ran is written to udeck-plugin-staged.txt.
+# network, as a repository's CI runs it, and pin on a release laid out on the
+# image's own disk, through its curl. arm64 runs under QEMU on an amd64 runner
+# (or amd64 on an arm64 one): the binary itself is proved natively by the
+# Linux build job, and what the image adds — Alpine's git and curl, a shell,
+# /tmp — is what emulation runs here. What ran is written to
+# udeck-plugin-staged.txt.
 #
 # push copies that index — by its digest, byte for byte — to --repository
 # (ghcr.io/iillyyaa1997/udeck-plugin unless told otherwise), tagged
@@ -77,8 +83,12 @@
 # refuses — once it has read every record of every archive, and checks what it
 # wrote. notes holds udeck-plugin-image.txt to what it must say and writes
 # notes.md, what the release says before GitHub's own notes: the image by its
-# digest. Both read the image file the same way, line by line, and refuse one
-# that names another image, another version or no whole digest.
+# digest. Both read the image file the same way, and compare it byte for byte
+# with the four lines push writes — `udeck-plugin pin` reads it as strictly — so
+# they refuse one that names another image, another version or no whole
+# digest, and one with a line more, a blank line or no line break at its end.
+#
+# version prints the release's version as the app says it, and nothing else.
 #
 # An archive holds one folder, udeck-plugin-<version>-<platform>/, with the
 # command, LICENSE, NOTICE and THIRD_PARTY_NOTICES (Scripts/third-party/: what
@@ -125,7 +135,7 @@ MPL-2.0 AND MIT
 Zlib"
 
 usage() {
-    sed -n '7,12p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '7,13p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
 
@@ -134,22 +144,43 @@ fail() {
     exit 1
 }
 
+# The version a tag of this commit has to name: CFBundleShortVersionString in
+# the app's Info.plist, which release.yml holds the tag to — read with sed, so
+# that a Linux job, which has no PlistBuddy, can ask it too.
+release_version() {
+    local plist="Sources/uDeck/Support/Info.plist" keys said
+    [ -f "$plist" ] || fail "no $plist"
+    keys="$(grep -c '<key>CFBundleShortVersionString</key>' "$plist" || true)"
+    [ "$keys" = 1 ] || fail "$plist names CFBundleShortVersionString $keys times, not once"
+    said="$(sed -n '/^[[:space:]]*<key>CFBundleShortVersionString<\/key>[[:space:]]*$/{n;s/^[[:space:]]*<string>\([^<]*\)<\/string>[[:space:]]*$/\1/p;}' "$plist")"
+    printf '%s\n' "$said" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' && [ "$(printf '%s\n' "$said" | wc -l | tr -d ' ')" = 1 ] \
+        || fail "$plist says CFBundleShortVersionString is \"$said\", not X.Y.Z on the line after its key"
+    printf '%s\n' "$said"
+}
+
 [ $# -gt 0 ] || usage
 WHAT="$1"
 shift
 case "$WHAT" in
-    macos|linux|image|push|sums|notes) ;;
+    macos|linux|image|push|sums|notes|version) ;;
     *) echo "make-cli: unknown command: $WHAT" >&2; usage ;;
 esac
 
+if [ "$WHAT" = version ]; then
+    [ $# -eq 0 ] || usage
+    release_version
+    exit 0
+fi
+
 VERSION=""
+VERSION_GIVEN=0
 OUT=".build/cli"
 ARCH=""
 IDENTITY="-"
 REVISION=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        --version) VERSION="${2-}"; shift 2 ;;
+        --version) VERSION="${2-}"; VERSION_GIVEN=1; shift 2 ;;
         --out) OUT="${2-}"; shift 2 ;;
         --arch) ARCH="${2-}"; shift 2 ;;
         --sign) IDENTITY="${2-}"; shift 2 ;;
@@ -162,6 +193,13 @@ done
 
 if [ -z "$OUT" ]; then
     echo "make-cli: --out needs a directory" >&2
+    exit 2
+fi
+# Given and empty is a version somebody meant to say and did not — as
+# `--version "$(make-cli.sh version)"` reads when `version` failed — not
+# "whatever the binary says".
+if [ "$VERSION_GIVEN" = 1 ] && [ -z "$VERSION" ]; then
+    echo "make-cli: --version is empty; it takes X.Y.Z (the tag without its v)" >&2
     exit 2
 fi
 if [ -n "$VERSION" ] && ! printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -409,10 +447,12 @@ image_text() {
     printf 'image=%s\ntag=v%s\ndigest=%s\nplatforms=%s\n' "$1" "$2" "$3" "$PLATFORMS"
 }
 
-# Reads an image file and holds it to image_text, byte for byte: of the image
-# `repository` names, of --version when one is asked for, with a digest that
-# is a whole sha256. Sets IMAGE_VERSION and IMAGE_DIGEST. Each refusal is an
-# exit of its own: a check in the middle of `a && b` does not stop a script
+# Reads an image file and holds it to image_text, byte for byte — compared by
+# cmp, since `$(cat file)` drops every line break at a file's end and would
+# take three more, or none, for the one there should be (D1b's review): of the
+# image `repository` names, of --version when one is asked for, with a digest
+# that is a whole sha256. Sets IMAGE_VERSION and IMAGE_DIGEST. Each refusal is
+# an exit of its own: a check in the middle of `a && b` does not stop a script
 # under `set -e`, and a release whose notes name `image@` with no digest is
 # immutable once made.
 read_image_file() {
@@ -428,8 +468,9 @@ read_image_file() {
     if [ -z "$digest" ]; then
         fail "$name has no line digest=sha256:<64 hexadecimal digits>: $(tr '\n' ' ' < "$file")"
     fi
-    if [ "$(cat "$file")" != "$(image_text "$repository" "$version" "$digest")" ]; then
-        fail "$name says: $(tr '\n' ' ' < "$file")— not $(image_text "$repository" "$version" "$digest" | tr '\n' ' ')"
+    image_text "$repository" "$version" "$digest" > "$SCRATCH/expected-$name"
+    if ! cmp -s "$file" "$SCRATCH/expected-$name"; then
+        fail "$name says: $(od -An -c "$file" | tr -s ' \n' ' ')— not, byte for byte, $(tr '\n' ' ' < "$SCRATCH/expected-$name")"
     fi
     if [ -n "$VERSION" ] && [ "$version" != "$VERSION" ]; then
         fail "$name is of v$version; this release is $VERSION"
@@ -576,8 +617,10 @@ check_image() {
     [ "$said" = "udeck-plugin $version" ] || fail "in the image ($platform) udeck-plugin says \"$said\", not \"udeck-plugin $version\""
     "${run[@]}" "$ref" udeck-plugin --help > "$SCRATCH/help.txt" || fail "udeck-plugin --help failed in the image ($platform)"
     grep -q '^usage: udeck-plugin' "$SCRATCH/help.txt" || fail "udeck-plugin --help in the image ($platform) printed no usage"
-    # The image's own shell and git, which GitLab CI and the check start.
-    "${run[@]}" "$ref" sh -c 'git --version && test -d /tmp' || fail "no shell, git or /tmp in the image ($platform)"
+    # The image's own shell and git, which GitLab CI and the check start, and
+    # curl, which `udeck-plugin pin` reads a release with.
+    "${run[@]}" "$ref" sh -c 'git --version && curl --version && test -d /tmp' \
+        || fail "no shell, git, curl or /tmp in the image ($platform)"
 
     # What it says of what it holds: the notices beside the command, the list
     # of Alpine's packages with where their sources are, and no package under
@@ -629,7 +672,43 @@ check_image() {
         test "$status" -eq 1
         grep -q "^error: plugins/hello-card/manifest.json: the folder changed.*\[rule 18\]$" /tmp/out.txt
     ' || fail "check-repo on a repository made in the image did not say what it should ($platform)"
-    echo "==> $ref as $platform: udeck-plugin $version, check and check-repo as a repository's CI runs them"
+
+    # A release on the image's own disk, laid out as GitHub's, and a plugin
+    # repository pinned to it: pin writes the lock file from the release's
+    # SHA256SUMS and image file through the image's curl, --check holds it to
+    # them, and a sum changed by hand is a failed --check.
+    # shellcheck disable=SC2016
+    "${run[@]}" "$ref" sh -eu -c '
+        version="$1"
+        release="/tmp/releases/download/v$version"
+        repo=/tmp/plugins-repository
+        mkdir -p "$release" "$repo"
+        cd "$release"
+        for platform in macos-universal linux-x86_64 linux-aarch64; do
+            printf "the %s archive\n" "$platform" > "udeck-plugin-$version-$platform.tar.gz"
+        done
+        printf "image=registry.invalid/udeck/udeck-plugin\ntag=v%s\ndigest=sha256:%s\nplatforms=linux/amd64,linux/arm64\n" \
+            "$version" 0000000000000000000000000000000000000000000000000000000000000000 > udeck-plugin-image.txt
+        sha256sum "udeck-plugin-$version-macos-universal.tar.gz" "udeck-plugin-$version-linux-x86_64.tar.gz" \
+            "udeck-plugin-$version-linux-aarch64.tar.gz" udeck-plugin-image.txt > SHA256SUMS
+        printf "{\"format\": 1, \"name\": \"Pinned in the image\"}\n" > "$repo/udeck-plugins.json"
+        export UDECK_PLUGIN_DOWNLOAD_BASE="file:///tmp/releases/download"
+        udeck-plugin pin --repo "$repo" --version "$version"
+        lock="$repo/.github/udeck-plugin.lock"
+        cat "$lock"
+        grep -qx "version=$version" "$lock"
+        grep -qx "linux-x86_64=$(sha256sum "udeck-plugin-$version-linux-x86_64.tar.gz" | cut -d " " -f 1)" "$lock"
+        grep -qx "image=sha256:0000000000000000000000000000000000000000000000000000000000000000" "$lock"
+        udeck-plugin pin --repo "$repo" --check
+        sed "s/^image=sha256:0/image=sha256:1/" "$lock" > /tmp/changed.lock
+        cat /tmp/changed.lock > "$lock"
+        status=0
+        udeck-plugin pin --repo "$repo" --check > /tmp/out.txt || status=$?
+        cat /tmp/out.txt
+        test "$status" -eq 1
+        grep -q "^  image: sha256:1" /tmp/out.txt
+    ' sh "$version" || fail "pin in the image did not pin a release on its disk as it should ($platform)"
+    echo "==> $ref as $platform: udeck-plugin $version; check, check-repo and pin as a repository's CI runs them"
 }
 
 build_image() {
