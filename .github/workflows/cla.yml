@@ -38,10 +38,11 @@ jobs:
           && ((github.event.issue.pull_request
                 && contains(github.event.comment.body, 'I have read the CLA Document and I hereby sign the CLA'))
               || github.event_name == 'pull_request_target')
-        # Pinned to a released tag. Running a third-party action on
-        # pull_request_target gives it write access to this repository, so this
-        # is worth pinning to a commit sha once the workflow is switched on.
-        uses: contributor-assistant/github-action@v2.6.1
+        # Pinned by the commit its v2.6.1 tag named when it was pinned (the
+        # version beside it), as every action in ci.yml and release.yml is: a
+        # third-party action run on pull_request_target holds this repository's
+        # write access, and a tag can be moved to other code.
+        uses: contributor-assistant/github-action@ca4a40a7d1004f18d9960b404b97e5f30a505a08 # v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
