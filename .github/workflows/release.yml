@@ -14,8 +14,17 @@ name: Release
 # the assets — what a plugin repository's lock file will pin.
 #
 # ci.yml makes the same archives and the same image on every push with the
-# same script, Scripts/make-cli.sh, and publishes nothing: what a tag adds is
-# the registry login, `--push`, and `gh release create`.
+# same script, Scripts/make-cli.sh, and goes the same way to the end — the
+# image pushed to a registry of the job's own and copied from there by its
+# digest, the image file, SHA256SUMS, the notes — publishing nothing. What a
+# tag changes is where the image is copied to (ghcr.io), the login just before
+# that, and `gh release create`.
+#
+# Every action is pinned by the commit its version's tag named when it was
+# pinned (the version beside it): a tag can be moved, and these run in jobs
+# that may write packages and releases. No checkout keeps the job's token in
+# .git/config (persist-credentials: false): nothing here pushes to git, and the
+# checkout is mounted into the containers the image is run in.
 on:
   push:
     tags: ["v*"]
@@ -31,7 +40,9 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Check that the tag matches the version in the app
         run: |
@@ -108,7 +119,7 @@ jobs:
         run: Scripts/make-cli.sh macos --version "$version" --out release-cli
 
       - name: Keep the application for the release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: app
           path: |
@@ -117,7 +128,7 @@ jobs:
           if-no-files-found: error
 
       - name: Keep the udeck-plugin archive for the release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udeck-plugin-macos
           path: release-cli/udeck-plugin-${{ env.version }}-macos-universal.tar.gz
@@ -145,7 +156,9 @@ jobs:
       STATIC_SDK_URL: https://download.swift.org/swift-6.4.0-release/static-sdk/swift-6.4.0-RELEASE/swift-6.4.0-RELEASE_static-linux-0.1.0.artifactbundle.tar.gz
       STATIC_SDK_CHECKSUM: 47d2fd89eebfdf9eb4d536b6710414297f755c17926cdebc4742c08982b40a9e
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install the Static Linux SDK
         run: swift sdk install "$STATIC_SDK_URL" --checksum "$STATIC_SDK_CHECKSUM"
@@ -154,7 +167,7 @@ jobs:
         run: Scripts/make-cli.sh linux --arch "${{ matrix.arch }}" --version "${GITHUB_REF_NAME#v}" --out release-cli
 
       - name: Keep it for the image and the release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udeck-plugin-linux-${{ matrix.arch }}
           path: release-cli/udeck-plugin-*-linux-${{ matrix.arch }}.tar.gz
@@ -172,36 +185,52 @@ jobs:
     permissions:
       contents: read
       packages: write
+    # The job's own registry, where the image is pushed first and run from, by
+    # its digest, before anything is published — as ci.yml does on every push.
+    # Pinned by digest, as everything else this job runs.
+    services:
+      registry:
+        image: registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+        ports:
+          - 5000:5000
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Take the Linux archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: udeck-plugin-linux-*
           path: release-cli
           merge-multiple: true
 
+      # Built once, pushed to the job's registry, and pulled from it by digest
+      # and run on both platforms, exactly as ci.yml does on every push — with
+      # no credential on the runner yet.
+      - name: Build the image, and run it from the job's registry on both platforms
+        run: Scripts/make-cli.sh image --version "${GITHUB_REF_NAME#v}" --out release-cli --revision "$GITHUB_SHA"
+
+      # Logged in just for the copy, and out again whatever it did.
       - name: Log in to ghcr.io
         env:
           GH_TOKEN: ${{ github.token }}
         run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
-      # Built and run on both platforms first, exactly as ci.yml does on every
-      # push; pushed only then — to ghcr.io/iillyyaa1997/udeck-plugin, the
-      # script's one name for it — as one index for linux/amd64 and
-      # linux/arm64, tagged with the release's tag. A package GitHub has not
-      # seen before is made private: making it public is a step for its owner
-      # on GitHub, once, after the first release (no API can).
-      - name: Build, run, and push the image
-        run: Scripts/make-cli.sh image --version "${GITHUB_REF_NAME#v}" --out release-cli --push --revision "$GITHUB_SHA"
+      # What ran, copied by its digest to ghcr.io/iillyyaa1997/udeck-plugin —
+      # the script's one name for it — tagged with the release's tag. A
+      # package GitHub has not seen before is made private: making it public
+      # is a step for its owner on GitHub, once, after the first release (no
+      # API can).
+      - name: Push the image that ran to ghcr.io
+        run: Scripts/make-cli.sh push --version "${GITHUB_REF_NAME#v}" --out release-cli
 
       - name: Log out of ghcr.io
         if: always()
         run: docker logout ghcr.io
 
       - name: Keep the image's digest for the release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udeck-plugin-image
           path: release-cli/udeck-plugin-image.txt
@@ -215,16 +244,18 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Take the application
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: app
           path: release
 
       - name: Take udeck-plugin's archives and the image's digest
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: udeck-plugin-*
           path: release-cli
@@ -233,6 +264,12 @@ jobs:
       - name: Write SHA256SUMS
         run: Scripts/make-cli.sh sums --version "${GITHUB_REF_NAME#v}" --out release-cli
 
+      # The image file held to what it must say — or the job stops here, before
+      # anything is published — and the notes written from it, by the command
+      # ci.yml runs on every push.
+      - name: Write the notes
+        run: Scripts/make-cli.sh notes --version "${GITHUB_REF_NAME#v}" --out release-cli
+
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -240,26 +277,15 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          digest=$(sed -n 's/^digest=\(sha256:[0-9a-f]\{64\}\)$/\1/p' release-cli/udeck-plugin-image.txt)
-          image=$(sed -n 's/^image=//p' release-cli/udeck-plugin-image.txt)
-          test -n "$digest" && test -n "$image"
-          # Said first in the notes, ahead of what GitHub generates: the
-          # image by its digest, which is what a repository's CI pins.
-          notes=$(printf '%s\n' \
-            "**udeck-plugin** for a plugin repository's CI — the image, pulled by its digest:" \
-            "" \
-            "    $image@$digest" \
-            "" \
-            "linux/amd64 and linux/arm64. The archives below — macOS (universal), Linux x86_64 and aarch64 — are checked against SHA256SUMS.")
           # The appcast is an asset of the release rather than a page on a site:
           # `releases/latest/download/appcast.xml` is a stable URL that needs no
           # hosting, no Pages setup and no second place to keep in sync. Every
           # asset in this one call: once published, the release cannot take
-          # another.
+          # another. The notes come first, then what GitHub generates.
           gh release create "$GITHUB_REF_NAME" \
             --verify-tag \
             --title "uDeck $version" \
-            --notes "$notes" \
+            --notes-file release-cli/notes.md \
             --generate-notes \
             "release/uDeck-$version.zip" \
             release/appcast.xml \

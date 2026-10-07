@@ -2,20 +2,23 @@
 #
 # Makes udeck-plugin for whoever has no uDeck to take it from: an archive for a
 # Mac, one for each Linux a plugin repository's CI runs on, the checksums over
-# them, and the container image such a CI pulls.
+# them, the container image such a CI pulls, and what the release says of it.
 #
 # Usage:  Scripts/make-cli.sh macos [--version X.Y.Z] [--sign IDENTITY] [--out DIR]
 #         Scripts/make-cli.sh linux --arch x86_64|aarch64 [--version X.Y.Z] [--out DIR]
-#         Scripts/make-cli.sh sums [--out DIR]
-#         Scripts/make-cli.sh image [--version X.Y.Z] [--out DIR] [--push]
-#                                   [--repository REGISTRY/NAME] [--revision COMMIT]
+#         Scripts/make-cli.sh image [--version X.Y.Z] [--out DIR] [--stage REGISTRY/NAME] [--revision COMMIT]
+#         Scripts/make-cli.sh push [--version X.Y.Z] [--out DIR] [--stage REGISTRY/NAME] [--repository REGISTRY/NAME]
+#         Scripts/make-cli.sh sums [--version X.Y.Z] [--out DIR] [--repository REGISTRY/NAME]
+#         Scripts/make-cli.sh notes [--version X.Y.Z] [--out DIR] [--repository REGISTRY/NAME]
 #
 # One script for both places that make them. release.yml runs it at a tag and
 # publishes what it made; ci.yml runs the same commands on every push and
 # publishes nothing. A release is therefore made by code every push has already
-# run — the only steps a tag adds are the registry login, `--push`, and `gh
-# release create` — and two copies of the steps cannot drift apart, as the bash
-# example check in ci.yml once drifted from the rules it stood in for.
+# run, push and notes included: the only things a tag changes are where `push`
+# copies the image — ghcr.io instead of a second name in the job's own registry
+# — the login just before it, and `gh release create`. And two copies of the
+# steps cannot drift apart, as the bash example check in ci.yml once drifted
+# from the rules it stood in for.
 #
 # --version is the release's version, the tag without its "v". Each command
 # runs the binary it made and refuses to go on unless it says exactly
@@ -23,9 +26,9 @@
 # and what the command says of itself are one number, held to the tag. Without
 # --version the binary's own answer is taken, as CI does.
 #
-# --out (default .build/cli) is where archives go and where `sums` and `image`
-# find them. Relative paths are read from the repository's root, wherever the
-# script is started from. A release puts them in release-cli/ — never
+# --out (default .build/cli) is where archives go and where the commands after
+# them find them. Relative paths are read from the repository's root, wherever
+# the script is started from. A release puts them in release-cli/ — never
 # release/, which generate_appcast reads whole: an archive there would be
 # offered to Sparkle as an update.
 #
@@ -45,40 +48,84 @@
 # architecture with nothing installed. It runs on a machine of that
 # architecture, because the binary is run to say its version.
 #
-# sums writes SHA256SUMS over the three archives — one version, all three
-# platforms, or it refuses — and over udeck-plugin-image.txt when it is there,
-# and checks what it wrote.
-#
 # image builds the image for linux/amd64 and linux/arm64 from the two Linux
-# archives — the very binaries the archives carry — and runs each platform's
-# copy before anything else happens: --version, --help, and check and
+# archives — the very binaries the archives carry — once, and pushes it to
+# --stage: a registry the job runs beside itself (localhost:5000, registry:2
+# as a service of the job, pinned by digest in both workflows), which nothing
+# outside the runner can see. It is pushed as a release pushes it — BuildKit's
+# image exporter, OCI media types, one index of both platforms — and the digest
+# BuildKit reports for that index is required. The index is then read back
+# from the registry, and each platform's image is pulled from it by that digest
+# and run before anything else happens: --version, --help, and check and
 # check-repo on the examples, with the checkout mounted read-only and no
 # network, as a repository's CI runs it. arm64 runs under QEMU on an amd64
 # runner (or amd64 on an arm64 one): the binary itself is proved natively by
 # the Linux build job, and what the image adds — Alpine's git, a shell, /tmp —
-# is what emulation runs here. With --push the same build is pushed, tagged
-# v<version>, as one multi-platform index, and its digest — the sha256 of that
-# index, what a lock file pins — is written to udeck-plugin-image.txt. Logging
-# in to the registry is the caller's: no credential passes through here.
+# is what emulation runs here. What ran is written to udeck-plugin-staged.txt.
+#
+# push copies that index — by its digest, byte for byte — to --repository
+# (ghcr.io/iillyyaa1997/udeck-plugin unless told otherwise), tagged
+# v<version>; reads the tag back and requires the digest that ran; and writes
+# udeck-plugin-image.txt: the image, its tag, its digest (the sha256 of that
+# index, what a lock file pins) and its platforms. What is published is what
+# was run, not a second build of it. Logging in to the registry is the
+# caller's, just before push: no credential passes through here, and none is
+# held while anything is built or run.
+#
+# sums writes SHA256SUMS over the three archives and udeck-plugin-image.txt —
+# one version, all three platforms and the image of that version, or it
+# refuses — once it has read every record of every archive, and checks what it
+# wrote. notes holds udeck-plugin-image.txt to what it must say and writes
+# notes.md, what the release says before GitHub's own notes: the image by its
+# digest. Both read the image file the same way, line by line, and refuse one
+# that names another image, another version or no whole digest.
 #
 # An archive holds one folder, udeck-plugin-<version>-<platform>/, with the
-# command, LICENSE and NOTICE in it.
+# command, LICENSE, NOTICE and THIRD_PARTY_NOTICES (Scripts/third-party/: what
+# else the command is made of, and under what licences) in it.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 IMAGE_REPOSITORY="ghcr.io/iillyyaa1997/udeck-plugin"
+# The job's own registry: the service both workflows run beside the image job
+# (`ports: 5000:5000`; a test holds the three to one port).
+STAGE="localhost:5000/udeck-plugin"
 # Pinned by digest, as the toolchain image in ci.yml is: a tag can be moved to
 # another build, and these run with the job's privileges — binfmt as
-# --privileged, BuildKit with the registry login. The digests are the
+# --privileged, BuildKit with the job's network. The digests are the
 # multi-architecture ones (Docker Hub, 2026-10-06), so they serve either runner.
 BUILDKIT="moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"
 BINFMT="tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
 PLATFORMS="linux/amd64,linux/arm64"
+NOTICES="Scripts/third-party/THIRD_PARTY_NOTICES"
+
+# The licences of what the image holds, for its licenses label, one SPDX
+# expression to a line. First the command's — its own and those of what is
+# linked into it, as THIRD_PARTY_NOTICES lists them — then those of Alpine's
+# packages, exactly as each package's record in /lib/apk/db/installed says
+# (L:). check_image reads every record in the image it built and refuses a
+# licence this list does not name: the label cannot quietly fall behind what
+# Alpine installs.
+COMMAND_LICENSES="Apache-2.0
+Apache-2.0 WITH Swift-exception
+Apache-2.0 WITH LLVM-exception
+MIT
+BSD-3-Clause"
+ALPINE_LICENSES="Apache-2.0
+BSD-3-Clause
+BSD-3-Clause OR GPL-2.0-or-later
+curl
+GPL-2.0-only
+GPL-2.0-or-later OR LGPL-3.0-or-later
+MIT
+MIT AND BSD-2-Clause AND GPL-2.0-or-later
+MPL-2.0 AND MIT
+Zlib"
 
 usage() {
-    sed -n '7,11p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '7,12p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
 
@@ -91,7 +138,7 @@ fail() {
 WHAT="$1"
 shift
 case "$WHAT" in
-    macos|linux|sums|image) ;;
+    macos|linux|image|push|sums|notes) ;;
     *) echo "make-cli: unknown command: $WHAT" >&2; usage ;;
 esac
 
@@ -99,7 +146,6 @@ VERSION=""
 OUT=".build/cli"
 ARCH=""
 IDENTITY="-"
-PUSH=0
 REVISION=""
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -107,7 +153,7 @@ while [ $# -gt 0 ]; do
         --out) OUT="${2-}"; shift 2 ;;
         --arch) ARCH="${2-}"; shift 2 ;;
         --sign) IDENTITY="${2-}"; shift 2 ;;
-        --push) PUSH=1; shift ;;
+        --stage) STAGE="${2-}"; shift 2 ;;
         --repository) IMAGE_REPOSITORY="${2-}"; shift 2 ;;
         --revision) REVISION="${2-}"; shift 2 ;;
         *) echo "make-cli: unknown option: $1" >&2; usage ;;
@@ -160,9 +206,50 @@ size_of() {
     wc -c < "$1" | tr -d ' '
 }
 
+# Every record of a tar.gz as the format stores it — one line each, sorted:
+# kind, mode, owner, group, name, and the pax keys it carries ("-" for none).
+# Read with Python's tarfile, which shows what is there: bsdtar on a Mac, asked
+# to list an archive, folds AppleDouble records (._NAME) into the files they
+# describe and shows neither them nor the extended attributes a pax header
+# holds, which another machine's tar unpacks as files of their own.
+records_of() {
+    python3 - "$1" <<'PY'
+import sys, tarfile
+with tarfile.open(sys.argv[1]) as tar:
+    lines = []
+    for m in tar.getmembers():
+        kind = "dir" if m.isdir() else "file" if m.isreg() else "other"
+        mode = "-" if m.isdir() else oct(m.mode & 0o7777)[2:]
+        pax = ",".join(sorted(m.pax_headers)) or "-"
+        lines.append(f"{kind} {mode} {m.uid} {m.gid} {m.name} {pax}")
+for line in sorted(lines, key=lambda l: l.split(" ")[4]):
+    print(line)
+PY
+}
+
+# What every archive holds, record for record, as records_of prints it.
+records_expected() {
+    local name="$1"
+    printf '%s\n' \
+        "dir - 0 0 $name -" \
+        "file 644 0 0 $name/LICENSE -" \
+        "file 644 0 0 $name/NOTICE -" \
+        "file 644 0 0 $name/THIRD_PARTY_NOTICES -" \
+        "file 755 0 0 $name/udeck-plugin -"
+}
+
+# Refuses an archive that holds anything but what records_expected says.
+check_records() {
+    local archive="$1" name="$2" found
+    found="$(records_of "$archive")" || fail "$(basename "$archive") cannot be read as a tar.gz"
+    [ "$found" = "$(records_expected "$name")" ] \
+        || fail "$(basename "$archive") does not hold exactly the command, LICENSE, NOTICE and THIRD_PARTY_NOTICES, owned by 0:0 and with nothing of the machine it was made on; it holds: $found"
+}
+
 # The archive of `binary` for `platform`, made in OUT; prints its path. Owner
-# and group are 0 and gzip leaves out the time, so that an archive says nothing
-# of the machine it was made on.
+# and group are 0, gzip leaves out the time, and no extended attribute, ACL,
+# file flag or AppleDouble record of a Mac goes in, so that an archive says
+# nothing of the machine it was made on.
 archive() {
     local binary="$1" version="$2" platform="$3"
     local name="udeck-plugin-$version-$platform"
@@ -172,19 +259,33 @@ archive() {
     cp "$binary" "$folder/udeck-plugin"
     chmod 755 "$folder/udeck-plugin"
     cp LICENSE NOTICE "$folder/"
-    chmod 644 "$folder/LICENSE" "$folder/NOTICE"
-    local owner
+    cp "$NOTICES" "$folder/THIRD_PARTY_NOTICES"
+    chmod 644 "$folder/LICENSE" "$folder/NOTICE" "$folder/THIRD_PARTY_NOTICES"
+    local options gnu=0
     if tar --version 2>/dev/null | grep -q 'GNU tar'; then
-        owner=(--owner=0 --group=0 --numeric-owner)
+        # GNU tar stores no extended attribute unless asked (--xattrs).
+        gnu=1
+        options=(--owner=0 --group=0 --numeric-owner)
     else
-        owner=(--uid 0 --gid 0)
+        # bsdtar stores a Mac's extended attributes — com.apple.provenance is
+        # on every file a Mac has downloaded or made — as pax records and, with
+        # its copyfile, AppleDouble ._ files beside them.
+        options=(--uid 0 --gid 0 --no-mac-metadata --no-xattrs --no-acls --no-fflags)
     fi
     rm -f "$OUT/$name.tar.gz"
-    (cd "$SCRATCH/archive" && tar "${owner[@]}" -cf - "$name") | gzip -n -9 > "$OUT/$name.tar.gz"
-    # Read back: what it holds is what a person unpacks.
-    local listed
-    listed="$(tar -tzf "$OUT/$name.tar.gz" | sort | tr '\n' ' ')"
-    [ "$listed" = "$name/ $name/LICENSE $name/NOTICE $name/udeck-plugin " ] || fail "$name.tar.gz holds $listed"
+    (cd "$SCRATCH/archive" && COPYFILE_DISABLE=1 tar "${options[@]}" -cf - "$name") | gzip -n -9 > "$OUT/$name.tar.gz"
+    # Read back: what it holds is what a person unpacks. GNU tar lists every
+    # record as it is stored, and the Static Linux SDK's image has no Python;
+    # `sums` reads these archives' records with Python before a release names
+    # them.
+    if [ "$gnu" = 1 ]; then
+        local listed
+        listed="$(tar -tzf "$OUT/$name.tar.gz" | sort | tr '\n' ' ')"
+        [ "$listed" = "$name/ $name/LICENSE $name/NOTICE $name/THIRD_PARTY_NOTICES $name/udeck-plugin " ] \
+            || fail "$name.tar.gz holds $listed"
+    else
+        check_records "$OUT/$name.tar.gz" "$name"
+    fi
     echo "$OUT/$name.tar.gz"
 }
 
@@ -299,6 +400,44 @@ build_linux() {
     echo "==> Done: $made, $(size_of "$made") bytes"
 }
 
+# --- the image file ------------------------------------------------------------------------------
+
+# What an image file says — udeck-plugin-staged.txt, written by `image`, and
+# udeck-plugin-image.txt, written by `push` — given the image, the version
+# and the digest: four lines, in this order, and nothing else.
+image_text() {
+    printf 'image=%s\ntag=v%s\ndigest=%s\nplatforms=%s\n' "$1" "$2" "$3" "$PLATFORMS"
+}
+
+# Reads an image file and holds it to image_text, byte for byte: of the image
+# `repository` names, of --version when one is asked for, with a digest that
+# is a whole sha256. Sets IMAGE_VERSION and IMAGE_DIGEST. Each refusal is an
+# exit of its own: a check in the middle of `a && b` does not stop a script
+# under `set -e`, and a release whose notes name `image@` with no digest is
+# immutable once made.
+read_image_file() {
+    local file="$1" repository="$2" name
+    name="$(basename "$file")"
+    [ -f "$file" ] || fail "no $name in $(dirname "$file")"
+    local version digest
+    version="$(sed -n 's/^tag=v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p' "$file")"
+    digest="$(sed -n 's/^digest=\(sha256:[0-9a-f]\{64\}\)$/\1/p' "$file")"
+    if [ -z "$version" ]; then
+        fail "$name has no line tag=vX.Y.Z: $(tr '\n' ' ' < "$file")"
+    fi
+    if [ -z "$digest" ]; then
+        fail "$name has no line digest=sha256:<64 hexadecimal digits>: $(tr '\n' ' ' < "$file")"
+    fi
+    if [ "$(cat "$file")" != "$(image_text "$repository" "$version" "$digest")" ]; then
+        fail "$name says: $(tr '\n' ' ' < "$file")— not $(image_text "$repository" "$version" "$digest" | tr '\n' ' ')"
+    fi
+    if [ -n "$VERSION" ] && [ "$version" != "$VERSION" ]; then
+        fail "$name is of v$version; this release is $VERSION"
+    fi
+    IMAGE_VERSION="$version"
+    IMAGE_DIGEST="$digest"
+}
+
 # --- sums ----------------------------------------------------------------------------------------
 
 sha256() {
@@ -330,13 +469,35 @@ write_sums() {
             *) fail "an archive no release names is in $OUT: $found" ;;
         esac
     done
-    if [ -f udeck-plugin-image.txt ]; then
-        files+=(udeck-plugin-image.txt)
-    fi
+    # Every record, as whoever unpacks one will find it — on any machine, with
+    # any tar.
+    for platform in macos-universal linux-x86_64 linux-aarch64; do
+        check_records "udeck-plugin-$version-$platform.tar.gz" "udeck-plugin-$version-$platform"
+    done
+    VERSION="$version"
+    read_image_file "$OUT/udeck-plugin-image.txt" "$IMAGE_REPOSITORY"
+    files+=(udeck-plugin-image.txt)
     sha256 "${files[@]}" > SHA256SUMS
     sha256 -c SHA256SUMS
     echo "==> $OUT/SHA256SUMS:"
     cat SHA256SUMS
+}
+
+# --- notes ---------------------------------------------------------------------------------------
+
+write_notes() {
+    read_image_file "$OUT/udeck-plugin-image.txt" "$IMAGE_REPOSITORY"
+    # Said first, ahead of what GitHub generates: the image by its digest,
+    # which is what a repository's CI pins.
+    printf '%s\n' \
+        "**udeck-plugin** for a plugin repository's CI — the image, pulled by its digest:" \
+        "" \
+        "    $IMAGE_REPOSITORY@$IMAGE_DIGEST" \
+        "" \
+        "linux/amd64 and linux/arm64. The archives below — macOS (universal), Linux x86_64 and aarch64 — are checked against SHA256SUMS; what else each is made of, and under what licences, is in its THIRD_PARTY_NOTICES." \
+        > "$OUT/notes.md"
+    echo "==> $OUT/notes.md:"
+    cat "$OUT/notes.md"
 }
 
 # --- image ---------------------------------------------------------------------------------------
@@ -365,21 +526,72 @@ image_context() {
     done
     cp Scripts/udeck-plugin.Dockerfile "$context/Dockerfile"
     cp LICENSE NOTICE "$context/"
+    cp "$NOTICES" "$context/THIRD_PARTY_NOTICES"
     echo "$version"
 }
 
-# Runs `tag`, as platform `platform`, the way a repository's CI runs it.
+# The image's licenses label: COMMAND_LICENSES and ALPINE_LICENSES, each once,
+# joined into one SPDX expression — a licence that is itself an AND or an OR
+# in brackets.
+licenses_label() {
+    local label="" seen="" licence
+    while IFS= read -r licence; do
+        [ -n "$licence" ] || continue
+        if printf '%s\n' "$seen" | grep -Fxq -- "$licence"; then continue; fi
+        seen="$seen
+$licence"
+        case "$licence" in
+            *" AND "* | *" OR "*) licence="($licence)" ;;
+        esac
+        label="${label:+$label AND }$licence"
+    done <<EOF
+$COMMAND_LICENSES
+$ALPINE_LICENSES
+EOF
+    printf '%s\n' "$label"
+}
+
+# The index at repository@digest, read from its registry: an OCI index with an
+# image for each platform.
+check_index() {
+    local repository="$1" digest="$2"
+    docker buildx imagetools inspect --raw "$repository@$digest" > "$SCRATCH/index.json" \
+        || fail "$repository@$digest cannot be read from its registry"
+    grep -q '"mediaType": *"application/vnd.oci.image.index.v1+json"' "$SCRATCH/index.json" \
+        || fail "$repository@$digest is not an OCI image index: $(cat "$SCRATCH/index.json")"
+    local arch
+    for arch in amd64 arm64; do
+        grep -q "\"architecture\": *\"$arch\"" "$SCRATCH/index.json" \
+            || fail "$repository@$digest has no linux/$arch image: $(cat "$SCRATCH/index.json")"
+    done
+}
+
+# Runs `ref`, as platform `platform`, the way a repository's CI runs it.
 check_image() {
-    local tag="$1" platform="$2" version="$3"
+    local ref="$1" platform="$2" version="$3"
     local run=(docker run --rm --network none --platform "$platform")
-    echo "==> Running $tag as $platform"
+    echo "==> Running $ref as $platform"
     local said
-    said="$("${run[@]}" "$tag" udeck-plugin --version)" || fail "udeck-plugin --version failed in the image ($platform)"
+    said="$("${run[@]}" "$ref" udeck-plugin --version)" || fail "udeck-plugin --version failed in the image ($platform)"
     [ "$said" = "udeck-plugin $version" ] || fail "in the image ($platform) udeck-plugin says \"$said\", not \"udeck-plugin $version\""
-    "${run[@]}" "$tag" udeck-plugin --help > "$SCRATCH/help.txt" || fail "udeck-plugin --help failed in the image ($platform)"
+    "${run[@]}" "$ref" udeck-plugin --help > "$SCRATCH/help.txt" || fail "udeck-plugin --help failed in the image ($platform)"
     grep -q '^usage: udeck-plugin' "$SCRATCH/help.txt" || fail "udeck-plugin --help in the image ($platform) printed no usage"
     # The image's own shell and git, which GitLab CI and the check start.
-    "${run[@]}" "$tag" sh -c 'git --version && test -d /tmp' || fail "no shell, git or /tmp in the image ($platform)"
+    "${run[@]}" "$ref" sh -c 'git --version && test -d /tmp' || fail "no shell, git or /tmp in the image ($platform)"
+
+    # What it says of what it holds: the notices beside the command, the list
+    # of Alpine's packages with where their sources are, and no package under
+    # a licence the label does not name.
+    "${run[@]}" "$ref" sh -c 'cd /usr/share/licenses/udeck-plugin && test -s LICENSE && test -s NOTICE && test -s THIRD_PARTY_NOTICES && grep -q "^git " ALPINE-PACKAGES' \
+        || fail "the image ($platform) lacks its licences, its notices or the list of its Alpine packages"
+    "${run[@]}" "$ref" sed -n 's/^L://p' /lib/apk/db/installed > "$SCRATCH/licenses.txt" \
+        || fail "the image's ($platform) package records cannot be read"
+    [ -s "$SCRATCH/licenses.txt" ] || fail "the image ($platform) has no package records"
+    local licence
+    while IFS= read -r licence; do
+        printf '%s\n' "$ALPINE_LICENSES" | grep -Fxq -- "$licence" \
+            || fail "a package in the image ($platform) is under \"$licence\", which its licenses label does not name: add it to ALPINE_LICENSES"
+    done < "$SCRATCH/licenses.txt"
 
     # The examples, strictly, read through git — the checkout made by the
     # runner's user, read by the image's root, as safe.directory allows.
@@ -387,7 +599,7 @@ check_image() {
     for example in examples/*/; do
         if [ -d "$example" ]; then examples=$((examples + 1)); fi
     done
-    "${run[@]}" -v "$PWD:/udeck:ro" "$tag" sh -c 'udeck-plugin check --strict /udeck/examples/*/' \
+    "${run[@]}" -v "$PWD:/udeck:ro" "$ref" sh -c 'udeck-plugin check --strict /udeck/examples/*/' \
         | tee "$SCRATCH/check.txt" || fail "check --strict on the examples failed in the image ($platform)"
     local clean
     clean="$(grep -c '^checked /udeck/examples/.* at [0-9a-f]\{12\} strictly: 0 errors, 0 warnings$' "$SCRATCH/check.txt" || true)"
@@ -398,7 +610,7 @@ check_image() {
     # which takes git's history. The script is the image's shell's, and its
     # variables are the image's: the quotes keep them from this one.
     # shellcheck disable=SC2016
-    "${run[@]}" -v "$PWD/examples:/examples:ro" "$tag" sh -eu -c '
+    "${run[@]}" -v "$PWD/examples:/examples:ro" "$ref" sh -eu -c '
         repo=/tmp/repository
         mkdir -p "$repo/plugins"
         cp -R /examples/hello-card "$repo/plugins/hello-card"
@@ -417,7 +629,7 @@ check_image() {
         test "$status" -eq 1
         grep -q "^error: plugins/hello-card/manifest.json: the folder changed.*\[rule 18\]$" /tmp/out.txt
     ' || fail "check-repo on a repository made in the image did not say what it should ($platform)"
-    echo "==> $tag as $platform: udeck-plugin $version, check and check-repo as a repository's CI runs them"
+    echo "==> $ref as $platform: udeck-plugin $version, check and check-repo as a repository's CI runs them"
 }
 
 build_image() {
@@ -429,12 +641,17 @@ build_image() {
     if [ -z "$REVISION" ]; then
         REVISION="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
     fi
-    local tag="$IMAGE_REPOSITORY:v$version"
+    local tag="$STAGE:v$version"
     local description="udeck-plugin $version: checks uDeck plugins and plugin repositories, in a repository's CI"
+    local licenses
+    licenses="$(licenses_label)"
+    rm -f "$OUT/udeck-plugin-staged.txt"
 
     # QEMU for the platform this runner is not, so that both platforms'
     # copies are built and run here; then a builder of its own — the Docker
-    # engine's default one cannot hold an image of two platforms.
+    # engine's default one cannot hold an image of two platforms — on the
+    # runner's network: BuildKit runs in a container, and the job's registry
+    # is at the runner's localhost.
     local foreign
     case "$(uname -m)" in
         x86_64|amd64) foreign=arm64 ;;
@@ -444,76 +661,79 @@ build_image() {
     echo "==> Letting this $(uname -m) machine run $foreign code"
     docker run --privileged --rm "$BINFMT" --install "$foreign"
     BUILDER="udeck-plugin-$$"
-    docker buildx create --name "$BUILDER" --driver docker-container --driver-opt "image=$BUILDKIT" --bootstrap
+    docker buildx create --name "$BUILDER" --driver docker-container \
+        --driver-opt "image=$BUILDKIT" --driver-opt network=host --bootstrap
 
-    # What goes into the image and how it is said, the same in every build
-    # below. No provenance attestation and no SBOM: the index holds exactly the
-    # two images people run, which every registry and every copy by digest
-    # — a mirror of it on a GitLab — reads as it is. Attestations are a
-    # decision of their own, not one to take in passing.
-    local build=(docker buildx build --builder "$BUILDER" --file "$context/Dockerfile"
-                 --build-arg "VERSION=$version" --build-arg "REVISION=$REVISION"
-                 --provenance=false --sbom=false)
-    local index=(--platform "$PLATFORMS"
-                 --annotation "index:org.opencontainers.image.description=$description"
-                 --annotation "index:org.opencontainers.image.source=https://github.com/iillyyaa1997/udeck"
-                 --annotation "index:org.opencontainers.image.version=$version"
-                 --annotation "index:org.opencontainers.image.licenses=Apache-2.0")
-
-    echo "==> Building $tag for $PLATFORMS"
-    "${build[@]}" "${index[@]}" --output "type=oci,dest=$SCRATCH/image.oci.tar" \
+    # No provenance attestation and no SBOM: the index holds exactly the two
+    # images people run, which every registry and every copy by digest — a
+    # mirror of it on a GitLab — reads as it is. Attestations are a decision of
+    # their own, not one to take in passing. OCI media types said rather than
+    # left to BuildKit's default, which has changed between its versions: the
+    # index's annotations need them.
+    echo "==> Building $tag for $PLATFORMS and pushing it to the job's own registry"
+    docker buildx build --builder "$BUILDER" --file "$context/Dockerfile" \
+        --build-arg "VERSION=$version" --build-arg "REVISION=$REVISION" --build-arg "LICENSES=$licenses" \
+        --provenance=false --sbom=false \
+        --platform "$PLATFORMS" \
+        --annotation "index:org.opencontainers.image.description=$description" \
+        --annotation "index:org.opencontainers.image.source=https://github.com/iillyyaa1997/udeck" \
+        --annotation "index:org.opencontainers.image.version=$version" \
+        --annotation "index:org.opencontainers.image.licenses=$licenses" \
+        --output "type=image,name=$tag,push=true,oci-mediatypes=true" \
         --metadata-file "$SCRATCH/built.json" "$context"
-    local built
-    built="$(digest_in "$SCRATCH/built.json" optional)"
-    echo "==> Built for $PLATFORMS: an index of digest ${built:-(BuildKit said none)}, not published"
-
-    local platform arch
-    for platform in linux/amd64 linux/arm64; do
-        arch="${platform#linux/}"
-        "${build[@]}" --platform "$platform" --load --tag "udeck-plugin-check:$arch" "$context"
-        echo "==> $platform: $(docker image inspect --format '{{.Size}}' "udeck-plugin-check:$arch") bytes"
-        check_image "udeck-plugin-check:$arch" "$platform" "$version"
-        docker image rm "udeck-plugin-check:$arch" >/dev/null
-    done
-
-    if [ "$PUSH" != "1" ]; then
-        echo "==> Not published: $tag would be pushed with --push"
-        return
-    fi
-    echo "==> Publishing $tag"
-    "${build[@]}" "${index[@]}" --push --tag "$tag" --metadata-file "$SCRATCH/pushed.json" "$context"
     local digest
-    digest="$(digest_in "$SCRATCH/pushed.json")"
-    # Read back from the registry: the digest names an index of both platforms.
-    docker buildx imagetools inspect --raw "$IMAGE_REPOSITORY@$digest" > "$SCRATCH/index.json"
-    for arch in amd64 arm64; do
-        grep -q "\"architecture\": *\"$arch\"" "$SCRATCH/index.json" \
-            || fail "$IMAGE_REPOSITORY@$digest has no linux/$arch image: $(cat "$SCRATCH/index.json")"
+    digest="$(digest_in "$SCRATCH/built.json")"
+    check_index "$STAGE" "$digest"
+    echo "==> $STAGE@$digest: an index for $PLATFORMS"
+
+    # Each platform's image as a repository's CI gets it: pulled by the
+    # index's digest, from the registry it was pushed to.
+    local platform
+    for platform in linux/amd64 linux/arm64; do
+        docker pull --platform "$platform" "$STAGE@$digest"
+        check_image "$STAGE@$digest" "$platform" "$version"
+        docker image rm "$STAGE@$digest" >/dev/null 2>&1 || true
     done
-    {
-        echo "image=$IMAGE_REPOSITORY"
-        echo "tag=v$version"
-        echo "digest=$digest"
-        echo "platforms=$PLATFORMS"
-    } > "$OUT/udeck-plugin-image.txt"
+
+    image_text "$STAGE" "$version" "$digest" > "$OUT/udeck-plugin-staged.txt"
+    echo "==> Built and run, not published: $OUT/udeck-plugin-staged.txt:"
+    cat "$OUT/udeck-plugin-staged.txt"
+}
+
+push_image() {
+    read_image_file "$OUT/udeck-plugin-staged.txt" "$STAGE"
+    local version="$IMAGE_VERSION" digest="$IMAGE_DIGEST"
+    local tag="$IMAGE_REPOSITORY:v$version"
+    rm -f "$OUT/udeck-plugin-image.txt"
+    echo "==> Publishing $STAGE@$digest as $tag"
+    # One source and no annotation of its own: the index is copied as it is,
+    # its bytes and so its digest unchanged, with every blob it names.
+    docker buildx imagetools create --tag "$tag" "$STAGE@$digest"
+    # Read back: the tag names the very index that ran.
+    docker buildx imagetools inspect "$tag" > "$SCRATCH/pushed.txt" || fail "$tag cannot be read back"
+    local said
+    said="$(sed -n 's/^Digest: *\(sha256:[0-9a-f]\{64\}\)$/\1/p' "$SCRATCH/pushed.txt" | head -1)"
+    [ "$said" = "$digest" ] || fail "$tag is ${said:-(no digest)}, not $digest, which ran: $(cat "$SCRATCH/pushed.txt")"
+    check_index "$IMAGE_REPOSITORY" "$digest"
+    image_text "$IMAGE_REPOSITORY" "$version" "$digest" > "$OUT/udeck-plugin-image.txt"
     echo "==> Published $IMAGE_REPOSITORY@$digest ($tag); $OUT/udeck-plugin-image.txt:"
     cat "$OUT/udeck-plugin-image.txt"
 }
 
-# The digest BuildKit reports for what it built, from its metadata file —
-# required, unless `optional` says an empty answer will do.
+# The digest BuildKit reports for what it pushed, from its metadata file —
+# required: the digest is what a release names.
 digest_in() {
     local digest
     digest="$(sed -n 's/.*"containerimage\.digest": *"\(sha256:[0-9a-f]\{64\}\)".*/\1/p' "$1" | head -1)"
-    if [ -z "$digest" ] && [ "${2-}" != "optional" ]; then
-        fail "no image digest in $1: $(cat "$1")"
-    fi
+    [ -n "$digest" ] || fail "no image digest in $1: $(cat "$1")"
     echo "$digest"
 }
 
 case "$WHAT" in
     macos) build_macos ;;
     linux) build_linux ;;
-    sums) write_sums ;;
     image) build_image ;;
+    push) push_image ;;
+    sums) write_sums ;;
+    notes) write_notes ;;
 esac

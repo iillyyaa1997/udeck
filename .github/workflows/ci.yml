@@ -9,6 +9,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Reading the repository is all any job here does with the token. Actions are
+# pinned by commit, the version beside each, and no checkout keeps the token in
+# .git/config, as in release.yml.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: Build and test
@@ -18,7 +24,9 @@ jobs:
     # 'NSGlassEffectView' in scope".
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Show the toolchain
         run: |
@@ -129,7 +137,7 @@ jobs:
         run: Scripts/make-cli.sh macos --out release-cli
 
       - name: Keep it for the release's dry run
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udeck-plugin-macos
           path: release-cli/udeck-plugin-*-macos-universal.tar.gz
@@ -170,7 +178,9 @@ jobs:
       run:
         working-directory: Packages/UDeckPluginFormat
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Show the toolchain
         run: |
@@ -268,52 +278,71 @@ jobs:
           grep -q '^error: plugins/hello-card/manifest.json: the folder changed.*\[rule 18\]$' out.txt
 
       - name: Keep the archive for the image and the release's dry run
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udeck-plugin-linux-${{ matrix.arch }}
           path: release-cli/udeck-plugin-*-linux-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
           retention-days: 7
 
-  # The image a release pushes to ghcr.io, built here on every push from the
-  # archives above and run on both of its platforms — and never pushed: no
-  # registry login, no write to packages. release.yml runs the same script,
-  # with the push.
+  # The image a release pushes to ghcr.io, made here on every push from the
+  # archives above the way a release makes it, all the way: built once and
+  # pushed to the job's own registry, pulled from it by its digest and run on
+  # both platforms, then copied by that digest — as a release copies it to
+  # ghcr.io — to a second name in the same registry, read back, and written
+  # into udeck-plugin-image.txt. Nothing leaves the runner: no registry login,
+  # no write to packages.
   udeck-plugin-image:
-    name: udeck-plugin image, built and run, not published
+    name: udeck-plugin image, built, run and copied, not published
     needs: plugin-format-linux
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    permissions:
-      contents: read
+    services:
+      registry:
+        image: registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+        ports:
+          - 5000:5000
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Take the Linux archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: udeck-plugin-linux-*
           path: release-cli
           merge-multiple: true
 
-      - name: Build the image for linux/amd64 and linux/arm64, and run each
+      - name: Build the image, and run it from the job's registry on both platforms
         run: Scripts/make-cli.sh image --out release-cli
 
+      - name: Copy the image that ran, as a release pushes it
+        run: Scripts/make-cli.sh push --out release-cli --repository localhost:5000/iillyyaa1997/udeck-plugin
+
+      - name: Keep the image's file for the release's dry run
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: udeck-plugin-image
+          path: release-cli/udeck-plugin-image.txt
+          if-no-files-found: error
+          retention-days: 7
+
   # What a tag would publish besides the app: the three archives under one
-  # version, and SHA256SUMS over them, written and checked as release.yml's
-  # last job writes them.
+  # version, the image's file, SHA256SUMS over the four and the notes, written
+  # and checked by the commands release.yml's last job runs.
   release-assets:
     name: The release's udeck-plugin assets, not published
-    needs: [build-and-test, plugin-format-linux]
+    needs: [build-and-test, plugin-format-linux, udeck-plugin-image]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - name: Take the archives
-        uses: actions/download-artifact@v4
+      - name: Take the archives and the image's file
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: udeck-plugin-*
           path: release-cli
@@ -321,5 +350,8 @@ jobs:
 
       - name: Write and check SHA256SUMS, as a release does
         run: |
-          Scripts/make-cli.sh sums --out release-cli
+          Scripts/make-cli.sh sums --out release-cli --repository localhost:5000/iillyyaa1997/udeck-plugin
           ls -l release-cli
+
+      - name: Write the notes, as a release does
+        run: Scripts/make-cli.sh notes --out release-cli --repository localhost:5000/iillyyaa1997/udeck-plugin
