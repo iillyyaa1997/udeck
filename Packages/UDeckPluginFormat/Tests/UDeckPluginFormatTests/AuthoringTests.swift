@@ -1170,8 +1170,7 @@ struct RunPluginTests {
         let tools = temp.url.appendingPathComponent("tools", isDirectory: true)
         try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
         let greet = tools.appendingPathComponent("greet-from-tools")
-        try Data("#!/bin/sh\nprintf '{\"rows\": [{\"text\": \"%s\"}]}' \"$PATH\"\n".utf8).write(to: greet)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: greet.path)
+        try Executable.write("#!/bin/sh\nprintf '{\"rows\": [{\"text\": \"%s\"}]}' \"$PATH\"\n", to: greet)
         let folder = temp.writePlugin(folder: "bare", manifest: """
             { "id": "bare", "name": "bare", "version": "1.0.0", "api": 1, "kind": "poll",
               "run": ["greet-from-tools"], "interval": 5, "timeout": 2 }

@@ -31,10 +31,12 @@ public final class TemporaryDirectory {
         try? Data(manifest.utf8).write(to: directory.appendingPathComponent("manifest.json"))
         if let script {
             let file = directory.appendingPathComponent(script.name)
-            try? Data(script.body.utf8).write(to: file)
-            try? FileManager.default.setAttributes(
-                [.posixPermissions: script.executable ? 0o755 : 0o644], ofItemAtPath: file.path
-            )
+            if script.executable {
+                try? Executable.write(script.body, to: file)
+            } else {
+                try? Data(script.body.utf8).write(to: file)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
+            }
         }
         return directory
     }

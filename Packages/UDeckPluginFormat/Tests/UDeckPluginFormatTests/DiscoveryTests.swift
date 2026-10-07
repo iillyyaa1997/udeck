@@ -121,8 +121,7 @@ struct DiscoveryTests {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         }
         let tool = second.appendingPathComponent("tool")
-        try Data("#!/bin/sh\n".utf8).write(to: tool)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+        try Executable.write("#!/bin/sh\n", to: tool)
         let configured = PluginDiscovery(searchPath: [first.path, second.path])
         #expect(configured.load(temp.url.appendingPathComponent("plugins/bare")).executable?.path
                 == tool.standardizedFileURL.path)
@@ -266,8 +265,7 @@ struct ContainmentTests {
         """.utf8).write(to: directory.appendingPathComponent("manifest.json"))
 
         let real = directory.appendingPathComponent("tools/real.sh")
-        try Data("#!/bin/sh\necho '{}'\n".utf8).write(to: real)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: real.path)
+        try Executable.write("#!/bin/sh\necho '{}'\n", to: real)
         try FileManager.default.createSymbolicLink(
             at: directory.appendingPathComponent("run.sh"), withDestinationURL: real
         )
@@ -329,8 +327,7 @@ struct LinkedFolderTests {
                   "run": ["./run.sh"], "interval": 5, "timeout": 2 }
                 """.utf8).write(to: directory.appendingPathComponent("manifest.json"))
             let script = directory.appendingPathComponent("run.sh")
-            try? Data("#!/bin/sh\nprintf '{}'\n".utf8).write(to: script)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+            try? Executable.write("#!/bin/sh\nprintf '{}'\n", to: script)
             return directory
         }
 
@@ -557,8 +554,7 @@ struct ByteReadingTests {
         let directory = temp.url.appendingPathComponent("plugins/bytes", isDirectory: true)
         let tool = directory.appendingPathComponent(relative)
         try FileManager.default.createDirectory(at: tool.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("#!/bin/sh\necho '{}'\n".utf8).write(to: tool)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+        try Executable.write("#!/bin/sh\necho '{}'\n", to: tool)
         return directory
     }
 
@@ -637,8 +633,7 @@ struct ByteReadingTests {
         let directory = try folder(with: "tool", in: temp)
         try FileManager.default.createDirectory(at: tools, withIntermediateDirectories: true)
         let greet = tools.appendingPathComponent("greet-from-tools")
-        try Data("#!/bin/sh\n".utf8).write(to: greet)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: greet.path)
+        try Executable.write("#!/bin/sh\n", to: greet)
         // The same folder, written relative to this process's own working folder.
         let here = FileManager.default.currentDirectoryPath
         let relative = String(repeating: "../", count: here.split(separator: "/").count) + String(tools.path.dropFirst())

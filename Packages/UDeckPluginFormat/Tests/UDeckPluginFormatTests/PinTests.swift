@@ -301,7 +301,7 @@ struct ReleaseSourceTests {
         let folder = temp.url.appendingPathComponent("bin", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let curl = folder.appendingPathComponent("curl")
-        try Data("""
+        try Executable.write("""
             #!/bin/sh
             log="$FAKE_CURL_LOG"
             for argument in "$@"; do printf 'argument %s\\n' "$argument" >> "$log"; done
@@ -314,8 +314,7 @@ struct ReleaseSourceTests {
             if [ "\(code)" = 200 ]; then printf 'served\\n' > "$output"; fi
             printf '%s\\n%s\\n' "\(code)" "$1"
 
-            """.utf8).write(to: curl)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: curl.path)
+            """, to: curl)
         return folder
     }
 
