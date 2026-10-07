@@ -46,7 +46,9 @@ See the [changelog](CHANGELOG.md) for what exists.
 
 ## Requirements
 
-**To run it:** macOS 14 or later, Apple Silicon or Intel. No Xcode needed.
+**To run it:** macOS 14 or later, on Apple Silicon. No Xcode needed. The
+release's uDeck.app is built for arm64 alone (0.5.0's is: `lipo -archs` says
+`arm64`); `udeck-plugin`'s own archive, below, is universal.
 
 **To build it:** the macOS 26 SDK, which means Xcode 26 or its command-line
 tools. The panel's surface is `NSGlassEffectView`, the system's own glass, and
@@ -148,6 +150,13 @@ docker run --rm --network none -v "$PWD:/repo:ro" \
   ghcr.io/iillyyaa1997/udeck-plugin@sha256:<digest> \
   udeck-plugin check-repo --repo /repo --strict
 ```
+
+Run it on a checkout with history. Rule 18 — a changed plugin's version goes
+up — compares HEAD with the commit before it, and a CI's default checkout has
+only HEAD: there the rule is not checked, the check says so in a warning, and
+it exits 0. On GitHub Actions give `actions/checkout` `fetch-depth: 0`; on
+GitLab CI set the variable `GIT_DEPTH: "0"`; or name both commits with `--base`
+and `--head`.
 
 What is in each asset, and how a repository will pin one release, is in
 [docs/plugin-repository.md](docs/plugin-repository.md#where-the-command-comes-from).

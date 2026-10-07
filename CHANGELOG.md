@@ -21,11 +21,18 @@ for what that promises.
   command says the release's version, and a release whose command says another
   is not made. Everything goes out in the one `gh release create` that
   publishes the app, since a published release takes no asset afterwards; the
-  image is pushed just before it, once each platform's copy has checked the
-  examples and a repository made inside it. CI makes the same archives and the
-  same image on every push, runs them, and publishes nothing — a change to the
-  release is proved before a tag needs it. `Scripts/make-cli.sh` makes all of
-  it, for both.
+  image is pushed just before it: built once, pulled by its digest from a
+  registry of the job's own and run on both platforms — its examples checked
+  and a repository made inside it — and only then copied by that digest to
+  ghcr.io. CI goes the same way on every push, to the image file, `SHA256SUMS`
+  and the release's notes, and publishes nothing — a change to the release is
+  proved before a tag needs it. `Scripts/make-cli.sh` makes all of it, for
+  both. Each archive carries `THIRD_PARTY_NOTICES`, the licences of what else
+  the command is made of (Swift's runtime and Foundation, swift-crypto and its
+  BoringSSL, LLVM's libc++, musl, fts, mimalloc), and holds nothing of the Mac
+  it was made on — no extended attribute, no AppleDouble `._` file; the image
+  lists every Alpine package in it with its licence and where its source is,
+  and its licenses label names them all.
 
 - **Every button that takes a link away says so first.** **Update**, **Switch
   to**, **Reinstall**, **Back to** and **Install this version** over a plugin

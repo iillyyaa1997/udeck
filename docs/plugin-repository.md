@@ -298,10 +298,18 @@ release from the one after 0.5.0 carries, besides uDeck itself:
 | `udeck-plugin-image.txt` | the container image: `image=ghcr.io/iillyyaa1997/udeck-plugin`, `tag=vX.Y.Z`, `digest=sha256:…` (of the index), `platforms=linux/amd64,linux/arm64` — the digest is also the first thing in the release's notes |
 
 Each archive is one folder, `udeck-plugin-X.Y.Z-<platform>/`, with the
-command, `LICENSE` and `NOTICE`. The image is Alpine, pinned by digest, with
-git and the same static binary at `/usr/local/bin/udeck-plugin`, and no
-`ENTRYPOINT`: GitLab CI hands a job's script to the image's shell, and the
-check starts git. Pull it by its digest — a tag can be moved, a digest cannot:
+command, `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES` — what else the
+command is made of (on Linux, statically: Swift's runtime and Foundation,
+swift-crypto and its BoringSSL, LLVM's libc++, musl, fts and mimalloc) and
+under what licences. The image is Alpine, pinned by digest, with git and the
+same static binary at `/usr/local/bin/udeck-plugin`, and no `ENTRYPOINT`:
+GitLab CI hands a job's script to the image's shell, and the check starts
+git. Its `/usr/share/licenses/udeck-plugin/` holds the same three texts and
+`ALPINE-PACKAGES`: every Alpine package in it — git and BusyBox among them,
+under the GPL — with its version, its licence and the aports commit it was
+built from, where its source is; its `org.opencontainers.image.licenses`
+label names every licence there. Pull it by its digest — a tag can be moved, a
+digest cannot:
 
 ```sh
 docker run --rm --network none -v "$PWD:/repo:ro" \
@@ -311,14 +319,22 @@ docker run --rm --network none -v "$PWD:/repo:ro" \
 
 Read-only and without a network is how it is meant to run: the check needs
 neither, and opens git's `safe.directory` for the mounted repository itself.
+It does need history: rule 18 compares HEAD with the commit before it, and on
+a clone that has only HEAD — what `actions/checkout` and GitLab CI fetch by
+default — rule 18 is not checked, a warning says so, and the exit status is
+0. Give `actions/checkout` `fetch-depth: 0`, set `GIT_DEPTH: "0"` in GitLab
+CI, or pass `--base` and `--head`.
 
 Everything is made by `Scripts/make-cli.sh` and published by `release.yml` in
 the one `gh release create` that publishes the app — uDeck's releases are
 immutable, so a release cannot take an asset afterwards — with the image
-pushed before it, from the same archives, once both platforms' copies have
-run `--version`, `check` and `check-repo` on the examples. `ci.yml` makes the
-same archives and the same image on every push, runs them, and publishes
-nothing.
+pushed before it: built once from the same archives, pushed to a registry of
+the release job's own, pulled from it by its digest and run on both
+platforms (`--version`, `check` and `check-repo` on the examples), and only
+then copied by that digest to ghcr.io, byte for byte. `ci.yml` does all of it
+on every push — the copy goes to a second name in the job's own registry —
+and writes the image file, `SHA256SUMS` and the notes as a release does,
+publishing nothing.
 
 > **Later — stage 2.** A plugin repository pins one release in a lock file
 > read from its base — the version, the archives' sha256, the image's digest —
