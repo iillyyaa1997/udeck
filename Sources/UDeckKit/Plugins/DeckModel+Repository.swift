@@ -174,17 +174,6 @@ extension DeckModel {
         standings[id] ?? .folderOfYourOwn
     }
 
-    /// What a button that takes `id`'s place would do to what is there now,
-    /// and the version that comes — asked of the disk when the button is
-    /// pressed, by the rule the installer decides the Trash by
-    /// (`OperatorsWork`), so that the warning is shown whenever something of
-    /// the operator's goes and not only when the row says **Modified
-    /// locally**. What the warning says, and what its button is held to
-    /// (`ShownPlace`).
-    public func place(of id: String, bringing arrival: ShownPlace.Arrival) -> ShownPlace.Place {
-        ShownPlace.Place.now(id, in: paths, record: installed.plugins[id], bringing: arrival)
-    }
-
     /// Whether a window's plugin is here to run.
     public func presence(of id: PluginIdentifier) -> PluginPresence {
         PluginPresence.of(id, plugins: plugins, installed: installed, readsCatalogue: settings.readsOfficialCatalogue)
@@ -291,9 +280,10 @@ extension DeckModel {
     // MARK: - Install, update, earlier versions
 
     // Every button below takes what its warning showed (`shown`, nil for a
-    // press nothing was shown before) and goes ahead only when that is what is
-    // there now; otherwise it answers the warning of what is there now and
-    // does nothing (`ShownPlace.press`). The first press of each is the same
+    // press nothing was shown before) and passes it, with what the model has,
+    // to `ShownPlace`, which decides the rest — the copy the button brings,
+    // what is there now, whether the warning holds — and is tested there; the
+    // button does what it says (`act`). The first press of each is the same
     // call with nothing shown: the warning, or the work at once.
 
     /// **Install** — or **Replace…** over a folder of the operator's own or a
@@ -301,30 +291,14 @@ extension DeckModel {
     /// repository has done since: what the operator saw is what they get.
     @discardableResult
     public func install(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        guard let catalogue, let entry = catalogue.entry(id) else { return .goAhead }
-        let version = entry.manifest?.version ?? ""
-        let there = place(of: id, bringing: .atHead(version: version, tree: entry.listing.tree))
-        if case .ask(let now) = ShownPlace.press(.install, shown: shown, now: there) {
-            return .ask(now)
-        }
-        let operation: InstallRequest.Operation =
-            installed.plugins[id] != nil ? .update : (folderExists(id) ? .replace : .install)
-        run(operation, id: id, commit: catalogue.commit, folder: entry.listing, version: version)
-        return .goAhead
+        act(ShownPlace.install(id, catalogue: catalogue, in: paths, installed: installed, shown: shown), id: id)
     }
 
     /// **Update**, or **Switch to** a version the repository went back to: the
     /// plugin at the head.
     @discardableResult
     public func update(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        guard let catalogue, let entry = catalogue.entry(id) else { return .goAhead }
-        let version = entry.manifest?.version ?? ""
-        let there = place(of: id, bringing: .atHead(version: version, tree: entry.listing.tree))
-        if case .ask(let now) = ShownPlace.press(.replaceCopy, shown: shown, now: there) {
-            return .ask(now)
-        }
-        run(.update, id: id, commit: catalogue.commit, folder: entry.listing, version: version)
-        return .goAhead
+        act(ShownPlace.update(id, catalogue: catalogue, in: paths, installed: installed, shown: shown), id: id)
     }
 
     /// **Reinstall**: what the record says was installed, put back — over a
@@ -332,34 +306,40 @@ extension DeckModel {
     /// A download, so not while **Official catalogue** is off.
     @discardableResult
     public func reinstall(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        guard settings.readsOfficialCatalogue, let record = installed.plugins[id] else { return .goAhead }
-        return atCommit(.reinstall, id: id, commit: record.commit, version: record.version, shown: shown)
+        guard settings.readsOfficialCatalogue else { return .goAhead }
+        return act(ShownPlace.reinstall(id, in: paths, installed: installed, shown: shown), id: id)
     }
 
     /// **Back to** the copy this one replaced.
     @discardableResult
     public func backToPrevious(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        guard let previous = installed.plugins[id]?.previous else { return .goAhead }
-        return atCommit(.earlier, id: id, commit: previous.commit, version: previous.version, shown: shown)
+        act(ShownPlace.backToPrevious(id, in: paths, installed: installed, shown: shown), id: id)
     }
 
     /// An earlier version, chosen from history: installed and marked pinned.
     @discardableResult
     public func installEarlier(_ id: String, line: PluginHistory.Line, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        atCommit(.earlier, id: id, commit: line.commit, version: line.version, shown: shown)
+        act(ShownPlace.earlier(id, line: line, in: paths, installed: installed, shown: shown), id: id)
     }
 
-    /// A copy replaced by `version` at `commit`, once what its warning showed
-    /// is what is there — and the commit it named is the one the files come
-    /// from.
-    private func atCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
-                          shown: ShownPlace.Place?) -> ShownPlace.Press {
-        let there = place(of: id, bringing: .atCommit(version: version, commit: commit))
-        if case .ask(let now) = ShownPlace.press(.replaceCopy, shown: shown, now: there) {
+    /// Does what `step` says — every argument it carries is `ShownPlace`'s —
+    /// and answers what the press came to.
+    private func act(_ step: ShownPlace.Step, id: String) -> ShownPlace.Press {
+        switch step {
+        case .nothing:
+            return .goAhead
+        case .ask(let now):
             return .ask(now)
+        case .install(let operation, let commit, let folder, let version):
+            run(operation, id: id, commit: commit, folder: folder, version: version)
+            return .goAhead
+        case .atCommit(let operation, let commit, let version):
+            runAtCommit(operation, id: id, commit: commit, version: version)
+            return .goAhead
+        case .remove:
+            // Removal has its own call; no step but `remove`'s answers this.
+            return .goAhead
         }
-        runAtCommit(operation, id: id, commit: commit, version: version)
-        return .goAhead
     }
 
     /// Reads a plugin's earlier versions from its folder's history.
@@ -468,8 +448,10 @@ extension DeckModel {
     /// that says what is there now removes anything.
     @discardableResult
     public func remove(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        if case .ask(let now) = ShownPlace.press(.remove, shown: shown, now: place(of: id, bringing: .nothing)) {
-            return .ask(now)
+        switch ShownPlace.remove(id, in: paths, installed: installed, shown: shown) {
+        case .ask(let now): return .ask(now)
+        case .remove: break
+        case .nothing, .install, .atCommit: return .goAhead
         }
         guard busyPlugin == nil, let identifier = PluginIdentifier(rawValue: id) else { return .goAhead }
         guard installedProblem == nil else {

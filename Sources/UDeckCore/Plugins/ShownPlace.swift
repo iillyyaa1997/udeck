@@ -248,6 +248,97 @@ public enum ShownPlace {
         }
     }
 
+    // MARK: - What each button comes to
+
+    /// What a press of a button that takes a plugin's place comes to — decided
+    /// here, whole: which copy the button brings, from which commit, what is
+    /// there now and whether its warning holds. Settings' buttons pass what
+    /// they have (the catalogue, the records, the warning confirmed) and do
+    /// what this says; none of them chooses a copy of its own. A choice made
+    /// where no test reaches it was the bug twice (C2b2's review: **Update**
+    /// asking with no copy; D1b's: the same, one call further in).
+    public enum Step: Equatable, Sendable {
+        /// Nothing to do: the catalogue does not have the plugin, or there is
+        /// no copy to go back to.
+        case nothing
+        /// The warning, of what is there now; nothing is done.
+        case ask(Place)
+        /// `operation` of the plugin's folder as the catalogue lists it at
+        /// `commit`: **Install**, **Replace…**, **Update**, **Switch to**.
+        case install(InstallRequest.Operation, commit: String, folder: PluginListing, version: String)
+        /// `operation` at `commit`, whose listing is read first:
+        /// **Reinstall**, **Back to** and an earlier version.
+        case atCommit(InstallRequest.Operation, commit: String, version: String)
+        /// **Remove**.
+        case remove
+    }
+
+    /// **Install** — or **Replace…** over a folder of the operator's own or a
+    /// link — at the commit the catalogue was built from: the folder's tree
+    /// there is the copy its warning names. An update when uDeck installed it
+    /// before, a replace when something of the operator's is in its place.
+    public static func install(_ id: String, catalogue: Catalogue?, in paths: UDeckPaths, installed: InstalledPlugins,
+                               shown: Place?) -> Step {
+        guard let catalogue, let entry = catalogue.entry(id) else { return .nothing }
+        let version = entry.manifest?.version ?? ""
+        let now = Place.now(id, in: paths, record: installed.plugins[id],
+                            bringing: .atHead(version: version, tree: entry.listing.tree))
+        if case .ask(let place) = press(.install, shown: shown, now: now) { return .ask(place) }
+        let operation: InstallRequest.Operation = installed.plugins[id] != nil
+            ? .update : (PluginInstaller.folderIsTaken(id, in: paths) ? .replace : .install)
+        return .install(operation, commit: catalogue.commit, folder: entry.listing, version: version)
+    }
+
+    /// **Update**, or **Switch to** a version the repository went back to:
+    /// the plugin at the catalogue's head — the folder's tree there, which a
+    /// republish of the same version changes, is the copy its warning names.
+    public static func update(_ id: String, catalogue: Catalogue?, in paths: UDeckPaths, installed: InstalledPlugins,
+                              shown: Place?) -> Step {
+        guard let catalogue, let entry = catalogue.entry(id) else { return .nothing }
+        let version = entry.manifest?.version ?? ""
+        let now = Place.now(id, in: paths, record: installed.plugins[id],
+                            bringing: .atHead(version: version, tree: entry.listing.tree))
+        if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
+        return .install(.update, commit: catalogue.commit, folder: entry.listing, version: version)
+    }
+
+    /// **Reinstall**: what the record says was installed, put back — the
+    /// record's commit is the copy.
+    public static func reinstall(_ id: String, in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?) -> Step {
+        guard let record = installed.plugins[id] else { return .nothing }
+        return atCommit(.reinstall, id: id, commit: record.commit, version: record.version, in: paths, installed: installed,
+                        shown: shown)
+    }
+
+    /// **Back to** the copy this one replaced.
+    public static func backToPrevious(_ id: String, in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?) -> Step {
+        guard let previous = installed.plugins[id]?.previous else { return .nothing }
+        return atCommit(.earlier, id: id, commit: previous.commit, version: previous.version, in: paths, installed: installed,
+                        shown: shown)
+    }
+
+    /// An earlier version, chosen from the folder's history.
+    public static func earlier(_ id: String, line: PluginHistory.Line, in paths: UDeckPaths, installed: InstalledPlugins,
+                               shown: Place?) -> Step {
+        atCommit(.earlier, id: id, commit: line.commit, version: line.version, in: paths, installed: installed, shown: shown)
+    }
+
+    /// A copy replaced by `version` at `commit`: the commit its warning names
+    /// is the one the files come from.
+    static func atCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
+                         in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?) -> Step {
+        let now = Place.now(id, in: paths, record: installed.plugins[id], bringing: .atCommit(version: version, commit: commit))
+        if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
+        return .atCommit(operation, commit: commit, version: version)
+    }
+
+    /// **Remove**: nothing comes, and it always asks first.
+    public static func remove(_ id: String, in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?) -> Step {
+        let now = Place.now(id, in: paths, record: installed.plugins[id], bringing: .nothing)
+        if case .ask(let place) = press(.remove, shown: shown, now: now) { return .ask(place) }
+        return .remove
+    }
+
     // MARK: - Allow
 
     /// Whether **Allow** grants nothing the operator was not shown: every

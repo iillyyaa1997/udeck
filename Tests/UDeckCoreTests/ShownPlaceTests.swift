@@ -298,4 +298,122 @@ struct ShownPlaceTests {
         #expect(ShownPlace.holds(ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: "a1"),
                                  now: ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: "a1")))
     }
+
+    // MARK: - What each button comes to, decided here
+
+    /// The catalogue as Settings reads it: `repository` at its commit.
+    func catalogue(_ repository: FakeRepository) -> Catalogue {
+        let entries = repository.listing.plugins.keys.sorted().map { id in
+            CatalogueEntry(id: id, listing: repository.plugin(id),
+                           verdict: RepositoryRules.check(folder: id, listing: repository.plugin(id),
+                                                          manifest: repository.data(at: "plugins/\(id)/manifest.json"),
+                                                          udeck: SemanticVersion("0.5.0")))
+        }
+        return Catalogue(address: .official, commit: repository.commit, branch: "main",
+                         passport: RepositoryPassport(name: "uDeck plugins"), entries: entries)
+    }
+
+    /// D1b's review: which copy **Update** brings was chosen in Settings'
+    /// code, where no test reaches — a model that asked with `.nothing`
+    /// passed every test and held the warning to no copy at all. Here the
+    /// whole press is `ShownPlace`'s: the operator's changes in uptime 1.3.0's
+    /// place, the warning says so; the repository publishes another tree under
+    /// the same 1.3.0; **Update** on that warning is the warning again, naming
+    /// the new tree, and nothing is installed.
+    @Test("Update after a republish of the same version from another tree asks again, and installs nothing it did not show")
+    func updateAfterARepublish() async throws {
+        var repository = FakeRepository.withUptime(version: "1.0.0")
+        let installer = installer(repository, trash: TestTrash(in: udeck.url))
+        try await install("uptime", from: repository, with: installer)
+        try Data("TOKEN=mine\n".utf8).write(to: live("uptime").appendingPathComponent(".env"))
+        let records = try installer.loadRecords()
+
+        repository.addPlugin("uptime", version: "1.3.0")
+        let published = catalogue(repository)
+        let tree = published.entry("uptime")!.listing.tree
+        let first = ShownPlace.update("uptime", catalogue: published, in: paths, installed: records, shown: nil)
+        let shown = ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: tree)
+        #expect(first == .ask(shown), "the warning names the version and the tree that come")
+        #expect(ShownPlace.update("uptime", catalogue: published, in: paths, installed: records, shown: shown)
+                == .install(.update, commit: published.commit, folder: published.entry("uptime")!.listing, version: "1.3.0"),
+                "pressed on a warning that holds, it installs what the warning named")
+
+        var republished = repository
+        republished.files["plugins/uptime/README.md"] = .init("# uptime, published again as 1.3.0\n")
+        republished.commit = String(repeating: "d", count: 40)
+        let again = catalogue(republished)
+        let newTree = again.entry("uptime")!.listing.tree
+        #expect(newTree != tree, "the premise: another tree under the same version")
+        #expect(ShownPlace.update("uptime", catalogue: again, in: paths, installed: records, shown: shown)
+                == .ask(ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: newTree)),
+                "the same 1.3.0 from another tree is the warning again")
+        // Switch to, through Install's button over a copy uDeck installed: the same.
+        #expect(ShownPlace.install("uptime", catalogue: again, in: paths, installed: records, shown: shown)
+                == .ask(ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: newTree)))
+    }
+
+    @Test("Install: the operation by what is there, the tree as the copy, the catalogue's commit")
+    func installSteps() async throws {
+        var repository = FakeRepository.withUptime()
+        repository.addPlugin("cpu")
+        let published = catalogue(repository)
+        let none = InstalledPlugins()
+        #expect(ShownPlace.install("uptime", catalogue: published, in: paths, installed: none, shown: nil)
+                == .install(.install, commit: repository.commit, folder: repository.plugin("uptime"), version: "1.0.0"))
+        #expect(ShownPlace.install("gone", catalogue: published, in: paths, installed: none, shown: nil) == .nothing)
+        #expect(ShownPlace.install("uptime", catalogue: nil, in: paths, installed: none, shown: nil) == .nothing)
+        #expect(ShownPlace.update("uptime", catalogue: nil, in: paths, installed: none, shown: nil) == .nothing)
+
+        // A folder of the operator's in its place: the warning, then a replace.
+        udeck.writePlugin(folder: "cpu", manifest: FakeRepository.manifest(id: "cpu"))
+        let tree = repository.plugin("cpu").tree
+        let warning = ShownPlace.Place(fate: .toTrash, arriving: "1.0.0", copy: tree)
+        #expect(ShownPlace.install("cpu", catalogue: published, in: paths, installed: none, shown: nil) == .ask(warning))
+        #expect(ShownPlace.install("cpu", catalogue: published, in: paths, installed: none, shown: warning)
+                == .install(.replace, commit: repository.commit, folder: repository.plugin("cpu"), version: "1.0.0"))
+
+        // Installed by uDeck: Install's button over it is an update.
+        let installer = installer(repository, trash: TestTrash(in: udeck.url))
+        try await install("uptime", from: repository, with: installer)
+        #expect(ShownPlace.install("uptime", catalogue: published, in: paths, installed: try installer.loadRecords(), shown: nil)
+                == .install(.update, commit: repository.commit, folder: repository.plugin("uptime"), version: "1.0.0"))
+    }
+
+    @Test("Reinstall, Back to, an earlier version: the commit is the copy; Remove brings nothing and always asks")
+    func atCommitSteps() async throws {
+        let repository = FakeRepository.withUptime()
+        let installer = installer(repository, trash: TestTrash(in: udeck.url))
+        try await install("uptime", from: repository, with: installer)
+        var records = try installer.loadRecords()
+        let record = try #require(records.plugins["uptime"])
+        try Data("TOKEN=mine\n".utf8).write(to: live("uptime").appendingPathComponent(".env"))
+
+        let reinstall = ShownPlace.Place(fate: .toTrash, arriving: record.version, copy: record.commit)
+        #expect(ShownPlace.reinstall("uptime", in: paths, installed: records, shown: nil) == .ask(reinstall))
+        #expect(ShownPlace.reinstall("uptime", in: paths, installed: records, shown: reinstall)
+                == .atCommit(.reinstall, commit: record.commit, version: record.version))
+        #expect(ShownPlace.reinstall("cpu", in: paths, installed: records, shown: nil) == .nothing)
+
+        #expect(ShownPlace.backToPrevious("uptime", in: paths, installed: records, shown: nil) == .nothing, "nothing to go back to")
+        let previousCommit = String(repeating: "9", count: 40)
+        records.plugins["uptime"]?.previous = PreviousCopy(ref: PluginRef(name: "main"), commit: previousCommit,
+                                                           tree: String(repeating: "7", count: 40), version: "0.9.0")
+        let back = ShownPlace.Place(fate: .toTrash, arriving: "0.9.0", copy: previousCommit)
+        #expect(ShownPlace.backToPrevious("uptime", in: paths, installed: records, shown: nil) == .ask(back))
+        #expect(ShownPlace.backToPrevious("uptime", in: paths, installed: records, shown: back)
+                == .atCommit(.earlier, commit: previousCommit, version: "0.9.0"))
+        #expect(ShownPlace.backToPrevious("uptime", in: paths, installed: records, shown: reinstall) == .ask(back),
+                "Reinstall's warning does not hold for Back to")
+
+        let line = PluginHistory.Line(version: "0.8.0", commit: String(repeating: "8", count: 40), date: nil, manifest: nil)
+        let earlier = ShownPlace.Place(fate: .toTrash, arriving: "0.8.0", copy: line.commit)
+        #expect(ShownPlace.earlier("uptime", line: line, in: paths, installed: records, shown: nil) == .ask(earlier))
+        #expect(ShownPlace.earlier("uptime", line: line, in: paths, installed: records, shown: earlier)
+                == .atCommit(.earlier, commit: line.commit, version: "0.8.0"))
+
+        let removal = ShownPlace.Place(fate: .toTrash, arriving: nil, copy: nil)
+        #expect(ShownPlace.remove("uptime", in: paths, installed: records, shown: nil) == .ask(removal))
+        #expect(ShownPlace.remove("uptime", in: paths, installed: records, shown: removal) == .remove)
+        #expect(ShownPlace.remove("uptime", in: paths, installed: records, shown: back) == .ask(removal))
+    }
 }
