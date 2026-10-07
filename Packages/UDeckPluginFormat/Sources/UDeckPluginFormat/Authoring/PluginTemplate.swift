@@ -148,7 +148,7 @@ public enum PluginTemplate {
 
     /// The top of the plugin repository `folder` is in: the nearest folder,
     /// it or one above it, that holds `udeck-plugins.json`.
-    static func repositoryRoot(above folder: URL) -> URL? {
+    public static func repositoryRoot(above folder: URL) -> URL? {
         var current = folder.standardizedFileURL
         while true {
             let passport = current.appendingPathComponent(RepositoryPassport.path)

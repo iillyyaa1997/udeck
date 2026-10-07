@@ -301,10 +301,10 @@ Each archive is one folder, `udeck-plugin-X.Y.Z-<platform>/`, with the
 command, `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES` — what else the
 command is made of (on Linux, statically: Swift's runtime and Foundation,
 swift-crypto and its BoringSSL, LLVM's libc++, musl, fts and mimalloc) and
-under what licences. The image is Alpine, pinned by digest, with git and the
-same static binary at `/usr/local/bin/udeck-plugin`, and no `ENTRYPOINT`:
-GitLab CI hands a job's script to the image's shell, and the check starts
-git. Its `/usr/share/licenses/udeck-plugin/` holds the same three texts and
+under what licences. The image is Alpine, pinned by digest, with git, curl and
+the same static binary at `/usr/local/bin/udeck-plugin`, and no `ENTRYPOINT`:
+GitLab CI hands a job's script to the image's shell, the check starts git, and
+`pin` curl. Its `/usr/share/licenses/udeck-plugin/` holds the same three texts and
 `ALPINE-PACKAGES`: every Alpine package in it — git and BusyBox among them,
 under the GPL — with its version, its licence and the aports commit it was
 built from, where its source is; its `org.opencontainers.image.licenses`
@@ -320,27 +320,179 @@ docker run --rm --network none -v "$PWD:/repo:ro" \
 Read-only and without a network is how it is meant to run: the check needs
 neither, and opens git's `safe.directory` for the mounted repository itself.
 It does need history: rule 18 compares HEAD with the commit before it, and on
-a clone that has only HEAD — what `actions/checkout` and GitLab CI fetch by
-default — rule 18 is not checked, a warning says so, and the exit status is
-0. Give `actions/checkout` `fetch-depth: 0`, set `GIT_DEPTH: "0"` in GitLab
-CI, or pass `--base` and `--head`.
+a clone that has only HEAD — what `actions/checkout` fetches by default — rule
+18 is not checked, a warning says so, and the exit status is 0. GitLab CI
+fetches the last 20 commits of a new project by default (its *Git shallow
+clone* setting, which the variable `GIT_DEPTH` overrides): enough while the
+commit to compare with is among them. Give `actions/checkout` `fetch-depth:
+0`, and set `GIT_DEPTH: "0"` in GitLab CI. `--base` and `--head` choose which
+commit HEAD is compared with when the clone holds it — the target branch's tip
+for a pull request — and do not make up for history the clone lacks: a
+`--base` it does not have is *"not a commit in … — a pull request's checkout
+needs fetch-depth: 0"*, exit status 2.
 
 Everything is made by `Scripts/make-cli.sh` and published by `release.yml` in
 the one `gh release create` that publishes the app — uDeck's releases are
 immutable, so a release cannot take an asset afterwards — with the image
 pushed before it: built once from the same archives, pushed to a registry of
 the release job's own, pulled from it by its digest and run on both
-platforms (`--version`, `check` and `check-repo` on the examples), and only
-then copied by that digest to ghcr.io, byte for byte. `ci.yml` does all of it
-on every push — the copy goes to a second name in the job's own registry —
-and writes the image file, `SHA256SUMS` and the notes as a release does,
-publishing nothing.
+platforms (`--version`, `check` and `check-repo` on the examples, and `pin` on
+a release on the image's own disk), and only then copied by that digest to
+ghcr.io, byte for byte. `ci.yml` does all of it on every push — the copy goes
+to a second registry of the job's own, which asks for a login as ghcr.io does
+— and writes the image file, `SHA256SUMS` and the notes as a release does,
+then pins that release as a plugin repository would and reads the lock file
+as its CI will, publishing nothing.
 
-> **Later — stage 2.** A plugin repository pins one release in a lock file
-> read from its base — the version, the archives' sha256, the image's digest —
-> and `udeck-plugin pin` writes it; the template repository's GitHub workflow
-> and GitLab CI read it, the GitLab one with a variable for a mirror of the
-> image (the digest says what, the variable only where from).
+#### The lock file
+
+A plugin repository's CI runs one release of the command, and the repository
+names it in `.github/udeck-plugin.lock`. The CI reads the file from the base
+of the change it checks — the target branch, not the pull request — so that a
+pull request cannot choose the check that judges it: a new lock file takes
+effect once it is merged, as the official repository's check does today. On
+GitLab the file is in the same place: `.github/` means nothing to GitLab, and
+one place serves a repository kept on both, a template copied to either, the
+`pin` that writes it and a Renovate rule that finds it.
+
+Five lines, `key=value`, in this order:
+
+```
+version=0.6.0
+macos-universal=<sha256 of udeck-plugin-0.6.0-macos-universal.tar.gz>
+linux-x86_64=<sha256 of udeck-plugin-0.6.0-linux-x86_64.tar.gz>
+linux-aarch64=<sha256 of udeck-plugin-0.6.0-linux-aarch64.tar.gz>
+image=sha256:<the digest of the image's index>
+```
+
+| Key | Value |
+|---|---|
+| `version` | the release, `X.Y.Z`: three whole numbers of at most nine digits, none written with a leading zero, and no `v` |
+| `macos-universal`, `linux-x86_64`, `linux-aarch64` | the archive's sha256 as the release's `SHA256SUMS` has it: 64 lowercase hexadecimal digits |
+| `image` | the image's digest as `udeck-plugin-image.txt` has it: `sha256:` and 64 lowercase hexadecimal digits |
+
+And nothing else: no comment, no blank line, no space anywhere, no byte order
+mark, no carriage return, every line ending in `\n`, every key once. A lock
+file is exactly what `udeck-plugin pin` writes, byte for byte, and anything
+else is refused with what is wrong with it — so that a CI job can read it with
+`sed`, never running it through `source`, and come to the answer
+`udeck-plugin` comes to. That is why it is not JSON.
+
+Where the files come from is not in it. The image is pulled as
+`$UDECK_PLUGIN_REGISTRY/udeck-plugin@<image>`, the registry being
+`ghcr.io/iillyyaa1997` unless a CI variable names a mirror; an archive is
+downloaded from `$UDECK_PLUGIN_DOWNLOAD_BASE/v<version>/`, GitHub's
+`https://github.com/iillyyaa1997/udeck/releases/download` unless a variable
+names another place laid out the same way. The variable says where, the file
+says what: a mirror that hands out other bytes makes the job red rather than
+running them.
+
+This is how a CI job reads it: the five values by `sed`, then the file held
+to the five lines they make, byte for byte. A test holds it to
+`udeck-plugin`'s own reading on a corpus of good and bad files, run by `sh` and
+by `bash`, with a Mac's sed and with GNU's:
+
+<!-- lock-reader -->
+```sh
+# Reads a lock file as udeck-plugin reads it: the five lines `udeck-plugin pin`
+# writes, byte for byte, or nothing. Sets version, macos_universal,
+# linux_x86_64, linux_aarch64 and image; never runs the file.
+read_udeck_plugin_lock() {
+    udeck_lock_value() {
+        LC_ALL=C sed -En "s/^$1=($2)\$/\\1/p" "$3"
+    }
+    version=$(udeck_lock_value version '(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})' "$1")
+    macos_universal=$(udeck_lock_value macos-universal '[0-9a-f]{64}' "$1")
+    linux_x86_64=$(udeck_lock_value linux-x86_64 '[0-9a-f]{64}' "$1")
+    linux_aarch64=$(udeck_lock_value linux-aarch64 '[0-9a-f]{64}' "$1")
+    image=$(udeck_lock_value image 'sha256:[0-9a-f]{64}' "$1")
+    udeck_lock_expected=$(mktemp) || return 1
+    printf 'version=%s\nmacos-universal=%s\nlinux-x86_64=%s\nlinux-aarch64=%s\nimage=%s\n' \
+        "$version" "$macos_universal" "$linux_x86_64" "$linux_aarch64" "$image" > "$udeck_lock_expected"
+    # Each value matched, and the file is the five lines they make: an empty
+    # value is one that did not match, and a key twice gives two lines.
+    if [ -n "$version" ] && [ -n "$macos_universal" ] && [ -n "$linux_x86_64" ] \
+        && [ -n "$linux_aarch64" ] && [ -n "$image" ] && cmp -s "$1" "$udeck_lock_expected"; then
+        rm -f "$udeck_lock_expected"
+        return 0
+    fi
+    rm -f "$udeck_lock_expected"
+    echo "$1 is not a lock file as udeck-plugin pin writes it; udeck-plugin pin --check says why" >&2
+    return 1
+}
+```
+<!-- /lock-reader -->
+
+And with it, the Linux archive a job runs:
+
+```sh
+read_udeck_plugin_lock .github/udeck-plugin.lock || exit 1
+base="${UDECK_PLUGIN_DOWNLOAD_BASE:-https://github.com/iillyyaa1997/udeck/releases/download}"
+archive="udeck-plugin-$version-linux-x86_64.tar.gz"
+curl -fsSLO "$base/v$version/$archive"
+echo "$linux_x86_64  $archive" | sha256sum -c -
+tar -xzf "$archive"
+```
+
+#### `udeck-plugin pin`
+
+```sh
+udeck-plugin pin                          # the latest release
+udeck-plugin pin --version 0.6.0          # that one
+udeck-plugin pin --check                  # is the lock file what its release has?
+udeck-plugin pin --check --version latest # ... and is it the latest?
+```
+
+`pin` writes the lock file of the repository it is run in — the folder that
+holds `udeck-plugins.json`, here or above — or of `--repo <path>`. It reads
+the release's `SHA256SUMS` and `udeck-plugin-image.txt` and holds them to one
+another before it writes anything: the image file exactly as a release writes
+it (`image=…/udeck-plugin`, `tag=vX.Y.Z` of the release asked for, a whole
+`digest=`, both platforms, nothing more), the sums one line for each of the
+three archives and the image file and for nothing else, and the image file the
+very one the sums name, by its sha256. Two files that disagree are not two
+halves of one release, and nothing is written. A lock file that is already what
+the release has is left untouched.
+
+`--check` writes nothing. It exits 0 when the lock file is exactly what `pin`
+would write for the release, and 1 when it is not, saying which line differs —
+or when there is no lock file, or one that does not read. Without `--version`
+it checks the lock file against the release it names, which a pull request's
+CI can do without turning red the day uDeck releases again; `--version
+latest` asks whether it is also the newest, which is what a scheduled job
+wants. Exit status 2, for `pin` and `--check` alike, is a release that could
+not be read: none there, a network that did not answer, two files that
+disagree.
+
+A release from before the command was published with uDeck's — 0.5.0 and
+earlier — has neither file, and `pin` says so: *"release v0.5.0 has no
+SHA256SUMS and no udeck-plugin-image.txt at …: uDeck 0.5.0 and the releases
+before it were made before udeck-plugin was published with them"*.
+
+**Where it reads from.** The latest release is GitHub's
+`…/releases/latest/download/udeck-plugin-image.txt`, which says its version;
+the sums are then read from that version's own folder, so a release published
+between the two requests is a refusal, never a lock of two releases.
+`UDECK_PLUGIN_DOWNLOAD_BASE` moves `pin` too: an `https://` or a `file://`
+address laid out as GitHub's — `v<version>/` for each release, and
+`…/latest/download/` beside a `…/download` for the latest — and never plain
+`http://`, since `pin` writes what it reads into the file a CI trusts.
+
+**How it reads.** With curl, the system's, started as `curl` on the `PATH`:
+there on every Mac and every GitHub runner, and in the image. Curl takes its
+proxy from the environment as its manual says — `https_proxy` or
+`HTTPS_PROXY`, else `all_proxy` or `ALL_PROXY`, and `no_proxy` or `NO_PROXY`
+for the hosts it reaches directly — so a runner that reaches GitHub only
+through a proxy needs nothing but those variables. `pin` asks for nothing over
+plain HTTP, so `http_proxy` and `HTTP_PROXY` never apply. Curl is told only
+the address and how to fetch it (`-q`: no `.curlrc`; redirects followed to
+`https://` only, at most ten; three tries on what curl calls transient; at
+most 1 MiB). Not Foundation's URLSession: it lives in FoundationNetworking,
+which the static Linux binary leaves out — it would bring the rest of
+Foundation, ICU and libcurl into every copy, and nothing here proves the
+Static Linux SDK links it. The tests go on no network: they hand `pin` a fake
+release, a fake curl that says what it was given, and the real curl a
+`file://` release.
 
 **What git is told, and what it is not.** Git runs with nobody's global or
 system configuration and no `GIT_` variable inherited. A repository's own
@@ -426,12 +578,10 @@ pull request has it. That rests on the review below.
 > script does not have.
 >
 > What is there already: every uDeck release from the one after 0.5.0 carries
-> the command itself ([Where the command comes from](#where-the-command-comes-from)).
-> What comes next: a lock file in the repository — `udeck-plugin`'s version,
-> the sha256 of its Linux archives and the image's digest — read from the
-> base, as the script is read now, so that a pull request cannot choose the
-> check that judges it; `udeck-plugin pin`, which writes that file for a
-> release on GitHub and GitLab alike; and `validate` running the pinned binary
+> the command itself ([Where the command comes from](#where-the-command-comes-from)),
+> and [the lock file](#the-lock-file) that names one release, read from the
+> base as the script is read now, with `udeck-plugin pin`, which writes it.
+> What comes next: `validate` running the binary the base's lock file pins
 > beside the script, failing when the two disagree, until they have agreed
 > long enough for the script to go.
 
@@ -1590,7 +1740,9 @@ owner sets the branch protection.
   library, `UDeckPluginFormat`, that builds on macOS and Linux; the
   `udeck-plugin` command (`check`, `check-repo`, `new`, `run`) is shipped as
   release assets and a container image (built: [Where the command comes
-  from](#where-the-command-comes-from)); uDeck links the same library; CI
+  from](#where-the-command-comes-from)), and a repository pins one release
+  in a lock file `udeck-plugin pin` writes (built: [The lock
+  file](#the-lock-file)); uDeck links the same library; CI
   templates for GitHub Actions and GitLab CI, with a variable for a mirror of
   the image; the version-bump and `minUDeck` checks; a template repository
   anyone can start from; a plugin folder that is a link to a working copy, for

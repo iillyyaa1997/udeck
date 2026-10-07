@@ -54,14 +54,6 @@ struct CommandTests {
         #expect(errors.joined().contains("usage: udeck-plugin"), "\(arguments)")
     }
 
-    @Test("pin is not in this release", arguments: ["pin"])
-    func later(_ command: String) async {
-        let result = await run(command, "x")
-        #expect(result.status == 2)
-        #expect(result.errors == ["udeck-plugin \(command): not in this release"])
-        #expect(result.output.isEmpty)
-    }
-
     @Test("check-repo prints each finding and a line that sums them up, as the Python check did")
     func checkRepository() async throws {
         let clean = try TestRepository()

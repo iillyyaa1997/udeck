@@ -11,9 +11,10 @@ import Glibc
 import Musl
 #endif
 
-/// A folder of the command's own, for the two things that need one: the index
-/// `Git.attributes` reads a commit's attributes through, and the uDeck folder
-/// `udeck-plugin run` hands a plugin when it is given none. It sits in
+/// A folder of the command's own, for the three things that need one: the
+/// index `Git.attributes` reads a commit's attributes through, the uDeck folder
+/// `udeck-plugin run` hands a plugin when it is given none, and the file curl
+/// writes a release's asset to for `udeck-plugin pin`. It sits in
 /// `udeck-plugin-<uid>` in the temporary folder — one of the command's own, so
 /// that taking away what stopped runs left reads that folder and not the
 /// whole temporary folder, which on a busy machine holds tens of thousands of
@@ -21,8 +22,8 @@ import Musl
 ///
 /// It is taken away when the command is done with it — and not when the
 /// command is stopped first, by a signal or a CI job's timeout. So its name
-/// says whose it is, `udeck-plugin-index-<pid>-<uuid>` or
-/// `udeck-plugin-run-<pid>-<uuid>`, and `udeck-plugin` starts by taking away
+/// says whose it is, `udeck-plugin-index-<pid>-<uuid>`,
+/// `udeck-plugin-run-<pid>-<uuid>` or `udeck-plugin-pin-<pid>-<uuid>`, and `udeck-plugin` starts by taking away
 /// what stopped runs left (`RepositoryCheck.sweepTemporaryFolder`): a folder of
 /// such a name whose process is gone, that belongs to this user, and that
 /// nothing has changed for an hour. A process with that number alive (or
@@ -32,7 +33,9 @@ enum ScratchFolder {
     static let prefix = "udeck-plugin-index-"
     /// The uDeck folder of one `udeck-plugin run`.
     static let runPrefix = "udeck-plugin-run-"
-    static let prefixes = [prefix, runPrefix]
+    /// The folder of one file `udeck-plugin pin` fetches.
+    static let pinPrefix = "udeck-plugin-pin-"
+    static let prefixes = [prefix, runPrefix, pinPrefix]
     /// Seconds since a folder last changed before it counts as left behind.
     static let leftAfter: Double = 3600
 

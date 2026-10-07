@@ -28,6 +28,7 @@ public enum Command {
                udeck-plugin new <id> [--name <name>] [--author <name>] [--description <text>]
                udeck-plugin run <folder> [--home <folder>] [--lang <code>] [--reason interval|manual|launch]
                udeck-plugin link <folder> [--home <folder>]
+               udeck-plugin pin [--version X.Y.Z | latest] [--repo <path>] [--check]
                udeck-plugin --version | --help
 
         Checks, makes, runs and links uDeck plugins, by the plugin contract and the
@@ -51,7 +52,7 @@ public enum Command {
                         17 with --official. Without them, check-repo compares
                         versions with the commit before HEAD, and warns when the
                         clone does not have it.
-          --repo <path> the repository (default: the current folder)
+          --repo <path> for check-repo, the repository (default: the current folder)
 
           new           a plugin that works and passes check --strict: in a plugin
                         repository (udeck-plugins.json here or above) as
@@ -84,11 +85,27 @@ public enum Command {
                         plugin uDeck installed, uDeck's own Link a folder... does
                         it, under Plugins in its Settings, and says first what
                         happens to the installed copy
+          pin           the repository's .github/udeck-plugin.lock (on GitHub and on
+                        GitLab alike): the udeck-plugin its CI runs, from one uDeck
+                        release -- its version, the sha256 of its three archives
+                        and its image's digest, as the release's SHA256SUMS and
+                        udeck-plugin-image.txt say them. The release is GitHub's,
+                        or UDECK_PLUGIN_DOWNLOAD_BASE's (https:// or file://,
+                        holding v<version>/ for each), read with curl, which takes
+                        its proxy from HTTPS_PROXY and NO_PROXY
+          --version <X.Y.Z | latest>
+                        the release (default: the latest; with --check, the one
+                        the lock file names)
+          --check       write nothing: exit 1 when the lock file is not what pin
+                        would write for that release, or is not there
+          --repo <path> for pin, the repository (default: the one the current
+                        folder is in, which holds udeck-plugins.json)
 
         Exit status: 0 no errors (warnings do not fail), 1 errors, 2 could not check.
         new and link: 0 done, 1 in the way, 2 wrong request. run: 0 a card, 1 a
         failure (a card printed before a run past its timeout is drawn, and is
-        one), 2 not run.
+        one), 2 not run. pin: 0 written or as the release has it, 1 (--check) not
+        as the release has it, 2 not pinned.
         """
 
     /// Runs `udeck-plugin` with `arguments`, the program's own name left out.
@@ -97,9 +114,10 @@ public enum Command {
     /// the process does, and say them as given. `homes` is where the
     /// accounts' home folders are — the machine's own account database but
     /// in tests — from which `link` finds uDeck's folder as uDeck does, and
-    /// `run` the `HOME` uDeck hands a producer.
+    /// `run` the `HOME` uDeck hands a producer. `fetching` is how `pin` reads
+    /// a release — curl, on the `PATH` of `environment`, when nil.
     public static func run(_ arguments: [String], environment: [String: String], currentDirectory: String? = nil,
-                           homes: UserHomes = .system,
+                           homes: UserHomes = .system, fetching: (any ReleaseFetching)? = nil,
                            output: (String) -> Void, errors: (String) -> Void) async -> Int32 {
         guard let command = arguments.first else {
             errors(usage)
@@ -128,8 +146,7 @@ public enum Command {
         case "link":
             return linkPlugin(rest, environment: environment, here: here, homes: homes, output: output, errors: errors)
         case "pin":
-            errors("udeck-plugin \(command): not in this release")
-            return 2
+            return pin(rest, environment: environment, here: here, fetching: fetching, output: output, errors: errors)
         default:
             errors("udeck-plugin: there is no command \"\(command)\"\n\n\(usage)")
             return 2

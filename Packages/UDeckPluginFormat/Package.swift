@@ -25,13 +25,13 @@ let package = Package(
         .library(name: "UDeckPluginFormatFixtures", targets: ["UDeckPluginFormatFixtures"]),
 
         // The command authors and repositories' CI run: `check`, `check-repo`,
-        // `new`, `run` and `link`. It travels inside uDeck.app
-        // (Contents/Helpers, put there by Scripts/make-app.sh), and Install
-        // command in uDeck's Settings links ~/.local/bin to it. Every release
-        // also carries it as archives for macOS (universal) and Linux (static
-        // musl, x86_64 and aarch64) and as the container image
-        // ghcr.io/iillyyaa1997/udeck-plugin, all made by Scripts/make-cli.sh;
-        // `pin`, which writes a plugin repository's lock file, comes later.
+        // `new`, `run`, `link` and `pin`, which writes a plugin repository's
+        // lock file. It travels inside uDeck.app (Contents/Helpers, put there
+        // by Scripts/make-app.sh), and Install command in uDeck's Settings
+        // links ~/.local/bin to it. Every release also carries it as archives
+        // for macOS (universal) and Linux (static musl, x86_64 and aarch64) and
+        // as the container image ghcr.io/iillyyaa1997/udeck-plugin, all made by
+        // Scripts/make-cli.sh.
         .executable(name: "udeck-plugin", targets: ["udeck-plugin"]),
 
         // What the command does, for the tests that run it — here and from
