@@ -1245,7 +1245,8 @@ private struct PluginRow: View {
             Text(description).font(.callout)
         }
 
-        Text(plugin.directory.path)
+        // The home folder as `~`, as every other path in Settings is written.
+        Text(model.displayPath(plugin.directory.path))
             .font(.system(.caption2, design: .monospaced))
             .foregroundStyle(.secondary)
             .textSelection(.enabled)
