@@ -146,6 +146,41 @@ struct ShownPlaceTests {
                 "a link that leads nowhere says what it says")
     }
 
+    /// C2b2's review, and D1's: which copy a warning names was decided only
+    /// where Settings' buttons call in, untested — **Update** asking with no
+    /// copy, or **Back to** with none, passed every test and brought back the
+    /// warning held to a version alone. What a button puts there says it.
+    @Test("What a button brings says the copy its warning names: the folder's tree at the head, the commit for one at a commit, none for Remove")
+    func arrival() throws {
+        let tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+        let commit = "1111111111111111111111111111111111111111"
+        #expect(ShownPlace.Arrival.atHead(version: "1.3.0", tree: tree).version == "1.3.0")
+        #expect(ShownPlace.Arrival.atHead(version: "1.3.0", tree: tree).copy == Optional(tree), "Install and Update: the tree")
+        #expect(ShownPlace.Arrival.atCommit(version: "1.2.0", commit: commit).version == "1.2.0")
+        #expect(ShownPlace.Arrival.atCommit(version: "1.2.0", commit: commit).copy == Optional(commit),
+                "Reinstall, Back to, an earlier version: the commit")
+        #expect(ShownPlace.Arrival.nothing.version == nil)
+        #expect(ShownPlace.Arrival.nothing.copy == nil, "Remove: nothing comes")
+
+        #expect(ShownPlace.Place.now("uptime", in: paths, record: nil, bringing: .atHead(version: "1.3.0", tree: tree))
+                == ShownPlace.Place(fate: .nothing, arriving: "1.3.0", copy: tree))
+        #expect(ShownPlace.Place.now("uptime", in: paths, record: nil, bringing: .atCommit(version: "1.2.0", commit: commit))
+                == ShownPlace.Place(fate: .nothing, arriving: "1.2.0", copy: commit))
+        #expect(ShownPlace.Place.now("uptime", in: paths, record: nil, bringing: .nothing)
+                == ShownPlace.Place(fate: .nothing, arriving: nil, copy: nil))
+
+        // The same version at the head from another tree — a republish — is
+        // another warning; so is the version at the head where the warning
+        // named it at a commit.
+        let shown = ShownPlace.Place.now("uptime", in: paths, record: nil, bringing: .atHead(version: "1.3.0", tree: tree))
+        let republished = ShownPlace.Place.now("uptime", in: paths, record: nil,
+                                               bringing: .atHead(version: "1.3.0", tree: "2222222222222222222222222222222222222222"))
+        #expect(!ShownPlace.holds(shown, now: republished))
+        #expect(!ShownPlace.holds(shown, now: ShownPlace.Place.now("uptime", in: paths, record: nil,
+                                                                   bringing: .atCommit(version: "1.3.0", commit: tree + "0"))))
+        #expect(ShownPlace.holds(shown, now: shown))
+    }
+
     /// **Remove** on a linked plugin says only the link goes. A folder put in
     /// the link's place while the warning is up would go to the Trash — not
     /// what was said — so the press is the warning of the folder instead.

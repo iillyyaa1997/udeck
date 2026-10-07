@@ -181,8 +181,8 @@ extension DeckModel {
     /// the operator's goes and not only when the row says **Modified
     /// locally**. What the warning says, and what its button is held to
     /// (`ShownPlace`).
-    public func place(of id: String, arriving: String?, copy: String? = nil) -> ShownPlace.Place {
-        ShownPlace.Place.now(id, in: paths, record: installed.plugins[id], arriving: arriving, copy: copy)
+    public func place(of id: String, bringing arrival: ShownPlace.Arrival) -> ShownPlace.Place {
+        ShownPlace.Place.now(id, in: paths, record: installed.plugins[id], bringing: arrival)
     }
 
     /// Whether a window's plugin is here to run.
@@ -303,7 +303,7 @@ extension DeckModel {
     public func install(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
         guard let catalogue, let entry = catalogue.entry(id) else { return .goAhead }
         let version = entry.manifest?.version ?? ""
-        let there = place(of: id, arriving: version, copy: entry.listing.tree)
+        let there = place(of: id, bringing: .atHead(version: version, tree: entry.listing.tree))
         if case .ask(let now) = ShownPlace.press(.install, shown: shown, now: there) {
             return .ask(now)
         }
@@ -319,7 +319,7 @@ extension DeckModel {
     public func update(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
         guard let catalogue, let entry = catalogue.entry(id) else { return .goAhead }
         let version = entry.manifest?.version ?? ""
-        let there = place(of: id, arriving: version, copy: entry.listing.tree)
+        let there = place(of: id, bringing: .atHead(version: version, tree: entry.listing.tree))
         if case .ask(let now) = ShownPlace.press(.replaceCopy, shown: shown, now: there) {
             return .ask(now)
         }
@@ -354,7 +354,7 @@ extension DeckModel {
     /// from.
     private func atCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
                           shown: ShownPlace.Place?) -> ShownPlace.Press {
-        let there = place(of: id, arriving: version, copy: commit)
+        let there = place(of: id, bringing: .atCommit(version: version, commit: commit))
         if case .ask(let now) = ShownPlace.press(.replaceCopy, shown: shown, now: there) {
             return .ask(now)
         }
@@ -468,7 +468,7 @@ extension DeckModel {
     /// that says what is there now removes anything.
     @discardableResult
     public func remove(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        if case .ask(let now) = ShownPlace.press(.remove, shown: shown, now: place(of: id, arriving: nil)) {
+        if case .ask(let now) = ShownPlace.press(.remove, shown: shown, now: place(of: id, bringing: .nothing)) {
             return .ask(now)
         }
         guard busyPlugin == nil, let identifier = PluginIdentifier(rawValue: id) else { return .goAhead }

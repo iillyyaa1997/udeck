@@ -90,6 +90,44 @@ public enum ShownPlace {
 
     // MARK: - Remove, Install, Replace…, Update, Reinstall, Back to
 
+    /// What a button puts at `plugins/<id>` — and so the version and the copy
+    /// its warning names. Which copy is the button's to say, and two buttons
+    /// that put the same version there take it from different places: a
+    /// warning that named the version alone, or the wrong copy, would hold its
+    /// button to nothing the repository could not change under it (C2b2's
+    /// review: **Update** installed a tree published under the version its
+    /// warning had named, and nobody had been shown it).
+    public enum Arrival: Equatable, Sendable {
+        /// **Remove**: nothing comes.
+        case nothing
+        /// **Install**, **Replace…**, **Update** and **Switch to**: `version`
+        /// from the catalogue's head. The copy is the plugin folder's `tree`
+        /// there: the head moves on with every merge, the folder only when it
+        /// changed.
+        case atHead(version: String, tree: String)
+        /// **Reinstall**, **Back to** and an earlier version: `version` at
+        /// `commit`, the commit the files are taken from — and so the copy.
+        case atCommit(version: String, commit: String)
+
+        /// The version that comes; nil for **Remove**.
+        public var version: String? {
+            switch self {
+            case .nothing: nil
+            case .atHead(let version, _), .atCommit(let version, _): version
+            }
+        }
+
+        /// The copy that comes, as the warning names it (`Place.copy`); nil
+        /// for **Remove**.
+        public var copy: String? {
+            switch self {
+            case .nothing: nil
+            case .atHead(_, let tree): tree
+            case .atCommit(_, let commit): commit
+            }
+        }
+    }
+
     /// What a button that takes an installed plugin's place does to what is
     /// at `plugins/<id>` — and the version and copy that come in its place —
     /// as its warning says it.
@@ -132,10 +170,19 @@ public enum ShownPlace {
         }
 
         /// What a button that takes `plugins/<id>` would do now, with
-        /// `record` the plugin's record as uDeck holds it, and `arriving`
-        /// and `copy` what the button would put there.
-        public static func now(_ id: String, in paths: UDeckPaths, record: InstalledRecord?, arriving: String?,
-                               copy: String? = nil) -> Place {
+        /// `record` the plugin's record as uDeck holds it, and `arrival` what
+        /// the button would put there. The one way a button asks: what it
+        /// puts there says the version and the copy together.
+        public static func now(_ id: String, in paths: UDeckPaths, record: InstalledRecord?,
+                               bringing arrival: Arrival) -> Place {
+            now(id, in: paths, record: record, arriving: arrival.version, copy: arrival.copy)
+        }
+
+        /// As `now(_:in:record:bringing:)`, given the version and the copy
+        /// apart — for the tests of what is there; a button says its
+        /// `Arrival`.
+        static func now(_ id: String, in paths: UDeckPaths, record: InstalledRecord?, arriving: String?,
+                        copy: String? = nil) -> Place {
             let live = paths.plugins.appendingPathComponent(id, isDirectory: true)
             guard PluginInstaller.folderIsTaken(id, in: paths) else {
                 return Place(fate: .nothing, arriving: arriving, copy: copy)
