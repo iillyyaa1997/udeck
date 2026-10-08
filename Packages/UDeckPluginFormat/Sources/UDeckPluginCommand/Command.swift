@@ -91,8 +91,11 @@ public enum Command {
                         and its image's digest, as the release's SHA256SUMS and
                         udeck-plugin-image.txt say them. The release is GitHub's,
                         or UDECK_PLUGIN_DOWNLOAD_BASE's (https:// or file://,
-                        holding v<version>/ for each), read with curl, which takes
-                        its proxy from HTTPS_PROXY and NO_PROXY
+                        holding v<version>/ for each; a login in it is said as
+                        ***), read with curl, which takes its proxy from
+                        HTTPS_PROXY and NO_PROXY. A lock file written from
+                        anywhere but GitHub holds what that place serves: check
+                        it against GitHub's with --check
           --version <X.Y.Z | latest>
                         the release (default: the latest; with --check, the one
                         the lock file names)

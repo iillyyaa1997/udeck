@@ -99,9 +99,10 @@ extension Command {
             asked = .latest
         }
 
+        let source: ReleaseSource
         let pinned: ReleasePin.Pinned
         do {
-            let source = try ReleaseSource(environment: environment)
+            source = try ReleaseSource(environment: environment)
             pinned = try ReleasePin.pin(asked, from: source, fetching: fetching ?? Curl(environment: environment))
         } catch let problem as ReleaseSource.Problem {
             errors("udeck-plugin pin: \(problem.description)")
@@ -116,10 +117,18 @@ extension Command {
         let lock = pinned.lock
         let image = "\(pinned.image)@\(lock.image)"
         let text = Array(lock.text.utf8)
+        // Two files a place serves that agree with each other are not two
+        // files GitHub published: a place other than GitHub can serve sums of
+        // its own, and an image file to go with them.
+        let elsewhere = source.isGitHub ? nil
+            : "note: \(ReleaseSource.variable) is \(source.shown), not GitHub's releases: the lock file holds what "
+                + "that place serves — check it against GitHub's release with udeck-plugin pin --check, "
+                + "\(ReleaseSource.variable) unset, where GitHub can be reached"
 
         if check {
             if existing == text {
                 output("\(shownFile) pins udeck-plugin \(lock.version) as its release has it: \(image)")
+                if let elsewhere { output(elsewhere) }
                 return 0
             }
             switch current {
@@ -137,6 +146,7 @@ extension Command {
 
         if existing == text {
             output("\(shownFile) already pins udeck-plugin \(lock.version); unchanged")
+            if let elsewhere { output(elsewhere) }
             return 0
         }
         do {
@@ -154,6 +164,7 @@ extension Command {
             output("  \(PluginLock.archive(platform, of: lock.version))  \(lock.archives[platform] ?? "")")
         }
         output("  image  \(image)")
+        if let elsewhere { output(elsewhere) }
         return 0
     }
 

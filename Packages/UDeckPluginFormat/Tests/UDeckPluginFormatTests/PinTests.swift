@@ -241,11 +241,13 @@ struct ReleaseSourceTests {
         }
     }
 
-    @Test("curl is told the address and how to fetch it, and nothing of a .curlrc")
+    @Test("curl is told how to fetch, and nothing of a .curlrc, in its arguments, and the address on its standard input")
     func curlArguments() {
-        let arguments = Curl.arguments(for: "https://github.com/x/v1.0.0/SHA256SUMS", output: "/tmp/f/body")
+        let url = "https://github.com/x/v1.0.0/SHA256SUMS"
+        let arguments = Curl.arguments(for: url, output: "/tmp/f/body")
         #expect(arguments.first == "curl" && arguments.dropFirst().first == "-q", "-q is curl's first argument, or it reads ~/.curlrc")
-        #expect(arguments.last == "https://github.com/x/v1.0.0/SHA256SUMS")
+        #expect(Array(arguments.suffix(2)) == ["--config", "-"], "the address is read from standard input")
+        #expect(!arguments.contains { $0.contains("github.com") }, "the address is in no argument: \(arguments)")
         let joined = arguments.joined(separator: " ")
         for said in ["--proto =https ", "--proto-redir =https ", "--location --max-redirs 10", "--retry 3",
                      "--max-filesize 1048576", "--output /tmp/f/body", "--write-out %{http_code}\\n%{url_effective}\\n"] {
@@ -254,6 +256,11 @@ struct ReleaseSourceTests {
         #expect(!joined.contains("--fail"), "a 404 is an answer, and --write-out says which address gave it")
         #expect(!joined.contains("--insecure") && !joined.contains(" -k "))
         #expect(Curl.arguments(for: "file:///r/v1.0.0/SHA256SUMS", output: "/b").joined(separator: " ").contains("--proto =file "))
+        // One line of curl's config syntax: the address quoted, with a \ put
+        // before each \ and " in it, so that curl reads it byte for byte.
+        #expect(Curl.config(for: url) == Array("url = \"\(url)\"\n".utf8))
+        let quoted: [UInt8] = Array((#"url = "https://a:p\"w\\d@m.example/u""# + "\n").utf8)
+        #expect(Curl.config(for: #"https://a:p"w\d@m.example/u"#) == quoted)
     }
 
     @Test("what curl's run comes to: found, missing where it was asked last, or why not")
@@ -296,7 +303,9 @@ struct ReleaseSourceTests {
     }
 
     /// A curl of the test's own, first on the PATH: it writes down what it was
-    /// started with and its whole environment, and serves one file.
+    /// started with, what it read on its standard input and its whole
+    /// environment, and serves one file — the address it was given on its
+    /// standard input, as `--config -` gives it.
     func fakeCurl(in temp: TemporaryDirectory, code: String = "200") throws -> URL {
         let folder = temp.url.appendingPathComponent("bin", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -305,14 +314,17 @@ struct ReleaseSourceTests {
             #!/bin/sh
             log="$FAKE_CURL_LOG"
             for argument in "$@"; do printf 'argument %s\\n' "$argument" >> "$log"; done
+            config="$(cat)"
+            printf '%s\\n' "$config" | sed 's/^/config /' >> "$log"
             env | LC_ALL=C sort | sed 's/^/environment /' >> "$log"
             output=""
             while [ $# -gt 1 ]; do
                 [ "$1" = --output ] && output="$2"
                 shift
             done
+            url="$(printf '%s\\n' "$config" | sed -n 's/^url = "\\(.*\\)"$/\\1/p')"
             if [ "\(code)" = 200 ]; then printf 'served\\n' > "$output"; fi
-            printf '%s\\n%s\\n' "\(code)" "$1"
+            printf '%s\\n%s\\n' "\(code)" "$url"
 
             """, to: curl)
         return folder
@@ -332,7 +344,8 @@ struct ReleaseSourceTests {
         #expect(fetched == .found(Array("served\n".utf8)))
         let lines = try String(contentsOf: log, encoding: .utf8).split(separator: "\n").map(String.init)
         #expect(lines.first == "argument -q")
-        #expect(lines.contains("argument https://github.com/iillyyaa1997/udeck/releases/download/v1.0.0/SHA256SUMS"))
+        #expect(lines.contains("config url = \"https://github.com/iillyyaa1997/udeck/releases/download/v1.0.0/SHA256SUMS\""))
+        #expect(!lines.contains { $0.hasPrefix("argument ") && $0.contains("github.com") }, "the address is in no argument")
         let handed = lines.filter { $0.hasPrefix("environment ") }.map { String($0.dropFirst("environment ".count)) }
         for (name, value) in environment {
             #expect(handed.contains("\(name)=\(value)"), "\(name) reaches curl as it was")
@@ -364,6 +377,81 @@ struct ReleaseSourceTests {
         withExtendedLifetime(temp) {}
     }
 
+    /// A login in UDECK_PLUGIN_DOWNLOAD_BASE — what a private GitLab's generic
+    /// packages ask for — reaches curl on its standard input, never among
+    /// its arguments, where any process on the machine reads it; and nothing
+    /// curl's answer comes to says it.
+    @Test("a login in the address reaches curl on its standard input alone, and no message says it")
+    func curlLogin() throws {
+        let temp = TemporaryDirectory()
+        let url = "https://ci:S3CRETTOKEN@mirror.example/udeck/v0.6.0/SHA256SUMS"
+        let answers: [(code: String, fetched: Fetched)] = [("200", .found(Array("served\n".utf8))), ("404", .missing(at: url))]
+        for (code, fetched) in answers {
+            let bin = try fakeCurl(in: temp, code: code)
+            let log = temp.url.appendingPathComponent("log-\(code)")
+            let environment = ["PATH": "\(bin.path):/usr/bin:/bin", "FAKE_CURL_LOG": log.path]
+            #expect(try Curl(environment: environment).fetch(url) == fetched)
+            let lines = try String(contentsOf: log, encoding: .utf8).split(separator: "\n").map(String.init)
+            let arguments = lines.filter { $0.hasPrefix("argument ") }
+            #expect(arguments.count > 10)
+            #expect(!arguments.contains { $0.contains("S3CRET") || $0.contains("mirror.example") }, "\(arguments)")
+            #expect(lines.contains("config url = \"\(url)\""), "the address, login and all, on standard input")
+        }
+        // Whatever curl's run comes to, a failure says the address with its
+        // login as ***, curl's own words included.
+        let failures: [(Int32, String, String)] = [
+            (0, "500\n\(url)\n", "could not read https://***@mirror.example/udeck/v0.6.0/SHA256SUMS: HTTP 500 from "
+                + "https://***@mirror.example/udeck/v0.6.0/SHA256SUMS"),
+            (6, "000\n\(url)\n", "could not read https://***@mirror.example/udeck/v0.6.0/SHA256SUMS: curl exited 6: "
+                + "curl: (6) Could not resolve host for https://***@mirror.example/udeck"),
+            (63, "", "https://***@mirror.example/udeck/v0.6.0/SHA256SUMS is larger than the 1048576 bytes pin reads"),
+            (-1, "", "curl was stopped by a signal while it read https://***@mirror.example/udeck/v0.6.0/SHA256SUMS"),
+            (0, "200", "could not read https://***@mirror.example/udeck/v0.6.0/SHA256SUMS: curl said \"200\""),
+        ]
+        for (status, said, expected) in failures {
+            do {
+                _ = try Curl.answer(status: status, said: Array(said.utf8),
+                                    errors: Array("curl: (6) Could not resolve host for https://ci:S3CRETTOKEN@mirror.example/udeck\n".utf8),
+                                    file: nil, url: url)
+                Issue.record("\(status) \(said.debugDescription) was an answer")
+            } catch let failure as FetchFailure {
+                #expect(failure.description == expected)
+                #expect(!failure.description.contains("S3CRET"))
+            }
+        }
+        withExtendedLifetime(temp) {}
+    }
+
+    @Test("an address is said with its login as ***, and as it is without one")
+    func shownWithoutTheLogin() throws {
+        #expect(ReleaseSource.shown(address: "https://ci:t0k@n@mirror.example/u@x/v1/") == "https://***@mirror.example/u@x/v1/")
+        #expect(ReleaseSource.shown(address: "https://token@mirror.example") == "https://***@mirror.example")
+        #expect(ReleaseSource.shown(address: ReleaseSource.github) == ReleaseSource.github)
+        #expect(ReleaseSource.shown(address: "file:///r/download") == "file:///r/download")
+        #expect(ReleaseSource.shown(address: "https://us er:pw@host/x") == "https://***@host/x", "a space is no end of an address")
+        #expect(ReleaseSource.shown(text: "at https://a:b@one.example/x and https://c@two.example, not https://three.example/@x")
+                == "at https://***@one.example/x and https://***@two.example, not https://three.example/@x")
+        #expect(ReleaseSource.shown(text: "https://four.example said: write to ops@four.example")
+                == "https://four.example said: write to ops@four.example", "an address ends at a space")
+        let source = try ReleaseSource(base: "https://ci:S3CRETTOKEN@gitlab.example/api/v4/projects/7/packages/generic/udeck/")
+        #expect(source.base == "https://ci:S3CRETTOKEN@gitlab.example/api/v4/projects/7/packages/generic/udeck",
+                "the address itself is kept, login and all: curl needs it")
+        #expect(source.shown == "https://***@gitlab.example/api/v4/projects/7/packages/generic/udeck")
+        let github = try ReleaseSource(environment: [:])
+        #expect(!source.isGitHub && github.isGitHub)
+        // Refused, the address is said without its login too.
+        for given in ["http://ci:S3CRETTOKEN@mirror.example/udeck", "ftp://ci:S3CRETTOKEN@mirror.example",
+                      "https://ci:S3CRETTOKEN@mirror.example/udeck?x", "https://ci:S3CRET TOKEN@mirror.example/udeck"] {
+            do {
+                _ = try ReleaseSource(base: given)
+                Issue.record("\(given) taken")
+            } catch let problem as ReleaseSource.Problem {
+                #expect(!problem.description.contains("S3CRET"), "\(problem.description)")
+                #expect(problem.description.contains("://***@mirror.example"), "\(problem.description)")
+            }
+        }
+    }
+
     /// The machine's own curl, on a release on disk: a Mac always has one, and
     /// so does the image (its check runs pin there). The Linux job's Swift
     /// image does not — swift-docker installs curl to fetch the toolchain and
@@ -386,6 +474,12 @@ struct ReleaseSourceTests {
         let base = "file://" + temp.url.appendingPathComponent("releases/download").path
         #expect(try curl.fetch("\(base)/v1.0.0/SHA256SUMS") == .found(Array("sums\n".utf8)))
         #expect(try curl.fetch("\(base)/v1.0.0/udeck-plugin-image.txt") == .missing(at: "\(base)/v1.0.0/udeck-plugin-image.txt"))
+        // The address read from standard input byte for byte: a " and a \
+        // in it, quoted for curl's config, are the folder's own.
+        let odd = temp.url.appendingPathComponent(#"a"b\c/download/v1.0.0"#, isDirectory: true)
+        try FileManager.default.createDirectory(at: odd, withIntermediateDirectories: true)
+        try Data("odd\n".utf8).write(to: odd.appendingPathComponent("SHA256SUMS"))
+        #expect(try curl.fetch("file://\(odd.path)/SHA256SUMS") == .found(Array("odd\n".utf8)))
         withExtendedLifetime(temp) {}
     }
 }
@@ -494,6 +588,39 @@ struct ReleasePinTests {
         #expect(throws: ReleasePin.Failure(description:
             "could not read https://mirror.example/udeck/v0.6.0/SHA256SUMS: curl exited 7: no route")) {
             try ReleasePin.pin(.version(SemanticVersion(major: 0, minor: 6, patch: 0)), from: mirror, fetching: unreachable)
+        }
+    }
+
+    /// A mirror that takes a login: the files are read with it, and every
+    /// address pin says — where the files came from, what is not there, what
+    /// could not be read, whichever fetcher said it — says it as ***.
+    @Test("a mirror's login is used and never said")
+    func mirrorLogin() throws {
+        let base = "https://ci:S3CRETTOKEN@gitlab.example/udeck"
+        let mirror = try ReleaseSource(base: base)
+        let version = SemanticVersion(major: 0, minor: 6, patch: 0)
+        let release = FakeRelease.release("0.6.0", base: base)
+        #expect(try ReleasePin.pin(.version(version), from: mirror, fetching: release).from == "https://***@gitlab.example/udeck/v0.6.0/")
+        var unreachable = release
+        unreachable.unreachable = ["\(base)/v0.6.0/SHA256SUMS"]
+        var gone = release
+        gone.files["\(base)/v0.6.0/udeck-plugin-image.txt"] = nil
+        for (fetching, said) in [(unreachable, "could not read https://***@gitlab.example/udeck/v0.6.0/SHA256SUMS: curl exited 7"),
+                                 (gone, "release v0.6.0 has no udeck-plugin-image.txt at https://***@gitlab.example/udeck/v0.6.0/:"),
+                                 (FakeRelease(), "release v0.6.0 has no SHA256SUMS and no udeck-plugin-image.txt at https://***@")] {
+            do {
+                _ = try ReleasePin.pin(.version(version), from: mirror, fetching: fetching)
+                Issue.record("pinned: \(said)")
+            } catch {
+                #expect("\(error)".hasPrefix(said), "\(error)")
+                #expect(!"\(error)".contains("S3CRET"), "\(error)")
+            }
+        }
+        do {
+            _ = try ReleasePin.pin(.latest, from: mirror, fetching: release)
+            Issue.record("a latest from a mirror")
+        } catch {
+            #expect("\(error)".hasPrefix("UDECK_PLUGIN_DOWNLOAD_BASE is https://***@gitlab.example/udeck, which"), "\(error)")
         }
     }
 }
@@ -631,6 +758,46 @@ struct PinCommandTests {
                              environment: ["UDECK_PLUGIN_DOWNLOAD_BASE": "http://mirror.example/udeck"])
         #expect(http.status == 2)
         #expect(http.errors.first?.contains("over plain http") == true)
+        withExtendedLifetime(temp) {}
+    }
+
+    /// From anywhere but GitHub, pin says that the lock file holds what that
+    /// place serves, and how to hold it to GitHub's release; and says the
+    /// place with its login as ***.
+    @Test("pinned from a mirror, the lock file is said to be the mirror's until it is checked against GitHub")
+    func fromAMirror() async throws {
+        let (temp, root) = try repository()
+        let base = "https://ci:S3CRETTOKEN@gitlab.example/udeck"
+        let mirror = ["UDECK_PLUGIN_DOWNLOAD_BASE": base]
+        let release = FakeRelease.release("0.6.0", base: base)
+        let note = "note: UDECK_PLUGIN_DOWNLOAD_BASE is https://***@gitlab.example/udeck, not GitHub's releases: the lock "
+            + "file holds what that place serves — check it against GitHub's release with udeck-plugin pin --check, "
+            + "UDECK_PLUGIN_DOWNLOAD_BASE unset, where GitHub can be reached"
+        let written = await pin(["--repo", root.path, "--version", "0.6.0"], release: release, environment: mirror)
+        #expect(written.status == 0, "\(written.errors)")
+        #expect(written.output.first == "pinned udeck-plugin 0.6.0 in \(root.path)/.github/udeck-plugin.lock, "
+                + "from https://***@gitlab.example/udeck/v0.6.0/")
+        #expect(written.output.last == note)
+        let unchanged = await pin(["--repo", root.path, "--version", "0.6.0"], release: release, environment: mirror)
+        #expect(unchanged.output.last == note)
+        let checked = await pin(["--repo", root.path, "--check"], release: release, environment: mirror)
+        #expect(checked.status == 0)
+        #expect(checked.output.last == note)
+        let missing = await pin(["--repo", root.path, "--version", "0.6.1"], release: release, environment: mirror)
+        #expect(missing.status == 2)
+        for run in [written, unchanged, checked, missing] {
+            #expect(!(run.output + run.errors).joined().contains("S3CRET"), "\(run.output) \(run.errors)")
+        }
+        // The lock file written from the mirror, checked against GitHub's
+        // release: the same bytes there are a pass, others a failure.
+        var github = FakeRelease.release("0.6.0")
+        github.latest("0.6.0")
+        let same = await pin(["--repo", root.path, "--check"], release: github)
+        #expect(same.status == 0)
+        #expect(same.output.count == 1, "no note from GitHub: \(same.output)")
+        let other = await pin(["--repo", root.path, "--check"],
+                              release: FakeRelease.release("0.6.0", digest: "sha256:" + String(repeating: "e", count: 64)))
+        #expect(other.status == 1)
         withExtendedLifetime(temp) {}
     }
 
