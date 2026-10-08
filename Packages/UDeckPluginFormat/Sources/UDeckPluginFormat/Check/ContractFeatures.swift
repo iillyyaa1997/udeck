@@ -119,8 +119,10 @@ public enum ContractFeatures {
     /// It is in no release here: no release has it in the contract.
     public static let outsideTheContract: Set<String> = ["restart"]
 
-    /// The release this registry was last brought up to date for.
-    static let reviewedAt = "0.6.0"
+    /// The release this registry was last brought up to date for. 0.6.1
+    /// adds nothing to the contract: it publishes what 0.6.0 — tagged, never
+    /// published — holds, `minUDeck` among it.
+    static let reviewedAt = "0.6.1"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 

@@ -8,7 +8,26 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [0.6.0] — 2026-10-08
+## [0.6.1] — 2026-10-08
+
+What 0.6.0 holds, published. 0.6.0 was tagged, and its release stopped before
+it published anything: ghcr.io answered the image's index with 500 Internal
+Server Error, twice, because the index was annotated with the image's whole
+licence expression — a probe package showed it takes each part of it, a flat
+list of twelve licences, and the whole expression as the image's label.
+
+- **The image's licences are its label, not an annotation of its index.** The
+  expression is the same, every licence of the command and of the image's
+  Alpine packages, and the index carries no annotation of them.
+- **The sources of the image read aports from its GitHub mirror**, which a
+  GitHub runner can reach (gitlab.alpinelinux.org answers one with 418); every
+  object git takes is held to its id. And make-cli reads what it looks for
+  whole: under pipefail a `grep -q` that has its answer early could fail a
+  release by SIGPIPE, or let `readelf | grep -q INTERP` pass unread.
+
+## [0.6.0] — 2026-10-08 — tagged, not published
+
+Everything below first reaches anybody in 0.6.1.
 
 Plugins come from somewhere now. uDeck lists the official repository's plugins
 in Settings and installs, updates, takes back to an earlier version and removes

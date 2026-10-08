@@ -5,5 +5,5 @@
 /// to `CFBundleShortVersionString` in the app's Info.plist, so that the two
 /// cannot say different numbers.
 public enum UDeckRelease {
-    public static let version = "0.6.0"
+    public static let version = "0.6.1"
 }

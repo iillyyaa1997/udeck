@@ -298,7 +298,7 @@ nothing could be checked.
 The command a repository's CI runs is published with uDeck, in the same
 release and under the same version — `udeck-plugin --version` says the
 release's number, and a release whose command says another is not made. Every
-release from 0.6.0 on carries, besides uDeck itself:
+release from 0.6.1 on carries, besides uDeck itself:
 
 | Asset | What it is |
 |---|---|
@@ -319,7 +319,8 @@ GitLab CI hands a job's script to the image's shell, the check starts git, and
 `ALPINE-PACKAGES`: every Alpine package in it — git and BusyBox among them,
 under the GPL — with its version, its licence and its folder in aports at the
 commit it was built from; its `org.opencontainers.image.licenses` label names
-every licence there. The source of every package there under the GPL or the
+every licence there (a label of the image, not an annotation of the index:
+ghcr.io refuses an index annotated with that expression). The source of every package there under the GPL or the
 LGPL is the release's `udeck-plugin-image-sources-X.Y.Z.tar`, which
 `ALPINE-PACKAGES` and `THIRD_PARTY_NOTICES` name: `make-cli.sh sources` reads
 the list out of the image that ran, takes each package's aports folder by git
@@ -640,7 +641,7 @@ pull request has it. That rests on the review below.
 > 18, 19 and 20 — the version check, `minUDeck` and one-line names — which the
 > script does not have.
 >
-> What is there already: every uDeck release from 0.6.0 on carries
+> What is there already: every uDeck release from 0.6.1 on carries
 > the command itself ([Where the command comes from](#where-the-command-comes-from)),
 > and [the lock file](#the-lock-file) that names one release, read from the
 > base as the script is read now, with `udeck-plugin pin`, which writes it.
@@ -760,7 +761,7 @@ new optional fields are exactly what the `api: 1` promise allows.
 ```
 
 Optional, the same `MAJOR.MINOR.PATCH` grammar, compared with the running
-uDeck's own version (`CFBundleShortVersionString`, `0.6.0` at the time of
+uDeck's own version (`CFBundleShortVersionString`, `0.6.1` at the time of
 writing). Absent means "any uDeck that speaks my `api`".
 
 `api` and `minUDeck` answer different questions. `api` says which *contract*;
