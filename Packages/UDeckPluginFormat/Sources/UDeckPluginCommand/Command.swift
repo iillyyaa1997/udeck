@@ -51,7 +51,10 @@ public enum Command {
           --head <rev>  check: rule 18 (a changed plugin's version goes up), and
                         17 with --official. Without them, check-repo compares
                         versions with the commit before HEAD, and warns when the
-                        clone does not have it.
+                        clone does not have it. With --strict or --official, a
+                        rule the clone's history is too short to check is an
+                        error: fetch full history (fetch-depth: 0 on GitHub,
+                        GIT_DEPTH: 0 on GitLab)
           --repo <path> for check-repo, the repository (default: the current folder)
 
           new           a plugin that works and passes check --strict: in a plugin

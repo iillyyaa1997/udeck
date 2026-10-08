@@ -188,10 +188,13 @@ struct Git {
     /// The commit `revision` names, or a failure that says why the check could
     /// not be made.
     func commit(_ revision: String) throws -> String {
-        guard let commit = try commitIfAny(revision) else {
-            throw CheckFailure("\(revision) is not a commit in \(repository) — a pull request's checkout needs fetch-depth: 0")
-        }
+        guard let commit = try commitIfAny(revision) else { throw notACommit(revision) }
         return commit
+    }
+
+    /// What is said of a revision that names no commit here.
+    func notACommit(_ revision: String) -> CheckFailure {
+        CheckFailure("\(revision) is not a commit in \(repository) — a pull request's checkout needs fetch-depth: 0")
     }
 
     /// The commit `revision` names, or nil when it names none.
@@ -200,6 +203,17 @@ struct Git {
         guard result.status == 0 else { return nil }
         let text = Blank.trimmed(String(decoding: result.output, as: UTF8.self))
         return GitHash.isObjectID(text) ? text : nil
+    }
+
+    /// Whether this clone is shallow — made with a depth, so that history
+    /// stops short of where it began. `rev-parse --is-shallow-repository` has
+    /// answered it since git 2.15; the Linux CI image has 2.43.
+    func isShallow() throws -> Bool {
+        let said = Blank.trimmed(String(decoding: try run(["rev-parse", "--is-shallow-repository"]), as: UTF8.self))
+        guard said == "true" || said == "false" else {
+            throw CheckFailure("git rev-parse --is-shallow-repository said \"\(said)\", not true or false")
+        }
+        return said == "true"
     }
 
     /// How many parents `commit` names in itself — whether or not this clone

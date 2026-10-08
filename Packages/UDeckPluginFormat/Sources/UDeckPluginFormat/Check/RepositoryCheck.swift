@@ -61,14 +61,22 @@ public enum RepositoryCheck {
 
         let head = tree.commit ?? revision
         if let base = options.base, let headRevision = options.head {
-            let baseCommit = try git.commit(base)
+            // A base the clone does not hold is no check at all — unless the
+            // check is strict and the clone shallow: then it is the history a
+            // strict check needs and was not given, and it fails saying so.
+            let baseCommit = try git.commitIfAny(base)
+            if baseCommit == nil, !(try mode.strict && git.isShallow()) { throw git.notACommit(base) }
             let headCommit = try git.commit(headRevision)
-            if mode.official { try OfficialRules.signOffs(git, base: baseCommit, head: headCommit, report: &report) }
-            try VersionBump.check(git, base: baseCommit, head: headCommit, label: base, report: &report)
+            if let baseCommit {
+                if mode.official { try OfficialRules.signOffs(git, base: baseCommit, head: headCommit, report: &report) }
+                try VersionBump.check(git, base: baseCommit, head: headCommit, label: base, report: &report)
+            } else {
+                VersionBump.baseNotInAShallowClone(base, mode: mode, report: &report)
+            }
         } else {
             // A push, with nothing to name a base: the branch as it was before
             // this commit, which on a squash-merged branch is the target's tip.
-            try VersionBump.checkAgainstParent(git, head: head, report: &report)
+            try VersionBump.checkAgainstParent(git, head: head, mode: mode, report: &report)
         }
         if tree.entries[CommitListing.pluginsFolder]?.kind == .tree {
             report.pluginFolders = tree.children(of: CommitListing.pluginsFolder).filter { $0.kind == .tree }.count

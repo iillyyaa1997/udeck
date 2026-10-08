@@ -21,7 +21,19 @@ import Foundation
 /// (a byte order mark, `1e400` in a field nobody reads) is held to the rule
 /// all the same. A manifest uDeck cannot read at all is rule 3's error already,
 /// in every layer, and has no version to compare.
+///
+/// The rule needs history, and a clone made with a depth may not hold it. What
+/// it lacks is said, never passed; and a strict check — `--strict`, and so
+/// `--official` — does not pass what it could not check: there it is an error.
+/// A first commit is no lack of history: it has nothing before it anywhere.
 enum VersionBump {
+    /// How to get the history the rule needs, on GitHub Actions and on GitLab
+    /// CI — said wherever a clone lacks it.
+    static let fullHistory = "fetch full history (fetch-depth: 0 on GitHub, GIT_DEPTH: 0 on GitLab)"
+
+    /// Said, with what was missing, of a strict check that could not compare.
+    static let strictNotChecked = "and a strict check does not pass what it could not check"
+
     /// `label` is how the base is named to the author — `origin/main` — or nil
     /// when it is the commit before `head`.
     static func check(_ git: Git, base: String, head: String, label: String?, report: inout CheckReport) throws {
@@ -29,7 +41,7 @@ enum VersionBump {
             // Without the point they branched at, every folder would look
             // changed: a shallow clone, or histories that never met.
             report.error(CheckRule.versionBump, "", "cannot compare with \(label ?? String(base.prefix(12))): no common "
-                         + "history here — fetch full history (fetch-depth: 0)")
+                         + "history here — \(fullHistory)")
             return
         }
         let before = try folders(git, at: since)
@@ -73,14 +85,33 @@ enum VersionBump {
     /// Rule 18 for a push, which names no base: the commit before `head` is
     /// the base. A first commit has nothing before it to compare with; a
     /// commit whose parent a shallow clone left out has, and is said to be
-    /// unchecked rather than passed.
-    static func checkAgainstParent(_ git: Git, head: String, report: inout CheckReport) throws {
+    /// unchecked rather than passed — a warning, and in a strict check an
+    /// error.
+    static func checkAgainstParent(_ git: Git, head: String, mode: CheckMode, report: inout CheckReport) throws {
         if let parent = try git.commitIfAny(head + "^1") {
             try check(git, base: parent, head: head, label: nil, report: &report)
         } else if try git.parentsWritten(in: head) > 0 {
-            report.warning(CheckRule.versionBump, "", "rule 18 not checked: HEAD has no parent here — fetch history "
-                           + "(fetch-depth: 2 or 0)")
+            if mode.strict {
+                report.error(CheckRule.versionBump, "", "rule 18 not checked: HEAD has no parent here, \(strictNotChecked) "
+                             + "— \(fullHistory)")
+            } else {
+                report.warning(CheckRule.versionBump, "", "rule 18 not checked: HEAD has no parent here — fetch history "
+                               + "(fetch-depth: 2 or 0)")
+            }
         }
+    }
+
+    /// A strict check given a base that a shallow clone does not hold: rule 18
+    /// — and with `--official` rule 17, the sign-offs since that base — could
+    /// not be checked, and the check fails saying so. Outside a strict check,
+    /// or in a clone that is not shallow, such a base is no commit the check
+    /// can be made against at all (`Git.notACommit`).
+    static func baseNotInAShallowClone(_ base: String, mode: CheckMode, report: inout CheckReport) {
+        let missing = "\(base) is not in this clone, which is shallow"
+        if mode.official {
+            report.error("17", "", "rule 17 not checked: \(missing), \(strictNotChecked) — \(fullHistory)")
+        }
+        report.error(CheckRule.versionBump, "", "rule 18 not checked: \(missing), \(strictNotChecked) — \(fullHistory)")
     }
 
     /// The tree id of every folder directly under `plugins/` at `commit`.

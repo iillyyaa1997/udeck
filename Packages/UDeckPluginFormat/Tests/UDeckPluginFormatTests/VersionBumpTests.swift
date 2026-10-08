@@ -144,12 +144,37 @@ struct VersionBumpTests {
         #expect(try repository.check(.installable, base: base, head: fixed).findings.isEmpty)
     }
 
-    /// A clone of one commit, as a CI checkout is by default.
-    func shallowClone(of repository: TestRepository, branches: Bool = false) throws -> URL {
+    /// A clone of one commit, as a CI checkout is by default — or of `depth`
+    /// commits, of `branch` alone.
+    func shallowClone(of repository: TestRepository, branches: Bool = false, depth: Int = 1,
+                      branch: String? = nil) throws -> URL {
         let clone = repository.temp.url.appendingPathComponent("clone-\(UUID().uuidString)")
-        try CorpusGit.run(["clone", "-q", "--depth", "1"] + (branches ? ["--no-single-branch"] : [])
+        try CorpusGit.run(["clone", "-q", "--depth", "\(depth)"] + (branches ? ["--no-single-branch"] : [])
+                          + (branch.map { ["--branch", $0] } ?? [])
                           + ["file://\(repository.folder.path)", clone.path], in: repository.temp.url, scratch: repository.temp.url)
         return clone
+    }
+
+    /// A clone of the whole history, as `fetch-depth: 0` makes one.
+    func fullClone(of repository: TestRepository) throws -> URL {
+        let clone = repository.temp.url.appendingPathComponent("full-\(UUID().uuidString)")
+        try CorpusGit.run(["clone", "-q", "--no-local", "file://\(repository.folder.path)", clone.path],
+                          in: repository.temp.url, scratch: repository.temp.url)
+        return clone
+    }
+
+    func isShallow(_ clone: URL, in repository: TestRepository) throws -> Bool {
+        try CorpusGit.run(["rev-parse", "--is-shallow-repository"], in: clone, scratch: repository.temp.url)
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "true"
+    }
+
+    /// What a strict check says of history it was not given: an error, with
+    /// how to fetch it on GitHub and on GitLab.
+    static let fullHistory = "fetch full history (fetch-depth: 0 on GitHub, GIT_DEPTH: 0 on GitLab)"
+
+    static func notChecked(_ what: String, rule: String = "18") -> String {
+        "error: rule \(rule) not checked: \(what), and a strict check does not pass what it could not check — "
+            + "\(fullHistory) [rule \(rule)]"
     }
 
     func check(_ folder: URL, _ mode: CheckMode, base: String? = nil, head: String? = nil,
@@ -194,8 +219,138 @@ struct VersionBumpTests {
         let clone = try shallowClone(of: repository, branches: true)
         let report = try check(clone, .strict, base: "origin/main", head: "origin/topic", in: repository)
         #expect(report.findings.map(\.description) == [
-            "error: cannot compare with origin/main: no common history here — fetch full history (fetch-depth: 0) [rule 18]",
+            "error: cannot compare with origin/main: no common history here — \(Self.fullHistory) [rule 18]",
         ])
+    }
+
+    // MARK: - A strict check and the history it was not given (Q148)
+
+    /// Without --base: a clone of one commit has no parent of HEAD to compare
+    /// with. The installable check warns, as it always did; a strict one — and
+    /// the official one — fails, and says how to fetch the history.
+    @Test("in a clone of one commit, a strict check fails where rule 18 could not be checked; the installable one warns")
+    func strictInACloneOfOneCommit() throws {
+        let repository = try TestRepository()
+        try repository.commit(["plugins/sample/README.md": .text("# Sample, changed\n")])
+        let clone = try shallowClone(of: repository)
+        #expect(try isShallow(clone, in: repository))
+        let installable = try check(clone, .installable, in: repository)
+        #expect(installable.findings.map(\.description) == [
+            "warning: rule 18 not checked: HEAD has no parent here — fetch history (fetch-depth: 2 or 0) [rule 18]",
+        ])
+        #expect(installable.errors.isEmpty)
+        for mode in [CheckMode.strict, .official] {
+            let report = try check(clone, mode, in: repository)
+            #expect(report.findings.map(\.description) == [Self.notChecked("HEAD has no parent here")], "\(mode)")
+        }
+    }
+
+    /// Two commits are enough for a push: the parent is here, rule 18 is
+    /// checked, and a strict check holds the clone to it — not to being
+    /// shallow. It passes a bumped version and refuses one left as it was.
+    @Test("in a shallow clone that holds HEAD's parent, rule 18 is checked, and a strict check passes or fails on it")
+    func strictInACloneOfTwoCommits() throws {
+        let repository = try TestRepository()
+        try repository.commit(["plugins/sample/README.md": .text("# Sample, changed\n")])
+        let unbumped = try shallowClone(of: repository, depth: 2)
+        #expect(try isShallow(unbumped, in: repository))
+        for mode in [CheckMode.installable, .strict, .official] {
+            #expect(try check(unbumped, mode, in: repository).keys == ["error 18 \(Self.manifest)"], "\(mode)")
+        }
+        try repository.commit([Self.manifest: try Self.bumped("1.0.1")])
+        let bumped = try shallowClone(of: repository, depth: 2)
+        #expect(try isShallow(bumped, in: repository))
+        for mode in [CheckMode.installable, .strict, .official] {
+            #expect(try check(bumped, mode, in: repository).findings.isEmpty, "\(mode)")
+        }
+    }
+
+    /// A first commit names no parent: there is nothing before it anywhere,
+    /// and nothing for rule 18 to check, in a shallow clone or a whole one.
+    @Test("a first commit passes a strict check, in a clone of one commit and in a whole clone")
+    func strictOnAFirstCommit() throws {
+        let first = try TestRepository()
+        let shallow = try shallowClone(of: first)
+        let whole = try fullClone(of: first)
+        #expect(try !isShallow(whole, in: first))
+        for clone in [shallow, whole] {
+            for mode in [CheckMode.installable, .strict, .official] {
+                #expect(try check(clone, mode, in: first).findings.isEmpty, "\(clone.lastPathComponent) \(mode)")
+            }
+        }
+    }
+
+    /// With --base: a base a shallow clone of the pull request's branch does
+    /// not hold. A strict check fails on rule 18 — and the official one on 17
+    /// too, the sign-offs since that base — and says how to fetch it; the
+    /// installable check cannot be made, as before (exit status 2).
+    @Test("with a --base a shallow clone does not hold, a strict check fails on rule 18 (and 17), the installable one cannot check")
+    func strictWithABaseOutsideTheClone() throws {
+        let repository = try TestRepository()
+        try repository.git("checkout", "-q", "-b", "topic")
+        try repository.commit(["plugins/sample/README.md": .text("# On the topic\n")])
+        try repository.git("checkout", "-q", "main")
+        let base = try repository.commit(["LICENSE": .text("Moved on\n")])
+        let clone = try shallowClone(of: repository, branch: "topic")
+        #expect(try isShallow(clone, in: repository))
+        #expect(throws: CheckFailure.self) { try check(clone, .installable, base: base, head: "HEAD", in: repository) }
+        let missing = "\(base) is not in this clone, which is shallow"
+        #expect(try check(clone, .strict, base: base, head: "HEAD", in: repository).findings.map(\.description)
+                == [Self.notChecked(missing)])
+        #expect(try check(clone, .official, base: base, head: "HEAD", in: repository).findings.map(\.description)
+                == [Self.notChecked(missing, rule: "17"), Self.notChecked(missing)])
+
+        // The same base in a whole clone: checked, and the change refused.
+        let whole = try fullClone(of: repository)
+        try CorpusGit.run(["checkout", "-q", "topic"], in: whole, scratch: repository.temp.url)
+        for mode in [CheckMode.installable, .strict, .official] {
+            #expect(try check(whole, mode, base: base, head: "HEAD", in: repository).keys == ["error 18 \(Self.manifest)"],
+                    "\(mode)")
+        }
+    }
+
+    /// A clone that is not shallow and does not hold the base was given a
+    /// base it never had — a typo, a branch never fetched — and no history
+    /// would bring it: the check cannot be made, strict or not.
+    @Test("a --base a whole clone does not have is a check that cannot be made, strict or not")
+    func strictWithABaseNoHistoryHas() throws {
+        let repository = try TestRepository()
+        let whole = try fullClone(of: repository)
+        #expect(try !isShallow(whole, in: repository))
+        for mode in [CheckMode.installable, .strict, .official] {
+            #expect(throws: CheckFailure.self, "\(mode)") {
+                try check(whole, mode, base: "ffffffffffffffffffffffffffffffffffffffff", head: "HEAD", in: repository)
+            }
+        }
+    }
+
+    /// The command: exit status 1 with --strict and --official, 0 with a
+    /// warning without them; and with a base the shallow clone lacks, 1 with
+    /// --strict and 2 without.
+    @Test("check-repo on a clone too shallow for rule 18: 1 with --strict or --official, 0 or 2 as before without")
+    func strictShallowFromTheCommandLine() async throws {
+        let repository = try TestRepository()
+        try repository.git("checkout", "-q", "-b", "topic")
+        try repository.commit(["plugins/sample/README.md": .text("# On the topic\n")])
+        try repository.git("checkout", "-q", "main")
+        let base = try repository.commit(["LICENSE": .text("Moved on\n")])
+        let clone = try shallowClone(of: repository, branch: "topic")
+
+        let plain = await CommandTests().run("check-repo", "--repo", clone.path)
+        #expect(plain.status == 0, "\(plain.output)")
+        #expect(plain.output.contains { $0.hasPrefix("warning: rule 18 not checked: HEAD has no parent here") })
+        for flag in ["--strict", "--official"] {
+            let strict = await CommandTests().run("check-repo", flag, "--repo", clone.path)
+            #expect(strict.status == 1, "\(flag) \(strict.output)")
+            let said = strict.output.first { $0.hasPrefix("error: rule 18 not checked") } ?? ""
+            #expect(said.contains("fetch-depth: 0 on GitHub") && said.contains("GIT_DEPTH: 0 on GitLab"), "\(flag) \(said)")
+        }
+        let withBase = await CommandTests().run("check-repo", "--repo", clone.path, "--base", base, "--head", "HEAD")
+        #expect(withBase.status == 2, "\(withBase.output)")
+        let strictWithBase = await CommandTests().run("check-repo", "--strict", "--repo", clone.path, "--base", base,
+                                                      "--head", "HEAD")
+        #expect(strictWithBase.status == 1, "\(strictWithBase.output)")
+        #expect(strictWithBase.output.last?.hasSuffix("strictly: 1 error, 0 warnings") == true, "\(strictWithBase.output)")
     }
 
     /// A clone without blobs — `actions/checkout` with `filter: blob:none` —
@@ -236,7 +391,8 @@ struct VersionBumpTests {
         // whatever it is asked for, and stops when it cannot (Linux's CI image
         // has 2.43); GIT_NO_LAZY_FETCH=0 is how a newer one behaves the same:
         // rule 18 gives the same answer either way.
-        for (mode, extra) in [(CheckMode.installable, [:]), (.strict, [:]), (.installable, ["GIT_NO_LAZY_FETCH": "0"])] {
+        for (mode, extra) in [(CheckMode.installable, [:]), (.strict, [:]), (.official, [:]),
+                              (.installable, ["GIT_NO_LAZY_FETCH": "0"]), (.strict, ["GIT_NO_LAZY_FETCH": "0"])] {
             let againstBase = try check(clone, mode, base: "origin/main", head: "HEAD", in: repository, extra: extra)
             #expect(againstBase.findings.map(\.description) == ["error: cannot compare with origin/main: \(notHere)"],
                     "\(mode) \(extra)")
