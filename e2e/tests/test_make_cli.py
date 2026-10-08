@@ -726,7 +726,8 @@ def test_an_image_is_built_once_pushed_to_the_jobs_registry_and_run_from_it_by_i
     assert f"--output type=image,name={STAGE}:v{VERSION},push=true,oci-mediatypes=true" in build
     assert "--platform linux/amd64,linux/arm64" in build and "--provenance=false" in build and "--sbom=false" in build
     assert "--build-arg VERSION=9.9.9" in build and "--build-arg REVISION=c0ffee" in build
-    assert f"--build-arg LICENSES={LABEL} " in build and f"index:org.opencontainers.image.licenses={LABEL} " in build
+    # The licences are the image's label; an index annotated with them is what ghcr.io refused for v0.6.0.
+    assert f"--build-arg LICENSES={LABEL} " in build and "index:org.opencontainers.image.licenses" not in build
     assert "index:org.opencontainers.image.source=https://github.com/iillyyaa1997/udeck" in build
     ref = f"{STAGE}@{BUILT}"
     inspect = calls.index(f"buildx imagetools inspect --raw {ref}")

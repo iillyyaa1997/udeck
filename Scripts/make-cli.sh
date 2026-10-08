@@ -835,7 +835,12 @@ build_image() {
     # mirror of it on a GitLab — reads as it is. Attestations are a decision of
     # their own, not one to take in passing. OCI media types said rather than
     # left to BuildKit's default, which has changed between its versions: the
-    # index's annotations need them.
+    # index's annotations need them. The licences are the image's label and
+    # not an annotation of the index: ghcr.io answers an index annotated with
+    # the whole expression with 500 — v0.6.0's release (run 37778317117), and
+    # on a probe package an index with it alone, while it takes each part, a
+    # flat list of twelve, and the expression as the label (runs of the
+    # probe-ghcr workflow on the branch probe/ghcr-500).
     echo "==> Building $tag for $PLATFORMS and pushing it to the job's own registry"
     docker buildx build --builder "$BUILDER" --file "$context/Dockerfile" \
         --build-arg "VERSION=$version" --build-arg "REVISION=$REVISION" --build-arg "LICENSES=$licenses" \
@@ -844,7 +849,6 @@ build_image() {
         --annotation "index:org.opencontainers.image.description=$description" \
         --annotation "index:org.opencontainers.image.source=https://github.com/iillyyaa1997/udeck" \
         --annotation "index:org.opencontainers.image.version=$version" \
-        --annotation "index:org.opencontainers.image.licenses=$licenses" \
         --output "type=image,name=$tag,push=true,oci-mediatypes=true" \
         --metadata-file "$SCRATCH/built.json" "$context"
     local digest
