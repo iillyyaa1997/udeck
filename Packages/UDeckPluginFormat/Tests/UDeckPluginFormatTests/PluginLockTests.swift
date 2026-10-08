@@ -146,11 +146,37 @@ struct PluginLockTests {
     /// The locales it is run in: none said, as a job that sets none, and
     /// UTF-8, as most runners' images set — where `sed`, but for the reader's
     /// own `LC_ALL=C`, would read a line by characters, and a byte that is not
-    /// UTF-8 is one it cannot read at all.
+    /// UTF-8 is one it cannot read at all. C.UTF-8, which every Linux this
+    /// runs on has — Ubuntu's libc ships it, and glibc builds it in from 2.35
+    /// — and en_US.UTF-8, which every Mac has and a Linux image has only when
+    /// somebody generated it. A locale the machine does not have leaves the
+    /// shell's tools in C without a word, and a run "in UTF-8" would prove
+    /// nothing: each is run only where `locale -a` lists it, and the one this
+    /// platform must have (`utf8Locale`) is an issue when it does not.
     static let locales: [(name: String, environment: [String: String])] = [
         ("no locale", [:]),
+        ("C.UTF-8", ["LANG": "C.UTF-8", "LC_ALL": "C.UTF-8"]),
         ("en_US.UTF-8", ["LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8"]),
     ]
+
+    #if os(Linux)
+    static let utf8Locale = "C.UTF-8"
+    #else
+    static let utf8Locale = "en_US.UTF-8"
+    #endif
+
+    /// A locale's name in one spelling: `locale -a` says en_US.utf8 on a
+    /// Linux, en_US.UTF-8 on a Mac.
+    static func spelling(_ name: String) -> String {
+        name.lowercased().replacingOccurrences(of: "utf-8", with: "utf8")
+    }
+
+    /// The locales `locale -a` says this machine has, in that spelling.
+    static func installedLocales() throws -> Set<String> {
+        let ran = try Subprocess.run(["/usr/bin/locale", "-a"], environment: ["PATH": "/usr/bin:/bin"])
+        guard ran.status == 0 else { return [] }
+        return Set(String(decoding: ran.output, as: UTF8.self).split(separator: "\n").map { spelling(String($0)) })
+    }
 
     /// Files with bytes outside ASCII, as UTF-8 and not: what a range in a
     /// pattern or a byte a locale cannot read could make the shell take.
@@ -238,8 +264,13 @@ struct PluginLockTests {
         }
         let swift = corpus.map { Self.swiftReading($0.1) }
         #expect(swift.filter { $0 != "refused" }.count == goods.count, "every good file is read and no other")
+        let installed = try Self.installedLocales()
+        #expect(installed.contains(Self.spelling(Self.utf8Locale)),
+                "\(Self.utf8Locale) is not among this machine's locales (locale -a): a run in it would be one in C")
+        let locales = Self.locales.filter { $0.environment.isEmpty || installed.contains(Self.spelling($0.name)) }
+        #expect(locales.count >= 2, "the reader ran in no UTF-8 locale: \(locales.map(\.name))")
         for shell in Self.shells {
-            for (locale, set) in Self.locales {
+            for (locale, set) in locales {
                 let environment = ["PATH": "/usr/bin:/bin", "TMPDIR": temp.url.path].merging(set) { $1 }
                 let ran = try Subprocess.run([shell, script.path] + files, environment: environment)
                 #expect(ran.status == 0, "\(shell), \(locale): \(String(decoding: ran.errors, as: UTF8.self))")
