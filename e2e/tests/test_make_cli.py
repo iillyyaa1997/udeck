@@ -1134,7 +1134,8 @@ def test_the_sources_are_read_from_the_alpine_release_the_image_is_built_on():
     release = re.search(r"^FROM alpine:(\d+\.\d+)\.\d+@sha256:", dockerfile, re.M).group(1)
     script = (REPO / "Scripts" / "make-cli.sh").read_text()
     assert re.findall(r'^DISTFILES="(.*)"$', script, re.M) == [f"https://distfiles.alpinelinux.org/distfiles/v{release}"]
-    assert re.findall(r'^APORTS="(.*)"$', script, re.M) == ["https://gitlab.alpinelinux.org/alpine/aports.git"]
+    # aports from its GitHub mirror: Alpine's GitLab turns GitHub's runners away.
+    assert re.findall(r'^APORTS="(.*)"$', script, re.M) == ["https://github.com/alpinelinux/aports.git"]
 
 
 def alpine_packages_script(tmp_path, installed):

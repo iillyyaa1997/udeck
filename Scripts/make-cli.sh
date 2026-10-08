@@ -138,8 +138,11 @@ NOTICES="Scripts/third-party/THIRD_PARTY_NOTICES"
 LOCK_READER='/^<!-- \/lock-reader -->$/ { inside = 0 } inside && !/^```/ { print } /^<!-- lock-reader -->$/ { inside = 1 }'
 # Where the sources of the image's Alpine packages are read from: aports, by
 # git, and the upstream archives Alpine keeps for the release the image is
-# built on — the Dockerfile's FROM, which a test holds to this one.
-APORTS="https://gitlab.alpinelinux.org/alpine/aports.git"
+# built on — the Dockerfile's FROM, which a test holds to this one. aports is
+# read from its mirror on GitHub: gitlab.alpinelinux.org answers a GitHub
+# runner with 418 (run 37715962002), and every object git takes from the
+# mirror is held to its id, so the mirror decides nothing.
+APORTS="https://github.com/alpinelinux/aports.git"
 DISTFILES="https://distfiles.alpinelinux.org/distfiles/v3.24"
 
 # The licences of what the image holds, for its licenses label, one SPDX
