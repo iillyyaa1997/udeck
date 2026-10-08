@@ -258,19 +258,29 @@ compares versions with the commit before `HEAD`, which on a branch that is
 only ever squash-merged into is the branch as it was.
 
 Rule 18 needs history, and a CI checkout has one commit unless told otherwise.
-Without `--base`, a `HEAD` whose parent the clone left out gets a warning —
-*"rule 18 not checked: HEAD has no parent here — fetch history (fetch-depth: 2
-or 0)"* — rather than passing unseen; a first commit, which has no parent
-anywhere, gets nothing. With `--base`, a base whose history does not meet the
-head's in the clone is an error — *"cannot compare with origin/main: no common
-history here — fetch full history (fetch-depth: 0)"* — rather than every
-plugin looking changed. A clone without blobs (`filter: blob:none`) has every
-commit and tree and only the files it checked out, and the check fetches
-nothing: a manifest the base lists and the clone does not hold is an error too
-— *"cannot compare with origin/main: plugins/uptime/manifest.json is not in
-this clone — fetch without a blob filter"* — rather than the plugin passing as
-new. Any other file the check must read and the clone does not hold, the
-passport first, makes it exit 2: the check could not be made.
+What the clone lacks is said, never passed, and a strict check — `--strict`,
+and so `--official` — does not pass what it could not check. Without `--base`,
+a `HEAD` whose parent the clone left out gets a warning — *"rule 18 not
+checked: HEAD has no parent here — fetch history (fetch-depth: 2 or 0)"* — and
+in a strict check an error: *"rule 18 not checked: HEAD has no parent here,
+and a strict check does not pass what it could not check — fetch full history
+(fetch-depth: 0 on GitHub, GIT_DEPTH: 0 on GitLab)"*. A first commit, which
+has no parent anywhere, gets nothing in either. With `--base`, a base whose
+history does not meet the head's in the clone is an error in every layer —
+*"cannot compare with origin/main: no common history here — fetch full history
+(fetch-depth: 0 on GitHub, GIT_DEPTH: 0 on GitLab)"* — rather than every
+plugin looking changed. A base a shallow clone does not hold at all is, in a
+strict check, an error of rule 18 too — *"rule 18 not checked: origin/main is
+not in this clone, which is shallow, …"* — and of rule 17 with `--official`;
+outside a strict check it is a check that could not be made, exit status 2, as
+is a base that a clone with its whole history does not have. A clone without
+blobs (`filter: blob:none`) has every commit and tree and only the files it
+checked out, and the check fetches nothing: a manifest the base lists and the
+clone does not hold is an error too — *"cannot compare with origin/main:
+plugins/uptime/manifest.json is not in this clone — fetch without a blob
+filter"* — rather than the plugin passing as new. Any other file the check
+must read and the clone does not hold, the passport first, makes it exit 2:
+the check could not be made.
 
 A repository is read through git at one commit, never through its working
 tree. One plugin folder is read the same way when it is committed in a git
@@ -294,8 +304,9 @@ release from 0.6.0 on carries, besides uDeck itself:
 |---|---|
 | `udeck-plugin-X.Y.Z-macos-universal.tar.gz` | arm64 and x86_64 in one binary, signed as the copy inside uDeck.app (ad-hoc, hardened runtime) — for a Mac without uDeck, and a macOS runner |
 | `udeck-plugin-X.Y.Z-linux-x86_64.tar.gz`, `-linux-aarch64.tar.gz` | a static musl binary, stripped: no dynamic loader, no shared library — any Linux of its architecture runs it with nothing installed |
-| `SHA256SUMS` | the sha256 of the three archives and of the file below |
-| `udeck-plugin-image.txt` | the container image: `image=ghcr.io/iillyyaa1997/udeck-plugin`, `tag=vX.Y.Z`, `digest=sha256:…` (of the index), `platforms=linux/amd64,linux/arm64` — the digest is also the first thing in the release's notes |
+| `SHA256SUMS` | the sha256 of the three archives and of the two files below |
+| `udeck-plugin-image.txt` | the container image: `image=ghcr.io/iillyyaa1997/udeck-plugin`, `tag=vX.Y.Z`, `digest=sha256:…` (of the index), `platforms=linux/amd64,linux/arm64` — the digest is also in the release's notes, on their third line |
+| `udeck-plugin-image-sources-X.Y.Z.tar` | the source of every Alpine package in the image under the GPL or the LGPL: one folder with each package's folder of Alpine's aports at the commit it was built from, the upstream archives its APKBUILD names, a README that lists the packages, and `SHA512SUMS` |
 
 Each archive is one folder, `udeck-plugin-X.Y.Z-<platform>/`, with the
 command, `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES` — what else the
@@ -306,10 +317,16 @@ the same static binary at `/usr/local/bin/udeck-plugin`, and no `ENTRYPOINT`:
 GitLab CI hands a job's script to the image's shell, the check starts git, and
 `pin` curl. Its `/usr/share/licenses/udeck-plugin/` holds the same three texts and
 `ALPINE-PACKAGES`: every Alpine package in it — git and BusyBox among them,
-under the GPL — with its version, its licence and the aports commit it was
-built from, where its source is; its `org.opencontainers.image.licenses`
-label names every licence there. Pull it by its digest — a tag can be moved, a
-digest cannot:
+under the GPL — with its version, its licence and its folder in aports at the
+commit it was built from; its `org.opencontainers.image.licenses` label names
+every licence there. The source of every package there under the GPL or the
+LGPL is the release's `udeck-plugin-image-sources-X.Y.Z.tar`, which
+`ALPINE-PACKAGES` and `THIRD_PARTY_NOTICES` name: `make-cli.sh sources` reads
+the list out of the image that ran, takes each package's aports folder by git
+at its commit — so each file is the one that commit holds — and the upstream
+archives its APKBUILD names from Alpine's distfiles, each held to the sha512
+the APKBUILD gives, before the image is published. Pull it by its digest — a
+tag can be moved, a digest cannot:
 
 ```sh
 docker run --rm --network none -v "$PWD:/repo:ro" \
@@ -319,17 +336,21 @@ docker run --rm --network none -v "$PWD:/repo:ro" \
 
 Read-only and without a network is how it is meant to run: the check needs
 neither, and opens git's `safe.directory` for the mounted repository itself.
-It does need history: rule 18 compares HEAD with the commit before it, and on
-a clone that has only HEAD — what `actions/checkout` fetches by default — rule
-18 is not checked, a warning says so, and the exit status is 0. GitLab CI
-fetches the last 20 commits of a new project by default (its *Git shallow
-clone* setting, which the variable `GIT_DEPTH` overrides): enough while the
-commit to compare with is among them. Give `actions/checkout` `fetch-depth:
-0`, and set `GIT_DEPTH: "0"` in GitLab CI. `--base` and `--head` choose which
-commit HEAD is compared with when the clone holds it — the target branch's tip
-for a pull request — and do not make up for history the clone lacks: a
-`--base` it does not have is *"not a commit in … — a pull request's checkout
-needs fetch-depth: 0"*, exit status 2.
+It does need history, and `--strict` requires it: rule 18 compares HEAD with
+the commit before it, and on a clone that has only HEAD — what
+`actions/checkout` fetches by default — `check-repo --strict` exits 1, *"rule
+18 not checked: HEAD has no parent here, …"*; without `--strict` a warning
+says so and the exit status is 0. GitLab CI fetches the last 20 commits of a
+new project by default (its *Git shallow clone* setting, which the variable
+`GIT_DEPTH` overrides): enough while the commit to compare with is among them,
+and not for a merge request whose base is further back. Give
+`actions/checkout` `fetch-depth: 0`, and set `GIT_DEPTH: "0"` in GitLab CI —
+with `--strict`, the rule for any repository's CI, that is a requirement, not
+advice. `--base` and `--head` choose which commit HEAD is compared with when
+the clone holds it — the target branch's tip for a pull request — and do not
+make up for history the clone lacks: a `--base` a shallow clone does not have
+fails a strict check, exit status 1, and without `--strict` is *"not a commit
+in … — a pull request's checkout needs fetch-depth: 0"*, exit status 2.
 
 Everything is made by `Scripts/make-cli.sh` and published by `release.yml` in
 the one `gh release create` that publishes the app — uDeck's releases are
@@ -337,12 +358,14 @@ immutable, so a release cannot take an asset afterwards — with the image
 pushed before it: built once from the same archives, pushed to a registry of
 the release job's own, pulled from it by its digest and run on both
 platforms (`--version`, `check` and `check-repo` on the examples, and `pin` on
-a release on the image's own disk), and only then copied by that digest to
-ghcr.io, byte for byte. `ci.yml` does all of it on every push — the copy goes
-to a second registry of the job's own, which asks for a login as ghcr.io does
-— and writes the image file, `SHA256SUMS` and the notes as a release does,
-then pins that release as a plugin repository would and reads the lock file
-as its CI will, publishing nothing.
+a release on the image's own disk), its sources gathered, and only then copied
+by that digest to ghcr.io, byte for byte. `ci.yml` does all of it on every
+push — the sources downloaded afresh each time, with no cache, since a
+release downloads them too; the copy to a second registry of the job's own,
+which asks for a login as ghcr.io does — and writes the image file,
+`SHA256SUMS` and the notes as a release does, then pins that release as a
+plugin repository would and reads the lock file as its CI will, publishing
+nothing.
 
 #### The lock file
 
@@ -434,7 +457,11 @@ the base, never from the checkout, which holds the pull request's:
 # hold — on GitHub Actions ${{ github.event.pull_request.base.sha }} for a
 # pull request and ${{ github.sha }} for a push to the default branch, whose
 # lock file is the merged one; on GitLab CI $CI_MERGE_REQUEST_DIFF_BASE_SHA
-# for a merge request and $CI_COMMIT_SHA for a push.
+# in a merge request pipeline, and $CI_COMMIT_SHA only in a pipeline of the
+# default branch ($CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH), whose lock file is
+# the merged one. A branch pipeline of a merge request's branch has no base
+# to read it from — its own lock file would choose the check that judges it:
+# run the check in merge request pipelines, not there.
 lock="$(mktemp)"
 git show "$BASE_SHA:.github/udeck-plugin.lock" > "$lock" || exit 1
 read_udeck_plugin_lock "$lock" || exit 1
@@ -447,11 +474,11 @@ tar -xzf "$archive"
 
 A base with no lock file — before the first one is merged — has chosen no
 release, and the job stops there. `git show` needs the base in the clone,
-which is the history rule 18 needs as well (`fetch-depth: 0`, `GIT_DEPTH:
-"0"`). A login in `UDECK_PLUGIN_DOWNLOAD_BASE` would be in this `curl`'s
-arguments, where every process on the runner can read it; give it to curl
-another way there — `--netrc-file`, or a `--config` on standard input, as
-`pin` does.
+which is the history a strict check requires for rule 18 as well
+(`fetch-depth: 0`, `GIT_DEPTH: "0"`). A login in `UDECK_PLUGIN_DOWNLOAD_BASE`
+would be in this `curl`'s arguments, where every process on the runner can
+read it; give it to curl another way there — `--netrc-file`, or a `--config`
+on standard input, as `pin` does.
 
 #### `udeck-plugin pin`
 
@@ -468,10 +495,10 @@ the release's `SHA256SUMS` and `udeck-plugin-image.txt` and holds them to one
 another before it writes anything: the image file exactly as a release writes
 it (`image=…/udeck-plugin`, `tag=vX.Y.Z` of the release asked for, a whole
 `digest=`, both platforms, nothing more), the sums one line for each of the
-three archives and the image file and for nothing else, and the image file the
-very one the sums name, by its sha256. Two files that disagree are not two
-halves of one release, and nothing is written. A lock file that is already what
-the release has is left untouched.
+three archives, the image file and the image's sources and for nothing else,
+and the image file the very one the sums name, by its sha256. Two files that
+disagree are not two halves of one release, and nothing is written. A lock
+file that is already what the release has is left untouched.
 
 `--check` writes nothing. It exits 0 when the lock file is exactly what `pin`
 would write for the release, and 1 when it is not, saying which line differs —
@@ -619,7 +646,8 @@ pull request has it. That rests on the review below.
 > base as the script is read now, with `udeck-plugin pin`, which writes it.
 > What comes next: `validate` running the binary the base's lock file pins
 > beside the script, failing when the two disagree, until they have agreed
-> long enough for the script to go.
+> long enough for the script to go — on a checkout with its whole history,
+> which `--official` requires for rules 17 and 18.
 
 **Branch protection is what "Verified" rests on.** On `main`: a pull request
 is required, with no exception for administrators; `validate` must pass; force
@@ -1650,8 +1678,10 @@ never the network. What they cover:
   long;
 * the repository check: the corpus of what the Python check said about 273
   repositories, replayed in every layer, and the words of every finding; rule
-  18 against a base, against the commit before, in a clone of one commit,
-  without a common history and in a clone without blobs; rule 19 against a
+  18 against a base, against the commit before, in a clone of one commit (a
+  warning, and in a strict check an error) and of two, with a base a shallow
+  clone does not hold, on a first commit, without a common history and in a
+  clone without blobs; rule 19 against a
   registry every part of the contract is dated in; rule 20 against every kind
   of character it refuses, at both ends of each range, and the ones beside
   them; git reading a repository whose configuration names a clean filter, a

@@ -151,15 +151,17 @@ docker run --rm --network none -v "$PWD:/repo:ro" \
   udeck-plugin check-repo --repo /repo --strict
 ```
 
-Run it on a checkout with history. Rule 18 — a changed plugin's version goes
-up — compares HEAD with the commit before it. `actions/checkout` fetches only
-HEAD unless told otherwise: there the rule is not checked, the check says so in
-a warning, and it exits 0. GitLab CI fetches a new project's last 20 commits,
-enough while the commit to compare with is among them. Give `actions/checkout`
-`fetch-depth: 0`, and set `GIT_DEPTH: "0"` in GitLab CI. `--base` and `--head`
-name the commits to compare when the clone holds them — the target branch's
-tip, for a pull request — and do not stand in for the history: a `--base` the
-clone lacks makes the check exit 2.
+Run it on a checkout with its whole history: `--strict` requires it. Rule 18 —
+a changed plugin's version goes up — compares HEAD with the commit before it.
+`actions/checkout` fetches only HEAD unless told otherwise: there the rule
+cannot be checked, and `check-repo --strict` exits 1 saying so (without
+`--strict`, a warning, and 0). GitLab CI fetches a new project's last 20
+commits, enough while the commit to compare with is among them. Give
+`actions/checkout` `fetch-depth: 0`, and set `GIT_DEPTH: "0"` in GitLab CI.
+`--base` and `--head` name the commits to compare when the clone holds them —
+the target branch's tip, for a pull request — and do not stand in for the
+history: a `--base` a shallow clone lacks fails a strict check (exit 1), and
+makes the check without `--strict` exit 2.
 
 A plugin repository pins the one release its CI runs in
 `.github/udeck-plugin.lock` — its version, the sha256 of its archives and the
