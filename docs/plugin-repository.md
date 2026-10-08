@@ -288,7 +288,7 @@ nothing could be checked.
 The command a repository's CI runs is published with uDeck, in the same
 release and under the same version — `udeck-plugin --version` says the
 release's number, and a release whose command says another is not made. Every
-release from the one after 0.5.0 carries, besides uDeck itself:
+release from 0.6.0 on carries, besides uDeck itself:
 
 | Asset | What it is |
 |---|---|
@@ -385,7 +385,10 @@ downloaded from `$UDECK_PLUGIN_DOWNLOAD_BASE/v<version>/`, GitHub's
 `https://github.com/iillyyaa1997/udeck/releases/download` unless a variable
 names another place laid out the same way. The variable says where, the file
 says what: a mirror that hands out other bytes makes the job red rather than
-running them.
+running them — as long as the file holds GitHub's sums. A lock file `pin`
+wrote from a mirror holds the mirror's, whatever they are, so it is checked
+against GitHub's release before it is merged ([`udeck-plugin
+pin`](#udeck-plugin-pin)).
 
 This is how a CI job reads it: the five values by `sed`, then the file held
 to the five lines they make, byte for byte. A test holds it to
@@ -423,16 +426,32 @@ read_udeck_plugin_lock() {
 ```
 <!-- /lock-reader -->
 
-And with it, the Linux archive a job runs:
+And with it, the Linux archive a job runs — the lock file read out of git at
+the base, never from the checkout, which holds the pull request's:
 
 ```sh
-read_udeck_plugin_lock .github/udeck-plugin.lock || exit 1
+# BASE_SHA: the commit the change is checked against, which the clone must
+# hold — on GitHub Actions ${{ github.event.pull_request.base.sha }} for a
+# pull request and ${{ github.sha }} for a push to the default branch, whose
+# lock file is the merged one; on GitLab CI $CI_MERGE_REQUEST_DIFF_BASE_SHA
+# for a merge request and $CI_COMMIT_SHA for a push.
+lock="$(mktemp)"
+git show "$BASE_SHA:.github/udeck-plugin.lock" > "$lock" || exit 1
+read_udeck_plugin_lock "$lock" || exit 1
 base="${UDECK_PLUGIN_DOWNLOAD_BASE:-https://github.com/iillyyaa1997/udeck/releases/download}"
 archive="udeck-plugin-$version-linux-x86_64.tar.gz"
 curl -fsSLO "$base/v$version/$archive"
 echo "$linux_x86_64  $archive" | sha256sum -c -
 tar -xzf "$archive"
 ```
+
+A base with no lock file — before the first one is merged — has chosen no
+release, and the job stops there. `git show` needs the base in the clone,
+which is the history rule 18 needs as well (`fetch-depth: 0`, `GIT_DEPTH:
+"0"`). A login in `UDECK_PLUGIN_DOWNLOAD_BASE` would be in this `curl`'s
+arguments, where every process on the runner can read it; give it to curl
+another way there — `--netrc-file`, or a `--config` on standard input, as
+`pin` does.
 
 #### `udeck-plugin pin`
 
@@ -476,7 +495,22 @@ between the two requests is a refusal, never a lock of two releases.
 `UDECK_PLUGIN_DOWNLOAD_BASE` moves `pin` too: an `https://` or a `file://`
 address laid out as GitHub's — `v<version>/` for each release, and
 `…/latest/download/` beside a `…/download` for the latest — and never plain
-`http://`, since `pin` writes what it reads into the file a CI trusts.
+`http://`, since `pin` writes what it reads into the file a CI trusts. It may
+carry a login, `https://user:token@host/…`, as a private GitLab's generic
+packages ask: `pin` says the address with the login as `***` wherever it says
+it, and hands it to curl on standard input.
+
+**A mirror is trusted for what it serves.** `pin` holds a release's two files
+to each other, and two files a mirror serves can agree with each other and
+not with anything GitHub published: a lock file written from a mirror holds
+the mirror's sums, and a job that reads it later checks downloads against
+those. So `pin` says so whenever it reads from anywhere but GitHub — *"note:
+UDECK_PLUGIN_DOWNLOAD_BASE is https://\*\*\*@gitlab.example/udeck, not GitHub's
+releases: the lock file holds what that place serves — check it against
+GitHub's release with udeck-plugin pin --check, UDECK_PLUGIN_DOWNLOAD_BASE
+unset, where GitHub can be reached"* — and a lock file written from a mirror
+is checked that way, by a job that reaches GitHub or by its author, before it
+is merged.
 
 **How it reads.** With curl, the system's, started as `curl` on the `PATH`:
 there on every Mac and every GitHub runner, and in the image. Curl takes its
@@ -485,14 +519,16 @@ proxy from the environment as its manual says — `https_proxy` or
 for the hosts it reaches directly — so a runner that reaches GitHub only
 through a proxy needs nothing but those variables. `pin` asks for nothing over
 plain HTTP, so `http_proxy` and `HTTP_PROXY` never apply. Curl is told only
-the address and how to fetch it (`-q`: no `.curlrc`; redirects followed to
+how to fetch, in its arguments (`-q`: no `.curlrc`; redirects followed to
 `https://` only, at most ten; three tries on what curl calls transient; at
-most 1 MiB). Not Foundation's URLSession: it lives in FoundationNetworking,
+most 1 MiB), and the address on its standard input, a one-line config (`--config
+-`): never among the arguments, which every process on the machine can read
+while curl runs. Not Foundation's URLSession: it lives in FoundationNetworking,
 which the static Linux binary leaves out — it would bring the rest of
 Foundation, ICU and libcurl into every copy, and nothing here proves the
 Static Linux SDK links it. The tests go on no network: they hand `pin` a fake
-release, a fake curl that says what it was given, and the real curl a
-`file://` release.
+release, a fake curl that says what it was given and read, and the real curl
+a `file://` release.
 
 **What git is told, and what it is not.** Git runs with nobody's global or
 system configuration and no `GIT_` variable inherited. A repository's own
@@ -577,7 +613,7 @@ pull request has it. That rests on the review below.
 > 18, 19 and 20 — the version check, `minUDeck` and one-line names — which the
 > script does not have.
 >
-> What is there already: every uDeck release from the one after 0.5.0 carries
+> What is there already: every uDeck release from 0.6.0 on carries
 > the command itself ([Where the command comes from](#where-the-command-comes-from)),
 > and [the lock file](#the-lock-file) that names one release, read from the
 > base as the script is read now, with `udeck-plugin pin`, which writes it.
@@ -692,11 +728,11 @@ new optional fields are exactly what the `api: 1` promise allows.
 ### `minUDeck`
 
 ```json
-"minUDeck": "0.6.0"
+"minUDeck": "0.8.0"
 ```
 
 Optional, the same `MAJOR.MINOR.PATCH` grammar, compared with the running
-uDeck's own version (`CFBundleShortVersionString`, `0.5.0` at the time of
+uDeck's own version (`CFBundleShortVersionString`, `0.6.0` at the time of
 writing). Absent means "any uDeck that speaks my `api`".
 
 `api` and `minUDeck` answer different questions. `api` says which *contract*;
@@ -725,11 +761,11 @@ introduced each manifest field, setting type and permission kind — every part
 of the contract is dated, the variables a producer and a card's action are
 handed included, and a test fails on one that is not — reads the manifest,
 and tells the author the lowest `minUDeck` that is true. Every part of the
-contract today came in uDeck 0.1.0, before any release that reads `minUDeck`,
-so no plugin needs one yet. A plugin that declares one no higher than the
-release that first reads it is told it does nothing; while that release has
-no number yet, that is any version up to the smallest it can have — 0.5.1
-after 0.5.0. A higher one is the author's to set, and is left alone.
+contract today came in uDeck 0.1.0, before 0.6.0, the first release that reads
+`minUDeck`, so no plugin needs one yet. A plugin that declares 0.6.0 or lower
+is told it does nothing: every uDeck that reads the field meets it (below
+0.1.0 it is an error: nothing of the contract was there). A higher one is the
+author's to set, and is left alone.
 
 What a producer *prints* — which row types its cards use — cannot be seen
 without running it, so the check does not see it. `udeck-plugin run` sees one

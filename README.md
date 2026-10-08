@@ -119,8 +119,8 @@ from there: a plugin you work on is linked in — `udeck-plugin link`, or **Link
 a folder…** in Settings — and runs from where it is.
 
 Without uDeck — on Linux, or on a Mac that does not run it — take the command
-from a [release](https://github.com/iillyyaa1997/udeck/releases): from the one
-after 0.5.0 on, each carries it for macOS (arm64 and x86_64 in one binary) and
+from a [release](https://github.com/iillyyaa1997/udeck/releases): from 0.6.0
+on, each carries it for macOS (arm64 and x86_64 in one binary) and
 for Linux (x86_64 and aarch64, static: nothing else to install), and
 `SHA256SUMS` over them. Check the archive before you run what is in it:
 
