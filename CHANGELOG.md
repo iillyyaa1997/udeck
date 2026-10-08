@@ -8,7 +8,19 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.6.0] — 2026-10-08
+
+Plugins come from somewhere now. uDeck lists the official repository's plugins
+in Settings and installs, updates, takes back to an earlier version and removes
+them — every file checked against the hash the repository lists, the folder
+swapped into place in one step, and nothing a person put into a plugin's folder
+thrown away without saying so first. Somebody writing a plugin gets
+`udeck-plugin`, which checks a plugin with the code uDeck itself runs, inside
+uDeck.app, and links a working copy in to run from where it is. And a release
+carries more than the app for the first time: the command as archives for
+macOS and Linux and as a container image, which a plugin repository's CI pins,
+by its digest, in a lock file — with the source of the image's GPL and LGPL
+packages beside it.
 
 - **`udeck-plugin pin` and the lock file.** A plugin repository names the one
   release of `udeck-plugin` its CI runs in `.github/udeck-plugin.lock`, on
@@ -21,11 +33,20 @@ for what that promises.
   Releases are GitHub's unless `UDECK_PLUGIN_DOWNLOAD_BASE` names another
   place laid out the same way (`https://` or `file://`, never plain `http://`);
   they are read with the system's curl, which takes its proxy from
-  `HTTPS_PROXY` and `NO_PROXY`. A release from before the command was
-  published — 0.5.0 and earlier — is said to be one. The specification gives
-  the shell reading a CI runs, with `sed` and never `source`, and a test holds
-  it to the command's own on a corpus of good and bad files. The image now
-  holds curl too, for `pin`.
+  `HTTPS_PROXY` and `NO_PROXY`. A login in that address
+  (`https://user:token@…`, as a private GitLab's generic packages ask) is said
+  as `***` wherever `pin` says the address, and reaches curl on its standard
+  input, never among its arguments, which any process on the machine can
+  read. Pinned from anywhere but GitHub, `pin` says that the lock file holds
+  what that place serves — two files a mirror serves can agree with each other
+  and with nothing GitHub published — and that `pin --check` against GitHub's
+  release is what tells. A release from before the command was published —
+  0.5.0 and earlier — is said to be one. The specification gives the shell
+  reading a CI runs, with `sed` and never `source`, on the lock file of the
+  change's base, read out of git rather than from the pull request's checkout;
+  a test holds it to the command's own on a corpus of good and bad files, in a
+  UTF-8 locale too and with bytes outside ASCII, and the image runs it with its
+  own BusyBox on every push. The image now holds curl too, for `pin`.
 
 - **`udeck-plugin` without uDeck.** Every release carries the command for
   whoever has no uDeck to take it from: `udeck-plugin-X.Y.Z-macos-universal.tar.gz`
@@ -52,6 +73,30 @@ for what that promises.
   lists every Alpine package in it with its licence and where its source is,
   and its licenses label names them all.
 
+- **The source of the image's GPL and LGPL packages goes out with it.** Git,
+  BusyBox and the other Alpine packages in the image under the GPL or the LGPL
+  (on 2026-10-07's index also apk-tools, musl's utilities, scanelf, libidn2,
+  libunistring, zstd's library and Alpine's base layout) have their source in
+  the same release: `udeck-plugin-image-sources-X.Y.Z.tar`, one asset and one
+  line of `SHA256SUMS` — each package's folder of Alpine's aports at the
+  commit it was built from, read by git, and the upstream archives its
+  APKBUILD names, from Alpine's distfiles, each held to the sha512 the
+  APKBUILD gives, with a README and a `SHA512SUMS` of everything in it. It is
+  gathered from the package list of the very image that ran, before that
+  image is published, and the image's `ALPINE-PACKAGES` and
+  `THIRD_PARTY_NOTICES` name it. CI gathers it on every push, as a release
+  does, and `udeck-plugin pin` knows it as one of a release's files.
+
+- **`check-repo --strict` fails where rule 18 could not be checked.** A clone
+  too shallow to compare a changed plugin's version — the one commit
+  `actions/checkout` fetches by default, or a `--base` a shallow clone does not
+  hold — got a warning and passed, or exited 2. With `--strict`, and so
+  `--official`, it is an error now, exit status 1, that says how to fetch the
+  history: `fetch-depth: 0` on GitHub, `GIT_DEPTH: 0` on GitLab — and with
+  `--official`, for a base the clone lacks, rule 17's sign-offs too. A first
+  commit, which has nothing before it, still passes, and without `--strict`
+  nothing changes.
+
 - **Every button that takes a link away says so first.** **Update**, **Switch
   to**, **Reinstall**, **Back to** and **Install this version** over a plugin
   whose place holds a link — one put there while the warning about the copy was
@@ -72,7 +117,8 @@ for what that promises.
 
 - **Link a folder… names both folders the same way.** Over a link, its warning
   wrote the folder chosen as `~/…` and the folder the link leads to as
-  `/Users/…`; both are written from the home folder now.
+  `/Users/…`; both are written from the home folder now, and so is a plugin's
+  folder under **More**, which was written whole.
 
 - **A plugin that will not load says in Russian that its details are English.**
   Why a manifest or a folder is refused is said in the plugin check's own words

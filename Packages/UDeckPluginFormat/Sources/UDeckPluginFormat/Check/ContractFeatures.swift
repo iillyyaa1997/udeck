@@ -109,7 +109,7 @@ public enum ContractRelease: Hashable, Sendable, Comparable, CustomStringConvert
 ///
 /// Measured for what is here now (git, every release tag against the decoders
 /// at that tag): every part of the contract was in v0.1.0, the first release,
-/// except `minUDeck` itself, which no release has had yet.
+/// except `minUDeck` itself, which came in 0.6.0.
 public enum ContractFeatures {
     /// What uDeck's decoder reads and the plugin contract (docs/plugin-api.md)
     /// does not describe: `restart`, which only a resident plugin would use,
@@ -120,7 +120,7 @@ public enum ContractFeatures {
     public static let outsideTheContract: Set<String> = ["restart"]
 
     /// The release this registry was last brought up to date for.
-    static let reviewedAt = "0.5.0"
+    static let reviewedAt = "0.6.0"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
@@ -134,7 +134,7 @@ public enum ContractFeatures {
         // does, with the release that brings it.
         add(firstRelease, ["id", "name", "version", "api", "kind", "description", "author", "homepage", "run",
                            "interval", "timeout", "permissions", "settings", "window"].map { .manifestField($0) })
-        add(.next, [.manifestField("minUDeck")])
+        add(.released(SemanticVersion(major: 0, minor: 6, patch: 0)), [.manifestField("minUDeck")])
         add(firstRelease, ["poll", "resident"].map { .pluginKind($0) })
         add(firstRelease, ["read", "write", "exec", "network", "screen", "secrets"].map { .permission($0) })
         add(firstRelease, ["defaultWidth", "defaultHeight", "minWidth", "minHeight"].map { .windowField($0) })

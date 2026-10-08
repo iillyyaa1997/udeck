@@ -84,17 +84,26 @@ struct ContractFeaturesTests {
     }
 
     /// Measured with git for every release tag: all of it was in v0.1.0,
-    /// except `minUDeck`, which no release has had yet.
-    @Test("what the registry says now: v0.1.0 for everything, and minUDeck not released")
-    func whatItSaysNow() {
+    /// except `minUDeck`, which came in 0.6.0 — and nothing is waiting for a
+    /// release.
+    @Test("what the registry says now: v0.1.0 for everything, and minUDeck from 0.6.0")
+    func whatItSaysNow() throws {
         let first = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
         for (feature, release) in ContractFeatures.registry where feature != .manifestField("minUDeck") {
             #expect(release == first, "\(feature)")
         }
-        #expect(ContractFeatures.minimumUDeckReadFrom == .next)
+        let read = ContractRelease.released(SemanticVersion(major: 0, minor: 6, patch: 0))
+        #expect(ContractFeatures.minimumUDeckReadFrom == read)
+        #expect(ContractFeatures.release(of: .manifestField("minUDeck")) == Optional(read))
+        #expect(!ContractFeatures.registry.values.contains(.next), "nothing is waiting for a release")
+        // The release after this one, which has no number yet: after every
+        // released one, and met only by a uDeck after this one.
+        let current = try #require(SemanticVersion(UDeckRelease.version))
         #expect(ContractRelease.released(SemanticVersion(major: 99, minor: 0, patch: 0)) < .next)
-        #expect(ContractRelease.next.isMet(by: SemanticVersion(major: 0, minor: 5, patch: 1)) == (UDeckRelease.version == "0.5.0"))
-        #expect(!ContractRelease.next.isMet(by: SemanticVersion(UDeckRelease.version)!))
+        #expect(read < .next)
+        #expect(!ContractRelease.next.isMet(by: current))
+        #expect(ContractRelease.next.isMet(by: current.next))
+        #expect(ContractRelease.next.description == "the uDeck release after \(UDeckRelease.version)")
     }
 
     // MARK: - What a manifest uses
@@ -133,44 +142,67 @@ struct ContractFeaturesTests {
         return report.findings
     }
 
-    /// With the registry as it is, no plugin needs `minUDeck`. One that
-    /// declares a release up to the first that could read the field is told it
-    /// does nothing; one that declares a later release is left alone — the
-    /// author may know of a change in how uDeck behaves that no part of the
-    /// contract names.
-    @Test("minUDeck is said to do nothing only when no uDeck that reads it could miss it")
+    /// With the registry as it is, no plugin needs `minUDeck`: everything
+    /// it can use came in 0.1.0. uDeck reads the field from 0.6.0 on, so one
+    /// that declares 0.6.0 or lower is told it does nothing; one that declares
+    /// a later release is left alone — the author may know of a change in how
+    /// uDeck behaves that no part of the contract names.
+    @Test("minUDeck is said to do nothing up to 0.6.0, the release that reads it, and is the author's above it")
     func doesNothing() throws {
         #expect(try rule19(#"{"id": "x", "kind": "poll"}"#).isEmpty)
         #expect(try rule19(#"{"id": "x", "minUDeck": null}"#).isEmpty)
-        let current = try #require(SemanticVersion(UDeckRelease.version))
-        let first = current.next
-        for declared in ["0.1.0", "\(current)", "\(first)"] {
+        // Below the first release, nothing a plugin uses is there.
+        #expect(try rule19(#"{"id": "x", "kind": "poll", "minUDeck": "0.0.0"}"#).map(\.message)
+                == ["\"minUDeck\" is 0.0.0, and the plugin needs uDeck 0.1.0"])
+        for declared in ["0.1.0", "0.5.0", "0.5.999999999", "0.6.0"] {
             let findings = try rule19(#"{"id": "x", "kind": "poll", "minUDeck": "\#(declared)"}"#)
             #expect(findings.map(\.level) == [.warning], "\(declared)")
             #expect(findings.first?.rule == CheckRule.minimumUDeck)
-            #expect(findings.first?.message.contains("does nothing") == true)
+            #expect(findings.first?.message == "\"minUDeck\" is \(declared), which does nothing: \"minUDeck\" is read from "
+                    + "uDeck 0.6.0 on, and every uDeck that reads it is \(declared) or later; leave it out", "\(declared)")
         }
-        // Past the smallest number the next release can have, it may be above
-        // it — and then it keeps every uDeck before it out, as the author meant.
-        for declared in ["\(first.next)", "0.6.0", "99.0.0"] {
+        for declared in ["0.6.1", "0.7.0", "1.0.0", "99.0.0"] {
             #expect(try rule19(#"{"id": "x", "kind": "poll", "minUDeck": "\#(declared)"}"#).isEmpty, "\(declared)")
         }
         #expect(try rule19(#"{"id": "x", "minUDeck": "0.1"}"#).isEmpty, "not a version: rule 4 says so")
         #expect(try rule19(#"{"id": "x", "minUDeck": 5}"#).isEmpty, "not text: rule 3 says so")
     }
 
-    /// Once the release that reads `minUDeck` has its number, the line is
+    /// Before the release that reads `minUDeck` has its number — as before
+    /// 0.6.0, and as for any part of the contract added with `.next` — the
+    /// smallest number it can have is the line: the version right after this
+    /// one. Up to it, the field does nothing; past it, it may be above that
+    /// release, and keeps every uDeck before it out, as the author meant.
+    @Test("with minUDeck's release not named yet, it does nothing up to the smallest number that release can have")
+    func doesNothingBeforeItsRelease() throws {
+        var registry = ContractFeatures.registry
+        registry[.manifestField("minUDeck")] = .next
+        let current = try #require(SemanticVersion(UDeckRelease.version))
+        let first = current.next
+        for declared in ["0.1.0", "\(current)", "\(first)"] {
+            let findings = try rule19(#"{"id": "x", "kind": "poll", "minUDeck": "\#(declared)"}"#, registry: registry)
+            #expect(findings.map(\.level) == [.warning], "\(declared)")
+            #expect(findings.first?.message.contains("is read from the uDeck release after \(current) on") == true,
+                    "\(findings)")
+        }
+        for declared in ["\(first.next)", "\(SemanticVersion(major: current.major, minor: current.minor + 1, patch: 0))", "99.0.0"] {
+            #expect(try rule19(#"{"id": "x", "kind": "poll", "minUDeck": "\#(declared)"}"#, registry: registry).isEmpty,
+                    "\(declared)")
+        }
+    }
+
+    /// Whatever release reads `minUDeck`, once it has its number the line is
     /// that number: at it or below, the field does nothing; above, the
     /// author's choice.
     @Test("with minUDeck's release named, it does nothing up to that release and is the author's above it")
     func doesNothingUpToItsRelease() throws {
         var registry = ContractFeatures.registry
-        registry[.manifestField("minUDeck")] = .released(SemanticVersion(major: 0, minor: 6, patch: 0))
-        for declared in ["0.5.9", "0.6.0"] {
+        registry[.manifestField("minUDeck")] = .released(SemanticVersion(major: 0, minor: 8, patch: 0))
+        for declared in ["0.6.0", "0.7.9", "0.8.0"] {
             #expect(try rule19(#"{"id": "x", "minUDeck": "\#(declared)"}"#, registry: registry).map(\.level) == [.warning],
                     "\(declared)")
         }
-        for declared in ["0.6.1", "1.0.0"] {
+        for declared in ["0.8.1", "1.0.0"] {
             #expect(try rule19(#"{"id": "x", "minUDeck": "\#(declared)"}"#, registry: registry).isEmpty, "\(declared)")
         }
     }

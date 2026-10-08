@@ -395,16 +395,20 @@ enum CorpusReplay {
     }
 
     /// Findings of rules the Python check never had — so the corpus cannot
-    /// hold them — that the Swift check reports in a case. None today: rule 18
-    /// needs history, which only rule 17's cases have, and none of them
-    /// changes a plugin; rule 19 says nothing of the `minUDeck` the corpus
-    /// declares — 0.6.0 and 99.0.0 are both past the smallest number the
-    /// release that first reads the field can have, and nothing a plugin uses
-    /// came after 0.1.0. Once that release
-    /// has its number, a case declaring it or less gets rule 19's warning,
-    /// and it is listed here. Rule 20 finds a line break or a control
-    /// character in no name or description the corpus holds.
-    static let newRules: [String: Set<String>] = [:]
+    /// hold them — that the Swift check reports in a case. Rule 18 adds none:
+    /// it needs history, which only rule 17's cases have, and none of them
+    /// changes a plugin. Rule 20 adds none: no name or description the corpus
+    /// holds has a line break or a control character. Rule 19 adds a warning
+    /// to the two cases that declare `"minUDeck": "0.6.0"`: 0.6.0 is the
+    /// release that first reads the field, so declaring it does nothing, and
+    /// nothing a plugin uses came after 0.1.0. The third that declares one,
+    /// P12, says 99.0.0, which is the author's to say. `newRulesOnly` holds
+    /// this list to the `minUDeck` every case's manifests declare.
+    static let newRules: [String: Set<String>] = [
+        "Rule12OnlyWhatTheContractDefines.test_every_field_the_contract_defines_is_known":
+            ["warning 19 plugins/sample/manifest.json"],
+        "Rule4Versions.test_min_udeck #3": ["warning 19 plugins/sample/manifest.json"],
+    ]
 
     /// What the Swift check must say of a case, as the corpus records it.
     static func expected(_ item: Corpus.Case) -> Outcome {

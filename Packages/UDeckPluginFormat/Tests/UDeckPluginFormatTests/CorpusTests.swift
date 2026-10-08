@@ -156,18 +156,37 @@ struct CorpusTests {
         Self.inWords(outcome, item)
     }
 
-    /// The findings the corpus cannot hold would be of the new rules only, and
-    /// named: there are none today, and a replay that grew a list of
-    /// exceptions would prove nothing.
-    @Test("the Swift check adds nothing to the corpus")
+    /// The findings the corpus cannot hold are of the new rules only, and
+    /// named — and not a list of exceptions a replay grew to pass: they are
+    /// exactly rule 19's warnings, one for each manifest whose `minUDeck`
+    /// does nothing because every uDeck that reads the field meets it, found
+    /// here from the manifests the corpus holds rather than from what the
+    /// check said of them.
+    @Test("the Swift check adds to the corpus only what rule 19 says of the minUDeck it declares")
     func newRulesOnly() throws {
         let corpus = try corpus()
         let names = Set(corpus.cases.map(\.name))
+        var declaring = 0
+        var expected: [String: Set<String>] = [:]
+        for item in corpus.cases {
+            guard let last = item.repository?.commits.last else { continue }
+            for (path, entry) in corpus.files(of: last) where path.hasSuffix("/manifest.json") {
+                guard let blob = entry.blob,
+                      let declared = StrictJSON.parse(Array(try corpus.bytes(blob))).value?.object?.last("minUDeck")
+                else { continue }
+                declaring += 1
+                guard let text = declared.string, let version = SemanticVersion(text),
+                      ContractFeatures.minimumUDeckReadFrom.isAtLeast(version) else { continue }
+                expected[item.name, default: []].insert("warning \(CheckRule.minimumUDeck) \(path)")
+            }
+        }
+        #expect(declaring == 6, "six cases declare a minUDeck: 0.6.0 twice, 99.0.0, 0.6, v0.6.0 and the number 1")
         for (name, findings) in CorpusReplay.newRules {
             #expect(names.contains(name), "no case \(name)")
             #expect(findings.allSatisfy { $0.split(separator: " ")[1] == Substring(CheckRule.minimumUDeck) })
         }
-        #expect(CorpusReplay.newRules.isEmpty)
+        #expect(CorpusReplay.newRules == expected)
+        #expect(CorpusReplay.newRules.count == 2)
     }
 
     /// The strict check is the installable one and more: whatever uDeck would

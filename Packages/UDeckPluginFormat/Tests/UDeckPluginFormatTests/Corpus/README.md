@@ -81,12 +81,14 @@ repository the way the Python check was run — strictly, as the official
 repository when `check.official` says so, with the case's base and head — and
 its findings are compared with `expected` as level, rule and path, with
 `divergence` where there is one, and so is the exit status: 273 of 273, with
-no exception. The rules the Python check never had add nothing here: rule 18
-needs history, which only rule 17's nine cases have, and none of them changes a
-plugin; rule 19 has nothing to say of the `minUDeck` three cases declare
-(0.6.0 twice and 99.0.0, each past the smallest number the first release that
-reads the field can have). A finding of theirs
-would have to be named in `CorpusReplay.newRules`, which a test keeps empty.
+no exception. Of the rules the Python check never had, rule 18 adds nothing —
+it needs history, which only rule 17's nine cases have, and none of them
+changes a plugin — and rule 20 adds nothing. Rule 19 adds a warning to two
+cases: three declare a `minUDeck` that is a version, 0.6.0 twice and 99.0.0,
+and 0.6.0 is the release that first reads the field, so declaring it does
+nothing. A finding of theirs has to be named in `CorpusReplay.newRules`, and a
+test holds that list to the `minUDeck` the corpus's manifests declare, read
+from the manifests themselves rather than from what the check said.
 Every finding's words are read too, in every layer: none may name a Swift type.
 
 ## Making it again
