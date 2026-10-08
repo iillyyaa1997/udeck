@@ -324,6 +324,12 @@ jobs:
       - name: Build the image, and run it from the job's registry on both platforms
         run: Scripts/make-cli.sh image --version "$(Scripts/make-cli.sh version)" --out release-cli --revision "$GITHUB_SHA"
 
+      # As a release gathers them: read out of the image that ran, from aports
+      # by git and from Alpine's distfiles — afresh on every push, with no
+      # cache, so that the downloads a release makes are the ones proved here.
+      - name: Gather the sources of the image's GPL and LGPL packages, as a release does
+        run: Scripts/make-cli.sh sources --version "$(Scripts/make-cli.sh version)" --out release-cli
+
       # registry:2 as the service above, by the same digest, on :5001 and with
       # htpasswd: a password of this run's own — openssl's, masked in the log —
       # and the bcrypt the registry asks for, by htpasswd (apache2-utils, which
@@ -362,17 +368,19 @@ jobs:
         if: always()
         run: docker logout localhost:5001
 
-      - name: Keep the image's file for the release's dry run
+      - name: Keep the image's file and its sources for the release's dry run
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udeck-plugin-image
-          path: release-cli/udeck-plugin-image.txt
+          path: |
+            release-cli/udeck-plugin-image.txt
+            release-cli/udeck-plugin-image-sources-*.tar
           if-no-files-found: error
           retention-days: 7
 
   # What a tag would publish besides the app: the three archives under one
-  # version, the image's file, SHA256SUMS over the four and the notes, written
-  # and checked by the commands release.yml's last job runs. Then the release
+  # version, the image's file and its sources, SHA256SUMS over the five and the
+  # notes, written and checked by the commands release.yml's last job runs. Then the release
   # is pinned as a plugin repository pins one, and the pin read as its CI will.
   release-assets:
     name: The release's udeck-plugin assets, not published
@@ -384,7 +392,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Take the archives and the image's file
+      - name: Take the archives, the image's file and its sources
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: udeck-plugin-*
@@ -411,7 +419,8 @@ jobs:
           version="$(Scripts/make-cli.sh version)"
           releases="$RUNNER_TEMP/releases"
           mkdir -p "$releases/download/v$version" "$releases/latest/download"
-          cp release-cli/SHA256SUMS release-cli/udeck-plugin-image.txt release-cli/udeck-plugin-*.tar.gz "$releases/download/v$version/"
+          cp release-cli/SHA256SUMS release-cli/udeck-plugin-image.txt release-cli/udeck-plugin-*.tar.gz \
+            "release-cli/udeck-plugin-image-sources-$version.tar" "$releases/download/v$version/"
           cp release-cli/udeck-plugin-image.txt "$releases/latest/download/"
           tar -xzf "release-cli/udeck-plugin-$version-linux-x86_64.tar.gz" -C "$RUNNER_TEMP"
           command="$RUNNER_TEMP/udeck-plugin-$version-linux-x86_64/udeck-plugin"
@@ -433,6 +442,7 @@ jobs:
             echo "$linux_aarch64  udeck-plugin-$version-linux-aarch64.tar.gz" | sha256sum -c -
             echo "$macos_universal  udeck-plugin-$version-macos-universal.tar.gz" | sha256sum -c -
             grep -qx "digest=$image" udeck-plugin-image.txt
+            grep " udeck-plugin-image-sources-$version.tar\$" SHA256SUMS | sha256sum -c -
           ' sh "$RUNNER_TEMP/read-lock.sh" "$repo/.github/udeck-plugin.lock" "$releases" "$version"
           lock="$repo/.github/udeck-plugin.lock"
           first="$(sed -n 's/^linux-x86_64=\(.\).*/\1/p' "$lock")"

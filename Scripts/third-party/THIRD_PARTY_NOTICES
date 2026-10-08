@@ -16,18 +16,25 @@ under the licences named. Which copy holds what:
     every one of them, its version, its licence and the aports commit it was
     built from (where its source is), is listed in
     /usr/share/licenses/udeck-plugin/ALPINE-PACKAGES, made from the image's own
-    package records when the image is built.
+    package records when the image is built. The source of every one of them
+    under the GPL or the LGPL — git, BusyBox and apk-tools among them — is
+    udeck-plugin-image-sources-X.Y.Z.tar, an asset of the release that
+    published the image, X.Y.Z being the version udeck-plugin --version says:
+    each package's folder of aports at that commit, and the upstream archives
+    its APKBUILD names.
 
-What each build links was read from the binaries of udeck-plugin 0.5.0: the
-strings of the stripped static Linux binary, and the load commands and symbols
-of the macOS one. Of the C that swift-foundation compiles into
-FoundationEssentials (its _FoundationCShims), the Linux binary holds uuid.c —
-its format strings are there, and UUID() calls it — which is under a licence
-of its own (10), and platform_shims.c, string_shims.c and the Unicode tables
-of CFUniCharBitmapData.inc.h — all 56 tables are there, byte for byte — which
-are swift-foundation's, under its licence (4). swift-asn1, which
-Packages/UDeckPluginFormat/Package.resolved also names, is a dependency of
-swift-crypto's other products and no part of udeck-plugin.
+What each build links was read from the binaries CI built at commit b326307
+(run 37453466780 of the CI workflow), whose udeck-plugin said 0.5.0, the
+version of the app at that commit: the strings of the stripped static Linux
+binary, and the load commands and symbols of the macOS one. Of the C that
+swift-foundation compiles into FoundationEssentials (its _FoundationCShims),
+the Linux binary holds uuid.c — its format strings are there, and UUID()
+calls it — which is under a licence of its own (10), and platform_shims.c,
+string_shims.c and the Unicode tables of CFUniCharBitmapData.inc.h — all 56
+tables are there, byte for byte — which are swift-foundation's, under its
+licence (4). swift-asn1, which Packages/UDeckPluginFormat/Package.resolved
+also names, is a dependency of swift-crypto's other products and no part of
+udeck-plugin.
 
 The Apache License 2.0 is in LICENSE, beside this file.
 

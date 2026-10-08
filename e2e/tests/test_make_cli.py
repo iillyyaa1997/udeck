@@ -353,13 +353,55 @@ def real_archive(out, version=VERSION, name="linux-x86_64", extra=None, uid=0):
     return archive
 
 
+def sources_archive(out, version=VERSION, change=None):
+    """A sources archive as `sources` writes one — or, with `change`, one it
+    would not: a file that is not what SHA512SUMS says, one more file, a file
+    owned by 501, a pax record, a record outside its folder."""
+    out.mkdir(parents=True, exist_ok=True)
+    folder = f"udeck-plugin-image-sources-{version}"
+    files = {
+        "README": b"The sources of the GPL and LGPL software in the udeck-plugin image\n",
+        f"aports/{'0' * 40}/main/git/APKBUILD": b"pkgname=git\n",
+        "distfiles/git-2.54.0.tar.xz": b"git's source\n",
+    }
+    sums = "".join(f"{hashlib.sha512(data).hexdigest()}  {name}\n" for name, data in sorted(files.items()) if name != "README")
+    files["SHA512SUMS"] = sums.encode()
+    if change == "tampered":
+        files["distfiles/git-2.54.0.tar.xz"] = b"something else\n"
+    if change == "unlisted":
+        files["distfiles/extra.tar.gz"] = b"not in SHA512SUMS\n"
+    archive = out / f"{folder}.tar"
+    with tarfile.open(archive, "w", format=tarfile.PAX_FORMAT if change == "pax" else tarfile.GNU_FORMAT) as tar:
+        def add(name, data=None):
+            info = tarfile.TarInfo(name)
+            info.uid = info.gid = 0
+            if change == "owned" and name.endswith("APKBUILD"):
+                info.uid = 501
+            if change == "pax" and name.endswith("APKBUILD"):
+                info.pax_headers = {"SCHILY.xattr.com.apple.provenance": "made on a Mac"}
+            if data is None:
+                info.type, info.mode = tarfile.DIRTYPE, 0o755
+                tar.addfile(info)
+            else:
+                info.mode, info.size = 0o644, len(data)
+                tar.addfile(info, io.BytesIO(data))
+
+        add(folder)
+        for name, data in sorted(files.items()):
+            add(f"{folder}/{name}", data)
+        if change == "outside":
+            add("elsewhere", b"x\n")
+    return archive
+
+
 def release_set(out, version=VERSION, image=GHCR):
     for name in ("macos-universal", "linux-x86_64", "linux-aarch64"):
         real_archive(out, version, name)
     (out / "udeck-plugin-image.txt").write_text(image_file(image, version))
+    sources_archive(out, version)
 
 
-def test_sums_cover_the_three_archives_and_the_image_and_say_what_sha256sum_says(checkout):
+def test_sums_cover_the_three_archives_the_image_and_its_sources_and_say_what_sha256sum_says(checkout):
     out = checkout / "out"
     release_set(out)
     (out / "notes.md").write_text("not an asset\n")
@@ -373,6 +415,7 @@ def test_sums_cover_the_three_archives_and_the_image_and_say_what_sha256sum_says
             f"udeck-plugin-{VERSION}-linux-x86_64.tar.gz",
             f"udeck-plugin-{VERSION}-linux-aarch64.tar.gz",
             "udeck-plugin-image.txt",
+            f"udeck-plugin-image-sources-{VERSION}.tar",
         )
     )
     assert (out / "SHA256SUMS").read_text() == expected
@@ -392,6 +435,16 @@ def test_sums_cover_the_three_archives_and_the_image_and_say_what_sha256sum_says
         (lambda out: (release_set(out), real_archive(out, extra="appledouble")), "._LICENSE"),
         (lambda out: (release_set(out), real_archive(out, name="macos-universal", extra="xattr")), "SCHILY.xattr.com.apple.provenance"),
         (lambda out: (release_set(out), real_archive(out, uid=501)), " 501 0 "),
+        # The image's sources: there, of this version, and every file in them
+        # what their own SHA512SUMS says.
+        (lambda out: (release_set(out), (out / f"udeck-plugin-image-sources-{VERSION}.tar").unlink()),
+         "no udeck-plugin-image-sources-9.9.9.tar"),
+        (lambda out: (release_set(out), sources_archive(out, "9.9.8")), "a sources archive no release names"),
+        (lambda out: (release_set(out), sources_archive(out, change="tampered")), "distfiles/git-2.54.0.tar.xz is not what its SHA512SUMS says"),
+        (lambda out: (release_set(out), sources_archive(out, change="unlisted")), "its SHA512SUMS names wrongly"),
+        (lambda out: (release_set(out), sources_archive(out, change="owned")), "is owned by 501:0"),
+        (lambda out: (release_set(out), sources_archive(out, change="pax")), "or carries pax records"),
+        (lambda out: (release_set(out), sources_archive(out, change="outside")), "elsewhere is outside"),
     ],
 )  # fmt: skip
 def test_sums_refuse_a_set_a_release_would_not_publish(checkout, arrange, said):
@@ -410,8 +463,9 @@ def test_notes_name_the_image_by_its_digest_first(checkout):
     assert done.returncode == 0, done.stdout + done.stderr
     notes = (out / "notes.md").read_text()
     assert notes.startswith("**udeck-plugin** for a plugin repository's CI")
-    assert f"\n    {GHCR}@{BUILT}\n" in notes
+    assert notes.splitlines()[2] == f"    {GHCR}@{BUILT}", "the digest, on the third line"
     assert "THIRD_PARTY_NOTICES" in notes
+    assert f"is udeck-plugin-image-sources-{VERSION}.tar." in notes
 
 
 @pytest.mark.parametrize(
@@ -518,6 +572,14 @@ if [ "$1" = run ]; then
     says="${FAKE_SAYS:-9.9.9}"
     [ "$platform" = linux/arm64 ] && says="${FAKE_ARM64_SAYS:-$says}"
     case "$*" in
+        *"cat /usr/share/licenses/udeck-plugin/ALPINE-PACKAGES"*)
+            printf '%s\n' "# Every Alpine package in this image: its name and version, its licence, and its folder in" \
+                "# udeck-plugin-image-sources-${FAKE_SOURCES_VERSION:-9.9.9}.tar, an asset of the release that published this image," \
+                "# https://github.com/iillyyaa1997/udeck/releases/tag/v9.9.9"
+            commit=0000000000000000000000000000000000000000
+            [ "$platform" = linux/arm64 ] && commit=1111111111111111111111111111111111111111
+            printf '%s\n' "busybox 1.37.0-r31 | GPL-2.0-only | https://gitlab.alpinelinux.org/alpine/aports/-/tree/$commit/main/busybox" \
+                "libcurl 8.22.0-r0 | curl | https://gitlab.alpinelinux.org/alpine/aports/-/tree/2222222222222222222222222222222222222222/main/curl" ;;
         *"/lib/apk/db/installed"*) printf '%s\n' GPL-2.0-only MIT "${FAKE_LICENSE:-curl}" ;;
         *"cd /usr/share/licenses/udeck-plugin"*) exit "${FAKE_NO_NOTICES:-0}" ;;
         *"udeck-plugin --version"*) echo "udeck-plugin $says" ;;
@@ -679,8 +741,10 @@ def test_an_image_is_built_once_pushed_to_the_jobs_registry_and_run_from_it_by_i
         assert any("/lib/apk/db/installed" in call for call in ran), platform
         notices = [call for call in ran if "cd /usr/share/licenses/udeck-plugin" in call]
         assert len(notices) == 1, platform
-        for looked_for in ("test -s LICENSE", "test -s NOTICE", "test -s THIRD_PARTY_NOTICES", 'grep -q "^git " ALPINE-PACKAGES'):
+        for looked_for in ("test -s LICENSE", "test -s NOTICE", "test -s THIRD_PARTY_NOTICES", 'grep -q "^git " ALPINE-PACKAGES',
+                           'grep -q "udeck-plugin-image-sources-X\\.Y\\.Z\\.tar" THIRD_PARTY_NOTICES'):
             assert looked_for in notices[0], (platform, looked_for)
+        assert sum(call.endswith(" cat /usr/share/licenses/udeck-plugin/ALPINE-PACKAGES") for call in ran) == 1, platform
         assert any("check --strict /udeck/examples/" in call and ":/udeck:ro" in call for call in ran), platform
         assert any("check-repo" in call and ":/examples:ro" in call for call in ran), platform
         assert any("read_udeck_plugin_lock" in call and "/docs:/docs:ro " in call for call in ran), platform
@@ -691,6 +755,15 @@ def test_an_image_is_built_once_pushed_to_the_jobs_registry_and_run_from_it_by_i
     assert (image / "seen" / "Dockerfile").read_text() == (REPO / "Scripts" / "udeck-plugin.Dockerfile").read_text()
     assert (image / "seen" / "THIRD_PARTY_NOTICES").read_bytes() == (REPO / "Scripts" / "third-party" / "THIRD_PARTY_NOTICES").read_bytes()
     assert (image / "out" / "udeck-plugin-staged.txt").read_text() == image_file(STAGE)
+    # What `sources` gathers from: each platform's ALPINE-PACKAGES, its
+    # comment left out, every line marked with the platform it came from.
+    tree = "https://gitlab.alpinelinux.org/alpine/aports/-/tree"
+    assert (image / "out" / "udeck-plugin-staged-packages.txt").read_text() == (
+        f"linux/amd64 busybox 1.37.0-r31 | GPL-2.0-only | {tree}/{'0' * 40}/main/busybox\n"
+        f"linux/amd64 libcurl 8.22.0-r0 | curl | {tree}/{'2' * 40}/main/curl\n"
+        f"linux/arm64 busybox 1.37.0-r31 | GPL-2.0-only | {tree}/{'1' * 40}/main/busybox\n"
+        f"linux/arm64 libcurl 8.22.0-r0 | curl | {tree}/{'2' * 40}/main/curl\n"
+    )
     assert left_behind(image) == []
     assert any(call.startswith("buildx rm --force udeck-plugin-") for call in calls), "the builder is taken away"
 
@@ -719,6 +792,9 @@ def test_an_image_is_built_once_pushed_to_the_jobs_registry_and_run_from_it_by_i
         ({"FAKE_NO_CURL": "1"}, "no shell, git, curl or /tmp in the image (linux/amd64)"),
         ({"FAKE_LICENSE": "GPL-3.0-only"}, 'under "GPL-3.0-only", which its licenses label does not name'),
         ({"FAKE_NO_NOTICES": "1"}, "lacks its licences, its notices or the list of its Alpine packages"),
+        # The list that names the asset with the sources has to name this
+        # release's.
+        ({"FAKE_SOURCES_VERSION": "9.9.8"}, "does not name udeck-plugin-image-sources-9.9.9.tar"),
     ],
 )
 def test_an_image_that_does_not_do_its_work_on_either_platform_is_never_staged(image, env, said):
@@ -726,6 +802,7 @@ def test_an_image_that_does_not_do_its_work_on_either_platform_is_never_staged(i
     assert done.returncode == 1, done.stdout + done.stderr
     assert said in done.stderr
     assert not (image / "out" / "udeck-plugin-staged.txt").exists()
+    assert not (image / "out" / "udeck-plugin-staged-packages.txt").exists()
     assert left_behind(image) == []
 
 
@@ -792,6 +869,249 @@ def test_push_without_an_image_that_ran_does_nothing(image):
     assert calls == []
 
 
+# --- sources ------------------------------------------------------------------------------------
+
+TREE = "https://gitlab.alpinelinux.org/alpine/aports/-/tree"
+
+
+def sha512_hex(data):
+    return hashlib.sha512(data).hexdigest()
+
+
+class Alpine:
+    """A copy of aports, a git repository with main/<origin>/ folders at two
+    commits, and of Alpine's distfiles, a folder of upstream archives — what
+    `sources` reads, at file:// addresses — with the files `image` leaves in
+    out/ for it."""
+
+    UPSTREAM = {
+        "git-2.54.0.tar.xz": b"git's source\n",
+        "busybox-1.37.0.tar.bz2": b"busybox's source\n",
+        "zstd-1.5.7.tar.gz": b"zstd's source\n",
+    }
+
+    def __init__(self, checkout):
+        self.checkout = checkout
+        self.aports = checkout.parent / "aports"
+        self.distfiles = checkout.parent / "distfiles"
+        self.out = checkout / "out"
+        self.aports.mkdir()
+        self.distfiles.mkdir()
+        self.out.mkdir()
+        self.env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
+                    "TMPDIR": str(checkout.parent / "tmp")}
+        self.git("init", "-q", "-b", "master")
+        # What Alpine's GitLab allows: a filter, and an object asked for by its id.
+        self.git("config", "uploadpack.allowFilter", "true")
+        self.git("config", "uploadpack.allowAnySHA1InWant", "true")
+        for name, data in self.UPSTREAM.items():
+            (self.distfiles / name).write_bytes(data)
+        self.package("git", "git-2.54.0.tar.xz", {"fix.patch": b"--- a\n+++ b\n", "git-daemon.initd": b"#!/sbin/openrc-run\n"},
+                     executable={"git-daemon.initd"})
+        # An install script, and another that is a link to it, as aports has
+        # alpine-baselayout's.
+        (self.aports / "main" / "git" / "git.pre-upgrade").write_text("#!/bin/sh\n")
+        (self.aports / "main" / "git" / "git.post-upgrade").symlink_to("git.pre-upgrade")
+        self.package("busybox", "busybox-1.37.0.tar.bz2", {"busyboxconfig": b"CONFIG_ASH=y\n"})
+        # Not under the GPL, and its upstream archive is nowhere: never read.
+        self.package("curl", "curl-8.22.0.tar.xz", {})
+        self.first = self.commit("First")
+        self.package("busybox", "busybox-1.37.0.tar.bz2", {"busyboxconfig": b"CONFIG_ASH=y\nCONFIG_HUSH=y\n"})
+        self.package("zstd", "zstd-1.5.7.tar.gz", {})
+        self.second = self.commit("Second")
+        (self.out / "udeck-plugin-staged.txt").write_text(image_file(STAGE))
+        self.listing(self.lines())
+
+    def git(self, *args):
+        return subprocess.run(["git", "-C", str(self.aports), "-c", "user.name=CI", "-c", "user.email=ci@example.invalid", *args],
+                              check=True, capture_output=True, text=True, env=self.env).stdout.strip()
+
+    def package(self, origin, remote, local, executable=(), sums=None):
+        folder = self.aports / "main" / origin
+        folder.mkdir(parents=True, exist_ok=True)
+        for name, data in local.items():
+            (folder / name).write_bytes(data)
+            (folder / name).chmod(0o755 if name in executable else 0o644)
+        upstream = self.UPSTREAM.get(remote, b"nowhere\n")
+        lines = [f"{sha512_hex(upstream)}  {remote}"] + [f"{sha512_hex(data)}  {name}" for name, data in local.items()]
+        sources = "\n\t".join([f"https://example.invalid/{remote}", *local])
+        apkbuild = f'pkgname={origin}\npkgver=1\npkgrel=0\nsource="{sources}\n\t"\n'
+        apkbuild += "\nsha512sums=\"\n" + "\n".join(lines) + "\n\"\n" if sums is None else sums
+        (folder / "APKBUILD").write_text(apkbuild)
+
+    def commit(self, message):
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", message)
+        return self.git("rev-parse", "HEAD")
+
+    def lines(self, first=None, second=None):
+        first, second = first or self.first, second or self.second
+        return [
+            f"linux/amd64 busybox 1.37.0-r31 | GPL-2.0-only | {TREE}/{first}/main/busybox",
+            f"linux/amd64 git 2.54.0-r0 | GPL-2.0-only | {TREE}/{first}/main/git",
+            f"linux/amd64 libcurl 8.22.0-r0 | curl | {TREE}/{first}/main/curl",
+            f"linux/amd64 zstd-libs 1.5.7-r2 | BSD-3-Clause OR GPL-2.0-or-later | {TREE}/{second}/main/zstd",
+            # On arm64, busybox from the later commit: a platform's packages
+            # are built when its builder gets to them.
+            f"linux/arm64 busybox 1.37.0-r31 | GPL-2.0-only | {TREE}/{second}/main/busybox",
+            f"linux/arm64 git 2.54.0-r0 | GPL-2.0-only | {TREE}/{first}/main/git",
+            f"linux/arm64 libcurl 8.22.0-r0 | curl | {TREE}/{first}/main/curl",
+            f"linux/arm64 zstd-libs 1.5.7-r2 | BSD-3-Clause OR GPL-2.0-or-later | {TREE}/{second}/main/zstd",
+        ]
+
+    def listing(self, lines):
+        (self.out / "udeck-plugin-staged-packages.txt").write_text("".join(line + "\n" for line in lines))
+
+    def run(self, *args, **env):
+        return make_cli(self.checkout, "sources", "--out", "out", "--aports", f"file://{self.aports}",
+                        "--distfiles", f"file://{self.distfiles}", *args, GIT_CONFIG_GLOBAL="/dev/null",
+                        GIT_CONFIG_NOSYSTEM="1", **env)
+
+    @property
+    def archive(self):
+        return self.out / f"udeck-plugin-image-sources-{VERSION}.tar"
+
+
+@pytest.fixture
+def alpine(checkout):
+    return Alpine(checkout)
+
+
+def test_sources_gather_each_gpl_and_lgpl_package_s_aports_folder_at_its_commit_and_its_upstream_archives(alpine):
+    done = alpine.run("--version", VERSION)
+    assert done.returncode == 0, done.stdout + done.stderr
+    folder = f"udeck-plugin-image-sources-{VERSION}"
+    found = members(alpine.archive)
+    assert all(name == folder or name.startswith(folder + "/") for name in found)
+    files = {name[len(folder) + 1:]: member for name, member in found.items() if member.isreg()}
+    first, second = alpine.first, alpine.second
+    assert sorted(files) == sorted([
+        "README", "SHA512SUMS",
+        f"aports/{first}/main/busybox/APKBUILD", f"aports/{first}/main/busybox/busyboxconfig",
+        f"aports/{first}/main/git/APKBUILD", f"aports/{first}/main/git/fix.patch", f"aports/{first}/main/git/git-daemon.initd",
+        f"aports/{first}/main/git/git.pre-upgrade",
+        f"aports/{second}/main/busybox/APKBUILD", f"aports/{second}/main/busybox/busyboxconfig",
+        f"aports/{second}/main/zstd/APKBUILD",
+        "distfiles/busybox-1.37.0.tar.bz2", "distfiles/git-2.54.0.tar.xz", "distfiles/zstd-1.5.7.tar.gz",
+    ]), "every GPL and LGPL package's folder at the commit it was built from, and nothing of curl's"
+    with tarfile.open(alpine.archive) as tar:
+        def read(path):
+            return tar.extractfile(f"{folder}/{path}").read()
+
+        for path in files:
+            if path.startswith("aports/"):
+                commit, rest = path.split("/", 2)[1:]
+                assert read(path) == subprocess.run(["git", "-C", str(alpine.aports), "show", f"{commit}:{rest}"],
+                                                    capture_output=True, check=True, env=alpine.env).stdout, path
+        for name, data in Alpine.UPSTREAM.items():
+            assert read(f"distfiles/{name}") == data
+        sums = read("SHA512SUMS").decode()
+        assert sums == "".join(f"{sha512_hex(read(path))}  {path}\n" for path in sorted(files) if path not in ("README", "SHA512SUMS"))
+        readme = read("README").decode()
+    assert {(m.uid, m.gid, m.uname, m.gname, m.mtime) for m in found.values()} == {(0, 0, "", "", 0)}
+    assert {name: dict(m.pax_headers) for name, m in found.items() if m.pax_headers} == {}
+    assert files[f"aports/{first}/main/git/git-daemon.initd"].mode == 0o755
+    assert files[f"aports/{first}/main/git/fix.patch"].mode == 0o644
+    links = {name[len(folder) + 1:]: member.linkname for name, member in found.items() if member.issym()}
+    assert links == {f"aports/{first}/main/git/git.post-upgrade": "git.pre-upgrade"}, "a link aports keeps, kept as one"
+    # What it holds, said in it: each package once a folder, with the
+    # platforms whose image holds it.
+    assert f"  busybox 1.37.0-r31 | GPL-2.0-only | linux/amd64 | aports/{first}/main/busybox\n" in readme
+    assert f"  busybox 1.37.0-r31 | GPL-2.0-only | linux/arm64 | aports/{second}/main/busybox\n" in readme
+    assert f"  git 2.54.0-r0 | GPL-2.0-only | linux/amd64, linux/arm64 | aports/{first}/main/git\n" in readme
+    assert (f"  zstd-libs 1.5.7-r2 | BSD-3-Clause OR GPL-2.0-or-later | linux/amd64, linux/arm64 | aports/{second}/main/zstd\n"
+            in readme)
+    assert "libcurl" not in readme and "curl-8.22.0" not in readme
+    assert f"https://github.com/iillyyaa1997/udeck/releases/tag/v{VERSION}" in readme
+    assert left_behind(alpine.checkout) == []
+    # Made the same way twice, it is the same archive, byte for byte.
+    made = alpine.archive.read_bytes()
+    assert alpine.run().returncode == 0
+    assert alpine.archive.read_bytes() == made
+
+
+def test_sums_take_the_sources_that_sources_made(alpine):
+    assert alpine.run("--version", VERSION).returncode == 0
+    for name in ("macos-universal", "linux-x86_64", "linux-aarch64"):
+        real_archive(alpine.out, VERSION, name)
+    (alpine.out / "udeck-plugin-image.txt").write_text(image_file())
+    done = make_cli(alpine.checkout, "sums", "--version", VERSION, "--out", "out")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert f"  udeck-plugin-image-sources-{VERSION}.tar\n" in (alpine.out / "SHA256SUMS").read_text()
+
+
+def point(alpine, origin, commit):
+    """The list as the image would have it had `origin` been built at `commit`."""
+    alpine.listing([re.sub(rf"/[0-9a-f]{{40}}/main/{origin}$", f"/{commit}/main/{origin}", line) for line in alpine.lines()])
+
+
+def a_patch_its_apkbuild_does_not_name(alpine):
+    alpine.package("git", "git-2.54.0.tar.xz", {"fix.patch": b"what the APKBUILD names\n"})
+    (alpine.aports / "main" / "git" / "fix.patch").write_bytes(b"something else\n")
+    return alpine.commit("A patch changed, and its sum not")
+
+
+def an_apkbuild_with(alpine, sums):
+    alpine.package("git", "git-2.54.0.tar.xz", {}, sums=sums)
+    return alpine.commit("An APKBUILD of its own")
+
+
+def a_link_out_of_the_folder(alpine, target):
+    (alpine.aports / "main" / "git" / "link").symlink_to(target)
+    return alpine.commit("A link out")
+
+
+def a_submodule_in_the_folder(alpine):
+    alpine.git("update-index", "--add", "--cacheinfo", f"160000,{alpine.first},main/git/vendored")
+    alpine.git("commit", "-q", "-m", "A submodule")
+    return alpine.git("rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize(
+    ("arrange", "said"),
+    [
+        (lambda a: (a.distfiles / "git-2.54.0.tar.xz").write_bytes(b"another git\n"),
+         "git-2.54.0.tar.xz from file://"),
+        (lambda a: (a.distfiles / "zstd-1.5.7.tar.gz").unlink(), "zstd-1.5.7.tar.gz, which aports"),
+        # A file of the folder that is not what its APKBUILD says, as abuild
+        # would refuse it.
+        (lambda a: point(a, "git", a_patch_its_apkbuild_does_not_name(a)),
+         " main/git/fix.patch is not what its APKBUILD's sha512sums says"),
+        (lambda a: point(a, "git", "e" * 40), f"aports commit {'e' * 40} (main/git) cannot be fetched from file://"),
+        (lambda a: a.listing([line.replace("/main/git", "/main/nothere") for line in a.lines()]), "has no main/nothere"),
+        (lambda a: a.listing([*a.lines(), "linux/amd64 git 2.54.0-r0 | GPL-2.0-only | https://example.invalid/git"]),
+         "has a line that is not <platform> <name> <version> | <licence>"),
+        (lambda a: a.listing([*a.lines(), f"linux/riscv64 git 2.54.0-r0 | GPL-2.0-only | {TREE}/{a.first}/main/git"]),
+         "has a line that is not"),
+        (lambda a: a.listing([line for line in a.lines() if line.startswith("linux/amd64 ")]),
+         "lists no package of linux/arm64"),
+        (lambda a: a.listing([line for line in a.lines() if "libcurl" in line]), "is under the GPL or the LGPL"),
+        (lambda a: a.listing([]), "has a line that is not"),
+        (lambda a: (a.out / "udeck-plugin-staged-packages.txt").unlink(), "no udeck-plugin-staged-packages.txt"),
+        (lambda a: (a.out / "udeck-plugin-staged.txt").unlink(), "no udeck-plugin-staged.txt"),
+        (lambda a: point(a, "git", an_apkbuild_with(a, "# no sums\n")), "its APKBUILD names no sha512sums"),
+        (lambda a: point(a, "git", an_apkbuild_with(a, f'sha512sums="{"a" * 128}  ../escape"\n')), "is not <sha512>  <file>"),
+        (lambda a: point(a, "git", a_link_out_of_the_folder(a, "../busybox/APKBUILD")), "is a link that leads out of its folder"),
+        (lambda a: point(a, "git", a_link_out_of_the_folder(a, "/etc/passwd")), "is a link that leads out of its folder"),
+        (lambda a: point(a, "git", a_link_out_of_the_folder(a, "..")), "is a link that leads out of its folder"),
+        (lambda a: point(a, "git", a_submodule_in_the_folder(a)), "holds what is not a plain file with a plain name"),
+    ],
+)  # fmt: skip
+def test_sources_refuse_what_they_cannot_hold_to_what_alpine_built_and_make_no_archive(alpine, arrange, said):
+    arrange(alpine)
+    done = alpine.run("--version", VERSION)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert said in done.stderr
+    assert not alpine.archive.exists()
+    assert left_behind(alpine.checkout) == []
+
+
+def test_sources_of_another_version_than_the_image_that_ran_are_refused(alpine):
+    done = alpine.run("--version", "9.9.8")
+    assert done.returncode == 1 and "is of v9.9.9; this release is 9.9.8" in done.stderr
+    assert not alpine.archive.exists()
+
+
 def test_the_image_and_what_builds_it_are_pinned_by_digest_and_say_where_they_come_from():
     dockerfile = (REPO / "Scripts" / "udeck-plugin.Dockerfile").read_text()
     assert re.search(r"^FROM alpine:[0-9.]+@sha256:[0-9a-f]{64}$", dockerfile, re.M), "the base by digest"
@@ -800,10 +1120,36 @@ def test_the_image_and_what_builds_it_are_pinned_by_digest_and_say_where_they_co
     for label in ('source="https://github.com/iillyyaa1997/udeck"', 'version="${VERSION}"', 'licenses="${LICENSES}"'):
         assert f"org.opencontainers.image.{label}" in dockerfile
     assert "COPY LICENSE NOTICE THIRD_PARTY_NOTICES /usr/share/licenses/udeck-plugin/" in dockerfile
-    assert "/lib/apk/db/installed | sort > /usr/share/licenses/udeck-plugin/ALPINE-PACKAGES" in dockerfile
+    assert "' /lib/apk/db/installed | sort\n} > /usr/share/licenses/udeck-plugin/ALPINE-PACKAGES" in dockerfile
     script = (REPO / "Scripts" / "make-cli.sh").read_text()
     for name in ("BUILDKIT", "BINFMT"):
         assert re.search(rf'^{name}="[a-z/]+:[A-Za-z0-9.-]+@sha256:[0-9a-f]{{64}}"$', script, re.M), name
+
+
+def test_the_sources_are_read_from_the_alpine_release_the_image_is_built_on():
+    """The distfiles `sources` reads are the ones of the Alpine release in the
+    Dockerfile's FROM: a base moved to 3.25 with distfiles left at v3.24 would
+    look for its archives where they are not."""
+    dockerfile = (REPO / "Scripts" / "udeck-plugin.Dockerfile").read_text()
+    release = re.search(r"^FROM alpine:(\d+\.\d+)\.\d+@sha256:", dockerfile, re.M).group(1)
+    script = (REPO / "Scripts" / "make-cli.sh").read_text()
+    assert re.findall(r'^DISTFILES="(.*)"$', script, re.M) == [f"https://distfiles.alpinelinux.org/distfiles/v{release}"]
+    assert re.findall(r'^APORTS="(.*)"$', script, re.M) == ["https://gitlab.alpinelinux.org/alpine/aports.git"]
+
+
+def alpine_packages_script(tmp_path, installed):
+    """The Dockerfile's RUN that writes ALPINE-PACKAGES, run here on a copy of
+    /lib/apk/db/installed — apk itself left out."""
+    dockerfile = (REPO / "Scripts" / "udeck-plugin.Dockerfile").read_text()
+    script = re.search(r"^RUN <<'SH'\n(.*?)\nSH$", dockerfile, re.M | re.S).group(1)
+    assert "apk add --no-cache git curl\n" in script and "/lib/apk/db/installed" in script
+    (tmp_path / "installed").write_text(installed)
+    script = (script.replace("apk add --no-cache git curl\n", "")
+              .replace("mkdir -p /usr/share/licenses/udeck-plugin\n", "")
+              .replace("/lib/apk/db/installed", str(tmp_path / "installed"))
+              .replace("/usr/share/licenses/udeck-plugin/ALPINE-PACKAGES", str(tmp_path / "ALPINE-PACKAGES")))
+    subprocess.run(["sh", "-c", script], check=True, env={**os.environ, "VERSION": VERSION})
+    return (tmp_path / "ALPINE-PACKAGES").read_text()
 
 
 def test_the_list_of_alpine_packages_names_each_with_its_licence_and_its_source_in_main():
@@ -815,7 +1161,7 @@ def test_the_list_of_alpine_packages_names_each_with_its_licence_and_its_source_
     that change passed every test).
     """
     dockerfile = (REPO / "Scripts" / "udeck-plugin.Dockerfile").read_text()
-    program = re.search(r"^awk '\n(.*?)\n' /lib/apk/db/installed", dockerfile, re.M | re.S).group(1)
+    program = re.search(r"^ *awk '\n(.*?)\n *' /lib/apk/db/installed", dockerfile, re.M | re.S).group(1)
     installed = (
         "C:Q1abc=\nP:git\nV:2.54.0-r0\nA:x86_64\nL:GPL-2.0-only\no:git\nc:0123456789abcdef\n\n"
         "C:Q1def=\nP:libcurl\nV:8.22.0-r0\nL:curl\no:curl\nc:fedcba9876543210\n"
@@ -825,6 +1171,28 @@ def test_the_list_of_alpine_packages_names_each_with_its_licence_and_its_source_
         "git 2.54.0-r0 | GPL-2.0-only | https://gitlab.alpinelinux.org/alpine/aports/-/tree/0123456789abcdef/main/git",
         "libcurl 8.22.0-r0 | curl | https://gitlab.alpinelinux.org/alpine/aports/-/tree/fedcba9876543210/main/curl",
     ]
+
+
+def test_the_list_of_alpine_packages_says_first_which_asset_holds_the_sources(tmp_path):
+    """ALPINE-PACKAGES as the image's RUN writes it: comment lines naming the
+    release's sources asset of the image's version — the very line image
+    checks for in the image it built, and `sources` reads past — then one line
+    a package, sorted."""
+    installed = (
+        "C:Q1def=\nP:libcurl\nV:8.22.0-r0\nL:curl\no:curl\nc:" + "f" * 40 + "\n\n"
+        "C:Q1abc=\nP:git\nV:2.54.0-r0\nA:x86_64\nL:GPL-2.0-only\no:git\nc:" + "0" * 40 + "\n"
+    )
+    lines = alpine_packages_script(tmp_path, installed).splitlines()
+    header = [line for line in lines if line.startswith("#")]
+    assert lines[: len(header)] == header, "the comment comes first"
+    assert f"# udeck-plugin-image-sources-{VERSION}.tar, an asset of the release that published this image," in header
+    assert f"# https://github.com/iillyyaa1997/udeck/releases/tag/v{VERSION}" in header
+    assert lines[len(header):] == [
+        f"git 2.54.0-r0 | GPL-2.0-only | https://gitlab.alpinelinux.org/alpine/aports/-/tree/{'0' * 40}/main/git",
+        f"libcurl 8.22.0-r0 | curl | https://gitlab.alpinelinux.org/alpine/aports/-/tree/{'f' * 40}/main/curl",
+    ]
+    script = (REPO / "Scripts" / "make-cli.sh").read_text()
+    assert 'grep -qxF "# udeck-plugin-image-sources-$version.tar, an asset of the release that published this image,"' in script
 
 
 def test_version_is_what_the_app_says_read_without_a_mac():
@@ -935,7 +1303,8 @@ def test_the_image_is_pushed_after_everything_is_made_and_before_the_release_tha
         '"release-cli/udeck-plugin-$version-macos-universal.tar.gz"',
         '"release-cli/udeck-plugin-$version-linux-x86_64.tar.gz"',
         '"release-cli/udeck-plugin-$version-linux-aarch64.tar.gz"',
-        "release-cli/udeck-plugin-image.txt", "release-cli/SHA256SUMS",
+        "release-cli/udeck-plugin-image.txt", '"release-cli/udeck-plugin-image-sources-$version.tar"',
+        "release-cli/SHA256SUMS",
     ):  # fmt: skip
         assert asset in create, asset
     assert "make-cli.sh sums" in blocks["publish"] and "make-cli.sh notes" in blocks["publish"]
@@ -946,7 +1315,7 @@ def test_the_image_is_pushed_after_everything_is_made_and_before_the_release_tha
 def test_archives_never_go_where_generate_appcast_reads():
     text = workflow("release.yml")
     assert re.search(r"generate_appcast\"? \\\n(?:.*\\\n)*\s+release/$", text, re.M), "the appcast is written from release/"
-    for line in re.findall(r"^.*make-cli\.sh (?:macos|linux|image|push|sums|notes).*$", text, re.M):
+    for line in re.findall(r"^.*make-cli\.sh (?:macos|linux|image|sources|push|sums|notes).*$", text, re.M):
         assert "--out release-cli" in line, line
 
 
@@ -956,6 +1325,7 @@ def test_ci_makes_what_a_release_publishes_on_every_push_and_publishes_nothing()
     assert "make-cli.sh macos" in blocks["build-and-test"]
     assert "make-cli.sh linux" in blocks["plugin-format-linux"]
     assert "make-cli.sh image" in blocks["udeck-plugin-image"]
+    assert "make-cli.sh sources" in blocks["udeck-plugin-image"]
     assert "--out release-cli --repository localhost:5001/iillyyaa1997/udeck-plugin" in blocks["udeck-plugin-image"]
     assert "make-cli.sh sums" in blocks["release-assets"] and "make-cli.sh notes" in blocks["release-assets"]
     assert needs(blocks["release-assets"]) == {"build-and-test", "plugin-format-linux", "udeck-plugin-image"}
@@ -995,11 +1365,34 @@ def test_ci_copies_the_image_to_a_second_registry_that_asks_for_a_login_and_logs
 
 def test_every_make_cli_call_in_ci_says_the_version_a_tag_would():
     text = workflow("ci.yml")
-    calls = [line for line in text.splitlines() if re.search(r"Scripts/make-cli\.sh (macos|linux|image|push|sums|notes)", line)]
-    assert len(calls) == 6, calls
+    calls = [line for line in text.splitlines() if re.search(r"Scripts/make-cli\.sh (macos|linux|image|sources|push|sums|notes)", line)]
+    assert len(calls) == 7, calls
     for call in calls:
         assert '--version "$(Scripts/make-cli.sh version)"' in call, call
     assert '--revision "$GITHUB_SHA"' in next(call for call in calls if "make-cli.sh image" in call)
+
+
+@pytest.mark.parametrize(("name", "job"), [("ci.yml", "udeck-plugin-image"), ("release.yml", "image")])
+def test_the_sources_are_gathered_from_the_image_that_ran_before_it_is_copied_and_kept_for_the_release(name, job):
+    """Gathered after `image` — which writes the package list they are read
+    from — and before the login and the copy, so that an image whose sources
+    cannot be gathered is never published; kept with the image's file for
+    the job that writes SHA256SUMS. Downloaded afresh, as a release does:
+    no cache in either workflow."""
+    found = steps(jobs(workflow(name))[job])
+    image = next(i for i, step in enumerate(found) if "make-cli.sh image" in step)
+    sources = [i for i, step in enumerate(found) if "make-cli.sh sources" in step]
+    login = next(i for i, step in enumerate(found) if "docker login" in step)
+    assert sources == [image + 1] and sources[0] < login, [step.split("\n")[0] for step in found]
+    kept = next(step for step in found if "upload-artifact@" in step and "udeck-plugin-image.txt" in step)
+    assert "release-cli/udeck-plugin-image-sources-*.tar" in kept
+    assert "actions/cache" not in workflow(name)
+
+
+def test_ci_pins_a_release_whose_sums_name_its_sources_and_checks_them():
+    step = next(step for step in steps(jobs(workflow("ci.yml"))["release-assets"]) if "pin --repo" in step)
+    assert '"release-cli/udeck-plugin-image-sources-$version.tar" "$releases/download/v$version/"' in step
+    assert 'grep " udeck-plugin-image-sources-$version.tar\\$" SHA256SUMS | sha256sum -c -' in step
 
 
 def test_ci_pins_the_release_it_made_and_reads_the_pin_with_the_reader_in_the_docs():

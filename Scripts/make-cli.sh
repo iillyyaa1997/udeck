@@ -7,6 +7,7 @@
 # Usage:  Scripts/make-cli.sh macos [--version X.Y.Z] [--sign IDENTITY] [--out DIR]
 #         Scripts/make-cli.sh linux --arch x86_64|aarch64 [--version X.Y.Z] [--out DIR]
 #         Scripts/make-cli.sh image [--version X.Y.Z] [--out DIR] [--stage REGISTRY/NAME] [--revision COMMIT]
+#         Scripts/make-cli.sh sources [--version X.Y.Z] [--out DIR] [--aports URL] [--distfiles URL]
 #         Scripts/make-cli.sh push [--version X.Y.Z] [--out DIR] [--stage REGISTRY/NAME] [--repository REGISTRY/NAME]
 #         Scripts/make-cli.sh sums [--version X.Y.Z] [--out DIR] [--repository REGISTRY/NAME]
 #         Scripts/make-cli.sh notes [--version X.Y.Z] [--out DIR] [--repository REGISTRY/NAME]
@@ -69,7 +70,24 @@
 # (or amd64 on an arm64 one): the binary itself is proved natively by the
 # Linux build job, and what the image adds — Alpine's git and curl, a shell,
 # /tmp — is what emulation runs here. What ran is written to
-# udeck-plugin-staged.txt.
+# udeck-plugin-staged.txt, and the list of Alpine's packages each platform's
+# copy holds — its /usr/share/licenses/udeck-plugin/ALPINE-PACKAGES — to
+# udeck-plugin-staged-packages.txt.
+#
+# sources gathers the source of every Alpine package in that image under the
+# GPL or the LGPL — git and BusyBox among them — into
+# udeck-plugin-image-sources-<version>.tar, which the release publishes beside
+# the image, as the image's ALPINE-PACKAGES and THIRD_PARTY_NOTICES say. For
+# each package, as the image's own records name it: its folder of Alpine's
+# aports at the commit it was built from — read by git, so that every file is
+# the one that commit holds — and the upstream archives its APKBUILD names,
+# from Alpine's distfiles, each held to the sha512 the APKBUILD gives; the
+# files of the folder the APKBUILD names are held to theirs too. One archive
+# rather than one a package: one more asset and one more line in SHA256SUMS,
+# whichever packages a release's image happens to hold. It runs after image
+# and before push, so that an image whose sources cannot be gathered is never
+# published. --aports and --distfiles say where to read from (default:
+# Alpine's own); the harness points them at copies of its own.
 #
 # push copies that index — by its digest, byte for byte — to --repository
 # (ghcr.io/iillyyaa1997/udeck-plugin unless told otherwise), tagged
@@ -80,10 +98,11 @@
 # caller's, just before push: no credential passes through here, and none is
 # held while anything is built or run.
 #
-# sums writes SHA256SUMS over the three archives and udeck-plugin-image.txt —
-# one version, all three platforms and the image of that version, or it
-# refuses — once it has read every record of every archive, and checks what it
-# wrote. notes holds udeck-plugin-image.txt to what it must say and writes
+# sums writes SHA256SUMS over the three archives, udeck-plugin-image.txt and
+# the image's sources — one version, all three platforms, and the image and the
+# sources of that version, or it refuses — once it has read every record of
+# every archive and every file of the sources against their own SHA512SUMS, and
+# checks what it wrote. notes holds udeck-plugin-image.txt to what it must say and writes
 # notes.md, what the release says before GitHub's own notes: the image by its
 # digest. Both read the image file the same way, and compare it byte for byte
 # with the four lines push writes — `udeck-plugin pin` reads it as strictly — so
@@ -117,6 +136,11 @@ NOTICES="Scripts/third-party/THIRD_PARTY_NOTICES"
 # one) — run in the image by its own awk.
 # shellcheck disable=SC2016
 LOCK_READER='/^<!-- \/lock-reader -->$/ { inside = 0 } inside && !/^```/ { print } /^<!-- lock-reader -->$/ { inside = 1 }'
+# Where the sources of the image's Alpine packages are read from: aports, by
+# git, and the upstream archives Alpine keeps for the release the image is
+# built on — the Dockerfile's FROM, which a test holds to this one.
+APORTS="https://gitlab.alpinelinux.org/alpine/aports.git"
+DISTFILES="https://distfiles.alpinelinux.org/distfiles/v3.24"
 
 # The licences of what the image holds, for its licenses label, one SPDX
 # expression to a line. First the command's — its own and those of what is
@@ -142,7 +166,7 @@ MPL-2.0 AND MIT
 Zlib"
 
 usage() {
-    sed -n '7,13p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '7,14p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
 }
 
@@ -169,7 +193,7 @@ release_version() {
 WHAT="$1"
 shift
 case "$WHAT" in
-    macos|linux|image|push|sums|notes|version) ;;
+    macos|linux|image|sources|push|sums|notes|version) ;;
     *) echo "make-cli: unknown command: $WHAT" >&2; usage ;;
 esac
 
@@ -194,6 +218,8 @@ while [ $# -gt 0 ]; do
         --stage) STAGE="${2-}"; shift 2 ;;
         --repository) IMAGE_REPOSITORY="${2-}"; shift 2 ;;
         --revision) REVISION="${2-}"; shift 2 ;;
+        --aports) APORTS="${2-}"; shift 2 ;;
+        --distfiles) DISTFILES="${2-}"; shift 2 ;;
         *) echo "make-cli: unknown option: $1" >&2; usage ;;
     esac
 done
@@ -524,7 +550,15 @@ write_sums() {
     done
     VERSION="$version"
     read_image_file "$OUT/udeck-plugin-image.txt" "$IMAGE_REPOSITORY"
-    files+=(udeck-plugin-image.txt)
+    # The sources of the image's GPL and LGPL packages, every file in them
+    # held to their own SHA512SUMS.
+    local sources="udeck-plugin-image-sources-$version.tar"
+    for found in udeck-plugin-image-sources-*.tar; do
+        [ ! -e "$found" ] || [ "$found" = "$sources" ] || fail "a sources archive no release names is in $OUT: $found"
+    done
+    [ -f "$sources" ] || fail "no $sources in $OUT: sources gathers it, from the packages of the image that ran"
+    check_sources "$OUT/$sources" "$version"
+    files+=(udeck-plugin-image.txt "$sources")
     sha256 "${files[@]}" > SHA256SUMS
     sha256 -c SHA256SUMS
     echo "==> $OUT/SHA256SUMS:"
@@ -542,7 +576,7 @@ write_notes() {
         "" \
         "    $IMAGE_REPOSITORY@$IMAGE_DIGEST" \
         "" \
-        "linux/amd64 and linux/arm64. The archives below — macOS (universal), Linux x86_64 and aarch64 — are checked against SHA256SUMS; what else each is made of, and under what licences, is in its THIRD_PARTY_NOTICES." \
+        "linux/amd64 and linux/arm64. The archives below — macOS (universal), Linux x86_64 and aarch64 — are checked against SHA256SUMS; what else each is made of, and under what licences, is in its THIRD_PARTY_NOTICES. The source of every Alpine package in the image under the GPL or the LGPL — git and BusyBox among them — is udeck-plugin-image-sources-$IMAGE_VERSION.tar." \
         > "$OUT/notes.md"
     echo "==> $OUT/notes.md:"
     cat "$OUT/notes.md"
@@ -630,10 +664,16 @@ check_image() {
         || fail "no shell, git, curl or /tmp in the image ($platform)"
 
     # What it says of what it holds: the notices beside the command, the list
-    # of Alpine's packages with where their sources are, and no package under
-    # a licence the label does not name.
-    "${run[@]}" "$ref" sh -c 'cd /usr/share/licenses/udeck-plugin && test -s LICENSE && test -s NOTICE && test -s THIRD_PARTY_NOTICES && grep -q "^git " ALPINE-PACKAGES' \
+    # of Alpine's packages with where their sources are — both naming the
+    # release's asset that holds the sources of the GPL and LGPL ones — and no
+    # package under a licence the label does not name.
+    "${run[@]}" "$ref" sh -c 'cd /usr/share/licenses/udeck-plugin && test -s LICENSE && test -s NOTICE && test -s THIRD_PARTY_NOTICES && grep -q "^git " ALPINE-PACKAGES && grep -q "udeck-plugin-image-sources-X\.Y\.Z\.tar" THIRD_PARTY_NOTICES' \
         || fail "the image ($platform) lacks its licences, its notices or the list of its Alpine packages"
+    local packages="$SCRATCH/packages-${platform#linux/}.txt"
+    "${run[@]}" "$ref" cat /usr/share/licenses/udeck-plugin/ALPINE-PACKAGES > "$packages" \
+        || fail "the image's ($platform) ALPINE-PACKAGES cannot be read"
+    grep -qxF "# udeck-plugin-image-sources-$version.tar, an asset of the release that published this image," "$packages" \
+        || fail "the image's ($platform) ALPINE-PACKAGES does not name udeck-plugin-image-sources-$version.tar, where the sources of its GPL and LGPL packages are: $(head -5 "$packages" | tr '\n' ' ')"
     "${run[@]}" "$ref" sed -n 's/^L://p' /lib/apk/db/installed > "$SCRATCH/licenses.txt" \
         || fail "the image's ($platform) package records cannot be read"
     [ -s "$SCRATCH/licenses.txt" ] || fail "the image ($platform) has no package records"
@@ -701,8 +741,9 @@ check_image() {
         done
         printf "image=registry.invalid/udeck/udeck-plugin\ntag=v%s\ndigest=sha256:%s\nplatforms=linux/amd64,linux/arm64\n" \
             "$wanted" 0000000000000000000000000000000000000000000000000000000000000000 > udeck-plugin-image.txt
+        printf "the sources of the image\n" > "udeck-plugin-image-sources-$wanted.tar"
         sha256sum "udeck-plugin-$wanted-macos-universal.tar.gz" "udeck-plugin-$wanted-linux-x86_64.tar.gz" \
-            "udeck-plugin-$wanted-linux-aarch64.tar.gz" udeck-plugin-image.txt > SHA256SUMS
+            "udeck-plugin-$wanted-linux-aarch64.tar.gz" udeck-plugin-image.txt "udeck-plugin-image-sources-$wanted.tar" > SHA256SUMS
         printf "{\"format\": 1, \"name\": \"Pinned in the image\"}\n" > "$repo/udeck-plugins.json"
         export UDECK_PLUGIN_DOWNLOAD_BASE="file:///tmp/releases/download"
         udeck-plugin pin --repo "$repo" --version "$wanted"
@@ -755,7 +796,7 @@ build_image() {
     local description="udeck-plugin $version: checks uDeck plugins and plugin repositories, in a repository's CI"
     local licenses
     licenses="$(licenses_label)"
-    rm -f "$OUT/udeck-plugin-staged.txt"
+    rm -f "$OUT/udeck-plugin-staged.txt" "$OUT/udeck-plugin-staged-packages.txt"
 
     # QEMU for the platform this runner is not, so that both platforms'
     # copies are built and run here; then a builder of its own — the Docker
@@ -805,6 +846,13 @@ build_image() {
         docker image rm "$STAGE@$digest" >/dev/null 2>&1 || true
     done
 
+    # The packages each platform's copy holds, as its ALPINE-PACKAGES lists
+    # them — what `sources` gathers the sources of — written with the file
+    # that says the image ran, and only then.
+    for platform in linux/amd64 linux/arm64; do
+        grep -v '^#' "$SCRATCH/packages-${platform#linux/}.txt" | sed "s|^|$platform |"
+    done > "$SCRATCH/staged-packages.txt"
+    mv "$SCRATCH/staged-packages.txt" "$OUT/udeck-plugin-staged-packages.txt"
     image_text "$STAGE" "$version" "$digest" > "$OUT/udeck-plugin-staged.txt"
     echo "==> Built and run, not published: $OUT/udeck-plugin-staged.txt:"
     cat "$OUT/udeck-plugin-staged.txt"
@@ -830,6 +878,296 @@ push_image() {
     cat "$OUT/udeck-plugin-image.txt"
 }
 
+# --- sources -------------------------------------------------------------------------------------
+
+sha512() {
+    if command -v sha512sum >/dev/null 2>&1; then sha512sum "$@"; else shasum -a 512 "$@"; fi
+}
+
+sha512_of() {
+    local said
+    said="$(sha512 "$1")" || fail "cannot read $1"
+    printf '%s\n' "${said%% *}"
+}
+
+# Git for aports: nobody's configuration, no prompt, and nothing fetched but
+# what is asked for by its id (git 2.45 and later know GIT_NO_LAZY_FETCH).
+aports_git() {
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_TERMINAL_PROMPT=0 GIT_NO_LAZY_FETCH=1 \
+        git -C "$SCRATCH/aports.git" "$@"
+}
+
+# The folder main/<origin> of aports at <commit>, into <folder>: the commit
+# and its trees fetched by the commit's id, then the folder's blobs by theirs
+# — git checks every object against its id, so each file is the one that
+# commit holds. Files and links with plain names: aports links one install
+# script to another (alpine-baselayout's post-upgrade is its pre-upgrade), and
+# such a link is kept as one, so long as it leads to a name in the same folder.
+# A submodule, a link elsewhere or a name git has to quote is refused.
+aports_folder() {
+    local commit="$1" origin="$2" folder="$3"
+    if [ ! -d "$SCRATCH/aports.git" ]; then
+        GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git init -q --bare "$SCRATCH/aports.git" < /dev/null
+        aports_git remote add aports "$APORTS" < /dev/null
+        aports_git config remote.aports.promisor true < /dev/null
+        aports_git config remote.aports.partialclonefilter blob:none < /dev/null
+    fi
+    aports_git fetch -q --no-tags --depth 1 --filter=blob:none aports "$commit" < /dev/null \
+        || fail "aports commit $commit (main/$origin) cannot be fetched from $APORTS"
+    aports_git cat-file -e "$commit^{commit}" < /dev/null 2>/dev/null || fail "$APORTS has no commit $commit"
+    local listing="$SCRATCH/listing.txt"
+    aports_git ls-tree -r --full-tree "$commit" -- "main/$origin/" < /dev/null > "$listing" \
+        || fail "aports $commit cannot be listed"
+    [ -s "$listing" ] || fail "aports $commit has no main/$origin"
+    local tab bad origin_pattern
+    tab="$(printf '\t')"
+    origin_pattern="$(printf '%s\n' "$origin" | sed 's/[.+]/\\&/g')"
+    bad="$(grep -Ev "^(100644|100755|120000) blob [0-9a-f]{40}${tab}main/$origin_pattern/[A-Za-z0-9._+-][A-Za-z0-9._+/-]*\$" "$listing" | head -1 || true)"
+    [ -z "$bad" ] || fail "aports $commit main/$origin holds what is not a plain file with a plain name: $bad"
+    sed -E 's/^[0-9]+ blob ([0-9a-f]{40}).*$/\1/' "$listing" | aports_git fetch -q --no-tags --stdin aports \
+        || fail "the files of aports $commit main/$origin cannot be fetched from $APORTS"
+    local meta mode blob path relative target
+    while IFS="$tab" read -r meta path; do
+        mode="${meta%% *}"
+        blob="${meta##* }"
+        relative="${path#main/"$origin"/}"
+        case "/$relative/" in */../* | */./*) fail "aports $commit main/$origin names $path" ;; esac
+        mkdir -p "$folder/$(dirname "$relative")"
+        if [ "$mode" = 120000 ]; then
+            target="$(aports_git cat-file blob "$blob" < /dev/null)" \
+                || fail "aports $commit: $path (blob $blob) is not in this copy"
+            case "$target" in
+                "" | .* | *[!A-Za-z0-9._+-]*) fail "aports $commit: $path is a link that leads out of its folder, to $target" ;;
+            esac
+            ln -s "$target" "$folder/$relative"
+            continue
+        fi
+        aports_git cat-file blob "$blob" < /dev/null > "$folder/$relative" \
+            || fail "aports $commit: $path (blob $blob) is not in this copy"
+        if [ "$mode" = 100755 ]; then chmod 755 "$folder/$relative"; else chmod 644 "$folder/$relative"; fi
+    done < "$listing"
+    [ -f "$folder/APKBUILD" ] || fail "aports $commit main/$origin has no APKBUILD"
+}
+
+# The lines of an APKBUILD's sha512sums="…": `<sha512>  <name>` for every file
+# its source= names, as abuild writes them.
+apkbuild_sums() {
+    awk -v q="'" '
+        !inside && ($0 ~ "^sha512sums=\"" || $0 ~ "^sha512sums=" q) { inside = 1; sub(/^sha512sums=./, "") }
+        inside {
+            last = ($0 ~ "[\"" q "][[:space:]]*$")
+            sub("[\"" q "][[:space:]]*$", "")
+            if ($0 !~ /^[[:space:]]*$/) print
+            if (last) exit
+        }
+    ' "$1"
+}
+
+build_sources() {
+    read_image_file "$OUT/udeck-plugin-staged.txt" "$STAGE"
+    local version="$IMAGE_VERSION"
+    local listed="$OUT/udeck-plugin-staged-packages.txt"
+    [ -f "$listed" ] || fail "no udeck-plugin-staged-packages.txt in $OUT: image writes it, with the image it ran"
+    local name="udeck-plugin-image-sources-$version"
+    local tree="$SCRATCH/sources/$name"
+    rm -f "$OUT/udeck-plugin-image-sources-$version.tar"
+    mkdir -p "$tree/aports" "$tree/distfiles"
+
+    # Every line as image wrote it: a platform, then an ALPINE-PACKAGES line —
+    # name, version, licence, and the package's folder in aports at the commit
+    # it was built from. Read into tab-separated fields; a line that is not
+    # one stops it.
+    local tab packages="$SCRATCH/packages.tsv"
+    tab="$(printf '\t')"
+    sed -En "s#^(linux/amd64|linux/arm64) ([^ |]+) ([^ |]+) [|] ([^|]*[^ |]) [|] https://gitlab[.]alpinelinux[.]org/alpine/aports/-/tree/([0-9a-f]{40})/main/([A-Za-z0-9._+-]+)\$#\\1$tab\\2$tab\\3$tab\\4$tab\\5$tab\\6#p" \
+        "$listed" > "$packages"
+    local lines read_lines
+    lines="$(grep -c . "$listed" || true)"
+    read_lines="$(grep -c . "$packages" || true)"
+    if [ "$read_lines" != "$lines" ] || [ "$lines" = 0 ]; then
+        fail "udeck-plugin-staged-packages.txt has a line that is not <platform> <name> <version> | <licence> | <its aports folder at a commit>: $(grep -Ev '^linux/(amd64|arm64) [^ |]+ [^ |]+ [|] .*[^ |] [|] https://gitlab[.]alpinelinux[.]org/alpine/aports/-/tree/[0-9a-f]{40}/main/[A-Za-z0-9._+-]+$' "$listed" | head -1)"
+    fi
+    local platform
+    for platform in linux/amd64 linux/arm64; do
+        grep -q "^$platform$tab" "$packages" || fail "udeck-plugin-staged-packages.txt lists no package of $platform"
+    done
+
+    # The GPL and the LGPL, in any expression a package's licence is — and
+    # the AGPL, which the same test finds.
+    local copyleft="$SCRATCH/copyleft.tsv"
+    awk -F "$tab" '$4 ~ /GPL/' "$packages" > "$copyleft"
+    [ -s "$copyleft" ] || fail "no package in udeck-plugin-staged-packages.txt is under the GPL or the LGPL, and BusyBox is: the list is not the image's"
+
+    local commit origin folder sum file count=0
+    while IFS="$tab" read -r commit origin; do
+        folder="$tree/aports/$commit/main/$origin"
+        echo "==> aports $commit main/$origin"
+        aports_folder "$commit" "$origin" "$folder"
+        apkbuild_sums "$folder/APKBUILD" > "$SCRATCH/sums.txt"
+        [ -s "$SCRATCH/sums.txt" ] || fail "aports $commit main/$origin: its APKBUILD names no sha512sums"
+        while read -r sum file; do
+            if ! printf '%s\n' "$sum" | grep -Eqx '[0-9a-f]{128}' || ! printf '%s\n' "$file" | grep -Eqx '[A-Za-z0-9_][A-Za-z0-9._+~-]*'; then
+                fail "aports $commit main/$origin: its APKBUILD's sha512sums has a line that is not <sha512>  <file>: $sum $file"
+            fi
+            if [ -f "$folder/$file" ]; then
+                # One of the folder's own files, as abuild checks it.
+                [ "$(sha512_of "$folder/$file")" = "$sum" ] \
+                    || fail "aports $commit main/$origin/$file is not what its APKBUILD's sha512sums says"
+                continue
+            fi
+            # An upstream archive, as Alpine's distfiles keep it.
+            if [ ! -f "$tree/distfiles/$file" ]; then
+                curl -fsSL --proto '=https,file' --retry 3 -o "$SCRATCH/download" "$DISTFILES/$file" < /dev/null \
+                    || fail "$file, which aports $commit main/$origin builds from, cannot be read from $DISTFILES"
+                mv "$SCRATCH/download" "$tree/distfiles/$file"
+                chmod 644 "$tree/distfiles/$file"
+                count=$((count + 1))
+            fi
+            [ "$(sha512_of "$tree/distfiles/$file")" = "$sum" ] \
+                || fail "$file from $DISTFILES is not what the APKBUILD of aports $commit main/$origin says: its sha512 is $(sha512_of "$tree/distfiles/$file")"
+        done < "$SCRATCH/sums.txt"
+    done < <(cut -f5,6 "$copyleft" | sort -u)
+
+    sources_readme "$version" "$copyleft" > "$tree/README"
+    (cd "$tree" && find . -type f ! -name README | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r file; do sha512 "$file"; done) \
+        > "$SCRATCH/SHA512SUMS"
+    mv "$SCRATCH/SHA512SUMS" "$tree/SHA512SUMS"
+
+    pack_sources "$SCRATCH/sources" "$name" "$SCRATCH/$name.tar"
+    check_sources "$SCRATCH/$name.tar" "$version"
+    mv "$SCRATCH/$name.tar" "$OUT/$name.tar"
+    echo "==> $OUT/$name.tar: $(size_of "$OUT/$name.tar") bytes — the sources of $(cut -f2 "$copyleft" | sort -u | wc -l | tr -d ' ') packages, from $(cut -f5,6 "$copyleft" | sort -u | wc -l | tr -d ' ') aports folders and $count upstream archives:"
+    sed -n '/^The packages/,$p' "$tree/README"
+}
+
+# What the archive says of itself, and of the packages it holds the sources
+# of — each with the platforms whose image holds it.
+sources_readme() {
+    local version="$1" copyleft="$2" tab title
+    tab="$(printf '\t')"
+    title="The sources of the GPL and LGPL software in the udeck-plugin image of uDeck $version"
+    printf '%s\n%s\n' "$title" "$(printf '%s\n' "$title" | sed 's/./=/g')"
+    cat <<EOF
+
+The image ghcr.io/iillyyaa1997/udeck-plugin:v$version — by the digest its
+release names in udeck-plugin-image.txt — is Alpine Linux with git and curl,
+and udeck-plugin. Every Alpine package in it is listed, with its version, its
+licence and its folder in Alpine's aports at the commit it was built from, in
+the image's /usr/share/licenses/udeck-plugin/ALPINE-PACKAGES. This archive is
+an asset of the same release,
+https://github.com/iillyyaa1997/udeck/releases/tag/v$version, and holds the
+source of every package there under the GPL or the LGPL, as Alpine built it:
+
+  aports/<commit>/main/<origin>/
+      the package's folder of aports, https://gitlab.alpinelinux.org/alpine/aports,
+      at the commit it was built from: its APKBUILD, its patches and the other
+      files it builds and installs, read by git at that commit
+  distfiles/
+      the upstream archives those APKBUILDs name, each the file its
+      APKBUILD's sha512sums names, from Alpine's distfiles:
+      $DISTFILES
+  SHA512SUMS
+      the sha512 of every file here but this one and itself
+
+To build a package again, on the Alpine release it was built for: in its
+folder, with SRCDEST pointing at distfiles/, run abuild.
+
+The packages — name and version, licence, the platforms whose image holds it,
+and its folder here:
+
+EOF
+    awk -F "$tab" '
+        {
+            key = "  " $2 " " $3 " | " $4 " | "
+            where = "aports/" $5 "/main/" $6
+            id = key SUBSEP where
+            if (!(id in platforms)) { order[++n] = id; keys[id] = key; wheres[id] = where; platforms[id] = $1 }
+            else platforms[id] = platforms[id] ", " $1
+        }
+        END { for (i = 1; i <= n; i++) print keys[order[i]] platforms[order[i]] " | " wheres[order[i]] }
+    ' "$copyleft" | LC_ALL=C sort
+}
+
+# The archive, written the same way wherever it is made: sorted, owned by 0:0
+# with no names, every time 0, no extended attribute and no pax record.
+pack_sources() {
+    python3 - "$1" "$2" "$3" <<'PY'
+import os, sys, tarfile
+root, name, out = sys.argv[1:4]
+def add(tar, path, arcname):
+    info = tarfile.TarInfo(arcname)
+    info.uid = info.gid = 0
+    info.uname = info.gname = ""
+    info.mtime = 0
+    if os.path.islink(path):
+        # A link aports keeps between two files of one folder.
+        info.type, info.mode, info.linkname = tarfile.SYMTYPE, 0o777, os.readlink(path)
+        tar.addfile(info)
+    elif os.path.isdir(path):
+        info.type, info.mode = tarfile.DIRTYPE, 0o755
+        tar.addfile(info)
+        for child in sorted(os.listdir(path)):
+            add(tar, os.path.join(path, child), arcname + "/" + child)
+    elif os.path.isfile(path):
+        info.mode = 0o755 if os.stat(path).st_mode & 0o100 else 0o644
+        info.size = os.path.getsize(path)
+        with open(path, "rb") as data:
+            tar.addfile(info, data)
+    else:
+        sys.exit(f"{arcname} is neither a file nor a folder")
+with tarfile.open(out, "w", format=tarfile.GNU_FORMAT) as tar:
+    add(tar, os.path.join(root, name), name)
+PY
+}
+
+# Refuses a sources archive that is not one folder, udeck-plugin-image-sources-
+# <version>/, of folders, plain files and links to a name in their own folder,
+# owned by 0:0 with no pax record — with a README, an APKBUILD, and a
+# SHA512SUMS that names every other file in it with the sha512 it has.
+check_sources() {
+    python3 - "$1" "udeck-plugin-image-sources-$2" <<'PY' || fail "$(basename "$1") is not the sources archive sources writes"
+import hashlib, sys, tarfile
+archive, name = sys.argv[1:3]
+problems = []
+files = {}
+try:
+    with tarfile.open(archive) as tar:
+        for member in tar.getmembers():
+            if member.name != name and not member.name.startswith(name + "/"):
+                problems.append(f"{member.name} is outside {name}/")
+            if ".." in member.name.split("/"):
+                problems.append(f"{member.name} climbs out")
+            if (member.uid, member.gid) != (0, 0) or member.pax_headers:
+                problems.append(f"{member.name} is owned by {member.uid}:{member.gid} or carries pax records")
+            if member.isreg():
+                files[member.name[len(name) + 1:]] = tar.extractfile(member).read()
+            elif member.issym():
+                if "/" in member.linkname or member.linkname in ("", ".", ".."):
+                    problems.append(f"{member.name} is a link out of its folder, to {member.linkname}")
+            elif not member.isdir():
+                problems.append(f"{member.name} is neither a file, a link nor a folder")
+except (OSError, tarfile.TarError) as error:
+    problems.append(f"it cannot be read: {error}")
+if "README" not in files:
+    problems.append("it has no README")
+listed = {}
+for line in files.get("SHA512SUMS", b"").decode("utf-8", "replace").splitlines():
+    sum, _, path = line.partition("  ")
+    listed[path] = sum
+expected = {path for path in files if path not in ("README", "SHA512SUMS")}
+if not listed or set(listed) != expected:
+    problems.append(f"its SHA512SUMS names wrongly: {sorted(set(listed) ^ expected)}")
+for path in sorted(expected & set(listed)):
+    if hashlib.sha512(files[path]).hexdigest() != listed[path]:
+        problems.append(f"{path} is not what its SHA512SUMS says")
+if not any(path.startswith("aports/") and path.endswith("/APKBUILD") for path in files):
+    problems.append("it holds no APKBUILD")
+for problem in problems[:10]:
+    print(problem, file=sys.stderr)
+sys.exit(1 if problems else 0)
+PY
+}
+
 # The digest BuildKit reports for what it pushed, from its metadata file —
 # required: the digest is what a release names.
 digest_in() {
@@ -843,6 +1181,7 @@ case "$WHAT" in
     macos) build_macos ;;
     linux) build_linux ;;
     image) build_image ;;
+    sources) build_sources ;;
     push) push_image ;;
     sums) write_sums ;;
     notes) write_notes ;;

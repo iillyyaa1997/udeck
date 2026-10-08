@@ -40,6 +40,7 @@ struct FakeRelease: ReleaseFetching {
             sums += "\(ReleaseFiles.sha256(Array("\(platform) \(version)".utf8)))  \(PluginLock.archive(platform, of: parsed))\n"
         }
         sums += "\(ReleaseFiles.sha256(image))  \(ReleaseFiles.image)\n"
+        sums += "\(ReleaseFiles.sha256(Array("sources \(version)".utf8)))  \(ReleaseFiles.imageSources(of: parsed))\n"
         files["\(base)/v\(version)/\(ReleaseFiles.sums)"] = Array(sums.utf8)
         files["\(base)/v\(version)/\(ReleaseFiles.image)"] = image
     }
@@ -129,14 +130,17 @@ struct ReleaseFilesTests {
 
     var goodSums: [String] {
         PluginLock.platforms.enumerated().map { "\(String(repeating: "\($0.offset)", count: 64))  udeck-plugin-0.6.0-\($0.element).tar.gz" }
-            + ["\(String(repeating: "9", count: 64))  udeck-plugin-image.txt"]
+            + ["\(String(repeating: "9", count: 64))  udeck-plugin-image.txt",
+               "\(String(repeating: "8", count: 64))  udeck-plugin-image-sources-0.6.0.tar"]
     }
 
-    @Test("SHA256SUMS: a sum for each archive and the image file, as sha256sum writes it")
+    @Test("SHA256SUMS: a sum for each archive, the image file and the image's sources, as sha256sum writes it")
     func sumsRead() throws {
         let read = try sums(goodSums)
         #expect(read["udeck-plugin-0.6.0-linux-aarch64.tar.gz"] == String(repeating: "2", count: 64))
         #expect(read["udeck-plugin-image.txt"] == String(repeating: "9", count: 64))
+        #expect(read["udeck-plugin-image-sources-0.6.0.tar"] == String(repeating: "8", count: 64))
+        #expect(read.count == 5)
         #expect(try sums(goodSums.reversed()) == read, "in any order")
     }
 
@@ -152,7 +156,14 @@ struct ReleaseFilesTests {
             (["ABCDEF" + String(repeating: "0", count: 58) + "  udeck-plugin-0.6.0-macos-universal.tar.gz"] + goodSums.dropFirst(),
              "is not <sha256>  <name>"),
             ([String(goodSums[0].dropFirst())] + goodSums.dropFirst(), "is not <sha256>  <name>"),
-            (goodSums + [""], "line 5, is not"),
+            (goodSums + [""], "line 6, is not"),
+            // The image's sources are part of every release from 0.6.0 on —
+            // of its own version, and once.
+            (goodSums.filter { !$0.hasSuffix(".tar") }, "names no udeck-plugin-image-sources-0.6.0.tar"),
+            (goodSums.map { $0.replacingOccurrences(of: "sources-0.6.0", with: "sources-0.5.9") }, "does not know"),
+            (goodSums + ["\(String(repeating: "7", count: 64))  udeck-plugin-image-sources-0.6.0.tar"],
+             "names udeck-plugin-image-sources-0.6.0.tar twice"),
+            (goodSums + ["\(String(repeating: "7", count: 64))  udeck-plugin-image-sources-0.6.0.tar.gz"], "does not know"),
         ]
         for (lines, said) in cases {
             #expect(throws: ReleaseFiles.Problem.self) { try sums(lines) }

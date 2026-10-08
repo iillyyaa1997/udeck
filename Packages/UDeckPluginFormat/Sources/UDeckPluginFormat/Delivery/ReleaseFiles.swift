@@ -6,15 +6,22 @@ import Foundation
 import Crypto
 
 /// The two files of a uDeck release that say what its `udeck-plugin` is:
-/// `SHA256SUMS`, over the three archives and the image file, and
-/// `udeck-plugin-image.txt`, the image by its digest — both written by
-/// Scripts/make-cli.sh, and read here as strictly as that script reads the
-/// image file before a release names it.
+/// `SHA256SUMS`, over the three archives, the image file and the image's
+/// sources, and `udeck-plugin-image.txt`, the image by its digest — both
+/// written by Scripts/make-cli.sh, and read here as strictly as that script
+/// reads the image file before a release names it.
 public enum ReleaseFiles {
     public static let sums = "SHA256SUMS"
     public static let image = "udeck-plugin-image.txt"
     /// The platforms an image is built for, as its file says them.
     public static let imagePlatforms = "linux/amd64,linux/arm64"
+
+    /// The archive of the sources of the image's GPL and LGPL packages, which
+    /// a release publishes beside the image and names in `SHA256SUMS`. No lock
+    /// file pins it: a CI runs the image, not its sources.
+    public static func imageSources(of version: SemanticVersion) -> String {
+        "udeck-plugin-image-sources-\(version).tar"
+    }
 
     /// Why a release's files cannot be pinned.
     public struct Problem: Error, Equatable, CustomStringConvertible {
@@ -83,14 +90,15 @@ public enum ReleaseFiles {
 
     /// Reads `SHA256SUMS` of `version`, as `sha256sum` writes it — a line of
     /// 64 lowercase hexadecimal digits, two spaces and a name for each file —
-    /// and answers the sum of each. It must name exactly the three archives
-    /// and the image file of that version, each once: a release with an asset
-    /// this command does not know is one for a newer `udeck-plugin` to pin.
+    /// and answers the sum of each. It must name exactly the three archives,
+    /// the image file and the image's sources of that version, each once: a
+    /// release with an asset this command does not know is one for a newer
+    /// `udeck-plugin` to pin.
     public static func sums(_ bytes: [UInt8], of version: SemanticVersion) throws -> [String: String] {
         guard bytes.last == UInt8(ascii: "\n") else {
             throw Problem("\(Self.sums) of v\(version) does not end with a line break")
         }
-        let expected = PluginLock.platforms.map { PluginLock.archive($0, of: version) } + [Self.image]
+        let expected = PluginLock.platforms.map { PluginLock.archive($0, of: version) } + [Self.image, imageSources(of: version)]
         var found: [String: String] = [:]
         for (index, line) in bytes.dropLast().split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false).enumerated() {
             let sum = line.prefix(64)

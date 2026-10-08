@@ -3,9 +3,9 @@ name: Release
 # A tag is the whole trigger. Everything a release consists of — the built app,
 # the archive, the signature over it and the feed that points at it, and
 # udeck-plugin for whoever has no uDeck to take it from: its archives for macOS
-# and Linux, their checksums, and the container image a plugin repository's CI
-# pulls — is made here, so that a release is never a sequence somebody has to
-# remember.
+# and Linux, their checksums, the container image a plugin repository's CI
+# pulls and the source of its GPL and LGPL packages — is made here, so that a
+# release is never a sequence somebody has to remember.
 #
 # Immutable releases are on for this repository: once published, a release's
 # assets can be neither replaced nor added to. So every asset is made first,
@@ -211,6 +211,13 @@ jobs:
       - name: Build the image, and run it from the job's registry on both platforms
         run: Scripts/make-cli.sh image --version "${GITHUB_REF_NAME#v}" --out release-cli --revision "$GITHUB_SHA"
 
+      # The source of every Alpine package in the image that ran under the GPL
+      # or the LGPL, as its own package list names them — gathered before the
+      # image is published, so that an image whose sources cannot be gathered
+      # never is.
+      - name: Gather the sources of the image's GPL and LGPL packages
+        run: Scripts/make-cli.sh sources --version "${GITHUB_REF_NAME#v}" --out release-cli
+
       # Logged in just for the copy, and out again whatever it did.
       - name: Log in to ghcr.io
         env:
@@ -229,11 +236,13 @@ jobs:
         if: always()
         run: docker logout ghcr.io
 
-      - name: Keep the image's digest for the release
+      - name: Keep the image's digest and its sources for the release
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: udeck-plugin-image
-          path: release-cli/udeck-plugin-image.txt
+          path: |
+            release-cli/udeck-plugin-image.txt
+            release-cli/udeck-plugin-image-sources-*.tar
           if-no-files-found: error
 
   publish:
@@ -254,7 +263,7 @@ jobs:
           name: app
           path: release
 
-      - name: Take udeck-plugin's archives and the image's digest
+      - name: Take udeck-plugin's archives, the image's digest and its sources
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: udeck-plugin-*
@@ -293,4 +302,5 @@ jobs:
             "release-cli/udeck-plugin-$version-linux-x86_64.tar.gz" \
             "release-cli/udeck-plugin-$version-linux-aarch64.tar.gz" \
             release-cli/udeck-plugin-image.txt \
+            "release-cli/udeck-plugin-image-sources-$version.tar" \
             release-cli/SHA256SUMS
