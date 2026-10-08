@@ -157,6 +157,11 @@ Apache-2.0 WITH Swift-exception
 Apache-2.0 WITH LLVM-exception
 MIT
 BSD-3-Clause"
+# Membership in a list like this one is asked with a here-string, never as
+# `printf … | grep -q`: under pipefail, grep -q leaves as soon as it has its
+# answer, the writer before it can die of SIGPIPE, and the pipeline fails —
+# MIT, in the middle of this list, failed CI that way (run 37716911865). A
+# harness test holds the script to it.
 ALPINE_LICENSES="Apache-2.0
 BSD-3-Clause
 BSD-3-Clause OR GPL-2.0-or-later
@@ -187,7 +192,7 @@ release_version() {
     keys="$(grep -c '<key>CFBundleShortVersionString</key>' "$plist" || true)"
     [ "$keys" = 1 ] || fail "$plist names CFBundleShortVersionString $keys times, not once"
     said="$(sed -n '/^[[:space:]]*<key>CFBundleShortVersionString<\/key>[[:space:]]*$/{n;s/^[[:space:]]*<string>\([^<]*\)<\/string>[[:space:]]*$/\1/p;}' "$plist")"
-    printf '%s\n' "$said" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' && [ "$(printf '%s\n' "$said" | wc -l | tr -d ' ')" = 1 ] \
+    grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' <<< "$said" && [ "$(wc -l <<< "$said" | tr -d ' ')" = 1 ] \
         || fail "$plist says CFBundleShortVersionString is \"$said\", not X.Y.Z on the line after its key"
     printf '%s\n' "$said"
 }
@@ -238,7 +243,7 @@ if [ "$VERSION_GIVEN" = 1 ] && [ -z "$VERSION" ]; then
     echo "make-cli: --version is empty; it takes X.Y.Z (the tag without its v)" >&2
     exit 2
 fi
-if [ -n "$VERSION" ] && ! printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+if [ -n "$VERSION" ] && ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<< "$VERSION"; then
     echo "make-cli: --version $VERSION is not X.Y.Z (the tag without its v)" >&2
     exit 2
 fi
@@ -269,7 +274,7 @@ version_of() {
         *) fail "$binary --version said \"$said\", not \"udeck-plugin X.Y.Z\"" ;;
     esac
     said="${said#udeck-plugin }"
-    printf '%s\n' "$said" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || fail "$binary says its version is \"$said\""
+    grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<< "$said" || fail "$binary says its version is \"$said\""
     if [ -n "$VERSION" ] && [ "$said" != "$VERSION" ]; then
         fail "$binary says it is udeck-plugin $said; this release is $VERSION — the command, the archive and the tag must say one number"
     fi
@@ -336,7 +341,7 @@ archive() {
     cp "$NOTICES" "$folder/THIRD_PARTY_NOTICES"
     chmod 644 "$folder/LICENSE" "$folder/NOTICE" "$folder/THIRD_PARTY_NOTICES"
     local options gnu=0
-    if tar --version 2>/dev/null | grep -q 'GNU tar'; then
+    if grep -q 'GNU tar' <<< "$(tar --version 2>/dev/null || true)"; then
         # GNU tar stores no extended attribute unless asked (--xattrs).
         gnu=1
         options=(--owner=0 --group=0 --numeric-owner)
@@ -457,13 +462,20 @@ build_linux() {
     local stripped
     stripped="$(size_of "$binary")"
 
-    readelf -h "$binary" | grep 'Machine:' | grep -q "$machine" \
-        || fail "udeck-plugin is not built for $ARCH: $(readelf -h "$binary" | grep 'Machine:')"
-    if readelf -l "$binary" | grep -q 'INTERP'; then
+    # Each read whole before it is looked at: `readelf | grep -q` under
+    # pipefail fails when grep has seen enough and readelf is cut off, and
+    # an `if` reads that as "not there" (see the note at ALPINE_LICENSES).
+    local header program dynamic
+    header="$(readelf -h "$binary")" || fail "readelf cannot read udeck-plugin's header"
+    program="$(readelf -l "$binary")" || fail "readelf cannot read udeck-plugin's program headers"
+    dynamic="$(readelf -d "$binary")" || fail "readelf cannot read udeck-plugin's dynamic section"
+    grep -q "$machine" <<< "$(grep 'Machine:' <<< "$header")" \
+        || fail "udeck-plugin is not built for $ARCH: $(grep 'Machine:' <<< "$header")"
+    if grep -q 'INTERP' <<< "$program"; then
         fail "udeck-plugin asks for a dynamic loader; it is not a static binary"
     fi
-    if readelf -d "$binary" | grep -q 'NEEDED'; then
-        fail "udeck-plugin needs shared libraries; it is not a static binary: $(readelf -d "$binary" | grep 'NEEDED' | tr '\n' ' ')"
+    if grep -q 'NEEDED' <<< "$dynamic"; then
+        fail "udeck-plugin needs shared libraries; it is not a static binary: $(grep 'NEEDED' <<< "$dynamic" | tr '\n' ' ')"
     fi
 
     local version
@@ -622,7 +634,7 @@ licenses_label() {
     local label="" seen="" licence
     while IFS= read -r licence; do
         [ -n "$licence" ] || continue
-        if printf '%s\n' "$seen" | grep -Fxq -- "$licence"; then continue; fi
+        if grep -Fxq -- "$licence" <<< "$seen"; then continue; fi
         seen="$seen
 $licence"
         case "$licence" in
@@ -682,7 +694,7 @@ check_image() {
     [ -s "$SCRATCH/licenses.txt" ] || fail "the image ($platform) has no package records"
     local licence
     while IFS= read -r licence; do
-        printf '%s\n' "$ALPINE_LICENSES" | grep -Fxq -- "$licence" \
+        grep -Fxq -- "$licence" <<< "$ALPINE_LICENSES" \
             || fail "a package in the image ($platform) is under \"$licence\", which its licenses label does not name: add it to ALPINE_LICENSES"
     done < "$SCRATCH/licenses.txt"
 
@@ -1009,7 +1021,7 @@ build_sources() {
         apkbuild_sums "$folder/APKBUILD" > "$SCRATCH/sums.txt"
         [ -s "$SCRATCH/sums.txt" ] || fail "aports $commit main/$origin: its APKBUILD names no sha512sums"
         while read -r sum file; do
-            if ! printf '%s\n' "$sum" | grep -Eqx '[0-9a-f]{128}' || ! printf '%s\n' "$file" | grep -Eqx '[A-Za-z0-9_][A-Za-z0-9._+~-]*'; then
+            if ! grep -Eqx '[0-9a-f]{128}' <<< "$sum" || ! grep -Eqx '[A-Za-z0-9_][A-Za-z0-9._+~-]*' <<< "$file"; then
                 fail "aports $commit main/$origin: its APKBUILD's sha512sums has a line that is not <sha512>  <file>: $sum $file"
             fi
             if [ -f "$folder/$file" ]; then

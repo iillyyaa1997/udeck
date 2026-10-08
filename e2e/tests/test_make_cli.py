@@ -1529,3 +1529,17 @@ def test_the_command_in_an_archive_is_signed_as_the_one_inside_udeck_app():
     for line in ('SIGN_FLAGS=(--force --options runtime --sign "$IDENTITY")', 'if [ "$IDENTITY" = "-" ]; then',
                  "    SIGN_FLAGS+=(--entitlements Scripts/adhoc.entitlements)"):  # fmt: skip
         assert line in make_app and line in make_cli, line
+
+
+def test_no_pipeline_ends_in_a_grep_that_leaves_early():
+    """Under pipefail, `writer | grep -q` fails whenever grep has its answer
+    before the writer is done: the writer dies of SIGPIPE and the pipeline
+    reports it. MIT, in the middle of ALPINE_LICENSES, failed CI that way
+    (run 37716911865), and `if readelf -l … | grep -q INTERP` would read the
+    same failure as "no INTERP". What is looked for is read with a
+    here-string instead."""
+    for name in ("make-cli.sh", "make-app.sh"):
+        script = (REPO / "Scripts" / name).read_text()
+        code = [line for line in script.splitlines() if not line.lstrip().startswith("#")]
+        found = [line for line in code if re.search(r"\|\s*grep\s+(-\w*q|--quiet)", line)]
+        assert found == [], (name, found)
