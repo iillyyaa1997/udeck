@@ -60,6 +60,9 @@ def checkout(tmp_path):
     (root / "examples" / "hello-card" / "manifest.json").write_text('{"id": "hello-card"}\n')
     (root / "Sources" / "uDeck" / "Support").mkdir(parents=True)
     shutil.copy(REPO / "Sources" / "uDeck" / "Support" / "Info.plist", root / "Sources" / "uDeck" / "Support")
+    # The lock file's reader, which the image runs out of the specification.
+    (root / "docs").mkdir()
+    shutil.copy(REPO / "docs" / "plugin-repository.md", root / "docs")
     (root / "stubs").mkdir()
     (tmp_path / "tmp").mkdir()
     return root
@@ -502,6 +505,7 @@ if [ "$1" = run ]; then
             # = or file:// — so that a checkout under a /tmp/ of its own is
             # left as it is.
             script="$(printf '%s\n' "$script" | sed -E -e "s#(^|[ \"'=])/examples#\\1$PWD/examples#g" \
+                -e "s#(^|[ \"'=])/docs/#\\1$PWD/docs/#g" \
                 -e "s#(^|[ \"'=]|file://)/tmp/#\\1$sandbox/tmp/#g")"
             PATH="$IMAGE_FAKES:$PATH" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 exec sh -eu -c "$script" "$@" ;;
     esac
@@ -568,9 +572,13 @@ pin)
         for platform in macos-universal linux-x86_64 linux-aarch64; do
             sum="$(awk -v name="udeck-plugin-$version-$platform.tar.gz" '$2 == name { print $1 }' "$release/SHA256SUMS")"
             [ "${FAKE_PIN:-}" = wrong ] && sum="ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            [ "${FAKE_PIN:-}" = wrong-mac ] && [ "$platform" = macos-universal ] \
+                && sum="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
             echo "$platform=$sum"
         done
         echo "image=$(sed -n 's/^digest=//p' "$release/udeck-plugin-image.txt")"
+        # A line no lock file has, which this pin's own --check takes.
+        [ "${FAKE_PIN:-}" = extra-line ] && echo "comment=1"
     } > "$expected"
     if [ "$check" = 0 ]; then
         mkdir -p "$repo/.github"
@@ -583,6 +591,14 @@ pin)
     rm -f "$expected" ;;
 *) exit 2 ;;
 esac
+"""
+
+# cmp as the image's, or — told so by FAKE_CMP — one that takes the lock file
+# with a line more for the five lines it should be: the reader leaning on it
+# would take that file, and the image's script must say so.
+IMAGE_CMP = """#!/bin/sh
+case "$*" in *longer.lock*) [ "${FAKE_CMP:-}" = lenient ] && exit 0 ;; esac
+exec /usr/bin/cmp "$@"
 """
 
 # sha256sum, which a Mac may not have, as the image's BusyBox prints it.
@@ -605,6 +621,7 @@ def image(checkout):
     executable(checkout / "stubs" / "docker", DOCKER)
     executable(checkout / "image-fakes" / "udeck-plugin", IMAGE_UDECK_PLUGIN)
     executable(checkout / "image-fakes" / "sha256sum", IMAGE_SHA256SUM)
+    executable(checkout / "image-fakes" / "cmp", IMAGE_CMP)
     (checkout / "sandbox").mkdir()
     executable(checkout / "stubs" / "uname", '#!/bin/sh\ncase "$1" in -s) echo Linux ;; -m) echo x86_64 ;; esac\n')
     out = checkout / "out"
@@ -666,6 +683,8 @@ def test_an_image_is_built_once_pushed_to_the_jobs_registry_and_run_from_it_by_i
             assert looked_for in notices[0], (platform, looked_for)
         assert any("check --strict /udeck/examples/" in call and ":/udeck:ro" in call for call in ran), platform
         assert any("check-repo" in call and ":/examples:ro" in call for call in ran), platform
+        assert any("read_udeck_plugin_lock" in call and "/docs:/docs:ro " in call for call in ran), platform
+    assert "the lock file read by the reader in the docs, as a job in this image reads it" in done.stdout
     # The binaries the image is built from are the ones the archives carry.
     for arch, platform in (("x86_64", "amd64"), ("aarch64", "arm64")):
         assert (image / "seen" / f"{platform}-udeck-plugin").read_text() == f"#!/bin/sh\necho the {arch} binary\n"
@@ -691,6 +710,12 @@ def test_an_image_is_built_once_pushed_to_the_jobs_registry_and_run_from_it_by_i
         ({"FAKE_RULE18": "silent"}, "check-repo on a repository made in the image did not say what it should (linux/amd64)"),
         ({"FAKE_PIN": "wrong"}, "pin in the image did not pin a release on its disk as it should (linux/amd64)"),
         ({"FAKE_PIN_CHECK": "pass"}, "pin in the image did not pin a release on its disk as it should (linux/amd64)"),
+        # What only the reader from the docs sees, run in the image (D2a's
+        # review: nothing ran it with BusyBox): a sum the greps do not look at,
+        # and a line no lock file has, both of which pin's --check takes.
+        ({"FAKE_PIN": "wrong-mac"}, "pin in the image did not pin a release on its disk as it should (linux/amd64)"),
+        ({"FAKE_PIN": "extra-line"}, "pin in the image did not pin a release on its disk as it should (linux/amd64)"),
+        ({"FAKE_CMP": "lenient"}, "pin in the image did not pin a release on its disk as it should (linux/amd64)"),
         ({"FAKE_NO_CURL": "1"}, "no shell, git, curl or /tmp in the image (linux/amd64)"),
         ({"FAKE_LICENSE": "GPL-3.0-only"}, 'under "GPL-3.0-only", which its licenses label does not name'),
         ({"FAKE_NO_NOTICES": "1"}, "lacks its licences, its notices or the list of its Alpine packages"),
@@ -987,6 +1012,65 @@ def test_ci_pins_the_release_it_made_and_reads_the_pin_with_the_reader_in_the_do
         assert said in step, said
     docs = (REPO / "docs" / "plugin-repository.md").read_text()
     assert docs.count("\n<!-- lock-reader -->\n```sh\n") == 1 and docs.count("\n```\n<!-- /lock-reader -->\n") == 1
+
+
+def lock_text(version, digit):
+    sums = "".join(f"{platform}={digit * 64}\n" for platform in ("macos-universal", "linux-x86_64", "linux-aarch64"))
+    return f"version={version}\n{sums}image=sha256:{digit * 64}\n"
+
+
+def test_the_ci_example_in_the_docs_reads_the_lock_file_of_the_base_not_the_pull_requests(tmp_path):
+    """D2a's review: the example read the checkout's lock file, which a pull request writes."""
+    docs = (REPO / "docs" / "plugin-repository.md").read_text()
+    after = docs.split("\n<!-- /lock-reader -->\n", 1)[1]
+    example = after.split("```sh\n", 1)[1].split("```\n", 1)[0]
+    reading = example.split('read_udeck_plugin_lock "$lock" || exit 1\n', 1)
+    assert len(reading) == 2, "the example reads the lock file it took from the base"
+    assert "read_udeck_plugin_lock .github" not in example, "never the checkout's"
+    reader = subprocess.run(["awk", re.findall(r"^LOCK_READER='(.*)'$", (REPO / "Scripts" / "make-cli.sh").read_text(), re.M)[0]],
+                            input=docs, capture_output=True, text=True, check=True).stdout
+
+    repo = tmp_path / "plugins-repository"
+    (repo / ".github").mkdir(parents=True)
+    env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "TMPDIR": str(tmp_path)}
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(repo), "-c", "user.name=CI", "-c", "user.email=ci@example.invalid", *args],
+                              capture_output=True, text=True, check=True, env=env).stdout.strip()
+
+    git("init", "-q", "-b", "main")
+    (repo / "udeck-plugins.json").write_text('{"format": 1, "name": "Docs"}\n')
+    git("add", "-A")
+    git("commit", "-q", "-m", "No lock file yet")
+    bare = git("rev-parse", "HEAD")
+    (repo / ".github" / "udeck-plugin.lock").write_text(lock_text("0.6.0", "1"))
+    git("add", "-A")
+    git("commit", "-q", "-m", "The lock file, merged")
+    base = git("rev-parse", "HEAD")
+    # The pull request: another release, of its own choosing, in the checkout.
+    (repo / ".github" / "udeck-plugin.lock").write_text(lock_text("0.7.0", "2"))
+    git("commit", "-q", "-a", "-m", "A pull request that pins what it likes")
+
+    script = reader + reading[0] + 'read_udeck_plugin_lock "$lock" || exit 1\nprintf "%s %s\\n" "$version" "$linux_x86_64"\n'
+    for shell in ("/bin/sh", "/bin/bash"):
+        done = subprocess.run([shell, "-c", script], cwd=repo, capture_output=True, text=True, env={**env, "BASE_SHA": base})
+        assert done.returncode == 0, done.stderr
+        assert done.stdout == f"0.6.0 {'1' * 64}\n", "the base's lock file"
+        stopped = subprocess.run([shell, "-c", script], cwd=repo, capture_output=True, text=True, env={**env, "BASE_SHA": bare})
+        assert stopped.returncode != 0 and stopped.stdout == "", "a base with no lock file chose nothing"
+
+
+def test_the_image_takes_the_reader_out_of_the_docs_as_ci_does():
+    """One awk program, in make-cli.sh and in ci.yml, for the reader between its markers."""
+    script = (REPO / "Scripts" / "make-cli.sh").read_text()
+    found = re.findall(r"^LOCK_READER='(.*)'$", script, re.M)
+    assert len(found) == 1, found
+    step = next(step for step in steps(jobs(workflow("ci.yml"))["release-assets"]) if "pin --repo" in step)
+    assert f"awk '{found[0]}' \\\n" in step, "ci.yml's awk is make-cli.sh's"
+    docs = (REPO / "docs" / "plugin-repository.md").read_text()
+    reader = subprocess.run(["awk", found[0]], input=docs, capture_output=True, text=True, check=True).stdout
+    assert reader.startswith("# Reads a lock file as udeck-plugin reads it") and "read_udeck_plugin_lock() {" in reader
+    assert "```" not in reader and "<!--" not in reader
 
 
 def test_the_cla_action_is_pinned_by_its_commit():

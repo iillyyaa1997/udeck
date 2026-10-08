@@ -138,8 +138,48 @@ struct PluginLockTests {
 
     /// The shells a CI job runs it with, those of them this machine has:
     /// `sh` everywhere — bash in its POSIX mode on a Mac, dash on Ubuntu —
-    /// and bash, which GitHub Actions runs `run:` steps with.
+    /// and bash, which GitHub Actions runs `run:` steps with. BusyBox's, which
+    /// a GitLab job in uDeck's image runs it with, is run in that image by
+    /// Scripts/make-cli.sh, on every push.
     static let shells = ["/bin/sh", "/bin/bash"].filter { FileManager.default.isExecutableFile(atPath: $0) }
+
+    /// The locales it is run in: none said, as a job that sets none, and
+    /// UTF-8, as most runners' images set — where `sed`, but for the reader's
+    /// own `LC_ALL=C`, would read a line by characters, and a byte that is not
+    /// UTF-8 is one it cannot read at all.
+    static let locales: [(name: String, environment: [String: String])] = [
+        ("no locale", [:]),
+        ("en_US.UTF-8", ["LANG": "en_US.UTF-8", "LC_ALL": "en_US.UTF-8"]),
+    ]
+
+    /// Files with bytes outside ASCII, as UTF-8 and not: what a range in a
+    /// pattern or a byte a locale cannot read could make the shell take.
+    /// udeck-plugin refuses every one.
+    static let outsideASCII: [(name: String, bytes: [UInt8])] = {
+        var cases: [(name: String, bytes: [UInt8])] = []
+        let good = Array(Self.good.text.utf8)
+        let hex = String(repeating: "a", count: 63)
+        cases.append(("a fullwidth digit in a sum", Self.replacing(1, with: "macos-universal=\u{FF11}" + hex)))
+        cases.append(("Arabic-Indic digits for the version", Self.replacing(0, with: "version=\u{0660}.\u{0666}.\u{0660}")))
+        cases.append(("a superscript digit in the version", Self.replacing(0, with: "version=0.6.\u{00B2}")))
+        cases.append(("an accented letter in a sum", Self.replacing(2, with: "linux-x86_64=\u{00E9}" + hex)))
+        cases.append(("a Cyrillic a in a sum", Self.replacing(3, with: "linux-aarch64=\u{0430}" + hex)))
+        cases.append(("a fullwidth a in the digest", Self.replacing(4, with: "image=sha256:\u{FF41}" + hex)))
+        cases.append(("a no-break space at the end of a line", Self.replacing(4, with: Self.goodLines[4] + "\u{00A0}")))
+        cases.append(("a combining mark after a key", Self.replacing(0, with: "version\u{0301}=0.6.0")))
+        cases.append(("a combining mark after a value", Self.replacing(0, with: "version=0.6.0\u{0301}")))
+        cases.append(("U+2028 for the line breaks", Array(Self.goodLines.joined(separator: "\u{2028}").utf8) + [0x0A]))
+        func bytes(_ index: Int, _ line: [UInt8]) -> [UInt8] {
+            var lines = Self.goodLines.map { Array($0.utf8) }
+            lines[index] = line
+            return lines.flatMap { $0 + [0x0A] }
+        }
+        cases.append(("a byte that is not UTF-8 in a key", bytes(0, Array("versi".utf8) + [0xFF] + Array("on=0.6.0".utf8))))
+        cases.append(("half a character in a sum", bytes(1, Array("macos-universal=".utf8) + [0xC3] + Array(hex.utf8))))
+        cases.append(("a byte that is not UTF-8 after the last line", good + [0xFF, 0x0A]))
+        cases.append(("a byte that is not UTF-8 before the first", [0xFE, 0x0A] + good))
+        return cases
+    }()
 
     /// What a file comes to: the five values, or refused.
     static func swiftReading(_ bytes: [UInt8]) -> String {
@@ -148,12 +188,19 @@ struct PluginLockTests {
             .joined(separator: "\n")
     }
 
-    @Test("the reader in the specification comes to udeck-plugin's answer on every file, good or not")
+    @Test("the reader in the specification comes to udeck-plugin's answer on every file, good or not, in any locale")
     func shellAgrees() throws {
         let reader = try Self.reader()
         #expect(reader.contains("read_udeck_plugin_lock() {"))
         #expect(!reader.contains("source") && !reader.contains("eval"), "the file is read, never run")
         #expect(Self.shells.contains("/bin/sh"))
+        // Every sed in it reads bytes, in the C locale: outside it, POSIX
+        // leaves what a range such as [0-9a-f] takes to the locale. On a Mac's
+        // sed a range is the same in en_US.UTF-8 (measured 2026-10-07), so the
+        // runs below would agree without it; this holds the line.
+        let seds = reader.components(separatedBy: "sed ").count - 1
+        #expect(seds > 0 && reader.components(separatedBy: "LC_ALL=C sed ").count - 1 == seds,
+                "every sed in the reader runs as LC_ALL=C sed")
         let temp = TemporaryDirectory()
         let script = temp.url.appendingPathComponent("read.sh")
         // Every file in one run of the shell, each answer ended by a line of
@@ -182,7 +229,7 @@ struct PluginLockTests {
                                                           "linux-aarch64": String(repeating: "9", count: 64)],
                                                image: "sha256:" + String(repeating: "0", count: 64)).text.utf8)),
         ]
-        let corpus = goods + Self.refused.map { ($0.name, $0.bytes) }
+        let corpus = goods + Self.refused.map { ($0.name, $0.bytes) } + Self.outsideASCII.map { ($0.name, $0.bytes) }
         var files: [String] = []
         for (index, (_, bytes)) in corpus.enumerated() {
             let lock = temp.url.appendingPathComponent("lock-\(index)")
@@ -192,13 +239,16 @@ struct PluginLockTests {
         let swift = corpus.map { Self.swiftReading($0.1) }
         #expect(swift.filter { $0 != "refused" }.count == goods.count, "every good file is read and no other")
         for shell in Self.shells {
-            let ran = try Subprocess.run([shell, script.path] + files,
-                                         environment: ["PATH": "/usr/bin:/bin", "TMPDIR": temp.url.path])
-            #expect(ran.status == 0, "\(shell): \(String(decoding: ran.errors, as: UTF8.self))")
-            let said = String(decoding: ran.output, as: UTF8.self).components(separatedBy: "\n--end--\n").dropLast()
-            #expect(said.count == corpus.count, "\(shell) answered \(said.count) of \(corpus.count) files")
-            for (index, answer) in said.enumerated() where index < corpus.count && answer != swift[index] {
-                Issue.record("\(corpus[index].0), \(shell): the shell says \(answer.debugDescription), udeck-plugin \(swift[index].debugDescription)")
+            for (locale, set) in Self.locales {
+                let environment = ["PATH": "/usr/bin:/bin", "TMPDIR": temp.url.path].merging(set) { $1 }
+                let ran = try Subprocess.run([shell, script.path] + files, environment: environment)
+                #expect(ran.status == 0, "\(shell), \(locale): \(String(decoding: ran.errors, as: UTF8.self))")
+                let said = String(decoding: ran.output, as: UTF8.self).components(separatedBy: "\n--end--\n").dropLast()
+                #expect(said.count == corpus.count, "\(shell), \(locale) answered \(said.count) of \(corpus.count) files")
+                for (index, answer) in said.enumerated() where index < corpus.count && answer != swift[index] {
+                    let which = "\(corpus[index].0), \(shell), \(locale)"
+                    Issue.record("\(which): the shell says \(answer.debugDescription), udeck-plugin \(swift[index].debugDescription)")
+                }
             }
         }
         // mktemp's files are taken away whatever the answer.

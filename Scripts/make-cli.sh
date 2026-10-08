@@ -63,7 +63,9 @@
 # and run before anything else happens: --version, --help, check and
 # check-repo on the examples, with the checkout mounted read-only and no
 # network, as a repository's CI runs it, and pin on a release laid out on the
-# image's own disk, through its curl. arm64 runs under QEMU on an amd64 runner
+# image's own disk, through its curl — the lock file it writes then read by the
+# reader docs/plugin-repository.md gives, with the image's BusyBox, as a GitLab
+# job in the image reads it. arm64 runs under QEMU on an amd64 runner
 # (or amd64 on an arm64 one): the binary itself is proved natively by the
 # Linux build job, and what the image adds — Alpine's git and curl, a shell,
 # /tmp — is what emulation runs here. What ran is written to
@@ -110,6 +112,11 @@ BUILDKIT="moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b
 BINFMT="tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
 PLATFORMS="linux/amd64,linux/arm64"
 NOTICES="Scripts/third-party/THIRD_PARTY_NOTICES"
+# The awk that takes the lock file's reader out of docs/plugin-repository.md,
+# from between its markers — ci.yml's, word for word (a test holds the two to
+# one) — run in the image by its own awk.
+# shellcheck disable=SC2016
+LOCK_READER='/^<!-- \/lock-reader -->$/ { inside = 0 } inside && !/^```/ { print } /^<!-- lock-reader -->$/ { inside = 1 }'
 
 # The licences of what the image holds, for its licenses label, one SPDX
 # expression to a line. First the command's — its own and those of what is
@@ -676,30 +683,54 @@ check_image() {
     # A release on the image's own disk, laid out as GitHub's, and a plugin
     # repository pinned to it: pin writes the lock file from the release's
     # SHA256SUMS and image file through the image's curl, --check holds it to
-    # them, and a sum changed by hand is a failed --check.
+    # them, and a sum changed by hand is a failed --check. And the lock file
+    # read as a GitLab job in this image reads it: the reader in
+    # docs/plugin-repository.md — taken out of it here by the same awk as
+    # ci.yml's — run by the image's BusyBox sh, sed, mktemp and cmp, held to
+    # every value pin wrote, and refusing a file with a line more than pin
+    # writes, which only its cmp tells from the lock file.
     # shellcheck disable=SC2016
-    "${run[@]}" "$ref" sh -eu -c '
-        version="$1"
-        release="/tmp/releases/download/v$version"
+    "${run[@]}" -v "$PWD/docs:/docs:ro" "$ref" sh -eu -c '
+        wanted="$1"
+        release="/tmp/releases/download/v$wanted"
         repo=/tmp/plugins-repository
         mkdir -p "$release" "$repo"
         cd "$release"
         for platform in macos-universal linux-x86_64 linux-aarch64; do
-            printf "the %s archive\n" "$platform" > "udeck-plugin-$version-$platform.tar.gz"
+            printf "the %s archive\n" "$platform" > "udeck-plugin-$wanted-$platform.tar.gz"
         done
         printf "image=registry.invalid/udeck/udeck-plugin\ntag=v%s\ndigest=sha256:%s\nplatforms=linux/amd64,linux/arm64\n" \
-            "$version" 0000000000000000000000000000000000000000000000000000000000000000 > udeck-plugin-image.txt
-        sha256sum "udeck-plugin-$version-macos-universal.tar.gz" "udeck-plugin-$version-linux-x86_64.tar.gz" \
-            "udeck-plugin-$version-linux-aarch64.tar.gz" udeck-plugin-image.txt > SHA256SUMS
+            "$wanted" 0000000000000000000000000000000000000000000000000000000000000000 > udeck-plugin-image.txt
+        sha256sum "udeck-plugin-$wanted-macos-universal.tar.gz" "udeck-plugin-$wanted-linux-x86_64.tar.gz" \
+            "udeck-plugin-$wanted-linux-aarch64.tar.gz" udeck-plugin-image.txt > SHA256SUMS
         printf "{\"format\": 1, \"name\": \"Pinned in the image\"}\n" > "$repo/udeck-plugins.json"
         export UDECK_PLUGIN_DOWNLOAD_BASE="file:///tmp/releases/download"
-        udeck-plugin pin --repo "$repo" --version "$version"
+        udeck-plugin pin --repo "$repo" --version "$wanted"
         lock="$repo/.github/udeck-plugin.lock"
         cat "$lock"
-        grep -qx "version=$version" "$lock"
-        grep -qx "linux-x86_64=$(sha256sum "udeck-plugin-$version-linux-x86_64.tar.gz" | cut -d " " -f 1)" "$lock"
+        grep -qx "version=$wanted" "$lock"
+        grep -qx "linux-x86_64=$(sha256sum "udeck-plugin-$wanted-linux-x86_64.tar.gz" | cut -d " " -f 1)" "$lock"
         grep -qx "image=sha256:0000000000000000000000000000000000000000000000000000000000000000" "$lock"
         udeck-plugin pin --repo "$repo" --check
+
+        awk "$2" /docs/plugin-repository.md > /tmp/read-lock.sh
+        grep -q "^read_udeck_plugin_lock() {" /tmp/read-lock.sh
+        . /tmp/read-lock.sh
+        read_udeck_plugin_lock "$lock"
+        test "$version" = "$wanted"
+        for platform in macos-universal linux-x86_64 linux-aarch64; do
+            case "$platform" in
+                macos-universal) read="$macos_universal" ;;
+                linux-x86_64) read="$linux_x86_64" ;;
+                linux-aarch64) read="$linux_aarch64" ;;
+            esac
+            test "$read" = "$(sha256sum "udeck-plugin-$wanted-$platform.tar.gz" | cut -d " " -f 1)"
+        done
+        test "$image" = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        { cat "$lock"; echo "comment=1"; } > /tmp/longer.lock
+        if read_udeck_plugin_lock /tmp/longer.lock 2>/dev/null; then exit 1; fi
+        echo "the lock file read by the reader in the docs, as a job in this image reads it"
+
         sed "s/^image=sha256:0/image=sha256:1/" "$lock" > /tmp/changed.lock
         cat /tmp/changed.lock > "$lock"
         status=0
@@ -707,8 +738,8 @@ check_image() {
         cat /tmp/out.txt
         test "$status" -eq 1
         grep -q "^  image: sha256:1" /tmp/out.txt
-    ' sh "$version" || fail "pin in the image did not pin a release on its disk as it should ($platform)"
-    echo "==> $ref as $platform: udeck-plugin $version; check, check-repo and pin as a repository's CI runs them"
+    ' sh "$version" "$LOCK_READER" || fail "pin in the image did not pin a release on its disk as it should ($platform)"
+    echo "==> $ref as $platform: udeck-plugin $version; check, check-repo and pin as a repository's CI runs them, the pin read as its CI reads it"
 }
 
 build_image() {
