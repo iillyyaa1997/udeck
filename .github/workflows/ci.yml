@@ -172,8 +172,10 @@ jobs:
     # Swift 6.4.0 exactly, pinned by digest rather than by tag: the Static Linux
     # SDK below has to match the toolchain release for release, and a tag can
     # be moved to another build. The digest is the multi-architecture one, so
-    # the same line serves both runners.
-    container: swift:6.4.0-noble@sha256:64bab762bc73a3fda6d9ebc559258bd6d7660c10a705bb25ecacad2f99d066f9
+    # the same line serves both runners. From Amazon ECR Public's copy of the
+    # Docker Official Images, the same digest: Docker Hub's limit on anonymous
+    # pulls turned both Linux jobs of CI 37989910575 away, twice.
+    container: public.ecr.aws/docker/library/swift:6.4.0-noble@sha256:64bab762bc73a3fda6d9ebc559258bd6d7660c10a705bb25ecacad2f99d066f9
     env:
       # The SDK and its checksum as swift.org lists them for 6.4.0
       # (https://www.swift.org/api/v1/install/releases.json).
@@ -306,7 +308,7 @@ jobs:
     timeout-minutes: 30
     services:
       registry:
-        image: registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+        image: public.ecr.aws/docker/library/registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
         ports:
           - 5000:5000
     steps:
@@ -346,7 +348,7 @@ jobs:
           docker run -d --name second-registry -p 5001:5000 -v "$auth/htpasswd:/auth/htpasswd:ro" \
             -e REGISTRY_AUTH=htpasswd -e REGISTRY_AUTH_HTPASSWD_REALM=udeck-ci \
             -e REGISTRY_AUTH_HTPASSWD_PATH=/auth/htpasswd \
-            registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
+            public.ecr.aws/docker/library/registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
           # Up, and asking: 401 without a login.
           for _ in $(seq 30); do
             code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5001/v2/ || true)"

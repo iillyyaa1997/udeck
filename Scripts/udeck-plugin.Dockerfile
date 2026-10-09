@@ -17,8 +17,9 @@
 # Nothing of Alpine is linked into the command: it is the same static binary
 # as in the archives, and Alpine is only what it starts. The base is pinned by
 # digest, the multi-architecture one, as the toolchain in ci.yml is: a tag can
-# be moved to another build.
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+# be moved to another build. From Amazon ECR Public's copy of the Docker
+# Official Images, the same digest, which no anonymous pull limit turns away.
+FROM public.ecr.aws/docker/library/alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 # Git and curl from Alpine's repository for that release, as they are when the
 # image is built: their security fixes reach the next release's image, and

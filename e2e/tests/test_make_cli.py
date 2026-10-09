@@ -1115,7 +1115,7 @@ def test_sources_of_another_version_than_the_image_that_ran_are_refused(alpine):
 
 def test_the_image_and_what_builds_it_are_pinned_by_digest_and_say_where_they_come_from():
     dockerfile = (REPO / "Scripts" / "udeck-plugin.Dockerfile").read_text()
-    assert re.search(r"^FROM alpine:[0-9.]+@sha256:[0-9a-f]{64}$", dockerfile, re.M), "the base by digest"
+    assert re.search(r"^FROM public\.ecr\.aws/docker/library/alpine:[0-9.]+@sha256:[0-9a-f]{64}$", dockerfile, re.M), "the base by digest"
     assert re.search(r"^apk add --no-cache git curl$", dockerfile, re.M), "check and check-repo start git, pin curl"
     assert not re.search(r"^ENTRYPOINT", dockerfile, re.M), "GitLab CI hands the job's script to the image's shell"
     for label in ('source="https://github.com/iillyyaa1997/udeck"', 'version="${VERSION}"', 'licenses="${LICENSES}"'):
@@ -1132,7 +1132,7 @@ def test_the_sources_are_read_from_the_alpine_release_the_image_is_built_on():
     Dockerfile's FROM: a base moved to 3.25 with distfiles left at v3.24 would
     look for its archives where they are not."""
     dockerfile = (REPO / "Scripts" / "udeck-plugin.Dockerfile").read_text()
-    release = re.search(r"^FROM alpine:(\d+\.\d+)\.\d+@sha256:", dockerfile, re.M).group(1)
+    release = re.search(r"^FROM public\.ecr\.aws/docker/library/alpine:(\d+\.\d+)\.\d+@sha256:", dockerfile, re.M).group(1)
     script = (REPO / "Scripts" / "make-cli.sh").read_text()
     assert re.findall(r'^DISTFILES="(.*)"$', script, re.M) == [f"https://distfiles.alpinelinux.org/distfiles/v{release}"]
     # aports from its GitHub mirror: Alpine's GitLab turns GitHub's runners away.
@@ -1273,7 +1273,7 @@ def needs(block):
 
 def test_a_release_builds_for_linux_with_the_toolchain_and_sdk_ci_proves_on_every_push():
     ci, release = jobs(workflow("ci.yml")), jobs(workflow("release.yml"))
-    for pin in (r"container: (swift:\S+@sha256:[0-9a-f]{64})", r"STATIC_SDK_URL: (\S+)", r"STATIC_SDK_CHECKSUM: ([0-9a-f]{64})"):
+    for pin in (r"container: (public\.ecr\.aws/docker/library/swift:\S+@sha256:[0-9a-f]{64})", r"STATIC_SDK_URL: (\S+)", r"STATIC_SDK_CHECKSUM: ([0-9a-f]{64})"):
         proved = re.findall(pin, ci["plugin-format-linux"])
         released = re.findall(pin, release["command-linux"])
         assert len(proved) == 1 and proved == released, pin
@@ -1357,7 +1357,7 @@ def test_ci_copies_the_image_to_a_second_registry_that_asks_for_a_login_and_logs
     assert "if: always()" in found[logout]
     assert "--repository localhost:5001/iillyyaa1997/udeck-plugin" in found[push]
     second = found[start]
-    service = re.search(r"image: (registry:\S+)", block).group(1)
+    service = re.search(r"image: (public\.ecr\.aws/docker/library/registry:\S+)", block).group(1)
     assert service in second, "the second registry is the service's image, by the same digest"
     assert "-p 5001:5000" in second and "REGISTRY_AUTH=htpasswd" in second
     assert "openssl rand" in second and "::add-mask::" in second, "a password of this run's own, masked"
@@ -1508,7 +1508,7 @@ def test_every_action_is_pinned_by_its_commit_and_no_checkout_keeps_the_token(na
 @pytest.mark.parametrize(("name", "job"), [("ci.yml", "udeck-plugin-image"), ("release.yml", "image")])
 def test_the_image_job_has_a_registry_of_its_own_where_make_cli_looks_for_it(name, job):
     block = jobs(workflow(name))[job]
-    assert re.search(r"^    services:\n      registry:\n        image: registry:2\.[0-9.]+@sha256:[0-9a-f]{64}\n        ports:\n          - 5000:5000$", block, re.M), block
+    assert re.search(r"^    services:\n      registry:\n        image: public\.ecr\.aws/docker/library/registry:2\.[0-9.]+@sha256:[0-9a-f]{64}\n        ports:\n          - 5000:5000$", block, re.M), block
     assert re.search(r'^STAGE="localhost:5000/udeck-plugin"$', (REPO / "Scripts" / "make-cli.sh").read_text(), re.M)
 
 
