@@ -69,6 +69,13 @@ of the rules, each with the findings the script reported.
   `Rule12OnlyWhatTheContractDefines.test_in_the_manifest [restart, …]` builds,
   and it carries the same divergence.
 
+## A name that is not UTF-8
+
+Outside the corpus, the two say one finding in two ways: a file name that is
+not valid UTF-8 is printed by the Python check with each bad byte as `\xNN` and
+by the Swift check with U+FFFD. Both report rule 7; udeck-plugins'
+compare-checks.py, which reads printed paths, counts it as a disagreement.
+
 ## How the Swift side uses it
 
 `CorpusTests` builds every case's repository with `git fast-import`, as the

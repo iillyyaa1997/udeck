@@ -353,6 +353,14 @@ make up for history the clone lacks: a `--base` a shallow clone does not have
 fails a strict check, exit status 1, and without `--strict` is *"not a commit
 in … — a pull request's checkout needs fetch-depth: 0"*, exit status 2.
 
+A repository of one's own starts from the [template
+repository](https://github.com/iillyyaa1997/udeck-plugins-template): the
+layout, the [lock file](#the-lock-file), and both CI files ready —
+`.github/workflows/validate.yml` for GitHub Actions and `.gitlab-ci.yml` for
+GitLab CI, with variables for a mirror and its login, and the proxy the runner
+gives taken as it is. It has no plugin of its own: `udeck-plugin new` makes the
+first.
+
 Everything is made by `Scripts/make-cli.sh` and published by `release.yml` in
 the one `gh release create` that publishes the app — uDeck's releases are
 immutable, so a release cannot take an asset afterwards — with the image
@@ -414,6 +422,51 @@ wrote from a mirror holds the mirror's, whatever they are, so it is checked
 against GitHub's release before it is merged ([`udeck-plugin
 pin`](#udeck-plugin-pin)).
 
+The [template
+repository](https://github.com/iillyyaa1997/udeck-plugins-template)'s two CI
+files go further than the snippets below. On GitLab CI a job's `image:` is
+part of `.gitlab-ci.yml`, which a merge request brings, and cannot be read
+from a file: there the digest is named a second time, in `.gitlab-ci.yml`. The
+job holds the image `.gitlab-ci.yml` names for it (the digest at the end of
+`CI_JOB_IMAGE`) and that image's `udeck-plugin --version` to a lock file, and
+fails when they differ: to the base's; or, in a merge request that changes the
+lock file, to the new one — and only after the base's `udeck-plugin` has held
+the new one to its release and given its own verdict on the merge request.
+That is its image mode, the default; on a shell executor, which runs no image,
+`UDECK_PLUGIN_FROM` set to `archive` has it download the release's archive
+instead. Whether a pull request changes the lock file is read out of git too:
+the file it commits, not the checkout's, which a `.gitattributes` line can make
+differ, and a checkout whose lock file is not the committed one is refused. A
+mirror's login is never part of `UDECK_PLUGIN_DOWNLOAD_BASE`, which GitHub
+shows in a job's log as it is, and the job refuses one there: it is a secret of
+its own — on GitLab a masked variable, with variable expansion off — that the
+job joins to the address only for curl and `pin`. A pull request that changes
+the lock file is judged by the release the base names, and before the release
+the new lock file names runs — on GitHub, before anything the new lock file
+names is downloaded — the base's `udeck-plugin` holds the new lock file to its
+release with `udeck-plugin pin --check`: to the mirror's, where there is one,
+and to GitHub's wherever GitHub's releases answer. A job with a mirror first
+asks whether they answer, for a release file at a fixed address that no lock
+file chooses,
+`https://github.com/iillyyaa1997/udeck/releases/download/v0.6.1/SHA256SUMS`,
+which GitHub sends on, as every release file, to the host `pin --check`
+downloads from too. There a lock file that is not what GitHub's release has is
+refused, and so is a release GitHub does not have. A runner that does not reach
+GitHub's releases has only the mirror, and trusts it, as a mirror is trusted:
+the job warns, for the reviewer to check the lock file where GitHub can be
+reached — on GitLab, once both checks have passed, with exit status 75, which
+the job's `allow_failure: exit_codes` makes GitLab's warning — and on GitHub's
+own runners, which always reach GitHub, it is an error instead. Once merged,
+such a lock file is the base's, and no job holds it to GitHub's release again.
+Either way the release the new lock file names runs last, once the base's
+verdict is in and printed, from a folder of its own and held to its sha256
+like any download; in GitLab's image mode it is the image's own, held to its
+digest. It runs with the job's rights, as anything the job runs does: what it
+is trusted on is that check of the lock file. On GitLab, on an executor that
+runs an image, the job itself runs in the one the merge request names, its
+shell and its curl too, so there the check is as sound as the registry that
+image is pulled from.
+
 This is how a CI job reads it: the five values by `sed`, then the file held
 to the five lines they make, byte for byte. A test holds it to
 `udeck-plugin`'s own reading on a corpus of good and bad files, run by `sh` and
@@ -455,14 +508,38 @@ the base, never from the checkout, which holds the pull request's:
 
 ```sh
 # BASE_SHA: the commit the change is checked against, which the clone must
-# hold — on GitHub Actions ${{ github.event.pull_request.base.sha }} for a
-# pull request and ${{ github.sha }} for a push to the default branch, whose
-# lock file is the merged one; on GitLab CI $CI_MERGE_REQUEST_DIFF_BASE_SHA
-# in a merge request pipeline, and $CI_COMMIT_SHA only in a pipeline of the
-# default branch ($CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH), whose lock file is
-# the merged one. A branch pipeline of a merge request's branch has no base
-# to read it from — its own lock file would choose the check that judges it:
-# run the check in merge request pipelines, not there.
+# hold. On GitHub Actions, for a pull request: the first parent of the merge
+# actions/checkout checks out by default, refs/pull/N/merge — the target
+# branch as GitHub merged the pull request into it, the base rule 18 needs.
+# HEAD^1 is that commit only when HEAD is that merge, so the job checks the
+# merge's second parent first, with PR_HEAD_SHA set from
+# ${{ github.event.pull_request.head.sha }} in the step's env:
+#
+#   test -n "$PR_HEAD_SHA" &&
+#     test "$(git rev-parse --verify --quiet 'HEAD^2^{commit}')" = "$PR_HEAD_SHA" ||
+#     exit 1
+#   BASE_SHA=$(git rev-parse --verify 'HEAD^1^{commit}')
+#
+# A checkout of the head itself — `ref:
+# ${{ github.event.pull_request.head.sha }}` — has at HEAD^1 the commit
+# before the head, which the pull request chose, and a checkout of the
+# target branch, pull_request_target's default, has an older commit of the
+# branch there; neither passes that check. A job that checks out anything
+# but the merge takes ${{ github.event.pull_request.base.sha }} instead,
+# which can lag behind the branch, so that rule 18 may compare with an older
+# version than the branch has. For a push to the default branch,
+# ${{ github.sha }}, whose lock file is the merged one. On GitLab CI, in a
+# merge request pipeline, the target branch's tip, fetched by name — git
+# fetch origin "+refs/heads/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME", then
+# FETCH_HEAD, with "$CI_MERGE_REQUEST_PROJECT_URL.git" in place of origin in
+# a pipeline that runs in a fork — or $CI_MERGE_REQUEST_TARGET_BRANCH_SHA in
+# a merged results pipeline; not $CI_MERGE_REQUEST_DIFF_BASE_SHA, where the
+# merge request branched off, which rule 18 must not compare with. And
+# $CI_COMMIT_SHA only in a pipeline of the default branch ($CI_COMMIT_BRANCH
+# == $CI_DEFAULT_BRANCH), whose lock file is the merged one. A branch
+# pipeline of a merge request's branch has no base to read it from — its own
+# lock file would choose the check that judges it: run the check in merge
+# request pipelines, not there.
 lock="$(mktemp)"
 git show "$BASE_SHA:.github/udeck-plugin.lock" > "$lock" || exit 1
 read_udeck_plugin_lock "$lock" || exit 1
@@ -474,9 +551,14 @@ tar -xzf "$archive"
 ```
 
 A base with no lock file — before the first one is merged — has chosen no
-release, and the job stops there. `git show` needs the base in the clone,
-which is the history a strict check requires for rule 18 as well
-(`fetch-depth: 0`, `GIT_DEPTH: "0"`). A login in `UDECK_PLUGIN_DOWNLOAD_BASE`
+release, and the job stops there. (The official repository's `validate` made
+one exception, for the one pull request that brought its first lock file
+together with the comparison of the two checks: the Python check from the base
+was still the gate there, so that pull request's own lock file was used once,
+with a warning in the log, and held to its release with `udeck-plugin pin
+--check`. A repository whose CI runs only `udeck-plugin` has nothing to fall
+back on.) `git show` needs the base in the clone, which is the history a strict
+check requires for rule 18 as well (`fetch-depth: 0`, `GIT_DEPTH: "0"`). A login in `UDECK_PLUGIN_DOWNLOAD_BASE`
 would be in this `curl`'s arguments, where every process on the runner can
 read it; give it to curl another way there — `--netrc-file`, or a `--config`
 on standard input, as `pin` does.
@@ -509,7 +591,30 @@ CI can do without turning red the day uDeck releases again; `--version
 latest` asks whether it is also the newest, which is what a scheduled job
 wants. Exit status 2, for `pin` and `--check` alike, is a release that could
 not be read: none there, a network that did not answer, two files that
-disagree.
+disagree. Status 2 does not say which of them it was; a CI job that has to
+tell a release GitHub does not have from a GitHub it cannot reach asks GitHub
+first, as [the lock file](#the-lock-file) says, and wherever GitHub answers it
+counts a 2 as a refusal.
+
+A pull request that changes the lock file is judged by the base's, so the
+release it names has not checked anything yet. CI holds the new lock file to
+that release with `pin --check` before it is merged, and runs the release on
+the pull request as well: the template repository's CI files as [the lock
+file](#the-lock-file) says, and the official repository's as [its
+CI](#the-official-repository) says, on the repository as the merge leaves it
+too.
+
+Renovate can notice a release and change the `version=` line. The four other
+lines hang on that one version, and `pin` reads them from the release and holds
+them to each other, which is simpler and surer than a pattern rule for each.
+The template repository's `renovate.json5` has Renovate change `version=` and
+run `udeck-plugin pin --version <new>` after it, where its admin allows the
+command (`allowedCommands`) and `udeck-plugin` is on its `PATH`; Renovate that
+runs no commands opens a pull request whose check fails until `pin` is run on
+its branch. On GitLab, `.gitlab-ci.yml` names the image by the lock file's
+digest too, and Renovate does not change it: copy the new digest into
+`.gitlab-ci.yml` on the same branch, since in its image mode, the default, the
+job fails while the two differ.
 
 A release from before the command was published with uDeck's — 0.5.0 and
 earlier — has neither file, and `pin` says so: *"release v0.5.0 has no
@@ -621,34 +726,64 @@ plugins/uptime/
 
 **CI.** `validate.yml` runs on `pull_request` into `main` and on `push` to
 `main` — never on `pull_request_target`, which would run a stranger's code with
-the repository's secrets. It runs `.github/scripts/check-repo.py --official`,
-which implements rules 1–17 with nothing but the Python standard library, and,
-for a pull request, checks the sign-off of every commit between the base and the
-head. The copy that runs, with its tests, is the base's, read out of git into a
-folder of its own; only the pull request that brings the check into `main`, when
-the base has none, is checked by its own copy. Python runs isolated (`-I`) from
-that folder, not from the checkout, so a `unittest/` or a `tempfile.py` in a pull
-request is never imported in place of the standard library's, and no step takes
-the check's path from an environment an earlier step could write. What the
-workflow cannot guard is itself: GitHub runs a `pull_request` workflow as the
-pull request has it. That rests on the review below.
+the repository's secrets. It runs two checks of one commit side by side:
+`.github/scripts/check-repo.py --official`, which implements rules 1–17 with
+nothing but the Python standard library, and `udeck-plugin check-repo --strict
+--official` from the release `.github/udeck-plugin.lock` names;
+`.github/scripts/compare-checks.py` holds them to the same findings — level,
+rule and path — for the passport and rules 1–17, and the job fails when either
+finds an error or could not check, or the two disagree. For a pull request both
+read its head, and
+the sign-off of every commit between the base and the head. The base is the
+first parent of the merge `actions/checkout` checks out, `refs/pull/N/merge` —
+`main` as GitHub merged the pull request into it — once the job has checked
+that the merge's second parent is the pull request's head; not the event's
+`base.sha`, which can lag behind `main`. The copies that run — the scripts with
+their tests, and the lock file — are the base's, read out of git into a folder
+of their own, each file of `.github/scripts/` under its exact name; only the
+pull request that brought the check into `main` was checked by its own copy,
+and the one that brought the lock file and the comparison by its own of those.
+What a pull request changes is what that merge changes against the base, so a
+branch that only lags behind `main` changes nothing `main` has taken since. A
+pull request whose merge changes the lock file is also checked by the release
+that lock file names, which has to pass and agree, and the lock file is held to
+that release with `udeck-plugin pin --check`. One whose merge changes
+`.github/scripts/`, `LICENSE` or the lock file has the merge's copies tried
+last, after the verdict, where the pull request's own code can add a failure and
+cannot take one away: their tests, beside the merge's lock file, and the
+merge's `check-repo.py` and `compare-checks.py` beside the release that lock
+file names — on the merge, as the push to `main` will check it, and on the
+head, as the next pull request will be checked — so that copies or a release
+which would fail `main`'s next run, or pull requests like this one, fail the
+pull request that brings them. One whose merge would take the scripts, their
+tests, the lock file or `LICENSE` off `main`, or leave one of them a file of
+zero bytes, a folder or a symbolic link, fails, and so does a name in
+`.github/scripts/` that uses anything but `A–Z a–z 0–9 . _ -` or starts with
+`.`. Python runs isolated (`-I`) from those folders, not from the checkout, so
+a `unittest/` or a `tempfile.py` at the top of a pull request is never imported
+in place of the standard library's, and no step takes the check's path from an
+environment an earlier step could write. What the workflow cannot guard is
+itself: GitHub runs a `pull_request` workflow as it is in that merge — `main`'s
+copy when the pull request leaves the file alone, the pull request's change
+applied to it when it changes it. That rests on the review below.
 
 > **Later — stage 2.** The script is replaced by `udeck-plugin check-repo
 > --official` ([The check](#the-check)), built from the same Swift library uDeck
 > uses, and the script is deleted rather than kept alongside: two
 > implementations of one set of rules drift, which is exactly what happened to
-> the bash check in uDeck's own CI. With it the official repository gets rules
-> 18, 19 and 20 — the version check, `minUDeck` and one-line names — which the
-> script does not have.
+> the bash check in uDeck's own CI. Rules 18, 19 and 20 — the version check,
+> `minUDeck` and one-line names — which the script does not have, the official
+> repository has had since udeck-plugins#2, through `udeck-plugin`.
 >
 > What is there already: every uDeck release from 0.6.1 on carries
 > the command itself ([Where the command comes from](#where-the-command-comes-from)),
 > and [the lock file](#the-lock-file) that names one release, read from the
 > base as the script is read now, with `udeck-plugin pin`, which writes it.
-> What comes next: `validate` running the binary the base's lock file pins
-> beside the script, failing when the two disagree, until they have agreed
-> long enough for the script to go — on a checkout with its whole history,
-> which `--official` requires for rules 17 and 18.
+> Since [udeck-plugins#2](https://github.com/iillyyaa1997/udeck-plugins/pull/2):
+> `validate` runs the binary the base's lock file pins beside the script, on a
+> checkout with its whole history, which `--official` requires for rules 17 and
+> 18, and fails when the two disagree; the script goes once they have agreed
+> long enough.
 
 **Branch protection is what "Verified" rests on.** On `main`: a pull request
 is required, with no exception for administrators; `validate` must pass; force
@@ -1815,11 +1950,13 @@ owner sets the branch protection.
   in a lock file `udeck-plugin pin` writes (built: [The lock
   file](#the-lock-file)); uDeck links the same library; CI
   templates for GitHub Actions and GitLab CI, with a variable for a mirror of
-  the image; the version-bump and `minUDeck` checks; a template repository
-  anyone can start from; a plugin folder that is a link to a working copy, for
-  development; a run log and the standard error of successful runs for
-  authors. The bash check in uDeck's CI and the official repository's Python
-  script go.
+  the image (built: in the template repository below); the version-bump and `minUDeck` checks; a template repository
+  anyone can start from (built:
+  [`udeck-plugins-template`](https://github.com/iillyyaa1997/udeck-plugins-template),
+  with the check for GitHub Actions and GitLab CI); a plugin folder that is a
+  link to a working copy, for development; a run log and the standard error of
+  successful runs for authors. The bash check in uDeck's CI and the official
+  repository's Python script go.
 * **Stage 3 — branches, pull requests, verified.** Installing from a branch or a
   pull request, forks included; **Unverified**, on the card too; consent for
   every new content; **Verified** computed from content, with the switch to

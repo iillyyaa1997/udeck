@@ -15,6 +15,16 @@ for what that promises.
   that is not notarised; the way through there is System Settings → Privacy &
   Security → Open Anyway, after the first refusal. The README's new
   Installing section says the same.
+- **A template to start a plugin repository from, and the official one's check
+  as it runs now.** docs/plugin-repository.md points to
+  [`udeck-plugins-template`](https://github.com/iillyyaa1997/udeck-plugins-template),
+  with the check for GitHub Actions and GitLab CI (writing-a-plugin.md links
+  it), and says what its CI does
+  with a lock file a pull request changes and with a mirror; how the official
+  repository's `validate` runs `udeck-plugin check-repo` beside the Python
+  check since udeck-plugins#2; and, in the CI example, which commit is the
+  base: the first parent of GitHub's merge of the pull request, and the target
+  branch's tip on GitLab.
 
 ## [0.6.1] — 2026-10-08
 

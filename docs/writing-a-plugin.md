@@ -322,3 +322,6 @@ it, not to wait.
 * **[`examples/slow-plugin`](../examples/slow-plugin)** and
   **[`examples/broken-card`](../examples/broken-card)** — what a deadline and a
   parse error look like from the operator's side.
+* **[A repository of your own](https://github.com/iillyyaa1997/udeck-plugins-template)**
+  — the template: the layout uDeck reads, the lock file, and the check on
+  GitHub and GitLab; `udeck-plugin new` adds the first plugin.
