@@ -14,11 +14,13 @@ see the last section.
 > **Being built.** What exists today: the command, its pre-flight and report,
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, a self-check, the builds a check needs, a fake GitHub for
-> the plugin catalogue, and fifty-one checks of uDeck itself in five groups
+> the plugin catalogue, and fifty-two checks of uDeck itself in five groups
 > (`e2e/run.sh --list`). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
 > itself as it ships, and by itself again once an operator who switched that off
-> switches it back on.
+> switches it back on; and a published release updating itself from GitHub, as
+> it does on a person's Mac. Every update check takes a pair, "from → to", so
+> any version can be tried against any other.
 > `panel`: the hover gesture that opens it, with its pointer-in-the-middle
 > control and the line between its two paths, the ways of putting it away again,
 > and the keyboard shortcut that opens the panel and puts it away — whichever way
@@ -42,6 +44,7 @@ e2e/run.sh --list              # what checks exist
 e2e/run.sh                     # all of them
 e2e/run.sh updates             # one group
 e2e/run.sh updates.wrong-key   # one check
+e2e/run.sh updates.sparkle --from checkout --to latest   # an update check between two others
 e2e/run.sh --guest 26          # on macOS 26 instead of 27 (bake it first)
 e2e/run.sh --vm per-group      # one machine per group instead of per check
 e2e/run.sh --keep-on-failure   # keep a failed check's machine to look at
@@ -186,15 +189,18 @@ keeps the crash report.
 
 ## Builds
 
-An update check needs two real builds of uDeck: one to install and a newer one to
-be offered. The lab makes them from the checkout it is running in, through
-`Scripts/make-app.sh`, and they differ from a build you would make by hand in
-three ways — each of them something a check depends on:
+An update check needs two real copies of uDeck: one to install and a newer one to
+be offered. By default the lab makes both from the checkout it is running in;
+with a pair that names a published release (see "Pairs" below) one side, or
+both, is that release instead, fetched from GitHub. What the lab makes, it makes
+through `Scripts/make-app.sh`, and a lab build differs from a build you would
+make by hand in these ways — each of them something a check depends on:
 
 * they go to `.build/e2e/<run>/builds/<check>/<feed>/<version>-<build>/`, never
-  `dist/` — a directory per check and per feed, because two checks build the same
-  versions and the second must not write over the zips and the build log the
-  first one's report is made of;
+  `dist/` — a directory per check and per feed (and per key, when the key is a
+  published release's), because two checks build the same versions and the
+  second must not write over the zips and the build log the first one's report
+  is made of;
 * they carry the version the lab asked for in both keys, including
   `CFBundleVersion`, which is the one Sparkle compares when it decides whether an
   update is newer;
@@ -217,11 +223,44 @@ A build is stopped as a whole — the script and the compiler it started share a
 process group — so a run that gives up on a build does not leave `swift build`
 using the Mac afterwards, and Ctrl-C ends it too.
 
-The update is signed with a key made for the run and deleted with it. Sparkle's
-own `generate_keys` would leave a private key in your login keychain; the lab
-generates the key itself and hands `sign_update` a file holding the base64 of the
-32-byte seed (measured: that is the form it reads, and its signatures verify
-against the public key baked into the bundle).
+**A build of this checkout that goes to a published release carries that
+release's public key** (`builds.PublicKey`), read out of the release's own
+Info.plist, and is numbered below it — 0.4.1 (1). The private half of that key
+lives only in GitHub's secrets, so this is the one way a build of the lab's can
+accept what the release key signed; nothing is ever signed with it. Every other
+rule above holds for it unchanged: its feed is still the lab's own in its plist
+(the guest's preferences point it elsewhere, see "Pairs"), its plugin catalogue
+still the fake, `NSAllowsLocalNetworking` still there. A build offered *to* a
+release keeps 0.4.2 and is numbered one above it.
+
+**A published release is not a lab build.** Its zip never goes through
+`Scripts/make-app.sh` or `Builder._verify`, whose rules every release breaks —
+the real feed, the real plugin catalogue, no `NSAllowsLocalNetworking` — and
+those rules are not loosened for it. The lab
+fetches the zip and the appcast from the release's assets into
+`.build/e2e/releases/<tag>/` (never `dist/`), and checks them against each other
+before anything uses them: the length the appcast gives, both version keys, the
+bundle identifier, and `sparkle:edSignature` over the zip under the
+`SUPublicEDKey` the zip's own Info.plist carries — the check Sparkle makes, made
+with the standard library (`udeck_e2e/ed25519.py`, RFC 8032's reference code,
+held to the RFC's test vectors by the lab's tests). Of the release a check is
+offered, also where the appcast sends uDeck for the zip: the zip GitHub's API
+lists for that release. A copy that
+still checks — and is still the size and the SHA-256 `digest` GitHub's API lists
+for the asset, so that an asset published again under the same tag is fetched
+again (by the digest: every release's appcast so far is 932 bytes) — is used
+again; one that does not is fetched again, a fresh download that is not what the
+API lists is "could not check", and a release that still does not check is not
+run: as "from" that check could not check, as
+"to" it has failed (see "What it is red for" under "The update by a published
+release"). Like a lab build it stays a zip on this Mac, read in memory, unpacked
+only inside a guest.
+
+An update the lab serves is signed with a key made for the run and deleted with
+it. Sparkle's own `generate_keys` would leave a private key in your login
+keychain; the lab generates the key itself and hands `sign_update` a file
+holding the base64 of the 32-byte seed (measured: that is the form it reads, and
+its signatures verify against the public key baked into the bundle).
 
 ## The checks
 
@@ -242,6 +281,372 @@ archive — Sparkle checks the signature after downloading it. What the pane say
 ("The check did not finish") is kept as evidence and decides nothing: uDeck
 prints it for any trouble its updater runs into, including never reaching the
 archive. No archive in the log, and the run says so rather than passing.
+
+With a published release as "from" (`updates.wrong-key --from 0.5.0`) the control
+gets a real one: the release trusts only the release key, so the offer is a build
+of this checkout — 0.4.2, numbered one above the release — signed with the run's
+own key, served from the guest's loopback as always, and the release is pointed
+at that feed through the guest's preferences (see "Pairs"). The witness is the
+same: the guest's own server names the archive, or the control does not pass.
+Measured on 2026-10-09, green: the released 0.5.0, whose Info.plist carries no
+`NSAllowsLocalNetworking` at all, asked the lab's plain-HTTP feed on 127.0.0.1
+and fetched the archive from it — the guest's log reads `"GET /uDeck-0.4.2.zip
+HTTP/1.1" 200` — refused it ("The update is improperly signed and could not be
+validated"), and was still 0.5.0 (6), the same process, 90 s later
+(`.build/e2e/20261009-040538Z`), and the same again after the first round of
+fixes to the pairs (`-063109Z`: `"GET /uDeck-0.4.2.zip HTTP/1.1" 200`, the pane
+saying the update is improperly signed, 0.5.0 still installed); not run again on
+the code as it is now. Both kept in `.build/e2e/kept/`.
+
+### Pairs
+
+Every update check runs between two copies of uDeck, "from → to", and the
+command line can choose them with `--from` and `--to`: each is `checkout` (a
+build of this checkout), `latest` (the release GitHub marks latest) or a
+published release by its version (`0.5.0`). An end that is not given is the
+check's own default:
+
+| check | by default | can also take |
+|---|---|---|
+| `updates.sparkle` | checkout → checkout | any pair but a release → checkout |
+| `updates.wrong-key` | checkout → checkout | a release → checkout |
+| `updates.it-looks-by-itself`, `updates.switched-on-it-looks-by-itself` | checkout → checkout | nothing else |
+| `updates.a-published-release` | the release before latest → latest | any pair whose "to" is a release |
+
+So a run without arguments asks the first four what they asked before pairs
+existed, and the fifth its own question — with one change: `updates.sparkle` and
+`updates.wrong-key` now start, as the two checks about looking by itself always
+did, from a machine that remembers none of uDeck's preferences, because a
+neighbouring check with a pair may have written a `SUFeedURL` there. On a fresh
+machine (`--vm per-check`, the default) there is nothing to forget, so the
+question is the same; under `--vm per-group` or `per-run` whatever an earlier
+check left is taken away first and said in the report. `e2e/run.sh --list`
+prints each check's default beside its name. Measured on 2026-10-09, `e2e/run.sh
+updates` after the second round of fixes to the pairs: all five green in 14m15s
+(`.build/e2e/20261009-152607Z`); the group has not run since, on the code as it
+is now — only `updates.a-published-release` has (see "The update by a published
+release"). Earlier the same day, after the first round, all five green in 11m31s
+(`-060923Z`); before any, all five green (`-041950Z`), and once with
+`updates.sparkle` "could not check" — the guest stopped answering SSH while its
+feed was being served — and green on its own straight after (`-050034Z`,
+`-052057Z`). All kept in `.build/e2e/kept/`.
+
+```sh
+e2e/run.sh updates.a-published-release                       # 0.5.0 → 0.6.1 today
+e2e/run.sh updates.a-published-release --from checkout --to 0.5.0
+e2e/run.sh updates.wrong-key --from 0.5.0                     # the control, with a real "from"
+e2e/run.sh updates.sparkle --from checkout --to latest
+```
+
+**A pair that cannot be run is refused before anything starts**, with the
+reason, and the run checks nothing:
+
+* a release going to a build of this checkout it would install: a release
+  installs only what the release key signed, and its private half lives in
+  GitHub's secrets. A release offered a build signed with the lab's key is the
+  wrong-key control with a real "from", and that is what it is for;
+* a pair given on the command line whose "to" is not newer than its "from" by
+  `CFBundleVersion`, the number Sparkle compares (`--from 0.6.1 --to 0.5.0`,
+  `--from latest --to latest`, `--from 0.5.0` with latest numbered no higher
+  than 0.5.0): an update there is none of. The lab's own pair is the exception
+  (below);
+* a pair a check cannot ask its question about: the wrong-key control offered a
+  published release — signed with the right key, and fetched from GitHub, where
+  the guest's own server, the control's witness, never sees it; anything but
+  checkout → checkout for the two checks about looking by itself, which end at
+  a request to the lab's own feed and install nothing; and a "to" of this
+  checkout for `updates.a-published-release`, which is `updates.sparkle`'s;
+* a "from" release whose settings window the lab cannot drive (below);
+* a release offered `latest` that does not itself ship the latest feed as its
+  `SUFeedURL`: it is asked through the feed it ships with, untouched, so the
+  pair would not prove the latest redirect;
+* `--from` or `--to` beside a check that takes no pair, or beside `--list`; a
+  side that is not one (`v0.5.0`, `0.5`); a release nobody published — the
+  error lists what is published, and says so when the version is a tag without
+  a release, as v0.6.0 is.
+
+Which releases exist is what GitHub's public API says, drafts, pre-releases and
+anything without both an `appcast.xml` and a `uDeck-X.Y.Z.zip` left out, and
+"latest" is GitHub's own mark, not the highest number. It is asked without a
+token — two questions a run from this Mac, of the sixty an hour GitHub allows one
+address — and a used-up limit says until when. Those two are not all that address
+asks: the 0.6.1 a check installs reads the plugin catalogue from api.github.com by
+itself when it starts, from the guest through Tart's NAT, so most likely from the
+same public address. How many questions that adds is not measured. A pair given on the command line that cannot be
+resolved, GitHub not answering this Mac included, refuses the run; a check's own
+default that cannot be resolved — GitHub not answering, a download cut short, an
+API answer the lab cannot read — is that check's "could not check", with the
+reason, and costs no machine: none is made for it, and with `--jobs 2` none is
+started ahead for it either. That holds under every `--vm`: the check stops
+before pytest sets up any of its fixtures, the machine its group or its run
+shares among them, so a check that cannot run neither boots the shared machine
+nor takes it, and a shared machine is never kept by `--keep-on-failure` for a
+check that never used it. The rest of the run goes on.
+
+A "to" that GitHub publishes **broken** is neither: it is that check's failure,
+given or not (see "What it is red for" below). A pair given on the command line
+whose "to" is not newer than "from" is refused before any verdict, broken "to"
+or whole, and a defect found in that "to" is said with the refusal: by the
+CFBundleVersion "to"'s appcast offers, where that much could be read — the
+appcast fetched whole, its zip there or not — as for a "to" that holds
+together; otherwise by version, and a build of this checkout, numbered 1, has no
+update to the first release GitHub publishes. A "from" that does not hold
+together is "could not check" — the lab does not install what it cannot vouch
+for.
+
+**The lab's own pair is asked the other way round.** The release before latest →
+latest — what a run asks with nothing given, and with `--to latest` alone, since
+nobody types the release before latest — asks whether what GitHub publishes as
+latest is an update to the release before it. A latest that is not newer than
+the release before it by `CFBundleVersion` is GitHub's publishing being wrong:
+every uDeck on the release before latest would say it is up to date. So it is
+that check's failure, before any machine, whatever else is broken in latest —
+latest's number read from its appcast where it does not hold together, since
+the appcast's number is the one Sparkle compares, and its defects said in the
+same line. The release before latest is compared only when it holds together:
+Sparkle compares with the installed bundle's own number, the one in its zip,
+and a release whose zip and appcast do not hold together does not vouch for
+it. Then a latest broken on its own. Only then what the lab cannot do: a release before latest it cannot
+vouch for, cannot press its way to an update in, or that does not ship the
+latest feed, is "could not check". Both releases are fetched before the lab asks
+whether it can drive the one before latest, since the finding needs no window
+driven.
+
+**Which releases can be "from" is read from each release's own source**, at its
+tag in this checkout. Once the settings window is open, the lab presses its way
+to an update by the identifiers uDeck gives the controls — `section.about`,
+`updates.checkNow`, `updates.install` (`releases.CHECK_NOW_PATH`) — never by
+translated titles, and a release whose source names none of them has a window
+the lab cannot drive. The way into that window is the exception every check
+shares: uDeck's menu item, which carries no identifier, is found by its English
+title `Settings…` and the window by `uDeck Settings` (see "The one thing the lab
+trusts a translated name for is the way in" under "The settings the operator
+changed"). A release's source is not read for those two titles; a release that
+changed them would be "could not check" — no way in — rather than refused.
+`section.about` counts when it is spelled out, or when — as every release so far
+writes it — the sidebar's `section.\(item)` and an enum of rows with `case about`
+are in the same file; `section.\(item)` alone names whatever rows there are.
+Read on 2026-10-09: 0.5.0 and 0.6.1 name all three; 0.1.0, 0.2.1, 0.3.0 and 0.4.0
+name none — their About pane has a "Check now" button, with no identifier on it
+or on the sidebar's rows. So "from" can be 0.5.0 or newer, and its tag has to be
+in the checkout (`git fetch --tags`, which the refusal says). "to" needs no
+window driven, so it can be any published release newer than "from" — for a
+build of this checkout, numbered 0.4.1 (1), that is every release but the first:
+`--from checkout --to 0.4.0` works as well as `--to 0.5.0`.
+
+**How "to" reaches "from".** Sparkle reads `SUFeedURL` from uDeck's preferences
+before its Info.plist (`-[SUHost objectForKey:ofClass:]` in Sparkle 2.9.6, and
+uDeck gives it no `feedURLStringForUpdater:` that would come first), so the lab
+writes it there — in the guest, never on this Mac — whenever "to" is not where
+"from"'s own plist points: a release offered a build of this checkout (the lab's
+feed on the guest's loopback), a build of this checkout offered the latest
+release (the real feed), anything offered a release by its version (that
+release's own `appcast.xml` asset). A release offered `latest` asks the feed it
+ships with, untouched — which is what proves the latest redirect. The write
+comes after the machine has forgotten what it remembered, and is read back. With
+`SUEnableAutomaticChecks` below, it is one of the two preferences the lab ever
+writes.
+
+**Which pair a check ran with cannot be missed.** Resolved — both ends down to
+version and build, the release whose public key a build of this checkout
+carries when it carries one, what a build of this checkout that is offered is
+signed with (the control's: another key, made for the check), and how "to"
+reaches "from"; for the two checks about looking by itself, that nothing is
+offered at all — it is said before the checks start, under each check's line in
+the report, and in the ledger: a `pairs` event with each release's tag, zip,
+SHA-256 and public key, and which public key each build of this checkout
+carries — the run's own, when the line names none — and a `pair` in every
+`check` event.
+
+```
+✅ updates.a-published-release  3m41s
+   pair: release 0.5.0 (6), the release before latest → release 0.6.1 (8), latest, via the real feed (default: the release before latest → latest)
+```
+
+### The update by a published release
+
+`updates.sparkle` and its control serve their own feed and sign with their own
+key, so neither can say whether the release key's private half — only in
+GitHub's secrets — signs what the `SUPublicEDKey` baked into released bundles
+accepts, nor whether Sparkle's real way works: the latest redirect, the download
+from GitHub's asset host, the install and the relaunch.
+
+`updates.a-published-release` is that way, driven exactly like
+`updates.sparkle` — the two share every step — and by default from the release
+before latest to latest: today 0.5.0 (6) to 0.6.1 (8). The release's zip,
+fetched and checked on this Mac, is unpacked in the guest and started; Settings
+→ About → "Check now" is pressed with the machine's pointer, since 0.5.0 ships
+with automatic checks off; the offer of "to" appears and is installed. What
+counts is the bundle on the guest's disk — `CFBundleShortVersionString` and
+`CFBundleVersion` as "to"'s own zip carries them — and a new process that stays,
+with a screenshot of the offer and one of the new uDeck's About pane: never
+uDeck's log, never what the pane says.
+
+**On the default pairs it is the one check that talks to github.com** — that
+is what it checks — from inside the guest, through Tart's own network: the
+appcast through the latest redirect, and the archive from GitHub's asset host. The 0.6.1 it installs also reads the real
+plugin catalogue from api.github.com when it starts, as it ships — harmless, and
+nothing the verdict reads. `updates.sparkle` given a published release as "to"
+talks to GitHub from the guest the same way. A release only as "from"
+(`updates.wrong-key --from 0.5.0`) is fetched by this Mac alone: the guest is
+offered the lab's own build on its loopback, and talks to GitHub only if the
+release it starts reads the plugin catalogue itself (0.6.1 and later do; 0.5.0
+does not).
+
+**No network from the guest is "could not check", never red.** Before uDeck is
+started the guest itself asks for exactly what the check needs, with its own
+curl, following redirects as Sparkle does (`updates.github_answers`): the feed
+"from" will ask, whose item for the zip has to offer the build, the address and
+the signature the lab checked on this Mac (the rest of the appcast is not
+compared), and the first bytes of the archive at that address. Measured from the
+guest on 2026-10-09, the latest feed is two redirects from github.com and the
+archive one, both landing on release-assets.githubusercontent.com. Before the
+check says anything against uDeck the guest is asked again. curl getting no
+answer at all — no name, no route, no answer in time — is the lab's, with curl's
+words, and so is GitHub answering with trouble of its own — 403, 429, a 5xx —
+which is the network at the level of HTTP: "could not check", with what GitHub
+answered. Only GitHub saying an asset is not there (404, 410) is what every
+uDeck that looks would meet too, so it is noted, left for the verdict, and named
+in the red line; the line never says the feed "still answers" unless it did.
+This Mac holds GitHub to the same rule while it fetches a release
+(`releases.ASSET_MISSING`): a 404 or 410 for an asset GitHub's API lists is the
+release's — red before any machine when it is "to", "could not check" when it is
+"from" — and 403, 429 or a 5xx is "could not check" on either side.
+
+**What it is red for.** On this Mac, before any machine is made, from what
+GitHub serves (`releases.ReleaseDefect`, `pairs.PairDefect`): a "to" whose
+appcast's `edSignature` does not hold over its zip under the `SUPublicEDKey`
+that very zip carries — the release key's private half no longer the key
+released bundles carry; a zip and an appcast that disagree on length, version or
+bundle; an appcast that is not XML, has no item for the zip, or whose item lacks
+a version, a length or an `edSignature`; an item that sends uDeck anywhere but
+the zip GitHub's API lists for that release (`browser_download_url`: another
+host, another port, another repository or tag, plain http, a relative address,
+the release's own address tucked into another's query — measured on 2026-10-09,
+every published release's enclosure is exactly that address); a zip whose
+Info.plist cannot be read (malformed XML included); a latest without its appcast
+or its zip, which the real feed leads every uDeck to; GitHub answering 404 or
+410 for an asset its own API lists; and, in the lab's own pair, a latest not
+newer than the release before it (see "The lab's own pair is asked the other way
+round" under "Pairs"). The address is read as Sparkle reads it only where that
+leaves no doubt: the scheme and the host in any case, and https's port 443
+written or not, are the same address (RFC 3986, 6.2.2.1 and 6.2.3; Sparkle 2.9.6
+takes the scheme in any case). Everything else is compared exactly, so an
+address Sparkle might still resolve to the same asset — a relative one, a path
+with `..` in it — is red too. The line is red with the reason,
+the pair line says `not run` and what was wrong, and the ledger's `pairs` event
+carries the `defect`. Where the defect is in the two assets as GitHub served
+them, both fetched whole, the reason ends with where GitHub's copies stay —
+`.build/e2e/releases/<tag>/`; a 404 or 410 and a latest without an asset leave
+no such pair of copies. The same of a "from" is "could not check", except where
+its appcast sends uDeck: nothing reads that of a release the lab only installs —
+it installs "from"'s zip itself, and Sparkle downloads "to" — so it is not
+asked. A guest would make none of it less true, and a flaky guest would only
+turn it into "could not check", so none is booted — under any `--vm`: the check
+stops before pytest sets up the machine its group or its run shares. Held by the
+lab's own tests against a GitHub made of answers, for each `--vm` mode with the
+machine it would have had set to fail its boot; no published release has been
+broken, so no run has met it.
+
+In the guest: "from" not taking "to" — the disk keeps "from", and the red line
+carries what GitHub answered the guest just before and what the pane said, so a
+refused signature and a failed download read apart; uDeck saying it is up to
+date or that the check did not finish while its feed declares "to"; and
+everything `updates.sparkle` is red for — another version on disk, no new
+process, one that dies, an old copy left running.
+
+What the guest's own probe cannot tell apart: GitHub in trouble *during* uDeck's
+own fetch — a 5xx, a reset — that has healed by the time the guest asks again
+before the verdict. The probe then says GitHub answers, and the check is red
+("did not finish", or the disk keeping "from"). The red line carries what GitHub
+answered and the pane's words, so a red with a fine probe and a pane naming a
+network error reads as one; running it again is the answer. Not retried by the
+lab.
+
+Measured on 2026-10-09, green: 0.5.0 (6) to 0.6.1 (8) through the real feed in
+1m34s, the guest reaching the feed in two redirects and the archive in one, and
+uDeck back as 0.6.1 (8), automatic checks on as it ships
+(`.build/e2e/20261009-040328Z`). Two attempts before it could not check — the
+clone's guest agent never answered within 180 s, while another application's
+virtual machine was running on the Mac (`-034551Z`, `-035233Z`) — and the
+self-check between them passed (`-035704Z`); nothing about uDeck was asked in
+either. From a build of this checkout carrying the release's key, green too: to
+0.5.0 through its own appcast, `--from checkout --to 0.5.0`, in 3m25s
+(`-041358Z`), and `updates.sparkle --from checkout --to latest` to 0.6.1 in
+2m01s (`-041734Z`).
+
+After the first round of fixes, all green: the default pair in the group run, in
+1m24s (`-060923Z`); `--from checkout --to 0.5.0` in 1m48s (`-062104Z`);
+`--from checkout --to 0.4.0` in 7m44s with the build (`-062308Z`) — 0.4.0 (5)
+on the disk and a new process that stayed, carrying the same `SUPublicEDKey` as
+0.5.0 and 0.6.1, and no picture of its About pane, because 0.4.0's window has
+no identifiers to open it by (said in the report, verdict unchanged); and
+`updates.sparkle --from checkout --to latest` in 1m31s (`-063359Z`). Of these,
+only the default pair has run again since: after the second round, alone, green
+in 1m22s (`-152204Z`) — the copies of 0.5.0 and 0.6.1 kept on this Mac matched
+the size and SHA-256 GitHub's API lists — and in the group run in 1m39s
+(`-152607Z`); after the third round, with each appcast held to the zip GitHub's
+API lists byte for byte, alone, green in 2m21s (`-170702Z`), on that round's
+code except `releases.py`, edited 33 s after the run had started — a comment,
+its author said; no copy of the file before the edit was kept to compare.
+
+After the fourth round — the lab's own pair red for a latest not newer than the
+release before it, the address compared as Sparkle reads one and asked only of
+the release offered — alone, green in 1m33s (`-175401Z`, the run 1m36s, exit 0).
+On the code as it is now — that, and a release before latest that does not hold
+together never compared by its appcast's number — alone, green in 4m50s
+(`-182211Z`, exit 0; the code's SHA-256 the same before and after the run): the
+kept copies of 0.5.0 and 0.6.1 still checked, the guest reached the latest feed
+in two redirects and the archive in one, both at
+release-assets.githubusercontent.com, offering 0.6.1 (8), and uDeck came back as
+0.6.1 (8) in a new process. Its screenshots show the offer — installed 0.5.0,
+latest 0.6.1, "Update to 0.6.1" — and 0.6.1 installed, automatic checks on,
+"Checked just now". The red of the lab's own pair has met
+no published release — their numbers rise, 1, 3, 4, 5, 6 and 8 from 0.1.0 to
+0.6.1, read from their appcasts on 2026-10-09 — and is held by the lab's own
+tests.
+
+And no machine for a "to" published broken, under `--vm per-run` and
+`per-group` alike, measured after the second round with the real lab and a
+defect injected for the occasion — a `sitecustomize.py` outside the repository, never committed, that
+makes the fetch of 0.6.1 say it does not hold together, in words that say they
+were injected. `updates.a-published-release` was red in 0s each time, the whole
+run over in 3 s and 2 s, and its run directory holds the ledger, the reason and
+the lab's start mark, and nothing else: no clone, no screenshot (`-154047Z`,
+`-154057Z`).
+
+And red where it should be, measured once against a copy of the check file —
+never committed — in which a build of this checkout going to a release carries
+the run's own key instead of the release's: the shape of a "from" that carries a
+key the release was not signed with. The pane then read "The update is
+improperly signed and could not be validated" — that Sparkle fetched 0.6.1 for
+it is inferred from those words; nothing in the guest witnessed the download —
+the disk kept 0.4.1 (1), the guest still reached GitHub when it was asked before
+the verdict, and the check said `the version on disk is ('0.4.1', '1'), not
+('0.6.1', '8')` (`-044950Z`). Its first run could not check: the guest stopped
+answering SSH while the version was being read (`-043920Z`). A release published
+broken is a different shape, found on this Mac before any machine (above). All
+of the runs named here are kept in `.build/e2e/kept/`.
+
+### Not in the full run
+
+**The control with a published release as "from".** A run gives each check one
+pair — its default, or the one `--from` and `--to` give — and
+`updates.wrong-key`'s default is checkout → checkout: the same offer signed with
+another key, refused. So a run without arguments holds the control between two
+builds of this checkout, and the control with a published release as "from" is
+the same check with another pair, which runs only when it is named with a
+release as `--from`:
+
+```
+e2e/run.sh updates.wrong-key --from 0.5.0
+```
+
+So a full run's green `updates.a-published-release` does not come with a control
+of its own release, and when the default "from" moves on — to 0.6.1 at the next
+release — nothing re-checks by itself that the new "from" refuses an offer
+signed with another key; that is the command above with the new version.
+Whether the full run should hold it too is not settled.
 
 ### Looking for an update by itself
 
@@ -266,8 +671,9 @@ uDeck's.
 `updates.switched-on-it-looks-by-itself` needs a switch to turn on, so it starts
 from a machine whose operator turned it off: after forgetting everything, the
 lab writes `SUEnableAutomaticChecks` false into uDeck's preferences — what the
-switch's setter writes, and the one preference the lab ever writes — and reads
-it back before uDeck starts. Turning it off in the window instead would first
+switch's setter writes, and one of the two preferences the lab ever writes (the
+other is `SUFeedURL`, for a pair; see "Pairs") — and reads it back before uDeck
+starts. Turning it off in the window instead would first
 cost a check, and that check's date would keep the switch from causing another
 for a day. uDeck must then stay quiet until the switch is touched (a request
 before it is uDeck ignoring the operator's off, and a failure), the switch must
@@ -1177,11 +1583,13 @@ problem.
 ### Plugins from a repository
 
 Twenty-two checks, one per row of the table in docs/plugin-repository.md ("The
-lab's checks"). None of them talks to github.com. A fake GitHub runs inside the
-guest (`e2e/guest/fake-github.py`, the guest's own Python and the standard
-library only, on `127.0.0.1:8766`), answering the part of the API uDeck uses —
-the default branch, the head with its `ETag` and `304`, a tree with and without
-`recursive=1`, a folder's history — and a raw file host beside it. Its content
+lab's checks"). None of them talks to github.com — in the lab only the update
+checks given a published release do, `updates.a-published-release` by default.
+A fake GitHub runs inside the guest (`e2e/guest/fake-github.py`, the guest's
+own Python and the standard library only, on `127.0.0.1:8766`), answering the
+part of the API uDeck uses — the default branch, the head with its `ETag` and
+`304`, a tree with and without `recursive=1`, a folder's history — and a raw
+file host beside it. Its content
 is the fixture commits in `e2e/fixtures/plugin-repository/`: `c1` holds
 `uptime` 1.0.0 and the three plugins uDeck must refuse (`future-api` with
 `api: 2`, `future-udeck` with `minUDeck: 99.0.0`, `linked` with a symbolic
@@ -1267,7 +1675,9 @@ One line per check, then a summary:
 
 ```
 ✅ updates.sparkle  2m14s
+   pair: checkout as 0.4.1 (6) → checkout as 0.4.2 (7), signed with the run's own key, via the lab's feed in the guest (default: checkout → checkout)
 ❌ updates.wrong-key  1m02s — Sparkle installed an update signed with the wrong key
+   pair: checkout as 0.4.1 (6) → checkout as 0.4.2 (7), signed with another key, made for the check, which "from" does not carry, via the lab's feed in the guest (default: checkout → checkout)
    evidence: .build/e2e/20260916-172233/updates.wrong-key/
 ⚠️ panel.dwell  0m40s — could not check: waiting for SSH after the reboot: no answer in 240s
 1 passed, 1 failed, 1 could not check in 3m56s

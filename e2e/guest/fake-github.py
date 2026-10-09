@@ -4,9 +4,10 @@
 This runs *in the machine*, not on this Mac, with the guest's own
 `/usr/bin/python3` (3.9 on the golden images, measured 2026-09-17) and nothing
 but the standard library. It is the plugin catalogue's counterpart of the
-update feed `updates.Feed` serves: the lab never talks to github.com — no
-account, no limit shared with the rest of the network, nothing that depends on
-somebody else's server — so a lab build of uDeck is pointed here through its
+update feed `updates.Feed` serves: the plugin checks never talk to github.com —
+no account, no limit shared with the rest of the network, nothing that depends
+on somebody else's server (only the update checks that take a published release
+do) — so a lab build of uDeck is pointed here through its
 `Info.plist` (`UDeckPluginsAPIBase` = `<base>/api`, `UDeckPluginsRawBase` =
 `<base>/raw`; `builds.Builder._verify` refuses a build that says anything else).
 

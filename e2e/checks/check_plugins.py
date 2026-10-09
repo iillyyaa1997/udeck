@@ -6,8 +6,10 @@ this checkout, and a fake GitHub served inside the guest
 (`plugin_repository.FakeGitHub`, `e2e/guest/fake-github.py`) whose content is
 the fixture commits in `e2e/fixtures/plugin-repository/` — `c1` with `uptime`
 1.0.0 and three plugins uDeck must refuse, `c2` the same with `uptime` 1.1.0.
-The lab never talks to github.com; every lab build is pointed at the fake, and
-the build step refuses one that is not (`builds.Builder._verify`).
+These checks never talk to github.com; every lab build is pointed at the fake,
+and the build step refuses one that is not (`builds.Builder._verify`). (The lab
+as a whole does, for the update checks that take a published release —
+`releases`, `updates.github_answers` — and never for these.)
 
 **Three oracles, and none of them is what uDeck says about itself.** The fake's
 access log is the traffic: what uDeck asked for, and what it did not — a check

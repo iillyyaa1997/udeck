@@ -1594,8 +1594,12 @@ shown in the row, in English and Russian like the rest of Settings.
 
 ### The fake repository in the guest
 
-The lab never talks to github.com: no account, no limits, and nothing that
-depends on somebody else's server. Like the update feed it already serves
+The plugin checks never talk to github.com: no account, no limits, and nothing
+that depends on somebody else's server. (The update checks given a published
+release do, since that is what they check — `updates.a-published-release` by
+default, which installs a published release in the guest and lets it update
+itself from GitHub: e2e/README.md, "The update by a published release".) Like
+the update feed it already serves
 (`e2e/udeck_e2e/updates.py`), a fake GitHub runs **inside the guest** on its
 loopback address, with the guest's own `/usr/bin/python3` and nothing but the
 standard library.

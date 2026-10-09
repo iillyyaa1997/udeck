@@ -205,8 +205,8 @@ fi
 # end-to-end update test never involves the real ones. Both are baked into the
 # bundle rather than passed at run time because Sparkle relaunches the
 # application to install an update, and an environment override does not survive
-# that relaunch. `NSAllowsLocalNetworking` is what lets the feed be plain HTTP on
-# the loopback address inside the test machine.
+# that relaunch. The feed is plain HTTP on the loopback address inside the test
+# machine (see `NSAllowsLocalNetworking` below).
 if [ -n "$TEST_FEED" ]; then
     /usr/libexec/PlistBuddy -c "Set :SUFeedURL $TEST_FEED" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey $TEST_KEY" "$APP/Contents/Info.plist"
@@ -220,8 +220,11 @@ if [ -n "$TEST_PLUGINS" ]; then
     /usr/libexec/PlistBuddy -c "Set :UDeckPluginsRawBase $BASE/raw" "$APP/Contents/Info.plist"
 fi
 
-# `NSAllowsLocalNetworking` is what lets either be plain HTTP on the loopback
-# address inside the test machine.
+# `NSAllowsLocalNetworking` is there so that either can be plain HTTP on the
+# loopback address inside the test machine. Sparkle's own fetch was measured not
+# to need it (a released 0.5.0, which lacks it, fetched a plain-HTTP feed on
+# 127.0.0.1 in the e2e lab on 2026-10-09); uDeck's fetch of the catalogue without
+# it has not been measured.
 if [ -n "$TEST_FEED$TEST_PLUGINS" ]; then
     /usr/libexec/PlistBuddy -c "Delete :NSAppTransportSecurity" "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
     /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$APP/Contents/Info.plist"
