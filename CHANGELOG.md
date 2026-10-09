@@ -8,6 +8,14 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [Unreleased]
+
+- **About says how to open a downloaded copy on macOS 15 and later.** It said
+  right-click → Open, which macOS 15 no longer lets past Gatekeeper for an app
+  that is not notarised; the way through there is System Settings → Privacy &
+  Security → Open Anyway, after the first refusal. The README's new
+  Installing section says the same.
+
 ## [0.6.1] — 2026-10-08
 
 What 0.6.0 holds, published. 0.6.0 was tagged, and its release stopped before

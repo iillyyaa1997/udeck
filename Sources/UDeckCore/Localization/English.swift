@@ -338,7 +338,7 @@ struct English: Vocabulary {
         case .aboutThisBuild: "This build"
         case .aboutNotSigned: "Not signed with a Developer ID and not notarised."
         case .aboutAdHoc:
-            "Builds are ad-hoc signed, so macOS will refuse a downloaded copy on first launch — right-click and choose Open. A binary you built yourself is unaffected."
+            "Builds are ad-hoc signed, so macOS will refuse a downloaded copy on first launch — on macOS 15 and later allow it in System Settings → Privacy & Security → Open Anyway, on macOS 14 Control-click it and choose Open. A binary you built yourself is unaffected."
         case .aboutNotSandboxed: "Not sandboxed, and cannot be: plugins run commands."
         case .aboutReadPermissions:
             "Read the permissions section of the plugin documentation before installing a plugin somebody else wrote."
