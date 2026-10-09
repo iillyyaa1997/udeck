@@ -47,8 +47,8 @@ See the [changelog](CHANGELOG.md) for what exists.
 ## Requirements
 
 **To run it:** macOS 14 or later, on Apple Silicon. No Xcode needed. The
-release's uDeck.app is built for arm64 alone (0.5.0's is: `lipo -archs` says
-`arm64`); `udeck-plugin`'s own archive, below, is universal.
+release's uDeck.app is built for arm64 alone (`lipo -archs` says `arm64`);
+`udeck-plugin`'s own archive, below, is universal.
 
 **To build it:** the macOS 26 SDK, which means Xcode 26 or its command-line
 tools. The panel's surface is `NSGlassEffectView`, the system's own glass, and
@@ -56,6 +56,28 @@ a type the SDK has never heard of cannot be compiled against however carefully
 its use is guarded — `@available` decides what runs, not what exists. On
 macOS 14 and 15 the same build falls back to a blur at runtime; it is only the
 compiler that needs the newer SDK.
+
+## Installing
+
+1. Download `uDeck-<version>.zip` from the
+   [latest release](https://github.com/iillyyaa1997/udeck/releases/latest)
+   and unzip it.
+2. Move `uDeck.app` to `/Applications`.
+3. Open it. The first time, macOS refuses, because uDeck is not notarised
+   ([a warning about signing](#a-warning-about-signing)):
+   * on macOS 15 and later, press **Done**, open **System Settings → Privacy &
+     Security**, scroll to the line about uDeck, press **Open Anyway** and
+     confirm with your password or Touch ID;
+   * on macOS 14, Control-click `uDeck.app` in Finder, choose **Open**, then
+     **Open** again in the dialog.
+
+   This is asked once; later launches open straight away.
+
+uDeck has no Dock icon: push the pointer up to the middle of the top edge and
+the panel drops down. From then on it looks for updates by itself once a day,
+and installs one only when you press Install in Settings → About
+([Updates](#updates)). What else it fetches is in
+[What uDeck connects to](#what-udeck-connects-to-and-when).
 
 ## Building and running
 
@@ -179,8 +201,10 @@ It also builds from this repository:
 
 Builds of uDeck are **ad-hoc signed**, not signed with an Apple Developer ID and
 not notarised. macOS will refuse to open a downloaded build on the first
-attempt; right-click the application and choose Open to get the dialog that lets
-you through, or run the binary you built yourself, which has no such problem.
+attempt. On macOS 15 and later the way through is **System Settings → Privacy &
+Security → Open Anyway**, after that first refusal — Control-click → Open no
+longer gets past it there; on macOS 14 Control-click → Open still does
+([Installing](#installing)). A binary you built yourself has no such problem.
 
 Notarisation is intended but not paid for yet. Nothing about the architecture
 changes when it arrives — only the build step.
