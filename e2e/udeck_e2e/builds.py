@@ -24,6 +24,13 @@ was decided rather than assumed:
   nothing; a build that shipped the real addresses would reach out to GitHub from
   every guest with a network, so `_verify` refuses it.
 
+A build of this checkout that is to be offered a *published* release carries
+that release's public key instead (`PublicKey`), read out of the release's own
+bundle: the private half lives only in GitHub's secrets, so this is the one way
+a lab build can accept what the release key signed. Nothing is signed with it,
+and the build is held to every rule above all the same (`Builder._verify`). A
+released zip itself never comes through here (`releases`).
+
 The signing key is made here and thrown away with the run. Sparkle's own
 `generate_keys` would put a private key in the login keychain — a permanent
 change to this Mac for a test that lasts minutes — so the key is generated in
@@ -69,6 +76,18 @@ class SigningKey:
     public_key: str
 
 
+@dataclass(frozen=True)
+class PublicKey:
+    """A key whose private half the lab does not have: a published release's, read out of its own bundle.
+
+    A build carrying it accepts what the release key signed and nothing the lab
+    can sign — which is the whole of what it is for: a build of this checkout that
+    a published release can be offered to (`pairs`). Nothing is ever signed with it.
+    """
+
+    public_key: str
+
+
 def make_key(directory: Path) -> SigningKey:
     """A throwaway EdDSA key for this run. Never the keychain, never the repository."""
     step = "making this run's signing key"
@@ -106,7 +125,7 @@ class Builder:
         repo_root: Path,
         work_dir: Path,
         feed_url: str,
-        key: SigningKey,
+        key: SigningKey | PublicKey,
         note: Note,
         plugins_url: str = plugin_repository.base_url(),
         popen: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
@@ -119,7 +138,10 @@ class Builder:
         self.repo_root = repo_root
         # A directory per feed: two checks serving their own appcast build the same
         # versions, and the second must not overwrite what the first is still using.
-        self.work_dir = work_dir / hashlib.sha256(feed_url.encode()).hexdigest()[:8]
+        # And per key when the key is a release's, so that a build carrying it never
+        # stands where one carrying the run's own key does.
+        mark = feed_url if isinstance(key, SigningKey) else f"{feed_url} {key.public_key}"
+        self.work_dir = work_dir / hashlib.sha256(mark.encode()).hexdigest()[:8]
         self.feed_url = feed_url
         self.plugins_url = plugins_url
         self.key = key
@@ -212,9 +234,12 @@ class Builder:
         wrong = [f"{key} is {plist.get(key)!r}, not {value!r}" for key, value in wanted.items() if plist.get(key) != value]
         transport = plist.get("NSAppTransportSecurity")
         if not (isinstance(transport, dict) and transport.get("NSAllowsLocalNetworking") is True):
-            # Without it the fake, plain HTTP on the loopback, is refused before a
-            # request leaves uDeck, and every plugin check would read that silence
-            # as uDeck's.
+            # For the fake, plain HTTP on the loopback: a catalogue fetch refused
+            # before the request left uDeck would be a silence every plugin check
+            # read as uDeck's. Whether uDeck's own fetch needs it is not measured;
+            # Sparkle's does not — a released 0.5.0, which lacks it, fetched the
+            # lab's plain-HTTP appcast and archive on 127.0.0.1 (e2e/README.md,
+            # updates.wrong-key with a real "from", 2026-10-09).
             wrong.append(f"NSAppTransportSecurity is {transport!r}, without NSAllowsLocalNetworking")
         identifier = str(plist.get("CFBundleIdentifier", ""))
         if identifier.endswith(".debug"):

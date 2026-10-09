@@ -401,3 +401,38 @@ def switch_automatic_checks_off(machine, step: str) -> None:
             f"the lab wrote {AUTOMATIC_CHECKS} as false for {BUNDLE_ID}, and it reads back as "
             f"{kept if kept is not None else 'nothing at all'}",
         )
+
+
+# Sparkle's own name for where uDeck asks for an update: the key in the bundle's
+# Info.plist, and a key it reads from uDeck's preferences *first*
+# (`-[SUHost objectForKey:ofClass:]`, user defaults before the plist, in Sparkle
+# 2.9.6 as Package.resolved pins it; `-[SPUUpdater retrieveFeedURL:]` takes it from
+# there, and uDeck gives Sparkle no `feedURLStringForUpdater:` that would come
+# before it). Every published release carries GitHub's latest feed and the lab's
+# own builds carry the lab's feed in the guest; a pair whose "to" is anywhere else
+# is reached by writing this into the guest's preferences — never this Mac's.
+FEED_URL = "SUFeedURL"
+
+
+def point_the_feed_at(machine, url: str, step: str) -> None:
+    """Make the uDeck in the guest ask `url` for its updates, and read it back.
+
+    The second of the two preferences the lab ever writes (the other is
+    `switch_automatic_checks_off`), and only for a pair whose "to" is not where
+    "from"'s own Info.plist points: a release offered a build of this checkout
+    (the lab's feed), a build of this checkout or a release offered a release by
+    name (that release's own appcast), a build of this checkout offered the latest
+    release (the real feed). Only with uDeck not running, after
+    `forget_preferences` — which would take it away again — and read back, because
+    a uDeck still asking its own feed would make the check a question about that
+    feed.
+    """
+    machine.ssh.run(f"defaults write {BUNDLE_ID} {FEED_URL} -string {shlex.quote(url)}", step)
+    kept = machine.ssh.ask(f"defaults read {BUNDLE_ID} {FEED_URL}", step)
+    if kept.returncode != 0 or kept.stdout.strip() != url:
+        said = (kept.stdout or kept.stderr or "").strip().splitlines()
+        raise LabError(
+            step,
+            f"the lab wrote {FEED_URL} = {url} for {BUNDLE_ID}, and it reads back as "
+            f"{said[-1] if said else 'nothing at all'}",
+        )

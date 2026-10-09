@@ -328,3 +328,31 @@ def test_a_build_that_ignores_the_first_signal_is_killed(tmp_path):
     # The clock moves only when something waits on it: this is the grace period
     # actually being waited out before the kill.
     assert lab._clock() >= config.BUILD_STOP_GRACE_SECONDS
+
+
+# --- A build that carries a published release's key ---------------------------------------
+
+
+def test_a_build_carrying_a_releases_public_key_says_so_to_make_app_and_keeps_every_other_rule(tmp_path):
+    """The private half lives in GitHub's secrets: the public half is what lets a lab build accept the release."""
+    from udeck_e2e.builds import PublicKey
+
+    script = Script()
+    release_key = PublicKey("pxUvxCxwUBF6ftsanVsAhrjGKlvWP5Qfdzf+c1BpMCw=")
+    build = builder(script, tmp_path, key=release_key).build("0.4.1", "1")
+    options = dict(zip(script.calls[0][0][1:], script.calls[0][0][2:]))
+    assert options["--test-key"] == release_key.public_key
+    assert options["--test-feed"] == FEED, "its feed is still the lab's own in its plist"
+    assert options["--test-plugins"] == plugin_repository.base_url()
+    assert build.zip.is_file()
+    # Never where a build carrying the run's own key stands.
+    assert Path(options["--out"]).parent != tmp_path / "run" / "builds" / digest()
+
+
+def test_a_build_carrying_a_releases_key_is_held_to_the_same_rules(tmp_path):
+    from udeck_e2e.builds import PublicKey
+
+    with pytest.raises(LabError, match="UDeckPluginsAPIBase is 'https://api.github.com'"):
+        builder(Script(ignores_test_plugins=True), tmp_path, key=PublicKey("cmVsZWFzZQ==")).build("0.4.1", "1")
+    with pytest.raises(LabError, match="without NSAllowsLocalNetworking"):
+        builder(Script(local_networking=False), tmp_path, key=PublicKey("cmVsZWFzZQ==")).build("0.4.1", "1")

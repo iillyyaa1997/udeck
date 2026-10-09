@@ -71,6 +71,22 @@ def parser() -> argparse.ArgumentParser:
         action="store_true",
         help="keep the machine of a check that did not pass, stopped and renamed udeck-e2e-kept-…",
     )
+    p.add_argument(
+        "--from",
+        dest="from_side",
+        metavar="SIDE",
+        default=None,
+        help="the uDeck an update check starts from: 'checkout' (a build of this checkout), 'latest' (the release "
+             "GitHub marks latest) or a published release by its version, such as 0.5.0; only with update checks, "
+             "and each one's own default for the end not given",
+    )
+    p.add_argument(
+        "--to",
+        dest="to_side",
+        metavar="SIDE",
+        default=None,
+        help="the uDeck it is offered, written the same way",
+    )
     p.add_argument("--golden", action="store_true", help="with cleanup: remove golden images too")
     # For the lab's own tests: run checks from somewhere else.
     p.add_argument("--checks-dir", type=Path, default=E2E_DIR / "checks", help=argparse.SUPPRESS)
@@ -102,10 +118,13 @@ def pytest_args(target_dir: Path, listing: bool) -> list[str]:
     return args
 
 
+# The flags whose names are not their destination's.
+FLAGS = {"from_side": "--from", "to_side": "--to"}
+
 # Which options each command takes. An option a command would ignore is refused:
 # `cleanup --list` once deleted the kept clones it was asked to list.
 ALLOWED = {
-    "checks": {"list", "guest", "vm", "keep_on_failure", "jobs"},
+    "checks": {"list", "guest", "vm", "keep_on_failure", "jobs", "from_side", "to_side"},
     "selfcheck": {"list", "guest", "vm", "keep_on_failure", "jobs"},
     "bake": {"list", "guest"},
     "cleanup": {"list", "guest", "golden"},
@@ -124,14 +143,20 @@ def main(argv: list[str] | None = None) -> int:
         for name, value in (
             ("list", args.list), ("guest", args.guest), ("vm", args.vm),
             ("keep_on_failure", args.keep_on_failure), ("golden", args.golden),
-            ("jobs", args.jobs),
+            ("jobs", args.jobs), ("from_side", args.from_side), ("to_side", args.to_side),
         )
         if value not in (None, False)
     }  # fmt: skip
     refused = sorted(given - ALLOWED[mode])
     if refused:
-        flags = ", ".join("--" + name.replace("_", "-") for name in refused)
+        flags = ", ".join(FLAGS.get(name, "--" + name.replace("_", "-")) for name in refused)
         print(f"{flags} does nothing with {'checks' if mode == 'checks' else repr(mode)}.", file=sys.stderr)
+        return EXIT_NOT_CHECKED
+
+    # The list says each update check's default pair; a pair given beside it would
+    # be shown nowhere and checked against nothing.
+    if args.list and (args.from_side is not None or args.to_side is not None):
+        print("--from and --to do nothing with --list, which shows each update check's own default pair.", file=sys.stderr)
         return EXIT_NOT_CHECKED
 
     # `--jobs 2` boots the machine the *next* check will use. With one machine for the
@@ -160,6 +185,8 @@ def main(argv: list[str] | None = None) -> int:
         repo_root=REPO_ROOT,
         checks_dir=target,
         runs_root=REPO_ROOT / ".build" / "e2e",
+        from_side=args.from_side,
+        to_side=args.to_side,
     )
     return run_pytest(plugin, pytest_args(target, args.list))
 

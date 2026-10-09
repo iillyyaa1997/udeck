@@ -2,7 +2,7 @@
 #
 # The end-to-end lab, as one command.
 #
-# Usage:  e2e/run.sh [CHECK-OR-GROUP ...] [--list] [--guest 27|26]
+# Usage:  e2e/run.sh [CHECK-OR-GROUP ...] [--list] [--guest 27|26] [--from SIDE] [--to SIDE]
 #
 # Everything the lab does — the pre-flight, the virtual machines, the checks and
 # the report — lives in the Python package beside this file. This wrapper only

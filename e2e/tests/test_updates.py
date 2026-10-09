@@ -1,5 +1,6 @@
 """The update that is offered: signing, the appcast, the feed in the guest, installing."""
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -131,11 +132,18 @@ def test_a_feed_that_never_answers_is_a_lab_error_with_what_the_server_said(tmp_
 # --- The feed's own log, as evidence ---------------------------------------------------
 
 
+def a_feed_that_served(machine, note):
+    """A feed as `serve` leaves it — the state every log worth collecting comes from."""
+    feed = updates.Feed(machine, note=note)
+    feed.served = True
+    return feed
+
+
 def test_the_feeds_log_is_brought_back_as_evidence(tmp_path):
     """For the negative control it is the proof: a fetched archive is a checked signature."""
     line = '127.0.0.1 - - [18/Sep/2026] "GET /uDeck-0.4.2.zip HTTP/1.1" 200 -'
     machine = FakeMachine({"server.log": line})
-    text = updates.Feed(machine, note=lambda t: None).collect_log(tmp_path)
+    text = a_feed_that_served(machine, note=lambda t: None).collect_log(tmp_path)
     assert line in text
     assert line in (tmp_path / "feed-server.log").read_text()
 
@@ -144,13 +152,23 @@ def test_a_log_that_cannot_be_collected_is_said_and_not_raised(tmp_path):
     """Evidence, not a verdict: a check must not turn on whether its artefacts arrived."""
     machine = FakeMachine({"server.log": Dropped})
     said = []
-    assert updates.Feed(machine, note=said.append).collect_log(tmp_path) == ""
+    assert a_feed_that_served(machine, note=said.append).collect_log(tmp_path) == ""
     assert any("could not be read" in note for note in said)
 
     unwritable = FakeMachine({"server.log": "a line"})
     said = []
-    assert updates.Feed(machine=unwritable, note=said.append).collect_log(tmp_path / "nowhere") == "a line"
+    assert a_feed_that_served(unwritable, note=said.append).collect_log(tmp_path / "nowhere") == "a line"
     assert any("could not be written" in note for note in said)
+
+
+def test_a_feed_that_never_served_leaves_no_log_of_the_labs_in_the_report(tmp_path):
+    """A check whose "to" is a published release serves nothing in the guest: an empty
+    feed-server.log beside its report would read as a feed nobody asked."""
+    machine = FakeMachine({"server.log": "a line"})
+    feed = updates.Feed(machine, note=lambda t: None)
+    assert feed.collect_log(tmp_path) == ""
+    assert not (tmp_path / "feed-server.log").exists()
+    assert not machine.ssh.commands
 
 
 # --- Who asked the feed ---------------------------------------------------------------
@@ -208,3 +226,100 @@ def test_an_empty_appcast_is_a_feed_that_offers_nothing():
     root = ElementTree.fromstring(updates.empty_appcast())
     assert root.tag == "rss" and root.find("channel") is not None
     assert list(root.iter("item")) == []
+
+
+# --- GitHub, asked from inside the guest ---------------------------------------------------
+
+from udeck_e2e import releases  # noqa: E402
+
+LATEST = config.LATEST_FEED
+ASSETS = "https://release-assets.githubusercontent.com/github-production-release-asset/1/2?sig=x"
+
+
+def a_published_release():
+    published = releases.Published(
+        "v0.6.1", "https://github.com/iillyyaa1997/udeck/releases/download/v0.6.1/appcast.xml", "uDeck-0.6.1.zip",
+        "https://github.com/iillyyaa1997/udeck/releases/download/v0.6.1/uDeck-0.6.1.zip", 6026092,
+    )  # fmt: skip
+    return releases.Release(
+        published=published, version="0.6.1", build="8", public_key="pxUv=", shipped_feed=LATEST,
+        zip=Path("/cache/uDeck-0.6.1.zip"), appcast=Path("/cache/appcast.xml"), enclosure_url=published.zip_url,
+        length=6026092, signature="rtOX==", sha256="00",
+    )  # fmt: skip
+
+
+def appcast_for(release, build=None, signature=None):
+    return (
+        '<?xml version="1.0" standalone="yes"?>\n'
+        '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0"><channel><item>'
+        f"<sparkle:version>{build or release.build}</sparkle:version>"
+        f"<sparkle:shortVersionString>{release.version}</sparkle:shortVersionString>"
+        f'<enclosure url="{release.enclosure_url}" length="{release.length}" '
+        f'sparkle:edSignature="{signature or release.signature}"/></item></channel></rss>'
+    )
+
+
+def guest_curl(feed=None, archive=None):
+    """The guest's curl as the probe asks it twice: for the feed, whole, and for the archive's first bytes."""
+    release = a_published_release()
+    feed = feed if feed is not None else appcast_for(release) + f"\nudeck-e2e-curl 200 2 {ASSETS}"
+    archive = archive if archive is not None else f"\nudeck-e2e-curl 206 1 {ASSETS}"
+    return FakeMachine({"-r 0-1023": archive, "/usr/bin/curl": feed})
+
+
+def test_a_guest_that_reaches_github_says_where_it_went():
+    machine = guest_curl()
+    fine, said = updates.github_answers(machine, a_published_release(), LATEST, "asking GitHub")
+    assert fine
+    assert f"{LATEST} answered the guest 200 from release-assets.githubusercontent.com after 2 redirect(s)" in said
+    assert "offering 0.6.1 (8)" in said and "its archive answered 206" in said
+    assert "sig=" not in said, "the signed address of the asset is not written down"
+    feed, archive = machine.ssh.commands
+    assert feed.startswith("/usr/bin/curl -sS -L ") and LATEST in feed and "-o /dev/null" not in feed
+    assert "-r 0-1023" in archive and "-o /dev/null" in archive and a_published_release().enclosure_url in archive
+
+
+def test_a_guest_without_the_network_is_the_labs_and_never_a_verdict():
+    machine = guest_curl(feed=Failed(6, ""))
+    with pytest.raises(LabError, match="the guest could not reach github.com for .*curl exited 6"):
+        updates.github_answers(machine, a_published_release(), LATEST, "asking GitHub")
+    machine = guest_curl(archive=Failed(28, ""))
+    with pytest.raises(LabError, match="the guest could not reach github.com for .*uDeck-0.6.1.zip"):
+        updates.github_answers(machine, a_published_release(), LATEST, "asking GitHub")
+    machine = guest_curl(feed=Dropped)
+    with pytest.raises(LabError, match="SSH to"):
+        updates.github_answers(machine, a_published_release(), LATEST, "asking GitHub")
+
+
+def test_github_saying_an_asset_is_not_there_is_left_for_udeck_to_meet():
+    """A 404 from the latest redirect is what a person's uDeck would meet too: the check goes on."""
+    fine, said = updates.github_answers(guest_curl(feed=f"Not Found\nudeck-e2e-curl 404 1 {ASSETS}"),
+                                        a_published_release(), LATEST, "asking GitHub")  # fmt: skip
+    assert not fine and "answered the guest 404" in said
+    fine, said = updates.github_answers(guest_curl(archive=f"\nudeck-e2e-curl 410 1 {ASSETS}"),
+                                        a_published_release(), LATEST, "asking GitHub")  # fmt: skip
+    assert not fine and "its archive answered 410" in said
+
+
+@pytest.mark.parametrize("status", [403, 429, 500, 502, 503])
+def test_github_in_trouble_is_the_network_and_never_a_verdict(status):
+    """GitHub declining or failing to answer — a rate limit, a server error — is the network at the level of
+    HTTP: "could not check", with what GitHub said, wherever the probe meets it."""
+    with pytest.raises(LabError, match=rf"GitHub answered the guest {status} for {re.escape(LATEST)}") as raised:
+        updates.github_answers(guest_curl(feed=f"busy\nudeck-e2e-curl {status} 1 {ASSETS}"),
+                               a_published_release(), LATEST, "asking GitHub")  # fmt: skip
+    assert "says nothing about uDeck or the release" in raised.value.reason
+    with pytest.raises(LabError, match=rf"GitHub answered the guest {status} for .*uDeck-0.6.1.zip"):
+        updates.github_answers(guest_curl(archive=f"\nudeck-e2e-curl {status} 1 {ASSETS}"),
+                               a_published_release(), LATEST, "asking GitHub")  # fmt: skip
+
+
+def test_a_feed_offering_another_release_than_the_lab_checked_is_the_labs():
+    """A release published while the run was starting: "to" is no longer what the disk is held to."""
+    release = a_published_release()
+    machine = guest_curl(feed=appcast_for(release, build="9") + f"\nudeck-e2e-curl 200 2 {ASSETS}")
+    with pytest.raises(LabError, match=r"offers the guest 0.6.1 \(9\), where the lab checked 0.6.1 \(8\)"):
+        updates.github_answers(machine, release, LATEST, "asking GitHub")
+    machine = guest_curl(feed=f"<html>a captive portal</html>\nudeck-e2e-curl 200 0 {LATEST}")
+    with pytest.raises(LabError, match="something the lab cannot use as its appcast"):
+        updates.github_answers(machine, release, LATEST, "asking GitHub")

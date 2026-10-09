@@ -768,3 +768,40 @@ SETTINGS_AT_REST = {
     "silentTTLMultiplier": 3,
     "pollWhileCollapsed": False,
 }
+
+# --- Published releases -----------------------------------------------------------
+#
+# The update checks take a pair, "from → to", and either side can be a release
+# GitHub has published (`pairs`, `releases`). These are where the lab finds them.
+
+# The repository uDeck is released from: the one in the feed every release ships
+# with (`SUFeedURL` in Sources/uDeck/Support/Info.plist, held against this by the
+# lab's own tests).
+RELEASES_REPOSITORY = "iillyyaa1997/udeck"
+
+# GitHub's public API, asked without a token: which releases are published and
+# which one GitHub marks latest. Sixty questions an hour from one address, and this
+# Mac asks two a run; a release that reads the plugin catalogue (0.6.1) asks more
+# from the guest, through Tart's NAT — how many is not measured.
+GITHUB_API = "https://api.github.com"
+
+# The feed every release ships with, which GitHub redirects to the latest
+# release's own appcast. A pair whose "to" is `latest` asks it untouched.
+LATEST_FEED = f"https://github.com/{RELEASES_REPOSITORY}/releases/latest/download/appcast.xml"
+
+# The two assets an update is made of, in every release since the first.
+RELEASE_APPCAST = "appcast.xml"
+
+# One answer from GitHub, API or asset, on this Mac: the whole of a release's zip
+# included (6 MB for 0.6.1).
+GITHUB_SECONDS = 120
+
+# Where published releases are kept once fetched, under the checkout's `.build`,
+# which git ignores — never `dist/`, where the copies a person uses live. A zip
+# there is data: read in memory, never unpacked or run on this Mac.
+RELEASES_CACHE = Path(".build") / "e2e" / "releases"
+
+# The guest asking GitHub for what the check needs, before a check by a published
+# release starts and again before it judges: the feed, following its redirects,
+# and the first bytes of the archive from wherever GitHub sends them.
+GUEST_GITHUB_SECONDS = 60

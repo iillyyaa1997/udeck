@@ -981,3 +981,485 @@ def test_a_check_that_waited_for_its_machine_is_told_how_long(lab):
 
     assert plugin._take_the_warm_one("pair.beta") is machine
     assert re.search(r"was started ahead \(up in 42s, waited \d+s for it\)", out.getvalue()), out.getvalue()
+
+
+# --- Pairs ------------------------------------------------------------------------------------
+
+from fakes import GitHubAsOn20261009, Web  # noqa: E402 — the GitHub made of answers the pair tests share
+
+PAIRED = """
+from udeck_e2e import pairs
+
+@pairs.takes(pairs.THE_WHOLE_UPDATE)
+def check_sparkle(machine, pair):
+    record(pair)
+
+@pairs.takes(pairs.A_PUBLISHED_RELEASE)
+def check_a_published_release(machine, pair):
+    record(pair)
+
+def record(pair):
+    import json, os
+    with open(os.environ["PAIRS_SEEN"], "a") as seen:
+        seen.write(json.dumps(pair.ledger()) + "\\n")
+"""
+
+
+def write_paired(lab, monkeypatch):
+    lab.write("check_updates.py", PAIRED)
+    lab.write("check_panel.py", "def check_dwell(machine): pass\n")
+    seen = lab.pytester.path / "pairs-seen.jsonl"
+    monkeypatch.setenv("PAIRS_SEEN", str(seen))
+    return seen
+
+
+def seen_pairs(seen):
+    return [json.loads(line) for line in seen.read_text().splitlines()] if seen.exists() else []
+
+
+def test_the_list_says_each_update_checks_default_pair_and_asks_github_nothing(lab, monkeypatch):
+    write_paired(lab, monkeypatch)
+    nowhere = Web()
+    code, out = lab.run(listing=True, web=nowhere)
+    assert code == 0
+    assert out.splitlines() == [
+        "panel.dwell",
+        "updates.sparkle  checkout → checkout",
+        "updates.a-published-release  the release before latest → latest",
+    ]
+    assert nowhere.asked == []
+
+
+def test_a_pair_given_to_a_check_that_takes_none_is_refused_before_anything_starts(lab, monkeypatch):
+    write_paired(lab, monkeypatch)
+    code, out = lab.run("panel.dwell", "updates.sparkle", from_side="checkout", to_side="latest")
+    assert code == 2
+    assert "--from and --to do nothing with panel.dwell: only an update check takes a pair" in out
+    assert "updates.sparkle, updates.a-published-release" in out
+    assert lab.preflights == 0 and lab.run_dirs() == []
+
+
+def test_a_pair_a_check_cannot_ask_its_question_about_is_refused_with_the_reason(lab, monkeypatch):
+    write_paired(lab, monkeypatch)
+    code, out = lab.run("updates", from_side="0.5.0", to_side="checkout")
+    assert code == 2
+    assert "updates.sparkle cannot run 0.5.0 → checkout: a release installs only what the release key signed" in out
+    assert "updates.a-published-release cannot run 0.5.0 → checkout" in out
+    assert lab.preflights == 0 and lab.run_dirs() == []
+
+
+def test_a_side_that_is_not_one_is_refused_with_what_to_write(lab, monkeypatch):
+    write_paired(lab, monkeypatch)
+    code, out = lab.run("updates.sparkle", to_side="v0.6.1")
+    assert code == 2
+    assert "'v0.6.1' is not one end of an update — without the v: 0.6.1" in out
+
+
+def test_a_check_runs_with_its_pair_and_the_report_and_the_ledger_say_which(lab, monkeypatch):
+    seen = write_paired(lab, monkeypatch)
+    code, out = lab.run("updates.sparkle")
+    assert code == 0
+    assert [p["text"] for p in seen_pairs(seen)] == [
+        "checkout as 0.4.1 (6) → checkout as 0.4.2 (7), signed with the run's own key, via the lab's feed in the guest"
+    ]
+    lines = out.splitlines()
+    result = next(i for i, line in enumerate(lines) if line.startswith("✅ updates.sparkle"))
+    assert lines[result + 1] == (
+        "   pair: checkout as 0.4.1 (6) → checkout as 0.4.2 (7), signed with the run's own key, via the lab's feed in "
+        "the guest (default: checkout → checkout)"
+    )
+    assert "   updates.sparkle: checkout as 0.4.1 (6) → checkout as 0.4.2 (7)" in out, "said before it runs too"
+    events = [e["event"] for e in lab.ledger()]
+    assert events == ["run-start", "pairs", "preflight", "pruned", "check", "run-end"]
+    pairs_event = next(e for e in lab.ledger() if e["event"] == "pairs")
+    assert pairs_event["pairs"]["updates.sparkle"]["given"] is False
+    assert lab.ledger_checks()["updates.sparkle"]["pair"].startswith("checkout as 0.4.1 (6) → checkout as 0.4.2 (7)")
+
+
+def test_a_given_pair_reaches_the_check_resolved_against_github(lab, monkeypatch):
+    seen = write_paired(lab, monkeypatch)
+    github = GitHubAsOn20261009()
+    code, out = lab.run("updates.sparkle", to_side="latest", web=github.web)
+    assert code == 0, out
+    (pair,) = seen_pairs(seen)
+    assert pair["given"] is True
+    assert pair["from"] == {"side": "checkout", "version": "0.4.1", "build": "1", "carries": "the public key of release 0.6.1"}
+    assert pair["to"]["version"] == "0.6.1" and pair["to"]["build"] == "8" and pair["to"]["asked_as"] == "latest"
+    assert (lab.pytester.path / ".build" / "e2e" / "releases" / "v0.6.1" / "uDeck-0.6.1.zip").is_file()
+    assert "(--from/--to: checkout → latest)" in out
+
+
+def test_a_given_pair_that_cannot_be_resolved_refuses_the_run_before_the_pre_flight(lab, monkeypatch):
+    write_paired(lab, monkeypatch)
+    code, out = lab.run("updates.sparkle", to_side="latest", web=Web())
+    assert code == 2
+    assert "The lab cannot start:" in out
+    assert "updates.sparkle cannot run checkout → latest:" in out and "did not answer this Mac" in out
+    assert lab.preflights == 0 and lab.machines == []
+    pairs_event = next(e for e in lab.ledger() if e["event"] == "pairs")
+    assert pairs_event["refused"] and "did not answer this Mac" in pairs_event["refused"][0]
+
+
+def test_a_default_pair_that_cannot_be_resolved_is_could_not_check_without_a_machine_and_the_rest_runs(lab, monkeypatch):
+    seen = write_paired(lab, monkeypatch)
+    code, out = lab.run(web=Web())
+    assert code == 2
+    assert "⚠️ updates.a-published-release" in out
+    assert "could not check: resolving the pair the release before latest → latest:" in out
+    assert "did not answer this Mac" in out
+    assert "✅ updates.sparkle" in out and "✅ panel.dwell" in out
+    assert "updates.a-published-release" not in labels(lab), "no machine is made for a check that cannot run"
+    assert lab.preflights == 1
+    assert [p["text"].split(" → ")[0] for p in seen_pairs(seen)] == ["checkout as 0.4.1 (6)"]
+    assert "   pair: the release before latest → latest, not resolved (default: the release before latest → latest)" in out
+    problem = next(e for e in lab.ledger() if e["event"] == "pairs")["pairs"]["updates.a-published-release"]
+    assert problem["given"] is False and "did not answer this Mac" in problem["problem"]
+
+
+def a_latest_signed_by_a_key_its_bundles_do_not_carry():
+    """GitHub as on 2026-10-09, but 0.6.1's appcast signed by a key nobody's uDeck carries: the release
+    key's private half no longer the key released bundles trust."""
+    from fakes import Key, an_appcast
+
+    github = GitHubAsOn20261009()
+    data = github.zips["0.6.1"]
+    github.publish("0.6.1", appcast=an_appcast("0.6.1", "8", data, Key().sign(data)))
+    return github
+
+
+def every_release_can_be_driven(monkeypatch):
+    """The pytester checkout has no tags; what the release's source says is test_releases.py's to hold."""
+    from udeck_e2e import releases
+
+    monkeypatch.setattr(releases, "check_now_problem", lambda *a, **k: None)
+
+
+def test_a_to_github_publishes_broken_is_red_without_a_machine_and_the_rest_runs(lab, monkeypatch):
+    """The defect the check by a published release exists to catch is its failure — never "could not check"."""
+    seen = write_paired(lab, monkeypatch)
+    every_release_can_be_driven(monkeypatch)
+    code, out = lab.run(web=a_latest_signed_by_a_key_its_bundles_do_not_carry().web)
+    assert code == 1, out
+    assert ("❌ updates.a-published-release  0s — latest as GitHub publishes it does not hold together: the appcast's "
+            "edSignature does not hold over uDeck-0.6.1.zip under the SUPublicEDKey its own Info.plist carries") in out
+    assert "✅ updates.sparkle" in out and "✅ panel.dwell" in out
+    assert "updates.a-published-release" not in labels(lab), "measured on this Mac: no machine is made for it"
+    assert [p["text"].split(" → ")[0] for p in seen_pairs(seen)] == ["checkout as 0.4.1 (6)"], "its body never ran"
+    assert ('   pair: the release before latest → latest, not run: its "to" as GitHub publishes it does not hold '
+            "together (default: the release before latest → latest)") in out
+    check = lab.ledger_checks()["updates.a-published-release"]
+    assert check["outcome"] == "failed" and "does not hold over uDeck-0.6.1.zip" in check["reason"]
+    defect = next(e for e in lab.ledger() if e["event"] == "pairs")["pairs"]["updates.a-published-release"]
+    assert "does not hold over uDeck-0.6.1.zip" in defect["defect"] and defect["problem"] is None
+
+
+def test_a_to_github_publishes_broken_is_red_when_the_pair_was_given_too(lab, monkeypatch):
+    """A given pair that cannot be resolved refuses the run; one whose "to" is broken has found something."""
+    write_paired(lab, monkeypatch)
+    code, out = lab.run("updates.sparkle", from_side="checkout", to_side="latest",
+                        web=a_latest_signed_by_a_key_its_bundles_do_not_carry().web)  # fmt: skip
+    assert code == 1, out
+    assert "❌ updates.sparkle" in out and "latest as GitHub publishes it does not hold together" in out
+    assert "The lab cannot start" not in out and lab.preflights == 1
+    assert lab.machines == []
+
+
+A_PUBLISHED_RELEASE_ALONE = """
+from udeck_e2e import pairs
+
+@pairs.takes(pairs.A_PUBLISHED_RELEASE)
+def check_a_published_release(machine, pair):
+    raise AssertionError("its body never runs")
+"""
+
+# The machine each --vm mode would give updates.a-published-release, written alone in check_updates.py.
+ITS_MACHINE = {"per-check": "updates.a-published-release", "per-group": "updates", "per-run": "run"}
+
+
+@pytest.mark.parametrize("vm_mode", ["per-check", "per-group", "per-run"])
+def test_a_to_github_publishes_broken_is_red_without_a_machine_in_every_vm_mode(lab, monkeypatch, vm_mode):
+    """Under per-group and per-run the shared machine is a wider fixture than any check's own, so pytest
+    would make and boot it before a function-scoped one. The defect is found before any fixture; and the
+    machine it would have had is set to fail its boot, which would turn the red into "could not check"."""
+    lab.write("check_updates.py", A_PUBLISHED_RELEASE_ALONE)
+    every_release_can_be_driven(monkeypatch)
+    lab.boot_fails_for = ITS_MACHINE[vm_mode]
+    code, out = lab.run(vm_mode=vm_mode, web=a_latest_signed_by_a_key_its_bundles_do_not_carry().web)
+    assert code == 1, out
+    assert "❌ updates.a-published-release  0s — latest as GitHub publishes it does not hold together" in out
+    assert "could not check" not in out and "the desktop never came up" not in out
+    assert lab.machines == [] and lab.timeline == [], "no machine is made, so none can fail to boot"
+    check = lab.ledger_checks()["updates.a-published-release"]
+    assert check["outcome"] == "failed" and "does not hold over uDeck-0.6.1.zip" in check["reason"]
+
+
+@pytest.mark.parametrize("vm_mode", ["per-check", "per-group", "per-run"])
+def test_a_default_pair_that_cannot_be_resolved_makes_no_machine_in_any_vm_mode(lab, monkeypatch, vm_mode):
+    lab.write("check_updates.py", A_PUBLISHED_RELEASE_ALONE)
+    lab.boot_fails_for = ITS_MACHINE[vm_mode]
+    code, out = lab.run(vm_mode=vm_mode, web=Web())
+    assert code == 2, out
+    assert "⚠️ updates.a-published-release" in out
+    assert "could not check: resolving the pair the release before latest → latest:" in out
+    assert "did not answer this Mac" in out and "the desktop never came up" not in out
+    assert lab.machines == [] and lab.timeline == []
+
+
+@pytest.mark.parametrize(
+    ("vm_mode", "machines"),
+    [("per-check", ["panel.dwell", "updates.sparkle"]), ("per-group", ["panel", "updates"]), ("per-run", ["run"])],
+)
+def test_a_broken_to_beside_checks_that_run_costs_their_machines_nothing(lab, monkeypatch, vm_mode, machines):
+    """The broken check shares its group with updates.sparkle, and its run with panel.dwell: it neither
+    makes a machine of its own nor takes the shared one, and the others run on theirs as before."""
+    seen = write_paired(lab, monkeypatch)
+    every_release_can_be_driven(monkeypatch)
+    code, out = lab.run(vm_mode=vm_mode, web=a_latest_signed_by_a_key_its_bundles_do_not_carry().web)
+    assert code == 1, out
+    assert "❌ updates.a-published-release  0s — latest as GitHub publishes it does not hold together" in out
+    assert "✅ panel.dwell" in out and "✅ updates.sparkle" in out
+    assert labels(lab) == machines
+    assert all(m.events.count("create") == 1 for m in lab.machines)
+    assert [p["text"].split(" → ")[0] for p in seen_pairs(seen)] == ["checkout as 0.4.1 (6)"], "its body never ran"
+    (run,) = lab.run_dirs()
+    assert list((run / "updates.a-published-release").glob("*.png")) == [], "no screen of a machine it never used"
+    assert sum(event == "screenshot at the end" for m in lab.machines for event in m.events) == 2
+
+
+def test_a_to_whose_zip_github_says_is_not_there_is_red_without_a_machine(lab, monkeypatch):
+    """404 for an asset GitHub's API lists: the guest leaves it to the verdict, and so does this Mac."""
+    from fakes import DOWNLOAD
+
+    lab.write("check_updates.py", A_PUBLISHED_RELEASE_ALONE)
+    every_release_can_be_driven(monkeypatch)
+    github = GitHubAsOn20261009()
+    github.web.file(f"{DOWNLOAD}/v0.6.1/uDeck-0.6.1.zip", b"Not Found", status=404)
+    code, out = lab.run(web=github.web)
+    assert code == 1, out
+    assert "❌ updates.a-published-release  0s — latest as GitHub publishes it does not hold together: GitHub answered 404" in out
+    assert lab.machines == []
+
+
+def test_a_to_whose_info_plist_is_not_xml_is_red_and_not_the_labs_exception(lab, monkeypatch):
+    """The skeptic's probe of 2026-10-09: expat's error used to escape as "the lab itself raised ExpatError"."""
+    import io
+    import zipfile
+
+    from fakes import an_appcast
+
+    lab.write("check_updates.py", A_PUBLISHED_RELEASE_ALONE)
+    every_release_can_be_driven(monkeypatch)
+    github = GitHubAsOn20261009()
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("uDeck.app/Contents/Info.plist", b'<?xml version="1.0"?><plist><dict><key>a</key><string>b</dict></plist>')
+    data = buffer.getvalue()
+    github.publish("0.6.1", data, an_appcast("0.6.1", "8", data, github.key.sign(data)))
+    code, out = lab.run(web=github.web)
+    assert code == 1, out
+    assert "❌ updates.a-published-release" in out and "has no readable uDeck.app/Contents/Info.plist: ExpatError" in out
+    assert "the lab itself raised" not in out and lab.machines == []
+
+
+def an_appcast_sending_udeck_elsewhere(github, version):
+    """`version`'s appcast published again, its item for the zip sending uDeck to a host that does not resolve."""
+    from fakes import DOWNLOAD, an_appcast
+
+    data = github.zips[version]
+    elsewhere = f"{DOWNLOAD}/v{version}/uDeck-{version}.zip".replace("github.com", "nowhere.invalid")
+    github.publish(version, appcast=an_appcast(version, dict(github.VERSIONS)[version], data, github.key.sign(data),
+                                               url=elsewhere))  # fmt: skip
+    return elsewhere
+
+
+def test_a_to_whose_appcast_sends_udeck_elsewhere_is_red_without_a_machine(lab, monkeypatch):
+    """The skeptic's probe of 2026-10-09: such a "to" was vouched for, and the guest's curl failing on the host
+    it names read as "could not check" — for a release every uDeck would fail to download."""
+    lab.write("check_updates.py", A_PUBLISHED_RELEASE_ALONE)
+    every_release_can_be_driven(monkeypatch)
+    github = GitHubAsOn20261009()
+    elsewhere = an_appcast_sending_udeck_elsewhere(github, "0.6.1")
+    code, out = lab.run(web=github.web)
+    assert code == 1, out
+    assert "❌ updates.a-published-release  0s — latest as GitHub publishes it does not hold together" in out
+    assert f"sends uDeck to {elsewhere}, not to the asset GitHub's API lists for v0.6.1" in out
+    assert lab.machines == [] and lab.timeline == []
+
+
+def test_a_from_whose_appcast_sends_udeck_elsewhere_runs_since_nothing_reads_where_it_sends_udeck(lab, monkeypatch):
+    """The lab installs "from"'s zip itself and Sparkle downloads "to": where "from"'s own appcast sends uDeck is
+    read by nobody, so it neither fails the check nor stops it."""
+    seen = write_paired(lab, monkeypatch)
+    every_release_can_be_driven(monkeypatch)
+    github = GitHubAsOn20261009()
+    an_appcast_sending_udeck_elsewhere(github, "0.5.0")
+    code, out = lab.run("updates.a-published-release", web=github.web)
+    assert code == 0, out
+    assert "✅ updates.a-published-release" in out and "❌" not in out and "⚠️" not in out
+    (pair,) = seen_pairs(seen)
+    assert pair["from"]["version"] == "0.5.0" and pair["to"]["version"] == "0.6.1"
+    assert "the defect of a release a check is offered, and nothing a check reads of one it installs" in out
+
+
+@pytest.mark.parametrize("broken", ["signed by another key", "its zip not there", "its appcast not there"])
+def test_a_broken_to_a_checkout_has_no_update_to_is_refused_and_never_red(lab, monkeypatch, broken):
+    """The skeptic's probe of 2026-10-09, `--from checkout --to 0.1.0`: refused with 0.1.0 whole, red with it
+    broken. 0.1.0 is numbered 1, as the build of this checkout going to it is — by its appcast when that was read,
+    its zip there or not, and by being the first release GitHub publishes when no appcast was."""
+    from fakes import DOWNLOAD, Key, an_appcast
+
+    write_paired(lab, monkeypatch)
+    github = GitHubAsOn20261009()
+    if broken == "signed by another key":
+        data = github.zips["0.1.0"]
+        github.publish("0.1.0", appcast=an_appcast("0.1.0", "1", data, Key().sign(data)))
+    elif broken == "its zip not there":
+        github.web.file(f"{DOWNLOAD}/v0.1.0/uDeck-0.1.0.zip", b"Not Found", status=404)
+    else:
+        github.web.file(f"{DOWNLOAD}/v0.1.0/appcast.xml", b"Not Found", status=404)
+    code, out = lab.run("updates.sparkle", from_side="checkout", to_side="0.1.0", web=github.web)
+    assert code == 2, out
+    assert "The lab cannot start:" in out and "updates.sparkle cannot run checkout → 0.1.0:" in out
+    assert "❌" not in out and lab.preflights == 0 and lab.machines == []
+    said = {"signed by another key": "(1, as its appcast offers it, against 1)",
+            "its zip not there": "(1, as its appcast offers it, against 1)",
+            "its appcast not there": "0.1.0 is the first release GitHub publishes"}[broken]  # fmt: skip
+    assert said in out
+
+
+# --- Not newer: red in the lab's own pair, a refusal in a pair someone gave ------------------------
+#
+# The skeptic's probes of 2026-10-09 on the lab's own pair, the release before latest (0.5.0, numbered 6) → latest:
+# P1, a latest whole but numbered 6 again; P2, a latest broken, its zip saying 9 and its appcast 6. Both were
+# "could not check" (exit 2); every uDeck 0.5.0 would say it is up to date, which is the check's to catch.
+
+
+def a_latest_numbered_6(github, broken):
+    from fakes import a_zip, an_appcast
+
+    data = a_zip("0.6.1", "9" if broken else "6", github.key)
+    github.publish("0.6.1", data, an_appcast("0.6.1", "6", data, github.key.sign(data)))
+    return github
+
+
+@pytest.mark.parametrize("broken", [False, True], ids=["P1 whole", "P2 broken"])
+@pytest.mark.parametrize("to_side", [None, "latest"], ids=["nothing given", "--to latest alone"])
+def test_in_the_labs_own_pair_a_latest_not_newer_than_the_one_before_is_red_without_a_machine(lab, monkeypatch,
+                                                                                               broken, to_side):
+    lab.write("check_updates.py", A_PUBLISHED_RELEASE_ALONE)
+    every_release_can_be_driven(monkeypatch)
+    github = a_latest_numbered_6(GitHubAsOn20261009(), broken)
+    code, out = lab.run(to_side=to_side, web=github.web)
+    assert code == 1, out
+    by = "6, as its appcast offers it," if broken else "6"
+    assert (f"❌ updates.a-published-release  0s — latest, release 0.6.1 (6), is not newer than the release before it, "
+            f"release 0.5.0 (6), by CFBundleVersion, the number Sparkle compares ({by} against 6): every uDeck 0.5.0 "
+            "that looks would say it is up to date, and never be offered 0.6.1") in out
+    assert ("— and 0.6.1 as GitHub publishes it does not hold together: uDeck-0.6.1.zip is not the release its tag "
+            "and appcast name: CFBundleVersion is '9', not '6'" in out) is broken
+    assert "⚠️" not in out and "The lab cannot start" not in out
+    how = "--from/--to" if to_side else "default"
+    assert (f"   pair: the release before latest → latest, not run: latest as GitHub publishes it is not newer than "
+            f"the release before it ({how}: the release before latest → latest)") in out
+    assert lab.machines == [] and lab.timeline == [], "measured on this Mac: no machine is made for it"
+    check = lab.ledger_checks()["updates.a-published-release"]
+    assert check["outcome"] == "failed" and "is not newer than the release before it" in check["reason"]
+    defect = next(e for e in lab.ledger() if e["event"] == "pairs")["pairs"]["updates.a-published-release"]
+    assert "every uDeck 0.5.0 that looks would say it is up to date" in defect["defect"] and defect["problem"] is None
+
+
+@pytest.mark.parametrize("broken", [False, True], ids=["P1 whole", "P2 broken"])
+@pytest.mark.parametrize("to_side", [None, "latest", "0.6.1"])
+def test_a_given_pair_whose_to_is_not_newer_is_refused_before_anything_starts_and_never_red(lab, monkeypatch,
+                                                                                            broken, to_side):
+    """The same two releases, "from" named on the command line: a request for an update there is none of."""
+    lab.write("check_updates.py", A_PUBLISHED_RELEASE_ALONE)
+    every_release_can_be_driven(monkeypatch)
+    github = a_latest_numbered_6(GitHubAsOn20261009(), broken)
+    code, out = lab.run(from_side="0.5.0", to_side=to_side, web=github.web)
+    assert code == 2, out
+    assert "The lab cannot start:" in out and "updates.a-published-release cannot run 0.5.0 → " in out
+    assert "is not newer than release 0.5.0 (6) by CFBundleVersion" in out
+    assert "❌" not in out and lab.preflights == 0 and lab.machines == []
+
+
+def test_a_check_stopped_before_its_machine_meets_no_other_setup_hook(lab, monkeypatch):
+    """The gate is the first `pytest_runtest_setup` (tryfirst): a hook registered after the lab's — a conftest
+    beside the checks is — would otherwise run before it, and anything it set up would come before the verdict."""
+    write_paired(lab, monkeypatch)
+    every_release_can_be_driven(monkeypatch)
+    met = lab.pytester.path / "setup-hooks-met"
+    lab.write("conftest.py", f"""
+def pytest_runtest_setup(item):
+    with open({str(met)!r}, "a") as file:
+        file.write(item.name + "\\n")
+""")
+    code, out = lab.run(web=a_latest_signed_by_a_key_its_bundles_do_not_carry().web)
+    assert code == 1, out
+    assert "❌ updates.a-published-release" in out
+    assert met.read_text().split() == ["check_dwell", "check_sparkle"], "the stopped check met no hook after the gate"
+
+
+@pytest.mark.parametrize("vm_mode", ["per-group", "per-run"])
+def test_a_shared_machine_is_not_kept_for_a_check_that_never_used_it(lab, monkeypatch, vm_mode):
+    """--keep-on-failure keeps a shared machine a check failed on; the broken "to" failed on this Mac."""
+    write_paired(lab, monkeypatch)
+    every_release_can_be_driven(monkeypatch)
+    code, out = lab.run(vm_mode=vm_mode, keep_on_failure=True,
+                        web=a_latest_signed_by_a_key_its_bundles_do_not_carry().web)  # fmt: skip
+    assert code == 1, out
+    assert lab.machines and all(m.events[-1] == "close keep=False" for m in lab.machines), [
+        (m.label, m.events) for m in lab.machines
+    ]
+
+
+def test_a_download_cut_short_is_one_checks_could_not_check_and_never_every_checks_never_started(lab, monkeypatch):
+    """An exception the transfer raises that is not an OSError used to escape as INTERNALERROR."""
+    import http.client
+
+    write_paired(lab, monkeypatch)
+    every_release_can_be_driven(monkeypatch)
+    github = GitHubAsOn20261009()
+
+    def web(url, headers):
+        if url.endswith(".zip"):
+            raise http.client.IncompleteRead(b"x" * 10, 6026082)
+        return github.web(url, headers)
+
+    code, out = lab.run(web=web)
+    assert code == 2, out
+    assert "⚠️ updates.a-published-release" in out
+    assert "the lab itself raised IncompleteRead resolving it" in out
+    assert "✅ updates.sparkle" in out and "✅ panel.dwell" in out
+    assert "never started" not in out and "INTERNALERROR" not in out
+    problem = next(e for e in lab.ledger() if e["event"] == "pairs")["pairs"]["updates.a-published-release"]
+    assert "IncompleteRead" in problem["problem"]
+
+
+def test_a_check_that_stops_before_its_machine_has_none_booted_for_it_ahead_either(lab, monkeypatch):
+    """`--jobs 2` warms the next check's machine; the next check here will never want one."""
+    write_paired(lab, monkeypatch)
+    lab.write("check_zz.py", "def check_last(machine): pass\n")
+    code, out = lab.run(jobs=2, web=Web())
+    assert "⚠️ updates.a-published-release" in out and "✅ zz.last" in out
+    assert "updates.a-published-release" not in labels(lab), labels(lab)
+    assert labels(lab) == ["panel.dwell", "updates.sparkle", "zz.last"]
+
+
+def test_a_check_that_asks_for_a_pair_without_taking_one_is_the_labs_mistake(lab):
+    lab.write("check_updates.py", "def check_sparkle(machine, pair): pass\n")
+    code, out = lab.run()
+    assert code == 2
+    assert "could not check: finding the check's pair: updates.sparkle takes no pair" in out
+
+
+def test_a_build_for_a_release_carries_its_public_key_and_every_other_build_the_runs(lab, tmp_path):
+    from udeck_e2e import builds
+
+    plugin = lab.plugin()
+    plugin.run_dir = tmp_path / "run"
+    ordinary = plugin.builder("http://127.0.0.1:8765/appcast.xml", "updates.sparkle")
+    for_a_release = plugin.builder("http://127.0.0.1:8765/appcast.xml", "updates.sparkle", release_key="cmVsZWFzZQ==")
+    assert ordinary.key is plugin.signing_key and isinstance(ordinary.key, builds.SigningKey)
+    assert for_a_release.key == builds.PublicKey("cmVsZWFzZQ==")
+    assert ordinary.work_dir != for_a_release.work_dir

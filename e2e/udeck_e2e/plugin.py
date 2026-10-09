@@ -22,9 +22,9 @@ from typing import IO, Any
 
 import pytest
 
-from udeck_e2e import builds, config, golden, names, preflight
+from udeck_e2e import builds, config, golden, names, pairs, preflight, releases
 from udeck_e2e.config import Guest
-from udeck_e2e.errors import CheckFailed, LabError
+from udeck_e2e.errors import CheckFailed, FailedBeforeTheMachine, LabError
 from udeck_e2e.guest import SSH, make_key
 from udeck_e2e.machine import Machine
 from udeck_e2e.tart import Tart
@@ -108,6 +108,9 @@ class LabPlugin:
         run_preflight: Preflight = real_preflight,
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         clock: Callable[[], float] = time.monotonic,
+        from_side: str | None = None,
+        to_side: str | None = None,
+        web: releases.Get | None = None,
     ) -> None:
         self.wanted = wanted
         self.listing = listing
@@ -153,6 +156,25 @@ class LabPlugin:
         # Which machine label follows which, in the order the checks will run.
         self.next_label: dict[str, str] = {}
         self.records: dict[str, CheckRecord] = {}
+        # The update checks' pairs (`pairs`): "from → to" as given with --from and
+        # --to, the rule of each check that takes one, the pair each was asked to run
+        # with and whether it was given, and — once GitHub has been asked — the pair
+        # resolved, or why it could not be.
+        self.from_side = from_side
+        self.to_side = to_side
+        self.web = web or releases.get
+        self.rules: dict[str, pairs.Rule] = {}
+        self.asked_pairs: dict[str, tuple[pairs.Pair, bool]] = {}
+        self.pairs: dict[str, pairs.Resolved] = {}
+        self.pair_problems: dict[str, str] = {}
+        # Checks whose "to" is a release GitHub publishes wrong — one that does not
+        # hold together, or in the lab's own pair a latest not newer than the
+        # release before it: their failure, found on this Mac before any machine
+        # (`pairs.PairDefect`).
+        self.pair_defects: dict[str, pairs.PairDefect] = {}
+        # The checks this run will run, in order — kept to plan the warming again
+        # once it is known which of them will never want a machine.
+        self.chosen_items: list[pytest.Item] = []
         self.collection_errors: list[str] = []
         self.lab_problems: list[str] = []
         self.interrupted = False
@@ -323,12 +345,16 @@ class LabPlugin:
 
     # --- Builds ------------------------------------------------------------
 
-    def builder(self, feed_url: str, for_check: str) -> builds.Builder:
-        """Lab builds for this run, pointed at `feed_url` and signed with its own key.
+    def builder(self, feed_url: str, for_check: str, release_key: str | None = None) -> builds.Builder:
+        """Lab builds for this run, pointed at `feed_url` and carrying its own key — or a release's.
 
         A directory per check, because two checks build the same versions: the
         second would otherwise write over the zips and the build log the first
         one's report is made of (Q38, Q39).
+
+        `release_key` is a published release's public key, for a build of this
+        checkout that the release is offered to (`pairs`). Whatever the key, the
+        build is held to every rule a lab build is (`Builder._verify`).
         """
         if self.run_dir is None:
             raise LabError("preparing a build", "there is no run in progress")
@@ -338,12 +364,16 @@ class LabPlugin:
             repo_root=self.repo_root,
             work_dir=self.run_dir / "builds" / for_check,
             feed_url=feed_url,
-            key=self.signing_key,
+            key=builds.PublicKey(release_key) if release_key is not None else self.signing_key,
             note=self.note,
         )
 
     def failed_in(self, scope: str, request: pytest.FixtureRequest) -> bool:
-        """Whether any check that used this scope's machine did not pass."""
+        """Whether any check that used this scope's machine did not pass.
+
+        A check that stopped before its machine (`stopped_before_its_machine`)
+        never used the one its group or run shares, so it keeps nothing.
+        """
         if scope == "function":
             nodeids = [request.node.nodeid]
         elif scope == "module":
@@ -352,7 +382,9 @@ class LabPlugin:
         else:
             nodeids = list(self.records)
         return any(
-            self.records[n].outcome is not Outcome.PASSED for n in nodeids if n in self.records
+            self.records[n].outcome is not Outcome.PASSED
+            for n in nodeids
+            if n in self.records and not self.stopped_before_its_machine(self.records[n].name)
         )
 
     # --- Collection --------------------------------------------------------
@@ -404,6 +436,7 @@ class LabPlugin:
         except names.CheckNameError as error:
             self.collection_errors.append(str(error))
             chosen = []
+        self._ask_for_pairs(chosen, by_name)
 
         keep = [by_name[name] for name in chosen]
         dropped = [item for item in items if item not in keep]
@@ -411,7 +444,114 @@ class LabPlugin:
             config.hook.pytest_deselected(items=dropped)
         items[:] = keep
         self.names = {by_name[name].nodeid: name for name in chosen}
+        self.chosen_items = keep
         self._plan_the_warming(keep)
+
+    def _ask_for_pairs(self, chosen: list[str], by_name: dict[str, pytest.Item]) -> None:
+        """Which pair each chosen update check runs with — and every pair that cannot be run, refused now.
+
+        Before anything starts, and with nothing fetched: what is decided here is
+        decided by the pair alone. A --from or --to that is not one end of an
+        update, a chosen check that takes no pair at all, or a pair a chosen check
+        cannot ask its question about is an error that says so, and the run
+        checks nothing — never a run that quietly does something else.
+        """
+        for name in chosen:
+            rule = pairs.rule_of(getattr(by_name[name], "obj", None))
+            if rule is not None:
+                self.rules[name] = rule
+        given = self.from_side is not None or self.to_side is not None
+        if given:
+            try:
+                for text in (self.from_side, self.to_side):
+                    if text is not None:
+                        pairs.side(text)
+            except pairs.PairError as error:
+                self.collection_errors.append(f"--from/--to: {error.reason}")
+                return
+            without = [name for name in chosen if name not in self.rules]
+            if without:
+                takers = [name for name in by_name if pairs.rule_of(getattr(by_name[name], "obj", None))]
+                self.collection_errors.append(
+                    f"--from and --to do nothing with {', '.join(without)}: only an update check takes a pair "
+                    f"({', '.join(takers) or 'there is none'})"
+                )
+                return
+        for name, rule in self.rules.items():
+            pair, was_given = pairs.asked(rule, self.from_side, self.to_side)
+            refused = rule.refusal(pair)
+            if refused:
+                self.collection_errors.append(f"{name} cannot run {pair}: {refused}")
+                continue
+            self.asked_pairs[name] = (pair, was_given)
+
+    def _resolve_pairs(self) -> list[str]:
+        """Every update check's pair, resolved: releases asked of GitHub, fetched and checked, builds numbered.
+
+        Before the pre-flight, so that nothing touches this Mac for a run whose
+        pair cannot be run. A pair given on the command line that cannot be
+        resolved refuses the run, and what is returned says why. A check's own
+        default that cannot be resolved — GitHub not answering, say — does not stop
+        the others: that check becomes "could not check" with the reason, without
+        a machine being made for it.
+
+        A "to" GitHub publishes broken (`pairs.PairDefect`) is neither: it is that
+        check's failure, given or not, and the rest of the run goes on — and so,
+        in the lab's own pair, is a latest not newer than the release before it,
+        which in a pair someone gave is a refusal like any other. And
+        whatever else one check's pair raises is that check's, said with the
+        exception's name — never every check's "never started".
+        """
+        refused: list[str] = []
+        if not self.asked_pairs:
+            return refused
+        catalogue: releases.Catalogue | None = None
+        for name, (pair, given) in self.asked_pairs.items():
+            if catalogue is None and not (pair.from_.is_checkout and pair.to.is_checkout):
+                catalogue = releases.Catalogue(releases.GitHub(get=self.web), self.repo_root, self.note, get=self.web)
+            try:
+                self.pairs[name] = pairs.resolve(self.rules[name], pair, given, catalogue, self.repo_root)
+                continue
+            except pairs.PairDefect as defect:
+                self.pair_defects[name] = defect
+                continue
+            except pairs.PairError as error:
+                reason = error.reason
+            except Exception as error:  # noqa: BLE001 — one check's pair, said, and never the whole run's
+                reason = f"the lab itself raised {type(error).__name__} resolving it: {_first_line(error)}"
+            if given:
+                refused.append(f"{name} cannot run {pair}: {reason}")
+            else:
+                self.pair_problems[name] = reason
+        self.record_event(
+            "pairs",
+            pairs={
+                name: (self.pairs[name].ledger() if name in self.pairs
+                       else {"asked": str(pair), "given": given, "problem": self.pair_problems.get(name),
+                             "defect": self.pair_defects[name].reason if name in self.pair_defects else None})
+                for name, (pair, given) in self.asked_pairs.items()
+            },
+            refused=refused,
+        )  # fmt: skip
+        if self.pair_problems or self.pair_defects:
+            # A check that stops before its machine must not have one booted for
+            # it ahead of time either (`--jobs 2`).
+            self._plan_the_warming(
+                [item for item in self.chosen_items if not self.stopped_before_its_machine(self.names[item.nodeid])]
+            )
+        return refused
+
+    def pair_text(self, name: str) -> str | None:
+        """The pair a check ran with, as the report says it — or None for a check that takes none."""
+        if name not in self.asked_pairs:
+            return None
+        pair, given = self.asked_pairs[name]
+        how = f"{'--from/--to' if given else 'default'}: {pair}"
+        if name in self.pairs:
+            return f"{self.pairs[name]} ({how})"
+        if name in self.pair_defects:
+            return f"{pair}, not run: {self.pair_defects[name].headline} ({how})"
+        return f"{pair}, not resolved ({how})"
 
     def _plan_the_warming(self, items: list[pytest.Item]) -> None:
         """Which machine label follows which, so one can be booted ahead of time.
@@ -452,7 +592,8 @@ class LabPlugin:
 
         if self.listing:
             for name in self.names.values():
-                self.say(name)
+                rule = self.rules.get(name)
+                self.say(f"{name}  {rule.default}" if rule is not None else name)
             if not self.names:
                 self.say("There are no checks yet.")
             self.stop(EXIT_PASSED)
@@ -493,6 +634,14 @@ class LabPlugin:
             checks=list(self.names.values()),
             repo=_git_state(self.repo_root),
         )
+
+        refused = self._resolve_pairs()
+        if refused:
+            self.say("The lab cannot start:")
+            for reason in refused:
+                self.say(f"  • {reason}")
+            self.stop(EXIT_NOT_CHECKED)
+            return
 
         def note(text: str) -> None:
             # Written before the thing it describes is done, so a run cut off
@@ -559,6 +708,8 @@ class LabPlugin:
             + (f", a machine {self.vm_mode.replace('-', ' ')}" if self.mode == "checks" else "")
             + f" — report in {self.shown(self.run_dir)}/"
         )
+        for name in self.asked_pairs:
+            self.say(f"   {name}: {self.pair_text(name)}")
 
     def pytest_runtestloop(self, session: pytest.Session) -> bool | None:
         return True if self.blocked else None
@@ -573,6 +724,39 @@ class LabPlugin:
         path = self.run_dir / self.names[request.node.nodeid]
         path.mkdir(exist_ok=True)
         return path
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_runtest_setup(self, item: pytest.Item) -> None:
+        """A check whose pair could not be resolved stops here, before any of its fixtures.
+
+        A hook, not a fixture: pytest sets up a wider-scoped fixture before a
+        narrower one, so under `--vm per-group` or `per-run` a function-scoped
+        fixture would only come after the shared machine had been made and booted
+        — and a boot that failed would turn a red into "could not check". Raised
+        here, before pytest sets up anything for the check, it costs no machine in
+        any --vm mode. Neither does a check whose "to" GitHub publishes wrong —
+        broken, or in the lab's own pair not newer than the release before it —
+        which has already failed: measured here, from what GitHub serves, and no
+        guest would make it less true (`pairs.PairDefect`).
+        """
+        name = self.names.get(item.nodeid)
+        if name is not None and name in self.pair_defects:
+            raise FailedBeforeTheMachine(self.pair_defects[name].reason)
+        if name is not None and name in self.pair_problems:
+            pair, _ = self.asked_pairs[name]
+            raise LabError(f"resolving the pair {pair}", self.pair_problems[name])
+
+    def stopped_before_its_machine(self, name: str) -> bool:
+        """Whether a check ends in `pytest_runtest_setup` above, with no machine of its own or anyone's."""
+        return name in self.pair_defects or name in self.pair_problems
+
+    @pytest.fixture
+    def pair(self, request: pytest.FixtureRequest) -> pairs.Resolved:
+        """The pair this check runs with, resolved: both ends down to their build numbers."""
+        name = self.names[request.node.nodeid]
+        if name not in self.pairs:
+            raise LabError("finding the check's pair", f"{name} takes no pair (it is not marked with pairs.takes)")
+        return self.pairs[name]
 
     @pytest.fixture
     def lab(self) -> "LabPlugin":
@@ -658,9 +842,12 @@ class LabPlugin:
 
         # Setup and call cannot both fail: a check whose setup failed is not called.
         record.details.append(text)
-        if call.when == "call" and self._is_verdict(excinfo):
+        found_before = call.when == "setup" and excinfo.errisinstance(FailedBeforeTheMachine)
+        if (call.when == "call" and self._is_verdict(excinfo)) or found_before:
             record.outcome = Outcome.FAILED
             record.reason = _first_line(excinfo.value) or excinfo.exconly()
+            # A verdict pronounced, so an interrupt afterwards does not take it away.
+            record.called = record.called or found_before
         else:
             record.outcome = Outcome.COULD_NOT_CHECK
             record.reason = _lab_reason(call.when, excinfo)
@@ -708,6 +895,9 @@ class LabPlugin:
         elif record.outcome is Outcome.COULD_NOT_CHECK:
             line += f" — could not check: {record.reason}"
         self.say(line)
+        pair = self.pair_text(record.name)
+        if pair is not None:
+            self.say(f"   pair: {pair}")
         if record.outcome is not Outcome.PASSED and evidence is not None and evidence.exists():
             self.say(f"   evidence: {self.shown(evidence)}/")
         if record.cleanup_problem:
@@ -726,6 +916,7 @@ class LabPlugin:
             cleanup_problem=record.cleanup_problem,
             stopped_in_cleanup=record.stopped_in_cleanup,
             evidence=self.shown(evidence) if evidence is not None and evidence.exists() else None,
+            pair=pair,
         )
 
     def pytest_keyboard_interrupt(self, excinfo: pytest.ExceptionInfo[BaseException]) -> None:

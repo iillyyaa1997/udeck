@@ -5,15 +5,25 @@ failing is not the same as a command answering "no" — and a second copy of thi
 is how that difference gets lost in one place and never tested there.
 """
 
+import base64
+import hashlib
+import io
 import json
+import plistlib
 import re
 import subprocess
+import zipfile
 from pathlib import Path
+from xml.sax.saxutils import quoteattr
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from udeck_e2e import config
 from udeck_e2e.builds import SigningKey
 from udeck_e2e.errors import LabError
 from udeck_e2e.guest import parse_boot_time
+from udeck_e2e.releases import Answer, ReleaseError
 
 
 def done(out="", rc=0):
@@ -230,8 +240,8 @@ class Lab:
     def note(self, text):
         self.notes.append(text)
 
-    def builder(self, feed_url, for_check):
-        self.builders.append((feed_url, for_check))
+    def builder(self, feed_url, for_check, release_key=None):
+        self.builders.append((feed_url, for_check) if release_key is None else (feed_url, for_check, release_key))
         directory = self._tmp / "builds" / for_check
         directory.mkdir(parents=True, exist_ok=True)
         return Builder(directory)
@@ -270,3 +280,134 @@ def throw_output(began=(1280.0, 720.0), thrown=12, at=(1280.0, 0.0), pinned=True
         "from": list(began) if began is not None else None, "at": list(at) if at is not None else None,
         "pinned": pinned, "track": [],
     })  # fmt: skip
+
+
+# --- GitHub, made of answers ------------------------------------------------------------
+
+API = f"{config.GITHUB_API}/repos/{config.RELEASES_REPOSITORY}/releases"
+DOWNLOAD = f"https://github.com/{config.RELEASES_REPOSITORY}/releases/download"
+
+
+class Key:
+    """A release key of the test's own: what GitHub's secret is to the real releases."""
+
+    def __init__(self):
+        self.private = Ed25519PrivateKey.generate()
+        raw = self.private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+        self.public = base64.b64encode(raw).decode()
+
+    def sign(self, data):
+        return base64.b64encode(self.private.sign(data)).decode()
+
+
+def a_zip(version, build, key, identifier="place.unicorns.udeck", feed=config.LATEST_FEED, plist_version=None):
+    plist = {
+        "CFBundleIdentifier": identifier,
+        "CFBundleShortVersionString": plist_version or version,
+        "CFBundleVersion": build,
+        "SUFeedURL": feed,
+        "SUPublicEDKey": key.public,
+    }
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("uDeck.app/Contents/Info.plist", plistlib.dumps(plist))
+        archive.writestr("uDeck.app/Contents/MacOS/uDeck", b"\xcf\xfa\xed\xfe" + version.encode() * 100)
+    return buffer.getvalue()
+
+
+def an_appcast(version, build, data, signature, length=None, name=None, url=None):
+    """The appcast the release workflow publishes; `url` is where its item sends uDeck, the release's own zip unless given."""
+    name = name or f"uDeck-{version}.zip"
+    url = url if url is not None else f"{DOWNLOAD}/v{version}/{name}"
+    return f"""<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>uDeck</title>
+        <item>
+            <title>{version}</title>
+            <sparkle:version>{build}</sparkle:version>
+            <sparkle:shortVersionString>{version}</sparkle:shortVersionString>
+            <enclosure url={quoteattr(url)} length="{length if length is not None else len(data)}" type="application/octet-stream" sparkle:edSignature="{signature}"/>
+        </item>
+    </channel>
+</rss>""".encode()
+
+
+def a_release(version, assets=("appcast.xml", "zip"), draft=False, prerelease=False, size=1, zip_data=None, appcast=None):
+    """A release as GitHub's API lists it. Given the bytes of an asset, its size and digest are theirs, as GitHub
+    lists them (measured 2026-10-09: `"digest": "sha256:<hex>"` on every asset); otherwise `size`, and no digest."""
+    names = [f"uDeck-{version}.zip" if a == "zip" else a for a in assets]
+    data = {f"uDeck-{version}.zip": zip_data, "appcast.xml": appcast}
+
+    def asset(name):
+        listed = {"name": name, "browser_download_url": f"{DOWNLOAD}/v{version}/{name}", "size": size}
+        if data.get(name) is not None:
+            listed["size"] = len(data[name])
+            listed["digest"] = "sha256:" + hashlib.sha256(data[name]).hexdigest()
+        return listed
+
+    return {"tag_name": f"v{version}", "draft": draft, "prerelease": prerelease, "assets": [asset(n) for n in names]}
+
+
+class Web:
+    """GitHub as a table of answers, and a record of every question."""
+
+    def __init__(self):
+        self.answers = {}
+        self.asked = []
+
+    def json(self, url, value, status=200, headers=None):
+        self.answers[url] = Answer(status, headers or {}, json.dumps(value).encode())
+
+    def file(self, url, body, status=200):
+        self.answers[url] = Answer(status, {}, body)
+
+    def __call__(self, url, headers):
+        self.asked.append(url)
+        answer = self.answers.get(url)
+        if answer is None:
+            raise ReleaseError(f"{url} did not answer this Mac: [Errno 8] nodename nor servname provided")
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+
+class GitHubAsOn20261009:
+    """The releases as GitHub listed them on 2026-10-09 — every one with both assets — made and signed here."""
+
+    VERSIONS = [("0.1.0", "1"), ("0.2.1", "3"), ("0.3.0", "4"), ("0.4.0", "5"), ("0.5.0", "6"), ("0.6.1", "8")]
+
+    def __init__(self, latest="0.6.1"):
+        self.web = Web()
+        self.key = Key()
+        self.zips = {}
+        listed = []
+        for version, build in self.VERSIONS:
+            data = a_zip(version, build, self.key)
+            self.zips[version] = data
+            appcast = an_appcast(version, build, data, self.key.sign(data))
+            listed.append(a_release(version, zip_data=data, appcast=appcast))
+            self.web.file(f"{DOWNLOAD}/v{version}/uDeck-{version}.zip", data)
+            self.web.file(f"{DOWNLOAD}/v{version}/appcast.xml", appcast)
+        # Newest first, as the API lists them.
+        self.web.json(f"{API}?per_page=100", list(reversed(listed)))
+        self.web.json(f"{API}/latest", {"tag_name": f"v{latest}"})
+
+    def publish(self, version, data=None, appcast=None):
+        """`version`'s assets published again — new bytes served, and the API listing their sizes and digests, as
+        GitHub does when an asset is replaced. What is not given stays as it was."""
+        name = f"uDeck-{version}.zip"
+        if data is not None:
+            self.zips[version] = data
+            self.web.file(f"{DOWNLOAD}/v{version}/{name}", data)
+        if appcast is not None:
+            self.web.file(f"{DOWNLOAD}/v{version}/appcast.xml", appcast)
+        listed = json.loads(self.web.answers[f"{API}?per_page=100"].body)
+        for item in listed:
+            if item["tag_name"] != f"v{version}":
+                continue
+            for asset in item["assets"]:
+                body = self.web.answers[f"{DOWNLOAD}/v{version}/{asset['name']}"].body
+                asset["size"] = len(body)
+                asset["digest"] = "sha256:" + hashlib.sha256(body).hexdigest()
+        self.web.json(f"{API}?per_page=100", listed)

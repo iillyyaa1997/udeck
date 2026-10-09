@@ -18,6 +18,18 @@ class CheckFailed(Exception):
     """
 
 
+class FailedBeforeTheMachine(CheckFailed):
+    """A verdict reached on this Mac before the check's machine was made.
+
+    A published release a check is offered that does not hold together — its
+    signature, its length, its versions — or, in the lab's own pair, a latest
+    not newer than the release before it (`pairs.PairDefect`), is read and
+    checked here, from what GitHub serves, and is the check's failure like any
+    other. It is pronounced while the check is being prepared, which is where
+    everything else that goes wrong is the lab's, so it carries its own type.
+    """
+
+
 class LabError(Exception):
     """The lab could not do something it needed to do in order to check.
 

@@ -92,6 +92,12 @@ def test_closing_the_terminal_during_a_cleanup_is_deferred_like_ctrl_c(sig):
         # Nothing follows the one machine of a whole run, so there is nothing to
         # start ahead of it — and an option that would do nothing is refused.
         ["--jobs", "2", "--vm", "per-run"],
+        # A pair is an update check's, and the list shows each one's default.
+        ["bake", "--from", "0.5.0"],
+        ["selfcheck", "--to", "latest"],
+        ["cleanup", "--from", "checkout"],
+        ["--list", "--from", "checkout"],
+        ["updates", "--list", "--to", "latest"],
     ],
 )
 def test_an_option_a_command_would_ignore_is_refused(argv, capsys, monkeypatch):
@@ -156,3 +162,25 @@ def test_jobs_reaches_the_run_and_one_is_the_default(monkeypatch):
     assert seen == {"jobs": 2}
     assert cli.main([]) == 0
     assert seen == {"jobs": 1}
+
+
+def test_from_and_to_reach_the_run_as_written_and_nothing_given_is_nothing(monkeypatch):
+    seen = {}
+
+    def fake_run_pytest(plugin, args):
+        seen["pair"] = (plugin.from_side, plugin.to_side)
+        return 0
+
+    monkeypatch.setattr(cli, "run_pytest", fake_run_pytest)
+    monkeypatch.setattr(interrupts, "stop_on_hangup_and_terminate", lambda: None)
+    assert cli.main(["updates.sparkle", "--from", "checkout", "--to", "0.6.1"]) == 0
+    assert seen == {"pair": ("checkout", "0.6.1")}
+    assert cli.main(["updates"]) == 0
+    assert seen == {"pair": (None, None)}
+
+
+def test_a_refused_pair_flag_is_named_as_it_is_typed(capsys, monkeypatch):
+    monkeypatch.setattr(interrupts, "stop_on_hangup_and_terminate", lambda: None)
+    assert cli.main(["bake", "--from", "0.5.0", "--to", "latest"]) == 2
+    assert "--from, --to does nothing with 'bake'." in capsys.readouterr().err
+
