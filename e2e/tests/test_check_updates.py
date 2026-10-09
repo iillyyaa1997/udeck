@@ -12,14 +12,14 @@ the first about the second is how a lab loses the right to be believed.
 """
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
 import pytest
 from fakes import Dropped, Failed, Lab, Machine
 
-from udeck_e2e import app, ui, updates
-from udeck_e2e.builds import Build
+from udeck_e2e import app, pairs, ui, updates
 from udeck_e2e.errors import CheckFailed, LabError, NotThere
 
 
@@ -34,6 +34,10 @@ def _load():
 
 
 checks = _load()
+
+# The pair every update check but the one by a published release runs with by
+# default, resolved as the lab resolves it: two builds of this checkout, nothing fetched.
+BETWEEN_CHECKOUTS = pairs.resolve(pairs.THE_WHOLE_UPDATE, pairs.BETWEEN_CHECKOUTS, False, None, Path("."))
 
 
 @pytest.fixture
@@ -69,9 +73,9 @@ def no_real_work(monkeypatch, tmp_path):
 
 def prepared(monkeypatch, version="0.4.2", number="7", zip_name="uDeck-0.4.2.zip"):
     """Skip the preparation: its own tests are further down."""
-    offer = Build(version, number, Path("/tmp") / zip_name)
-    monkeypatch.setattr(checks, "_prepare", lambda machine, check_dir, lab, feed, signed_by: offer)
-    monkeypatch.setattr(checks, "_open_the_about_pane", lambda machine, check_dir: None)
+    offer = checks.Offered(version, number, zip_name, None, "http://127.0.0.1:8765/appcast.xml")
+    monkeypatch.setattr(checks, "_prepare", lambda machine, check_dir, lab, feed, pair, signed_by=None: offer)
+    monkeypatch.setattr(checks, "_open_the_about_pane", lambda machine, check_dir, shot=None: None)
     return offer
 
 
@@ -124,7 +128,7 @@ def test_a_click_the_lab_could_not_make_is_not_a_passed_control(machine, lab, ch
     machine.click_fails = LabError("pressing Install", "the VNC click did not finish in 30s")
 
     with pytest.raises(LabError, match="the VNC click did not finish"):
-        checks.check_wrong_key(machine, check_dir, lab)
+        checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
     assert "   uDeck did not even offer it" not in lab.notes
 
 
@@ -141,7 +145,7 @@ def test_system_events_refusing_is_not_uDeck_declining_to_offer(machine, lab, ch
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
 
     with pytest.raises(LabError, match="System Events refused"):
-        checks.check_wrong_key(machine, check_dir, lab)
+        checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
     assert "   uDeck did not even offer it" not in lab.notes
 
 
@@ -158,7 +162,7 @@ def test_an_update_that_was_never_offered_does_not_pass_as_a_refusal(machine, la
     monkeypatch.setattr(updates.Feed, "collect_log", feed_log('"GET /appcast.xml HTTP/1.1" 200 -'))
 
     with pytest.raises(LabError, match="never offered the update") as raised:
-        checks.check_wrong_key(machine, check_dir, lab)
+        checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
     assert not isinstance(raised.value, CheckFailed)
 
 
@@ -168,9 +172,9 @@ def test_the_control_passes_when_the_guest_saw_uDeck_fetch_the_archive(machine, 
     finds(monkeypatch)
     says(monkeypatch, "Installed 0.4.1", "Latest 0.4.2")
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
-    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 200 -'))
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.archive} HTTP/1.1" 200 -'))
 
-    checks.check_wrong_key(machine, check_dir, lab)
+    checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
     assert machine.clicks and machine.clicks[-1][2].startswith("pressing Install")
     assert machine.now >= checks.REFUSAL_SECONDS
 
@@ -187,7 +191,7 @@ def test_uDeck_saying_its_check_did_not_finish_is_not_a_refusal(machine, lab, ch
     monkeypatch.setattr(updates.Feed, "collect_log", feed_log(""))
 
     with pytest.raises(LabError, match="never answered for"):
-        checks.check_wrong_key(machine, check_dir, lab)
+        checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_a_window_that_cannot_be_read_does_not_hide_an_update_that_installed(machine, lab, check_dir, monkeypatch):
@@ -203,7 +207,7 @@ def test_a_window_that_cannot_be_read_does_not_hide_an_update_that_installed(mac
     monkeypatch.setattr(app, "installed_version", lambda m: checks.SECOND)
 
     with pytest.raises(CheckFailed, match="which was signed with a key it does not trust"):
-        checks.check_wrong_key(machine, check_dir, lab)
+        checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_a_screenshot_that_fails_does_not_hide_an_update_that_installed(machine, lab, check_dir, monkeypatch):
@@ -215,7 +219,7 @@ def test_a_screenshot_that_fails_does_not_hide_an_update_that_installed(machine,
     machine.screenshot_fails_at = "after the refusal"
 
     with pytest.raises(CheckFailed, match="signed with a key it does not trust"):
-        checks.check_wrong_key(machine, check_dir, lab)
+        checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
     assert any("no screenshot 'after the refusal'" in note for note in lab.notes)
 
 
@@ -225,11 +229,11 @@ def test_an_install_still_in_flight_is_not_nothing_installed(machine, lab, check
     finds(monkeypatch)
     says(monkeypatch, "Installed 0.4.1")
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
-    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 200 -'))
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.archive} HTTP/1.1" 200 -'))
     machine.ssh.answers["pgrep -fl"] = "941 /Applications/uDeck.app/Contents/Frameworks/Autoupdate"
 
     with pytest.raises(LabError, match="still installing"):
-        checks.check_wrong_key(machine, check_dir, lab)
+        checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_a_uDeck_that_died_on_the_press_is_not_a_refusal(machine, lab, check_dir, monkeypatch):
@@ -240,11 +244,11 @@ def test_a_uDeck_that_died_on_the_press_is_not_a_refusal(machine, lab, check_dir
     finds(monkeypatch)
     says(monkeypatch, "Installed 0.4.1")
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
-    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 200 -'))
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.archive} HTTP/1.1" 200 -'))
     machine.ssh.answers["pgrep -x uDeck"] = ["404", ""]
 
     with pytest.raises(CheckFailed, match="did not refuse the update and carry on"):
-        checks.check_wrong_key(machine, check_dir, lab)
+        checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_a_uDeck_that_came_back_as_another_process_is_not_a_refusal(machine, lab, check_dir, monkeypatch):
@@ -255,11 +259,11 @@ def test_a_uDeck_that_came_back_as_another_process_is_not_a_refusal(machine, lab
     finds(monkeypatch)
     says(monkeypatch, "Installed 0.4.1")
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
-    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 200 -'))
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.archive} HTTP/1.1" 200 -'))
     machine.ssh.answers["pgrep -x uDeck"] = ["404", "909"]
 
     with pytest.raises(CheckFailed, match="did not refuse the update and carry on"):
-        checks.check_wrong_key(machine, check_dir, lab)
+        checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_an_archive_the_server_refused_is_not_an_archive_it_served(machine, lab, check_dir, monkeypatch):
@@ -269,10 +273,10 @@ def test_an_archive_the_server_refused_is_not_an_archive_it_served(machine, lab,
     finds(monkeypatch)
     says(monkeypatch, "Installed 0.4.1")
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
-    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 404 -'))
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.archive} HTTP/1.1" 404 -'))
 
     with pytest.raises(LabError, match="never answered for"):
-        checks.check_wrong_key(machine, check_dir, lab)
+        checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_the_archive_is_recognised_whatever_protocol_the_server_logs(machine, lab, check_dir, monkeypatch):
@@ -282,9 +286,9 @@ def test_the_archive_is_recognised_whatever_protocol_the_server_logs(machine, la
     finds(monkeypatch)
     says(monkeypatch, "Installed 0.4.1")
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
-    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.0" 200 -'))
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.archive} HTTP/1.0" 200 -'))
 
-    checks.check_wrong_key(machine, check_dir, lab)
+    checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_the_running_installer_is_looked_for_in_a_way_that_cannot_match_the_question(machine, lab, check_dir, monkeypatch):
@@ -293,9 +297,9 @@ def test_the_running_installer_is_looked_for_in_a_way_that_cannot_match_the_ques
     finds(monkeypatch)
     says(monkeypatch, "Installed 0.4.1")
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
-    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.zip.name} HTTP/1.1" 200 -'))
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.archive} HTTP/1.1" 200 -'))
 
-    checks.check_wrong_key(machine, check_dir, lab)
+    checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
     asked = [c for c in machine.ssh.commands if "pgrep -fl" in c]
     assert asked and "Autoupdate" not in asked[0] and "[A]utoupdate" in asked[0]
 
@@ -311,7 +315,7 @@ def test_a_slow_relaunch_is_not_a_failed_update(machine, lab, check_dir, monkeyp
     monkeypatch.setattr(app, "installed_version", lambda m: checks.SECOND)
     machine.ssh.answers["pgrep -x uDeck"] = ["101", "", "", "202"]
 
-    checks.check_sparkle(machine, check_dir, lab)
+    checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
     assert "after the update" in machine.shots
 
 
@@ -326,7 +330,7 @@ def test_an_updated_uDeck_that_crashes_on_launch_is_not_one_that_came_back(machi
     machine.ssh.answers["pgrep -x uDeck"] = ["101", "202", ""]
 
     with pytest.raises(CheckFailed, match="was gone"):
-        checks.check_sparkle(machine, check_dir, lab)
+        checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_an_old_uDeck_still_running_beside_the_new_one_is_not_an_update(machine, lab, check_dir, monkeypatch):
@@ -339,7 +343,7 @@ def test_an_old_uDeck_still_running_beside_the_new_one_is_not_an_update(machine,
     machine.ssh.answers["pgrep -x uDeck"] = ["101", "101 202"]
 
     with pytest.raises(CheckFailed, match="did not replace the copy that was running"):
-        checks.check_sparkle(machine, check_dir, lab)
+        checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_the_uDeck_that_came_back_is_watched_for_the_whole_settle(machine, lab, check_dir, monkeypatch):
@@ -353,7 +357,7 @@ def test_the_uDeck_that_came_back_is_watched_for_the_whole_settle(machine, lab, 
     machine.ssh.answers["pgrep -x uDeck"] = ["101", "202", "202", "", "202"]
 
     with pytest.raises(CheckFailed, match="was gone"):
-        checks.check_sparkle(machine, check_dir, lab)
+        checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_a_dropped_connection_never_reads_as_uDeck_is_not_running(machine, lab, check_dir, monkeypatch):
@@ -365,7 +369,7 @@ def test_a_dropped_connection_never_reads_as_uDeck_is_not_running(machine, lab, 
     machine.ssh.answers["pgrep -x uDeck"] = ["101", Dropped]
 
     with pytest.raises(LabError, match="SSH to 192.168.64.2 failed"):
-        checks.check_sparkle(machine, check_dir, lab)
+        checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_a_screenshot_that_fails_does_not_hide_an_update_that_did_not_happen(machine, lab, check_dir, monkeypatch):
@@ -378,7 +382,7 @@ def test_a_screenshot_that_fails_does_not_hide_an_update_that_did_not_happen(mac
     machine.screenshot_fails_at = "after the update"
 
     with pytest.raises(CheckFailed, match=r"the version on disk is \('0.4.1', '6'\)"):
-        checks.check_sparkle(machine, check_dir, lab)
+        checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_uDeck_saying_it_is_up_to_date_is_a_failure(machine, lab, check_dir, monkeypatch):
@@ -389,7 +393,7 @@ def test_uDeck_saying_it_is_up_to_date_is_a_failure(machine, lab, check_dir, mon
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
 
     with pytest.raises(CheckFailed, match="did not offer 0.4.2"):
-        checks.check_sparkle(machine, check_dir, lab)
+        checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 def test_a_feed_that_died_is_not_uDeck_failing_to_find_an_update(machine, lab, check_dir, monkeypatch):
@@ -403,7 +407,7 @@ def test_a_feed_that_died_is_not_uDeck_failing_to_find_an_update(machine, lab, c
     machine.ssh.answers["http_code"] = "000"
 
     with pytest.raises(LabError, match="stopped answering") as raised:
-        checks.check_sparkle(machine, check_dir, lab)
+        checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
     assert not isinstance(raised.value, CheckFailed)
 
 
@@ -415,7 +419,7 @@ def test_uDeck_still_looking_is_a_lab_problem_and_not_a_failure(machine, lab, ch
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
 
     with pytest.raises(NotThere):
-        checks.check_sparkle(machine, check_dir, lab)
+        checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
 # --- Preparing the machine --------------------------------------------------------------
@@ -434,7 +438,7 @@ def test_the_check_ends_the_uDeck_a_previous_check_left_running(machine, lab, ch
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
 
     feed = updates.Feed(machine, lab.note)
-    checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+    checks._prepare(machine, check_dir, lab, feed, BETWEEN_CHECKOUTS)
 
     quit_asked = [i for i, c in enumerate(machine.ssh.commands) if "to quit" in c]
     unpacked = [i for i, c in enumerate(machine.ssh.commands) if "ditto -x -k" in c]
@@ -448,7 +452,7 @@ def test_two_copies_of_uDeck_running_is_a_lab_problem(machine, lab, check_dir, m
 
     feed = updates.Feed(machine, lab.note)
     with pytest.raises(LabError, match="2 copies of uDeck are running"):
-        checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+        checks._prepare(machine, check_dir, lab, feed, BETWEEN_CHECKOUTS)
 
 
 def test_the_lab_installing_the_wrong_version_is_not_a_verdict_about_uDeck(machine, lab, check_dir, monkeypatch):
@@ -458,7 +462,7 @@ def test_the_lab_installing_the_wrong_version_is_not_a_verdict_about_uDeck(machi
 
     feed = updates.Feed(machine, lab.note)
     with pytest.raises(LabError, match="the lab installed"):
-        checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+        checks._prepare(machine, check_dir, lab, feed, BETWEEN_CHECKOUTS)
 
 
 def test_each_check_builds_into_a_directory_of_its_own(machine, lab, check_dir, monkeypatch):
@@ -468,7 +472,7 @@ def test_each_check_builds_into_a_directory_of_its_own(machine, lab, check_dir, 
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
 
     feed = updates.Feed(machine, lab.note)
-    checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+    checks._prepare(machine, check_dir, lab, feed, BETWEEN_CHECKOUTS)
     assert lab.builders == [(feed.url, check_dir.name)]
 
 
@@ -479,7 +483,7 @@ def test_a_machine_that_never_starts_uDeck_is_a_lab_problem(machine, lab, check_
 
     feed = updates.Feed(machine, lab.note)
     with pytest.raises(LabError, match="uDeck was not running within"):
-        checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+        checks._prepare(machine, check_dir, lab, feed, BETWEEN_CHECKOUTS)
     assert machine.now >= 30
 
 
@@ -503,7 +507,7 @@ def test_waiting_for_the_relaunch_spends_the_installs_budget_and_not_a_second_on
     machine.ssh.answers["pgrep -x uDeck"] = "101"  # it never comes back as a new process
 
     with pytest.raises(CheckFailed, match="did not come back as a new process"):
-        checks.check_sparkle(machine, check_dir, lab)
+        checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
     assert machine.now >= 100, "the swap has to eat into the budget for this to mean anything"
     assert machine.now <= checks.INSTALL_SECONDS + 5
 
@@ -515,7 +519,7 @@ def test_a_blip_while_uDeck_starts_is_not_uDeck_failing_to_start(machine, lab, c
     monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
 
     feed = updates.Feed(machine, lab.note)
-    checks._prepare(machine, check_dir, lab, feed, signed_by=None)
+    checks._prepare(machine, check_dir, lab, feed, BETWEEN_CHECKOUTS)
     assert "uDeck running" in machine.shots
 
 
@@ -603,7 +607,7 @@ class Scene:
         self.launched_at = machine.now
         return {"101"}
 
-    def open_the_about_pane(self, machine, check_dir):
+    def open_the_about_pane(self, machine, check_dir, shot=None):
         """The settings window on the About pane, found with its button — as the check's own helper returns it."""
         self.window_opened_at = machine.now
         if self.asks_when_the_window_opens:
@@ -895,3 +899,405 @@ def test_a_machine_that_remembers_nothing_is_not_touched(machine, lab, check_dir
     checks._a_uDeck_that_never_looked(machine, check_dir, lab, updates.Feed(machine, lab.note))
     assert not any("defaults delete" in c for c in machine.ssh.commands)
     assert not any("defaults write" in c for c in machine.ssh.commands), "what uDeck ships, and nothing the lab wrote"
+
+
+# --- Pairs with a published release ------------------------------------------------------------
+
+from udeck_e2e import config, releases  # noqa: E402
+
+
+def a_release(tmp_path, version, build, feed=config.LATEST_FEED):
+    published = releases.Published(
+        f"v{version}", f"https://github.com/iillyyaa1997/udeck/releases/download/v{version}/appcast.xml",
+        f"uDeck-{version}.zip", f"https://github.com/iillyyaa1997/udeck/releases/download/v{version}/uDeck-{version}.zip", 9,
+    )  # fmt: skip
+    archive = tmp_path / "releases" / f"v{version}" / f"uDeck-{version}.zip"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    archive.write_bytes(b"released!")
+    return releases.Release(
+        published=published, version=version, build=build, public_key=f"key-of-{version}=", shipped_feed=feed,
+        zip=archive, appcast=archive.with_name("appcast.xml"), enclosure_url=published.zip_url, length=9,
+        signature="c2ln", sha256="00",
+    )  # fmt: skip
+
+
+def a_pair(rule, from_end, to_end, asked):
+    return pairs.Resolved(asked, True, from_end, to_end)
+
+
+def release_to_latest(tmp_path):
+    return pairs.Resolved(
+        pairs.THE_RELEASE_BEFORE_LATEST_TO_LATEST, False, a_release(tmp_path, "0.5.0", "6"), a_release(tmp_path, "0.6.1", "8")
+    )
+
+
+def release_to_a_release_by_name(tmp_path):
+    return a_pair(None, a_release(tmp_path, "0.5.0", "6"), a_release(tmp_path, "0.6.1", "8"),
+                  pairs.Pair(pairs.Side("0.5.0"), pairs.Side("0.6.1")))  # fmt: skip
+
+
+def checkout_to_latest(tmp_path):
+    latest = a_release(tmp_path, "0.6.1", "8")
+    return a_pair(None, pairs.Checkout("0.4.1", "1", key_of=latest), latest,
+                  pairs.Pair(pairs.Side("checkout"), pairs.Side("latest")))  # fmt: skip
+
+
+def release_to_checkout(tmp_path):
+    return a_pair(None, a_release(tmp_path, "0.5.0", "6"), pairs.Checkout("0.4.2", "7"),
+                  pairs.Pair(pairs.Side("0.5.0"), pairs.Side("checkout")))  # fmt: skip
+
+
+class GitHubFromTheGuest:
+    """`updates.github_answers` as the guest would answer it, and every time it was asked."""
+
+    def __init__(self, monkeypatch, answers=((True, "the guest reaches GitHub"),)):
+        self.answers = list(answers)
+        self.asked = []
+        monkeypatch.setattr(updates, "github_answers", self)
+
+    def __call__(self, machine, release, feed_url, step):
+        self.asked.append((release.version, feed_url, step))
+        answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+
+def a_guest_for_prepare(machine, monkeypatch, there):
+    machine.ssh.answers["stat -f %Su"] = "admin"
+    machine.ssh.answers["pgrep -x uDeck"] = ["", "", "101"]
+    monkeypatch.setattr(app, "installed_version", lambda m: there)
+
+
+def feed_written(machine):
+    return [c for c in machine.ssh.commands if f"defaults write {app.BUNDLE_ID} {app.FEED_URL}" in c]
+
+
+def test_a_release_offered_latest_asks_the_feed_it_ships_with_untouched(machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_latest(tmp_path)
+    a_guest_for_prepare(machine, monkeypatch, ("0.5.0", "6"))
+    github = GitHubFromTheGuest(monkeypatch)
+    feed = updates.Feed(machine, lab.note)
+    offered = checks._prepare(machine, check_dir, lab, feed, pair)
+
+    assert offered == checks.Offered("0.6.1", "8", "uDeck-0.6.1.zip", pair.to, config.LATEST_FEED)
+    assert machine.ssh.copied == [("uDeck-0.5.0.zip", "/tmp/uDeck-0.5.0.zip")], "the release's own zip, unpacked in the guest"
+    assert feed_written(machine) == [], "the real feed, untouched"
+    assert lab.builders == [], "nothing of this checkout is built"
+    assert not feed.serving, "the lab serves nothing: it comes from GitHub"
+    assert github.asked == [("0.6.1", config.LATEST_FEED, "asking GitHub from inside the guest")]
+    assert "uDeck running" in machine.shots
+    assert any("the guest reaches GitHub" in note for note in lab.notes)
+
+
+def test_a_release_named_by_its_version_is_reached_through_its_own_appcast(machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_a_release_by_name(tmp_path)
+    a_guest_for_prepare(machine, monkeypatch, ("0.5.0", "6"))
+    machine.ssh.answers[f"defaults read {app.BUNDLE_ID} {app.FEED_URL}"] = pair.to.own_appcast
+    github = GitHubFromTheGuest(monkeypatch)
+    checks._prepare(machine, check_dir, lab, updates.Feed(machine, lab.note), pair)
+
+    (written,) = feed_written(machine)
+    assert written.endswith(f"-string {pair.to.own_appcast}")
+    forgotten = next(i for i, c in enumerate(machine.ssh.commands) if "defaults read place.unicorns.udeck" in c)
+    assert forgotten < machine.ssh.commands.index(written), "written after what the machine kept was read"
+    assert github.asked[0][1] == pair.to.own_appcast
+
+
+def test_a_build_of_this_checkout_going_to_latest_carries_the_releases_key_and_is_pointed_at_the_real_feed(
+        machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = checkout_to_latest(tmp_path)
+    a_guest_for_prepare(machine, monkeypatch, ("0.4.1", "1"))
+    machine.ssh.answers[f"defaults read {app.BUNDLE_ID} {app.FEED_URL}"] = config.LATEST_FEED
+    GitHubFromTheGuest(monkeypatch)
+    feed = updates.Feed(machine, lab.note)
+    checks._prepare(machine, check_dir, lab, feed, pair)
+
+    assert lab.builders == [(feed.url, check_dir.name, "key-of-0.6.1=")]
+    assert machine.ssh.copied == [("uDeck-0.4.1.zip", "/tmp/uDeck-0.4.1.zip")]
+    assert feed_written(machine)[0].endswith(f"-string {config.LATEST_FEED}")
+
+
+def test_a_release_offered_a_build_of_this_checkout_is_pointed_at_the_labs_feed_and_offered_the_runs_key(
+        machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_checkout(tmp_path)
+    a_guest_for_prepare(machine, monkeypatch, ("0.5.0", "6"))
+    feed = updates.Feed(machine, lab.note)
+    machine.ssh.answers[f"defaults read {app.BUNDLE_ID} {app.FEED_URL}"] = feed.url
+    signed = []
+    monkeypatch.setattr(updates, "sign", lambda zip_path, key, tool: signed.append(key) or "a-signature")
+    offered = checks._prepare(machine, check_dir, lab, feed, pair)
+
+    assert offered.release is None and offered.keys == ("0.4.2", "7") and offered.asked_at == feed.url
+    assert lab.builders == [(feed.url, check_dir.name)], "the offer carries the run's own key"
+    assert signed == [lab.signing_key], "signed with the run's key, which no release trusts"
+    assert feed.serving
+    assert feed_written(machine)[0].endswith(f"-string {feed.url}")
+
+
+def test_a_feed_written_that_does_not_read_back_is_the_labs(machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_a_release_by_name(tmp_path)
+    a_guest_for_prepare(machine, monkeypatch, ("0.5.0", "6"))
+    machine.ssh.answers[f"defaults read {app.BUNDLE_ID} {app.FEED_URL}"] = config.LATEST_FEED
+    GitHubFromTheGuest(monkeypatch)
+    with pytest.raises(LabError, match="reads back as"):
+        checks._prepare(machine, check_dir, lab, updates.Feed(machine, lab.note), pair)
+
+
+def test_a_guest_that_cannot_reach_github_is_could_not_check_before_udeck_is_started(machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_latest(tmp_path)
+    a_guest_for_prepare(machine, monkeypatch, ("0.5.0", "6"))
+    GitHubFromTheGuest(monkeypatch, [LabError("asking GitHub", "the guest could not reach github.com: curl: (6) Could not resolve host")])
+    with pytest.raises(LabError, match="could not reach github.com") as raised:
+        checks._prepare(machine, check_dir, lab, updates.Feed(machine, lab.note), pair)
+    assert not isinstance(raised.value, CheckFailed)
+    assert not any(c.startswith("open -a") for c in machine.ssh.commands)
+
+
+def test_github_answering_an_error_is_noted_and_left_for_udeck(machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_latest(tmp_path)
+    a_guest_for_prepare(machine, monkeypatch, ("0.5.0", "6"))
+    GitHubFromTheGuest(monkeypatch, [(False, "the feed answered the guest 404")])
+    checks._prepare(machine, check_dir, lab, updates.Feed(machine, lab.note), pair)
+    assert any("404" in note and "what it does with that is the verdict" in note for note in lab.notes)
+
+
+def offered_from_github(monkeypatch, pair):
+    offer = checks.Offered(*pair.to.keys, pair.to.zip.name, pair.to, config.LATEST_FEED)
+    monkeypatch.setattr(checks, "_prepare", lambda machine, check_dir, lab, feed, pair, signed_by=None: offer)
+    opened = []
+    monkeypatch.setattr(checks, "_open_the_about_pane", lambda machine, check_dir, shot=None: opened.append(shot))
+    return offer, opened
+
+
+def test_the_published_release_check_passes_on_the_disk_and_a_new_process(machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_latest(tmp_path)
+    _, opened = offered_from_github(monkeypatch, pair)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.5.0", "Version 0.6.1 is available.")
+    monkeypatch.setattr(app, "installed_version", lambda m: ("0.6.1", "8"))
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "202"]
+    github = GitHubFromTheGuest(monkeypatch)
+
+    checks.check_a_published_release(machine, check_dir, lab, pair)
+    assert github.asked == [], "nothing is asked of GitHub again when nothing is judged against uDeck"
+    assert machine.shots[:2] == ["the update is offered", "after the update"]
+    assert opened == [None, "the installed version"], "a picture of the version installed, after the verdict"
+    assert any("the guest's disk holds 0.6.1 (8)" in note and "from GitHub" in note for note in lab.notes)
+
+
+def test_a_published_release_that_stays_put_is_red_only_while_the_guest_reaches_github(
+        machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_latest(tmp_path)
+    offered_from_github(monkeypatch, pair)
+    finds(monkeypatch)
+    says(monkeypatch, "Version 0.6.1 is available.")
+    monkeypatch.setattr(app, "installed_version", lambda m: ("0.5.0", "6"))
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "202"]
+    github = GitHubFromTheGuest(monkeypatch)
+    with pytest.raises(CheckFailed, match=r"the version on disk is \('0.5.0', '6'\), not \('0.6.1', '8'\)") as raised:
+        checks.check_a_published_release(machine, check_dir, lab, pair)
+    assert [step for _, _, step in github.asked] == ["asking GitHub from inside the guest before judging"]
+    assert "the guest reaches GitHub" in str(raised.value), "what GitHub answered the guest, in the red line"
+    assert str(raised.value).endswith("the pane says: Version 0.6.1 is available."), "and what the pane said"
+
+
+def test_the_red_line_says_what_the_pane_said_so_a_bad_signature_and_a_failed_download_read_apart(
+        machine, lab, check_dir, monkeypatch, tmp_path):
+    """Evidence only: the verdict is the disk, and a pane that cannot be read changes nothing."""
+    pair = release_to_latest(tmp_path)
+    offered_from_github(monkeypatch, pair)
+    finds(monkeypatch)
+    pane = ["Installed 0.5.0", "Latest 0.6.1", "The check did not finish: The update is improperly signed and could not be validated."]
+    says(monkeypatch, *pane)
+    monkeypatch.setattr(app, "installed_version", lambda m: ("0.5.0", "6"))
+    machine.ssh.answers["pgrep -x uDeck"] = ["101"]
+    GitHubFromTheGuest(monkeypatch)
+    with pytest.raises(CheckFailed, match=re.escape("the pane says: " + " | ".join(pane))):
+        checks.check_a_published_release(machine, check_dir, lab, pair)
+
+    read = []
+
+    def readable_once(machine, step, window=ui.SETTINGS_WINDOW):
+        # The offer is read, and decides; the window then stops answering.
+        read.append(step)
+        if len(read) > 1:
+            raise LabError(step, "System Events refused: … (-1728)")
+        return pane
+
+    monkeypatch.setattr(ui, "static_texts", readable_once)
+    with pytest.raises(CheckFailed, match=r"the version on disk is .*the settings window could not be read"):
+        checks.check_a_published_release(machine, check_dir, lab, pair)
+
+
+def test_github_in_trouble_at_judging_is_could_not_check_and_never_red(machine, lab, check_dir, monkeypatch, tmp_path):
+    """GitHub's own answers, through the real probe: a 503 for the feed or the archive is the network."""
+    pair = release_to_latest(tmp_path)
+    offered_from_github(monkeypatch, pair)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.5.0", "Latest 0.6.1",
+         "The check did not finish: An error occurred in retrieving update information (503).")  # fmt: skip
+    monkeypatch.setattr(app, "installed_version", lambda m: ("0.5.0", "6"))
+    machine.ssh.answers["pgrep -x uDeck"] = ["101"]
+    # First, so that it answers before the fake's "http_code" does: curl's own format names it too.
+    machine.ssh.answers = {"/usr/bin/curl": "busy\nudeck-e2e-curl 503 0 github.com", **machine.ssh.answers}
+    with pytest.raises(LabError, match="GitHub answered the guest 503") as raised:
+        checks.check_a_published_release(machine, check_dir, lab, pair)
+    assert not isinstance(raised.value, CheckFailed)
+
+    finds(monkeypatch, **{"updates.install": NotThere("waiting", "'updates.install' did not appear")})
+    with pytest.raises(LabError, match="GitHub answered the guest 503") as raised:
+        checks.check_a_published_release(machine, check_dir, lab, pair)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_guest_that_lost_github_is_not_a_release_that_did_not_install(machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_latest(tmp_path)
+    offered_from_github(monkeypatch, pair)
+    finds(monkeypatch)
+    says(monkeypatch, "Version 0.6.1 is available.")
+    monkeypatch.setattr(app, "installed_version", lambda m: ("0.5.0", "6"))
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "202"]
+    GitHubFromTheGuest(monkeypatch, [LabError("asking GitHub", "the guest could not reach github.com: curl: (7)")])
+    with pytest.raises(LabError, match="could not reach github.com") as raised:
+        checks.check_a_published_release(machine, check_dir, lab, pair)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_release_offered_nothing_while_github_answers_is_red_and_while_it_does_not_is_not(
+        machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_latest(tmp_path)
+    offered_from_github(monkeypatch, pair)
+    finds(monkeypatch, **{"updates.install": NotThere("waiting", "'updates.install' did not appear")})
+    says(monkeypatch, "Installed 0.5.0", "uDeck is up to date.")
+    GitHubFromTheGuest(monkeypatch)
+    with pytest.raises(CheckFailed, match="did not offer 0.6.1"):
+        checks.check_a_published_release(machine, check_dir, lab, pair)
+
+    GitHubFromTheGuest(monkeypatch, [LabError("asking GitHub", "the guest could not reach github.com")])
+    with pytest.raises(LabError, match="could not reach github.com") as raised:
+        checks.check_a_published_release(machine, check_dir, lab, pair)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_feed_github_says_is_not_there_is_red_and_never_said_to_still_answer(machine, lab, check_dir, monkeypatch, tmp_path):
+    """The latest redirect leading nowhere is what every uDeck meets: the release's, and the line says so."""
+    pair = release_to_latest(tmp_path)
+    offered_from_github(monkeypatch, pair)
+    finds(monkeypatch, **{"updates.install": NotThere("waiting", "'updates.install' did not appear")})
+    says(monkeypatch, "Installed 0.5.0", "The check did not finish: An error occurred in retrieving update information (404).")
+    GitHubFromTheGuest(monkeypatch, [(False, f"{config.LATEST_FEED} answered the guest 404 from github.com after 1 redirect(s)")])
+    with pytest.raises(CheckFailed) as raised:
+        checks.check_a_published_release(machine, check_dir, lab, pair)
+    assert "did not offer 0.6.1, and GitHub answers the guest: " in str(raised.value)
+    assert "answered the guest 404" in str(raised.value)
+    assert "still answers" not in str(raised.value)
+
+
+def test_the_offer_from_github_is_waited_for_longer_than_one_from_the_guests_loopback(
+        machine, lab, check_dir, monkeypatch, tmp_path):
+    waited = []
+
+    def wait_for(machine, identifier, step, window=ui.SETTINGS_WINDOW, seconds=None):
+        waited.append((identifier, seconds))
+        return at(machine, identifier)
+
+    pair = release_to_latest(tmp_path)
+    offered_from_github(monkeypatch, pair)
+    finds(monkeypatch)
+    monkeypatch.setattr(ui, "wait_for", wait_for)
+    says(monkeypatch, "Version 0.6.1 is available.")
+    monkeypatch.setattr(app, "installed_version", lambda m: ("0.6.1", "8"))
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "202"]
+    checks.check_a_published_release(machine, check_dir, lab, pair)
+    assert ("updates.install", checks.OFFER_FROM_GITHUB_SECONDS) in waited
+
+
+def test_a_window_that_will_not_show_the_installed_version_changes_no_verdict(machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_latest(tmp_path)
+    offered_from_github(monkeypatch, pair)
+
+    def refuse(machine, check_dir, shot=None):
+        if shot == "the installed version":
+            raise LabError("opening uDeck's settings", "System Events refused: (-1728)")
+
+    monkeypatch.setattr(checks, "_open_the_about_pane", refuse)
+    finds(monkeypatch)
+    says(monkeypatch, "Version 0.6.1 is available.")
+    monkeypatch.setattr(app, "installed_version", lambda m: ("0.6.1", "8"))
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "202"]
+    checks.check_a_published_release(machine, check_dir, lab, pair)
+    assert any("no screenshot of the installed version" in note for note in lab.notes)
+
+
+def test_the_wrong_key_control_with_a_real_from_holds_the_disk_to_that_release(machine, lab, check_dir, monkeypatch, tmp_path):
+    pair = release_to_checkout(tmp_path)
+    keys = []
+    offer = checks.Offered("0.4.2", "7", "uDeck-0.4.2.zip", None, "http://127.0.0.1:8765/appcast.xml")
+    monkeypatch.setattr(checks, "_prepare", lambda machine, check_dir, lab, feed, pair, signed_by=None:
+                        keys.append(signed_by) or offer)  # fmt: skip
+    monkeypatch.setattr(checks, "_open_the_about_pane", lambda machine, check_dir, shot=None: None)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.5.0")
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log('"GET /uDeck-0.4.2.zip HTTP/1.1" 200 -'))
+
+    monkeypatch.setattr(app, "installed_version", lambda m: ("0.5.0", "6"))
+    checks.check_wrong_key(machine, check_dir, lab, pair)
+    assert keys == [None], "None is the run's own key: no release trusts it"
+    assert not (check_dir / "another-key").exists()
+
+    monkeypatch.setattr(app, "installed_version", lambda m: ("0.4.2", "7"))
+    with pytest.raises(CheckFailed, match=r"uDeck installed \('0.4.2', '7'\), which was signed with a key it does not trust"):
+        checks.check_wrong_key(machine, check_dir, lab, pair)
+
+
+def test_every_update_check_says_which_pairs_it_takes():
+    rules = {name: pairs.rule_of(getattr(checks, name)) for name in dir(checks) if name.startswith("check_")}
+    assert rules == {
+        "check_sparkle": pairs.THE_WHOLE_UPDATE,
+        "check_wrong_key": pairs.THE_WRONG_KEY,
+        "check_it_looks_by_itself": pairs.ONLY_THIS_CHECKOUT,
+        "check_switched_on_it_looks_by_itself": pairs.ONLY_THIS_CHECKOUT,
+        "check_a_published_release": pairs.A_PUBLISHED_RELEASE,
+    }
+
+
+# --- What the pairs read out of this checkout -------------------------------------------------
+#
+# Here and not beside their modules' own tests: this is the one file of those that
+# may read the checkout (test_make_app.py, MAY_READ_THE_CHECKOUT), and it starts
+# no process.
+
+import plistlib  # noqa: E402
+
+
+def test_the_feed_and_the_repository_are_the_ones_udeck_ships_with():
+    plist = plistlib.loads((Path(__file__).resolve().parents[2] / "Sources" / "uDeck" / "Support" / "Info.plist").read_bytes())
+    assert plist["SUFeedURL"] == config.LATEST_FEED
+    assert f"github.com/{config.RELEASES_REPOSITORY}/" in plist["SUFeedURL"]
+
+
+def test_the_identifiers_read_from_a_releases_source_are_the_ones_the_checks_press():
+    """`CHECK_NOW_PATH` is held to what checks/check_updates.py clicks and waits for, and to today's source."""
+    source = (Path(__file__).resolve().parents[1] / "checks" / "check_updates.py").read_text()
+    for identifier in releases.CHECK_NOW_PATH:
+        assert f'"{identifier}"' in source, identifier
+    view = (Path(__file__).resolve().parents[2] / "Sources" / "UDeckKit" / "Views" / "SettingsView.swift").read_text()
+
+    def found(needle):
+        text, whole = needle
+        return re.search(rf"(?<!\w){re.escape(text)}(?!\w)", view) if whole else text in view
+
+    for identifier, ways in releases.CHECK_NOW_PATH.items():
+        assert any(all(found(needle) for needle in way) for way in ways), identifier
+
+
+def test_the_two_builds_between_checkouts_were_never_released():
+    """So a lab build can never be mistaken for a release, on a screen or in a report.
+
+    Read from CHANGELOG.md, which has a heading for every version released or
+    tagged — CI checks out no tags."""
+    changelog = (Path(__file__).resolve().parents[2] / "CHANGELOG.md").read_text()
+    assert "## [0.6.1]" in changelog and "## [0.4.0]" in changelog, "the headings the test reads are still there"
+    for version, _ in (pairs.CHECKOUT_FROM, pairs.CHECKOUT_TO):
+        assert f"## [{version}]" not in changelog

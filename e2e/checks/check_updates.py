@@ -14,8 +14,17 @@ turned automatic checks off and turns them back on gets a uDeck that looks by
 itself again. Both are judged on the guest's own access log, which is the
 traffic and not a sentence uDeck writes about itself.
 
-Everything is real — a release build of this checkout, Sparkle, an appcast served
-inside the machine — and nothing is asked of uDeck that a person could not do:
+And a fifth that none of those can stand in for: a *published* release updating
+itself from GitHub (`check_a_published_release`) — the release key, the real
+feed and its latest redirect, GitHub's asset host — driven exactly like the
+first. Every check here takes a pair, "from → to" (`pairs`): which two copies of
+uDeck it runs between, a build of this checkout or a published release on
+either side, chosen with `--from` and `--to` and each check's own default
+otherwise, refused up front when the check cannot ask its question about it.
+
+Everything is real — a release build of this checkout or a published release,
+Sparkle, an appcast served inside the machine or GitHub's own — and nothing is
+asked of uDeck that a person could not do:
 the settings window is opened from uDeck's own menu, the section is chosen and
 the buttons are pressed with the machine's pointer, and what counts as success is
 the version on disk afterwards, never what the screen says about itself.
@@ -32,12 +41,15 @@ Two rules run through the whole file, both learned from this check:
 """
 
 import re
+from dataclasses import dataclass
 
-from udeck_e2e import app, builds, ui, updates
+from udeck_e2e import app, builds, config, pairs, releases, ui, updates
 from udeck_e2e.errors import LabError, NotThere, expect
 
-FIRST = ("0.4.1", "6")
-SECOND = ("0.4.2", "7")
+# The two builds of this checkout an update between checkouts is made of — every
+# update check's default "from" and "to" but the one by a published release.
+FIRST = pairs.CHECKOUT_FROM
+SECOND = pairs.CHECKOUT_TO
 
 # From pressing Install to the new version being on disk: Sparkle unpacks the
 # archive, swaps the bundle and relaunches uDeck. The relaunch is waited for
@@ -56,6 +68,10 @@ RELAUNCH_SETTLE_SECONDS = 10
 # refused only when it is installed, and how long it then watches nothing happen.
 OFFER_SECONDS = 60
 REFUSAL_SECONDS = 90
+
+# How long uDeck is given to offer an update it has to fetch the appcast of from
+# GitHub, through the latest redirect, rather than from the guest's own loopback.
+OFFER_FROM_GITHUB_SECONDS = 60
 
 # What uDeck says on the About pane once it has an answer of its own. The guest
 # runs in English (Q43), and these are its words: `updatesUpToDate` and
@@ -110,11 +126,32 @@ KEPT_OFF = "0"
 LISTEN_EVERY_SECONDS = 1
 
 
-def check_sparkle(machine, check_dir, lab):
-    """The whole update: uDeck finds 0.4.2, installs it, and comes back as 0.4.2."""
+@pairs.takes(pairs.THE_WHOLE_UPDATE)
+def check_sparkle(machine, check_dir, lab, pair):
+    """The whole update: uDeck finds "to", installs it, and comes back as it — by default 0.4.1 to 0.4.2, both this checkout's.
+
+    Between any two that can be (`pairs.THE_WHOLE_UPDATE`): a build of this
+    checkout to another, to a published release by name or to the latest one —
+    built then with that release's public key, and pointed at its feed through
+    the guest's preferences — and a release to a release. A release to a build of
+    this checkout is refused: nothing the lab can sign is what a release installs.
+    """
+    _the_whole_update(machine, check_dir, lab, pair)
+
+
+def _the_whole_update(machine, check_dir, lab, pair):
+    """Install "from", ask it for an update in its own window, install what it offers, and read the disk.
+
+    What decides it is the bundle on the guest's disk — its two version keys, the
+    ones "to" carries — and a new process that stays: never what the pane says
+    about itself, and never uDeck's log. When "to" comes from GitHub, GitHub is
+    asked from inside the guest before anything is said against uDeck
+    (`_expect_the_guest_still_reaches_github`): a guest without the network is
+    "could not check", never red.
+    """
     feed = updates.Feed(machine, lab.note)
     try:
-        offered = _prepare(machine, check_dir, lab, feed, signed_by=None)
+        offered = _prepare(machine, check_dir, lab, feed, pair)
         _open_the_about_pane(machine, check_dir)
 
         ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
@@ -129,17 +166,33 @@ def check_sparkle(machine, check_dir, lab):
         before = app.running_pids(machine)
         machine.click(*install.middle, "installing the update")
         deadline = machine.clock() + INSTALL_SECONDS
-        version = _the_version_once_it_is(machine, SECOND, deadline)
+        version = _the_version_once_it_is(machine, offered.keys, deadline)
         after = _wait_for_the_relaunch(machine, before, deadline)
         _evidence(machine, check_dir, "after the update", lab)
 
-        expect(version == SECOND, f"the version on disk is {version}, not {SECOND}")
+        if version != offered.keys:
+            # First whether GitHub still answers the guest — no answer, or GitHub
+            # in trouble, is the lab's and raises — and then what the pane says,
+            # which is evidence and never raises: "improperly signed" and a failed
+            # download read the same on the disk. Both go into the red line.
+            reached = _expect_the_guest_still_reaches_github(machine, offered, lab)
+            said = _what_the_pane_says_or_why_not(machine)
+            expect(
+                False,
+                f"the version on disk is {version}, not {offered.keys}" + (f"; {reached[1]}" if reached else "")
+                + f"; the pane says: {said}",
+            )
         expect(
             bool(after - before),
             f"uDeck did not come back as a new process after the update: it was "
             f"{sorted(before) or 'not running'} before and is {sorted(after) or 'not running'} now",
         )
         _expect_the_new_uDeck_stayed(machine, before, after)
+        lab.note(
+            f"   the guest's disk holds {offered.version} ({offered.build}) and uDeck came back as "
+            f"{sorted(after - before)}, {offered.where}"
+        )
+        _the_installed_version_on_screen(machine, check_dir, lab)
     finally:
         feed.collect_log(check_dir)
         feed.stop()
@@ -175,11 +228,21 @@ def _expect_the_new_uDeck_stayed(machine, before, after):
     )
 
 
-def check_wrong_key(machine, check_dir, lab):
-    """An update signed with another key is refused — the control for the check above."""
+@pairs.takes(pairs.THE_WRONG_KEY)
+def check_wrong_key(machine, check_dir, lab, pair):
+    """An update signed with a key "from" does not trust is refused — the control for the checks above.
+
+    By default a build of this checkout, which carries the run's own key, offered
+    one signed with another key made for this check. With a published release as
+    "from" (`--from 0.5.0`), which trusts only the release key, the offer is a
+    build of this checkout signed with the run's own key, and the release is
+    pointed at the lab's feed through the guest's preferences.
+    """
     feed = updates.Feed(machine, lab.note)
     try:
-        offered = _prepare(machine, check_dir, lab, feed, signed_by=builds.make_key(check_dir / "another-key"))
+        # The key "from" does not trust. None is the run's own, which no release trusts.
+        another = builds.make_key(check_dir / "another-key") if pairs.signs_with_another_key(pair.from_) else None
+        offered = _prepare(machine, check_dir, lab, feed, pair, signed_by=another)
         _open_the_about_pane(machine, check_dir)
 
         ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
@@ -210,7 +273,7 @@ def check_wrong_key(machine, check_dir, lab):
         log = feed.collect_log(check_dir)
 
         expect(
-            version == FIRST,
+            version == pair.from_.keys,
             f"uDeck installed {version}, which was signed with a key it does not trust; the pane says: {said}",
         )
         _nothing_is_still_installing(machine)
@@ -221,6 +284,7 @@ def check_wrong_key(machine, check_dir, lab):
         feed.stop()
 
 
+@pairs.takes(pairs.ONLY_THIS_CHECKOUT)
 def check_it_looks_by_itself(machine, check_dir, lab):
     """uDeck as it ships asks its feed for an update by itself, straight after it starts, with nothing pressed.
 
@@ -286,6 +350,7 @@ def check_it_looks_by_itself(machine, check_dir, lab):
         feed.stop()
 
 
+@pairs.takes(pairs.ONLY_THIS_CHECKOUT)
 def check_switched_on_it_looks_by_itself(machine, check_dir, lab):
     """Once the operator turns automatic checks back on, uDeck asks its feed without being asked again.
 
@@ -408,6 +473,72 @@ def check_switched_on_it_looks_by_itself(machine, check_dir, lab):
         feed.stop()
 
 
+# --- The update by a published release ------------------------------------------
+
+
+@pairs.takes(pairs.A_PUBLISHED_RELEASE)
+def check_a_published_release(machine, check_dir, lab, pair):
+    """A published release updates itself to another, the way it does on a person's Mac — by default the one before latest to latest.
+
+    Everything `updates.sparkle` cannot reach, because it serves its own feed and
+    signs with its own key: the release key's private half — only in GitHub's
+    secrets — signing what the `SUPublicEDKey` baked into a released bundle
+    accepts, the real feed and its latest redirect, and the download from GitHub's
+    asset host, the install and the relaunch. Driven exactly like
+    `updates.sparkle`: the release's zip, fetched and checked on this Mac
+    (`releases`), unpacked in the guest; started; Settings → About → "Check now"
+    pressed with the machine's pointer, because a release before 0.6.0 does not
+    look by itself; the offer installed. The verdict is the bundle on the guest's
+    disk — the two version keys "to"'s own zip carries — and a new process that
+    stays, with screenshots of the offer and of the version installed.
+
+    "to" = `latest` is the real feed, untouched: the release asks it as it
+    ships. "to" = a release by name (`--to 0.5.0`) is that release's own appcast
+    asset, written into the guest's preferences as `SUFeedURL`, which Sparkle reads
+    before the plist. "from" may be a build of this checkout too, built with
+    "to"'s public key. "to" can never be a build of this checkout
+    (`pairs.APublishedRelease`).
+
+    **On the default pairs, the one check that talks to github.com**, from inside
+    the guest — that is what it checks: the appcast and the archive, and — once it
+    is installed — 0.6.1 and later read the real plugin catalogue at launch, as
+    they ship. `updates.sparkle` given a published release as "to" talks to GitHub
+    the same way. Before it starts and again before it says anything against
+    uDeck, the guest asks GitHub for the feed and the archive itself
+    (`updates.github_answers`): no answer, or GitHub answering with trouble of its
+    own (403, 429, a 5xx), is "could not check", with what was said, never red.
+
+    **What it is red for** — the README's "What it is red for" under "The update by
+    a published release" in full. Found on this Mac before any machine, from what
+    GitHub serves (`pairs.PairDefect`): a "to" whose appcast's signature does not
+    hold over its zip under the `SUPublicEDKey` that zip carries — the release
+    key's private half no longer the key released bundles trust; a zip and an
+    appcast that disagree on length, version or bundle; an appcast that is not
+    XML, has no item for the zip, or whose item lacks a version, a length or an
+    edSignature; an item that sends uDeck anywhere but the zip GitHub's API lists
+    for that release (scheme and host in any case, https's port written or not,
+    the rest exactly); a zip whose Info.plist cannot be read; a latest without its
+    appcast or its zip; GitHub answering 404 or 410 for an asset its own API
+    lists; and, in the lab's own pair, a latest not newer than the release before
+    it by CFBundleVersion — every uDeck on the release before latest would say it
+    is up to date — whatever else is broken in latest (a release before latest
+    that does not hold together is never compared: it is "could not check"). The same "not newer" in a pair given
+    on the command line is refused before anything starts. Found in the guest:
+    "from" not taking "to" — the disk keeps "from", the report saying what the pane
+    said and what GitHub answered the guest — uDeck saying it is up to date or that
+    the check did not finish while its feed declares "to", and everything
+    `updates.sparkle` is red for.
+
+    **Which releases can be "from"** is read from each release's own source:
+    only a settings window whose controls carry the identifiers the lab presses by
+    (`releases.CHECK_NOW_PATH`) can be driven, and that is 0.5.0 onwards; 0.4.0
+    and older are refused before anything starts. A release offered latest has to
+    ship the latest feed itself, or the pair is refused: it would not prove the
+    latest redirect.
+    """
+    _the_whole_update(machine, check_dir, lab, pair)
+
+
 # --- What the two about looking by itself do ---------------------------------------
 
 
@@ -430,13 +561,7 @@ def _a_uDeck_that_never_looked(machine, check_dir, lab, feed, switched_off=False
     if there != FIRST:
         raise LabError(step, f"the lab installed {FIRST}, but the machine has {there}")
 
-    kept = app.preferences(machine, step)
-    if kept is not None:
-        lab.note(
-            f"   macOS kept preferences for uDeck from before this check, taking them away: "
-            f"{' '.join(kept.split())[:200]}"
-        )
-        app.forget_preferences(machine, step)
+    _a_machine_that_remembers_nothing(machine, lab, step)
     if switched_off:
         app.switch_automatic_checks_off(machine, step)
         lab.note(f"   automatic checks switched off, as an operator's click leaves them: {app.AUTOMATIC_CHECKS} = {KEPT_OFF}")
@@ -444,6 +569,24 @@ def _a_uDeck_that_never_looked(machine, check_dir, lab, feed, switched_off=False
     appcast = check_dir / updates.APPCAST
     appcast.write_text(updates.empty_appcast())
     feed.serve(appcast)
+
+
+def _a_machine_that_remembers_nothing(machine, lab, step):
+    """Whatever macOS kept for uDeck from before this check, taken away — and said when there was any.
+
+    The preferences are read before they are forgotten: a machine another check
+    used is not a fault, but what it remembered is worth a line in the report.
+    Sparkle reads all of it before the plist — whether and when to look, and
+    `SUFeedURL`, which a neighbouring check with a pair may have written — so a
+    check that starts from it is about the machine, not about what it installed.
+    """
+    kept = app.preferences(machine, step)
+    if kept is not None:
+        lab.note(
+            f"   macOS kept preferences for uDeck from before this check, taking them away: "
+            f"{' '.join(kept.split())[:200]}"
+        )
+        app.forget_preferences(machine, step)
 
 
 def _uDeck_asks(machine, feed, before, seconds, step):
@@ -567,42 +710,161 @@ def _expect_the_click_landed(machine, switch):
 # --- What the update and its control do --------------------------------------------
 
 
-def _prepare(machine, check_dir, lab, feed, signed_by):
-    """Two builds, the older one installed and running, the newer one offered.
+@dataclass(frozen=True)
+class Offered:
+    """What uDeck is offered, as the check holds the disk to it: both version keys, the archive's name, and where it comes from.
+
+    `release` is the published release when "to" comes from GitHub, and None when
+    the lab serves it from the guest's own loopback. `asked_at` is the feed uDeck
+    asks, and `where` says both in words for the report.
+    """
+
+    version: str
+    build: str
+    archive: str
+    release: releases.Release | None
+    asked_at: str
+
+    @property
+    def keys(self):
+        return self.version, self.build
+
+    @property
+    def where(self):
+        if self.release is None:
+            return f"from the lab's feed in the guest ({self.asked_at})"
+        return f"from GitHub ({self.asked_at})"
+
+
+def _prepare(machine, check_dir, lab, feed, pair, signed_by=None):
+    """The pair's "from" installed and running, and its "to" offered to it.
+
+    "from" is a build of this checkout, made here — with "to"'s public key when
+    "to" is a release — or a published release's zip, which the lab has already
+    fetched and checked against its appcast (`pairs.resolve`). Either way it is
+    unpacked inside the guest only (`app.install`).
+
+    "to" is a build of this checkout, signed (`signed_by`, or the run's own key)
+    and served from the guest's own loopback, or a published release, which the
+    guest fetches from GitHub itself. "from" is pointed at it through the guest's
+    preferences whenever its own Info.plist points elsewhere (`_the_feed_from_asks`).
 
     The machine may not be fresh: with --vm per-group or per-run the previous
-    check left its own uDeck installed and running, so this establishes the
-    state rather than assuming it (Q17).
+    check left its own uDeck installed and running, and what macOS remembered for
+    it, so this establishes the state rather than assuming it (Q17).
     """
-    builder = lab.builder(feed.url, check_dir.name)
-    installed = builder.build(*FIRST)
-    offered = builder.build(*SECOND)
+    builders = {}
 
-    app.install(machine, installed.zip, lab.note)
+    def build(end):
+        key = end.public_key
+        if key not in builders:
+            builders[key] = (lab.builder(feed.url, check_dir.name) if key is None
+                             else lab.builder(feed.url, check_dir.name, release_key=key))
+        return builders[key].build(*end.keys)
+
+    archive = pair.from_.zip if isinstance(pair.from_, releases.Release) else build(pair.from_).zip
+    asked_at, written = _the_feed_from_asks(pair, feed)
+    if isinstance(pair.to, pairs.Checkout):
+        offered_build = build(pair.to)
+        offered = Offered(*pair.to.keys, offered_build.zip.name, None, asked_at)
+    else:
+        offered_build = None
+        offered = Offered(*pair.to.keys, pair.to.zip.name, pair.to, asked_at)
+
+    app.install(machine, archive, lab.note)
     step = "preparing the machine for the update check"
     there = app.installed_version(machine)
-    if there != FIRST:
+    if there != pair.from_.keys:
         # The lab installed it a moment ago: this is the lab, not uDeck.
-        raise LabError(step, f"the lab installed {FIRST}, but the machine has {there}")
+        raise LabError(step, f"the lab installed {pair.from_.keys}, but the machine has {there}")
+    _a_machine_that_remembers_nothing(machine, lab, step)
+    if written:
+        app.point_the_feed_at(machine, asked_at, step)
+        lab.note(f"   uDeck in the guest asks {asked_at} for its updates ({app.FEED_URL} in its preferences)")
 
-    key = signed_by or lab.signing_key
-    signature = updates.sign(offered.zip, key, updates.find_sign_update(lab.repo_root))
-    appcast = check_dir / "appcast.xml"
-    appcast.write_text(updates.appcast(updates.Offer(offered, signature, offered.zip.stat().st_size), feed.base_url))
-    feed.serve(appcast, offered.zip)
+    if offered_build is not None:
+        key = signed_by or lab.signing_key
+        signature = updates.sign(offered_build.zip, key, updates.find_sign_update(lab.repo_root))
+        appcast = check_dir / "appcast.xml"
+        appcast.write_text(updates.appcast(updates.Offer(offered_build, signature, offered_build.zip.stat().st_size), feed.base_url))
+        feed.serve(appcast, offered_build.zip)
+    else:
+        fine, said = updates.github_answers(machine, offered.release, asked_at, "asking GitHub from inside the guest")
+        lab.note(f"   {said}" + ("" if fine else " — uDeck is asked anyway, and what it does with that is the verdict"))
 
     app.launch(machine)
     machine.screenshot(check_dir, "uDeck running")
     return offered
 
 
-def _open_the_about_pane(machine, check_dir):
+def _the_feed_from_asks(pair, feed):
+    """The feed "from" asks for its updates, and whether the lab has to write it into the guest's preferences.
+
+    A build of this checkout carries the lab's feed in its Info.plist and a
+    release carries the real one, so a pair needs the write only when "to" is
+    elsewhere: a release offered a build of this checkout (the lab's feed); a
+    build of this checkout offered the latest release (the real feed); anything
+    offered a release by name (that release's own appcast). A release offered the
+    latest one asks the feed it ships with, untouched — that is the point of it.
+    """
+    from_a_release = isinstance(pair.from_, releases.Release)
+    if isinstance(pair.to, pairs.Checkout):
+        return feed.url, from_a_release
+    if pair.to_by_the_latest_feed:
+        if from_a_release:
+            if pair.from_.shipped_feed != config.LATEST_FEED:
+                # `pairs.resolve` refuses this pair; reaching here is the lab's mistake.
+                raise LabError(
+                    "choosing the feed uDeck asks",
+                    f"{pair.from_.version} ships {pair.from_.shipped_feed!r}, not the latest feed, and was offered latest",
+                )
+            return pair.from_.shipped_feed, False
+        return config.LATEST_FEED, True
+    return pair.to.own_appcast, True
+
+
+def _open_the_about_pane(machine, check_dir, shot="the About section"):
     ui.open_settings_and_wait(machine, "opening uDeck's settings")
     ui.wait_for(machine, "section.about", "waiting for the settings window")
     ui.click(machine, "section.about", "choosing the About section")
     element = ui.wait_for(machine, "updates.checkNow", "waiting for the About section")
-    machine.screenshot(check_dir, "the About section")
+    machine.screenshot(check_dir, shot)
     return element
+
+
+def _the_installed_version_on_screen(machine, check_dir, lab):
+    """The uDeck that came back, its About pane open — a picture of the version installed, for a person.
+
+    After the verdict, and evidence only: the verdict is the disk. A window that
+    cannot be opened is said and changes nothing.
+    """
+    try:
+        _open_the_about_pane(machine, check_dir, shot="the installed version")
+    except LabError as error:
+        lab.note(f"   no screenshot of the installed version: {error.reason}")
+
+
+def _expect_the_guest_still_reaches_github(machine, offered, lab):
+    """Before anything is said against uDeck about an update from GitHub: the guest still reaches it.
+
+    The same two questions `_prepare` asked before uDeck was started
+    (`updates.github_answers`), asked again at the moment of judging: a guest that
+    has lost the network since gives uDeck nothing to find or download, and "uDeck
+    did not update" would be a sentence about the network. That raises — "could
+    not check", with curl's words — and so does GitHub answering with trouble of
+    its own (403, 429, a 5xx). Only an asset GitHub says is not there is left for
+    the verdict: every uDeck that looks meets that too.
+
+    Returns whether everything answered, and GitHub's answer in words — or None
+    when the update does not come from GitHub at all.
+    """
+    if offered.release is None:
+        return None
+    fine, said = updates.github_answers(
+        machine, offered.release, offered.asked_at, "asking GitHub from inside the guest before judging"
+    )
+    lab.note(f"   before judging, {said}")
+    return fine, said
 
 
 def _wait_until_it_is_offered(machine, check_dir, lab, offered, feed):
@@ -621,22 +883,32 @@ def _wait_until_it_is_offered(machine, check_dir, lab, offered, feed):
     uDeck nothing whatever to find — so the sentence "uDeck did not offer the
     update" would be about the lab, wearing uDeck's name.
     """
+    seconds = OFFER_FROM_GITHUB_SECONDS if offered.release is not None else config.UI_APPEAR_SECONDS
     try:
-        return ui.wait_for(machine, "updates.install", "waiting for uDeck to offer the update")
+        return ui.wait_for(machine, "updates.install", "waiting for uDeck to offer the update", seconds=seconds)
     except NotThere:
         _evidence(machine, check_dir, "no update offered", lab)
         said = _what_the_pane_says_or_why_not(machine)
-        step = "asking whether the feed uDeck was given is still answering"
-        if not feed.answers_now(step):
-            raise LabError(
-                step,
-                "the guest's own server stopped answering, so there was nothing for uDeck to "
-                f"find and nothing to say about it; the pane says: {said}",
-            ) from None
+        if offered.release is not None:
+            fine, reached = _expect_the_guest_still_reaches_github(machine, offered, lab)
+            # "Still answers" only when it does: a feed GitHub says is not there
+            # is the release's own trouble, and the sentence names it.
+            feed_said = (
+                f"although the feed it was given declares it and still answers the guest ({reached})" if fine
+                else f"and GitHub answers the guest: {reached}"
+            )
+        else:
+            step = "asking whether the feed uDeck was given is still answering"
+            if not feed.answers_now(step):
+                raise LabError(
+                    step,
+                    "the guest's own server stopped answering, so there was nothing for uDeck to "
+                    f"find and nothing to say about it; the pane says: {said}",
+                ) from None
+            feed_said = "although the feed it was given declares it and still answers"
         expect(
             UP_TO_DATE not in said and DID_NOT_FINISH not in said,
-            f"uDeck did not offer {offered.version}, although the feed it was given declares it "
-            f"and still answers; the pane says: {said}",
+            f"uDeck did not offer {offered.version}, {feed_said}; the pane says: {said}",
         )
         raise
 
@@ -684,11 +956,11 @@ def _prove_it_fetched_and_refused(offered, log, said):
     of a control that proves nothing (Q34, Q37). The pane's words stay in the
     report, as evidence for a person, and decide nothing.
     """
-    if _served(log, offered.zip.name):
+    if _served(log, offered.archive):
         return
     raise LabError(
         "proving the update was refused",
-        f"the guest's server never answered for {offered.zip.name}, so nothing reached the "
+        f"the guest's server never answered for {offered.archive}, so nothing reached the "
         f"signature this control is about; it saw: {log.strip()[-300:] or 'nothing'}; "
         f"the pane says: {said}",
     )
