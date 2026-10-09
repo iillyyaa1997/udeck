@@ -716,10 +716,10 @@ def test_an_image_is_built_once_pushed_to_the_jobs_registry_and_run_from_it_by_i
     assert done.returncode == 0, done.stdout + done.stderr
     assert not any("login" in call or "imagetools create" in call or "ghcr.io" in call for call in calls), calls
     assert not (image / "out" / "udeck-plugin-image.txt").exists()
-    binfmt = [i for i, call in enumerate(calls) if call.startswith("run --privileged --rm tonistiigi/binfmt:")]
+    binfmt = [i for i, call in enumerate(calls) if call.startswith("run --privileged --rm mirror.gcr.io/tonistiigi/binfmt:")]
     assert len(binfmt) == 1 and calls[binfmt[0]].endswith("--install arm64")
     create = [call for call in calls if call.startswith("buildx create ")]
-    assert len(create) == 1 and "--driver-opt network=host" in create[0] and "--driver-opt image=moby/buildkit:" in create[0]
+    assert len(create) == 1 and "--driver-opt network=host" in create[0] and "--driver-opt image=mirror.gcr.io/moby/buildkit:" in create[0]
     builds = [i for i, call in enumerate(calls) if call.startswith("buildx build")]
     assert len(builds) == 1, "built once: what is pushed is what ran"
     build = calls[builds[0]]
@@ -1124,7 +1124,7 @@ def test_the_image_and_what_builds_it_are_pinned_by_digest_and_say_where_they_co
     assert "' /lib/apk/db/installed | sort\n} > /usr/share/licenses/udeck-plugin/ALPINE-PACKAGES" in dockerfile
     script = (REPO / "Scripts" / "make-cli.sh").read_text()
     for name in ("BUILDKIT", "BINFMT"):
-        assert re.search(rf'^{name}="[a-z/]+:[A-Za-z0-9.-]+@sha256:[0-9a-f]{{64}}"$', script, re.M), name
+        assert re.search(rf'^{name}="mirror\.gcr\.io/[a-z/]+:[A-Za-z0-9.-]+@sha256:[0-9a-f]{{64}}"$', script, re.M), name
 
 
 def test_the_sources_are_read_from_the_alpine_release_the_image_is_built_on():

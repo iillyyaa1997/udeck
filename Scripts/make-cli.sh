@@ -126,9 +126,12 @@ STAGE="localhost:5000/udeck-plugin"
 # Pinned by digest, as the toolchain image in ci.yml is: a tag can be moved to
 # another build, and these run with the job's privileges — binfmt as
 # --privileged, BuildKit with the job's network. The digests are the
-# multi-architecture ones (Docker Hub, 2026-10-06), so they serve either runner.
-BUILDKIT="moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"
-BINFMT="tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
+# multi-architecture ones (Docker Hub, 2026-10-06), so they serve either runner;
+# pulled through mirror.gcr.io, Google's mirror of Docker Hub, by the same
+# digests, since Docker Hub's limit on anonymous pulls turned CI 37991659183's
+# image job away.
+BUILDKIT="mirror.gcr.io/moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"
+BINFMT="mirror.gcr.io/tonistiigi/binfmt:qemu-v10.2.3@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
 PLATFORMS="linux/amd64,linux/arm64"
 NOTICES="Scripts/third-party/THIRD_PARTY_NOTICES"
 # The awk that takes the lock file's reader out of docs/plugin-repository.md,
