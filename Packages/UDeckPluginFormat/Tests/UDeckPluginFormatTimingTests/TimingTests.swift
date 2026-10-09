@@ -285,12 +285,19 @@ struct RunningTimingTests {
         // waiting is not asked here: beside the tests that start git by the
         // hundred, a process one of them starts can hold the pipes a while.
         runner.drainGrace = 10
+        // The producer exits only once the child has left the group: uDeck
+        // ends the group when the producer exits, and a child still in it then
+        // was ended with it and wrote nothing (CI 37967274596, "the producer
+        // printed nothing" after 0.081 s). Escaper waits the same way.
         let late = Self.plugin(temp, "late", timeout: "2", script: #"""
             /usr/bin/perl -e '
                 use POSIX ();
+                pipe(my $left, my $tell) or exit 5;
                 defined(my $pid = fork()) or exit 3;
-                exit 0 if $pid;
+                if ($pid) { close($tell); sysread($left, my $byte, 1); exit 0; }
+                close($left);
                 POSIX::setsid() or exit 4;
+                syswrite($tell, "x"); close($tell);
                 select(undef, undef, undef, 0.2);
                 syswrite(STDOUT, "{\"rows\": [{\"text\": \"late\"}]}");
                 syswrite(STDERR, "said late\n");
