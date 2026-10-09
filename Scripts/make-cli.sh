@@ -7,7 +7,7 @@
 # Usage:  Scripts/make-cli.sh macos [--version X.Y.Z] [--sign IDENTITY] [--out DIR]
 #         Scripts/make-cli.sh linux --arch x86_64|aarch64 [--version X.Y.Z] [--out DIR]
 #         Scripts/make-cli.sh image [--version X.Y.Z] [--out DIR] [--stage REGISTRY/NAME] [--revision COMMIT]
-#         Scripts/make-cli.sh sources [--version X.Y.Z] [--out DIR] [--aports URL] [--distfiles URL]
+#         Scripts/make-cli.sh sources [--version X.Y.Z] [--out DIR] [--stage REGISTRY/NAME] [--aports URL] [--distfiles URL]
 #         Scripts/make-cli.sh push [--version X.Y.Z] [--out DIR] [--stage REGISTRY/NAME] [--repository REGISTRY/NAME]
 #         Scripts/make-cli.sh sums [--version X.Y.Z] [--out DIR] [--repository REGISTRY/NAME]
 #         Scripts/make-cli.sh notes [--version X.Y.Z] [--out DIR] [--repository REGISTRY/NAME]
