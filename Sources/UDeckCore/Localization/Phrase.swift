@@ -182,6 +182,12 @@ public enum Phrase: Sendable, Equatable {
     case permissionsDeclared
     case permissionsDeclaredHelp
     case permissionsPluginAsksTo(name: String)
+    /// The card's question about a plugin that asks for nothing and whose
+    /// code nobody verified: it is asked whether it may run at all.
+    case permissionsAsksNothingUnverified(name: String)
+    /// The card of a plugin held to its tree whose folder would not hash —
+    /// a file in it cannot be read: nothing can be decided for it.
+    case permissionsFolderUnreadable(name: String)
     case permissionsUnsandboxed
     case permissionsAllowAndRun
 
@@ -268,6 +274,9 @@ public enum Phrase: Sendable, Equatable {
 
     /// Where a plugin on this machine stands, as its row in Settings marks it.
     case pluginMarkVerified
+    /// From a branch or a pull request, exactly as installed: nobody
+    /// verified it.
+    case pluginMarkUnverified
     case pluginMarkOwnFolder
     case pluginMarkModified
     case pluginMarkMissing

@@ -31,7 +31,7 @@ struct PollLoopsTests {
                 settings: PluginSettings = PluginSettings(), polling: Bool = true,
                 quiet: Set<String> = []) -> [String: PollLoop] {
         PollLoops.wanted(plugins, placed: placed, grants: grants, settings: settings, polling: polling,
-                         isQuiet: { quiet.contains($0) })
+                         isQuiet: { quiet.contains($0) }, requiredTree: { _ in nil })
     }
 
     @Test("a loop for every placed, allowed poll plugin with an interval, none while nothing is polled")
@@ -154,7 +154,7 @@ struct ReverificationTests {
     func notBeforeTheCatalogue() {
         let installed = InstalledPlugins(plugins: ["uptime": record(checkedAgainst: head)])
         let plugins = [plugin("uptime")]
-        #expect(Reverification.folders(of: plugins, installed: installed) == ["uptime": plugins[0].directory])
+        #expect(Reverification.folders(of: plugins, installed: installed, recordsReadable: true) == ["uptime": plugins[0].directory])
         let trees: [String: String?] = ["uptime": tree]
 
         let atLaunch = Reverification.of(plugins, installed: installed, trees: trees, head: .notReadYet, now: now)
@@ -179,7 +179,7 @@ struct ReverificationTests {
     func linkedAndMissing() {
         let installed = InstalledPlugins(plugins: ["linked": record(checkedAgainst: head), "gone": record(checkedAgainst: head)])
         let plugins = [plugin("linked", linkedTo: "/work/linked"), plugin("own")]
-        #expect(Reverification.folders(of: plugins, installed: installed).isEmpty, "a working copy is never hashed")
+        #expect(Reverification.folders(of: plugins, installed: installed, recordsReadable: true).isEmpty, "a working copy is never hashed")
         let found = Reverification.of(plugins, installed: installed, trees: [:], head: .read(String(repeating: "d", count: 40)), now: now)
         #expect(found.standings == ["linked": .folderOfYourOwn, "own": .folderOfYourOwn, "gone": .missing])
         #expect(found.records == nil, "a linked plugin's record is not written")
@@ -265,7 +265,7 @@ struct VisibilityTests {
     let plugins = [plugin("linked", linkedTo: "/work/linked"), plugin("disk")]
     var loops: [String: PollLoop] {
         PollLoops.wanted(plugins, placed: identifiers("linked", "disk"), grants: PermissionGrants(),
-                         settings: PluginSettings(), polling: true, isQuiet: { _ in false })
+                         settings: PluginSettings(), polling: true, isQuiet: { _ in false }, requiredTree: { _ in nil })
     }
 
     @Test("shown: every plugin runs now and every loop starts afresh after it")

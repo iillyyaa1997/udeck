@@ -38,14 +38,18 @@ public enum PollLoops {
     /// The loops that should be running now, by plugin id: every `poll` plugin
     /// placed on a tab, allowed, not being quieted, with an interval — and none
     /// at all while nothing is polled (`polling`: the panel out of sight, and
-    /// polling while collapsed off).
+    /// polling while collapsed off). Allowed as the gate says with the tree
+    /// each plugin's decision is held to (`requiredTree`: nil for one held to
+    /// its version), so that code nobody verified runs only on a decision for
+    /// exactly what is on disk — asked of every caller, so that none forgets it.
     public static func wanted(
         _ plugins: [DiscoveredPlugin],
         placed: Set<PluginIdentifier>,
         grants: PermissionGrants,
         settings: PluginSettings,
         polling: Bool,
-        isQuiet: (String) -> Bool
+        isQuiet: (String) -> Bool,
+        requiredTree: (PluginIdentifier) -> String?
     ) -> [String: PollLoop] {
         guard polling else { return [:] }
         var loops: [String: PollLoop] = [:]
@@ -54,7 +58,8 @@ public enum PollLoops {
                   !isQuiet(manifest.id.rawValue),
                   placed.contains(manifest.id),
                   PermissionGate.launchDecision(for: manifest, grant: grants[manifest.id],
-                                                enabled: settings.isEnabled(manifest.id)).isAllowed,
+                                                enabled: settings.isEnabled(manifest.id),
+                                                requiredTree: requiredTree(manifest.id)).isAllowed,
                   let interval = manifest.interval, interval > 0
             else { continue }
             loops[manifest.id.rawValue] = PollLoop(plugin: plugin, grant: grants[manifest.id])

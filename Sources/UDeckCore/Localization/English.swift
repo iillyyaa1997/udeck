@@ -151,6 +151,8 @@ struct English: Vocabulary {
         case .permissionsDeclaredHelp:
             "uDeck shows you this and will not start the plugin without your agreement, but it cannot hold it against a running program — see the plugin documentation."
         case .permissionsPluginAsksTo(let name): "\(name) asks to:"
+        case .permissionsAsksNothingUnverified(let name): "\(name) asks for nothing, but its code is unverified"
+        case .permissionsFolderUnreadable(let name): "uDeck could not read every file in \(name)'s folder, so it does not run it"
         case .permissionsUnsandboxed:
             "uDeck runs this plugin as you, without a sandbox. Allowing it means agreeing to run this program; declining means uDeck never starts it."
         case .permissionsAllowAndRun: "Allow and run"
@@ -239,6 +241,7 @@ struct English: Vocabulary {
         case .catalogueRecordsBroken(let reason):
             "~/.udeck/installed.json cannot be read, so uDeck installs, updates and removes nothing until it can: \(reason)"
         case .pluginMarkVerified: "Verified"
+        case .pluginMarkUnverified: "Unverified"
         case .pluginMarkOwnFolder: "A folder of your own"
         case .pluginMarkModified: "Modified locally"
         case .pluginMarkMissing: "Missing"

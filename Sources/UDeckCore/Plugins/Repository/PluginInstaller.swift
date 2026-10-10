@@ -75,6 +75,13 @@ public struct InstallRequest: Codable, Equatable, Sendable {
     public var operation: Operation
     public var id: PluginIdentifier
     public var source: String
+    /// The source's own repository, where its default branch is: a copy of
+    /// the default branch is taken from there and nowhere else
+    /// (`PluginOrigin.mayBeTaken`).
+    public var sourceRepository: RepositoryAddress
+    /// The repository the files are taken from, and the line of its history
+    /// the copy follows — the button's (`ShownPlace.Step`), never assumed:
+    /// a copy from a pull request put back is a copy from that pull request.
     public var repository: RepositoryAddress
     public var ref: PluginRef
     public var commit: String
@@ -91,11 +98,12 @@ public struct InstallRequest: Codable, Equatable, Sendable {
     public var automatic: Bool
 
     public init(operation: Operation, id: PluginIdentifier, source: String = InstalledPlugins.officialSource,
-                repository: RepositoryAddress, ref: PluginRef, commit: String, folder: PluginListing,
-                version: String, headCommit: String?, automatic: Bool = false) {
+                sourceRepository: RepositoryAddress, repository: RepositoryAddress, ref: PluginRef, commit: String,
+                folder: PluginListing, version: String, headCommit: String?, automatic: Bool = false) {
         self.operation = operation
         self.id = id
         self.source = source
+        self.sourceRepository = sourceRepository
         self.repository = repository
         self.ref = ref
         self.commit = commit
@@ -104,6 +112,9 @@ public struct InstallRequest: Codable, Equatable, Sendable {
         self.headCommit = headCommit
         self.automatic = automatic
     }
+
+    /// Where the copy comes from.
+    public var origin: PluginOrigin { PluginOrigin(repository: repository, ref: ref) }
 }
 
 /// `intent.json`: a journal of one operation, in its staging folder, so that a
@@ -268,6 +279,10 @@ public struct PluginInstaller: Sendable {
     /// the catalogue; with them, every rule the catalogue row checks is checked
     /// again before a single file is requested.
     public func stage(_ request: InstallRequest, manifest: Data? = nil) async throws -> StagedInstall {
+        // A copy of the default branch is recorded as the source's own, and
+        // stands Verified: it is taken from the source's own repository, and a
+        // fork's default branch is not found there.
+        guard request.origin.mayBeTaken(forSourceAt: request.sourceRepository) else { throw ProviderError.notFound }
         _ = try loadRecords()
         let id = request.id.rawValue
         var before = RepositoryRules.listingRefusals(folder: id, listing: request.folder)
@@ -484,19 +499,23 @@ public struct PluginInstaller: Sendable {
             pinned = existing?.pinned ?? false
         }
         let at = now()
-        return InstalledRecord(
+        var record = InstalledRecord(
             source: request.source, repository: request.repository, ref: request.ref,
             commit: request.commit, tree: request.folder.tree, version: request.version,
             installedAt: at, pinned: pinned,
-            verification: PluginVerification(
-                status: request.source == InstalledPlugins.officialSource && request.ref.kind == "default"
-                    ? .verified : .modified,
-                by: request.source == InstalledPlugins.officialSource && request.ref.kind == "default"
-                    ? InstalledPlugins.officialSource : nil,
-                checkedAgainst: request.headCommit ?? request.commit, checkedAt: at),
+            verification: PluginVerification(status: .unverified, by: nil,
+                                             checkedAgainst: request.headCommit ?? request.commit, checkedAt: at),
             previous: previous,
             automatic: request.automatic ? true : nil
         )
+        // Verified only from the official source's default branch; a branch,
+        // a pull request — anything else — is code nobody verified, however
+        // it was put back: Reinstall and Back to of such a copy included.
+        if record.isOfficialDefault {
+            record.verification = PluginVerification(status: .verified, by: InstalledPlugins.officialSource,
+                                                     checkedAgainst: request.headCommit ?? request.commit, checkedAt: at)
+        }
+        return record
     }
 
     /// Step 7. With a copy in place: exchanged in one step, so at no moment is

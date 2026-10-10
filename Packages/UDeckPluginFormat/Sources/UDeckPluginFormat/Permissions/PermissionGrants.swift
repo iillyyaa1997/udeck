@@ -14,6 +14,15 @@ public struct PluginGrant: Codable, Equatable, Sendable {
     /// silently inheriting the old answer.
     public var decidedForVersion: String
 
+    /// The tree the plugin's folder hashed to when the decision was made —
+    /// git's id for the folder, the way uDeck hashes it — for code nobody
+    /// verified: a branch or a pull request, whose content changes under the
+    /// same version without anybody reviewing it. Such a decision holds only
+    /// for exactly that content (`PermissionGate`'s `requiredTree`). Absent
+    /// for a decision held to the version alone, and from every decision
+    /// written before there was such code; read back, those hold for no tree.
+    public var decidedForTree: String?
+
     /// Truncated to whole seconds.
     ///
     /// The file this is stored in uses ISO-8601 timestamps, which carry no
@@ -26,12 +35,23 @@ public struct PluginGrant: Codable, Equatable, Sendable {
         granted: Set<Capability> = [],
         denied: Set<Capability> = [],
         decidedForVersion: String,
+        decidedForTree: String? = nil,
         decidedAt: Date = Date()
     ) {
         self.granted = granted
         self.denied = denied
         self.decidedForVersion = decidedForVersion
+        self.decidedForTree = decidedForTree
         self.decidedAt = Date(timeIntervalSince1970: decidedAt.timeIntervalSince1970.rounded(.down))
+    }
+
+    /// Whether this decision is the one for `version` — and, when a tree is
+    /// required (`PermissionGate`), for exactly that tree too. An empty tree
+    /// is a folder not hashed yet, and no decision holds for it.
+    public func holds(forVersion version: String, tree requiredTree: String?) -> Bool {
+        guard decidedForVersion == version else { return false }
+        guard let requiredTree else { return true }
+        return !requiredTree.isEmpty && decidedForTree == requiredTree
     }
 }
 
@@ -56,7 +76,8 @@ public enum LaunchDecision: Equatable, Sendable {
     case allowed
 
     /// The operator has not been asked yet, or the plugin changed what it asks
-    /// for since they were.
+    /// for since they were. Nothing pending is a plugin that asks for nothing
+    /// and whose code nobody verified: it is asked whether it may run at all.
     case awaitingDecision(pending: [Capability])
 
     /// The operator refused something the plugin declared it needs.
@@ -72,23 +93,41 @@ public enum LaunchDecision: Equatable, Sendable {
 ///
 /// See `CapabilityEnforcement` for what "allowed" can and cannot mean here.
 public enum PermissionGate {
+    /// The tree to require of a folder whose decision is held to its tree
+    /// and which has not been hashed yet: no decision holds for it, so the
+    /// plugin waits until it is (`PluginGrant.holds`).
+    public static let treeNotHashedYet = ""
+
     /// May this plugin be launched at all?
     ///
     /// This is the enforcement that is genuinely real for a plugin's own
     /// process: it either runs with everything it declared, or it does not run.
     /// Launching a plugin with half its declared capabilities refused would be
     /// theatre — nothing would actually stop it from doing the rest.
+    ///
+    /// `requiredTree` is for code nobody verified — a branch, a pull request —
+    /// and is the tree its folder hashes to now (`treeNotHashedYet` until it
+    /// is hashed). Given, a decision counts only when it was made for exactly
+    /// that tree, and a plugin that asks for nothing is asked about too
+    /// (`awaitingDecision` with nothing pending): its code changes without
+    /// anybody reviewing it, and nothing else stands between it and the
+    /// operator's machine. Nil — a verified plugin, a folder of the
+    /// operator's own, a linked working copy, `udeck-plugin run` — and the
+    /// decision is held to the version, as it always was. A required tree
+    /// only ever asks for more: nothing that is allowed without one is
+    /// allowed by one that is not.
     public static func launchDecision(
         for manifest: PluginManifest,
         grant: PluginGrant?,
-        enabled: Bool
+        enabled: Bool,
+        requiredTree: String? = nil
     ) -> LaunchDecision {
         guard enabled else { return .disabled }
 
         let requested = manifest.permissions.capabilities
-        guard !requested.isEmpty else { return .allowed }
+        guard !requested.isEmpty || requiredTree != nil else { return .allowed }
 
-        guard let grant, grant.decidedForVersion == manifest.version else {
+        guard let grant, grant.holds(forVersion: manifest.version, tree: requiredTree) else {
             return .awaitingDecision(pending: requested)
         }
 
@@ -124,14 +163,17 @@ public enum PermissionGate {
     /// `launchDecision` applies. Without them a grant outlived what it was
     /// given for: version 1 asked for `exec: ["open"]` and got it, version 2
     /// replaced it asking for nothing, and the permission screen said the
-    /// plugin asks for nothing while its buttons still ran `open`.
+    /// plugin asks for nothing while its buttons still ran `open`. With a
+    /// `requiredTree`, as for `launchDecision`, it has to have been decided
+    /// for exactly that tree as well.
     public static func mayRun(
         _ action: CardAction,
         requestedBy manifest: PluginManifest,
-        grant: PluginGrant?
+        grant: PluginGrant?,
+        requiredTree: String? = nil
     ) -> Bool {
         guard let executable = action.run.first, !executable.isEmpty else { return false }
-        guard let grant, grant.decidedForVersion == manifest.version else { return false }
+        guard let grant, grant.holds(forVersion: manifest.version, tree: requiredTree) else { return false }
         let capability = Capability.exec(executable)
         guard manifest.permissions.capabilities.contains(capability) else { return false }
         return grant.granted.contains(capability)

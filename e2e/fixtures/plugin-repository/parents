@@ -1,0 +1,10 @@
+# The fixture commits off the main line, each with the fixture commit it was
+# made on: a pull request's head, a branch's commit. Each folder named here is
+# the whole repository at that commit, as for `history`; the fake
+# (e2e/guest/fake-github.py) hashes them into real git ids with that parent,
+# and serves them by id — a branch or a pull request in `state.json` points at
+# one by its name.
+#
+# pr3: pull request #3's head, made on c1 — uptime 1.0.1, asking for what 1.0.0
+# asks, and asks-nothing, a new plugin asking for no permission at all.
+pr3 c1

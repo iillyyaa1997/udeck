@@ -406,7 +406,11 @@ grant is decided against the `version` in your manifest, so bumping it re-asks �
 except when uDeck replaces a **Verified** copy from the official repository with
 another one asking for exactly the same permissions, which carries the decision
 to the new version ([Updating](plugin-repository.md#updating)) — and an action
-runs only when the manifest on disk *now* declares `exec` for that command. A version that drops a permission drops the buttons that used it, in
+runs only when the manifest on disk *now* declares `exec` for that command.
+A copy from a branch or a pull request — code nobody verified — is decided
+against its folder's content instead: every change to it asks again, under the
+same version too, and so does a plugin of that kind that asks for nothing
+([Consent for unverified code](plugin-repository.md#consent-for-unverified-code)). A version that drops a permission drops the buttons that used it, in
 the same release rather than the next one the operator happens to reinstall.
 
 **A relative path is resolved with symlinks followed, on both sides.** Declaring

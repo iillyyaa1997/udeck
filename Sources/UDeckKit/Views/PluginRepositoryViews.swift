@@ -433,6 +433,10 @@ struct InstalledRepositoryControls: View {
             Label(strings(.pluginMarkVerified), systemImage: "checkmark.seal.fill")
                 .font(.caption).foregroundStyle(.green)
                 .accessibilityIdentifier("plugin.\(id).mark")
+        case .unverified:
+            Label(strings(.pluginMarkUnverified), systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.orange)
+                .accessibilityIdentifier("plugin.\(id).mark")
         case .modifiedLocally:
             Label(strings(.pluginMarkModified), systemImage: "pencil")
                 .font(.caption).foregroundStyle(.orange)

@@ -206,10 +206,18 @@ struct DeckWindowView: View {
     @ViewBuilder
     private func card(for presentation: CardPresentation) -> some View {
         switch model.launchDecision(for: window.pluginID) {
+        case .awaitingDecision where model.folderWouldNotHash(window.pluginID):
+            // Held to its tree, and its folder would not hash: nothing can be
+            // decided for it, and it says so rather than waiting in silence.
+            note(strings(.permissionsFolderUnreadable(name: manifest?.name ?? window.pluginID.rawValue)), tint: theme.warn)
+        case .awaitingDecision where model.waitsForItsTree(window.pluginID):
+            // Code held to its tree is asked about once its folder is hashed,
+            // a moment after the plugins folder is read: never before.
+            note(presentation.note ?? "no data yet", tint: theme.dim)
         case .awaitingDecision(let pending):
             PermissionRequestView(
                 model: model, theme: theme, pluginID: window.pluginID,
-                manifest: manifest, pending: pending, shell: shell
+                manifest: manifest, pending: pending, tree: model.consentTree(for: window.pluginID), shell: shell
             )
         case .refused(let denied):
             note("Not running: you declined \(denied.map(\.summary).joined(separator: ", "))", tint: theme.warn)

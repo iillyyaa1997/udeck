@@ -23,15 +23,37 @@ public struct RepositoryAddress: Codable, Equatable, Hashable, Sendable, CustomS
 
 /// Which line of a repository's history a plugin follows.
 public struct PluginRef: Codable, Equatable, Hashable, Sendable {
-    /// `default` — the source's default branch. Reserved for later: `branch`,
-    /// `pr`, `commit`.
+    /// `default` — the source's default branch; `branch` — another branch;
+    /// `pr` — a pull request. Reserved for later: `commit`. A kind this uDeck
+    /// does not know is read as it is written, and is unverified.
     public var kind: String
-    /// The branch's name (`main`), or null.
+    /// The default branch's name (`main`) or null; the branch's name; the
+    /// pull request's number, as a string.
     public var name: String?
 
-    public init(kind: String = "default", name: String?) {
+    public init(kind: String = PluginRef.defaultKind, name: String?) {
         self.kind = kind
         self.name = name
+    }
+
+    public static let defaultKind = "default"
+    public static let branchKind = "branch"
+    public static let pullRequestKind = "pr"
+
+    /// The source's default branch, `name` when it is known.
+    public static func defaultBranch(_ name: String?) -> PluginRef { PluginRef(kind: defaultKind, name: name) }
+    /// A branch other than the default one.
+    public static func branch(_ name: String) -> PluginRef { PluginRef(kind: branchKind, name: name) }
+    /// A pull request, by its number.
+    public static func pullRequest(_ number: Int) -> PluginRef { PluginRef(kind: pullRequestKind, name: String(number)) }
+
+    /// Whether this is the source's default branch.
+    public var isDefault: Bool { kind == Self.defaultKind }
+
+    /// The pull request's number, for a pull request.
+    public var pullRequestNumber: Int? {
+        guard kind == Self.pullRequestKind, let name, let number = Int(name), number > 0 else { return nil }
+        return number
     }
 
     private enum CodingKeys: String, CodingKey { case kind, name }
@@ -53,7 +75,20 @@ public struct PluginVerification: Codable, Equatable, Sendable {
         case verified
         /// The folder no longer hashes to what was installed.
         case modified
-        // `trusted` and `unverified` come with stages 3 and 4.
+        /// Exactly what was installed, from a branch or a pull request: code
+        /// nobody verified.
+        case unverified
+        // `trusted` comes with stage 4.
+
+        /// A status this uDeck does not know — written by a later one — is
+        /// read as `modified`: the status is recomputed from the folder anyway
+        /// and never decides anything, and a word the file did not have when
+        /// this build was made is no reason to read the whole file as broken,
+        /// which would stop every install, update and removal.
+        public init(from decoder: any Decoder) throws {
+            let text = try decoder.singleValueContainer().decode(String.self)
+            self = Status(rawValue: text) ?? .modified
+        }
     }
 
     public var status: Status
@@ -92,12 +127,47 @@ public struct PreviousCopy: Codable, Equatable, Sendable {
     public var commit: String
     public var tree: String
     public var version: String
+    /// The repository it came from. Absent from every copy recorded before
+    /// there were branches and pull requests: those came from the source's
+    /// own repository.
+    public var repository: RepositoryAddress?
 
-    public init(ref: PluginRef, commit: String, tree: String, version: String) {
+    public init(ref: PluginRef, commit: String, tree: String, version: String, repository: RepositoryAddress? = nil) {
         self.ref = ref
         self.commit = commit
         self.tree = tree
         self.version = version
+        self.repository = repository
+    }
+
+    /// Where it came from — `source` being the source's own repository,
+    /// where a copy recorded without one came from.
+    public func origin(source: RepositoryAddress) -> PluginOrigin {
+        PluginOrigin(repository: repository ?? source, ref: ref)
+    }
+}
+
+/// Where a copy comes from: a repository, and the line of its history — what
+/// an install records, and what **Reinstall** and **Back to** take it from
+/// again, so that a copy from a pull request is put back as one, never as
+/// the default branch's.
+public struct PluginOrigin: Equatable, Sendable {
+    public var repository: RepositoryAddress
+    public var ref: PluginRef
+
+    public init(repository: RepositoryAddress, ref: PluginRef) {
+        self.repository = repository
+        self.ref = ref
+    }
+
+    /// Whether a copy is taken from here for the source whose own repository
+    /// is `source`: from a repository on its host, and the default branch
+    /// from `source` alone. A copy of the default branch is recorded as the
+    /// source's own, which stands Verified (`InstalledRecord.isOfficialDefault`):
+    /// another repository's default branch — a fork's — is never taken as one.
+    public func mayBeTaken(forSourceAt source: RepositoryAddress) -> Bool {
+        guard repository.provider == source.provider, repository.host == source.host else { return false }
+        return !ref.isDefault || repository == source
     }
 }
 
@@ -179,7 +249,19 @@ public struct InstalledRecord: Codable, Equatable, Sendable {
 
     /// This record's own copy, as the one a later install would replace.
     public var asPrevious: PreviousCopy {
-        PreviousCopy(ref: ref, commit: commit, tree: tree, version: version)
+        PreviousCopy(ref: ref, commit: commit, tree: tree, version: version, repository: repository)
+    }
+
+    /// Where this copy came from: what **Reinstall** puts back.
+    public var origin: PluginOrigin { PluginOrigin(repository: repository, ref: ref) }
+
+    /// Whether this copy came from the default branch of the official
+    /// source: every commit uDeck installs from there comes from that branch
+    /// or its history, and force pushes to it are refused, so the commit is
+    /// one somebody merged. Anything else — a branch, a pull request, a kind
+    /// of ref this uDeck does not know — is code nobody verified.
+    public var isOfficialDefault: Bool {
+        source == InstalledPlugins.officialSource && ref.isDefault
     }
 
     /// What the folder is now, given the tree it hashes to on disk and the
@@ -193,14 +275,11 @@ public struct InstalledRecord: Codable, Equatable, Sendable {
         guard treeOnDisk == tree else {
             return PluginVerification(status: .modified, by: nil, checkedAgainst: headCommit ?? commit, checkedAt: now)
         }
-        // Every commit uDeck installs from the official source comes from its
-        // default branch or that branch's history, and force pushes to it are
-        // refused, so the commit is one somebody merged.
-        if source == InstalledPlugins.officialSource && ref.kind == "default" {
+        if isOfficialDefault {
             return PluginVerification(status: .verified, by: InstalledPlugins.officialSource,
                                       checkedAgainst: headCommit ?? commit, checkedAt: now)
         }
-        return PluginVerification(status: .modified, by: nil, checkedAgainst: headCommit ?? commit, checkedAt: now)
+        return PluginVerification(status: .unverified, by: nil, checkedAgainst: headCommit ?? commit, checkedAt: now)
     }
 }
 
@@ -243,6 +322,9 @@ public struct InstalledPlugins: Codable, Equatable, Sendable {
 public enum PluginStanding: Equatable, Sendable {
     /// Installed from the official repository and still exactly what was merged.
     case verified
+    /// Installed from a branch or a pull request, and still exactly that:
+    /// nobody verified it.
+    case unverified
     /// Installed from a repository, and changed on disk since.
     case modifiedLocally
     /// Put into the plugins folder by anyone but uDeck. uDeck claims nothing.
@@ -264,7 +346,109 @@ public enum PluginStanding: Equatable, Sendable {
         guard let record else { return .folderOfYourOwn }
         guard folderExists else { return .missing }
         guard treeOnDisk == record.tree else { return .modifiedLocally }
-        return record.source == InstalledPlugins.officialSource && record.ref.kind == "default"
-            ? .verified : .modifiedLocally
+        return record.isOfficialDefault ? .verified : .unverified
+    }
+}
+
+/// What a plugin's permission decision is held to.
+///
+/// A verified copy, a folder of the operator's own and a linked working copy
+/// are decided once per `version`, as they always were. Code nobody verified —
+/// installed from a branch or a pull request — is decided per tree: every new
+/// content asks again, even when the plugin asks for nothing, because it
+/// changes without anybody reviewing it and there is no sandbox. The record's
+/// ref is used only to ask for more, never to allow: whatever it says, a
+/// copy that is not the official default branch's is held to its tree.
+public enum ConsentBasis: Equatable, Sendable {
+    case version
+    case tree
+
+    /// The basis of a plugin with `record` — none for a folder uDeck did not
+    /// install — whose folder is a link (`linked`) or not. A link is the
+    /// operator's own working copy, whatever record is left at its id.
+    ///
+    /// `recordsReadable` is whether `installed.json` could be read. While it
+    /// cannot, nothing says where any copy came from, and every folder that
+    /// is not a link is held to its tree: a broken file only ever asks for
+    /// more, never lets a branch's copy run on its version.
+    public static func of(_ record: InstalledRecord?, linked: Bool, recordsReadable: Bool) -> ConsentBasis {
+        guard !linked else { return .version }
+        guard recordsReadable else { return .tree }
+        guard let record, !record.isOfficialDefault else { return .version }
+        return .tree
+    }
+
+    /// The tree `PermissionGate` requires: none for a decision held to the
+    /// version; for one held to the tree, the tree its folder hashes to —
+    /// `hashed`, nil while it has not been hashed or would not hash — or,
+    /// until then, one no decision holds for, so that the plugin waits.
+    public func requiredTree(hashed: String?) -> String? {
+        switch self {
+        case .version: nil
+        case .tree: hashed ?? PermissionGate.treeNotHashedYet
+        }
+    }
+}
+
+/// What each plugin folder hashed to, for the decisions held to a tree
+/// (`ConsentBasis`) — and whether the plugins folder may have changed since.
+///
+/// Two questions, two answers. Whether a plugin's poll loop runs, and what
+/// its card shows, go by the tree last hashed (`lastHashed`): a change in the
+/// plugins folder that hashes to the same tree again stops no loop and
+/// changes no card. Whether a run starts now, and what a decision is made
+/// for, go by the folder as it is now (`now`): from a change the watcher saw
+/// until its hashing lands, nothing held to its tree runs or is decided —
+/// such a run is skipped, not failed (`skipsRun`).
+public struct HashedTrees: Equatable, Sendable {
+    /// By folder name: the tree, or nil for a folder that would not hash.
+    public private(set) var trees: [String: String?]
+    /// Whether the plugins folder was read to be hashed again, or a copy was
+    /// put in place, and that hashing has not landed.
+    public private(set) var inQuestion: Bool
+
+    public init(trees: [String: String?] = [:], inQuestion: Bool = false) {
+        self.trees = trees
+        self.inQuestion = inQuestion
+    }
+
+    /// Something in the plugins folder changed, or a copy was put in place:
+    /// until the next hashing lands, nothing held to its tree runs.
+    public mutating func mayHaveChanged() {
+        inQuestion = true
+    }
+
+    /// A hashing landed: what the folders hash to now.
+    public mutating func hashed(_ trees: [String: String?]) {
+        self.trees = trees
+        inQuestion = false
+    }
+
+    /// The tree the gate requires of `id`, held to `basis`, as last hashed:
+    /// what its loop is planned on and its card shows.
+    public func lastHashed(_ id: String, basis: ConsentBasis) -> String? {
+        basis.requiredTree(hashed: trees[id] ?? nil)
+    }
+
+    /// The same for a run that starts now, or a decision made now: while
+    /// the folder may have changed since it was hashed, one no decision
+    /// holds for.
+    public func now(_ id: String, basis: ConsentBasis) -> String? {
+        guard basis == .tree, inQuestion else { return lastHashed(id, basis: basis) }
+        return PermissionGate.treeNotHashedYet
+    }
+
+    /// Whether a run of `id` that starts now is skipped — not run, and not
+    /// recorded as a failure: its folder is held to its tree and is not
+    /// hashed, or may have changed since. Its card says why it waits.
+    public func skipsRun(_ id: String, basis: ConsentBasis) -> Bool {
+        now(id, basis: basis) == PermissionGate.treeNotHashedYet
+    }
+
+    /// Whether `id`'s folder was hashed and would not hash — a file that
+    /// cannot be read: no decision can be held to it.
+    public func wouldNotHash(_ id: String) -> Bool {
+        guard let tree = trees[id] else { return false }
+        return tree == nil
     }
 }

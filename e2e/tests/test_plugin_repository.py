@@ -86,6 +86,46 @@ def test_the_fixtures_are_what_the_checks_are_written_against():
         assert json.loads((root / commit / "udeck-plugins.json").read_text())["format"] == 1
 
 
+def test_pull_request_3s_head_is_c1_with_uptime_changed_and_a_plugin_that_asks_for_nothing():
+    """`pr3`, made on c1: uptime 1.0.1 asking for what 1.0.0 asks, and asks-nothing, asking for no permission at all."""
+    root = plugin_repository.FIXTURES
+    repository = fake_github.Repository(str(root))
+    assert repository.parents == {"pr3": "c1"}
+    assert repository.commits["pr3"].parent is repository.commits["c1"]
+    plugins = root / "pr3" / "plugins"
+    assert sorted(p.name for p in plugins.iterdir()) == ["asks-nothing", "future-api", "future-udeck", "linked", "uptime"]
+    uptime = json.loads((plugins / "uptime" / "manifest.json").read_text())
+    assert uptime["version"] == "1.0.1" and uptime["permissions"] == {"exec": ["sysctl", "./hold.sh"]}
+    assert "version=1.0.1\n" in (plugins / "uptime" / "uptime.sh").read_text()
+    nothing = json.loads((plugins / "asks-nothing" / "manifest.json").read_text())
+    assert nothing["id"] == "asks-nothing" and "permissions" not in nothing and nothing["run"] == ["./run.sh"]
+    assert os.access(plugins / "asks-nothing" / "run.sh", os.X_OK)
+    assert (plugins / "asks-nothing" / "README.md").is_file()
+    # Everything else is c1's, byte for byte: the folders' trees say so.
+    c1, pr3 = repository.commits["c1"].snapshot, repository.commits["pr3"].snapshot
+    for path in ("udeck-plugins.json", "plugins/future-api", "plugins/future-udeck", "plugins/linked"):
+        assert c1.at(path) == pr3.at(path), path
+    for path in ("plugins/uptime/README.md", "plugins/uptime/hold.sh", "plugins/uptime/manifest.ru.json"):
+        assert c1.at(path) == pr3.at(path), path
+    assert c1.at("plugins/uptime") != pr3.at("plugins/uptime")
+
+
+def test_a_parents_file_that_names_what_is_not_there_is_refused(tmp_path):
+    root = tmp_path / "repository"
+    shutil.copytree(plugin_repository.FIXTURES, root, symlinks=True)
+    for text, complaint in (
+        ("pr3 c9\n", "which no line before it names"),
+        ("pr3\n", "is not a commit and the commit it was made on"),
+        ("pr3 c1\npr3 c1\n", "named twice"),
+        ("c2 c1\n", "named twice"),
+    ):
+        (root / "parents").write_text(text)
+        with pytest.raises(ValueError, match=complaint):
+            fake_github.Repository(str(root))
+    (root / "parents").unlink()
+    assert fake_github.Repository(str(root)).parents == {}, "no file: no commit off the main line"
+
+
 # --- Git's hashing, against git ------------------------------------------------------------
 
 
@@ -130,6 +170,25 @@ def test_every_fixture_commit_hashes_as_git_hashes_it(tmp_path):
         made = git(*args, cwd=work, env=env)
         assert commit.sha == made, name
         parent = made
+    # Off the main line: each with the commit it was made on as its parent.
+    assert repository.parents, "the fixtures have commits off the main line"
+    for name, on in repository.parents.items():
+        commit = repository.commits[name]
+        for child in work.iterdir():
+            if child.name != ".git":
+                shutil.rmtree(child) if child.is_dir() and not child.is_symlink() else child.unlink()
+        shutil.copytree(plugin_repository.FIXTURES / name, work, symlinks=True, dirs_exist_ok=True)
+        git("add", "-A", cwd=work)
+        tree = git("write-tree", cwd=work)
+        assert commit.snapshot.root == tree, name
+        stamp = f"{commit.when} +0000"
+        env = {
+            "GIT_AUTHOR_NAME": "uDeck lab", "GIT_AUTHOR_EMAIL": "lab@udeck.invalid", "GIT_AUTHOR_DATE": stamp,
+            "GIT_COMMITTER_NAME": "uDeck lab", "GIT_COMMITTER_EMAIL": "lab@udeck.invalid", "GIT_COMMITTER_DATE": stamp,
+        }  # fmt: skip
+        made = git("commit-tree", tree, "-m", commit.message, "-p", repository.commits[on].sha, cwd=work, env=env)
+        assert commit.sha == made, name
+        assert commit.when > max(repository.commits[main].when for main in repository.names)
 
 
 def test_a_folder_sorts_as_if_its_name_ended_in_a_slash():
@@ -362,6 +421,101 @@ def test_the_lab_can_ask_the_fake_what_it_holds_and_what_it_was_told(served):
     assert state["main"] == "c2" and state["alter"] == ["x"] and state["limit_until"] is None
     _, _, facts = served.json("/lab/facts")
     assert facts["history"] == ["c1", "c2", "c3"] and len(facts["commits"]["c2"]["sha"]) == 40
+    assert facts["parents"] == {"pr3": "c1"} and len(facts["commits"]["pr3"]["sha"]) == 40
+    assert state["branches"] == {} and state["pulls"] == {}
+
+
+# --- Branches, pull requests, commits off the main line -----------------------------------
+
+
+SHA_ONLY = {"Accept": "application/vnd.github.sha"}
+
+
+def test_a_branch_is_its_head_by_name_or_refs_heads_with_its_etag_and_304(served):
+    facts = served.fake.repository.facts()["commits"]
+    pr3, c1 = facts["pr3"]["sha"], facts["c1"]["sha"]
+    served.state(main="c1", branches={"fix/uptime": "pr3"})
+    # uDeck asks refs/heads/{branch} as one path segment, the slashes escaped.
+    for ref in ("refs%2Fheads%2Ffix%2Fuptime", "refs/heads/fix/uptime", "fix%2Fuptime", "fix/uptime"):
+        status, headers, body = served.get(f"{API}/commits/{ref}", SHA_ONLY)
+        assert (status, body.decode(), headers["ETag"]) == (200, pr3, f'"{pr3}"'), ref
+    status, _, body = served.get(f"{API}/commits/refs%2Fheads%2Ffix%2Fuptime", {**SHA_ONLY, "If-None-Match": f'"{pr3}"'})
+    assert status == 304 and body == b""
+    # The default branch by its full name too; and a branch that is not there is GitHub's 422.
+    assert served.get(f"{API}/commits/refs%2Fheads%2Fmain", SHA_ONLY)[2].decode() == c1
+    assert served.get(f"{API}/commits/refs%2Fheads%2Fgone", SHA_ONLY)[0] == 422
+    assert served.get(f"{API}/commits/refs%2Fheads%2F{c1}", SHA_ONLY)[0] == 422, "an id is no branch's name"
+    assert served.get(f"{API}/commits/refs%2Ftags%2Fv1", SHA_ONLY)[0] == 422
+    # The lab moves the branch, or deletes it: the same question, another answer.
+    served.state(main="c1", branches={"fix/uptime": "c1"})
+    status, _, body = served.get(f"{API}/commits/refs%2Fheads%2Ffix%2Fuptime", {**SHA_ONLY, "If-None-Match": f'"{pr3}"'})
+    assert status == 200 and body.decode() == c1
+    served.state(main="c1")
+    assert served.get(f"{API}/commits/refs%2Fheads%2Ffix%2Fuptime", SHA_ONLY)[0] == 422
+
+
+def test_a_pull_requests_head_is_refs_pull_n_head_even_when_its_branch_is_gone(served):
+    facts = served.fake.repository.facts()["commits"]
+    pr3 = facts["pr3"]["sha"]
+    served.state(main="c1", pulls={"3": {"head": "pr3", "head_repo": "someone/udeck-plugins", "head_ref": "fix"}})
+    status, headers, body = served.get(f"{API}/commits/refs%2Fpull%2F3%2Fhead", SHA_ONLY)
+    assert (status, body.decode(), headers["ETag"]) == (200, pr3, f'"{pr3}"')
+    assert served.get(f"{API}/commits/refs%2Fpull%2F3%2Fhead", {**SHA_ONLY, "If-None-Match": f'"{pr3}"'})[0] == 304
+    assert served.get(f"{API}/commits/refs%2Fpull%2F4%2Fhead", SHA_ONLY)[0] == 422
+
+
+def test_a_pull_request_says_its_head_its_state_its_merge_and_where_it_came_from(served):
+    facts = served.fake.repository.facts()["commits"]
+    pr3, c1, c2 = facts["pr3"]["sha"], facts["c1"]["sha"], facts["c2"]["sha"]
+    served.state(main="c1", pulls={"3": {"head": "pr3", "head_repo": "someone/udeck-plugins", "head_ref": "fix",
+                                         "title": "Uptime 1.0.1, and a plugin that asks for nothing"}})  # fmt: skip
+    status, headers, body = served.json(f"{API}/pulls/3")
+    assert status == 200 and headers["x-ratelimit-remaining"] == "59", "a pull request is one API request"
+    assert body["number"] == 3 and body["state"] == "open" and body["merged"] is False
+    assert body["merge_commit_sha"] is None and body["merged_at"] is None
+    assert body["head"]["sha"] == pr3 and body["head"]["ref"] == "fix"
+    assert body["head"]["repo"] == {"full_name": "someone/udeck-plugins", "fork": True}
+    assert body["base"]["ref"] == "main" and body["base"]["sha"] == c1
+    assert body["title"] == "Uptime 1.0.1, and a plugin that asks for nothing"
+    # Asked again with its ETag, unchanged: 304, which spends the limit as GitHub's does without a token.
+    status, again, _ = served.get(f"{API}/pulls/3", {"If-None-Match": headers["ETag"]})
+    assert status == 304 and again["x-ratelimit-remaining"] == "58"
+    # Merged as c2; and from the repository itself, the fork's name absent.
+    served.state(main="c2", pulls={"3": {"head": "pr3", "state": "closed", "merged": True, "merge_commit": "c2"}})
+    _, _, body = served.json(f"{API}/pulls/3")
+    assert body["state"] == "closed" and body["merged"] is True and body["merge_commit_sha"] == c2
+    assert body["head"]["repo"] == {"full_name": REPOSITORY, "fork": False} and body["merged_at"]
+    # Closed unmerged: no merge commit, whatever the lab wrote; a deleted fork: no repository.
+    served.state(main="c1", pulls={"3": {"head": "pr3", "state": "closed", "merged": False, "merge_commit": "c2",
+                                         "head_repo": None}})  # fmt: skip
+    _, _, body = served.json(f"{API}/pulls/3")
+    assert body["merged"] is False and body["merge_commit_sha"] is None and body["head"]["repo"] is None
+    assert body["head"]["sha"] == pr3, "its head is still read through the repository it was opened against"
+    # A pull request the lab did not name, or one that is no number.
+    assert served.get(f"{API}/pulls/9")[0] == 404
+    assert served.get(f"{API}/pulls/three")[0] == 404
+
+
+def test_a_commit_off_the_main_line_is_served_by_its_id_listing_files_and_history(served):
+    facts = served.fake.repository.facts()["commits"]
+    pr3, c1 = facts["pr3"], facts["c1"]["sha"]
+    served.state(main="c1")
+    status, _, body = served.json(f"{API}/git/trees/{pr3['sha']}?recursive=1")
+    entries = {entry["path"]: entry for entry in body["tree"]}
+    assert status == 200 and body["sha"] == pr3["tree"]
+    assert entries["plugins/asks-nothing"]["sha"] == pr3["paths"]["plugins/asks-nothing"]["sha"]
+    assert entries["plugins/asks-nothing/run.sh"]["mode"] == "100755"
+    status, _, data = served.get(f"{RAW}/{pr3['sha']}/plugins/asks-nothing/manifest.json")
+    assert status == 200 and fake_github.blob_id(data) == pr3["paths"]["plugins/asks-nothing/manifest.json"]["sha"]
+    # Not on main, so not in main's files.
+    assert served.get(f"{RAW}/{c1}/plugins/asks-nothing/manifest.json")[0] == 404
+    _, _, body = served.json(f"{API}/commits/{pr3['sha']}")
+    assert body["parents"] == [{"sha": c1}]
+    # Its history, parent by parent: uptime changed at pr3 and at c1, and c2 is not on the way.
+    _, _, body = served.json(f"{API}/commits?sha={pr3['sha']}&path=plugins/uptime")
+    assert [commit["sha"] for commit in body] == [pr3["sha"], c1]
+    _, _, body = served.json(f"{API}/commits?sha=main&path=plugins/asks-nothing")
+    assert body == []
 
 
 # --- Reading the log -----------------------------------------------------------------------

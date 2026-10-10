@@ -18,11 +18,17 @@ struct PermissionRequestView: View {
     var pluginID: PluginIdentifier
     var manifest: PluginManifest?
     var pending: [Capability]
+    /// For code nobody verified, the tree its folder hashed to when this was
+    /// drawn: what **Allow** grants for, and nothing else (`ConsentBasis`).
+    var tree: String?
     @Bindable var shell: ShellState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(strings(.permissionsPluginAsksTo(name: manifest?.name ?? pluginID.rawValue)))
+            // Nothing pending is a plugin that asks for nothing and whose code
+            // nobody verified: it is asked whether it may run at all.
+            Text(pending.isEmpty ? strings(.permissionsAsksNothingUnverified(name: manifest?.name ?? pluginID.rawValue))
+                                 : strings(.permissionsPluginAsksTo(name: manifest?.name ?? pluginID.rawValue)))
                 .font(theme.bodyFont)
                 .foregroundStyle(theme.text)
 
@@ -49,7 +55,7 @@ struct PermissionRequestView: View {
             HStack(spacing: 7) {
                 Button(strings(.permissionsAllowAndRun)) {
                     shell.onInteract()
-                    model.decidePermissions(for: pluginID, allow: true, shown: pending)
+                    model.decidePermissions(for: pluginID, allow: true, shown: pending, shownTree: tree)
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
                 // Identifiers, not titles, for whatever drives the panel from
@@ -59,7 +65,7 @@ struct PermissionRequestView: View {
 
                 Button(strings(.actionDecline)) {
                     shell.onInteract()
-                    model.decidePermissions(for: pluginID, allow: false, shown: pending)
+                    model.decidePermissions(for: pluginID, allow: false, shown: pending, shownTree: tree)
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
                 .accessibilityIdentifier("consent.\(pluginID.rawValue).decline")

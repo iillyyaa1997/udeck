@@ -264,13 +264,24 @@ public enum ShownPlace {
         /// The warning, of what is there now; nothing is done.
         case ask(Place)
         /// `operation` of the plugin's folder as the catalogue lists it at
-        /// `commit`: **Install**, **Replace…**, **Update**, **Switch to**.
-        case install(InstallRequest.Operation, commit: String, folder: PluginListing, version: String)
-        /// `operation` at `commit`, whose listing is read first:
-        /// **Reinstall**, **Back to** and an earlier version.
-        case atCommit(InstallRequest.Operation, commit: String, version: String)
+        /// `commit`: **Install**, **Replace…**, **Update**, **Switch to** —
+        /// `from` the catalogue's repository and its default branch.
+        case install(InstallRequest.Operation, commit: String, folder: PluginListing, version: String,
+                     from: PluginOrigin)
+        /// `operation` at `commit`, whose listing is read first, `from` the
+        /// repository and the line of history the copy belongs to:
+        /// **Reinstall** and **Back to** where the copy came from — a pull
+        /// request's copy stays one — and an earlier version from the
+        /// default branch.
+        case atCommit(InstallRequest.Operation, commit: String, version: String, from: PluginOrigin)
         /// **Remove**.
         case remove
+    }
+
+    /// Where the catalogue's copies come from: its repository, at its default
+    /// branch.
+    static func origin(of catalogue: Catalogue) -> PluginOrigin {
+        PluginOrigin(repository: catalogue.address, ref: .defaultBranch(catalogue.branch))
     }
 
     /// **Install** — or **Replace…** over a folder of the operator's own or a
@@ -286,7 +297,8 @@ public enum ShownPlace {
         if case .ask(let place) = press(.install, shown: shown, now: now) { return .ask(place) }
         let operation: InstallRequest.Operation = installed.plugins[id] != nil
             ? .update : (PluginInstaller.folderIsTaken(id, in: paths) ? .replace : .install)
-        return .install(operation, commit: catalogue.commit, folder: entry.listing, version: version)
+        return .install(operation, commit: catalogue.commit, folder: entry.listing, version: version,
+                        from: origin(of: catalogue))
     }
 
     /// **Update**, or **Switch to** a version the repository went back to:
@@ -299,37 +311,48 @@ public enum ShownPlace {
         let now = Place.now(id, in: paths, record: installed.plugins[id],
                             bringing: .atHead(version: version, tree: entry.listing.tree))
         if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
-        return .install(.update, commit: catalogue.commit, folder: entry.listing, version: version)
+        return .install(.update, commit: catalogue.commit, folder: entry.listing, version: version,
+                        from: origin(of: catalogue))
     }
 
     /// **Reinstall**: what the record says was installed, put back — the
-    /// record's commit is the copy.
+    /// record's commit is the copy, from where the record says it came: a
+    /// copy from a pull request is put back as one, never as the default
+    /// branch's, and so stays unverified.
     public static func reinstall(_ id: String, in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?) -> Step {
         guard let record = installed.plugins[id] else { return .nothing }
-        return atCommit(.reinstall, id: id, commit: record.commit, version: record.version, in: paths, installed: installed,
-                        shown: shown)
+        return atCommit(.reinstall, id: id, commit: record.commit, version: record.version, from: record.origin,
+                        in: paths, installed: installed, shown: shown)
     }
 
-    /// **Back to** the copy this one replaced.
-    public static func backToPrevious(_ id: String, in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?) -> Step {
+    /// **Back to** the copy this one replaced, from where it came — `source`
+    /// being the source's own repository, where a copy recorded without one
+    /// came from.
+    public static func backToPrevious(_ id: String, source: RepositoryAddress, in paths: UDeckPaths,
+                                      installed: InstalledPlugins, shown: Place?) -> Step {
         guard let previous = installed.plugins[id]?.previous else { return .nothing }
-        return atCommit(.earlier, id: id, commit: previous.commit, version: previous.version, in: paths, installed: installed,
-                        shown: shown)
+        return atCommit(.earlier, id: id, commit: previous.commit, version: previous.version,
+                        from: previous.origin(source: source), in: paths, installed: installed, shown: shown)
     }
 
-    /// An earlier version, chosen from the folder's history.
-    public static func earlier(_ id: String, line: PluginHistory.Line, in paths: UDeckPaths, installed: InstalledPlugins,
-                               shown: Place?) -> Step {
-        atCommit(.earlier, id: id, commit: line.commit, version: line.version, in: paths, installed: installed, shown: shown)
+    /// An earlier version, chosen from the folder's history — which is the
+    /// history of `source`'s default branch, `branch`, whatever the copy on
+    /// disk came from: a version is something that branch had.
+    public static func earlier(_ id: String, line: PluginHistory.Line, source: RepositoryAddress, branch: String?,
+                               in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?) -> Step {
+        atCommit(.earlier, id: id, commit: line.commit, version: line.version,
+                 from: PluginOrigin(repository: source, ref: .defaultBranch(branch)),
+                 in: paths, installed: installed, shown: shown)
     }
 
     /// A copy replaced by `version` at `commit`: the commit its warning names
     /// is the one the files come from.
     static func atCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
-                         in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?) -> Step {
+                         from origin: PluginOrigin, in paths: UDeckPaths, installed: InstalledPlugins,
+                         shown: Place?) -> Step {
         let now = Place.now(id, in: paths, record: installed.plugins[id], bringing: .atCommit(version: version, commit: commit))
         if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
-        return .atCommit(operation, commit: commit, version: version)
+        return .atCommit(operation, commit: commit, version: version, from: origin)
     }
 
     /// **Remove**: nothing comes, and it always asks first.
@@ -349,11 +372,56 @@ public enum ShownPlace {
     /// linked working copy's, say — asking for one command more is asked about
     /// again rather than granted unseen. **Decline** needs no such test:
     /// refusing what was not shown only keeps the plugin from running.
-    public static func allows(shown: [Capability], requested: [Capability], grant: PluginGrant?, version: String) -> Bool {
-        let held = grant.flatMap { $0.decidedForVersion == version ? $0.granted : nil } ?? []
+    ///
+    /// For code nobody verified the decision is held to its tree
+    /// (`ConsentBasis`): `requiredTree` is the tree its folder hashes to now,
+    /// and **Allow** grants only when that is the tree the card showed
+    /// (`shownTree`), byte for byte — content changed while the card was up
+    /// is asked about again — and never before the folder is hashed. What is
+    /// held already is what was decided for that tree.
+    public static func allows(shown: [Capability], requested: [Capability], grant: PluginGrant?, version: String,
+                              shownTree: String? = nil, requiredTree: String? = nil) -> Bool {
+        if let requiredTree {
+            guard !requiredTree.isEmpty, let shownTree, same(shownTree, requiredTree) else { return false }
+        }
+        let held = grant.flatMap { $0.holds(forVersion: version, tree: requiredTree) ? $0.granted : nil } ?? []
         return requested.allSatisfy { capability in
             held.contains(capability) || shown.contains { same($0, capability) }
         }
+    }
+
+    /// What a press of **Allow** or **Decline** records.
+    public enum Decision: Equatable, Sendable {
+        /// Nothing: **Allow** of more than was shown, or of content that is
+        /// not what was shown (`allows`), or anything about a folder not
+        /// hashed yet — the card asks about what is there now.
+        case nothing
+        /// This decision, in place of the one there was.
+        case record(PluginGrant)
+        /// Switched off: **Decline** of a plugin held to its tree that asks
+        /// for nothing — a decision with nothing in it would let it run, and
+        /// switched off it does not; switched on again, it asks again.
+        case switchOff
+    }
+
+    /// What **Allow** (`allow`) or **Decline** of `manifest`'s request
+    /// records, given what the card or Settings listed (`shown`) and the tree
+    /// it showed (`shownTree`), the decision there was, and the tree the
+    /// decision is held to (`requiredTree`, nil for one held to the version;
+    /// `PermissionGate.treeNotHashedYet` while the folder is not hashed). The
+    /// decision covers everything the manifest asks for now, and keeps the
+    /// version and the tree it was made for.
+    public static func decide(allow: Bool, shown: [Capability], shownTree: String?, manifest: PluginManifest,
+                              grant: PluginGrant?, requiredTree: String?, at date: Date = Date()) -> Decision {
+        let requested = manifest.permissions.capabilities
+        if allow, !allows(shown: shown, requested: requested, grant: grant, version: manifest.version,
+                          shownTree: shownTree, requiredTree: requiredTree) {
+            return .nothing
+        }
+        if requiredTree == PermissionGate.treeNotHashedYet { return .nothing }
+        if !allow, requiredTree != nil, requested.isEmpty { return .switchOff }
+        return .record(PluginGrant(granted: allow ? Set(requested) : [], denied: allow ? [] : Set(requested),
+                                   decidedForVersion: manifest.version, decidedForTree: requiredTree, decidedAt: date))
     }
 
     // MARK: - By bytes

@@ -39,6 +39,67 @@ public struct CommitSummary: Codable, Equatable, Sendable {
     }
 }
 
+/// One pull request, as uDeck reads it: where its head is, and whether it
+/// was merged or closed. The fork it came from and its title are for showing
+/// only — a fork can be deleted, and its pull request's head is still read
+/// through the repository it was opened against, by commit.
+public struct PullRequest: Equatable, Sendable {
+    public enum State: String, Sendable {
+        case open
+        case closed
+    }
+
+    public var number: Int
+    public var state: State
+    public var merged: Bool
+    /// The commit it was merged as, on the branch it was merged into — only
+    /// when it was merged: the host's word for an open pull request is a
+    /// test merge, which no branch has.
+    public var mergeCommit: String?
+    /// The commit its head is at.
+    public var head: String
+    /// The head's branch, in the repository it came from.
+    public var headRef: String
+    /// That repository, `owner/repo` — nil when it was deleted.
+    public var headRepository: String?
+    public var title: String
+
+    public init(number: Int, state: State, merged: Bool, mergeCommit: String?, head: String, headRef: String,
+                headRepository: String?, title: String) {
+        self.number = number
+        self.state = state
+        self.merged = merged
+        self.mergeCommit = mergeCommit
+        self.head = head
+        self.headRef = headRef
+        self.headRepository = headRepository
+        self.title = title
+    }
+
+    /// GitHub's answer to `GET /repos/{o}/{r}/pulls/{n}`, or nil when it is
+    /// not one: a number other than the one asked for, a head that is not a
+    /// commit id, a state that is neither open nor closed.
+    static func read(_ data: Data, asked number: Int) -> PullRequest? {
+        struct Repository: Decodable { var full_name: String? }
+        struct Head: Decodable { var sha: String; var ref: String?; var repo: Repository? }
+        struct Answer: Decodable {
+            var number: Int
+            var state: String
+            var merged: Bool?
+            var merge_commit_sha: String?
+            var title: String?
+            var head: Head
+        }
+        guard let answer = try? JSONDecoder().decode(Answer.self, from: data), answer.number == number,
+              let state = State(rawValue: answer.state), GitHash.isObjectID(answer.head.sha) else { return nil }
+        let merged = answer.merged ?? false
+        let mergeCommit = merged ? answer.merge_commit_sha.flatMap { GitHash.isObjectID($0) ? $0 : nil } : nil
+        return PullRequest(number: number, state: state, merged: merged, mergeCommit: mergeCommit,
+                           head: answer.head.sha, headRef: answer.head.ref ?? "",
+                           headRepository: answer.head.repo?.full_name, title: answer.title ?? "")
+    }
+}
+
 /// What uDeck asks of a repository host. GitHub implements it now; GitLab's
 /// client implements the same questions in stage 4, through its own API.
 public protocol RepositoryProvider: Sendable {
@@ -55,6 +116,8 @@ public protocol RepositoryProvider: Sendable {
     func file(at path: String, commit: String) async throws -> Data
     /// The commits on `branch` that changed `path`, newest first.
     func commits(touching path: String, on branch: String) async throws -> [CommitSummary]
+    /// Pull request `number`: its head, and whether it was merged or closed.
+    func pull(_ number: Int) async throws -> PullRequest
 
     /// Where a person reads a folder at a commit, in the browser.
     func folderPage(_ path: String, commit: String) -> URL?
@@ -250,6 +313,17 @@ public struct GitHubClient: RepositoryProvider {
             let text = commit.commit?.committer?.date ?? commit.commit?.author?.date
             return CommitSummary(sha: commit.sha, date: text.flatMap { dates.date(from: $0) })
         }
+    }
+
+    /// `GET /repos/{o}/{r}/pulls/{n}` — one request, which says the head,
+    /// the state and the merge together; a pull request that is not there
+    /// is `notFound`.
+    public func pull(_ number: Int) async throws -> PullRequest {
+        let (data, _) = try await api("\(repositoryPath)/pulls/\(number)")
+        guard let pull = PullRequest.read(data, asked: number) else {
+            throw ProviderError.badAnswer("pull request #\(number) could not be read")
+        }
+        return pull
     }
 
     public func folderPage(_ path: String, commit: String) -> URL? {

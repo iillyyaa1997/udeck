@@ -169,7 +169,14 @@ public struct CatalogueRefresher: Sendable {
     /// stored. A folder with the same tree as before has, byte for byte, the
     /// same manifest, so a refresh after one merge fetches one manifest.
     private func fetchMissingBlobs(_ listing: CommitListing, language: String) async throws {
-        for folder in listing.pluginFolders {
+        try await fetchManifests(of: listing, folders: listing.pluginFolders, language: language)
+    }
+
+    /// The manifests of `folders` of a listing, and their translations into
+    /// `language`, as a refresh fetches them: by commit, from the raw host,
+    /// each checked against its blob id — the ones not stored already.
+    public func fetchManifests(of listing: CommitListing, folders: [String], language: String) async throws {
+        for folder in folders {
             guard let plugin = listing.plugins[folder] else { continue }
             for name in [PluginDiscovery.manifestFilename, "manifest.\(language.lowercased()).json"] {
                 guard let file = plugin.file(at: name), store.blob(file.sha) == nil else { continue }

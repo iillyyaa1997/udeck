@@ -136,7 +136,8 @@ struct ActionProcessesTests {
     }
 
     func request(_ repository: FakeRepository, _ operation: InstallRequest.Operation, version: String) -> InstallRequest {
-        InstallRequest(operation: operation, id: PluginIdentifier(rawValue: "uptime")!, repository: .official,
+        InstallRequest(operation: operation, id: PluginIdentifier(rawValue: "uptime")!, sourceRepository: .official,
+                       repository: .official,
                        ref: PluginRef(name: "main"), commit: repository.commit, folder: repository.plugin("uptime"),
                        version: version, headCommit: repository.commit)
     }

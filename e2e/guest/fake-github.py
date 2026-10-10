@@ -12,9 +12,11 @@ do) — so a lab build of uDeck is pointed here through its
 `<base>/raw`; `builds.Builder._verify` refuses a build that says anything else).
 
 **Its content is fixture folders, one per commit** (`e2e/fixtures/plugin-repository/`):
-a folder per commit, a file listing them oldest first (`history`), and nothing
-else. The fake computes real git blob, tree and commit ids from them itself —
-there is no git in the guest — so a plugin installed from it hashes, in uDeck's
+a folder per commit, a file listing the main line oldest first (`history`),
+each the parent of the next, and a file naming the commits off it with the
+commit each was made on (`parents`) — a pull request's head, a branch's commit.
+The fake computes real git blob, tree and commit ids from them itself — there
+is no git in the guest — so a plugin installed from it hashes, in uDeck's
 Swift, to the id this Python gave it, or the install is refused. Two
 independent implementations of git's hashing have to agree before any check
 passes; the lab's own tests hold this one against git itself.
@@ -24,9 +26,13 @@ passes; the lab's own tests hold this one against git itself.
 
     GET /api/repos/{o}/{r}                               the default branch
     GET /api/repos/{o}/{r}/commits/{ref}                 a commit; the bare SHA, an ETag and 304
-                                                         with Accept: application/vnd.github.sha
-    GET /api/repos/{o}/{r}/commits?sha=&path=&per_page=  the commits that changed a path
-    GET /api/repos/{o}/{r}/git/trees/{sha}[?recursive=1] a listing
+                                                         with Accept: application/vnd.github.sha. {ref}
+                                                         is main, a branch — bare or refs/heads/{b} —
+                                                         refs/pull/{n}/head, or any commit's id
+    GET /api/repos/{o}/{r}/commits?sha=&path=&per_page=  the commits that changed a path, parent by parent
+    GET /api/repos/{o}/{r}/git/trees/{sha}[?recursive=1] a listing, of any commit, on the main line or off it
+    GET /api/repos/{o}/{r}/pulls/{n}                     a pull request: its head, state, merge, the
+                                                         repository it came from; an ETag and 304
     GET /raw/{o}/{r}/{commit}/{path}                     one file, standing in for raw.githubusercontent.com
 
 API answers carry `x-ratelimit-remaining` and `x-ratelimit-reset`, and the
@@ -37,10 +43,22 @@ carry none, as GitHub's do not (measured, per the document).
 afresh on every request:
 
     {"main": "c2"}                                  which commit main points at
+    {"branches": {"fix/uptime": "pr3"}}             the other branches, each at a fixture commit;
+                                                    one left out is deleted (422, as GitHub's)
+    {"pulls": {"3": {"head": "pr3", "head_repo": "someone/udeck-plugins", "head_ref": "fix",
+                     "state": "open", "merged": false, "merge_commit": null, "title": "…"}}}
+                                                    pull requests by number, each head at a fixture
+                                                    commit; head_repo null is a deleted fork, absent
+                                                    the repository itself; merge_commit is read only
+                                                    when merged; refs/pull/{n}/head follows head
     {"limit_until": 1790000000}                     the hourly limit is used up until then:
                                                     403 with remaining 0 and that reset
     {"alter": ["plugins/uptime/uptime.sh"]}         answer these files with different bytes
     {"truncated": true}                             say the whole-repository listing is truncated
+
+Moving a branch's head, force-pushing it, merging or closing a pull request is
+one rewrite of the file: a head at another fixture commit, `state` and
+`merged` changed, a branch left out.
 
 **It keeps an access log**, one JSON object per line and per request — method,
 host, path, query, status, and the headers that decide an answer — which is the
@@ -206,29 +224,69 @@ class Commit:
         return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self.when))
 
 
+def read_lines(path: str) -> list[str]:
+    """A fixture list's lines, comments and blank lines left out; none when there is no file."""
+    try:
+        with open(path) as file:
+            return [line.strip() for line in file if line.strip() and not line.lstrip().startswith("#")]
+    except FileNotFoundError:
+        return []
+
+
 class Repository:
-    """Every fixture commit, in the order `history` gives, each with its parent."""
+    """Every fixture commit with its parent: the main line in the order `history`
+    gives, each the parent of the next, and the commits `parents` names off it."""
 
     def __init__(self, root: str) -> None:
-        with open(os.path.join(root, "history")) as file:
-            names = [line.strip() for line in file if line.strip() and not line.startswith("#")]
+        names = read_lines(os.path.join(root, "history"))
         if not names:
             raise ValueError(f"{root}/history names no commits")
         self.commits: dict[str, Commit] = {}
         self.by_sha: dict[str, Commit] = {}
         parent = None
         for index, name in enumerate(names):
-            commit = Commit(name, Snapshot(os.path.join(root, name)), parent, FIRST_COMMIT_TIME + index * COMMIT_SPACING)
-            self.commits[name] = commit
-            self.by_sha[commit.sha] = commit
-            parent = commit
+            parent = self._add(root, name, parent, FIRST_COMMIT_TIME + index * COMMIT_SPACING)
         self.names = names
+        # Off the main line: dated after all of it, one day apart, in the
+        # order the file gives — each made on a commit named before it.
+        self.parents: dict[str, str] = {}
+        for index, line in enumerate(read_lines(os.path.join(root, "parents"))):
+            name, _, on = line.partition(" ")
+            name, on = name.strip(), on.strip()
+            if not name or not on or " " in on:
+                raise ValueError(f"{root}/parents: {line!r} is not a commit and the commit it was made on")
+            if name in self.commits:
+                raise ValueError(f"{root}/parents: {name} is named twice")
+            if on not in self.commits:
+                raise ValueError(f"{root}/parents: {name} is made on {on}, which no line before it names")
+            self._add(root, name, self.commits[on], FIRST_COMMIT_TIME + (len(names) + index) * COMMIT_SPACING)
+            self.parents[name] = on
 
-    def resolve(self, ref: str, main: str) -> Commit | None:
-        """A branch name, a fixture's own name, or a commit id — as GitHub resolves a ref."""
-        if ref == DEFAULT_BRANCH:
-            return self.commits.get(main)
-        return self.by_sha.get(ref)
+    def _add(self, root: str, name: str, parent: Commit | None, when: int) -> Commit:
+        commit = Commit(name, Snapshot(os.path.join(root, name)), parent, when)
+        self.commits[name] = commit
+        self.by_sha[commit.sha] = commit
+        return commit
+
+    def resolve(self, ref: str, state: dict) -> Commit | None:
+        """`main`, another branch — bare or as `refs/heads/{b}` — `refs/pull/{n}/head`,
+        or a commit id, as GitHub resolves a ref, with the branches and pull
+        requests the lab's state names."""
+        branches = state.get("branches") or {}
+        pulls = state.get("pulls") or {}
+        name = ref
+        if ref.startswith("refs/pull/") and ref.endswith("/head"):
+            pull = pulls.get(ref[len("refs/pull/") : -len("/head")])
+            return self.commits.get(str(pull.get("head"))) if isinstance(pull, dict) else None
+        if ref.startswith("refs/heads/"):
+            name = ref[len("refs/heads/") :]
+        elif ref.startswith("refs/"):
+            return None
+        if name == DEFAULT_BRANCH:
+            return self.commits.get(str(state.get("main")))
+        if name in branches:
+            return self.commits.get(str(branches[name]))
+        return None if name != ref else self.by_sha.get(ref)
 
     def tree_owner(self, sha: str) -> Snapshot | None:
         """The snapshot that holds this tree, or whose commit this is."""
@@ -244,6 +302,7 @@ class Repository:
         return {
             "default_branch": DEFAULT_BRANCH,
             "history": self.names,
+            "parents": self.parents,
             "commits": {
                 name: {
                     "sha": commit.sha,
@@ -264,7 +323,7 @@ def read_state(root: str, default_main: str) -> dict:
     Broken is not guessed at: the lab writes the file whole and renames it into
     place, and reads it back through `/lab/state` before it relies on it.
     """
-    state = {"main": default_main, "limit_until": None, "alter": [], "truncated": False}
+    state = {"main": default_main, "branches": {}, "pulls": {}, "limit_until": None, "alter": [], "truncated": False}
     try:
         with open(os.path.join(root, "state.json")) as file:
             given = json.load(file)
@@ -373,22 +432,23 @@ class Fake:
         if path != prefix and not path.startswith(prefix + "/"):
             return self.json(404, {"message": "Not Found"})
         rest = path[len(prefix) :]
-        main = str(state.get("main"))
         if rest in ("", "/"):
             return self.json(
-                200, {"full_name": self.owner_repo, "default_branch": DEFAULT_BRANCH, "private": False}
+                200, {"full_name": self.owner_repo, "default_branch": DEFAULT_BRANCH, "private": False, "fork": False}
             )
         if rest == "/commits":
-            return self.history(query, main)
+            return self.history(query, state)
         if rest.startswith("/commits/"):
-            return self.commit(rest[len("/commits/") :], headers, main)
+            return self.commit(rest[len("/commits/") :], headers, state)
         if rest.startswith("/git/trees/"):
             recursive = query.get("recursive", ["0"])[0] not in ("", "0", "false")
             return self.tree(rest[len("/git/trees/") :], recursive, bool(state.get("truncated")))
+        if rest.startswith("/pulls/"):
+            return self.pull(rest[len("/pulls/") :], headers, state)
         return self.json(404, {"message": "Not Found"})
 
-    def commit(self, ref: str, headers: dict, main: str) -> tuple[int, dict, bytes]:
-        commit = self.repository.resolve(ref, main)
+    def commit(self, ref: str, headers: dict, state: dict) -> tuple[int, dict, bytes]:
+        commit = self.repository.resolve(ref, state)
         if commit is None:
             return self.json(422, {"message": f"No commit found for SHA: {ref}"})
         etag = f'"{commit.sha}"'
@@ -407,8 +467,50 @@ class Fake:
             "parents": [{"sha": commit.parent.sha}] if commit.parent else [],
         }
 
-    def history(self, query: dict, main: str) -> tuple[int, dict, bytes]:
-        start = self.repository.resolve(query.get("sha", [DEFAULT_BRANCH])[0], main)
+    def pull(self, number: str, headers: dict, state: dict) -> tuple[int, dict, bytes]:
+        """A pull request as GitHub's `GET /pulls/{n}` answers it — the fields uDeck reads, and the head and base
+        GitHub always sends. A number the lab did not name is 404."""
+        given = (state.get("pulls") or {}).get(number) if number.isdigit() else None
+        head = self.repository.commits.get(str(given.get("head"))) if isinstance(given, dict) else None
+        if head is None:
+            return self.json(404, {"message": "Not Found"})
+        merged = bool(given.get("merged"))
+        merge = self.repository.commits.get(str(given.get("merge_commit"))) if merged else None
+        head_repo = given.get("head_repo", self.owner_repo)
+        head_ref = str(given.get("head_ref") or f"pull-{number}")
+        base = self.repository.resolve(DEFAULT_BRANCH, state)
+        body = {
+            "number": int(number),
+            "state": str(given.get("state") or "open"),
+            "title": str(given.get("title") or f"The lab's pull request #{number}"),
+            "draft": False,
+            "merged": merged,
+            "merged_at": merge.date if merge else None,
+            # GitHub names a test merge for an open pull request too; uDeck
+            # reads the field only when `merged` is true, and here there is
+            # none to name.
+            "merge_commit_sha": merge.sha if merge else None,
+            "head": {
+                "label": f"{(head_repo or 'ghost').split('/')[0]}:{head_ref}",
+                "ref": head_ref,
+                "sha": head.sha,
+                "repo": {"full_name": head_repo, "fork": head_repo != self.owner_repo} if head_repo else None,
+            },
+            "base": {
+                "label": f"{self.owner_repo.split('/')[0]}:{DEFAULT_BRANCH}",
+                "ref": DEFAULT_BRANCH,
+                "sha": base.sha if base else None,
+                "repo": {"full_name": self.owner_repo, "fork": False},
+            },
+        }
+        status, extra, data = self.json(200, body)
+        etag = f'"{hashlib.sha256(data).hexdigest()}"'
+        if headers.get("if-none-match", "") == etag:
+            return 304, {"ETag": etag}, b""
+        return status, {**extra, "ETag": etag}, data
+
+    def history(self, query: dict, state: dict) -> tuple[int, dict, bytes]:
+        start = self.repository.resolve(query.get("sha", [DEFAULT_BRANCH])[0], state)
         if start is None:
             return self.json(422, {"message": "No commit found"})
         path = query.get("path", [""])[0].strip("/")
@@ -459,7 +561,7 @@ class Fake:
         if owner_repo != self.owner_repo or len(parts) < 4:
             return 404, {"Content-Type": "text/plain; charset=utf-8"}, b"404: Not Found"
         state = self.state()
-        commit = self.repository.resolve(parts[2], str(state.get("main")))
+        commit = self.repository.resolve(parts[2], state)
         path = "/".join(parts[3:])
         found = commit.snapshot.at(path) if commit else None
         if found is None or found[0] == MODE_FOLDER:

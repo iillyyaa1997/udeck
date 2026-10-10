@@ -40,9 +40,14 @@ public struct Reverification: Equatable, Sendable {
     /// record left from a copy a link took the place of by hand is neither
     /// read from its tree nor written — a linked plugin is never in
     /// `installed.json`, and its working copy is not hashed.
-    public static func folders(of plugins: [DiscoveredPlugin], installed: InstalledPlugins) -> [String: URL] {
+    ///
+    /// While `installed.json` cannot be read (`recordsReadable` false), every
+    /// folder that is not a link: each is held to its tree then
+    /// (`ConsentBasis`), and a decision about it needs its tree.
+    public static func folders(of plugins: [DiscoveredPlugin], installed: InstalledPlugins,
+                               recordsReadable: Bool) -> [String: URL] {
         var folders: [String: URL] = [:]
-        for plugin in plugins where !plugin.isLinked && installed.plugins[plugin.folderName] != nil {
+        for plugin in plugins where !plugin.isLinked && (!recordsReadable || installed.plugins[plugin.folderName] != nil) {
             folders[plugin.folderName] = plugin.directory
         }
         return folders

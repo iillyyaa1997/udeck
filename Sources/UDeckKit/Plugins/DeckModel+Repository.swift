@@ -61,14 +61,32 @@ extension DeckModel {
         GitHubClient(endpoints: endpoints, udeckVersion: udeckVersion, limits: limits)
     }
 
+    /// The client a copy from `origin` is taken through: the official
+    /// source's, or one for another repository on the same host, asking the
+    /// same API and raw host and counted against the same limit — nil for a
+    /// repository elsewhere, and for another repository's default branch,
+    /// which would be recorded as the official one's (`PluginOrigin.mayBeTaken`).
+    func provider(for origin: PluginOrigin) -> GitHubClient? {
+        let official = provider
+        guard origin.mayBeTaken(forSourceAt: official.address) else { return nil }
+        if origin.repository == official.address { return official }
+        return GitHubClient(
+            endpoints: GitHubEndpoints(apiBase: endpoints.apiBase, rawBase: endpoints.rawBase,
+                                       repository: origin.repository.path),
+            udeckVersion: udeckVersion, limits: limits
+        )
+    }
+
     var catalogueStore: CatalogueStore { CatalogueStore(paths: paths) }
 
     /// Where the catalogue comes from, as the operator reads it.
     public var catalogueAddress: RepositoryAddress { provider.address }
 
-    private var installer: PluginInstaller {
-        let provider = self.provider
-        return PluginInstaller(
+    private var installer: PluginInstaller { installer(fetchingFrom: provider) }
+
+    /// The installer, fetching files from `provider`'s repository.
+    private func installer(fetchingFrom provider: GitHubClient) -> PluginInstaller {
+        PluginInstaller(
             paths: paths, discovery: discovery, trash: trash,
             fetch: { path, commit in try await provider.file(at: path, commit: commit) }
         )
@@ -256,7 +274,7 @@ extension DeckModel {
         reverifications += 1
         let asked = reverifications
         let plugins = self.plugins
-        let folders = Reverification.folders(of: plugins, installed: installed)
+        let folders = Reverification.folders(of: plugins, installed: installed, recordsReadable: installedProblem == nil)
         // The hashing before this one would not be applied: it stops at its
         // next folder rather than hashing every installed plugin for nothing.
         reverifyTask?.cancel()
@@ -266,6 +284,15 @@ extension DeckModel {
             let found = Reverification.of(plugins, installed: installed, trees: trees,
                                           head: catalogueWasRead ? .read(catalogue?.commit) : .notReadYet, now: Date())
             if found.standings != standings { standings = found.standings }
+            // What code held to its tree runs on from now (`requiredTree`):
+            // its loop starts or stops only when its tree is another.
+            var hashed = treesOnDisk
+            hashed.hashed(trees)
+            if hashed != treesOnDisk {
+                let moved = hashed.trees != treesOnDisk.trees
+                treesOnDisk = hashed
+                if moved { restartPolling() }
+            }
             if let records = found.records, installedProblem == nil {
                 installed = records
                 save(JSONFileStore<InstalledPlugins>(url: paths.installedFile), installed, named: "installed plugins")
@@ -391,11 +418,11 @@ extension DeckModel {
     /// nothing shown — and when that step would warn first, nothing here
     /// answers it. Answers whether it started.
     private func updateByItself(_ id: String) -> Bool {
-        guard case .install(let operation, let commit, let folder, let version)
+        guard case .install(let operation, let commit, let folder, let version, let origin)
                 = ShownPlace.update(id, catalogue: catalogue, in: paths, installed: installed, shown: nil) else {
             return false
         }
-        run(operation, id: id, commit: commit, folder: folder, version: version, automatic: true)
+        run(operation, id: id, commit: commit, folder: folder, version: version, from: origin, automatic: true)
         return busyPlugin == id
     }
 
@@ -440,16 +467,19 @@ extension DeckModel {
         return act(ShownPlace.reinstall(id, in: paths, installed: installed, shown: shown), id: id)
     }
 
-    /// **Back to** the copy this one replaced.
+    /// **Back to** the copy this one replaced, from where it came.
     @discardableResult
     public func backToPrevious(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        act(ShownPlace.backToPrevious(id, in: paths, installed: installed, shown: shown), id: id)
+        act(ShownPlace.backToPrevious(id, source: catalogueAddress, in: paths, installed: installed, shown: shown), id: id)
     }
 
-    /// An earlier version, chosen from history: installed and marked pinned.
+    /// An earlier version, chosen from the default branch's history: installed
+    /// and marked pinned.
     @discardableResult
     public func installEarlier(_ id: String, line: PluginHistory.Line, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        act(ShownPlace.earlier(id, line: line, in: paths, installed: installed, shown: shown), id: id)
+        act(ShownPlace.earlier(id, line: line, source: catalogueAddress,
+                               branch: catalogueState.defaultBranch ?? catalogue?.branch,
+                               in: paths, installed: installed, shown: shown), id: id)
     }
 
     /// Does what `step` says — every argument it carries is `ShownPlace`'s —
@@ -460,11 +490,11 @@ extension DeckModel {
             return .goAhead
         case .ask(let now):
             return .ask(now)
-        case .install(let operation, let commit, let folder, let version):
-            run(operation, id: id, commit: commit, folder: folder, version: version)
+        case .install(let operation, let commit, let folder, let version, let origin):
+            run(operation, id: id, commit: commit, folder: folder, version: version, from: origin)
             return .goAhead
-        case .atCommit(let operation, let commit, let version):
-            runAtCommit(operation, id: id, commit: commit, version: version)
+        case .atCommit(let operation, let commit, let version, let origin):
+            runAtCommit(operation, id: id, commit: commit, version: version, from: origin)
             return .goAhead
         case .remove:
             // Removal has its own call; no step but `remove`'s answers this.
@@ -492,11 +522,16 @@ extension DeckModel {
     }
 
     /// An operation at a commit that is not the head: its listing from the
-    /// cache, or one request for it.
-    private func runAtCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String) {
+    /// cache, or one request for it — to the repository the copy comes from.
+    private func runAtCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
+                             from origin: PluginOrigin) {
         // Off, uDeck makes no request about plugins at all — whichever button
         // was pressed, and whatever screen it was on.
         guard settings.readsOfficialCatalogue, busyPlugin == nil else { return }
+        guard let provider = provider(for: origin) else {
+            operationProblems[id] = .catalogue(.notFound)
+            return
+        }
         busyPlugin = id
         operationProblems[id] = nil
         let refresher = CatalogueRefresher(provider: provider, store: catalogueStore, limits: limits)
@@ -507,7 +542,7 @@ extension DeckModel {
                     throw InstallError.refused([.noManifest(path: "plugins/\(id)/manifest.json")])
                 }
                 busyPlugin = nil
-                run(operation, id: id, commit: commit, folder: folder, version: version)
+                run(operation, id: id, commit: commit, folder: folder, version: version, from: origin)
             } catch {
                 operationProblems[id] = OperationProblem(error)
                 busyPlugin = nil
@@ -525,12 +560,18 @@ extension DeckModel {
     /// `automatic` is an update nobody pressed (`updateVerifiedPlugins`): its
     /// record says so, it ends no card action (`quietUnlessActing`), and when
     /// it fails its row says it was one.
+    ///
+    /// `origin` is where the copy comes from, as the button's step says it
+    /// (`ShownPlace.Step`) — the repository the files are fetched from and
+    /// the ref the record keeps — and nothing here assumes it: a copy from a
+    /// pull request put back is recorded as one, and stays unverified.
     private func run(
         _ operation: InstallRequest.Operation,
         id: String,
         commit: String,
         folder: PluginListing,
         version: String,
+        from origin: PluginOrigin,
         automatic: Bool = false
     ) {
         guard settings.readsOfficialCatalogue, busyPlugin == nil,
@@ -539,15 +580,19 @@ extension DeckModel {
             operationProblems[id] = .recordsBroken(installedProblem ?? "")
             return
         }
+        guard let provider = provider(for: origin) else {
+            operationProblems[id] = .catalogue(.notFound)
+            return
+        }
         busyPlugin = id
         operationProblems[id] = nil
         autoUpdates.began(id)
         let request = InstallRequest(
-            operation: operation, id: identifier, repository: provider.address,
-            ref: PluginRef(kind: "default", name: catalogueState.defaultBranch ?? catalogue?.branch),
-            commit: commit, folder: folder, version: version, headCommit: catalogue?.commit, automatic: automatic
+            operation: operation, id: identifier, sourceRepository: catalogueAddress,
+            repository: origin.repository, ref: origin.ref, commit: commit, folder: folder, version: version,
+            headCommit: catalogue?.commit, automatic: automatic
         )
-        let installer = self.installer
+        let installer = installer(fetchingFrom: provider)
         let store = catalogueStore
         // The copy the permission decision was made for, read before the swap.
         let before = copyForTheDecision(id)
@@ -805,6 +850,9 @@ extension DeckModel {
         } catch {
             installedProblem = "\(error)"
         }
+        // A copy just put in place is not run on its predecessor's tree: not
+        // until the hashing after this read of the plugins folder lands.
+        if !treesOnDisk.inQuestion { treesOnDisk.mayHaveChanged() }
     }
 
     private func persistRateLimit() {

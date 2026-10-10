@@ -47,7 +47,8 @@ struct LinkedFolderInstallerTests {
     }
 
     func request(_ repository: FakeRepository, _ operation: InstallRequest.Operation) -> InstallRequest {
-        InstallRequest(operation: operation, id: PluginIdentifier(rawValue: "uptime")!, repository: .official,
+        InstallRequest(operation: operation, id: PluginIdentifier(rawValue: "uptime")!, sourceRepository: .official,
+                       repository: .official,
                        ref: PluginRef(name: "main"), commit: repository.commit, folder: repository.plugin("uptime"),
                        version: "1.0.0", headCommit: repository.commit)
     }
@@ -423,7 +424,7 @@ struct LinkRaceTests {
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: other.path)
         let run = await PollExecutor().poll(plugin: read, grant: grant, enabled: true, settings: PluginSettings(),
                                             paths: udeck.paths, searchPath: ["/usr/bin", "/bin"], appearance: .dark,
-                                            reason: .interval, language: "en")
+                                            reason: .interval, language: "en", requiredTree: nil)
         guard case .card(let card) = run else { Issue.record("\(run)"); return }
         #expect(card.rows == [.text("the folder that was read")])
 
@@ -637,7 +638,8 @@ struct PluginRunTests {
         let plugin = PluginDiscovery(searchPath: ["/usr/bin", "/bin"]).load(temp.plugins.appendingPathComponent("chatty"))
         let attempt = await PollExecutor().attempt(
             plugin: plugin, grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .dark, reason: .launch, language: "en")
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .dark, reason: .launch, language: "en",
+            requiredTree: nil)
         guard case .card = attempt.execution else { Issue.record("\(attempt.execution)"); return }
         let run = attempt.run
         #expect(run?.result == .card)
@@ -651,7 +653,8 @@ struct PluginRunTests {
 
         let refused = await PollExecutor().attempt(
             plugin: plugin, grant: nil, enabled: false, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .dark, reason: .interval, language: "en")
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .dark, reason: .interval, language: "en",
+            requiredTree: nil)
         #expect(refused.run == nil)
         snapshot.record(refused, at: Date())
         #expect(snapshot.lastRun == run, "nothing ran: the last run is still the last one that did")

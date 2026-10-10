@@ -32,16 +32,23 @@ public struct PollExecutor: Sendable {
         appearance: Appearance,
         reason: RefreshReason,
         language: String,
+        requiredTree: String?,
         now: Date = Date()
     ) async -> PollExecution {
         await attempt(plugin: plugin, grant: grant, enabled: enabled, settings: settings, paths: paths,
-                      searchPath: searchPath, appearance: appearance, reason: reason, language: language, now: now)
+                      searchPath: searchPath, appearance: appearance, reason: reason, language: language,
+                      requiredTree: requiredTree, now: now)
             .execution
     }
 
     /// `poll`, and the run it took when one happened — how it ended, how long
     /// it took, the tail of its standard error — which uDeck keeps with the
     /// plugin's last run whatever it came to, a card included.
+    ///
+    /// `requiredTree` is the tree the plugin's decision is held to, for code
+    /// nobody verified (`PermissionGate.launchDecision`), asked again at the
+    /// moment of the run: nil for one held to its version. Asked of every
+    /// caller, so that none forgets it.
     public func attempt(
         plugin: DiscoveredPlugin,
         grant: PluginGrant?,
@@ -52,6 +59,7 @@ public struct PollExecutor: Sendable {
         appearance: Appearance,
         reason: RefreshReason,
         language: String,
+        requiredTree: String?,
         now: Date = Date()
     ) async -> PollAttempt {
         // `isUsable` rather than "no problems at all": a translation that will
@@ -62,7 +70,8 @@ public struct PollExecutor: Sendable {
                                                                  occurredAt: now)), run: nil)
         }
 
-        let decision = PermissionGate.launchDecision(for: manifest, grant: grant, enabled: enabled)
+        let decision = PermissionGate.launchDecision(for: manifest, grant: grant, enabled: enabled,
+                                                     requiredTree: requiredTree)
         guard decision.isAllowed else {
             return PollAttempt(execution: .failure(PluginFailure(reason: .notPermitted(decision), occurredAt: now)),
                                run: nil)

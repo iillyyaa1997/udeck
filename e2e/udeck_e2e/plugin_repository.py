@@ -19,10 +19,13 @@ the feed out of uDeck's account.
 
 **The lab drives the fake by rewriting one small file over SSH** (`state.json`
 beside it), which the fake reads on every request: which commit `main` points
-at, whether the hourly limit is used up and until when, which files to answer
-with different bytes, whether to say the listing is truncated. Each change is
-read back through the fake itself (`/lab/state`) before a check relies on it: a
-state file that did not take would make every sentence after it about the lab.
+at, which commit each other branch points at, each pull request's head, state,
+merge and the repository it came from — by fixture commit name, the pull
+requests keyed by their number as a string, as JSON keeps it — whether the
+hourly limit is used up and until when, which files to answer with different
+bytes, whether to say the listing is truncated. Each change is read back
+through the fake itself (`/lab/state`) before a check relies on it: a state
+file that did not take would make every sentence after it about the lab.
 """
 
 from __future__ import annotations

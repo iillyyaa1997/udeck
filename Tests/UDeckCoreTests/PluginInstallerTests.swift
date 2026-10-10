@@ -21,7 +21,8 @@ struct PluginInstallerTests {
 
     func request(_ repository: FakeRepository, _ operation: InstallRequest.Operation = .install,
                  id: String = "uptime", version: String = "1.0.0") -> InstallRequest {
-        InstallRequest(operation: operation, id: PluginIdentifier(rawValue: id)!, repository: .official,
+        InstallRequest(operation: operation, id: PluginIdentifier(rawValue: id)!, sourceRepository: .official,
+                       repository: .official,
                        ref: PluginRef(name: "main"), commit: repository.commit, folder: repository.plugin(id),
                        version: version, headCommit: repository.commit)
     }
@@ -94,6 +95,80 @@ struct PluginInstallerTests {
         #expect(Set((uptime["verification"] as? [String: Any] ?? [:]).keys) == ["status", "by", "checkedAgainst", "checkedAt"])
         #expect(Set((uptime["repository"] as? [String: Any] ?? [:]).keys) == ["provider", "host", "path"])
         #expect(Set((uptime["ref"] as? [String: Any] ?? [:]).keys) == ["kind", "name"])
+    }
+
+    /// A copy is **Verified** only from the official source's default
+    /// branch; from a branch, a pull request — a kind of ref this uDeck does
+    /// not know, another source, a fork's branch — it is code nobody
+    /// verified, by nobody. The record keeps the ref and the repository the
+    /// request named.
+    @Test("an install's record says where the copy came from, and verified only for the official default branch",
+          arguments: [
+              ("official", PluginRef(kind: "default", name: "main"), RepositoryAddress.official,
+               PluginVerification.Status.verified),
+              ("official", PluginRef(kind: "default", name: nil), .official, .verified),
+              ("official", PluginRef(kind: "branch", name: "feature/x"), .official, .unverified),
+              ("official", PluginRef(kind: "branch", name: "main"), RepositoryAddress(path: "someone/fork"), .unverified),
+              ("official", PluginRef(kind: "pr", name: "3"), .official, .unverified),
+              ("official", PluginRef(kind: "commit", name: nil), .official, .unverified),
+              ("official", PluginRef(kind: "commit", name: nil), RepositoryAddress(path: "someone/fork"), .unverified),
+              ("someone", PluginRef(kind: "default", name: "main"), .official, .unverified),
+          ])
+    func recordedOrigin(source: String, ref: PluginRef, from: RepositoryAddress,
+                        status: PluginVerification.Status) async throws {
+        let repository = FakeRepository.withUptime()
+        let installer = installer(FetchLog(repository))
+        var asked = request(repository)
+        asked.source = source
+        asked.ref = ref
+        asked.repository = from
+        let record = try installer.commit(try await installer.stage(asked))
+        #expect(record.ref == ref && record.repository == from && record.source == source)
+        #expect(record.verification.status == status)
+        #expect(record.verification.by == (status == .verified ? "official" : nil))
+        #expect(try records().plugins["uptime"] == record)
+        #expect(PluginStanding.of(record: record, folderExists: true, treeOnDisk: record.tree)
+                == (status == .verified ? .verified : .unverified))
+        #expect(PluginStanding.of(record: record, folderExists: true, treeOnDisk: String(repeating: "0", count: 40))
+                == .modifiedLocally, "changed on disk, whatever it was")
+    }
+
+    /// A copy of the default branch is recorded as the source's own, and
+    /// stands Verified: it is taken from the source's own repository alone.
+    /// Another repository's default branch — a `previous.repository` written
+    /// by hand, a fork's root page — is not found there: refused before
+    /// anything is fetched or written.
+    @Test("the default branch is taken from the source's own repository alone")
+    func defaultBranchFromTheSourceAlone() async throws {
+        let fork = RepositoryAddress(path: "someone/fork")
+        #expect(PluginOrigin(repository: .official, ref: .defaultBranch("main")).mayBeTaken(forSourceAt: .official))
+        #expect(PluginOrigin(repository: .official, ref: .defaultBranch(nil)).mayBeTaken(forSourceAt: .official))
+        #expect(!PluginOrigin(repository: fork, ref: .defaultBranch("main")).mayBeTaken(forSourceAt: .official))
+        #expect(!PluginOrigin(repository: fork, ref: .defaultBranch(nil)).mayBeTaken(forSourceAt: .official))
+        #expect(!PluginOrigin(repository: .official, ref: .defaultBranch("main")).mayBeTaken(forSourceAt: fork),
+                "the source's own repository is the one asked, not the shipped one")
+        #expect(PluginOrigin(repository: fork, ref: .branch("main")).mayBeTaken(forSourceAt: .official))
+        #expect(PluginOrigin(repository: .official, ref: .pullRequest(3)).mayBeTaken(forSourceAt: .official))
+        #expect(!PluginOrigin(repository: RepositoryAddress(host: "example.com", path: "someone/fork"), ref: .branch("x"))
+            .mayBeTaken(forSourceAt: .official), "another host")
+        #expect(!PluginOrigin(repository: RepositoryAddress(provider: "gitlab", path: "someone/fork"), ref: .branch("x"))
+            .mayBeTaken(forSourceAt: .official), "another provider")
+
+        let repository = FakeRepository.withUptime()
+        let log = FetchLog(repository)
+        let installer = installer(log)
+        var asked = request(repository, .earlier)
+        asked.repository = fork
+        do {
+            _ = try await installer.stage(asked)
+            Issue.record("a fork's default branch was taken as the source's")
+        } catch let error as ProviderError {
+            #expect(error == .notFound)
+        }
+        #expect(log.paths.isEmpty, "nothing was fetched")
+        #expect(try records().plugins.isEmpty)
+        #expect(stagingIsEmpty())
+        #expect(!FileManager.default.fileExists(atPath: live.path))
     }
 
     /// An update uDeck made by itself says so in its record, and only that
@@ -322,7 +397,8 @@ struct PluginInstallerTests {
         let record = try updater.commit(try await updater.stage(request(second, .update, version: "1.1.0")))
         #expect(record.version == "1.1.0" && record.pinned == false)
         #expect(record.previous == PreviousCopy(ref: PluginRef(name: "main"), commit: first.commit,
-                                                tree: first.treeID("plugins/uptime")!, version: "1.0.0"))
+                                                tree: first.treeID("plugins/uptime")!, version: "1.0.0",
+                                                repository: .official))
         #expect(try GitHash.tree(ofDirectoryAt: live) == second.treeID("plugins/uptime"))
         #expect(trash.names.isEmpty, "uDeck's own copy is deleted, not trashed")
         #expect(stagingIsEmpty())

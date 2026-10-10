@@ -21,12 +21,18 @@ struct ShownPlaceTests {
                         trash: trash, fetch: FetchLog(repository).fetch, now: { Date(timeIntervalSince1970: 1_790_000_000) })
     }
 
-    func install(_ id: String, from repository: FakeRepository, with installer: PluginInstaller) async throws {
+    func install(_ id: String, from repository: FakeRepository, with installer: PluginInstaller,
+                 ref: PluginRef = PluginRef(name: "main")) async throws {
         try installer.commit(try await installer.stage(InstallRequest(
-            operation: .install, id: PluginIdentifier(rawValue: id)!, repository: .official, ref: PluginRef(name: "main"),
+            operation: .install, id: PluginIdentifier(rawValue: id)!, sourceRepository: .official, repository: .official,
+            ref: ref,
             commit: repository.commit, folder: repository.plugin(id), version: "1.0.0", headCommit: repository.commit
         )))
     }
+
+    /// Where the catalogue's copies come from: the official repository, at
+    /// its default branch.
+    static let official = PluginOrigin(repository: .official, ref: .defaultBranch("main"))
 
     /// An author's working copy whose manifest says `id`.
     func workingCopy(id: String) throws -> URL {
@@ -335,7 +341,8 @@ struct ShownPlaceTests {
         let shown = ShownPlace.Place(fate: .toTrash, arriving: "1.3.0", copy: tree)
         #expect(first == .ask(shown), "the warning names the version and the tree that come")
         #expect(ShownPlace.update("uptime", catalogue: published, in: paths, installed: records, shown: shown)
-                == .install(.update, commit: published.commit, folder: published.entry("uptime")!.listing, version: "1.3.0"),
+                == .install(.update, commit: published.commit, folder: published.entry("uptime")!.listing, version: "1.3.0",
+                            from: Self.official),
                 "pressed on a warning that holds, it installs what the warning named")
 
         var republished = repository
@@ -359,7 +366,8 @@ struct ShownPlaceTests {
         let published = catalogue(repository)
         let none = InstalledPlugins()
         #expect(ShownPlace.install("uptime", catalogue: published, in: paths, installed: none, shown: nil)
-                == .install(.install, commit: repository.commit, folder: repository.plugin("uptime"), version: "1.0.0"))
+                == .install(.install, commit: repository.commit, folder: repository.plugin("uptime"), version: "1.0.0",
+                            from: Self.official))
         #expect(ShownPlace.install("gone", catalogue: published, in: paths, installed: none, shown: nil) == .nothing)
         #expect(ShownPlace.install("uptime", catalogue: nil, in: paths, installed: none, shown: nil) == .nothing)
         #expect(ShownPlace.update("uptime", catalogue: nil, in: paths, installed: none, shown: nil) == .nothing)
@@ -370,13 +378,15 @@ struct ShownPlaceTests {
         let warning = ShownPlace.Place(fate: .toTrash, arriving: "1.0.0", copy: tree)
         #expect(ShownPlace.install("cpu", catalogue: published, in: paths, installed: none, shown: nil) == .ask(warning))
         #expect(ShownPlace.install("cpu", catalogue: published, in: paths, installed: none, shown: warning)
-                == .install(.replace, commit: repository.commit, folder: repository.plugin("cpu"), version: "1.0.0"))
+                == .install(.replace, commit: repository.commit, folder: repository.plugin("cpu"), version: "1.0.0",
+                            from: Self.official))
 
         // Installed by uDeck: Install's button over it is an update.
         let installer = installer(repository, trash: TestTrash(in: udeck.url))
         try await install("uptime", from: repository, with: installer)
         #expect(ShownPlace.install("uptime", catalogue: published, in: paths, installed: try installer.loadRecords(), shown: nil)
-                == .install(.update, commit: repository.commit, folder: repository.plugin("uptime"), version: "1.0.0"))
+                == .install(.update, commit: repository.commit, folder: repository.plugin("uptime"), version: "1.0.0",
+                            from: Self.official))
     }
 
     @Test("Reinstall, Back to, an earlier version: the commit is the copy; Remove brings nothing and always asks")
@@ -391,29 +401,177 @@ struct ShownPlaceTests {
         let reinstall = ShownPlace.Place(fate: .toTrash, arriving: record.version, copy: record.commit)
         #expect(ShownPlace.reinstall("uptime", in: paths, installed: records, shown: nil) == .ask(reinstall))
         #expect(ShownPlace.reinstall("uptime", in: paths, installed: records, shown: reinstall)
-                == .atCommit(.reinstall, commit: record.commit, version: record.version))
+                == .atCommit(.reinstall, commit: record.commit, version: record.version, from: Self.official))
         #expect(ShownPlace.reinstall("cpu", in: paths, installed: records, shown: nil) == .nothing)
 
-        #expect(ShownPlace.backToPrevious("uptime", in: paths, installed: records, shown: nil) == .nothing, "nothing to go back to")
+        #expect(ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: nil) == .nothing,
+                "nothing to go back to")
         let previousCommit = String(repeating: "9", count: 40)
         records.plugins["uptime"]?.previous = PreviousCopy(ref: PluginRef(name: "main"), commit: previousCommit,
                                                            tree: String(repeating: "7", count: 40), version: "0.9.0")
         let back = ShownPlace.Place(fate: .toTrash, arriving: "0.9.0", copy: previousCommit)
-        #expect(ShownPlace.backToPrevious("uptime", in: paths, installed: records, shown: nil) == .ask(back))
-        #expect(ShownPlace.backToPrevious("uptime", in: paths, installed: records, shown: back)
-                == .atCommit(.earlier, commit: previousCommit, version: "0.9.0"))
-        #expect(ShownPlace.backToPrevious("uptime", in: paths, installed: records, shown: reinstall) == .ask(back),
+        #expect(ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: nil) == .ask(back))
+        #expect(ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: back)
+                == .atCommit(.earlier, commit: previousCommit, version: "0.9.0", from: Self.official))
+        #expect(ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: reinstall)
+                == .ask(back),
                 "Reinstall's warning does not hold for Back to")
 
         let line = PluginHistory.Line(version: "0.8.0", commit: String(repeating: "8", count: 40), date: nil, manifest: nil)
         let earlier = ShownPlace.Place(fate: .toTrash, arriving: "0.8.0", copy: line.commit)
-        #expect(ShownPlace.earlier("uptime", line: line, in: paths, installed: records, shown: nil) == .ask(earlier))
-        #expect(ShownPlace.earlier("uptime", line: line, in: paths, installed: records, shown: earlier)
-                == .atCommit(.earlier, commit: line.commit, version: "0.8.0"))
+        #expect(ShownPlace.earlier("uptime", line: line, source: .official, branch: "main", in: paths, installed: records,
+                                   shown: nil) == .ask(earlier))
+        #expect(ShownPlace.earlier("uptime", line: line, source: .official, branch: "main", in: paths, installed: records,
+                                   shown: earlier)
+                == .atCommit(.earlier, commit: line.commit, version: "0.8.0", from: Self.official))
 
         let removal = ShownPlace.Place(fate: .toTrash, arriving: nil, copy: nil)
         #expect(ShownPlace.remove("uptime", in: paths, installed: records, shown: nil) == .ask(removal))
         #expect(ShownPlace.remove("uptime", in: paths, installed: records, shown: removal) == .remove)
         #expect(ShownPlace.remove("uptime", in: paths, installed: records, shown: back) == .ask(removal))
+    }
+
+    /// Stage 3's first hazard (DeckModel+Repository.swift:411 at 4c4ff8a):
+    /// every button built its install from the default branch, so a
+    /// **Reinstall** of a pull request's copy would have been recorded as the
+    /// default branch's — and so **Verified**. The step says where the copy
+    /// comes from, and the installer records exactly that.
+    @Test("Reinstall and Back to of a pull request's copy put it back as the pull request's, unverified; an earlier version is the default branch's")
+    func aPullRequestsCopyStaysOne() async throws {
+        let repository = FakeRepository.withUptime()
+        let installer = installer(repository, trash: TestTrash(in: udeck.url))
+        try await install("uptime", from: repository, with: installer, ref: .pullRequest(3))
+        var records = try installer.loadRecords()
+        let record = try #require(records.plugins["uptime"])
+        #expect(record.ref == PluginRef(kind: "pr", name: "3") && record.verification.status == .unverified
+                && record.verification.by == nil, "the premise: installed from pull request #3, unverified")
+        let pullRequest = PluginOrigin(repository: .official, ref: .pullRequest(3))
+
+        guard case .atCommit(.reinstall, let commit, let version, let origin)
+                = ShownPlace.reinstall("uptime", in: paths, installed: records, shown: nil) else {
+            Issue.record("Reinstall over uDeck's own copy goes ahead"); return
+        }
+        #expect(commit == record.commit && version == record.version && origin == pullRequest,
+                "Reinstall puts back pull request #3's copy, from pull request #3")
+        // What the installer records for that step: still the pull request's, still unverified.
+        let again = try installer.commit(try await installer.stage(InstallRequest(
+            operation: .reinstall, id: PluginIdentifier(rawValue: "uptime")!, sourceRepository: .official,
+            repository: origin.repository,
+            ref: origin.ref, commit: commit, folder: repository.plugin("uptime"), version: version,
+            headCommit: repository.commit
+        )))
+        #expect(again.ref == .pullRequest(3) && again.verification.status == .unverified && again.verification.by == nil)
+        #expect(PluginStanding.of(record: again, folderExists: true, treeOnDisk: again.tree) == .unverified)
+
+        // Back to: from where the copy it replaced came — recorded, or the
+        // source's own repository for a copy recorded before there was one.
+        let elsewhere = RepositoryAddress(path: "someone/udeck-plugins")
+        records.plugins["uptime"]?.previous = PreviousCopy(ref: .pullRequest(2), commit: String(repeating: "9", count: 40),
+                                                           tree: String(repeating: "7", count: 40), version: "0.9.0")
+        guard case .atCommit(.earlier, _, _, let back)
+                = ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: nil) else {
+            Issue.record("Back to over uDeck's own copy goes ahead"); return
+        }
+        #expect(back == PluginOrigin(repository: .official, ref: .pullRequest(2)))
+        records.plugins["uptime"]?.previous?.repository = elsewhere
+        guard case .atCommit(.earlier, _, _, let backElsewhere)
+                = ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: nil) else {
+            Issue.record("Back to over uDeck's own copy goes ahead"); return
+        }
+        #expect(backElsewhere == PluginOrigin(repository: elsewhere, ref: .pullRequest(2)))
+
+        // An earlier version is a version the default branch had, whatever is on disk.
+        let line = PluginHistory.Line(version: "0.8.0", commit: String(repeating: "8", count: 40), date: nil, manifest: nil)
+        #expect(ShownPlace.earlier("uptime", line: line, source: .official, branch: "main", in: paths, installed: records,
+                                   shown: nil)
+                == .atCommit(.earlier, commit: line.commit, version: "0.8.0", from: Self.official))
+        // Update and Install from the catalogue: its repository, its default branch.
+        let published = catalogue(repository)
+        guard case .install(_, _, _, _, let fromCatalogue)
+                = ShownPlace.update("uptime", catalogue: published, in: paths, installed: records, shown: nil) else {
+            Issue.record("Update over uDeck's own copy goes ahead"); return
+        }
+        #expect(fromCatalogue == Self.official)
+    }
+
+    /// For code nobody verified, **Allow** grants for the tree the card
+    /// showed, only while it is the one on disk, and never before the folder
+    /// is hashed — whatever the capabilities.
+    @Test("Allow, held to a tree: only the tree the card showed, only once hashed; nothing held from another tree")
+    func allowHeldToATree() {
+        let tree = String(repeating: "a", count: 40)
+        let other = String(repeating: "b", count: 40)
+        let asks: [Capability] = [.exec("sysctl")]
+        #expect(ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0", shownTree: tree, requiredTree: tree))
+        #expect(ShownPlace.allows(shown: [], requested: [], grant: nil, version: "1.0.0", shownTree: tree, requiredTree: tree),
+                "asking for nothing, the tree is what is allowed")
+        #expect(!ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0", shownTree: other,
+                                   requiredTree: tree), "content changed while the card was up")
+        #expect(!ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0", shownTree: nil, requiredTree: tree),
+                "a card that showed no tree")
+        #expect(!ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0",
+                                   shownTree: PermissionGate.treeNotHashedYet, requiredTree: PermissionGate.treeNotHashedYet),
+                "a folder not hashed yet")
+        #expect(!ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0",
+                                   shownTree: String(repeating: "A", count: 40), requiredTree: tree), "by bytes")
+        // What is held already is what was decided for this tree.
+        let more: [Capability] = [.exec("sysctl"), .exec("rm")]
+        let forTree = PluginGrant(granted: [.exec("rm")], decidedForVersion: "1.0.0", decidedForTree: tree)
+        let forOther = PluginGrant(granted: [.exec("rm")], decidedForVersion: "1.0.0", decidedForTree: other)
+        let forVersion = PluginGrant(granted: [.exec("rm")], decidedForVersion: "1.0.0")
+        #expect(ShownPlace.allows(shown: asks, requested: more, grant: forTree, version: "1.0.0", shownTree: tree,
+                                  requiredTree: tree))
+        #expect(!ShownPlace.allows(shown: asks, requested: more, grant: forOther, version: "1.0.0", shownTree: tree,
+                                   requiredTree: tree), "decided for another tree")
+        #expect(!ShownPlace.allows(shown: asks, requested: more, grant: forVersion, version: "1.0.0", shownTree: tree,
+                                   requiredTree: tree), "decided for the version alone, before there were trees")
+        // Held to the version, the tree changes nothing.
+        #expect(ShownPlace.allows(shown: asks, requested: more, grant: forOther, version: "1.0.0"))
+    }
+
+    /// What a press of **Allow** or **Decline** records: the version and the
+    /// tree the decision was made for, and nothing at all when the card did
+    /// not show what is there now.
+    @Test("Allow and Decline record the version and the tree; Decline of an unverified plugin that asks for nothing switches it off")
+    func decide() throws {
+        let tree = String(repeating: "a", count: 40)
+        let at = Date(timeIntervalSince1970: 1_790_000_000)
+        func manifest(_ exec: [String]) throws -> PluginManifest {
+            let asks = exec.isEmpty ? "" : #", "permissions": {"exec": [\#(exec.map { "\"\($0)\"" }.joined(separator: ", "))]}"#
+            return try JSONDecoder().decode(PluginManifest.self, from: Data("""
+                { "id": "p", "name": "p", "version": "1.0.1", "api": 1, "kind": "poll", "run": ["./run.sh"],
+                  "interval": 5, "timeout": 2\(asks) }
+                """.utf8))
+        }
+        let asking = try manifest(["sysctl"])
+        let nothing = try manifest([])
+        func decide(_ allow: Bool, _ manifest: PluginManifest, shown: [Capability], shownTree: String?,
+                    required: String?) -> ShownPlace.Decision {
+            ShownPlace.decide(allow: allow, shown: shown, shownTree: shownTree, manifest: manifest, grant: nil,
+                              requiredTree: required, at: at)
+        }
+        // Held to the version, as always: no tree recorded.
+        #expect(decide(true, asking, shown: [.exec("sysctl")], shownTree: nil, required: nil)
+                == .record(PluginGrant(granted: [.exec("sysctl")], decidedForVersion: "1.0.1", decidedAt: at)))
+        #expect(decide(false, asking, shown: [.exec("sysctl")], shownTree: nil, required: nil)
+                == .record(PluginGrant(denied: [.exec("sysctl")], decidedForVersion: "1.0.1", decidedAt: at)))
+        #expect(decide(true, asking, shown: [], shownTree: nil, required: nil) == .nothing, "more than was shown")
+        // Held to the tree: the version and the tree.
+        #expect(decide(true, asking, shown: [.exec("sysctl")], shownTree: tree, required: tree)
+                == .record(PluginGrant(granted: [.exec("sysctl")], decidedForVersion: "1.0.1", decidedForTree: tree,
+                                       decidedAt: at)))
+        #expect(decide(true, nothing, shown: [], shownTree: tree, required: tree)
+                == .record(PluginGrant(decidedForVersion: "1.0.1", decidedForTree: tree, decidedAt: at)))
+        #expect(decide(false, asking, shown: [.exec("sysctl")], shownTree: tree, required: tree)
+                == .record(PluginGrant(denied: [.exec("sysctl")], decidedForVersion: "1.0.1", decidedForTree: tree,
+                                       decidedAt: at)), "a refusal holds for this content")
+        #expect(decide(false, nothing, shown: [], shownTree: tree, required: tree) == .switchOff,
+                "a decision with nothing in it would let it run")
+        #expect(decide(true, asking, shown: [.exec("sysctl")], shownTree: String(repeating: "b", count: 40), required: tree)
+                == .nothing, "changed while the card was up")
+        #expect(decide(true, nothing, shown: [], shownTree: nil, required: PermissionGate.treeNotHashedYet) == .nothing)
+        #expect(decide(false, asking, shown: [.exec("sysctl")], shownTree: nil, required: PermissionGate.treeNotHashedYet)
+                == .nothing, "nothing is decided about content nobody hashed")
+        #expect(decide(false, nothing, shown: [], shownTree: nil, required: PermissionGate.treeNotHashedYet) == .nothing)
     }
 }

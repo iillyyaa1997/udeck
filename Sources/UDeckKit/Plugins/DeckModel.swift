@@ -30,6 +30,17 @@ public final class DeckModel {
     /// Where each plugin folder stands — verified, modified, a folder of the
     /// operator's own — as of the last read of the plugins folder.
     public internal(set) var standings: [String: PluginStanding] = [:]
+    /// What each installed plugin's folder hashed to, the last time it was
+    /// hashed (`Reverification.trees`), and whether it may have changed since
+    /// (`HashedTrees`). A plugin whose permission decision is held to its tree
+    /// (`ConsentBasis`) runs only on a decision for exactly its tree, and not
+    /// at all while its folder is not hashed: from the moment the plugins
+    /// folder is read to be hashed again — an install, a removal, a change
+    /// the watcher saw — until that hashing lands, its runs are skipped, and
+    /// a copy put in place is never run on the decision its predecessor's
+    /// tree had. Its loop and its card go by the tree last hashed, so a
+    /// hashing that finds the same tree stops nothing.
+    public internal(set) var treesOnDisk = HashedTrees()
     /// The official catalogue as the cache holds it, shown at once.
     public internal(set) var catalogue: Catalogue?
     public internal(set) var catalogueState: CatalogueState
@@ -290,7 +301,12 @@ public final class DeckModel {
             layout.removeWindows(gone)
             saveLayout()
         }
-        if WatchedFolders.rehashes(after: changes) { reverify() }
+        if WatchedFolders.rehashes(after: changes) {
+            // Whatever is in the folders now may not be what was hashed:
+            // code held to its tree does not run until it is hashed again.
+            if !treesOnDisk.inQuestion { treesOnDisk.mayHaveChanged() }
+            reverify()
+        }
         restartPolling()
         onPluginsChanged?()
     }
@@ -327,11 +343,61 @@ public final class DeckModel {
         )
     }
 
+    /// What the card and Settings say of `id`: by the tree last hashed, so
+    /// that a hashing that finds the same tree changes nothing on screen. A
+    /// run, and a decision, go by `requiredTree(for:)`.
     public func launchDecision(for id: PluginIdentifier) -> LaunchDecision {
         guard let manifest = plugin(withID: id)?.manifest else { return .disabled }
         return PermissionGate.launchDecision(
-            for: manifest, grant: grants[id], enabled: pluginSettings.isEnabled(id)
+            for: manifest, grant: grants[id], enabled: pluginSettings.isEnabled(id), requiredTree: treeLastHashed(for: id)
         )
+    }
+
+    /// What `id`'s permission decision is held to: its tree for code nobody
+    /// verified — a branch, a pull request — and its version otherwise
+    /// (`ConsentBasis`); its tree for every folder but a link while
+    /// `installed.json` cannot be read.
+    public func consentBasis(of id: PluginIdentifier) -> ConsentBasis {
+        ConsentBasis.of(installed.plugins[id.rawValue], linked: plugin(withID: id)?.isLinked ?? false,
+                        recordsReadable: installedProblem == nil)
+    }
+
+    /// The tree the gate requires of `id` for a run that starts now, or a
+    /// decision made now (`PermissionGate`): nil for a decision held to the
+    /// version; the tree its folder hashed to; or, until it is hashed — and
+    /// while it may have changed since — one no decision holds for.
+    func requiredTree(for id: PluginIdentifier) -> String? {
+        let basis = consentBasis(of: id)
+        guard basis == .tree else { return nil }
+        return treesOnDisk.now(id.rawValue, basis: basis)
+    }
+
+    /// The same by the tree last hashed: what `id`'s poll loop is planned on
+    /// and its card shows (`HashedTrees`).
+    func treeLastHashed(for id: PluginIdentifier) -> String? {
+        let basis = consentBasis(of: id)
+        guard basis == .tree else { return nil }
+        return treesOnDisk.lastHashed(id.rawValue, basis: basis)
+    }
+
+    /// The tree a card asking about `id` shows, and **Allow** grants for —
+    /// for a decision held to the tree, once its folder is hashed; nil
+    /// otherwise.
+    public func consentTree(for id: PluginIdentifier) -> String? {
+        guard let tree = treeLastHashed(for: id), tree != PermissionGate.treeNotHashedYet else { return nil }
+        return tree
+    }
+
+    /// Whether `id` waits for its folder to be hashed before it can be asked
+    /// about at all: nothing is asked about content nobody has hashed.
+    public func waitsForItsTree(_ id: PluginIdentifier) -> Bool {
+        treeLastHashed(for: id) == PermissionGate.treeNotHashedYet
+    }
+
+    /// Whether `id` waits on a folder that would not hash — a file in it
+    /// cannot be read — so nothing can be decided for it.
+    public func folderWouldNotHash(_ id: PluginIdentifier) -> Bool {
+        consentBasis(of: id) == .tree && treesOnDisk.wouldNotHash(id.rawValue)
     }
 
     // MARK: - Polling
@@ -366,7 +432,8 @@ public final class DeckModel {
         if !polling { refreshTask?.cancel() }
         let pluginRuns = self.pluginRuns
         let wanted = PollLoops.wanted(plugins, placed: placedPluginIDs, grants: grants, settings: pluginSettings,
-                                      polling: polling, isQuiet: { pluginRuns.isQuiet($0) })
+                                      polling: polling, isQuiet: { pluginRuns.isQuiet($0) },
+                                      requiredTree: { treeLastHashed(for: $0) })
         let plan = PollLoops.plan(running: pollLoops, wanted: wanted, again: again)
         for id in plan.stop {
             pollTasks[id]?.cancel()
@@ -445,7 +512,11 @@ public final class DeckModel {
     }
 
     private func poll(_ plugin: DiscoveredPlugin, reason requested: RefreshReason) async {
-        guard let id = plugin.manifest?.id, pluginRuns.begin(id.rawValue) else { return }
+        guard let id = plugin.manifest?.id else { return }
+        // Held to its tree and not hashed, or changed since: not run, and no
+        // failure — its card says why it waits (`HashedTrees.skipsRun`).
+        guard !treesOnDisk.skipsRun(id.rawValue, basis: consentBasis(of: id)),
+              pluginRuns.begin(id.rawValue) else { return }
         defer { pluginRuns.end(id.rawValue) }
         // `launch` until the plugin has drawn a card since uDeck started,
         // whatever asked for the run (`RefreshReason.of`).
@@ -459,7 +530,8 @@ public final class DeckModel {
             searchPath: settings.pluginExecutableSearchPath,
             appearance: appearance,
             reason: reason,
-            language: strings.language.rawValue
+            language: strings.language.rawValue,
+            requiredTree: requiredTree(for: id)
         )
 
         // Re-read rather than reuse the value from before the await: another
@@ -629,19 +701,27 @@ public final class DeckModel {
     /// when that is nothing the operator was not shown (`ShownPlace.allows`):
     /// otherwise nothing is recorded, and the card asks about what is asked
     /// for now.
-    public func decidePermissions(for id: PluginIdentifier, allow: Bool, shown: [Capability]) {
+    ///
+    /// For code nobody verified the decision is held to its tree as well
+    /// (`ConsentBasis`): `shownTree` is the tree the card showed
+    /// (`consentTree`), **Allow** grants only for that tree and only while it
+    /// is the one on disk, and the decision records it beside the version.
+    /// **Decline** of such a plugin that asks for nothing switches it off —
+    /// a decision with nothing in it would let it run.
+    public func decidePermissions(for id: PluginIdentifier, allow: Bool, shown: [Capability], shownTree: String? = nil) {
         guard let manifest = plugin(withID: id)?.manifest else { return }
-        if allow, !ShownPlace.allows(shown: shown, requested: manifest.permissions.capabilities, grant: grants[id],
-                                     version: manifest.version) {
-            DeckLog.plugins.info("\(id.rawValue, privacy: .public) asks for more than was shown; asked again, nothing granted")
+        switch ShownPlace.decide(allow: allow, shown: shown, shownTree: shownTree, manifest: manifest, grant: grants[id],
+                                 requiredTree: requiredTree(for: id)) {
+        case .nothing:
+            DeckLog.plugins.info("\(id.rawValue, privacy: .public) asks for more than was shown, is not what was shown, or is not hashed yet; asked again, nothing decided")
             return
+        case .switchOff:
+            DeckLog.plugins.info("\(id.rawValue, privacy: .public) asks for nothing, its code is unverified, and it was declined: switched off")
+            setEnabled(false, for: id)
+            return
+        case .record(let grant):
+            grants[id] = grant
         }
-        let requested = Set(manifest.permissions.capabilities)
-        grants[id] = PluginGrant(
-            granted: allow ? requested : [],
-            denied: allow ? [] : requested,
-            decidedForVersion: manifest.version
-        )
         save(grantsStore, grants, named: "permission decisions")
         restartPolling()
         if allow { refresh(id) }
@@ -653,7 +733,7 @@ public final class DeckModel {
     /// the refusal happens in code the plugin does not control.
     public func run(_ action: CardAction, from id: PluginIdentifier) -> String? {
         guard let manifest = plugin(withID: id)?.manifest,
-              PermissionGate.mayRun(action, requestedBy: manifest, grant: grants[id]) else {
+              PermissionGate.mayRun(action, requestedBy: manifest, grant: grants[id], requiredTree: requiredTree(for: id)) else {
             return "\(action.run.first ?? "that command") is not one of the commands \(id) was allowed to run"
         }
         guard let executable = resolve(command: action.run[0], for: id) else {

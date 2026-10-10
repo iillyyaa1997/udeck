@@ -157,6 +157,8 @@ struct Russian: Vocabulary {
         case .permissionsDeclaredHelp:
             "uDeck показывает это и не запустит плагин без вашего согласия, но удержать уже запущенную программу он не может — см. документацию по плагинам."
         case .permissionsPluginAsksTo(let name): "\(name) просит:"
+        case .permissionsAsksNothingUnverified(let name): "\(name) ничего не просит, но его код не проверен"
+        case .permissionsFolderUnreadable(let name): "uDeck не смог прочитать все файлы в папке \(name), поэтому не запускает его"
         case .permissionsUnsandboxed:
             "uDeck запускает этот плагин от вашего имени, без песочницы. Разрешить — значит согласиться запустить эту программу; отказать — значит uDeck её никогда не запустит."
         case .permissionsAllowAndRun: "Разрешить и запустить"
@@ -244,6 +246,7 @@ struct Russian: Vocabulary {
         case .catalogueRecordsBroken(let reason):
             "~/.udeck/installed.json не читается, поэтому uDeck ничего не устанавливает, не обновляет и не удаляет, пока это не исправлено: \(reason)"
         case .pluginMarkVerified: "Проверен"
+        case .pluginMarkUnverified: "Не проверен"
         case .pluginMarkOwnFolder: "Ваша собственная папка"
         case .pluginMarkModified: "Изменён на этом Mac"
         case .pluginMarkMissing: "Папки нет"
@@ -485,6 +488,8 @@ extension Russian {
             switch decision {
             case .allowed: return "разрешён"
             case .disabled: return "выключен"
+            case .awaitingDecision(let pending) where pending.isEmpty:
+                return "ждёт вашего решения, можно ли его запускать"
             case .awaitingDecision(let pending):
                 return "ждёт вашего решения: \(pending.map { say($0.summaryPhrase) }.joined(separator: ", "))"
             case .refused(let denied):

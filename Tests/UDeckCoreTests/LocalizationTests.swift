@@ -63,7 +63,9 @@ struct LocalizationTests {
         .pluginLess, .pluginSettings, .pluginEverySeconds(30),
         .pluginLastFailure(reason: .exited(code: 1)), .permissionsAsksNothing, .permissionsAsksTo,
         .permissionsDeclared, .permissionsDeclaredHelp,
-        .permissionsPluginAsksTo(name: "disk-space"), .permissionsUnsandboxed,
+        .permissionsPluginAsksTo(name: "disk-space"), .permissionsAsksNothingUnverified(name: "asks-nothing"),
+        .permissionsFolderUnreadable(name: "asks-nothing"),
+        .permissionsUnsandboxed,
         .permissionsAllowAndRun,
 
         .pluginsOfficialCatalogue, .pluginsOfficialCatalogueHelp(source: "github.com/o/r"),
@@ -92,7 +94,7 @@ struct LocalizationTests {
         .catalogueFileUnreachable(path: "plugins/uptime/uptime.sh", reason: "offline"),
         .catalogueTookTooLong, .catalogueCannotWrite(reason: "disk full"),
         .catalogueRecordsBroken(reason: "not JSON"),
-        .pluginMarkVerified, .pluginMarkOwnFolder, .pluginMarkModified, .pluginMarkMissing,
+        .pluginMarkVerified, .pluginMarkUnverified, .pluginMarkOwnFolder, .pluginMarkModified, .pluginMarkMissing,
         .pluginFrom(source: "github.com/o/r", commit: "5c3e0d2"), .pluginPinned,
         .pluginUpdatedByItself(date: "10 October 2026"), .pluginUpdateByItselfFailed(version: "1.1.0"),
         .historyTitle(name: "uptime"), .historyReading, .historyNone, .historyInstalledMark, .historyInstall,
@@ -108,6 +110,7 @@ struct LocalizationTests {
         .failureReason(.outputLimitExceeded(bytes: 1_048_576)), .failureReason(.emptyOutput),
         .failureReason(.unparsableOutput("\"rows\" is required")), .failureReason(.notPermitted(.allowed)),
         .failureReason(.notPermitted(.disabled)), .failureReason(.notPermitted(.awaitingDecision(pending: [.exec("git")]))),
+        .failureReason(.notPermitted(.awaitingDecision(pending: []))),
         .failureReason(.notPermitted(.refused(denied: [.screen]))), .failureReason(.notLoadable([.missingManifest])),
         .pluginStandardErrorEnd, .pluginStandardErrorNothing, .pluginStandardErrorBefore(bytes: 1834),
         .catalogueReplaceLinkConfirm(id: "uptime", target: "~/src/uptime"),
@@ -181,7 +184,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 317,
+        #expect(Self.all.count == 321,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

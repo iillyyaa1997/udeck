@@ -1342,16 +1342,26 @@ private struct PluginRow: View {
                 }
                 HStack {
                     // What the list above shows is what Allow grants (`ShownPlace.allows`).
-                    Button(strings(.actionAllow)) { model.decidePermissions(for: manifest.id, allow: true, shown: requested) }
-                    Button(strings(.actionDecline)) { model.decidePermissions(for: manifest.id, allow: false, shown: requested) }
+                    let tree = model.consentTree(for: manifest.id)
+                    Button(strings(.actionAllow)) {
+                        model.decidePermissions(for: manifest.id, allow: true, shown: requested, shownTree: tree)
+                    }
+                    Button(strings(.actionDecline)) {
+                        model.decidePermissions(for: manifest.id, allow: false, shown: requested, shownTree: tree)
+                    }
                 }
                 .padding(.top, 2)
             }
         }
     }
 
+    /// Checked only under a decision that holds for this version — and, for
+    /// code held to its tree, for the tree last hashed — so a decision the
+    /// card asks again about is not shown as granted.
     private func granted(_ capability: Capability, _ manifest: PluginManifest) -> Bool {
-        model.grants[manifest.id]?.granted.contains(capability) ?? false
+        guard let grant = model.grants[manifest.id],
+              grant.holds(forVersion: manifest.version, tree: model.treeLastHashed(for: manifest.id)) else { return false }
+        return grant.granted.contains(capability)
     }
 
     @ViewBuilder

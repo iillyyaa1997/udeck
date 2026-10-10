@@ -37,6 +37,8 @@ public struct PluginFailure: Equatable, Sendable {
                 switch decision {
                 case .allowed: "permitted"
                 case .disabled: "switched off"
+                case .awaitingDecision(let pending) where pending.isEmpty:
+                    "waiting for you to decide whether it may run"
                 case .awaitingDecision(let pending):
                     "waiting for you to decide about: \(pending.map(\.summary).joined(separator: ", "))"
                 case .refused(let denied):

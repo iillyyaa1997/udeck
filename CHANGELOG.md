@@ -36,6 +36,24 @@ for what that promises.
   Anything else asks on the card, as before. `installed.json` gains an
   `automatic: true` on a copy uDeck put in place by itself; a uDeck from before
   reads it and skips the key.
+- **Code nobody verified asks before every new content, underneath.** The
+  ground for installing from a branch or a pull request, which nothing in
+  Settings offers yet. `installed.json` keeps a branch's or a pull request's
+  ref (`branch`, `pr`) and the status `unverified`, and every button that puts a
+  copy back — **Reinstall**, **Back to** — keeps the ref the copy came from, so
+  that a pull request's copy is never recorded as the default branch's, and so
+  **Verified**; `previous` says the repository its copy came from. A status a
+  later uDeck writes is read as `modified` rather than making the file
+  unreadable. For such a copy the permission decision is held to the folder's
+  content (`decidedForTree` in `grants.json`, beside the version): every new
+  content asks again, a plugin that asks for nothing included — *"… asks for
+  nothing, but its code is unverified"* — and it waits until its folder is
+  hashed. Verified plugins, folders of your own and linked folders are decided
+  per version, as before — and every folder but a link is held to its content
+  while `installed.json` cannot be read. A 0.6 uDeck cannot read the status
+  `unverified`: going back to 0.6 after such a copy is installed makes it read
+  the whole of `installed.json` as broken, and install, update and remove
+  nothing until the copy is removed with a 0.7 uDeck.
 - **About says how to open a downloaded copy on macOS 15 and later.** It said
   right-click → Open, which macOS 15 no longer lets past Gatekeeper for an app
   that is not notarised; the way through there is System Settings → Privacy &

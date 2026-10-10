@@ -1334,7 +1334,12 @@ its hash be compared at all.
         "ref": { "kind": "default", "name": "main" },
         "commit": "0b7d6c5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c",
         "tree": "3e8d1c6b5a4f9e2d7c0b3a6f5e8d1c4b7a2f9e60",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "repository": {
+          "provider": "github",
+          "host": "github.com",
+          "path": "iillyyaa1997/udeck-plugins"
+        }
       }
     }
   }
@@ -1347,18 +1352,18 @@ its hash be compared at all.
 | `plugins` | object | Keyed by plugin id — the same id as the folder. |
 | `source` | string | The source it was installed from. `official` in stage 1. |
 | `repository` | object | Where that source pointed when the plugin was installed: `provider` (`github`; later `gitlab`), `host`, and `path` (`owner/repo`). A copy, so that the record still says where the plugin came from after the source is renamed or removed. |
-| `ref.kind` | string | `default` — the source's default branch. Reserved for later: `branch`, `pr`, `commit`. |
-| `ref.name` | string or null | The branch name (`main`); later the branch, or the pull request's number as a string. |
+| `ref.kind` | string | `default` — the source's default branch; `branch` — another branch; `pr` — a pull request. Reserved for later: `commit`. A kind uDeck does not know is read as it is written, and is unverified. |
+| `ref.name` | string or null | The default branch's name (`main`); the branch's name; the pull request's number, as a string. |
 | `commit` | 40 hex characters | The commit the files were taken from. |
 | `tree` | 40 hex characters | The tree SHA of `plugins/<id>` at that commit — and so of the folder on disk, as it was installed. |
 | `version` | string | The manifest's `version` at that commit. |
 | `installedAt` | ISO-8601 time, UTC, whole seconds | When this copy was put in place. |
 | `pinned` | boolean | `true` when the operator chose this version over the newest one — an earlier version, or **Back to 1.0.0**. A pinned plugin is still told about newer versions, and [updates by themselves](#automatic-updates) leave it alone. **Update** clears it. |
-| `verification.status` | string | What the folder was, the last time uDeck looked: `verified`, `modified` (stage 1); `trusted`, `unverified` (later). |
+| `verification.status` | string | What the folder was, the last time uDeck looked: `verified`, `modified`, `unverified`; `trusted` later. A status uDeck does not know — a later uDeck's — is read as `modified`, rather than making the whole file unreadable: it is recomputed anyway. |
 | `verification.by` | string or null | Whose guarantee it is: `official`, or (later) the trusted source's id; `null` when nobody's. |
 | `verification.checkedAgainst` | 40 hex characters or null | The commit of the default branch the folder was compared against. |
 | `verification.checkedAt` | ISO-8601 time | When. |
-| `previous` | object or null | The copy this one replaced — `ref`, `commit`, `tree`, `version` — so that **Back to 1.0.0** is one click. `null` after a first install. |
+| `previous` | object or null | The copy this one replaced — `ref`, `commit`, `tree`, `version`, and the `repository` it came from — so that **Back to 1.0.0** is one click, from where that copy came: a pull request's copy goes back as the pull request's. `null` after a first install. A copy recorded before there were branches and pull requests has no `repository`: it came from the source's own. |
 | `automatic` | `true`, or absent | Present only on a copy uDeck put in place by itself — a verified plugin [updating itself](#automatic-updates) — and the row says *Updated by itself on October 10, 2026*. Any press that installs writes the record without it. A uDeck from before automatic updates reads the record and skips the key. |
 
 **`verification` is recorded, not trusted.** It is recomputed every time the
@@ -1368,7 +1373,7 @@ moment it opens, and so that "verified as of this commit" can be read back
 later. Nothing — least of all a consent decision — is ever taken from the
 stored value alone.
 
-How it is computed in stage 1:
+How it is computed:
 
 * The folder's tree SHA, hashed now, differs from `tree` → **`modified`**, by
   nobody.
@@ -1376,6 +1381,20 @@ How it is computed in stage 1:
   by `official`. Every commit uDeck installs from the official source comes
   either from resolving its default branch or from that branch's history, and
   force pushes to it are refused, so the commit is one somebody merged.
+* Otherwise — a branch, a pull request, a kind of ref uDeck does not know —
+  **`unverified`**, by nobody: exactly what was installed, and code nobody
+  verified. Its row says **Unverified**, not *Modified locally*.
+
+The ref is carried through every button that puts a copy back: **Reinstall**
+puts back the record's own copy from its own repository and ref, and **Back
+to** the previous copy from its `repository` and `ref`, so a pull request's
+copy put back is recorded as the pull request's again — never as the default
+branch's, which would make it **Verified**. An earlier version is a version the
+default branch had, and is installed as the default branch's. A default
+branch's copy is taken from the source's own repository and from nowhere else:
+a `previous` whose `repository` is another — a fork — and whose ref is the
+default branch is refused, as not found, before anything is fetched
+(`PluginOrigin.mayBeTaken`), since it would be recorded as the source's own.
 
 A folder in `~/.udeck/plugins` with no record is **a folder of your own**:
 uDeck claims nothing about it, as today. A record whose folder is gone is
@@ -1653,12 +1672,51 @@ are asked `AutoUpdateSchedule` beside it, both tested there.
 
 ### Consent for unverified code
 
-> **Later — stage 3.** An unverified plugin (a branch, a pull request) is only
-> ever offered an update, with *What changed*, and its consent is tied to its
-> tree SHA rather than its `version`: every new content asks again, even when
-> the plugin asks for nothing, because code on a branch changes without review
-> and there is no sandbox. `PluginGrant` gains a `decidedForTree` for this; for
-> verified and local plugins consent stays tied to `version`, as it is.
+The permission decision of code nobody verified — a copy whose record is not
+the official source's default branch — is tied to its tree SHA, not to its
+`version`: every new content asks again, even when the plugin asks for nothing,
+because code on a branch changes without review and there is no sandbox. For a
+verified copy, a folder of the operator's own and a linked working copy it
+stays tied to `version`, as it is. The record's ref is used only to ask for
+more, never to allow: whatever it says, a copy that is not the default
+branch's is held to its tree (`ConsentBasis` in UDeckCore).
+
+* `grants.json` keeps the tree the decision was made for beside the version,
+  as `decidedForTree`; a decision written before has none, and holds for no
+  tree. **Allow** records both, for the tree the folder last hashed to — the
+  one the card was drawn for — and only while nothing in the plugins folder
+  has changed since: a press between a change and its hashing records
+  nothing, and the card is drawn again for what is there.
+* The tree is the one uDeck hashed the folder to (`HashedTrees` in UDeckCore).
+  A folder never hashed — at launch, after a plugin's first install — waits,
+  and its card asks nothing: nothing is asked about content nobody has hashed.
+  After anything changes in the plugins folder — an edit, an update, a copy
+  put back — a run of a plugin held to its tree is skipped, not run and not a
+  failure, until the folder is hashed again; its poll loop and its card stay
+  as they were meanwhile, so a hashing that finds the same tree changes
+  nothing, and new content stops the loop and asks. A change counts from when
+  the folder watcher reports it, a fraction of a second after it is made: a
+  run that starts inside that fraction runs on the decision before it. A copy
+  uDeck puts in place counts as changed from that moment, and runs only on a
+  decision for its own tree.
+* A folder that would not hash — a file in it cannot be read — is never
+  decided for: its card says *"uDeck could not read every file in asks-nothing's
+  folder, so it does not run it"*.
+* While `installed.json` cannot be read, nothing says where any copy came
+  from: every folder but a link is held to its tree, and asks — a broken file
+  only ever asks for more.
+* A plugin that asks for nothing is asked too: *"asks-nothing asks for
+  nothing, but its code is unverified"*, with **Allow and run** and **Decline**.
+  **Decline** switches it off, since a decision with nothing in it would let it
+  run; switched on again, it asks again.
+* A local edit to an unverified copy asks again, as any new content does.
+
+The gate is `PermissionGate.launchDecision` and `mayRun` in the plugin format,
+given the tree required (`requiredTree`); without one — `udeck-plugin run`, a
+verified plugin — it is the rule it always was.
+
+> **Later — stage 3.** Installing from a branch or a pull request, and an
+> unverified plugin only ever being offered an update, with *What changed*.
 
 ---
 
@@ -1818,21 +1876,32 @@ standard library.
 
 * **Its content is fixture folders, one per commit** — for example
   `c1/` (`uptime` 1.0.0 and the refusal fixtures), `c2/` (`uptime` 1.1.0,
-  asking for the same), `c3/` (`uptime` 1.2.0, asking for one command more), a
-  file saying which commit `main` points at, and the order of history. The
-  fake computes real git blob, tree and commit ids from them itself; there is
-  no git in the guest. Because its hashing is Python and uDeck's is Swift, two
-  independent implementations have to agree before any check passes.
+  asking for the same), `c3/` (`uptime` 1.2.0, asking for one command more),
+  the main line's order (`history`), and the commits off it with the commit
+  each was made on (`parents`): `pr3/`, a pull request's head made on `c1`,
+  with `uptime` 1.0.1 asking for the same and `asks-nothing`, a new plugin
+  asking for no permission. The fake computes real git blob, tree and commit
+  ids from them itself, parents included; there is no git in the guest.
+  Because its hashing is Python and uDeck's is Swift, two independent
+  implementations have to agree before any check passes.
 * **It answers the subset of the API uDeck uses:** `GET /repos/{o}/{r}`;
   `GET /repos/{o}/{r}/commits/{ref}` with `Accept: application/vnd.github.sha`,
-  an `ETag`, and `304`; `GET /repos/{o}/{r}/git/trees/{sha}` with and without
-  `recursive=1`; `GET /repos/{o}/{r}/commits?sha=&path=`; and raw files at
-  `/{o}/{r}/{commit}/{path}` under a second prefix standing in for the raw
-  host. API answers carry `x-ratelimit-remaining` and `x-ratelimit-reset`, and
-  the remaining count goes down.
+  an `ETag`, and `304`, `{ref}` being `main`, another branch (bare or
+  `refs/heads/{b}`), `refs/pull/{n}/head` or any commit's id; `GET
+  /repos/{o}/{r}/pulls/{n}` with its head, state, merge commit and the
+  repository it came from, an `ETag` and `304`; `GET
+  /repos/{o}/{r}/git/trees/{sha}` with and without `recursive=1`, for a commit
+  on the main line or off it; `GET /repos/{o}/{r}/commits?sha=&path=`, parent
+  by parent; and raw files at `/{o}/{r}/{commit}/{path}` under a second prefix
+  standing in for the raw host. API answers carry `x-ratelimit-remaining` and
+  `x-ratelimit-reset`, and the remaining count goes down — a `304` too.
 * **The lab drives it** by rewriting a small state file over SSH: which commit
-  `main` is at; "the limit is used up until T" (`403` with `remaining: 0`);
-  "answer this file with different bytes"; "say the listing is truncated".
+  `main` is at; which commit each other branch is at, a branch left out being
+  deleted; each pull request's head, state, merge commit and the repository it
+  came from — a deleted fork's is none; "the limit is used up until T" (`403`
+  with `remaining: 0`); "answer this file with different bytes"; "say the
+  listing is truncated". Moving a head, force-pushing, merging and closing are
+  each one rewrite.
 * **It keeps an access log** of every request — method, path, query, status —
   which is the oracle for what uDeck asked for and, just as much, for what it
   did not.
@@ -1933,7 +2002,29 @@ never the network. What they cover:
   is provably uDeck's own is deleted;
 * the rate-limit state: blocking, resetting, the reserve for unrequested
   refreshes;
-* `installed.json`: reading and writing, and the status computation;
+* `installed.json`: reading and writing, and the status computation — a file
+  from 0.6, a status a later uDeck writes read as `modified` with the file
+  whole, a branch's and a pull request's record written as read, and verified,
+  unverified and modified by the source, the ref and the tree on disk;
+* the permission gate, held to a version or to a tree (`PermissionGate`, in
+  the plugin format, run on Linux too): a table of the two bases — no
+  decision, one for this tree, for another tree, from before there were trees,
+  for another version, a refusal, a folder not hashed yet, nothing asked for —
+  and that a required tree only ever asks for more; what the decision is held
+  to (`ConsentBasis`), an `installed.json` that cannot be read included; a
+  hashing that finds the same tree keeping a poll loop, another tree stopping
+  it, and the runs between a change and its hashing skipped (`HashedTrees`);
+  **Allow** granting only for the tree the card showed; a pull request's copy
+  put back by **Reinstall** and **Back to** as the pull request's, unverified,
+  an earlier version as the default branch's, and a fork's default branch
+  never taken as the source's (`ShownPlace`, `PluginInstaller`);
+* a github.com link, read (`RepositoryLink`): every form it accepts — a pull
+  request and the pages under it, a branch whose name holds `/` with and
+  without a plugin's folder after it, a repository's own page — and every one
+  it refuses, with what it is; what a link comes to once GitHub is asked
+  (`RefResolver`), against a provider of the test's own that counts its
+  requests; and a pull request as GitHub answers it, through the client's own
+  transport (`GitHubClient.pull`);
 * which windows the layout keeps;
 * what Settings → Plugins decides before it draws: which warning **Remove**,
   **Replace…**, **Update**, **Reinstall**, **Back to**, **Install this
@@ -2051,8 +2142,13 @@ owner sets the branch protection.
   successful runs for authors. The bash check in uDeck's CI and the official
   repository's Python script go.
 * **Stage 3 — branches, pull requests, verified.** Installing from a branch or a
-  pull request, forks included; **Unverified**, on the card too; consent for
-  every new content; **Verified** computed from content, with the switch to
+  pull request, forks included (built underneath: `installed.json` keeps a
+  branch's and a pull request's ref, and every button that puts a copy back
+  keeps it, [`installed.json`](#installedjson); a github.com link read and
+  resolved, `RepositoryLink` and `RefResolver`, which nothing in Settings
+  offers yet); **Unverified**, on the card too; consent for
+  every new content (built: [Consent for unverified code](#consent-for-unverified-code));
+  **Verified** computed from content, with the switch to
   the merged version when a pull request lands; automatic daily updates for
   verified plugins (built: [Automatic updates](#automatic-updates), with the
   permission decision carried across a swap of one verified copy for another,

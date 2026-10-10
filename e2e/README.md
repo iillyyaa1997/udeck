@@ -1588,23 +1588,31 @@ lab's checks"). None of them talks to github.com — in the lab only the update
 checks given a published release do, `updates.a-published-release` by default.
 A fake GitHub runs inside the guest (`e2e/guest/fake-github.py`, the guest's
 own Python and the standard library only, on `127.0.0.1:8766`), answering the
-part of the API uDeck uses — the default branch, the head with its `ETag` and
-`304`, a tree with and without `recursive=1`, a folder's history — and a raw
-file host beside it. Its content
-is the fixture commits in `e2e/fixtures/plugin-repository/`: `c1` holds
+part of the API uDeck uses — the default branch, the head of a branch or of a
+pull request (`refs/heads/{b}`, `refs/pull/{n}/head`) with its `ETag` and
+`304`, a pull request (`/pulls/{n}`), a tree with and without `recursive=1`, a
+folder's history — and a raw file host beside it. Its content
+is the fixture commits in `e2e/fixtures/plugin-repository/`. On the main line,
+in the order `history` gives: `c1` holds
 `uptime` 1.0.0 and the three plugins uDeck must refuse (`future-api` with
 `api: 2`, `future-udeck` with `minUDeck: 99.0.0`, `linked` with a symbolic
 link), `c2` the same with `uptime` 1.1.0, asking for what 1.0.0 asks, and `c3`
-with `uptime` 1.2.0, asking for one command more. The fake hashes them into real git
+with `uptime` 1.2.0, asking for one command more. Off it, as `parents` names
+them with the commit each was made on: `pr3`, made on `c1`, a pull request's
+head — `uptime` 1.0.1, asking for what 1.0.0 asks, and `asks-nothing`, a new
+plugin asking for no permission at all. The fake hashes them into real git
 blob, tree and commit ids itself — there is no git in the guest — and the lab's
 own tests hold its hashing against `git hash-object`, `git write-tree` and `git
-commit-tree`. uDeck's Swift then has to agree with it, file by file and folder
+commit-tree`, parents included. uDeck's Swift then has to agree with it, file by file and folder
 by folder, or nothing installs.
 
 **The lab drives the fake by rewriting a small state file over SSH**: which
-commit `main` is at, "the limit is used up until T" (`403` with
+commit `main` is at, which commit each other branch is at (a branch left out
+is deleted), each pull request's head, state and merge commit and the
+repository it came from, "the limit is used up until T" (`403` with
 `x-ratelimit-remaining: 0`), "answer this file with different bytes", "say the
-listing is truncated". Each change is read back through the fake before a check
+listing is truncated". Moving a head, force-pushing, merging and closing are
+each one such rewrite. Each change is read back through the fake before a check
 relies on it.
 
 **Three oracles, none of them what uDeck says about itself.** The fake's access

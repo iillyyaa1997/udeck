@@ -47,7 +47,10 @@ In scope, and treated as vulnerabilities:
 
 - anything letting a plugin get past a gate uDeck does claim to enforce — an
   action running without its `exec` grant, a plugin launching while its
-  capabilities are declined;
+  capabilities are declined, or code nobody verified — a copy from a branch or
+  a pull request — running on a decision made for other content, or before
+  you were asked about it (a change counts from when the folder watcher
+  reports it, a fraction of a second after it is made);
 - uDeck installing plugin files other than the ones the official repository
   lists at the commit it showed — a file that does not match its hash, a folder
   that does not add up — or marking a plugin **Verified** that is not exactly
