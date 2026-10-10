@@ -158,7 +158,7 @@ struct English: Vocabulary {
         // Plugins from a repository
         case .pluginsOfficialCatalogue: "Official catalogue"
         case .pluginsOfficialCatalogueHelp(let source):
-            "uDeck reads the list of plugins in \(source) a few seconds after it starts and once a day, and when you press Check now — the list and each plugin's manifest, nothing else. A plugin's files are fetched only when you press Install. Off, uDeck makes no request about plugins at all; what is installed keeps running."
+            "uDeck reads the list of plugins in \(source) a few seconds after it starts and once a day, and when you press Check now — the list and each plugin's manifest, nothing else. A plugin's files are fetched when you press Install, and when a verified plugin updates itself. Off, uDeck makes no request about plugins at all; what is installed keeps running."
         case .catalogueCheckNow: "Check now"
         case .catalogueChecked(let source, let time): "\(source) · checked \(time)"
         case .catalogueNeverRead(let source): "\(source) · not read yet"
@@ -168,6 +168,9 @@ struct English: Vocabulary {
         case .catalogueEmpty: "The repository offers no plugins yet."
         case .catalogueUpdatesWaiting(let count):
             count == 1 ? "1 update is waiting" : "\(count) updates are waiting"
+        case .catalogueUpdatesByThemselves: "Update verified plugins by themselves"
+        case .catalogueUpdatesByThemselvesHelp:
+            "After each read of the catalogue, a verified plugin whose new version asks for exactly what it asks for now is updated without a press: its window stays, and so does your permission decision. A new version that asks for different permissions, a plugin you changed or put a file of your own into, and one you kept at an earlier version wait here for you to press Update."
         case .catalogueLimited(let readAt, let until):
             "GitHub allows 60 requests an hour from this network without signing in, and they are used up — by uDeck or by something else on the same connection. "
                 + (readAt.map { "The list below is from \($0); " } ?? "")
@@ -196,6 +199,7 @@ struct English: Vocabulary {
         case .catalogueInstalled: "Installed"
         case .catalogueAvailable(let version): "\(version) available"
         case .catalogueChangedStill(let version): "Changed in the repository, still \(version)"
+        case .catalogueAsksDifferently: "asks for different permissions"
         case .catalogueRepositoryNowHas(let version): "The repository now has \(version)"
         case .catalogueSwitchTo(let version): "Switch to \(version)"
         case .catalogueUpdateNeedsAPI(let version, let api): "\(version) needs a newer uDeck (api \(api))"
@@ -240,6 +244,9 @@ struct English: Vocabulary {
         case .pluginMarkMissing: "Missing"
         case .pluginFrom(let source, let commit): "From \(source) at \(commit)"
         case .pluginPinned: "Kept at this version — newer ones are still shown"
+        case .pluginUpdatedByItself(let date): "Updated by itself on \(date)"
+        case .pluginUpdateByItselfFailed(let version):
+            "Updating to \(version) by itself did not work; uDeck tries again after the next read of the catalogue."
         case .pluginMarkLinked: "Linked"
         case .pluginLinkedTo(let path): "A link to \(path): uDeck runs the plugin from there"
         case .pluginLinkNotFollowed(let destination): "A link to \(destination), which uDeck does not follow"

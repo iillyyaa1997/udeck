@@ -245,13 +245,22 @@ uDeck reads it from `api.github.com` and `raw.githubusercontent.com`, anonymousl
 * when Settings → Plugins is opened and the list is more than an hour old, and
   whenever **Check now** is pressed there;
 * and when you press **Install**, **Update**, **Reinstall**, **Back to** or
-  **Earlier versions**, the files that needs — so GitHub learns which plugin.
+  **Earlier versions**, the files that needs — so GitHub learns which plugin;
+* and, after a read, the files of a **Verified** plugin that updates itself.
 
 A read is usually one or two requests, each carrying `User-Agent:
-uDeck/<version>` and the network address any request carries; no plugin is
-downloaded or installed by itself. **Settings → Plugins → Official catalogue**
-turns all of it off: uDeck then makes no request about plugins at all, the
-plugins you have keep running, and uDeck stops knowing about their updates.
+uDeck/<version>` and the network address any request carries. **Verified
+plugins update themselves**: after a read that finds a new version of one —
+asking for exactly the permissions the installed one asks for — uDeck downloads
+that plugin's files and puts it in place, its window and your permission
+decision kept, and its row says *Updated by itself*. A new version asking for
+different permissions, a plugin you changed or put a file of your own into, and
+one you kept at an earlier version are only offered, for you to press
+**Update**; nothing else is downloaded or installed by itself. **Settings →
+Plugins → Update verified plugins by themselves** turns that off, and every
+update waits for a press. **Settings → Plugins → Official catalogue** turns all
+of it off: uDeck then makes no request about plugins at all, the plugins you
+have keep running, and uDeck stops knowing about their updates.
 What exactly is read, cached and counted against GitHub's limits is in
 [docs/plugin-repository.md](docs/plugin-repository.md#what-udeck-fetches-and-when).
 

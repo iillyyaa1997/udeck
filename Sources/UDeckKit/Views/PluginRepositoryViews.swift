@@ -25,6 +25,17 @@ struct CatalogueSection: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if model.settings.readsOfficialCatalogue {
+                // Under the catalogue's own switch: off, nothing is read, so
+                // nothing could update itself either.
+                Toggle(strings(.catalogueUpdatesByThemselves), isOn: Binding(
+                    get: { model.settings.updatesVerifiedByThemselves },
+                    set: { model.setAutoUpdateVerified($0) }
+                ))
+                .accessibilityIdentifier("catalogue.autoUpdate")
+                Text(strings(.catalogueUpdatesByThemselvesHelp))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("catalogue.autoUpdateHelp")
                 HStack(spacing: 10) {
                     Button(strings(.catalogueCheckNow)) { model.checkCatalogueNow() }
                         .disabled(model.catalogueRefreshing)
@@ -278,7 +289,7 @@ struct CatalogueRowView: View {
         case .cannotInstall(let refusal): strings(.catalogueRefusal(refusal))
         case .folderOfYourOwn: model.linkedFolder(id) == nil ? strings(.catalogueOwnFolder(id: id)) : strings(.catalogueLinkedHere(id: id))
         case .missing: strings(.catalogueMissing(id: id, path: model.pluginsDirectoryDisplayPath))
-        case .installed(let offer): OfferText.text(offer, strings)
+        case .installed(let offer): OfferText.text(offer, strings, asksDifferently: model.updateAsksDifferently(id))
         }
     }
 
@@ -364,7 +375,13 @@ struct InstalledRepositoryControls: View {
                 Text(strings(.pluginPinned)).font(.caption).foregroundStyle(.secondary)
                     .accessibilityIdentifier("plugin.\(id).pinned")
             }
-            if let offer, let text = OfferText.text(offer, strings), offer != .current {
+            if let record, record.automatic == true {
+                Text(strings(.pluginUpdatedByItself(date: Clock.day(record.installedAt, strings))))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("plugin.\(id).updatedByItself")
+            }
+            if let offer, let text = OfferText.text(offer, strings, asksDifferently: model.updateAsksDifferently(id)),
+               offer != .current {
                 HStack(spacing: 8) {
                     Text(text).font(.caption).bold()
                         .accessibilityIdentifier("plugin.\(id).offer")
@@ -377,6 +394,12 @@ struct InstalledRepositoryControls: View {
             buttons
             if let confirming {
                 confirmation(confirming)
+            }
+            if let version = model.autoUpdates.failures[id] {
+                Text(strings(.pluginUpdateByItselfFailed(version: version)))
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("plugin.\(id).updateByItselfFailed")
             }
             if let problem = model.operationProblems[id] {
                 ProblemText(problem: problem).accessibilityIdentifier("plugin.\(id).problem")
@@ -649,13 +672,16 @@ struct MissingPluginRow: View {
 
 // MARK: - Pieces
 
-/// What an update offer says, in one line.
+/// What an update offer says, in one line — and, when the update asks for
+/// other permissions than the copy on disk (`asksDifferently`), that it does:
+/// why it waits for a press, and that the card will ask.
 enum OfferText {
-    static func text(_ offer: UpdateOffer, _ strings: Strings) -> String? {
-        switch offer {
+    static func text(_ offer: UpdateOffer, _ strings: Strings, asksDifferently: Bool = false) -> String? {
+        let asks = asksDifferently ? ", " + strings(.catalogueAsksDifferently) : ""
+        return switch offer {
         case .current: strings(.catalogueInstalled)
-        case .newer(let version): strings(.catalogueAvailable(version: version))
-        case .changedStill(let version): strings(.catalogueChangedStill(version: version))
+        case .newer(let version): strings(.catalogueAvailable(version: version)) + asks
+        case .changedStill(let version): strings(.catalogueChangedStill(version: version)) + asks
         case .older(let version): strings(.catalogueRepositoryNowHas(version: version))
         case .goneFromRepository: strings(.catalogueGone)
         case .cannotRun(let version, let reason):
@@ -710,6 +736,16 @@ struct ProblemText: View {
 
 /// A time as a row says it: `14:02` today, with the date on any other day.
 enum Clock {
+    /// A day as a sentence says it, in uDeck's language: *October 10, 2026*,
+    /// *10 октября 2026 г.*
+    static func day(_ date: Date, _ strings: Strings) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: strings.language.rawValue)
+        formatter.timeZone = .current
+        formatter.setLocalizedDateFormatFromTemplate("dMMMMyyyy")
+        return formatter.string(from: date)
+    }
+
     /// The same, to the second: when a run started.
     static func withSeconds(_ date: Date, _ strings: Strings) -> String {
         let formatter = DateFormatter()

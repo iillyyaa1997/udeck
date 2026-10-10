@@ -96,6 +96,95 @@ struct PluginInstallerTests {
         #expect(Set((uptime["ref"] as? [String: Any] ?? [:]).keys) == ["kind", "name"])
     }
 
+    /// An update uDeck made by itself says so in its record, and only that
+    /// one: a press after it writes the shape every other record has. A file
+    /// written before there were updates by themselves reads as it did.
+    @Test("an update by itself is marked in its record, and only it")
+    func automaticMark() async throws {
+        let first = FakeRepository.withUptime()
+        let fromFirst = installer(FetchLog(first))
+        try fromFirst.commit(try await fromFirst.stage(request(first)))
+        let next = FakeRepository.withUptime(version: "1.1.0")
+        var automatic = request(next, .update, version: "1.1.0")
+        automatic.automatic = true
+        let fromNext = installer(FetchLog(next))
+        let record = try fromNext.commit(try await fromNext.stage(automatic))
+        #expect(record.automatic == true && record.previous?.version == "1.0.0" && record.pinned == false)
+        func written() throws -> [String: Any] {
+            let json = try JSONSerialization.jsonObject(with: Data(contentsOf: paths.installedFile)) as? [String: Any]
+            return try #require((json?["plugins"] as? [String: Any])?["uptime"] as? [String: Any])
+        }
+        #expect(try written()["automatic"] as? Bool == true)
+        #expect(try records().plugins["uptime"] == record)
+
+        let pressed = try fromFirst.commit(try await fromFirst.stage(request(first, .earlier)))
+        #expect(pressed.automatic == nil)
+        #expect(try written()["automatic"] == nil, "a press writes the record's usual shape")
+
+        let before = Data(#"""
+            {"version": 1, "plugins": {"uptime": {"source": "official",
+              "repository": {"provider": "github", "host": "github.com", "path": "iillyyaa1997/udeck-plugins"},
+              "ref": {"kind": "default", "name": "main"}, "commit": "c", "tree": "t", "version": "1.0.0",
+              "installedAt": "2026-09-21T14:13:20Z", "pinned": false,
+              "verification": {"status": "verified", "by": "official", "checkedAgainst": null,
+                               "checkedAt": "2026-09-21T14:13:20Z"},
+              "previous": null}}}
+            """#.utf8)
+        let read = try JSONDecoder.iso8601.decode(InstalledPlugins.self, from: before)
+        #expect(read.plugins["uptime"]?.automatic == nil)
+    }
+
+    /// An update by itself was decided on uDeck's own copy, and the operator
+    /// had its download's time to put something of theirs at the place.
+    /// Asked again at the swap, by the rule every button warns by, each of
+    /// these leaves the folder, the record and the Trash exactly as they were:
+    /// nobody is there to be warned.
+    static let cameWhileItDownloaded: [(String, @Sendable (URL, URL) throws -> Void)] = [
+        ("a .env", { live, _ in try Data("TOKEN=mine\n".utf8).write(to: live.appendingPathComponent(".env")) }),
+        ("an edit", { live, _ in
+            try Data("#!/bin/sh\necho mine\n".utf8).write(to: live.appendingPathComponent("uptime.sh"))
+        }),
+        ("a link in the copy's place", { live, elsewhere in
+            try FileManager.default.moveItem(at: live, to: elsewhere)
+            try FileManager.default.createSymbolicLink(at: live, withDestinationURL: elsewhere)
+        }),
+        ("no folder any more", { live, elsewhere in try FileManager.default.moveItem(at: live, to: elsewhere) }),
+    ]
+
+    @Test("an update by itself replaces only uDeck's own copy, asked at the swap", arguments: 0..<cameWhileItDownloaded.count)
+    func automaticLeavesWhatCame(row: Int) async throws {
+        let (what, came) = Self.cameWhileItDownloaded[row]
+        let first = FakeRepository.withUptime()
+        let trash = TestTrash(in: temp.url)
+        let fromFirst = installer(FetchLog(first), trash: trash)
+        try fromFirst.commit(try await fromFirst.stage(request(first)))
+        let installed = try records()
+        let next = FakeRepository.withUptime(version: "1.1.0")
+        var automatic = request(next, .update, version: "1.1.0")
+        automatic.automatic = true
+        let fromNext = installer(FetchLog(next), trash: trash)
+        let staged = try await fromNext.stage(automatic)
+
+        let elsewhere = temp.url.appendingPathComponent("elsewhere-\(row)", isDirectory: true)
+        try came(live, elsewhere)
+        let tree = try? GitHash.tree(ofDirectoryAt: live)
+        await #expect(throws: AutoUpdate.OperatorsWorkCame(id: "uptime"), "\(what)") {
+            try await fromNext.commit(staged, once: { true })
+        }
+        #expect(try records() == installed, "\(what): the record is the one before")
+        #expect(trash.names.isEmpty, "\(what): nothing went to the Trash")
+        #expect(stagingIsEmpty(), "\(what): the staged copy went")
+        #expect((try? GitHash.tree(ofDirectoryAt: live)) == tree, "\(what): the place is as it came to be")
+
+        // The same, pressed: the warning was answered, and the swap goes ahead.
+        if row == 0 {
+            var pressed = automatic
+            pressed.automatic = false
+            let record = try fromNext.commit(try await fromNext.stage(pressed))
+            #expect(record.version == "1.1.0" && trash.names == ["uptime"], "a press takes the place, the .env to the Trash")
+        }
+    }
+
     // MARK: - Refusals, each leaving ~/.udeck as it was
 
     @Test("a file whose hash is wrong is refused, and nothing is installed")

@@ -19,8 +19,9 @@ where each one came from.
 
 uDeck gets this in five stages, each of which ships something that works on its
 own (see [Stages](#stages)). **Everything in this document without a mark is
-stage 1 and is being built now.** Anything that belongs to a later stage is
-marked where it appears:
+built** — stage 1, and what later stages have built since, which
+[Stages](#stages) lists. Anything that belongs to a later stage and is not
+built yet is marked where it appears:
 
 > **Later — stage 3.** Text like this describes something that is not built
 > yet.
@@ -811,7 +812,7 @@ traces the lab can check.
   its cache: reinstalled, it starts again from 1.
 * It declares `"permissions": { "exec": ["sysctl"] }` — honestly, since it runs
   it — which means installing it walks through the consent sheet, and every
-  new version asks again.
+  new version that asks for something else asks again.
 * `version` `1.0.0`, `api` `1`, no `minUDeck`; `interval` 60, `timeout` 2, card
   `ttl` 120; `manifest.ru.json`; `README.md`; `LICENSE` naming its author.
 
@@ -851,7 +852,10 @@ What a bump means, as guidance for authors:
   renamed or removed (their stored value stops applying), or the card starts
   to mean something different.
 
-Any change of `version` re-asks the permission question, as it always has.
+Any change of `version` re-asks the permission question — except when one
+**Verified** copy replaces another and the new one asks for exactly what the old
+one did: then the decision is carried to the new version
+([Updating](#updating)).
 
 Where the grammar is enforced:
 
@@ -1228,7 +1232,8 @@ arrived different from what the repository lists (expected 1a2b3c4, got
 Installing does not add the plugin to a tab, and does not run it. It appears in
 the list a new tab offers, as a folder dropped in by hand does. Consent works
 as it does today: the first time it is placed, a plugin that asks for anything
-asks, and a new `version` asks again.
+asks, and a new `version` asks again — unless it replaced a **Verified** copy
+asking for exactly what that one asked ([Updating](#updating)).
 
 One install, update or removal runs at a time. They are rare, and doing them
 one after another is what keeps `installed.json` and the plugins folder from
@@ -1348,12 +1353,13 @@ its hash be compared at all.
 | `tree` | 40 hex characters | The tree SHA of `plugins/<id>` at that commit — and so of the folder on disk, as it was installed. |
 | `version` | string | The manifest's `version` at that commit. |
 | `installedAt` | ISO-8601 time, UTC, whole seconds | When this copy was put in place. |
-| `pinned` | boolean | `true` when the operator chose this version over the newest one — an earlier version, or **Back to 1.0.0**. A pinned plugin is still told about newer versions; later, automatic updates leave it alone. **Update** clears it. |
+| `pinned` | boolean | `true` when the operator chose this version over the newest one — an earlier version, or **Back to 1.0.0**. A pinned plugin is still told about newer versions, and [updates by themselves](#automatic-updates) leave it alone. **Update** clears it. |
 | `verification.status` | string | What the folder was, the last time uDeck looked: `verified`, `modified` (stage 1); `trusted`, `unverified` (later). |
 | `verification.by` | string or null | Whose guarantee it is: `official`, or (later) the trusted source's id; `null` when nobody's. |
 | `verification.checkedAgainst` | 40 hex characters or null | The commit of the default branch the folder was compared against. |
 | `verification.checkedAt` | ISO-8601 time | When. |
 | `previous` | object or null | The copy this one replaced — `ref`, `commit`, `tree`, `version` — so that **Back to 1.0.0** is one click. `null` after a first install. |
+| `automatic` | `true`, or absent | Present only on a copy uDeck put in place by itself — a verified plugin [updating itself](#automatic-updates) — and the row says *Updated by itself on October 10, 2026*. Any press that installs writes the record without it. A uDeck from before automatic updates reads the record and skips the key. |
 
 **`verification` is recorded, not trusted.** It is recomputed every time the
 plugins folder is read, and after every refresh; uDeck writes it back only when
@@ -1471,11 +1477,15 @@ says what changed:
 | An older version (the repository went back) | *The repository now has 1.1.0* | **Switch to 1.1.0** |
 | A newer version that cannot run here | *1.3.0 needs uDeck 0.8.0* | nothing |
 | No folder any more | *No longer in the repository* | **Remove**; the plugin keeps running |
+| A newer version asking for different permissions | *1.3.0 available, asks for different permissions* · *What changed* | **Update**, and the card asks before it runs |
+| The same version, different files, asking for different permissions | *Changed in the repository, still 1.2.0, asks for different permissions* · *What changed* | **Update**, and the card asks before it runs |
 
 *What changed* opens
 `https://github.com/{owner}/{repo}/compare/{installed commit}...{head}` in the
-browser. Nothing pops up and nothing is installed by itself: in stage 1 the
-operator updates when they choose.
+browser. Nothing pops up. A verified plugin whose new version asks for exactly
+what the installed one asks for does not wait on its row: it
+[updates itself](#automatic-updates) after the read that found it. Everything
+else in the table waits for the operator to press it.
 
 The same line appears on the plugin's row in the catalogue, and the Plugins
 pane of Settings shows how many updates are waiting.
@@ -1484,9 +1494,21 @@ pane of Settings shows how many updates are waiting.
 
 An update is an install of the plugin at the head commit, with every step above
 — downloaded, hashed, checked, swapped in, the window kept. The record's
-current values move to `previous`, and `pinned` goes back to `false`. A new
-`version` re-asks the permission question when the plugin asks for anything,
-as it always has.
+current values move to `previous`, and `pinned` goes back to `false`.
+
+The permission decision is held to the `version` it was made for, so that a new
+version asking for more asks again. When a **Verified** copy is replaced by
+another **Verified** copy — **Update**, **Switch to**, **Back to**, an earlier
+version, or an update by itself — and the new manifest asks for exactly what
+the old one asked for, every capability compared byte for byte as a set, the
+decision is carried to the new version as it was, a refusal included, and the
+card does not ask again. Anything else — a new or a dropped permission, a copy
+that was not **Verified**, a decision made for another version — leaves the
+decision as it was, and a new `version` asks on the card, as it always has.
+Carrying grants nothing: the gate still holds every capability the new
+manifest asks for against what the decision holds. If uDeck stops between the
+swap and writing the decision, the plugin asks again. The rule is `GrantCarry`
+in UDeckCore, tested there.
 
 A plugin whose copy holds anything of the operator's is not updated over
 without a word: *"Your changes to uptime will be moved to the Trash and
@@ -1578,17 +1600,65 @@ A folder that no longer hashes to its record is **Modified locally**. It runs
 as it is, loses its **Verified** mark, and the row offers **Reinstall 1.2.0**,
 which puts back what was installed and moves the changed copy to the Trash.
 
-### Automatic updates, and consent for unverified code
+### Automatic updates
 
-> **Later — stage 3.** Verified plugins update themselves once a day, unless the
-> new version asks for different permissions — then uDeck asks first. An
-> unverified plugin (a branch, a pull request) is only ever offered an update,
-> with *What changed*, and its consent is tied to its tree SHA rather than its
-> `version`: every new content asks again, even when the plugin asks for
-> nothing, because code on a branch changes without review and there is no
-> sandbox. `PluginGrant` gains a `decidedForTree` for this; for verified and
-> local plugins consent stays tied to `version`, as today. A pinned plugin is
-> never updated automatically.
+A verified plugin updates itself, with nothing pressed, after a read of the
+catalogue that finds a newer version — or the same version with other files —
+asking for exactly what the installed one asks for. It is the update
+**Update** makes, every step of it, run by uDeck one plugin at a time: the
+files of that one plugin downloaded at the head, hashed, checked, swapped in,
+its window kept, `previous` written, and its permission decision carried to
+the new version ([Updating](#updating)), so that the card goes on running
+without asking. The record says `automatic: true`, and the row *Updated by
+itself on October 10, 2026*, with **Back to 1.0.0** as after any update.
+
+It happens only when all of these hold, and the row offers the update as usual
+when any does not:
+
+* **Update verified plugins by themselves**, under Settings → Plugins → Official
+  catalogue, is on. It is on as uDeck ships (`autoUpdateVerified` in
+  `settings.json`, absent until it is switched off), and does nothing while
+  **Official catalogue** is off;
+* the installed copy stands **Verified** — not **Modified locally**, not a
+  folder of the operator's own, not a linked folder;
+* it is not `pinned`: an earlier version the operator chose stays;
+* the new version asks for the same permissions, every capability compared
+  byte for byte as a set. One more, one fewer or another, and the row says
+  *1.3.0 available, asks for different permissions*: the operator presses
+  **Update**, and the card asks;
+* nothing of the operator's is at its place — nothing that would go to the
+  Trash by the [rule every button warns by](#what-goes-to-the-trash), such as a
+  `.env`, and no link: an update by itself has nobody to warn. This is asked
+  again at the swap, after the download: a `.env`, an edit or a link put there
+  meanwhile — or the folder gone — leaves the folder exactly as it is, and the
+  update waits on the row;
+* it has not failed since the last read. A failure is said on the row —
+  *Updating to 1.3.0 by itself did not work* and why — until the next read or
+  the next install, update or removal of that plugin, and tried again after
+  the next read. A plugin left as it was — by a card action, the switch, the
+  operator's work at its place — has not failed.
+
+When the reads happen is [What uDeck fetches, and when](#what-udeck-fetches-and-when):
+a few seconds after launch when the last read is over a day old, once a day
+while uDeck runs, when Settings → Plugins is opened on a list over an hour old,
+and on **Check now** — and each read that succeeds is followed by the updates
+it found, once the plugin folders are hashed again. An update by itself never
+ends anything the plugin is doing: while one of its card actions runs, the
+update waits, and uDeck asks again every minute; it waits the same way while
+another install, update or removal runs. A card action that starts while the
+update downloads leaves the folder as it was, and so does **Update verified
+plugins by themselves** or **Official catalogue** switched off meanwhile.
+Which plugins update themselves is `AutoUpdate` in UDeckCore, and when they
+are asked `AutoUpdateSchedule` beside it, both tested there.
+
+### Consent for unverified code
+
+> **Later — stage 3.** An unverified plugin (a branch, a pull request) is only
+> ever offered an update, with *What changed*, and its consent is tied to its
+> tree SHA rather than its `version`: every new content asks again, even when
+> the plugin asks for nothing, because code on a branch changes without review
+> and there is no sandbox. `PluginGrant` gains a `decidedForTree` for this; for
+> verified and local plugins consent stays tied to `version`, as it is.
 
 ---
 
@@ -1673,10 +1743,17 @@ repository. What that means, exactly:
   old; and whenever **Check now** is pressed.
 * **When the operator presses Install, Update or Earlier versions**, the files
   that needs.
+* **After a read that finds an update a verified plugin makes by itself**
+  ([Automatic updates](#automatic-updates)), that plugin's files at the head —
+  no more than **Update** would fetch, and only while **Update verified plugins
+  by themselves** is on. Switched off while one downloads, that download finishes
+  and nothing of it is put in place.
 
 Nothing else. A refresh reads only what [the catalogue](#reading-a-repository-without-downloading-it)
-reads, usually one or two requests; no plugin is downloaded or installed by
-itself. A failed refresh is tried again after an hour, then daily as usual.
+reads, usually one or two requests; the only plugin downloaded without a press
+is a verified one updating itself, and only when its new version asks for
+exactly what it asks for now. A failed refresh is tried again after an hour,
+then daily as usual.
 
 It talks to two hosts, `api.github.com` and `raw.githubusercontent.com`. What
 reaches GitHub is what any HTTPS request carries: the network address, the
@@ -1740,7 +1817,8 @@ loopback address, with the guest's own `/usr/bin/python3` and nothing but the
 standard library.
 
 * **Its content is fixture folders, one per commit** — for example
-  `c1/` (`uptime` 1.0.0 and the refusal fixtures), `c2/` (`uptime` 1.1.0), a
+  `c1/` (`uptime` 1.0.0 and the refusal fixtures), `c2/` (`uptime` 1.1.0,
+  asking for the same), `c3/` (`uptime` 1.2.0, asking for one command more), a
   file saying which commit `main` points at, and the order of history. The
   fake computes real git blob, tree and commit ids from them itself; there is
   no git in the guest. Because its hashing is Python and uDeck's is Swift, two
@@ -1784,7 +1862,9 @@ guest's `~/.udeck` over SSH.
 | `plugins.catalogue-on-first-launch` | On a fresh guest, with nothing pressed, the fake's log shows the catalogue being read within a minute — and no file requested but the passport and manifests. Settings lists the fixture plugins. |
 | `plugins.install-fetches-one-folder` | **Install** on `uptime` requests only files under `plugins/uptime/` at the listed commit, and no API request at all. The folder in the guest hashes to the fixture's tree; the record in `installed.json` has every field above; the row says **Verified**. |
 | `plugins.card-reaches-the-panel` | Placed on an empty tab and allowed, `uptime`'s card appears, and says it has run once. |
-| `plugins.update-keeps-the-window` | With `main` moved to `c2`, **Check now** shows *1.1.0 available*; after **Update**, `layout.json` has the same window (same id, same place), the card shows 1.1.0's output after the new consent, and `previous` holds 1.0.0. |
+| `plugins.update-keeps-the-window` | With **Update verified plugins by themselves** off and `main` moved to `c2`, **Check now** shows *1.1.0 available*; after **Update**, `layout.json` has the same window (same id, same place), the card shows 1.1.0's output without asking again — 1.1.0 asks for what 1.0.0 asked, and `grants.json` holds the decision for 1.1.0 — and `previous` holds 1.0.0. |
+| `plugins.verified-updates-itself` | `uptime` 1.0.0 installed, placed and allowed; uDeck ended, `main` moved to `c2` and the catalogue's `state.json` made two days old; started again with nothing pressed, uDeck reads `c2` and fetches every file of `plugins/uptime` there by itself: the folder hashes to `c2`'s tree, the record says 1.1.0, `previous` 1.0.0 and `automatic: true`, the window is the same, the card runs 1.1.0 without asking (`grants.json` holds the decision for 1.1.0), and the row says *Updated by itself on …* — in Russian too, kept as a screenshot — and offers **Back to 1.0.0**. The control: 1.0.0 chosen under **Earlier versions…** is pinned, and **Check now** leaves it there, 1.1.0 offered, none of its files fetched, and uDeck's log saying it is pinned. |
+| `plugins.permissions-change-only-offers` | **Update verified plugins by themselves** clicked off (`settings.json` says so), `main` moved to `c2`: **Check now** offers *1.1.0 available* and fetches no file of `uptime` but its manifest. The card's **Hold** pressed and left running, the switch clicked on again: the next **Check now** reads the catalogue and leaves `uptime` at 1.0.0 — no file of it fetched, the action still running and never seeing its folder change, uDeck's log saying it waits for the action; the action ended, the minute's tick puts 1.1.0 in place by itself, with no read in between. `main` moved to `c3`, whose 1.2.0 asks for one command more: after **Check now** reads `c3`, the row says *1.2.0 available, asks for different permissions*, nothing of 1.2.0 but its manifest is fetched, 1.1.0 stays and uDeck's log says why; **Update** puts 1.2.0 in place, and its card asks for consent before it runs. |
 | `plugins.earlier-version` | **Earlier versions…** lists 1.1.0 and 1.0.0; with a `.env` put into the folder over SSH, choosing 1.0.0 first says *"Your changes to uptime will be moved to the Trash…"*; confirmed, it installs 1.0.0, `pinned` is `true`, the row still says *1.1.0 available*, and the `.env` is in the guest's Trash. |
 | `plugins.remove-leaves-nothing` | Before **Remove**, `cache/uptime`, the grant and a setting value are there to be taken; after it: no folder, no `cache/uptime`, no entry in `grants.json`, `plugin-settings.json` or `installed.json`, no window. Installed again, it asks for consent again and its card says it has run once. |
 | `plugins.refuses-what-it-cannot-run` | Fixtures with `api: 2` and `minUDeck: "99.0.0"` are listed with their reasons and no **Install**, and nothing of theirs but the manifest was ever requested. |
@@ -1870,7 +1950,20 @@ never the network. What they cover:
   (`BundlePlace`); when a warning's button acts and when it says what is there
   now instead — another version, another copy of the same version, a link put
   in the copy's place (`ShownPlace`); and when a failed run is said on a fresh
-  card (`PluginSnapshot.failureOnAFreshCard`).
+  card (`PluginSnapshot.failureOnAFreshCard`);
+* which plugins update themselves (`AutoUpdate`): each condition — the switch,
+  an update waiting, **Verified**, `pinned`, the permissions, the operator's
+  work at the place, a failure since the last read, a card action running,
+  another operation — taken away alone from a plugin that does, each with its
+  own reason, and the permissions compared byte for byte as a set; and the
+  decision across a swap (`GrantCarry`): carried from one verified copy to
+  another asking for the same, a refusal included, left as it was otherwise,
+  and the gate running the new version on a carried decision and asking on one
+  left as it was; when they are asked (`AutoUpdateSchedule`): only after a read
+  that succeeded, only on folders hashed after it, again on the minute's tick
+  while one waits, a failure said until the next read and a folder left as it
+  was no failure; and, at the swap, an update by itself refusing a place that
+  holds the operator's work by then (`PluginInstaller`);
 * what `Scripts/make-cli.sh` makes and refuses, and what `release.yml` may do
   and in which order, in the lab's own tests (`e2e/tests/test_make_cli.py`):
   the archives and their names, the signature of the Mac's, a static and
@@ -1961,7 +2054,10 @@ owner sets the branch protection.
   pull request, forks included; **Unverified**, on the card too; consent for
   every new content; **Verified** computed from content, with the switch to
   the merged version when a pull request lands; automatic daily updates for
-  verified plugins; history rewritten on a branch detected and asked about.
+  verified plugins (built: [Automatic updates](#automatic-updates), with the
+  permission decision carried across a swap of one verified copy for another,
+  [Updating](#updating)); history rewritten on a branch detected and asked
+  about.
 * **Stage 4 — own and private sources.** `~/.udeck/sources.json`; GitLab,
   gitlab.com and self-hosted; tokens pasted from a pre-filled creation page, or
   **Sign in** — GitHub and gitlab.com by device flow, a self-hosted GitLab with

@@ -6,10 +6,13 @@ and asks whether the check would still be green — a record with a field
 missing, a window moved, a catalogue that fetched one file more.
 """
 
+import ast
+import calendar
 import importlib.util
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -72,7 +75,7 @@ def test_the_checks_name_the_fixture_plugins_there_are():
 
 def test_the_action_the_check_presses_writes_where_the_check_reads():
     """plugins.an-update-ends-a-running-action reads what the fixture's Hold writes, in the words it writes."""
-    for commit in ("c1", "c2"):
+    for commit in FACTS["history"]:
         hold = (plugin_repository.FIXTURES / commit / "plugins" / "uptime" / "hold.sh").read_text()
         assert f"log={checks.HOLD_LOG}\n" in hold
         assert 'echo "ended ' in hold and 'echo "changed under it ' in hold and 'echo "started ' in hold
@@ -287,3 +290,97 @@ def test_the_greeter_runs_a_bare_name_and_each_folder_says_which_it_is():
     assert manifest["run"] == [checks.GREET] and "/" not in checks.GREET
     for which in ("a", "b"):
         assert f'"{checks.VERSION_ROW}", "{which}"' in checks._card_script(which)
+
+
+# --- Updating by themselves ----------------------------------------------------------------
+
+
+def test_the_words_the_update_checks_wait_for_are_uDecks_own():
+    """plugins.verified-updates-itself and plugins.permissions-change-only-offers read uDeck's own sentences."""
+    english = _source("Sources", "UDeckCore", "Localization", "English.swift")
+    assert 'case .catalogueAvailable(let version): "\\(version) available"' in english
+    assert 'case .catalogueAsksDifferently: "asks for different permissions"' in english
+    assert checks.AVAILABLE_1_2_0_ASKS == "1.2.0 available" + ", " + "asks for different permissions"
+    assert f'"{checks.UPDATED_BY_ITSELF}\\(date)"' in english
+    russian = _source("Sources", "UDeckCore", "Localization", "Russian.swift")
+    assert f'"{checks.RU_UPDATED_BY_ITSELF}\\(date)"' in russian
+    assert checks.RU_UPDATES_BY_THEMSELVES_HELP in russian
+    assert 'case .catalogueAvailable(let version): "Доступна \\(version)"' in russian
+    assert checks.RU_AVAILABLE_1_1_0 == "Доступна 1.1.0"
+    # The row joins the two (OfferText), and the identifiers the checks read are the views' own.
+    views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift")
+    assert '", " + strings(.catalogueAsksDifferently)' in views
+    for identifier in ('"catalogue.autoUpdate"', '"catalogue.autoUpdateHelp"', '"plugin.\\(id).updatedByItself"'):
+        assert identifier in views
+
+
+def test_the_reasons_the_checks_read_in_uDecks_log_are_the_ones_it_writes():
+    """The controls read uDeck's own log for why a plugin was left alone: the sentence, and each reason's name, are uDeck's."""
+    model = _source("Sources", "UDeckKit", "Plugins", "DeckModel+Repository.swift")
+    swift = {
+        checks.DOES_NOT_UPDATE_ITSELF: '"\\(id, privacy: .public) does not update itself: \\(String(describing: reason), privacy: .public)"',
+        checks.UPDATES_ITSELF_LATER: '"\\(id, privacy: .public) updates itself later: \\(String(describing: wait), privacy: .public)"',
+    }
+    for words, written in swift.items():
+        assert written in model, f"DeckModel no longer writes {words!r}"
+        assert words.format(id="", reason="", wait="").strip() in written
+    decider = _source("Sources", "UDeckCore", "Plugins", "Repository", "AutoUpdate.swift")
+    for reason in ("pinned", "asksDifferently", "actionRunning"):
+        assert re.search(rf"^\s+case {reason}$", decider, re.M), f"AutoUpdate has no case {reason}"
+    # The tick the update that waited comes on.
+    assert f"Timer(timeInterval: {checks.TICK_SECONDS}, repeats: true)" in model
+
+
+def test_every_older_check_that_moves_main_starts_with_updates_by_themselves_off():
+    """A check that moves main and then presses Update has to see an offer: with the switch as shipped, uDeck installs c2 by itself first."""
+    tree = ast.parse((Path(__file__).resolve().parents[1] / "checks" / "check_plugins.py").read_text())
+    new = {"check_verified_updates_itself", "check_permissions_change_only_offers"}
+    moving = []
+    for function in tree.body:
+        if not isinstance(function, ast.FunctionDef) or not function.name.startswith("check_"):
+            continue
+        source = ast.unparse(function)
+        if "main='c2'" in source.replace("main=\"c2\"", "main='c2'") and "tell(" in source:
+            moving.append(function.name)
+            if function.name not in new:
+                assert "updates_itself=False" in source, f"{function.name} moves main and starts uDeck updating by itself"
+    assert {"check_update_keeps_the_window", "check_every_replacement_warns_first",
+            "check_an_update_ends_a_running_action", "check_screens_in_russian"} <= set(moving)
+    russian = ast.unparse(next(f for f in tree.body if isinstance(f, ast.FunctionDef) and f.name == "check_screens_in_russian"))
+    assert "'autoUpdateVerified': False" in russian, "the Russian check writes settings.json itself, after _prepare"
+
+
+def test_aging_the_catalogue_moves_its_last_read_back_and_keeps_the_rest(tmp_path, monkeypatch, capsys):
+    """The script the guest's Python runs, run here in this process — this file runs nothing of its own."""
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"head": "abc", "lastSuccess": "2026-10-10T08:00:00Z", "lastAttempt": "2026-10-10T08:00:00Z",
+                                 "failuresInARow": 0, "rateLimit": {"remaining": 59}}))
+    monkeypatch.setattr(sys, "argv", ["-c", str(state), "2"])
+    exec(compile(checks.AGE_THE_CATALOGUE, "<the guest's python3 -c>", "exec"), {"__name__": "__main__"})
+    said = capsys.readouterr().out
+    aged = json.loads((tmp_path / "state.json.new").read_text())
+    then = calendar.timegm(time.strptime(aged["lastSuccess"], "%Y-%m-%dT%H:%M:%SZ"))
+    assert abs(time.time() - then - 2 * 86400) < 120
+    assert aged["lastAttempt"] == aged["lastSuccess"] == said.strip()
+    assert {k: v for k, v in aged.items() if not k.startswith("last")} == {"head": "abc", "failuresInARow": 0, "rateLimit": {"remaining": 59}}
+    assert checks.AGED_DAYS > 1, "over a day, or the launch does not read the catalogue (CatalogueSchedule.refreshesAtLaunch)"
+    assert checks.CATALOGUE_STATE == "~/.udeck/catalogue/official/state.json"
+
+
+def _request(path, host="raw", status=200, lab=False):
+    return plugin_repository.Request(at=0, method="GET", host=host, path=path, query="", status=status, lab=lab)
+
+
+def test_a_download_is_a_plugins_files_and_not_its_manifest():
+    """What _files_fetched counts: a read of the catalogue fetches manifests, a download every other file."""
+    raw = f"/raw/{config.PLUGINS_REPOSITORY}/{'c' * 40}"
+    heard = [
+        _request(f"{raw}/plugins/uptime/manifest.json"),
+        _request(f"{raw}/plugins/uptime/manifest.ru.json"),
+        _request(f"{raw}/udeck-plugins.json"),
+        _request(f"{raw}/plugins/other/run.sh"),
+        _request(f"/api/repos/{config.PLUGINS_REPOSITORY}/commits/main", host="api"),
+    ]
+    assert checks._files_fetched(heard, "uptime") == []
+    fetched = [_request(f"{raw}/plugins/uptime/uptime.sh"), _request(f"{raw}/plugins/uptime/hold.sh", status=404)]
+    assert checks._files_fetched(heard + fetched, "uptime") == fetched

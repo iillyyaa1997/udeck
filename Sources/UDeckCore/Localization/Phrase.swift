@@ -198,6 +198,10 @@ public enum Phrase: Sendable, Equatable {
     case catalogueOff
     case catalogueEmpty
     case catalogueUpdatesWaiting(Int)
+    /// **Update verified plugins by themselves** (`AutoUpdate`): the switch,
+    /// and what it does and leaves to the operator.
+    case catalogueUpdatesByThemselves
+    case catalogueUpdatesByThemselvesHelp
 
     /// Why the list below is not fresh, each in the words of
     /// docs/plugin-repository.md. `readAt` is when the list below was read,
@@ -223,6 +227,9 @@ public enum Phrase: Sendable, Equatable {
     case catalogueInstalled
     case catalogueAvailable(version: String)
     case catalogueChangedStill(version: String)
+    /// After an offer, when the new version asks for other permissions than
+    /// the copy on disk: why it waits for a press, and that the card asks.
+    case catalogueAsksDifferently
     case catalogueRepositoryNowHas(version: String)
     case catalogueSwitchTo(version: String)
     case catalogueUpdateNeedsAPI(version: String, api: Int)
@@ -266,6 +273,10 @@ public enum Phrase: Sendable, Equatable {
     case pluginMarkMissing
     case pluginFrom(source: String, commit: String)
     case pluginPinned
+    /// A copy a verified plugin put in place by itself (`AutoUpdate`), and
+    /// one it could not: tried again at the next read of the catalogue.
+    case pluginUpdatedByItself(date: String)
+    case pluginUpdateByItselfFailed(version: String)
 
     /// A linked folder (Q125): its mark, and where its link leads — or that
     /// uDeck does not follow it, and why is said above.

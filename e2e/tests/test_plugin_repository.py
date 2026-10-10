@@ -60,14 +60,17 @@ needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git is not i
 
 
 def test_the_fixtures_are_what_the_checks_are_written_against():
-    """c1 has uptime 1.0.0 and the refusal fixtures, c2 the same with uptime 1.1.0."""
+    """c1 has uptime 1.0.0 and the refusal fixtures, c2 the same with uptime 1.1.0, c3 with 1.2.0 asking for one command more."""
     root = plugin_repository.FIXTURES
-    assert fake_github.Repository(str(root)).names == ["c1", "c2"]
-    for commit, version in (("c1", "1.0.0"), ("c2", "1.1.0")):
+    assert fake_github.Repository(str(root)).names == ["c1", "c2", "c3"]
+    same = ["sysctl", "./hold.sh"]
+    # c2 asks for exactly what c1 does, so it updates itself (plugins.verified-updates-itself);
+    # c3 asks for one command more, so it is only offered (plugins.permissions-change-only-offers).
+    for commit, version, asks in (("c1", "1.0.0", same), ("c2", "1.1.0", same), ("c3", "1.2.0", [*same, "uname"])):
         plugins = root / commit / "plugins"
         assert sorted(p.name for p in plugins.iterdir()) == ["future-api", "future-udeck", "linked", "uptime"]
         manifest = json.loads((plugins / "uptime" / "manifest.json").read_text())
-        assert manifest["version"] == version and manifest["permissions"] == {"exec": ["sysctl", "./hold.sh"]}
+        assert manifest["version"] == version and manifest["permissions"] == {"exec": asks}
         # The card says which version it is, so a check can tell 1.0.0's output from 1.1.0's.
         producer = (plugins / "uptime" / "uptime.sh").read_text()
         assert f"version={version}\n" in producer
@@ -266,6 +269,10 @@ def test_a_folders_history_is_the_commits_that_changed_it_newest_first(served):
     # linked did not change in c2.
     _, _, body = served.json(f"{API}/commits?sha=main&path=plugins/linked")
     assert [commit["sha"] for commit in body] == [facts["c1"]["sha"]]
+    # With main at c3, c3 is first.
+    served.state(main="c3")
+    _, _, body = served.json(f"{API}/commits?sha=main&path=plugins/uptime")
+    assert [commit["sha"] for commit in body] == [facts["c3"]["sha"], facts["c2"]["sha"], facts["c1"]["sha"]]
     # With main at c1, c2 is not in the history at all.
     served.state(main="c1")
     _, _, body = served.json(f"{API}/commits?sha=main&path=plugins/uptime")
@@ -274,7 +281,7 @@ def test_a_folders_history_is_the_commits_that_changed_it_newest_first(served):
 
 def test_a_raw_file_is_the_one_at_that_commit_and_hashes_to_its_listed_id(served):
     facts = served.fake.repository.facts()["commits"]
-    for name in ("c1", "c2"):
+    for name in ("c1", "c2", "c3"):
         status, headers, body = served.get(f"{RAW}/{facts[name]['sha']}/plugins/uptime/manifest.json")
         assert status == 200
         assert fake_github.blob_id(body) == facts[name]["paths"]["plugins/uptime/manifest.json"]["sha"]
@@ -354,7 +361,7 @@ def test_the_lab_can_ask_the_fake_what_it_holds_and_what_it_was_told(served):
     _, _, state = served.json("/lab/state")
     assert state["main"] == "c2" and state["alter"] == ["x"] and state["limit_until"] is None
     _, _, facts = served.json("/lab/facts")
-    assert facts["history"] == ["c1", "c2"] and len(facts["commits"]["c2"]["sha"]) == 40
+    assert facts["history"] == ["c1", "c2", "c3"] and len(facts["commits"]["c2"]["sha"]) == 40
 
 
 # --- Reading the log -----------------------------------------------------------------------

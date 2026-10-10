@@ -122,6 +122,11 @@ public struct InstalledRecord: Codable, Equatable, Sendable {
     public var pinned: Bool
     public var verification: PluginVerification
     public var previous: PreviousCopy?
+    /// True when this copy was put in place by uDeck itself — a verified
+    /// plugin updating itself (`AutoUpdate`) — rather than by a press: the row
+    /// says *Updated by itself on October 10, 2026*. Absent from the file otherwise,
+    /// and from every record written before there were automatic updates.
+    public var automatic: Bool?
 
     public init(
         source: String,
@@ -133,7 +138,8 @@ public struct InstalledRecord: Codable, Equatable, Sendable {
         installedAt: Date,
         pinned: Bool,
         verification: PluginVerification,
-        previous: PreviousCopy?
+        previous: PreviousCopy?,
+        automatic: Bool? = nil
     ) {
         self.source = source
         self.repository = repository
@@ -145,10 +151,11 @@ public struct InstalledRecord: Codable, Equatable, Sendable {
         self.pinned = pinned
         self.verification = verification
         self.previous = previous
+        self.automatic = automatic
     }
 
     private enum CodingKeys: String, CodingKey {
-        case source, repository, ref, commit, tree, version, installedAt, pinned, verification, previous
+        case source, repository, ref, commit, tree, version, installedAt, pinned, verification, previous, automatic
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -164,6 +171,10 @@ public struct InstalledRecord: Codable, Equatable, Sendable {
         try c.encode(verification, forKey: .verification)
         // `null` after a first install, written rather than left out.
         try c.encode(previous, forKey: .previous)
+        // Only on a copy uDeck put in place by itself: every other record
+        // keeps the shape it always had, and a uDeck from before automatic
+        // updates reads this one too, skipping the key it does not know.
+        if automatic == true { try c.encode(true, forKey: .automatic) }
     }
 
     /// This record's own copy, as the one a later install would replace.

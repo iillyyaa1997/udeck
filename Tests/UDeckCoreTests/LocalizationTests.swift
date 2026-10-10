@@ -69,7 +69,7 @@ struct LocalizationTests {
         .pluginsOfficialCatalogue, .pluginsOfficialCatalogueHelp(source: "github.com/o/r"),
         .catalogueCheckNow, .catalogueChecked(source: "github.com/o/r", at: "14:02"),
         .catalogueNeverRead(source: "github.com/o/r"), .catalogueReading, .catalogueOff, .catalogueEmpty,
-        .catalogueUpdatesWaiting(2),
+        .catalogueUpdatesWaiting(2), .catalogueUpdatesByThemselves, .catalogueUpdatesByThemselvesHelp,
         .catalogueLimited(readAt: "14:02", until: "15:07"), .catalogueRawLimited(until: "15:07"),
         .catalogueUnreachable(reason: "offline", readAt: "14:02"), .catalogueNotFound(source: "github.com/o/r"),
         .catalogueNotARepository(source: "github.com/o/r", branch: "main"), .catalogueFutureFormat(declared: 2),
@@ -78,7 +78,7 @@ struct LocalizationTests {
         .catalogueArrivedDifferent(path: "udeck-plugins.json", expected: "1a2b3c4", got: "5d6e7f8"),
         .catalogueVerified, .catalogueSize(files: 4, size: "6 KB"), .catalogueAsksTo("run sysctl"),
         .catalogueInstall, .catalogueUpdate, .catalogueReplace, .catalogueInstalled,
-        .catalogueAvailable(version: "1.3.0"), .catalogueChangedStill(version: "1.2.0"),
+        .catalogueAvailable(version: "1.3.0"), .catalogueChangedStill(version: "1.2.0"), .catalogueAsksDifferently,
         .catalogueRepositoryNowHas(version: "1.1.0"), .catalogueSwitchTo(version: "1.1.0"),
         .catalogueUpdateNeedsAPI(version: "2.0.0", api: 2), .catalogueUpdateNeedsUDeck(version: "1.3.0", required: "0.8.0"),
         .catalogueUpdateCannotInstall(version: "1.3.0"), .catalogueGone, .catalogueOwnFolder(id: "uptime"),
@@ -94,6 +94,7 @@ struct LocalizationTests {
         .catalogueRecordsBroken(reason: "not JSON"),
         .pluginMarkVerified, .pluginMarkOwnFolder, .pluginMarkModified, .pluginMarkMissing,
         .pluginFrom(source: "github.com/o/r", commit: "5c3e0d2"), .pluginPinned,
+        .pluginUpdatedByItself(date: "10 October 2026"), .pluginUpdateByItselfFailed(version: "1.1.0"),
         .historyTitle(name: "uptime"), .historyReading, .historyNone, .historyInstalledMark, .historyInstall,
         .historyFailed,
         .windowNotInPluginsFolder(id: "uptime", path: "~/.udeck/plugins"), .windowWillNotRun(id: "uptime"),
@@ -180,7 +181,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 312,
+        #expect(Self.all.count == 317,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
@@ -263,6 +264,8 @@ struct LocalizationTests {
         #expect(!strings(.catalogueLimited(readAt: nil, until: "15:07")).contains("nil"))
         #expect(strings(.catalogueAvailable(version: "1.3.0")).contains("1.3.0"))
         #expect(strings(.catalogueChangedStill(version: "1.2.0")).contains("1.2.0"))
+        #expect(strings(.pluginUpdatedByItself(date: "10 October 2026")).contains("10 October 2026"))
+        #expect(strings(.pluginUpdateByItselfFailed(version: "1.1.0")).contains("1.1.0"))
         #expect(strings(.catalogueUpdateNeedsUDeck(version: "1.3.0", required: "0.8.0")).contains("0.8.0"))
         #expect(strings(.catalogueUpdateNeedsAPI(version: "2.0.0", api: 2)).contains("api 2"))
         #expect(strings(.catalogueReplaceConfirm(id: "uptime", path: "~/.udeck/plugins")).contains("~/.udeck/plugins"))

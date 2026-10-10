@@ -10,6 +10,32 @@ for what that promises.
 
 ## [Unreleased]
 
+- **Verified plugins update themselves.** After a read of the official
+  catalogue that finds a new version of a **Verified** plugin asking for
+  exactly the permissions the installed one asks for, uDeck puts it in place
+  with nothing pressed — the update **Update** makes, one plugin at a time,
+  its window kept and `previous` written — and its row says *Updated by itself
+  on October 10, 2026*, with **Back to** as after any update. A new version that
+  asks for different permissions is only offered, and its row says *1.3.0
+  available, asks for different permissions*; a plugin changed on disk, one
+  holding a file of yours such as a `.env`, a linked folder and one kept at an
+  earlier version are only offered too — asked again at the moment of the swap,
+  so that a file of yours put there while it downloads leaves it as it was. An
+  update by itself never ends a card action: it waits, and is asked about again
+  every minute. A failed one is said on the row and tried again after the next
+  read. **Settings → Plugins →
+  Update verified plugins by themselves** turns it off (`autoUpdateVerified` in
+  `settings.json`); it is on as uDeck ships, and does nothing while **Official
+  catalogue** is off. README, SECURITY.md and docs/plugin-repository.md no
+  longer say that no plugin is installed by itself.
+- **A new version asking for what the old one asked does not ask again.** When
+  one **Verified** copy replaces another — **Update**, **Switch to**, **Back
+  to**, an earlier version, or an update by itself — and the new manifest asks
+  for exactly the same permissions, byte for byte, your permission decision is
+  carried to the new version, a refusal included, and the card goes on running.
+  Anything else asks on the card, as before. `installed.json` gains an
+  `automatic: true` on a copy uDeck put in place by itself; a uDeck from before
+  reads it and skips the key.
 - **About says how to open a downloaded copy on macOS 15 and later.** It said
   right-click → Open, which macOS 15 no longer lets past Gatekeeper for an app
   that is not notarised; the way through there is System Settings → Privacy &

@@ -84,10 +84,15 @@ public struct InstallRequest: Codable, Equatable, Sendable {
     public var version: String
     /// The head of the default branch, which the new copy is verified against.
     public var headCommit: String?
+    /// Whether uDeck makes it by itself — a verified plugin updating itself
+    /// (`AutoUpdate`) — rather than for a press. The record says so, and the
+    /// swap replaces only uDeck's own copy: anything else at the place by
+    /// then leaves it as it is (`AutoUpdate.OperatorsWorkCame`).
+    public var automatic: Bool
 
     public init(operation: Operation, id: PluginIdentifier, source: String = InstalledPlugins.officialSource,
                 repository: RepositoryAddress, ref: PluginRef, commit: String, folder: PluginListing,
-                version: String, headCommit: String?) {
+                version: String, headCommit: String?, automatic: Bool = false) {
         self.operation = operation
         self.id = id
         self.source = source
@@ -97,6 +102,7 @@ public struct InstallRequest: Codable, Equatable, Sendable {
         self.folder = folder
         self.version = version
         self.headCommit = headCommit
+        self.automatic = automatic
     }
 }
 
@@ -414,6 +420,16 @@ public struct PluginInstaller: Sendable {
         let existing = records.plugins[id]
         let liveExists = folderIsTaken(id)
         let operators = OperatorsWork.goesToTrash(id, in: paths, record: existing)
+        // An update nobody pressed replaces uDeck's own copy, exactly as it was
+        // put there, and nothing else. Its download gave the operator time to
+        // put something of theirs at the place, and nobody is there to be
+        // warned, so the place is asked about again here, at the swap, by the
+        // rule every button warns by (`ShownPlace.Place`).
+        if request.automatic,
+           ShownPlace.Place.now(id, in: paths, record: existing, arriving: request.version).fate != .deleted {
+            abandon(staged)
+            throw AutoUpdate.OperatorsWorkCame(id: id)
+        }
 
         let record = makeRecord(request, existing: existing)
         do {
@@ -478,7 +494,8 @@ public struct PluginInstaller: Sendable {
                 by: request.source == InstalledPlugins.officialSource && request.ref.kind == "default"
                     ? InstalledPlugins.officialSource : nil,
                 checkedAgainst: request.headCommit ?? request.commit, checkedAt: at),
-            previous: previous
+            previous: previous,
+            automatic: request.automatic ? true : nil
         )
     }
 

@@ -14,7 +14,7 @@ see the last section.
 > **Being built.** What exists today: the command, its pre-flight and report,
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, a self-check, the builds a check needs, a fake GitHub for
-> the plugin catalogue, and fifty-two checks of uDeck itself in five groups
+> the plugin catalogue, and fifty-four checks of uDeck itself in five groups
 > (`e2e/run.sh --list`). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
 > itself as it ships, and by itself again once an operator who switched that off
@@ -27,9 +27,10 @@ see the last section.
 > it was opened — with its wrong-chord control and a check that the combination
 > dies with uDeck. `login`: "Open at Login", through a restart and an update, and
 > switched off. `settings`: two changes made in uDeck's own window, and whether
-> they hold across a restart. `plugins`: the twenty-two checks of
-> docs/plugin-repository.md — the catalogue, installing, updating, earlier
-> versions, removing, each refusal, a linked folder, and what Settings offers
+> they hold across a restart. `plugins`: the twenty-four checks of
+> docs/plugin-repository.md — the catalogue, installing, updating, a verified
+> plugin updating itself and an update asking for other permissions only
+> offered, earlier versions, removing, each refusal, a linked folder, and what Settings offers
 > somebody writing a plugin: Link a folder…, the run log's switch, a failed run
 > on a fresh card, Install command, Where to look for commands, and all of it
 > in Russian — against a fake GitHub in the guest.
@@ -1582,7 +1583,7 @@ problem.
 
 ### Plugins from a repository
 
-Twenty-two checks, one per row of the table in docs/plugin-repository.md ("The
+Twenty-four checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"). None of them talks to github.com — in the lab only the update
 checks given a published release do, `updates.a-published-release` by default.
 A fake GitHub runs inside the guest (`e2e/guest/fake-github.py`, the guest's
@@ -1593,7 +1594,8 @@ file host beside it. Its content
 is the fixture commits in `e2e/fixtures/plugin-repository/`: `c1` holds
 `uptime` 1.0.0 and the three plugins uDeck must refuse (`future-api` with
 `api: 2`, `future-udeck` with `minUDeck: 99.0.0`, `linked` with a symbolic
-link), `c2` the same with `uptime` 1.1.0. The fake hashes them into real git
+link), `c2` the same with `uptime` 1.1.0, asking for what 1.0.0 asks, and `c3`
+with `uptime` 1.2.0, asking for one command more. The fake hashes them into real git
 blob, tree and commit ids itself — there is no git in the guest — and the lab's
 own tests hold its hashing against `git hash-object`, `git write-tree` and `git
 commit-tree`. uDeck's Swift then has to agree with it, file by file and folder
@@ -1623,7 +1625,20 @@ no pixel to click.
 window it has, not how windows are made. Consent is given where the operator
 gives it, on the card (`consent.<id>.allow`). A file changed on disk and a
 manifest broken and mended are changed over SSH, because that is what "changed
-on disk" means. One value is left in `plugin-settings.json` before a removal,
+on disk" means. A check that moves `main` and presses **Update** on what it
+offers starts uDeck with **Update verified plugins by themselves** off — one
+key in `settings.json`, written before uDeck starts — or uDeck would put `c2`
+in place by itself before anything could be pressed; the two checks of updates
+by themselves start it as it ships. `plugins.verified-updates-itself` makes the
+catalogue look two days old while uDeck is not running — the guest's own Python
+moves `lastSuccess` back in `~/.udeck/catalogue/official/state.json` — so that
+the launch reads it again, as after a Mac that was off for a day, and then
+presses nothing at all. `plugins.permissions-change-only-offers` presses the
+card's **Hold** and later ends it with `SIGTERM` over SSH, as an action that
+finishes ends, to see the update by itself that waited on it come on the
+minute's tick. Where a plugin is left alone, the two read uDeck's own log for
+the reason it gives (`pinned`, `asksDifferently`, `actionRunning`): from outside,
+every reason looks the same. One value is left in `plugin-settings.json` before a removal,
 so that the removal has something there to take away. A linked folder
 (`plugins.linked-folder`) is a working copy the lab makes outside `~/.udeck`
 and links in by hand while uDeck is not running, as `udeck-plugin link` would;

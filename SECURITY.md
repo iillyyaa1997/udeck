@@ -52,6 +52,11 @@ In scope, and treated as vulnerabilities:
   lists at the commit it showed — a file that does not match its hash, a folder
   that does not add up — or marking a plugin **Verified** that is not exactly
   what was merged;
+- a plugin updating itself when it should only have been offered: a new version
+  asking for different permissions than the installed one, a copy that was not
+  **Verified**, one you kept at an earlier version, one holding a file of yours,
+  or with **Update verified plugins by themselves** switched off — or an update
+  carrying your permission decision to a version that asks for more;
 - a plugin escaping its folder: `run` resolving outside it, a manifest reading
   or writing files uDeck opens on its behalf outside the declared scope;
 - a malformed manifest or card crashing or hanging uDeck, since a hung host
@@ -80,8 +85,13 @@ launch and both with a switch to turn them off:
   the last 24 hours, once a day while uDeck runs, when Settings → Plugins is
   opened on a list more than an hour old, when you press Check now, and the
   plugin's files when you press Install, Update, Reinstall or pick an earlier
-  version. Off with Settings → Plugins → *Official catalogue*, after which uDeck
-  makes no request about plugins at all.
+  version — and, after a read, the files of a **Verified** plugin whose new
+  version asks for exactly the permissions it asks for now: such a plugin
+  updates itself, keeping your permission decision. Anything else is only
+  offered. Off with Settings → Plugins → *Update verified plugins by
+  themselves*, after which every update waits for a press; all of it off with
+  Settings → Plugins → *Official catalogue*, after which uDeck makes no request
+  about plugins at all.
 
 Neither carries an account, an identifier, a cookie or the list of what you
 have installed. The details are in [README.md](README.md#what-udeck-connects-to-and-when)

@@ -42,6 +42,11 @@ public final class DeckModel {
     public internal(set) var operationProblems: [String: OperationProblem] = [:]
     /// Earlier versions, as they were read.
     public internal(set) var histories: [String: HistoryLoad] = [:]
+    /// When the installed plugins are asked whether they update themselves,
+    /// and which of them failed to since the catalogue was last read — said on
+    /// their rows, and not tried again before the next read
+    /// (`AutoUpdateSchedule`, `updateVerifiedPlugins`).
+    public internal(set) var autoUpdates = AutoUpdateSchedule()
 
     /// The running uDeck's own version, as `CFBundleShortVersionString` says it.
     public let udeckVersion: String

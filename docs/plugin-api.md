@@ -173,7 +173,7 @@ read, inside `~/.udeck` or around it — is refused, and the refusal says which.
 |---|---|---|
 | `id` | yes | Lowercase letters, digits and `- _ .`, 1–64 characters, matching the folder name. |
 | `name` | yes | What the operator sees. One line: no line break, tab or other control character — see [One line](#one-line). |
-| `version` | yes | Your plugin's version, as `MAJOR.MINOR.PATCH` — see [Versions](#versions). Changing it re-asks the permission question — see [Permissions](#permissions). |
+| `version` | yes | Your plugin's version, as `MAJOR.MINOR.PATCH` — see [Versions](#versions). Changing it re-asks the permission question, unless a verified update asks for exactly the same — see [Permissions](#permissions). |
 | `api` | yes | The contract version this plugin is written against. Currently `1`. |
 | `minUDeck` | no | The oldest uDeck release that has everything your plugin uses, as `MAJOR.MINOR.PATCH` — see [Versions](#versions). Absent means any uDeck that speaks your `api`. |
 | `kind` | yes | `poll` or `resident`. Only `poll` is implemented; see [Runtime kinds](#runtime-kinds). |
@@ -403,8 +403,10 @@ the background it expects to survive.
 
 **The grant follows the version, and the manifest has to still be asking.** A
 grant is decided against the `version` in your manifest, so bumping it re-asks —
-and an action runs only when the manifest on disk *now* declares `exec` for that
-command. A version that drops a permission drops the buttons that used it, in
+except when uDeck replaces a **Verified** copy from the official repository with
+another one asking for exactly the same permissions, which carries the decision
+to the new version ([Updating](plugin-repository.md#updating)) — and an action
+runs only when the manifest on disk *now* declares `exec` for that command. A version that drops a permission drops the buttons that used it, in
 the same release rather than the next one the operator happens to reinstall.
 
 **A relative path is resolved with symlinks followed, on both sides.** Declaring
@@ -610,7 +612,10 @@ reads when deciding whether to trust your plugin at all, and an understated one
 is a good reason not to.
 
 Changing your plugin's `version` re-opens the question, so an update that starts
-asking for more cannot inherit an answer given to an earlier version. And what
+asking for more cannot inherit an answer given to an earlier version. (A
+verified update from the official repository that asks for exactly what the
+installed version asks for keeps the answer, and installs itself:
+[Automatic updates](plugin-repository.md#automatic-updates).) And what
 the operator agrees to is what they were shown: a manifest that asks for more
 while the question is on the screen — a linked folder you are editing, say — is
 asked about again when **Allow** is pressed, and nothing is granted until it is.

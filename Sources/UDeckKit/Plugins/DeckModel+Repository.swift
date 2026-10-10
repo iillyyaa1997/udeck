@@ -82,7 +82,9 @@ extension DeckModel {
     ///
     /// Nothing else asks GitHub anything: opening Settings → Plugins when the
     /// catalogue is more than an hour old, **Check now**, and **Install**,
-    /// **Update** or **Earlier versions** — each pressed by the operator.
+    /// **Update** or **Earlier versions** — each pressed by the operator — and,
+    /// after a read, the files of a verified plugin that updates itself
+    /// (`updateVerifiedPlugins`).
     public func startCatalogueSchedule() {
         launchRefresh?.cancel()
         catalogueTimer?.invalidate()
@@ -98,6 +100,9 @@ extension DeckModel {
         // `CatalogueSchedule.nextDue`, which is where the rule is tested.
         let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
+                // An update by itself that waited — on a card action, on
+                // another operation — is asked about again.
+                self?.updateVerifiedPlugins()
                 guard let self, self.settings.readsOfficialCatalogue, !self.catalogueRefreshing,
                       CatalogueSchedule.nextDue(self.catalogueState, now: Date()) <= Date(),
                       self.catalogueState.lastAttempt.map({ Date().timeIntervalSince($0) > 60 }) ?? true
@@ -151,6 +156,12 @@ extension DeckModel {
         catalogueState = catalogueStore.state()
         await reloadCatalogue()
         reverify()
+        // A read that succeeded: every update waiting is asked about anew — one
+        // that failed since the last read too — once the hashing just started
+        // is applied, and not on a standing from before the read.
+        var succeeded = false
+        if case .refreshed = outcome { succeeded = true }
+        autoUpdates.read(succeeded: succeeded, hashing: reverifications)
     }
 
     /// The catalogue as the cache holds it now, read away from the main thread
@@ -194,6 +205,22 @@ extension DeckModel {
     /// How many updates are waiting.
     public var updatesWaiting: Int {
         installed.plugins.keys.filter { updateOffer(for: $0)?.isWaiting == true && folderExists($0) }.count
+    }
+
+    /// Whether the version the catalogue's head has for `id` asks for other
+    /// permissions than the copy on disk (`AutoUpdate.asksDifferently`) —
+    /// false when either cannot be read. Such an update never happens by
+    /// itself, and its row says why.
+    public func updateAsksDifferently(_ id: String) -> Bool {
+        guard let now = installedManifest(id)?.permissions.capabilities,
+              let head = catalogue?.entry(id)?.manifest?.permissions.capabilities else { return false }
+        return AutoUpdate.asksDifferently(now, head)
+    }
+
+    /// The manifest of the copy at `plugins/<id>`, as the folder was last
+    /// read — none for a linked folder, which no repository updates.
+    func installedManifest(_ id: String) -> PluginManifest? {
+        plugins.first { $0.folderName == id && !$0.isLinked }?.manifest
     }
 
     /// Whether something sits at `plugins/<id>` — asked the way the swap
@@ -243,6 +270,9 @@ extension DeckModel {
                 installed = records
                 save(JSONFileStore<InstalledPlugins>(url: paths.installedFile), installed, named: "installed plugins")
             }
+            // After a read of the catalogue: on standings hashed since.
+            autoUpdates.hashed(asked)
+            updateVerifiedPlugins()
         }
     }
 
@@ -275,6 +305,106 @@ extension DeckModel {
     func resume(_ id: PluginIdentifier) {
         pluginRuns.resume(id.rawValue)
         restartPolling()
+    }
+
+    /// `quiet`, for an update nobody pressed: nothing more of the plugin
+    /// starts from here on, and a card action that is running is not ended
+    /// for it — the answer is false then, the folder is left as it was, and
+    /// the update is asked about again on the minute's tick. False too when
+    /// **Update verified plugins by themselves** or **Official catalogue** was
+    /// switched off while it downloaded: then it is not made at all.
+    func quietUnlessActing(_ id: PluginIdentifier) async -> Bool {
+        guard switchedOnStill(id) else { return false }
+        pluginRuns.quiet(id.rawValue)
+        guard !actionProcesses.isRunning(id.rawValue) else {
+            DeckLog.plugins.info("\(id.rawValue, privacy: .public) has a card action running; it is not ended for an update by itself")
+            return false
+        }
+        return await quiet(id) && switchedOnStill(id)
+    }
+
+    private func switchedOnStill(_ id: PluginIdentifier) -> Bool {
+        guard settings.verifiedPluginsUpdateThemselves else {
+            DeckLog.plugins.info("\(id.rawValue, privacy: .public) does not update itself: switched off while it downloaded")
+            return false
+        }
+        return true
+    }
+
+    // MARK: - Updating by themselves
+
+    /// Verified plugins whose update is waiting, updated by themselves, one at
+    /// a time, through the update **Update** makes — whatever `AutoUpdate`
+    /// says of each, decided there and tested there. Asked once the folders
+    /// are hashed after each successful read of the catalogue, after each
+    /// install, update or removal ends, and on the minute's tick while one
+    /// waits; at any other time it does nothing.
+    func updateVerifiedPlugins() {
+        guard autoUpdates.asks else { return }
+        let switchedOn = settings.verifiedPluginsUpdateThemselves
+        guard switchedOn, installedProblem == nil, catalogue != nil else {
+            autoUpdates.asked(started: false, waits: false)
+            return
+        }
+        var waits = false
+        for id in installed.plugins.keys.sorted() {
+            switch autoUpdateVerdict(for: id, switchedOn: switchedOn) {
+            case .update(let version):
+                DeckLog.plugins.info("\(id, privacy: .public) updates itself to \(version, privacy: .public)")
+                if updateByItself(id) {
+                    autoUpdates.asked(started: true, waits: waits)
+                    return
+                }
+                DeckLog.plugins.info("\(id, privacy: .public) did not update itself: its place is not what was asked about")
+            case .later(let wait):
+                waits = true
+                DeckLog.plugins.info("\(id, privacy: .public) updates itself later: \(String(describing: wait), privacy: .public)")
+            case .not(.nothingWaiting):
+                break
+            case .not(let reason):
+                DeckLog.plugins.info("\(id, privacy: .public) does not update itself: \(String(describing: reason), privacy: .public)")
+            }
+        }
+        autoUpdates.asked(started: false, waits: waits)
+    }
+
+    /// What `AutoUpdate` says of `id` now. Its place is hashed — what
+    /// replacing it would do, by the rule every button warns by — only for a
+    /// plugin whose update could otherwise go ahead.
+    func autoUpdateVerdict(for id: String, switchedOn: Bool) -> AutoUpdate.Verdict {
+        guard let record = installed.plugins[id] else { return .not(.nothingWaiting) }
+        let offer = updateOffer(for: id)
+        let standing = standings[id]
+        let asked = offer?.isWaiting == true && standing == .verified && !record.pinned
+        let place = asked ? ShownPlace.Place.now(id, in: paths, record: record, bringing: .nothing).fate : .nothing
+        let plugin = AutoUpdate.Plugin(
+            record: record, offer: offer, standing: standing,
+            asksNow: installedManifest(id)?.permissions.capabilities,
+            asksAtHead: catalogue?.entry(id)?.manifest?.permissions.capabilities,
+            place: place, actionRunning: actionProcesses.isRunning(id),
+            failedSinceTheLastRead: autoUpdates.failures[id] != nil
+        )
+        return AutoUpdate.verdict(plugin, switchedOn: switchedOn, busy: busyPlugin != nil)
+    }
+
+    /// Starts `id`'s update by itself: the step **Update** takes, pressed with
+    /// nothing shown — and when that step would warn first, nothing here
+    /// answers it. Answers whether it started.
+    private func updateByItself(_ id: String) -> Bool {
+        guard case .install(let operation, let commit, let folder, let version)
+                = ShownPlace.update(id, catalogue: catalogue, in: paths, installed: installed, shown: nil) else {
+            return false
+        }
+        run(operation, id: id, commit: commit, folder: folder, version: version, automatic: true)
+        return busyPlugin == id
+    }
+
+    /// **Update verified plugins by themselves**, on or off. On, it counts
+    /// from the next read of the catalogue.
+    public func setAutoUpdateVerified(_ on: Bool) {
+        var changed = settings
+        changed.autoUpdateVerified = on
+        update(settings: changed)
     }
 
     // MARK: - Install, update, earlier versions
@@ -391,12 +521,17 @@ extension DeckModel {
     /// The manifest the catalogue row was checked by is read again from the
     /// blob store — off the main thread (`CatalogueStore.manifest(of:)`) — and
     /// every rule checked against it before a file is requested.
+    ///
+    /// `automatic` is an update nobody pressed (`updateVerifiedPlugins`): its
+    /// record says so, it ends no card action (`quietUnlessActing`), and when
+    /// it fails its row says it was one.
     private func run(
         _ operation: InstallRequest.Operation,
         id: String,
         commit: String,
         folder: PluginListing,
-        version: String
+        version: String,
+        automatic: Bool = false
     ) {
         guard settings.readsOfficialCatalogue, busyPlugin == nil,
               let identifier = PluginIdentifier(rawValue: id) else { return }
@@ -406,35 +541,75 @@ extension DeckModel {
         }
         busyPlugin = id
         operationProblems[id] = nil
+        autoUpdates.began(id)
         let request = InstallRequest(
             operation: operation, id: identifier, repository: provider.address,
             ref: PluginRef(kind: "default", name: catalogueState.defaultBranch ?? catalogue?.branch),
-            commit: commit, folder: folder, version: version, headCommit: catalogue?.commit
+            commit: commit, folder: folder, version: version, headCommit: catalogue?.commit, automatic: automatic
         )
         let installer = self.installer
         let store = catalogueStore
+        // The copy the permission decision was made for, read before the swap.
+        let before = copyForTheDecision(id)
         Task {
             defer {
                 busyPlugin = nil
                 catalogueState.rateLimit = limits.current
                 persistRateLimit()
+                // An update by itself that waited on this one goes now.
+                updateVerifiedPlugins()
             }
             do {
-                DeckLog.plugins.info("\(operation.rawValue, privacy: .public) \(id, privacy: .public) at \(commit, privacy: .public)")
+                DeckLog.plugins.info("\(operation.rawValue, privacy: .public) \(id, privacy: .public) at \(commit, privacy: .public)\(automatic ? " by itself" : "", privacy: .public)")
                 let manifest = await store.manifest(of: folder)
                 let staged = try await installer.stage(request, manifest: manifest)
                 defer { resume(identifier) }
-                let record = try await installer.commit(staged, once: { await self.quiet(identifier) })
+                let record = try await installer.commit(staged, once: { @Sendable in
+                    automatic ? await self.quietUnlessActing(identifier) : await self.quiet(identifier)
+                })
                 DeckLog.plugins.info("\(id, privacy: .public) \(record.version, privacy: .public) is in place")
+                // Before the plugin runs again: it is quiet until `resume`.
+                carryTheDecision(of: identifier, from: before, to: record, asking: staged.plugin.manifest)
                 reloadInstalled()
                 discoverPlugins()
             } catch {
-                DeckLog.plugins.error("\(operation.rawValue, privacy: .public) \(id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-                operationProblems[id] = OperationProblem(error)
+                if automatic, autoUpdates.ended(id, version: version, throwing: error) == .leftAsItWas {
+                    // A card action was running, the switch went off, or the
+                    // operator's work came to the place: no failure, and the
+                    // next asking says what becomes of it.
+                    DeckLog.plugins.info("\(id, privacy: .public) is left as it was by its update by itself: \(String(describing: error), privacy: .public)")
+                } else {
+                    DeckLog.plugins.error("\(operation.rawValue, privacy: .public) \(id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                    operationProblems[id] = OperationProblem(error)
+                }
                 reloadInstalled()
                 discoverPlugins()
             }
         }
+    }
+
+    /// The copy at `plugins/<id>` as the permission decision knows it: its
+    /// version, what it asks for, and whether it stands **Verified**.
+    private func copyForTheDecision(_ id: String) -> GrantCarry.Copy? {
+        guard let manifest = installedManifest(id) else { return nil }
+        return GrantCarry.Copy(version: manifest.version, asks: manifest.permissions.capabilities,
+                               verified: standings[id] == .verified)
+    }
+
+    /// The permission decision after `before` was replaced by `record`'s copy,
+    /// which asks for what `manifest` asks: carried to the new version when
+    /// `GrantCarry` says so — a verified copy for a verified copy, asking for
+    /// the same — and left as it was otherwise, so that the card asks.
+    private func carryTheDecision(of id: PluginIdentifier, from before: GrantCarry.Copy?, to record: InstalledRecord,
+                                  asking manifest: PluginManifest?) {
+        guard let manifest else { return }
+        let after = GrantCarry.Copy(version: record.version, asks: manifest.permissions.capabilities,
+                                    verified: record.verification.status == .verified)
+        let carried = GrantCarry.after(grants[id], old: before, new: after)
+        guard carried != grants[id] else { return }
+        grants[id] = carried
+        saveGrants()
+        DeckLog.plugins.info("the permission decision of \(id.rawValue, privacy: .public) holds for \(record.version, privacy: .public): it asks for what \(before?.version ?? "", privacy: .public) asked for")
     }
 
     // MARK: - Removal
@@ -460,9 +635,13 @@ extension DeckModel {
         }
         busyPlugin = id
         operationProblems[id] = nil
+        autoUpdates.began(id)
         let installer = self.installer
         Task {
-            defer { busyPlugin = nil }
+            defer {
+                busyPlugin = nil
+                updateVerifiedPlugins()
+            }
             defer { resume(identifier) }
             do {
                 let removal = try await installer.beginRemoval(identifier, once: { await self.quiet(identifier) })
@@ -596,6 +775,7 @@ extension DeckModel {
         guard installedProblem == nil else { return .refused(.recordsBroken(installedProblem ?? "")) }
         busyPlugin = id
         operationProblems[id] = nil
+        autoUpdates.began(id)
         defer { busyPlugin = nil }
         let installer = self.installer
         do {

@@ -1,11 +1,13 @@
 """Plugins from a repository: the catalogue, installing, updating, removing — and saying no.
 
-Twenty-two checks, one per row of the table in docs/plugin-repository.md ("The
+Twenty-four checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"), and all of them against the same two things: a release build of
 this checkout, and a fake GitHub served inside the guest
 (`plugin_repository.FakeGitHub`, `e2e/guest/fake-github.py`) whose content is
 the fixture commits in `e2e/fixtures/plugin-repository/` — `c1` with `uptime`
-1.0.0 and three plugins uDeck must refuse, `c2` the same with `uptime` 1.1.0.
+1.0.0 and three plugins uDeck must refuse, `c2` the same with `uptime` 1.1.0,
+asking for what 1.0.0 asks, and `c3` with `uptime` 1.2.0, asking for one
+command more.
 These checks never talk to github.com; every lab build is pointed at the fake,
 and the build step refuses one that is not (`builds.Builder._verify`). (The lab
 as a whole does, for the update checks that take a published release —
@@ -29,7 +31,12 @@ and the tab is empty but for it. The consent is given where the operator gives
 it, on the card in the panel. A file changed on disk, and a manifest broken and
 mended, are changed over SSH, because that is what "changed on disk" means.
 Nothing else is written into the guest: every install, update, removal and
-switch is a click. The plugins the lab writes itself — linked working copies
+switch is a click — but for the updates a verified plugin makes by itself
+(`plugins.verified-updates-itself`), where nothing is pressed at all, which is
+the point. A check that moves `main` and presses **Update** starts uDeck with
+**Update verified plugins by themselves** switched off in `settings.json`
+(`_prepare(updates_itself=False)`), so that what it moves `main` to is offered
+rather than installed before it can press anything. The plugins the lab writes itself — linked working copies
 outside `~/.udeck`, folders of commands — are written over SSH, as an author
 writes them, and linked in by hand where the check is not about linking; a
 folder chosen in Settings is chosen in the system's folder panel, by typing its
@@ -88,6 +95,9 @@ LIMIT_SECONDS = 150
 
 # What the rows say, in the guest's English (Q43): English.swift.
 AVAILABLE_1_1_0 = "1.1.0 available"
+# c3's uptime asks for one command more (catalogueAvailable, catalogueAsksDifferently).
+AVAILABLE_1_2_0_ASKS = "1.2.0 available, asks for different permissions"
+UPDATED_BY_ITSELF = "Updated by itself on "
 VERIFIED = "Verified"
 MODIFIED = "Modified locally"
 LIMIT_USED_UP = "they are used up"
@@ -198,6 +208,28 @@ RU_INSTALLED_COMMAND = "Установлена: "
 # written from ~, as the folder chosen is.
 RU_OVER_A_LINK = "{id} сейчас — ссылка на ~/"
 RU_REPLACING_A_LINK = "{id} здесь — ссылка на ~/"
+# Updating by themselves (Russian.swift: pluginUpdatedByItself, catalogueUpdatesByThemselvesHelp,
+# catalogueAvailable).
+RU_UPDATED_BY_ITSELF = "Обновился сам "
+RU_UPDATES_BY_THEMSELVES_HELP = "После каждого чтения каталога проверенный плагин"
+RU_AVAILABLE_1_1_0 = "Доступна 1.1.0"
+
+# How long the catalogue is made to look old while uDeck is not running, so that
+# the launch reads it again (CatalogueSchedule.refreshesAtLaunch: over a day).
+AGED_DAYS = 2
+# How long uDeck is listened to after a read that must not install anything: an
+# update by itself starts as soon as the folders are hashed after the read, a
+# second or two, and its download takes a few more on the guest's loopback.
+LEFT_ALONE_SECONDS = 20
+# How long an update by itself that waited on a card action may take once the
+# action has ended: the minute's tick asks again (`DeckModel.startCatalogueSchedule`,
+# a 60-second Timer), and then the update itself.
+TICK_SECONDS = 60
+# What uDeck says, in its own log (`DeckModel.updateVerifiedPlugins`), of a plugin
+# that does not update itself or waits: `AutoUpdate.Reason` and `AutoUpdate.Wait`
+# as Swift describes them.
+DOES_NOT_UPDATE_ITSELF = "{id} does not update itself: {reason}"
+UPDATES_ITSELF_LATER = "{id} updates itself later: {wait}"
 
 
 # --- The checks -------------------------------------------------------------------------
@@ -324,13 +356,17 @@ def check_update_keeps_the_window(machine, check_dir, lab):
     """With `main` moved to c2, **Check now** offers 1.1.0, and **Update** keeps the window where it was.
 
     After the update, `layout.json` has the same window — the same id, on the same
-    tab, in the same place — the card shows 1.1.0's output after the new consent
-    (a new version asks again), and the record's `previous` holds 1.0.0.
+    tab, in the same place — the card shows 1.1.0's output without asking again,
+    since 1.1.0 asks for exactly what 1.0.0 asked for and the decision is carried
+    to it (`GrantCarry`; `grants.json` says 1.1.0), and the record's `previous`
+    holds 1.0.0. uDeck starts with **Update verified plugins by themselves** off,
+    so that 1.1.0 is offered and pressed rather than put in place by itself.
 
-    **Red for**: an update that takes the window with it, and one that forgets
-    what it replaced.
+    **Red for**: an update that takes the window with it, one that forgets what
+    it replaced, and one after which a plugin asking for nothing new stops until
+    somebody agrees again.
     """
-    scene = _prepare(machine, check_dir, lab, main="c1")
+    scene = _prepare(machine, check_dir, lab, main="c1", updates_itself=False)
     try:
         _the_catalogue_read(scene, since=0, commit="c1")
         _install(scene, UPTIME)
@@ -357,8 +393,276 @@ def check_update_keeps_the_window(machine, check_dir, lab):
             after == before,
             f"the update moved or replaced {UPTIME}'s window: before it was {before}, after it is {after}",
         )
-        card = _allow_and_read_the_card(scene, UPTIME, "after the update")
+        card = _the_card_without_asking(scene, UPTIME, "1.1.0", "after the update")
         expect(card.get(VERSION_ROW) == "1.1.0", f"after the update the card is not 1.1.0's: {card}")
+        _expect_the_decision_for(machine, UPTIME, "1.1.0", "after the update")
+    finally:
+        scene.close()
+
+
+def check_verified_updates_itself(machine, check_dir, lab):
+    """With `main` moved to c2 while uDeck was not running, the next launch updates `uptime` to 1.1.0 with nothing pressed.
+
+    `uptime` 1.0.0 is installed, placed and allowed; uDeck is ended, `main` moved
+    to c2 — 1.1.0, asking for exactly what 1.0.0 asks — and the catalogue's
+    `state.json` made `AGED_DAYS` old, as a Mac that slept through a day leaves
+    it. uDeck is started and nothing is pressed. Then: the fake's log has the
+    read at c2 and every file of `plugins/uptime` at c2, fetched by uDeck alone;
+    the folder hashes to c2's tree; the record says 1.1.0, `previous` 1.0.0 at c1,
+    and `automatic: true`; the window is the one it was; the card runs 1.1.0's
+    producer without asking — `grants.json` holds the decision for 1.1.0; and
+    the row says *Updated by itself on …* and still offers **Back to 1.0.0**.
+    The row is read again with uDeck in Russian, for a person to read.
+
+    The control, in the same scene: 1.0.0 chosen under **Earlier versions…** is
+    pinned, and **Check now** — a read the log shows — leaves it at 1.0.0, with
+    1.1.0 still offered, not one of its files fetched, and uDeck's own log
+    saying it does not update itself because it is pinned.
+
+    **Red for**: a uDeck that only ever offers updates (nothing in place after a
+    minute); one that updates and then stops the plugin until somebody agrees
+    again to what it already agreed to (the card asks); one that loses the
+    window or `previous`; and one that updates a plugin the operator kept at an
+    earlier version.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        _place(scene, UPTIME)
+        _allow_and_read_the_card(scene, UPTIME, "at 1.0.0")
+        before = _the_window(machine, UPTIME, "reading the window before the update")
+
+        app.quit_app(machine, "ending uDeck before main moves")
+        scene.github.tell("moving main to c2", main="c2")
+        _age_the_catalogue(machine, AGED_DAYS)
+        heard_from = _count(scene)
+        app.launch(machine)
+        machine.screenshot(check_dir, "uDeck started again, nothing pressed")
+        record = None
+        deadline = machine.clock() + CATALOGUE_SECONDS + OPERATION_SECONDS
+        while machine.clock() < deadline:
+            record = ((_read_json(machine, INSTALLED) or {}).get("plugins") or {}).get(UPTIME)
+            if record and record.get("version") == "1.1.0":
+                break
+            machine.sleep(2)
+        heard = _since(scene, heard_from, "reading the fake's log")
+        expect(
+            record is not None and record.get("version") == "1.1.0",
+            f"{CATALOGUE_SECONDS + OPERATION_SECONDS}s after a launch with main at c2 and nothing pressed, "
+            f"installed.json says {record!r}: 1.1.0 asks for what 1.0.0 asks and was not put in place by itself; "
+            f"uDeck asked {described(heard)}",
+        )
+        c1, c2 = scene.github.commit("c1"), scene.github.commit("c2")
+        files = scene.github.files("c2", f"plugins/{UPTIME}")
+        fetched = {r.raw_file()[1] for r in heard if r.raw_file() and r.raw_file()[0] == c2 and r.status == 200}
+        missing = sorted(set(files) - fetched)
+        expect(not missing, f"uDeck put 1.1.0 in place without fetching {missing} at c2: {described(heard)}")
+        tree = scene.github.tree_in_guest(f"{UDECK_HOME}/plugins/{UPTIME}", "hashing the folder updated by itself")
+        expect(tree == scene.github.tree("c2", f"plugins/{UPTIME}"),
+               f"the folder updated by itself hashes to {tree}, not c2's plugins/{UPTIME}")  # fmt: skip
+        previous = record.get("previous") or {}
+        expect(previous.get("version") == "1.0.0" and previous.get("commit") == c1,
+               f"after the update by itself, previous is {previous!r}, not 1.0.0 at c1")  # fmt: skip
+        expect(record.get("automatic") is True, f"the record of the update by itself does not say so: {record!r}")
+        expect(record.get("commit") == c2 and (record.get("verification") or {}).get("status") == "verified",
+               f"the record of the update by itself is not c2's, verified: {record!r}")  # fmt: skip
+        after = _the_window(machine, UPTIME, "reading the window after the update by itself")
+        expect(after == before, f"the update by itself moved or replaced {UPTIME}'s window: {before} → {after}")
+
+        card = _the_card_without_asking(scene, UPTIME, "1.1.0", "after the update by itself")
+        expect(card.get(VERSION_ROW) == "1.1.0", f"after the update by itself the card is not 1.1.0's: {card}")
+        _expect_the_decision_for(machine, UPTIME, "1.1.0", "after the update by itself")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        said = _wait_until(machine, f"plugin.{UPTIME}.updatedByItself",
+                           lambda said: bool(said) and said.startswith(UPDATED_BY_ITSELF), NOTICED_SECONDS)  # fmt: skip
+        dump = _keep_the_pane(machine, check_dir, lab, "updated-by-itself.txt")
+        expect(said is not None and said.startswith(UPDATED_BY_ITSELF),
+               f"the row of a plugin updated by itself says {said!r}, not {UPDATED_BY_ITSELF!r}…")  # fmt: skip
+        expect(ui.element(dump, f"plugin.{UPTIME}.backTo") is not None,
+               "after an update by itself the row does not offer Back to 1.0.0")  # fmt: skip
+        expect(ui.element(dump, f"plugin.{UPTIME}.offer") is None,
+               f"after the update by itself the row still offers {ui.says(ui.element(dump, f'plugin.{UPTIME}.offer'))!r}")  # fmt: skip
+
+        # The same row in uDeck's Russian, for a person to read.
+        ru = ui.RUSSIAN
+        app.quit_app(machine, "ending uDeck to switch it to Russian")
+        settings = _read_json(machine, SETTINGS) or {}
+        _write(machine, SETTINGS, {**settings, "language": ru.code}, "setting uDeck's language to Russian")
+        app.launch(machine)
+        ui.plugins_pane(machine, "opening Settings → Plugins in Russian", language=ru)
+        said = _wait_until(machine, f"plugin.{UPTIME}.updatedByItself",
+                           lambda said: bool(said) and said.startswith(RU_UPDATED_BY_ITSELF), NOTICED_SECONDS,
+                           window=ru.settings_window)  # fmt: skip
+        help_ = _wait_until(machine, "catalogue.autoUpdateHelp", lambda said: bool(said), NOTICED_SECONDS,
+                            window=ru.settings_window)  # fmt: skip
+        _keep_the_pane(machine, check_dir, lab, "ru-updated-by-itself.txt", window=ru.settings_window)
+        expect(said is not None and said.startswith(RU_UPDATED_BY_ITSELF),
+               f"in Russian, the row of a plugin updated by itself says {said!r}")  # fmt: skip
+        expect(help_ is not None and help_.startswith(RU_UPDATES_BY_THEMSELVES_HELP),
+               f"in Russian, the switch's help says {help_!r}")  # fmt: skip
+
+        # The control: kept at 1.0.0, it is left there by a read that offers 1.1.0.
+        window = ru.settings_window
+        _press(machine, f"plugin.{UPTIME}.earlier", "opening Earlier versions…", window)
+        _wait_until(machine, f"plugin.{UPTIME}.history.1.0.0.install", lambda said: said is not None, OPERATION_SECONDS,
+                    window=window, present=True)  # fmt: skip
+        record = _operate(scene, f"plugin.{UPTIME}.history.1.0.0.install", "choosing 1.0.0",
+                          lambda r: r and r.get("version") == "1.0.0", window=window)  # fmt: skip
+        expect(record is not None and record.get("pinned") is True, f"1.0.0 chosen from the history is not pinned: {record!r}")
+        expect(not record.get("automatic"), f"1.0.0 chosen by a press is recorded as an update by itself: {record!r}")
+        looked_from = _count(scene)
+        said_from = scene.log.mark("marking uDeck's log before Check now on the pinned 1.0.0")
+        _press(machine, "catalogue.checkNow", "pressing Check now on the pinned 1.0.0", window)
+        heard = _left_alone(scene, looked_from)
+        looked = [r for r in heard if r.is_api and r.path.endswith("/commits/main") and r.status in (200, 304)]
+        if not looked:
+            raise LabError("pressing Check now on the pinned 1.0.0", f"uDeck did not read the catalogue: {described(heard)}")
+        offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == RU_AVAILABLE_1_1_0, NOTICED_SECONDS,
+                            window=window)  # fmt: skip
+        _keep_the_pane(machine, check_dir, lab, "ru-pinned-left-alone.txt", window=window)
+        downloads = _files_fetched(heard, UPTIME)
+        expect(not downloads, f"a read with uptime pinned at 1.0.0 fetched {described(downloads)}")
+        record = ((_read_json(machine, INSTALLED) or {}).get("plugins") or {}).get(UPTIME) or {}
+        expect(record.get("version") == "1.0.0" and record.get("pinned") is True,
+               f"pinned at 1.0.0, uptime was replaced after a read: {record!r}")  # fmt: skip
+        expect(offer == RU_AVAILABLE_1_1_0, f"pinned at 1.0.0, the row says {offer!r} and not {RU_AVAILABLE_1_1_0!r}")
+        # And it was left there for being pinned, not for any other reason.
+        _expect_uDeck_said(scene, said_from, DOES_NOT_UPDATE_ITSELF.format(id=UPTIME, reason="pinned"),
+                           "after Check now on the pinned 1.0.0")  # fmt: skip
+    finally:
+        scene.close()
+
+
+def check_permissions_change_only_offers(machine, check_dir, lab):
+    """An update asking for one command more is only offered, saying so; the switch off offers every update.
+
+    `uptime` 1.0.0 installed, placed and allowed. First the switch: **Update
+    verified plugins by themselves** clicked off in Settings → Plugins
+    (`settings.json` says `autoUpdateVerified: false`), `main` moved to c2 and
+    **Check now** pressed — the row offers *1.1.0 available*, and for
+    `LEFT_ALONE_SECONDS` no file of `plugins/uptime` but its manifest is
+    fetched. Then the card's **Hold** (`hold.sh`) is pressed and left running,
+    and the switch clicked on again: the next **Check now** reads the catalogue
+    and, for `LEFT_ALONE_SECONDS`, leaves the plugin as it is — no file of it
+    fetched, the record at 1.0.0, the action still running and not once seeing
+    its folder change, and uDeck's own log saying it updates itself later for
+    the action. The lab ends the action, as one that finishes ends, and within
+    the minute's tick and an update (`TICK_SECONDS` + `OPERATION_SECONDS`) 1.1.0
+    is in place by itself, with no read of the catalogue in between: the
+    control, which shows the switch and the action were what held it. Then
+    `main` moved to c3, whose 1.2.0 asks for one command more: after **Check
+    now** — which the log shows reading c3's manifest — the row says *1.2.0
+    available, asks for different permissions*, nothing of 1.2.0 but its
+    manifest is fetched, 1.1.0 stays, and uDeck's log says why. **Update**
+    pressed puts 1.2.0 in place, and its card asks for consent before it runs.
+
+    **Red for**: an update by itself of a version asking for different
+    permissions, a switch that does not hold updates back — or that holds them
+    for good — an update by itself that ends a card action or swaps the folder
+    under it, one that waits on an action for good, and a row that offers such
+    an update without saying why it waits.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        _place(scene, UPTIME)
+        _allow_and_read_the_card(scene, UPTIME, "at 1.0.0")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        _switch(machine, "catalogue.autoUpdate", False, "switching updates by themselves off")
+        saved = _wait_for_disk(machine, lambda: (_read_json(machine, SETTINGS) or {}).get("autoUpdateVerified") is False,
+                               config.SETTINGS_SAVE_SECONDS)  # fmt: skip
+        expect(saved, f"the switch was turned off and {SETTINGS} says {(_read_json(machine, SETTINGS) or {})!r}")
+        scene.github.tell("moving main to c2", main="c2")
+        looked_from = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now with the switch off")
+        offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == AVAILABLE_1_1_0, OPERATION_SECONDS)
+        heard = _left_alone(scene, looked_from)
+        _keep_the_pane(machine, check_dir, lab, "switched-off-only-offers.txt")
+        expect(offer == AVAILABLE_1_1_0, f"with the switch off and main at c2, the row says {offer!r}, not {AVAILABLE_1_1_0!r}")
+        downloads = _files_fetched(heard, UPTIME)
+        expect(not downloads, f"with the switch off, uDeck fetched {described(downloads)} after Check now")
+        record = ((_read_json(machine, INSTALLED) or {}).get("plugins") or {}).get(UPTIME) or {}
+        expect(record.get("version") == "1.0.0", f"with the switch off, uptime is {record.get('version')!r} after Check now")
+
+        # A card action running: the update by itself waits for it, and never ends it.
+        machine.ssh.run(f"rm -f {HOLD_LOG}", "clearing the action's own log")
+        _hold_on_the_card(scene, "with the switch off")
+        ui.plugins_pane(machine, "opening Settings → Plugins with Hold running")
+        _switch(machine, "catalogue.autoUpdate", True, "switching updates by themselves on again")
+        saved = _wait_for_disk(machine, lambda: (_read_json(machine, SETTINGS) or {}).get("autoUpdateVerified") is True,
+                               config.SETTINGS_SAVE_SECONDS)  # fmt: skip
+        expect(saved, f"the switch was turned on and {SETTINGS} says {(_read_json(machine, SETTINGS) or {})!r}")
+        looked_from = _count(scene)
+        said_from = scene.log.mark("marking uDeck's log before Check now with Hold running")
+        _press(machine, "catalogue.checkNow", "pressing Check now with the switch on and Hold running")
+        heard = _left_alone(scene, looked_from)
+        looked = [r for r in heard if r.is_api and r.path.endswith("/commits/main") and r.status in (200, 304)]
+        if not looked:
+            raise LabError("pressing Check now with Hold running", f"uDeck did not read the catalogue: {described(heard)}")
+        held = _hold_log(machine)
+        _keep(check_dir, "hold-while-it-waited.log", held)
+        downloads = _files_fetched(heard, UPTIME)
+        expect(not downloads, f"with Hold running, uDeck fetched {described(downloads)} after Check now")
+        record = ((_read_json(machine, INSTALLED) or {}).get("plugins") or {}).get(UPTIME) or {}
+        expect(record.get("version") == "1.0.0", f"with Hold running, uptime is {record.get('version')!r} after Check now")
+        expect("changed under it" not in held, f"with Hold running, its folder was replaced under it: {held[:300]!r}")
+        expect("ended" not in held and _hold_is_running(machine),
+               f"an update by itself ended the card's action: {held[:300]!r}")  # fmt: skip
+        _expect_uDeck_said(scene, said_from, UPDATES_ITSELF_LATER.format(id=UPTIME, wait="actionRunning"),
+                           "after Check now with Hold running")  # fmt: skip
+
+        # The action ends, and the minute's tick puts 1.1.0 in place with nothing pressed.
+        heard_from = _count(scene)
+        machine.ssh.run("/usr/bin/pkill -TERM -f hold.sh", "ending the action, as one that finishes ends")
+        if not _wait_for_disk(machine, lambda: not _hold_is_running(machine), NOTICED_SECONDS):
+            raise LabError("ending the action", f"hold.sh did not end on SIGTERM: {_hold_log(machine)!r}")
+        record = None
+        deadline = machine.clock() + TICK_SECONDS + OPERATION_SECONDS
+        while machine.clock() < deadline:
+            record = ((_read_json(machine, INSTALLED) or {}).get("plugins") or {}).get(UPTIME)
+            if record and record.get("version") == "1.1.0":
+                break
+            machine.sleep(2)
+        heard = _since(scene, heard_from, "reading the fake's log after the action ended")
+        held = _hold_log(machine)
+        _keep(check_dir, "hold.log", held)
+        expect(record is not None and record.get("version") == "1.1.0" and record.get("automatic") is True,
+               f"{TICK_SECONDS + OPERATION_SECONDS}s after the action ended, uptime did not update itself to 1.1.0: "
+               f"{record!r}; uDeck asked {described(heard)}")  # fmt: skip
+        read = [r for r in heard if r.is_api and r.path.endswith("/commits/main")]
+        expect(not read, f"the update that waited on the action came after another read, not on the tick: {described(read)}")
+        expect("changed under it" not in held, f"the folder was replaced while the action ran in it: {held[:300]!r}")
+
+        scene.github.tell("moving main to c3", main="c3")
+        looked_from = _count(scene)
+        said_from = scene.log.mark("marking uDeck's log before Check now with main at c3")
+        _press(machine, "catalogue.checkNow", "pressing Check now with main at c3")
+        offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == AVAILABLE_1_2_0_ASKS, OPERATION_SECONDS)
+        heard = _left_alone(scene, looked_from)
+        _keep_the_pane(machine, check_dir, lab, "asks-for-different-permissions.txt")
+        c3 = scene.github.commit("c3")
+        read = [r for r in heard if r.raw_file() == (c3, f"plugins/{UPTIME}/manifest.json") and r.status == 200]
+        if not read:
+            raise LabError("pressing Check now with main at c3", f"uDeck never read c3's manifest: {described(heard)}")
+        expect(offer == AVAILABLE_1_2_0_ASKS, f"with main at c3, the row says {offer!r}, not {AVAILABLE_1_2_0_ASKS!r}")
+        downloads = _files_fetched(heard, UPTIME)
+        expect(not downloads, f"1.2.0 asks for one command more, and uDeck fetched {described(downloads)} by itself")
+        record = ((_read_json(machine, INSTALLED) or {}).get("plugins") or {}).get(UPTIME) or {}
+        expect(record.get("version") == "1.1.0", f"1.2.0 asks for one command more, and uptime is {record.get('version')!r}")
+        _expect_uDeck_said(scene, said_from, DOES_NOT_UPDATE_ITSELF.format(id=UPTIME, reason="asksDifferently"),
+                           "after Check now with main at c3")  # fmt: skip
+
+        record = _operate(scene, f"plugin.{UPTIME}.update", "updating to 1.2.0", lambda r: r and r.get("version") == "1.2.0")
+        expect(record is not None and not record.get("automatic"), f"after Update, installed.json says {record!r}")
+        card = _allow_and_read_the_card(scene, UPTIME, "after the update to 1.2.0")
+        expect(card.get(VERSION_ROW) == "1.2.0", f"after the update to 1.2.0 the card is not 1.2.0's: {card}")
+        grant = _expect_the_decision_for(machine, UPTIME, "1.2.0", "after allowing 1.2.0")
+        expect(any(g.get("scope") == "uname" for g in grant.get("granted") or []),
+               f"1.2.0 was allowed and its decision does not hold uname: {grant!r}")  # fmt: skip
     finally:
         scene.close()
 
@@ -784,7 +1088,7 @@ def check_every_replacement_warns_first(machine, check_dir, lab):
     operator's `.env` without saying first that it goes to the Trash, and a
     `.env` that does not reach the Trash.
     """
-    scene = _prepare(machine, check_dir, lab, main="c1")
+    scene = _prepare(machine, check_dir, lab, main="c1", updates_itself=False)
     try:
         _the_catalogue_read(scene, since=0, commit="c1")
         _install(scene, UPTIME)
@@ -853,7 +1157,7 @@ def check_an_update_ends_a_running_action(machine, check_dir, lab):
     ends the action (it is still running afterwards, or the update does not
     happen).
     """
-    scene = _prepare(machine, check_dir, lab, main="c1")
+    scene = _prepare(machine, check_dir, lab, main="c1", updates_itself=False)
     try:
         _the_catalogue_read(scene, since=0, commit="c1")
         _install(scene, UPTIME)
@@ -868,19 +1172,7 @@ def check_an_update_ends_a_running_action(machine, check_dir, lab):
         if offer != AVAILABLE_1_1_0:
             raise CheckFailed(f"after Check now, with main at c2, {UPTIME}'s row says {offer!r}, not {AVAILABLE_1_1_0!r}")
 
-        _open_the_panel(machine, "opening the panel to press Hold")
-        hold = f"card.{UPTIME}.action.0"
-        try:
-            button = ui.wait_for(machine, hold, "waiting for the card's Hold", ui.PANEL)
-        except NotThere as error:
-            raise CheckFailed(f"{UPTIME}'s card offers no Hold action: {error.reason}") from None
-        machine.click(*button.middle, "pressing Hold on the card")
-        started = _wait_for_disk(machine, lambda: "started" in _hold_log(machine), NOTICED_SECONDS)
-        if not started:
-            raise CheckFailed(f"Hold was pressed and the action never started: {_hold_log(machine)!r}")
-        _put_the_panel_away(machine, "after pressing Hold")
-        if not _hold_is_running(machine):
-            raise LabError("before the update", f"the action ended by itself before the update: {_hold_log(machine)!r}")
+        _hold_on_the_card(scene, "before the update")
 
         ui.plugins_pane(machine, "opening Settings → Plugins")
         record = _operate(scene, f"plugin.{UPTIME}.update", "updating uptime while Hold runs",
@@ -1412,12 +1704,13 @@ def check_screens_in_russian(machine, check_dir, lab):
     English; a warning that writes a folder as `/Users/…`; **Update** over a
     link without that warning.
     """
-    scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False, updates_itself=False)
     ru = ui.RUSSIAN
     window = ru.settings_window
     try:
         machine.ssh.run(f"mkdir -p {UDECK_HOME}", "making uDeck's folder")
-        _write(machine, SETTINGS, {"language": ru.code}, "setting uDeck's language to Russian")
+        # Updates by themselves off, as `_prepare` leaves them: main moves to c2 below.
+        _write(machine, SETTINGS, {"language": ru.code, "autoUpdateVerified": False}, "setting uDeck's language to Russian")
         folder = f"{WORK}/{FLAKY}"
         _a_plugin_folder(machine, folder, _manifest(FLAKY, "./run.sh", interval=FLAKY_INTERVAL),
                          {"run.sh": _card_script("steady", ttl=FLAKY_TTL, fail_when=FAIL, says=FLAKY_SAYS)})
@@ -1540,13 +1833,18 @@ class Scene:
         self.github.stop()
 
 
-def _prepare(machine, check_dir, lab, main, launch=True, **state):
+def _prepare(machine, check_dir, lab, main, launch=True, updates_itself=True, **state):
     """A lab build installed on a machine with nothing of uDeck's in it, the fake serving, and uDeck started.
 
     The feed is one nobody serves, as for the settings checks: a lab build must
     not be able to update itself against anything real (Q41). `~/.udeck` is taken
     away before uDeck starts — a fresh guest has none, and one shared with an
     earlier check (`--vm per-group`) must not lend this one its plugins.
+
+    `updates_itself` False starts uDeck with **Update verified plugins by
+    themselves** off (`settings.json`, `autoUpdateVerified: false`): a check that
+    moves `main` to press **Update** on what it offers would otherwise see it
+    put in place by itself first.
     """
     feed = updates.Feed(machine, lab.note)
     build = lab.builder(feed.url, check_dir.name).build(*VERSION)
@@ -1556,6 +1854,9 @@ def _prepare(machine, check_dir, lab, main, launch=True, **state):
     if there != VERSION:
         raise LabError(step, f"the lab installed {VERSION}, but the machine has {there}")
     machine.ssh.run(f"rm -rf {UDECK_HOME} /tmp/udeck-e2e-manifest.json", step)
+    if not updates_itself:
+        machine.ssh.run(f"mkdir -p {UDECK_HOME}", step)
+        _write(machine, SETTINGS, {"autoUpdateVerified": False}, "starting uDeck with updates by themselves off")
 
     github = FakeGitHub(machine, lab.note)
     github.serve(check_dir, main=main, **state)
@@ -1745,6 +2046,41 @@ def _expect_it_in_the_trash(machine, token, what):
     )
 
 
+def _hold_on_the_card(scene, label):
+    """**Hold** pressed on `uptime`'s card in the panel, and left running — one the card does not offer is uDeck's failure."""
+    machine = scene.machine
+    _open_the_panel(machine, "opening the panel to press Hold")
+    hold = f"card.{UPTIME}.action.0"
+    try:
+        button = ui.wait_for(machine, hold, "waiting for the card's Hold", ui.PANEL)
+    except NotThere as error:
+        raise CheckFailed(f"{UPTIME}'s card offers no Hold action: {error.reason}") from None
+    machine.click(*button.middle, "pressing Hold on the card")
+    started = _wait_for_disk(machine, lambda: "started" in _hold_log(machine), NOTICED_SECONDS)
+    if not started:
+        raise CheckFailed(f"Hold was pressed and the action never started: {_hold_log(machine)!r}")
+    _put_the_panel_away(machine, "after pressing Hold")
+    if not _hold_is_running(machine):
+        raise LabError(label, f"the action ended by itself: {_hold_log(machine)!r}")
+
+
+def _expect_uDeck_said(scene, mark, words, label, seconds=NOTICED_SECONDS):
+    """uDeck's own log, from `mark`, holding `words` — the reason it gives for what it did — or the check fails.
+
+    What a control shows from outside (nothing fetched, the row's words) is the
+    same for every reason a plugin does not update itself; this is the one place
+    uDeck says which reason it was.
+    """
+    deadline = scene.machine.clock() + seconds
+    while True:
+        said = scene.log.read(mark, f"reading uDeck's log {label}")
+        if words in said or scene.machine.clock() >= deadline:
+            break
+        scene.machine.sleep(2)
+    lines = [line for line in said.splitlines() if "itself" in line]
+    expect(words in said, f"{label}, uDeck's log does not say {words!r}; of updating by itself it says {lines[-6:]!r}")
+
+
 def _hold_log(machine):
     return machine.ssh.ask(f"cat {HOLD_LOG} 2>/dev/null || true", "reading the action's own log").stdout
 
@@ -1838,6 +2174,101 @@ def _allow_and_read_the_card(scene, plugin, label):
     card = _read_the_card(scene, plugin, label, lambda card: RUNS in card and card[RUNS] not in ("", "unknown"))
     _put_the_panel_away(machine, label)
     return card
+
+
+def _the_card_without_asking(scene, plugin, version, label):
+    """The panel opened, and `plugin`'s card read once it shows `version` — a consent asked for instead is uDeck's failure.
+
+    For a copy whose permission decision was carried to it (`GrantCarry`): it
+    asks for exactly what the copy before it asked for, and the operator
+    already answered that.
+    """
+    machine = scene.machine
+    _open_the_panel(machine, f"opening the panel: {label}")
+    consent = f"consent.{plugin}.allow"
+
+    def card_of(texts):
+        return {texts[i]: texts[i + 1] for i in range(len(texts) - 1) if texts[i] in (RUNS, VERSION_ROW, "up")}
+
+    def ready(found, texts):
+        card = card_of(texts)
+        return consent in found or (card.get(VERSION_ROW) == version and card.get(RUNS) not in (None, "", "unknown"))
+
+    dump, texts = _wait_for_the_card(machine, ready, CARD_SECONDS)
+    machine.screenshot(scene.check_dir, f"{plugin}'s card: {label}")
+    _keep(scene.check_dir, f"card-{label.replace(' ', '-')}.txt", "\n".join(texts))
+    asked = ui.element(dump, consent) is not None
+    _put_the_panel_away(machine, label)
+    expect(not asked, f"{plugin} {version}, {label}, asks for consent on its card although it asks for what it asked before: {texts}")
+    card = card_of(texts)
+    if card.get(VERSION_ROW) != version or card.get(RUNS) in (None, "", "unknown"):
+        raise CheckFailed(f"{plugin}'s card {label} never said it had run as {version}: the panel says {texts}")
+    return card
+
+
+def _expect_the_decision_for(machine, plugin, version, label):
+    """`grants.json`'s decision for `plugin` is for `version`: the decision, as it is there."""
+    grant = ((_read_json(machine, GRANTS) or {}).get("byPlugin") or {}).get(plugin) or {}
+    expect(grant.get("decidedForVersion") == version,
+           f"{label}, {GRANTS} holds {plugin}'s decision for {grant.get('decidedForVersion')!r}, not {version}: {grant!r}")  # fmt: skip
+    return grant
+
+
+# The catalogue's state file, and what makes it look `argv[2]` days old: its last
+# read, and its last attempt, moved back by that much, in the ISO 8601 uDeck writes
+# (`JSONFileStore`), written beside it for a `mv` over it. Run by the guest's own
+# Python, which the fake already runs on.
+CATALOGUE_STATE = f"{UDECK_HOME}/catalogue/official/state.json"
+AGE_THE_CATALOGUE = """\
+import json, sys, time
+path = sys.argv[1]
+with open(path) as file:
+    state = json.load(file)
+then = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - float(sys.argv[2]) * 86400))
+state["lastSuccess"] = state["lastAttempt"] = then
+with open(path + ".new", "w") as file:
+    json.dump(state, file, indent=2)
+print(then)
+"""
+
+
+def _age_the_catalogue(machine, days):
+    """The catalogue's `state.json` made `days` old, as a Mac that was off for them leaves it — uDeck not running."""
+    state = CATALOGUE_STATE
+    said = machine.ssh.run(f"/usr/bin/python3 -c {shlex.quote(AGE_THE_CATALOGUE)} {state} {days} && mv {state}.new {state}",
+                           f"making the catalogue {days} days old")  # fmt: skip
+    if not said.stdout.strip():
+        raise LabError(f"making the catalogue {days} days old", f"{state} was not rewritten: {said.stderr.strip()!r}")
+
+
+def _left_alone(scene, before):
+    """uDeck's requests from `before` on, listened to for `LEFT_ALONE_SECONDS` — long enough for an update by itself to begin."""
+    machine = scene.machine
+    until = machine.clock() + LEFT_ALONE_SECONDS
+    while machine.clock() < until:
+        machine.sleep(min(2, max(0.5, until - machine.clock())))
+    return _since(scene, before, "listening for an update by itself")
+
+
+def _files_fetched(heard, plugin):
+    """The requests for `plugin`'s files other than its manifest — what a download of it fetches, and a read of the catalogue never does."""
+    prefix = f"plugins/{plugin}/"
+    return [r for r in heard if r.raw_file() and r.raw_file()[1].startswith(prefix)
+            and r.raw_file()[1] not in (f"{prefix}manifest.json", f"{prefix}manifest.ru.json")]  # fmt: skip
+
+
+def _switch(machine, identifier, on, step, window=ui.SETTINGS_WINDOW):
+    """A switch in Settings set `on` by a click, and read back — one uDeck does not offer is uDeck's failure."""
+    wanted = "1" if on else "0"
+    switch = ui.element(_read_the_screen(machine, step, window), identifier)
+    if switch is None:
+        raise CheckFailed(f"{step}: Settings → Plugins has no {identifier}")
+    if switch.value == wanted:
+        return
+    machine.click(*switch.middle, step)
+    now = _wait_until(machine, identifier, lambda said: said == wanted, config.UI_CHANGE_SECONDS, window)
+    if now != wanted:
+        raise LabError(step, f"the lab clicked {switch} and it reads {now!r}")
 
 
 def _put_the_panel_away(machine, label):

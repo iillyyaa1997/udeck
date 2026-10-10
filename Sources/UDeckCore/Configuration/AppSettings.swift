@@ -118,6 +118,29 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// The catalogue switch as it stands.
     public var readsOfficialCatalogue: Bool { officialCatalogue ?? true }
 
+    /// Whether a verified plugin updates itself after a read of the official
+    /// catalogue — when the new version asks for exactly what the installed one
+    /// does (`AutoUpdate`) — or `nil` for the shipped answer, which is yes.
+    /// The switch under Settings → Plugins, **Update verified plugins by
+    /// themselves**.
+    ///
+    /// On as uDeck ships, because a verified plugin is code a maintainer of the
+    /// official repository read before merging, and one that stays a day behind
+    /// is one that stays broken a day longer; and optional so that the settings
+    /// file says nothing until the operator switches it off. Off, every update
+    /// waits on its row for a press, as each did before. Either way nothing
+    /// happens while **Official catalogue** is off.
+    public var autoUpdateVerified: Bool?
+
+    /// The switch as it stands. What it does needs **Official catalogue** on
+    /// as well (`verifiedPluginsUpdateThemselves`).
+    public var updatesVerifiedByThemselves: Bool { autoUpdateVerified ?? true }
+
+    /// Whether a verified plugin updates itself now: the switch, and
+    /// **Official catalogue** with it — off, uDeck makes no request about
+    /// plugins at all. What `AutoUpdate.verdict` is given as `switchedOn`.
+    public var verifiedPluginsUpdateThemselves: Bool { readsOfficialCatalogue && updatesVerifiedByThemselves }
+
     /// Whether every run of a linked folder is written into its run log
     /// (`RunLog`, `<uDeck folder>/logs/<id>.log`), or `nil` for the shipped
     /// answer, which is no. The switch under Settings → Plugins, **Keep a run
@@ -149,6 +172,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         textSize: CGFloat? = nil,
         language: Language? = nil,
         officialCatalogue: Bool? = nil,
+        autoUpdateVerified: Bool? = nil,
         linkedFolderRunLog: Bool? = nil
     ) {
         self.version = version
@@ -167,6 +191,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.textSize = textSize
         self.language = language
         self.officialCatalogue = officialCatalogue
+        self.autoUpdateVerified = autoUpdateVerified
         self.linkedFolderRunLog = linkedFolderRunLog
     }
 
@@ -368,6 +393,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         language = (try c.decodeIfPresent(String.self, forKey: .language)).flatMap(Language.init(rawValue:))
         textSize = try c.decodeIfPresent(CGFloat.self, forKey: .textSize)
         officialCatalogue = try c.decodeIfPresent(Bool.self, forKey: .officialCatalogue)
+        autoUpdateVerified = try c.decodeIfPresent(Bool.self, forKey: .autoUpdateVerified)
         linkedFolderRunLog = try c.decodeIfPresent(Bool.self, forKey: .linkedFolderRunLog)
     }
 

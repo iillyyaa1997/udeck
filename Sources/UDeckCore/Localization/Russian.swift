@@ -164,7 +164,7 @@ struct Russian: Vocabulary {
         // Плагины из репозитория
         case .pluginsOfficialCatalogue: "Официальный каталог"
         case .pluginsOfficialCatalogueHelp(let source):
-            "uDeck читает список плагинов в \(source) через несколько секунд после запуска, раз в день и по кнопке «Проверить» — только список и манифест каждого плагина. Файлы плагина скачиваются, лишь когда вы нажимаете «Установить». Если выключить, uDeck не делает никаких запросов о плагинах; установленные продолжают работать."
+            "uDeck читает список плагинов в \(source) через несколько секунд после запуска, раз в день и по кнопке «Проверить» — только список и манифест каждого плагина. Файлы плагина скачиваются, когда вы нажимаете «Установить» и когда проверенный плагин обновляется сам. Если выключить, uDeck не делает никаких запросов о плагинах; установленные продолжают работать."
         case .catalogueCheckNow: "Проверить"
         case .catalogueChecked(let source, let time): "\(source) · проверено в \(time)"
         case .catalogueNeverRead(let source): "\(source) · ещё не прочитан"
@@ -173,6 +173,9 @@ struct Russian: Vocabulary {
             "Официальный каталог выключен. Установленные плагины продолжают работать; их обновления uDeck не ищет."
         case .catalogueEmpty: "В репозитории пока нет плагинов."
         case .catalogueUpdatesWaiting(let count): "Ждут обновления: \(count)"
+        case .catalogueUpdatesByThemselves: "Обновлять проверенные плагины самостоятельно"
+        case .catalogueUpdatesByThemselvesHelp:
+            "После каждого чтения каталога проверенный плагин, чья новая версия просит ровно то же, что и нынешняя, обновляется без нажатия: его окно остаётся на месте, ваше решение о разрешениях тоже. Новая версия, которая просит другие разрешения, плагин, который вы изменили или куда положили свой файл, и плагин, оставленный на прежней версии, ждут здесь, пока вы не нажмёте «Обновить»."
         case .catalogueLimited(let readAt, let until):
             "GitHub без входа разрешает 60 запросов в час с одного адреса, и они израсходованы — uDeck или чем-то ещё на этом же подключении. "
                 + (readAt.map { "Список ниже — на \($0); " } ?? "")
@@ -201,6 +204,7 @@ struct Russian: Vocabulary {
         case .catalogueInstalled: "Установлен"
         case .catalogueAvailable(let version): "Доступна \(version)"
         case .catalogueChangedStill(let version): "Изменён в репозитории, всё ещё \(version)"
+        case .catalogueAsksDifferently: "просит другие разрешения"
         case .catalogueRepositoryNowHas(let version): "В репозитории теперь \(version)"
         case .catalogueSwitchTo(let version): "Перейти на \(version)"
         case .catalogueUpdateNeedsAPI(let version, let api): "\(version) нужен uDeck новее (api \(api))"
@@ -245,6 +249,9 @@ struct Russian: Vocabulary {
         case .pluginMarkMissing: "Папки нет"
         case .pluginFrom(let source, let commit): "Из \(source), коммит \(commit)"
         case .pluginPinned: "Оставлен на этой версии — о новых всё равно сообщается"
+        case .pluginUpdatedByItself(let date): "Обновился сам \(date)"
+        case .pluginUpdateByItselfFailed(let version):
+            "Самостоятельно обновиться до \(version) не вышло; uDeck попробует снова после следующего чтения каталога."
         case .pluginMarkLinked: "Связанная папка"
         case .pluginLinkedTo(let path): "Ссылка на \(path): uDeck запускает плагин оттуда"
         case .pluginLinkNotFollowed(let destination): "Ссылка на \(destination), по которой uDeck не идёт"
