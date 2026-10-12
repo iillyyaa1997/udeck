@@ -1,0 +1,57 @@
+0|AXWindow|AXStandardWindow||uDeck Settings|||60;40;|1500;1309;|shown
+1|AXGroup|AXHostingView|||||60;68;|1500;1281;|shown
+2|AXSplitGroup||||||60;68;|1500;1281;|shown
+3|AXGroup|AXHostingView|||||60;68;|144;1281;|shown
+4|AXScrollArea||||||60;68;|144;1281;|shown
+5|AXOutline|||||Sidebar|60;68;|144;1281;|shown
+6|AXRow|AXOutlineRow|||||60;78;|144;28;|shown
+7|AXCell||||||70;78;|124;28;|shown
+8|AXStaticText||section.general||General||77;83;|71;18;|shown
+6|AXRow|AXOutlineRow|||||60;106;|144;28;|shown
+7|AXCell||||||70;106;|124;28;|shown
+8|AXStaticText||section.opening||Opening||77;111;|77;18;|shown
+6|AXRow|AXOutlineRow|||||60;134;|144;30;|shown
+7|AXCell||||||70;134;|124;30;|shown
+8|AXStaticText||section.look||Look||77;139;|53;20;|shown
+6|AXRow|AXOutlineRow|||||60;164;|144;28;|shown
+7|AXCell||||||70;164;|124;28;|shown
+8|AXStaticText||section.plugins||Plugins||79;169;|66;16;|shown
+6|AXRow|AXOutlineRow|||||60;192;|144;28;|shown
+7|AXCell||||||70;192;|124;28;|shown
+8|AXStaticText||section.about||About||78;197;|59;17;|shown
+6|AXColumn||ListColumn||||70;68;|124;1281;|shown
+3|AXSplitter||||144.0||204;68;|1;1281;|shown
+3|AXGroup|AXHostingView|||||205;68;|1355;1281;|shown
+4|AXScrollArea||||||205;68;|1355;1281;|shown
+5|AXStaticText||||Gesture||333;88;|48;16;|shown
+5|AXCheckBox||||1||394;88;|328;16;|shown
+5|AXStaticText||||Pause first||316;114;|65;16;|shown
+5|AXSlider||||0.08||394;114;|230;20;|shown
+6|AXValueIndicator||||0.08||392;112;|12;28;|shown
+5|AXStaticText||||60 ms||655;117;|30;13;|shown
+5|AXStaticText||||Or push past||303;144;|78;16;|shown
+5|AXSlider||||0.136363636364||394;144;|230;20;|shown
+6|AXValueIndicator||||0.136363636364||422;142;|12;28;|shown
+5|AXStaticText||||24 pt||659;147;|26;13;|shown
+5|AXStaticText||||Then stay quiet||287;174;|94;16;|shown
+5|AXSlider||||0.15||394;174;|230;20;|shown
+6|AXValueIndicator||||0.15||414;172;|12;28;|shown
+5|AXStaticText||||0.1 s||660;177;|25;13;|shown
+5|AXStaticText||||Shortcut||328;219;|53;16;|shown
+5|AXCheckBox||||1||394;219;|205;16;|shown
+5|AXStaticText||||Keys||352;246;|29;16;|shown
+5|AXCheckBox|AXToggle|||1||394;245;|28;20;|shown
+5|AXCheckBox|AXToggle|||1||430;245;|29;20;|shown
+5|AXCheckBox|AXToggle|||0||467;245;|29;20;|shown
+5|AXCheckBox|AXToggle|||0||504;245;|28;20;|shown
+5|AXPopUpButton||||U||540;245;|110;20;|shown
+5|AXStaticText||||Also||354;290;|27;16;|shown
+5|AXCheckBox||||1||394;290;|303;16;|shown
+5|AXCheckBox||||1||394;312;|221;16;|shown
+5|AXStaticText||||uDeck asks macOS for no permissions. It watches the pointer, which needs none, and registers one keyboard combination, which is not the same as watching the keyboard.||225;357;|529;26;|shown
+1|AXButton|AXCloseButton|||||70;47;|12;14;|shown
+1|AXButton|AXFullScreenButton|||||110;47;|12;14;|shown
+2|AXGroup||||||109;46;|14;16;|shown
+3|AXGroup||||||109;46;|14;16;|shown
+1|AXButton|AXMinimizeButton|||||90;47;|12;14;|shown
+1|AXStaticText||||uDeck Settings||758;45;|103;16;|shown

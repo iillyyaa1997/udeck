@@ -381,6 +381,14 @@ def _prepare(machine, check_dir, lab, launch=True):
                 "what this check reads out of it afterwards would not be its own change",
             )
 
+    # Before uDeck starts, so that it starts with the pointer away from the strip.
+    # A machine shared between checks (`--vm per-group`, `--target here`) has the
+    # pointer where the last check left it, which for the dwell is in the strip:
+    # uDeck started there opens by the dwell before the check has begun, and the
+    # check then reads that opening as its own (run 38213314297, panel.push:
+    # `fired by dwell` 0.2 s after uDeck started). A fresh guest's pointer is
+    # near the top-left corner, outside the strip, so on Tart nothing changes.
+    panel.park_in_the_middle(machine)
     log = panel.GestureLog(machine, lab.note)
     log.keep("asking the guest to keep uDeck's own account of the panel")
     if launch:

@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from fakes import Dropped, Lab, Machine
+from fakes import Dropped, Lab, Machine, as_the_lab_keeps_it, ax_answer, ax_walk
 
 from udeck_e2e import app, config, panel, ui
 from udeck_e2e.errors import CheckFailed, LabError
@@ -182,10 +182,11 @@ def a_machine(log_says, settings_says, running="404", in_front=None, pressed=THE
         "pgrep -x uDeck": running,
         "stat -f %Su": config.GUEST_USER,
         "cat ~/.udeck": settings_says,
-        "on attr(": [OPENING_TREE, pressed],
-        "on findIt(": "935,226,144,28",
-        "click menu item": "opened",
-        "get name of every window": ui.SETTINGS_WINDOW,
+        # Two walks to find Opening in the sidebar at rest, one to read the screen
+        # at rest, and the screen as the click left it for every walk after.
+        "ax walk uDeck": [ax_walk(OPENING_TREE), ax_walk(OPENING_TREE), ax_walk(OPENING_TREE), ax_walk(pressed)],
+        "ax press-menu-item": ax_answer(pressed="Settings…"),
+        "ax windows uDeck": ax_answer(windows=[{"title": ui.SETTINGS_WINDOW, "subrole": "AXStandardWindow", "frame": None}]),
         # TextEdit before each panel, the Finder brought over it: one answer per
         # question, the last repeating.
         "frontmost is true": in_front or [
@@ -694,4 +695,4 @@ def test_what_uDeck_said_is_kept_even_when_a_check_fails(monkeypatch, lab, check
         checks.check_a_switch_survives_a_restart(machine, check_dir, lab)
     assert "the reveal with the switch as it ships" in (check_dir / "story.log").read_text()
     assert (check_dir / "settings.json").read_text() == THE_SWITCH_OFF
-    assert (check_dir / "opening-before-the-change.txt").read_text() == OPENING_TREE
+    assert (check_dir / "opening-before-the-change.txt").read_text() == as_the_lab_keeps_it(OPENING_TREE)

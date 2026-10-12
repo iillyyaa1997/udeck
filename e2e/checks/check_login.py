@@ -15,7 +15,7 @@ a different list (measured 2026-09-18: deleting uDeck from it emptied it while
 database, which is what macOS acts on at login, read with `sfltool dumpbtm`.
 """
 
-from udeck_e2e import app, login, ui, updates
+from udeck_e2e import app, login, targets, ui, updates
 from udeck_e2e.errors import CheckFailed, LabError, expect
 
 VERSION = ("0.4.1", "6")
@@ -55,12 +55,21 @@ WOULD_OPEN = f"Would open: {THIS_COPY}"
 # rather than believed.
 SETTLE_BEFORE_RESTART_SECONDS = 30
 
+# What the two checks that switch the item on from off need, and only a fresh machine
+# has: the system keeps uDeck's record across a reinstall, so on a machine one check
+# has already switched it on, the next one's click switches it off (measured on a
+# GitHub runner, run 38213314297: login.survives-an-update after login.registers
+# found the record disabled, generation 2). A Tart clone per check starts without
+# one; on `--target here` the runner is one machine for the whole job.
+NEVER_SWITCHED_ON = "a machine on which Open at Login has never been switched on"
+
 # After the desktop is up, how long the system is given to open what it was told to open.
 OPENS_WITHIN_SECONDS = 60
 # And how long a machine that must open nothing is watched before it is believed.
 NOTHING_OPENS_SECONDS = 45
 
 
+@targets.needs_a_vm(NEVER_SWITCHED_ON)
 def check_registers(machine, check_dir, lab):
     """Switching it on puts uDeck in the system's database, pointing at this copy."""
     _prepare(machine, check_dir, lab)
@@ -95,6 +104,7 @@ def check_registers(machine, check_dir, lab):
     lab.note(f"   the system now has: {after.describe()}")
 
 
+@targets.needs_a_vm("a restart of the machine")
 def check_survives_a_restart(machine, check_dir, lab):
     """A machine that restarts comes back with uDeck running, and nobody started it."""
     _prepare(machine, check_dir, lab)
@@ -182,6 +192,7 @@ def check_survives_a_restart(machine, check_dir, lab):
     lab.note(f"   uDeck came back on its own as {sorted(pids)}")
 
 
+@targets.needs_a_vm("a restart of the machine")
 def check_off_stays_off(machine, check_dir, lab):
     """Switched on and then off again, a machine that restarts comes back without uDeck.
 
@@ -269,6 +280,7 @@ def check_off_stays_off(machine, check_dir, lab):
     )
 
 
+@targets.needs_a_vm(NEVER_SWITCHED_ON)
 def check_survives_an_update(machine, check_dir, lab):
     """uDeck updates itself, and the system's record comes through it intact.
 

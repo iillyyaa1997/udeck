@@ -24,6 +24,15 @@ was decided rather than assumed:
   nothing; a build that shipped the real addresses would reach out to GitHub from
   every guest with a network, so `_verify` refuses it.
 
+**The compiling can be done once, elsewhere** (`--prebuilt DIR`). Every lab
+build of one checkout is the same binary with a different Info.plist, a
+different key and a different zip, so on GitHub one job compiles uDeck and the
+jobs that run the checks only assemble, sign and zip it (`Scripts/make-app.sh
+--prebuilt`). The directory says which commit it was compiled from
+(`PREBUILT_COMMIT`), and a directory from another commit is refused
+(`prebuilt_problem`): a check about a binary of some other checkout is a check
+about nothing this run was asked.
+
 A build of this checkout that is to be offered a *published* release carries
 that release's public key instead (`PublicKey`), read out of the release's own
 bundle: the private half lives only in GitHub's secrets, so this is the one way
@@ -66,6 +75,75 @@ MAKE_APP = Path("Scripts") / "make-app.sh"
 
 # Where the bundle's plist sits inside the zip the script makes.
 INFO_PLIST = "uDeck.app/Contents/Info.plist"
+
+# What a directory of binaries compiled elsewhere has to hold (`--prebuilt`):
+# the two products `make-app.sh` puts in the bundle, and the commit they were
+# compiled from, in a file of its own.
+PREBUILT_PRODUCTS = ("uDeck", "udeck-plugin")
+PREBUILT_COMMIT = "commit"
+# What the binaries are compiled from: a change to any of it in the working copy
+# makes the commit's binaries someone else's.
+COMPILED_FROM = ("Sources", "Packages", "Package.swift", "Package.resolved")
+
+
+def prebuilt_problem(
+    directory: Path,
+    repo_root: Path,
+    head: Callable[[Path], str | None] | None = None,
+    changed: Callable[[Path], list[str] | None] | None = None,
+) -> str | None:
+    """Why the binaries in `directory` may not be this run's builds — or None when they may.
+
+    They are this checkout's only when they were compiled from its commit and
+    nothing they are compiled from has changed in the working copy since: the
+    lab's checks are of the working copy, and binaries of the commit underneath
+    an edit would check the code before it.
+    """
+    missing = [name for name in PREBUILT_PRODUCTS if not (directory / name).is_file()]
+    if missing:
+        return f"--prebuilt {directory} has no {', '.join(missing)}"
+    try:
+        commit = (directory / PREBUILT_COMMIT).read_text().strip()
+    except OSError:
+        return f"--prebuilt {directory} does not say which commit it was compiled from (no {PREBUILT_COMMIT} file)"
+    checkout = (head or _head)(repo_root)
+    if checkout is None:
+        return "the lab could not read this checkout's commit, so it cannot tell whose binaries --prebuilt holds"
+    if commit != checkout:
+        return f"--prebuilt {directory} was compiled from {commit[:12]}, and this checkout is {checkout[:12]}"
+    edited = (changed or _changed)(repo_root)
+    if edited is None:
+        return "the lab could not read whether this checkout's sources changed, so it cannot tell whose binaries --prebuilt holds"
+    if edited:
+        shown = ", ".join(edited[:3]) + (f" and {len(edited) - 3} more" if len(edited) > 3 else "")
+        return f"--prebuilt {directory} was compiled from {commit[:12]}, and this working copy has changed {shown} since"
+    return None
+
+
+def _changed(repo_root: Path) -> list[str] | None:
+    """What the working copy changed of what the binaries are compiled from (`COMPILED_FROM`), or None if git cannot say."""
+    try:
+        done = subprocess.run(
+            ["git", "--no-optional-locks", "-C", str(repo_root), "status", "--porcelain", "--untracked-files=all",
+             "--", *COMPILED_FROM],
+            capture_output=True, text=True, timeout=30, check=False,
+        )  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        return None
+    return [line[3:] for line in done.stdout.splitlines() if line.strip()]
+
+
+def _head(repo_root: Path) -> str | None:
+    try:
+        done = subprocess.run(
+            ["git", "--no-optional-locks", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )  # fmt: skip
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
 
 
 @dataclass(frozen=True)
@@ -128,6 +206,7 @@ class Builder:
         key: SigningKey | PublicKey,
         note: Note,
         plugins_url: str = plugin_repository.base_url(),
+        prebuilt: Path | None = None,
         popen: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
         seconds: float = config.BUILD_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
@@ -144,6 +223,7 @@ class Builder:
         self.work_dir = work_dir / hashlib.sha256(mark.encode()).hexdigest()[:8]
         self.feed_url = feed_url
         self.plugins_url = plugins_url
+        self.prebuilt = prebuilt
         self.key = key
         self.note = note
         self.seconds = seconds
@@ -174,6 +254,7 @@ class Builder:
                     "--test-feed", self.feed_url,
                     "--test-key", self.key.public_key,
                     "--test-plugins", self.plugins_url,
+                    *(["--prebuilt", str(self.prebuilt)] if self.prebuilt is not None else []),
                 ],
                 step,
                 out / "build.log",

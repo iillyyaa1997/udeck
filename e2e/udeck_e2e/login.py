@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from urllib.parse import unquote, urlsplit
 
 from udeck_e2e.errors import LabError
 
@@ -70,6 +71,22 @@ class LoginRecord:
         return f"{self.identifier} at {self.url or '(no path)'} — {self.disposition}, generation {self.generation}"
 
 
+def record_path(url: str) -> str:
+    """The path a record names, however `sfltool` spells it.
+
+    macOS 27 prints a path, `/Applications/uDeck.app`; macOS 26.6.2 prints a
+    file URL, `file:///Applications/uDeck.app/` (measured on a GitHub runner,
+    run 38213314297, login.registers). Both are the same copy, and a check
+    asking which copy the record names must not read the spelling as an answer.
+    """
+    url = url.replace("(null)", "").strip()
+    if url.startswith("file://"):
+        url = unquote(urlsplit(url).path)
+        if len(url) > 1:
+            url = url.rstrip("/")
+    return url
+
+
 def records(dump: str) -> list[LoginRecord]:
     """Every item in a `sfltool dumpbtm` dump, in the order it printed them.
 
@@ -100,7 +117,7 @@ def _keep(found: list[LoginRecord], fields: dict[str, str]) -> None:
             name=fields.get("Name", ""),
             identifier=identifier,
             bundle_id=fields.get("Bundle Identifier", "").replace("(null)", ""),
-            url=fields.get("URL", "").replace("(null)", ""),
+            url=record_path(fields.get("URL", "")),
             disposition=fields.get("Disposition", ""),
             generation=int(generation) if generation.isdigit() else 0,
             uuid=fields.get("UUID", ""),

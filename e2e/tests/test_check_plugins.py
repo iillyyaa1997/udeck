@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from udeck_e2e import config, plugin_repository, ui
+from udeck_e2e import ax, config, plugin_repository, ui
 from udeck_e2e.errors import CheckFailed
 
 
@@ -191,10 +191,10 @@ def test_a_window_is_its_id_its_tab_and_its_place():
 
 
 def test_the_panel_is_found_by_its_subrole_and_a_settings_window_by_its_name():
-    script = ui._applescript(ui._FIND, process="uDeck", window=ui.PANEL, identifier="consent.uptime.allow")
-    assert 'first window whose subrole is "AXSystemDialog"' in script and "whose name is" not in script
-    script = ui._applescript(ui._FIND, process="uDeck", window=ui.SETTINGS_WINDOW, identifier="x")
-    assert 'first window whose name is "uDeck Settings"' in script
+    """The helper is asked for `panel` — the window whose subrole is AXSystemDialog — or a window by its title."""
+    assert ax.window_spec(ui.PANEL, ui.PANEL) == "panel"
+    assert ax.window_spec(ui.SETTINGS_WINDOW, ui.PANEL) == "title=uDeck Settings"
+    assert ax.window_spec(ui.RUSSIAN.settings_window, ui.PANEL) == "title=Настройки uDeck"
 
 
 def test_a_control_says_its_value_its_title_or_its_description():

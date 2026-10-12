@@ -84,3 +84,30 @@ def select(available: Iterable[str], wanted: Iterable[str]) -> list[str]:
             f"What exists:\n{listing}"
         )
     return [name for name in available if name in chosen]
+
+
+class ShardError(ValueError):
+    """A `--shard` that is not `i/n` with 1 ≤ i ≤ n."""
+
+
+def parse_shard(text: str) -> tuple[int, int]:
+    """`i/n` as two numbers: the i-th of n shards, counting from 1."""
+    parts = text.split("/")
+    if len(parts) != 2 or not all(part.isascii() and part.isdigit() for part in parts):
+        raise ShardError(f"--shard is i/n, the i-th of n parts, such as 2/3 — not {text!r}")
+    index, count = int(parts[0]), int(parts[1])
+    if count < 1 or not 1 <= index <= count:
+        raise ShardError(f"--shard {text}: the part has to be between 1 and {max(count, 1)}")
+    return index, count
+
+
+def shard(names: Iterable[str], index: int, count: int) -> list[str]:
+    """The checks in part `index` of `count`, in the order they are defined.
+
+    Dealt like cards, the first check to part 1, the second to part 2 and round
+    again, so that every check is in exactly one part, the parts differ in size
+    by one at most, and a group whose long checks sit together — the plugins
+    group's are — is spread across all of them rather than given to one. The
+    same names and the same `count` always make the same parts.
+    """
+    return [name for position, name in enumerate(names) if position % count == index - 1]

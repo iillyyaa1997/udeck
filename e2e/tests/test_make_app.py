@@ -299,3 +299,31 @@ def test_this_is_the_only_file_that_runs_anything_in_the_repository():
         assert path.name in MAY_READ_THE_CHECKOUT, f"{path.name} reaches the checkout"
         for running in ("subprocess", "Popen", "os.system", "pytester"):
             assert running not in text, f"{path.name} reaches the checkout and can run {running}"
+
+
+def test_prebuilt_binaries_are_assembled_without_compiling_anything(checkout, tmp_path):
+    """`--prebuilt DIR`: GitHub's builds job compiles once, the jobs that run checks only assemble."""
+    (checkout / "stubs" / "swift").write_text("#!/bin/sh\necho 'swift was run' >&2\nexit 1\n")
+    shutil.rmtree(checkout / ".build")
+    prebuilt = tmp_path / "prebuilt"
+    prebuilt.mkdir()
+    shutil.copy("/bin/echo", prebuilt / "uDeck")
+    shutil.copy("/bin/echo", prebuilt / "udeck-plugin")
+    done = make_app(
+        checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99", "--zip", "--prebuilt", str(prebuilt),
+    )  # fmt: skip
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "swift was run" not in done.stderr and "Taking the binaries compiled in" in done.stdout
+    with zipfile.ZipFile(checkout / "lab-builds" / "uDeck-9.9.9.zip") as archive:
+        # Re-signed in the bundle, so not byte for byte: but these, and nothing compiled.
+        assert {"uDeck.app/Contents/MacOS/uDeck", "uDeck.app/Contents/Helpers/udeck-plugin"} <= set(archive.namelist())
+    assert plist_in(checkout / "lab-builds" / "uDeck-9.9.9.zip")["CFBundleVersion"] == "99"
+
+
+def test_prebuilt_binaries_that_are_not_there_or_are_debug_are_refused(checkout, tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    done = make_app(checkout, "--out", "lab-builds", "--zip", "--prebuilt", str(empty))
+    assert done.returncode == 2 and "has no uDeck" in done.stderr
+    done = make_app(checkout, "--debug", "--prebuilt", str(empty))
+    assert done.returncode == 2 and "takes release binaries" in done.stderr

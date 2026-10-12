@@ -71,7 +71,7 @@ import shlex
 from collections.abc import Callable
 from pathlib import Path
 
-from udeck_e2e import app, config, probes
+from udeck_e2e import app, ax, config, probes, ui
 from udeck_e2e.errors import LabError, expect
 
 Note = Callable[[str], None]
@@ -959,16 +959,98 @@ def bring_forward(machine, application, step, document=None):
     """
     opening = f"/usr/bin/open -a {shlex.quote(application)}"
     if document is not None:
+        _start_it_afresh(machine, application, step)
         opening += f" {shlex.quote(document)}"
     machine.ssh.run(opening, step)
     deadline = machine.clock() + config.FORWARD_SECONDS
     while True:
         in_front = probes.frontmost(machine, step)
         if in_front == application:
-            return in_front
+            break
         if machine.clock() >= deadline:
             raise LabError(step, f"{in_front} is in front after {config.FORWARD_SECONDS}s, not {application}")
         machine.sleep(1)
+    if document is not None:
+        _wait_for_its_window(machine, application, document, step, deadline)
+    return in_front
+
+
+def _start_it_afresh(machine, application, step):
+    """The application ended, if it is running, so that a document opens in it alone, as on a fresh guest.
+
+    On a machine shared between checks (`--vm per-group`, `--target here`) a
+    check before this one started it without a document, and it put up its
+    Open panel, which stayed: on a runner every key pressed into the document
+    after that went nowhere, though the document's window had the focus by the
+    accessibility API (runs 38215534337 to 38233896126, the Open panel behind it
+    in every screenshot). On a fresh guest it is not running, and nothing
+    happens here. Ended with a signal, not asked over Apple events, which may
+    raise a consent dialog in the guest — and told not to bring back the
+    windows it had when it is opened again.
+    """
+    if machine.ssh.ask(f"/usr/bin/pgrep -x {shlex.quote(application)}", step).returncode != 0:
+        return
+    machine.ssh.run(f"/usr/bin/pkill -x {shlex.quote(application)}; exit 0", step)
+    deadline = machine.clock() + config.QUIT_SECONDS
+    while machine.ssh.ask(f"/usr/bin/pgrep -x {shlex.quote(application)}", step).returncode == 0:
+        if machine.clock() >= deadline:
+            raise LabError(step, f"{application} was still running {config.QUIT_SECONDS}s after the lab ended it")
+        machine.sleep(1)
+    bundle = APPLICATION_BUNDLES.get(application)
+    if bundle is not None:
+        machine.ssh.run(f"/usr/bin/defaults write {bundle} ApplePersistenceIgnoreState -bool true", step)
+
+
+# The bundle identifier of an application the checks bring forward, for what is
+# written into its preferences (`_start_it_afresh`).
+APPLICATION_BUNDLES = {"TextEdit": "com.apple.TextEdit"}
+
+
+def _wait_for_its_window(machine, application, document, step, deadline):
+    """Until the application has a window — the document's own, in front, when there is one.
+
+    In front is not the same as ready, and the helper asks fast enough to see
+    the difference. An application just started is in front a moment before it
+    has a window to move (measured on a runner, run 38224850163,
+    panel.a-click-past-the-panel: "TextEdit has no window"). And on a machine
+    shared between checks (`--vm per-group`, `--target here`) an earlier check
+    has left it running and in front, so `open -a` with a document returns with
+    it in front at once, before the document's window exists — a key pressed
+    then goes to whatever window was there (run 38215534337,
+    panel.the-key-after-escape: the document held '' after its control key).
+    Through System Events each step took long enough to hide both; on a fresh
+    guest this is true the first time it is asked.
+    """
+    name = document.rsplit("/", 1)[-1] if document is not None else None
+    ready_since = None
+    while True:
+        titles = ax.window_titles(machine, application, step)
+        ready = bool(titles) and (name is None or is_the_document(titles[0], name))
+        if ready and name is not None:
+            # In front is not yet where the keys go: a window is listed the moment
+            # it exists, and takes the keyboard once it has been shown. So the
+            # document has to be the window the application says has the focus,
+            # and still be after half a second (run 38229286903: a key pressed as
+            # soon as the window was listed did not reach it).
+            focused = ax.ask(machine, ["focused", application], step).get("focused")
+            ready = isinstance(focused, str) and is_the_document(focused, name)
+        if ready:
+            if ready_since is not None and machine.clock() - ready_since >= ui.SETTLED_SECONDS:
+                return
+            ready_since = ready_since if ready_since is not None else machine.clock()
+            machine.sleep(ui.SETTLED_SECONDS)
+            continue
+        ready_since = None
+        if machine.clock() >= deadline:
+            wanted = f"the document {name}, with the focus" if name else "any window"
+            raise LabError(step, f"{application}'s front window is {titles[:1] or 'none'}, not {wanted}")
+        machine.sleep(1)
+
+
+def is_the_document(title: str, name: str) -> bool:
+    """Whether a window's title names the document: with its extension or without, and whatever follows a dash."""
+    shown = title.split(" — ", 1)[0].strip()
+    return shown in (name, name.rsplit(".", 1)[0])
 
 
 def bring_forward_before_the_panel(machine, note, document=None):
@@ -978,7 +1060,10 @@ def bring_forward_before_the_panel(machine, note, document=None):
     lab failing to set it, never a verdict about uDeck.
     """
     application = config.IN_FRONT_BEFORE_THE_PANEL
-    bring_forward(machine, application, f"bringing {application} forward before the panel", document=document)
+    step = f"bringing {application} forward before the panel"
+    bring_forward(machine, application, step, document=document)
+    if document is None:
+        _wait_for_its_window(machine, application, None, step, machine.clock() + config.FORWARD_SECONDS)
     probes.move_window(machine, application, config.OUT_OF_THE_WAY, f"putting {application}'s window out of the way")
     note(f"   in front before the panel: {application}")
     return application

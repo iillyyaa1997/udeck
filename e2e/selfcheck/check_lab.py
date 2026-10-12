@@ -7,7 +7,7 @@ lab is in doubt: after a Tart update, a macOS update, a new golden image.
 
 import time
 
-from udeck_e2e import config, probes
+from udeck_e2e import config, probes, targets
 from udeck_e2e.errors import LabError
 
 # Where the pointer is put and read back: the middle, the corners, the top edge
@@ -21,10 +21,12 @@ POINTS = [
 ]
 
 
+@targets.needs_a_vm("the golden image a clone is made from")
 def check_machine_is_as_baked(machine):
     probes.verify_golden(machine)
 
 
+@targets.needs_a_vm("Tart's VNC server, which is what this checks")
 def check_screen_and_pointer(machine, check_dir):
     # The boot already waited for a drawn frame; this one is saved for the report.
     machine.screenshot(check_dir, "the desktop")
@@ -80,6 +82,7 @@ def pointer_settles_at(machine, wanted, seconds=10, sleep=None, clock=None):
         sleep(1)
 
 
+@targets.needs_a_vm("a restart of the machine")
 def check_restart_comes_back(machine):
     # Everything here is about the lab, so anything wrong is a LabError — "could
     # not check" — never a verdict that exits 1.

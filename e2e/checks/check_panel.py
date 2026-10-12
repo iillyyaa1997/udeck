@@ -163,6 +163,7 @@ start of it, is the lab's, and those are "could not check".
 """
 
 import shlex
+import uuid
 
 from udeck_e2e import app, config, panel, probes, updates
 from udeck_e2e.errors import LabError, expect
@@ -1168,7 +1169,7 @@ def check_the_hotkey_again(machine, check_dir, lab):
 
     **A key that did not arrive and a document that cannot be read look the
     same**, and only one of them is about uDeck. `probes.typed_into` raises when
-    System Events refuses the question, but an answer of `""` is not a refusal —
+    the question is refused, but an answer of `""` is not a refusal —
     it is the window read as empty — and "the key I pressed is not in this text"
     is satisfied by every empty string there is. So the same reading is asked
     both ways: the letter that reached the document before the panel was ever
@@ -1216,8 +1217,7 @@ def check_the_hotkey_again(machine, check_dir, lab):
         lab.note(f"   {application} holds with the panel open: {while_open!r}")
         # The positive half of this one reading, and it is what makes the other
         # half mean anything: "the key is not in the text" is true of every
-        # empty answer, and System Events hands back an empty window as readily
-        # as it hands back a full one.
+        # empty answer, and an empty window is read back as readily as a full one.
         expect(
             config.BEFORE_THE_PANEL_KEY in while_open.lower(),
             f"{application} holds {while_open!r} with the panel open, without the "
@@ -1531,6 +1531,14 @@ def _prepare(machine, check_dir, lab, launch=True):
     if there != VERSION:
         raise LabError("preparing the machine for the panel check", f"the lab installed {VERSION}, but the machine has {there}")
 
+    # Before uDeck starts, so that it starts with the pointer away from the strip.
+    # A machine shared between checks (`--vm per-group`, `--target here`) has the
+    # pointer where the last check left it, which for the dwell is in the strip:
+    # uDeck started there opens by the dwell before the check has begun, and the
+    # check then reads that opening as its own (run 38213314297, panel.push:
+    # `fired by dwell` 0.2 s after uDeck started). A fresh guest's pointer is
+    # near the top-left corner, outside the strip, so on Tart nothing changes.
+    panel.park_in_the_middle(machine)
     log = panel.GestureLog(machine, lab.note)
     log.keep("asking the guest to keep uDeck's own account of the gesture")
     # The control starts uDeck itself, after its window on the log has opened, so that
@@ -1666,8 +1674,15 @@ def _a_document_in_front(machine, lab):
     """
     application = config.IN_FRONT_BEFORE_THE_PANEL
     step = f"giving {application} a document to be typed into"
-    machine.ssh.run(f": > {shlex.quote(config.THE_DOCUMENT)}", step)
-    panel.bring_forward_before_the_panel(machine, lab.note, document=config.THE_DOCUMENT)
+    # A document of its own, new to the application. On a machine shared between
+    # checks (`--vm per-group`, `--target here`) the check before left the last one
+    # open, and emptying it underneath made TextEdit put "could not be autosaved:
+    # the file has been changed by another application" over its window, which
+    # took the key (measured on a runner, run 38226268791). A fresh guest has
+    # nothing open, so there it is the same document as ever, under another name.
+    document = config.THE_DOCUMENT.removesuffix(".txt") + f"-{uuid.uuid4().hex[:8]}.txt"
+    machine.ssh.run(f": > {shlex.quote(document)}", step)
+    panel.bring_forward_before_the_panel(machine, lab.note, document=document)
 
     machine.key(config.BEFORE_THE_PANEL_KEY, f"into {application}, before the panel was ever shown")
     machine.sleep(config.SETTLE_SECONDS)

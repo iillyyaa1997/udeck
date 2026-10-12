@@ -1,0 +1,29 @@
+SAME  the panel — a card asking for consent — every element (ui.tree): System Events 31.272s, helper 1.096s, 20 items
+SAME  the panel — a card asking for consent — identified controls to depth 12 (ui.identified): System Events 14.523s, helper 1.15s, 9 items
+SAME  the panel — a card asking for consent — identifiers (ui.identifiers): System Events 7.625s, helper 0.912s, 9 items
+SAME  the panel — a card asking for consent — sentences (ui.static_texts): System Events 6.772s, helper 0.578s, 4 items
+SAME  the panel — a card asking for consent — 'panel.refresh' found (ui.find): System Events 4.563s, helper 1.412s
+SAME  the panel — a card asking for consent — 'panel.sendAway' found (ui.find): System Events 1.869s, helper 0.869s
+SAME  the panel — a card asking for consent — 'panel.fullscreen' found (ui.find): System Events 3.381s, helper 1.333s
+SAME  the panel — a card asking for consent — 'terminal' found (ui.find): System Events 6.373s, helper 1.065s
+SAME  the panel — a card asking for consent — 'consent.flaky.allow' found (ui.find): System Events 2.97s, helper 1.272s
+SAME  the panel — a card asking for consent — 'arrow.down.right' found (ui.find): System Events 3.639s, helper 1.768s
+SAME  the panel — the card having run — every element (ui.tree): System Events 22.457s, helper 1.575s, 17 items
+SAME  the panel — the card having run — identified controls to depth 12 (ui.identified): System Events 11.693s, helper 2.627s, 5 items
+SAME  the panel — the card having run — identifiers (ui.identifiers): System Events 8.669s, helper 2.754s, 5 items
+SAME  the panel — the card having run — sentences (ui.static_texts): System Events 8.722s, helper 0.66s, 5 items
+SAME  the panel — the card having run — 'panel.refresh' found (ui.find): System Events 4.218s, helper 0.773s
+SAME  the panel — the card having run — 'panel.settings' found (ui.find): System Events 4.944s, helper 0.839s
+SAME  the panel — the card having run — 'panel.sendAway' found (ui.find): System Events 4.828s, helper 2.427s
+SAME  the panel — the card having run — 'panel.fullscreen' found (ui.find): System Events 5.036s, helper 2.15s
+SAME  the panel — the card having run — 'arrow.down.right' found (ui.find): System Events 6.153s, helper 1.046s
+SAME  the panel — the card after a failed run — every element (ui.tree): System Events 42.091s, helper 3.615s, 20 items
+SAME  the panel — the card after a failed run — identified controls to depth 12 (ui.identified): System Events 18.643s, helper 1.6s, 8 items
+SAME  the panel — the card after a failed run — identifiers (ui.identifiers): System Events 8.574s, helper 1.472s, 8 items
+SAME  the panel — the card after a failed run — sentences (ui.static_texts): System Events 7.203s, helper 0.975s, 7 items
+SAME  the panel — the card after a failed run — 'panel.refresh' found (ui.find): System Events 1.897s, helper 1.422s
+SAME  the panel — the card after a failed run — 'panel.settings' found (ui.find): System Events 3.962s, helper 2.247s
+SAME  the panel — the card after a failed run — 'panel.fullscreen' found (ui.find): System Events 5.429s, helper 1.89s
+SAME  the panel — the card after a failed run — 'card.flaky.failedDot' found (ui.find): System Events 7.085s, helper 2.203s
+SAME  the panel — the card after a failed run — 'card.flaky.valuesFrom' found (ui.find): System Events 7.932s, helper 2.477s
+SAME  the panel — the card after a failed run — 'arrow.down.right' found (ui.find): System Events 9.701s, helper 1.451s

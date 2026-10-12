@@ -1,0 +1,20 @@
+0|AXWindow|AXSystemDialog|||||730;-2;|1100;792;|shown
+1|AXGroup|AXHostingView|||||730;-2;|1100;792;|shown
+2|AXButton||||||742;42;|43;23;|shown
+2|AXButton||||||799;46;|8;14;|shown
+2|AXButton||panel.refresh||||1699;43;|26;22;|shown
+2|AXButton||panel.settings||||1730;43;|26;22;|shown
+2|AXButton||panel.sendAway||||1761;43;|26;22;|shown
+2|AXButton||panel.fullscreen||||1792;43;|26;22;|shown
+2|AXScrollArea||||||742;73;|1076;705;|shown
+3|AXStaticText||||Flaky||753;84;|33;15;|shown
+3|AXImage||clock.badge.questionmark||||1254;86;|13;11;|shown
+3|AXScrollArea||||||753;107;|512;252;|shown
+4|AXStaticText||||Flaky asks to:||753;107;|77;15;|shown
+4|AXImage||terminal||||754;131;|11;9;|shown
+4|AXStaticText||||run sysctl||772;130;|62;13;|shown
+4|AXStaticText||||uDeck runs this plugin as you, without a sandbox. Allowing it means agreeing to run this program; declining means uDeck never starts it.||753;151;|498;24;|shown
+4|AXButton||consent.flaky.allow||||753;183;|103;23;|shown
+4|AXButton||consent.flaky.decline||||863;183;|66;23;|shown
+3|AXImage||arrow.down.right||||1260;354;|16;16;|shown
+2|AXUnknown||||||1252;780;|56;5;|shown

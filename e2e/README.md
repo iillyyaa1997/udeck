@@ -7,14 +7,19 @@ installs, that the panel opens when the pointer reaches the top edge, that
 on means the tests take over your screen. The lab runs them inside throwaway
 macOS virtual machines instead, headless, and puts everything back afterwards.
 
-The checks run on an Apple Silicon Mac only, and not in GitHub CI: hosted
-runners do not offer nested virtualisation. The lab's own tests do run there —
-see the last section.
+The checks run on an Apple Silicon Mac with Tart, and on GitHub's own macOS
+runners, where there is no Tart — hosted runners offer no nested
+virtualisation — and the runner itself is the guest: push a branch named
+`lab/<anything>`, or run the **Lab** workflow from the Actions tab once
+`.github/workflows/lab.yml` is on main (see "On a GitHub runner" below). The
+lab's own tests run in CI on every push to main and every pull request — see
+the last section.
 
 > **Being built.** What exists today: the command, its pre-flight and report,
 > the machines and the golden image they are cloned from, their screen and
-> pointer over VNC, a self-check, the builds a check needs, a fake GitHub for
-> the plugin catalogue, and fifty-four checks of uDeck itself in five groups
+> pointer over VNC, the accessibility helper that reads uDeck's windows, a
+> self-check, the builds a check needs, a fake GitHub for the plugin catalogue,
+> the same lab on a GitHub runner, and fifty-eight checks of uDeck itself in five groups
 > (`e2e/run.sh --list`). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
 > itself as it ships, and by itself again once an operator who switched that off
@@ -51,12 +56,27 @@ e2e/run.sh --guest 26          # on macOS 26 instead of 27 (bake it first)
 e2e/run.sh --vm per-group      # one machine per group instead of per check
 e2e/run.sh --keep-on-failure   # keep a failed check's machine to look at
 e2e/run.sh --jobs 2            # boot the next check's machine while this one runs
+e2e/run.sh plugins --shard 2/3 # the second of three parts of the plugins group
+e2e/run.sh --prebuilt DIR      # assemble the builds from binaries compiled in DIR
 e2e/run.sh cleanup --list      # what cleanup would remove, removing nothing
 e2e/run.sh cleanup             # remove kept or left-behind clones
 e2e/run.sh cleanup --golden --guest 26   # …and macOS 26's golden image
 ```
 
 An option a command would ignore is refused rather than ignored.
+
+`--shard I/N` runs the I-th of N parts of the checks chosen: dealt in turn,
+the first check to part 1, the second to part 2 and round again, so every
+check is in exactly one part, the parts differ by one check at most, and the
+same names make the same parts every time. `--prebuilt DIR` assembles, signs and
+zips the builds a check asks for from the binaries `swift build -c release` left
+in DIR — uDeck, udeck-plugin, Sparkle.framework, the resource bundles — instead
+of compiling (`Scripts/make-app.sh --prebuilt`); DIR has to say in a file named
+`commit` that they were compiled from this checkout's commit, and a DIR from
+another commit is refused — and so is any DIR under a working copy that has
+changed what they are compiled from (`Sources/`, `Packages/`, `Package.*`) since
+that commit. `--target here` is for GitHub's runners only and is refused
+anywhere else ("On a GitHub runner").
 
 You need [Tart](https://tart.run) — exactly the version pinned in
 [`udeck_e2e/config.py`](udeck_e2e/config.py) — and
@@ -188,6 +208,211 @@ every other VNC action; a heartbeat that fails is said once and changes no
 verdict, and it stops with the machine. If the server does crash anyway, the
 check that was running says the machine was killed by SIGTRAP and where macOS
 keeps the crash report.
+
+## The accessibility helper
+
+What is on uDeck's screens — which controls, where, what they say — is read by
+the lab's own helper, `guest/ax.swift`: one Swift file, compiled by the lab with
+`xcrun swiftc -O` for Apple silicon and macOS 26 and up, kept under
+`.build/e2e/ax/` by the file's sha256, put into every machine when it boots
+(`~/.udeck-e2e/ax` in the guest) and asked over SSH like any other command.
+It walks a window of uDeck's through the accessibility API and prints JSON;
+`udeck_e2e/ax.py` reads that and hands `ui.py`'s callers the lines they have
+always read, so no check changed for it.
+
+Until 2026-10-12 the same walks were System Events AppleScript, one Apple
+event per attribute per element. Measured on the same screens of the same uDeck
+in a macOS 27 guest (`e2e/run.sh selfcheck`, run 20261012-063626Z): Settings →
+Plugins took System Events 63.9 s to walk whole and 28.5 s for its identified
+controls, the **Install from a link…** sheet 67.9 s, Plugins in Russian 69.1 s,
+Look 48.8 s, General 6.5 s — and the helper 0.13 to 0.28 s for every one of
+them. Those 40-to-76-second walks, sometimes past the 180 s the lab allows, are
+what left checks without a verdict before.
+
+**It reads what System Events read.** The self-check
+`ax.the-helper-reads-what-system-events-read` walks Settings' five panes, the
+link sheet, the panel and two panes in Russian both ways, reads every reading
+`ui` makes of them — the whole tree, the identified controls, the identifiers,
+the sentences, controls found one by one, uDeck's windows and menu, and the
+two readings of TextEdit the panel checks make — and holds them against each
+other. In the run above 66 of 76 readings were identical, and the other 10
+differed in one way only: **System Events misread SwiftUI's repeated texts.**
+Every catalogue row's "Verified", its publisher, its version and "Asks for
+nothing" came back from System Events as the *first* row's — the same
+identifier at the same place, which two controls cannot be — while the helper
+read each row's own, where the screenshot shows them (`_row_of` in the plugin
+checks had been written around that misreading). The comparison lets exactly
+that through and nothing else (`ax.held_against`): System Events' row a copy of
+an earlier row of its own, the helper's a control met for the first time in its
+reading, saying the same words — and in a list of identifiers, which has no
+words, only a pair of identifiers the same screen's tree showed misread. The
+walks of that run are kept in `tests/ax-equality/` with a test that holds them
+to it. One more thing differs and is left out on purpose: inside the window's
+own title-bar buttons System Events listed one group more; no check reads the
+title bar.
+
+A second self-check, `ax.cards-and-questions-read-as-system-events-read`, reads
+the screens the plugin checks make, made with their own helpers: the panel with
+a plugin's card asking for consent, the card once it has run and after a failed
+run (its dot and its line), Settings → Plugins with **More** open on that run,
+the **Install from a link…** sheet with a pull request looked up, and the
+question **Remove** asks. Its card runs only when the lab reveals or refreshes
+the panel, so both readers read one screen. Its first run to get that far
+(20261012-114749Z) read the three panel screens the same both ways, 29 readings
+of 29 with nothing misread, and then the guest stopped answering SSH in the
+middle of System Events' walk of Settings → Plugins with **More** open. Its
+next run (20261012-151715Z) read every screen: 49 of 59 readings identical, the
+panel's all of them. The other ten are the three Settings screens, and on each
+the fault was System Events': the end of the failed run's standard error holds
+a line break, which the old tree walk printed as it was, so its walk of those
+screens could not be read at all (the helper prints it as ⏎, as the old walk of
+identified controls always did); and its lists of identified controls came
+back longer than the helper's, holding copies of rows it had already read. With
+the line break put back, each tree differs only by the misreading above, and
+each list, its own copies set aside, is the helper's less exactly the controls
+that tree shows misread — measured on the recording of the trees and the
+lists (six of the ten readings), which is kept with the others and held by a
+test. The other four follow from the same misreading and are not recorded:
+three counts of identified controls, and one control (`link.asks-nothing.unverified`)
+System Events did not find. The self-check pairs rows by place and lets nothing
+else through, so on those screens it still says *could not check*. Of the
+questions the plugin checks read, only the one **Remove** asks is compared:
+the one **Link a folder…** asks before it replaces a plugin
+(`plugins.linkFolder.confirmText`) and a row's question before a replacement
+are read by neither self-check.
+
+To read what System Events read, the helper reads only the attributes an
+element lists. A SwiftUI button lists `AXAttributedDescription` and not
+`AXDescription`, so System Events read its description as "" where asking for
+`AXDescription` directly answers the button's label (measured on a runner, run
+38210592133); a check that read a button's description would otherwise have
+read something new. Values become text as AppleScript made them: `1.0` for a
+whole real, twelve significant digits otherwise, places cut to whole points.
+
+**What lets it read the screen over SSH** is the golden image's own grant, not
+anything about the helper: the guest's TCC database grants Accessibility,
+AppleEvents, PostEvent and ScreenCapture to `/usr/libexec/sshd-keygen-wrapper`
+— the process macOS holds responsible for everything an SSH session starts —
+and to `osascript` (read out of the guest by the self-check, run
+20261012-063626Z). So a helper rebuilt from a changed source, at any path, is
+trusted as the last one was; a machine that would not trust it says so when it
+boots, before any check reads a screen through it. Nothing was baked for it.
+
+**System Events still does what the accessibility API cannot.** It types:
+`ui.choose_folder` and `ui.type_text` send keystrokes, and the panel's chords
+(`probes.press_chord`) are key codes with modifiers held, which only a
+keystroke made inside the guest delivers (the panel's keyboard shortcut,
+below). It names the application in front (`probes.frontmost`): the panel checks are
+built on System Events' own answer to that — with the panel held open it still
+names the application from before it — and the accessibility API has no one
+question whose answer is that one (its focused application is uDeck there). And
+`app.quit_app` asks uDeck itself to quit, which is an Apple event to uDeck, not
+a reading of its screen.
+
+The pointer still goes through VNC in a Tart guest, and a click is still a
+click at the place the walk said — once two walks half a second apart have put
+the control in the same place (`ui._settled`). A walk that takes a tenth of a
+second can land inside an animation the old walks always outlasted: on a
+runner the panel's **Hold** was read while the panel grew from a peek, clicked
+where it had been, and the action never started (run 38224850163).
+
+**Fast reads find what slow reads hid.** A few checks leaned on a walk taking
+seconds: a card read right after **Allow** still showed the version before the
+update (run 38213314297, plugins.permissions-change-only-offers), and a check
+that asks about a version now waits for that version's card
+(`_allow_and_read_the_card`); TextEdit was in front a moment before it had a
+window, and the lab now waits for the window (`panel.bring_forward`). None of
+them changed what a check asserts.
+
+## On a GitHub runner (`--target here`)
+
+GitHub's macOS runners are Apple silicon virtual machines with no nested
+virtualisation, so there is no Tart on them — but each is a throwaway macOS
+made for one job and deleted after it, with a logged-in desktop. Measured on
+one on 2026-10-12 (runs 38190017851, 38209960064): the job may use the
+accessibility API, post pointer and key events and take screenshots; uDeck
+installs into /Applications and runs; `sudo` asks for no password; IOHID
+movement from `guest/push-pointer.py` reaches the pointer. So there the runner
+is the guest: `e2e/run.sh --target here` runs the checks on the machine the
+lab itself runs on.
+
+**It is refused on any other machine.** Everything a check does to its guest
+— installing uDeck in /Applications, moving the pointer, typing, changing the
+display, asking `sudo` to keep uDeck's log — would be done to the machine
+running the lab. So `--target here` runs only where both `GITHUB_ACTIONS=true`
+and `RUNNER_ENVIRONMENT=github-hosted` are set, which GitHub sets in every job
+on its own runners and nothing on a person's Mac does; anywhere else it says
+why and stops before it does anything, a listing included, and the pre-flight
+asks again. `--guest`, `--vm`, `--jobs` and `--keep-on-failure` are refused
+beside it: there is one machine, the runner.
+
+**The machine is made of local things.** A command runs through `/bin/zsh -c`
+with the environment an SSH session has in the guest (`HOME`, `USER`,
+`LOGNAME`, `SHELL`, `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `TMPDIR`), since the
+guest's user logs in with zsh and every command the lab writes was written for
+that. The pointer, clicks and keys are the helper posting events through the
+window server; a screenshot is `screencapture`. Before the first check the
+runner is made ready the way the bake makes a golden image ready, as far as a
+runner can be: its display goes from 1024×768 to the largest it has, 1920×1080
+(it has nothing larger; the guest's is 2560×1440), notifications are
+silenced, and a click on the bare desktop is made a click on the desktop again
+(on a runner the first one swept every window aside and showed "Click
+Wallpaper to Show Desktop Items", run 38213314297).
+
+**The places the panel checks aim at are worked out for that screen.** Each was
+measured on the guest's 2560×1440 and is also written as what it is in uDeck's
+own geometry (`config.places`: the panel's share of the screen and its caps,
+the anchor and the strip's margins, the keep-alive inset, read back out of
+uDeck's source by the lab's tests). Worked out on the guest's screen the
+formulas give back exactly the numbers measured there; on the runner's they
+are worked out, not measured, and nothing has yet measured the panel the runner
+draws against them. And on a screen that short, Settings →
+Plugins is longer than its window, so a click in a settings window first
+scrolls the pane until the control is in view (`ui.in_view`); in a Tart guest
+nothing scrolls, as nothing ever had to.
+
+**Between two checks the runner is what `--vm per-run` makes a guest**: one
+machine for every check of the job, whatever their groups, and each check
+preparing what it stands on — a fresh install; `~/.udeck` taken away by the
+plugin checks, and what uDeck remembered forgotten by the settings and update
+checks that read it; the pointer parked in the middle of the screen before uDeck
+starts (left in the strip by the check before, it opened the panel by the dwell
+as uDeck started), a document typed into only in a TextEdit started afresh, once
+the document's window has the focus (TextEdit left running by a check before
+kept its Open panel up, and every key into the document went nowhere). **A check
+that needs what only a virtual machine gives says so** (`targets.needs_a_vm`)
+and is not run: a restart (`login.survives-a-restart`, `login.off-stays-off`;
+the runner refuses any other restart a check asks for, and a check that met the
+refusal half-way could not be checked — it did part of its work first), and a
+machine on which Open at Login has never been switched on (`login.registers`,
+`login.survives-an-update`: the system keeps uDeck's record across a reinstall,
+so on a machine one of them has switched it on the other's click switches it off
+— measured on a runner, run 38213314297). Its outcome is ⏭️ **not on this
+target**: listed with what it needs, counted in the summary, and neither a pass
+nor a failure. It leaves the exit code to the checks that ran — a run whose
+other checks all passed exits 0, and says what it did not run — and a run of
+nothing else has checked nothing and exits 2.
+
+**`.github/workflows/lab.yml`** runs the whole lab this way on every push to a
+branch named `lab/<anything>`, and from the Actions tab (workflow_dispatch:
+which checks, and `--from`/`--to` for the update checks). It never runs on pull
+requests — a fork's code would choose what a macOS runner does — and not on
+pushes to main for now: a lab still finding its feet on runners must not paint
+main red. One job compiles uDeck once and hands the binaries to the others
+(`--prebuilt`); five jobs, as many macOS jobs as a free account runs at once,
+then run the plugins group in three parts (`--shard`), the panel, settings and
+login groups, and the update checks. Each writes its verdict table into the
+job's summary (`python -m udeck_e2e.report`), a warning on the run's page for
+each check not on this target (`--annotations`) — they leave the exit code to
+the checks that ran, so a green job says there what it did not run — and keeps
+its run's report as an artifact for two weeks, whatever the outcome, without the
+run's private keys (`signing/`, `ssh/`, an update check's `another-key/`): an
+artifact of a public repository is anyone's to download. Its token reads the
+repository and nothing else, and its actions are pinned by commit, as in
+`ci.yml`; the lab is handed it to ask GitHub's API (`UDECK_E2E_GITHUB_TOKEN`),
+because a runner's address is shared and the sixty questions an hour GitHub
+allows an address without one ran out there. The lab sends it to
+`api.github.com` and nowhere else, and never into the guest.
 
 ## Builds
 
@@ -1354,11 +1579,11 @@ at the end is compared without regard to case.
 
 And the reading at the open panel is asked **both ways in the same breath**,
 because "the key I pressed is not in this text" is true of every empty string
-there is. `probes.typed_into` raises when System Events refuses the question,
-but an empty answer is not a refusal — it is a window read as holding nothing —
-so the letter that reached the document before the panel was ever shown has to
-still be there. A document that comes back empty goes red on that instead of
-passing by holding nothing at all.
+there is. `probes.typed_into` raises when the accessibility helper refuses the
+question, but an empty answer is not a refusal — it is a window read as holding
+nothing — so the letter that reached the document before the panel was ever
+shown has to still be there. A document that comes back empty goes red on that
+instead of passing by holding nothing at all.
 
 `panel.the-hotkey-closes-what-the-gesture-opened` presses the shortcut at a
 panel it did not open: the peek the pointer earned. uDeck's toggle is written as
@@ -1742,16 +1967,19 @@ One line per check, then a summary:
 1 passed, 1 failed, 1 could not check in 3m56s
 ```
 
-There are three outcomes, and they are kept apart on purpose:
+There are three outcomes, and they are kept apart on purpose — and on
+`--target here` a fourth:
 
 | | means | exit code |
 |---|---|---|
-| ✅ passed | uDeck did what the check expected | 0 when every check passed |
+| ✅ passed | uDeck did what the check expected | 0 when every check that ran passed |
 | ❌ failed | uDeck did not — this is evidence about uDeck | 1 if any check failed |
 | ⚠️ could not check | the lab could not carry the check out — a machine that did not boot, SSH that never answered — and says nothing either way about uDeck | 2 otherwise |
+| ⏭️ not on this target | the check needs what only a virtual machine gives — a restart, a machine nothing has registered uDeck on — and did not run | none of its own |
 
-A run that checked nothing exits 2, never 0. So does a run where every check
-passed but a clone could not be cleaned up.
+A run that checked nothing exits 2, never 0 — a run of nothing but checks not
+for its target included. So does a run where every check passed but a clone
+could not be cleaned up.
 
 Each run leaves `.build/e2e/<run>/`, named by its start in UTC: `ledger.jsonl`,
 one JSON line per event written as it happens — including every signal the
@@ -1809,8 +2037,10 @@ UV_PROJECT_ENVIRONMENT="$PWD/.build/e2e/venv" uv run --frozen --project e2e pyte
 From the repository's root. The path must be absolute: uv reads a relative one
 from `e2e/`, and would quietly make a second environment there.
 
-They need neither Tart nor a virtual machine, so they run in CI on every push —
-unlike the checks, which need a machine to drive. That is the part worth running
+They need neither Tart nor a virtual machine, so they run in CI on every push to
+main and every pull request —
+unlike the checks, which need a machine to drive and run on `lab/` branches
+(`lab.yml`, above). That is the part worth running
 everywhere: a mistake in the harness is invisible, because a check that proves
 nothing looks exactly like a check that passed.
 

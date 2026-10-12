@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import shlex
 
-from udeck_e2e import config
+from udeck_e2e import ax, config
 from udeck_e2e.errors import LabError
 from udeck_e2e.machine import Machine
 
@@ -56,8 +56,18 @@ def pointer(machine: Machine) -> tuple[int, int]:
     AppKit counts from the bottom-left corner of the primary screen and in
     fractions (1279.996 for 1280); the lab counts pixels from the top-left, as
     in a screenshot. Through `tart exec`, which runs inside the logged-in session.
+
+    On `--target here` there is no `tart exec` and no need for one: the lab runs
+    inside the logged-in session, and the accessibility helper asks the window
+    server, which counts from the top-left already.
     """
     step = f"reading where {machine.name}'s pointer is"
+    if getattr(machine, "target", "tart") == "here":
+        at = ax.ask(machine, ["pointer"], step)
+        try:
+            return round(float(at["x"])), round(float(at["y"]))
+        except (KeyError, TypeError, ValueError):
+            raise LabError(step, f"unexpected answer {at!r}") from None
     done = machine.tart.exec(
         machine.name, ["/usr/bin/osascript", "-l", "JavaScript", "-e", POINTER_SCRIPT], step, seconds=60
     )
@@ -122,7 +132,7 @@ def frontmost(machine: Machine, step: str) -> str:
 
 
 def typed_into(machine: Machine, process: str, step: str) -> str:
-    """What the text in `process`'s front window says, as System Events reads it.
+    """What the text in `process`'s front window says: `text area 1 of scroll area 1 of window 1`.
 
     The one question that can tell where a keystroke landed. Which application
     is in front cannot: with the panel on screen and uDeck holding the keyboard,
@@ -130,15 +140,16 @@ def typed_into(machine: Machine, process: str, step: str) -> str:
     so a key that went to uDeck and a key that went to that application look the
     same from outside. The document does not look the same.
 
-    A window this cannot be read out of is the lab's failure — `_ask_system_events`
-    raises — because a check reading "" would take a key that never arrived and a
-    key that arrived somewhere unreadable for the same thing.
+    A window this cannot be read out of is the lab's failure — the helper
+    refuses, and `ax.ask` raises — because a check reading "" would take a key
+    that never arrived and a key that arrived somewhere unreadable for the same
+    thing. Read by the accessibility helper, as System Events read it until
+    2026-10-12, and stripped as osascript's answer was.
     """
-    return _ask_system_events(
-        machine,
-        f'tell process "{process}" to get value of text area 1 of scroll area 1 of window 1',
-        step,
-    )
+    answer = ax.ask(machine, ["text", process], step)
+    if not isinstance(answer.get("text"), str):
+        raise LabError(step, f"the accessibility helper's answer has no text: {answer!r}")
+    return answer["text"].strip()
 
 
 def press_chord(machine: Machine, key_code: int, modifiers: tuple[str, ...], step: str) -> None:
@@ -160,9 +171,7 @@ def press_chord(machine: Machine, key_code: int, modifiers: tuple[str, ...], ste
 def move_window(machine: Machine, process: str, to: tuple[int, int], step: str) -> None:
     """Put the top-left corner of `process`'s front window at `to`, in screen points."""
     x, y = to
-    _ask_system_events(
-        machine, f'tell process "{process}" to set position of window 1 to {{{x}, {y}}}', step
-    )
+    ax.ask(machine, ["move-window", process, str(x), str(y)], step)
 
 
 def guest_build(machine: Machine) -> str:

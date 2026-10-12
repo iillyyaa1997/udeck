@@ -1463,3 +1463,130 @@ def test_a_build_for_a_release_carries_its_public_key_and_every_other_build_the_
     assert ordinary.key is plugin.signing_key and isinstance(ordinary.key, builds.SigningKey)
     assert for_a_release.key == builds.PublicKey("cmVsZWFzZQ==")
     assert ordinary.work_dir != for_a_release.work_dir
+
+
+# --- Targets and shards -------------------------------------------------------------------
+
+NEEDS_A_RESTART = """
+from udeck_e2e import targets
+
+@targets.needs_a_vm("a restart of the machine")
+def check_survives_a_restart(machine):
+    raise AssertionError("a check not for this target ran")
+
+def check_registers(machine):
+    pass
+"""
+
+
+def fake_here_preflight(note, prebuilt, repo_root):
+    note("Checking on this runner, macOS 26.6.2: the runner is the guest.")
+    return preflight.Assessment([], []), {"target": "here", "macos": "26.6.2"}
+
+
+def test_a_check_that_needs_a_vm_is_not_run_on_here_and_is_listed_as_not_on_this_target(lab):
+    lab.write("check_login.py", NEEDS_A_RESTART)
+    code, out = lab.run(target="here", run_here_preflight=fake_here_preflight)
+    assert code == 0, out
+    assert "login.survives-a-restart: not on this target — it needs a restart of the machine" in out
+    assert "⏭️ login.survives-a-restart" in out and "✅ login.registers" in out
+    assert "1 passed, 1 not on this target" in out
+    checks = lab.ledger_checks()
+    assert checks["login.survives-a-restart"]["outcome"] == "not-on-this-target"
+    assert "restart" in checks["login.survives-a-restart"]["reason"]
+    start = next(e for e in lab.ledger() if e["event"] == "run-start")
+    assert start["target"] == "here" and start["guest"] is None
+    assert start["not_on_this_target"] == {"login.survives-a-restart": "it needs a restart of the machine, which only a virtual machine gives"}
+    # One machine for the whole run, and it was made for the check that ran.
+    assert [m.label for m in lab.machines] == ["run"]
+
+
+def test_on_tart_the_same_check_runs(lab):
+    lab.write("check_login.py", NEEDS_A_RESTART)
+    code, out = lab.run()
+    assert code == 1 and "a check not for this target ran" in out
+
+
+def test_a_run_of_nothing_but_checks_not_for_this_target_checked_nothing_and_made_no_machine(lab):
+    lab.write("check_login.py", NEEDS_A_RESTART)
+    code, out = lab.run("login.survives-a-restart", target="here", run_here_preflight=fake_here_preflight)
+    assert code == 2
+    assert "1 not on this target" in out
+    assert lab.machines == []
+
+
+def test_a_machine_that_refuses_a_restart_mid_check_is_could_not_check_not_skipped(lab):
+    """A check that asks for a restart without saying so up front meets the runner's
+    refusal (`HereMachine.reboot`) half-way, after doing part of what it does to the
+    runner: not a verdict, and not "did not run" either — the lab could not carry
+    it out, and says the check wants `targets.needs_a_vm`. Neither does the
+    refusal turn into ⏭️ when the check raises it from its own setup."""
+    lab.write(
+        "check_login.py",
+        "import pytest\n"
+        "from udeck_e2e.errors import NotOnThisTarget\n"
+        "@pytest.fixture\n"
+        "def restarted():\n"
+        "    raise NotOnThisTarget('a restart of the machine, which on a runner would end the job')\n"
+        "def check_restarts(machine):\n"
+        "    raise NotOnThisTarget('a restart of the machine, which on a runner would end the job')\n"
+        "def check_restarts_first(machine, restarted):\n"
+        "    pass\n",
+    )
+    code, out = lab.run(target="here", run_here_preflight=fake_here_preflight)
+    assert code == 2, out
+    assert "⏭️" not in out and "not on this target" not in out.replace("0 not on this target", "")
+    assert "⚠️ login.restarts " in out and "⚠️ login.restarts-first " in out
+    checks = lab.ledger_checks()
+    for name in ("login.restarts", "login.restarts-first"):
+        assert checks[name]["outcome"] == "could-not-check"
+        assert "refused a restart of the machine" in checks[name]["reason"]
+        assert "targets.needs_a_vm" in checks[name]["reason"]
+
+
+def test_here_skips_the_tart_preflight_and_the_golden_image(lab):
+    lab.write("check_login.py", "def check_registers(machine):\n    pass\n")
+    lab.vms = []  # no golden image at all
+    code, out = lab.run(target="here", run_here_preflight=fake_here_preflight)
+    assert code == 0, out
+    assert lab.preflights == 0
+    assert "on this runner (macOS 26.6.2)" in out
+
+
+def test_a_refusing_here_preflight_stops_the_run_before_any_machine(lab):
+    lab.write("check_login.py", "def check_registers(machine):\n    pass\n")
+
+    def refusing(note, prebuilt, repo_root):
+        return preflight.Assessment([preflight.Problem("--target here runs only on a GitHub-hosted runner", "Leave it out.")], []), {}
+
+    code, out = lab.run(target="here", run_here_preflight=refusing)
+    assert code == 2 and "GitHub-hosted runner" in out and lab.machines == []
+
+
+FIVE = "\n".join(f"def check_{name}(machine):\n    pass\n" for name in ("one", "two", "three", "four", "five"))
+
+
+def test_a_shard_runs_its_part_of_the_checks_chosen_and_says_which(lab):
+    lab.write("check_g.py", FIVE)
+    code, out = lab.run(shard=(2, 3))
+    assert code == 0, out
+    assert sorted(lab.ledger_checks()) == ["g.five", "g.two"]
+    assert "Running 2 checks on macOS 27, a machine per check, part 2 of 3" in out
+    assert next(e for e in lab.ledger() if e["event"] == "run-start")["shard"] == [2, 3]
+
+
+def test_the_shards_of_a_group_are_the_group(lab):
+    lab.write("check_g.py", FIVE)
+    lab.write("check_other.py", "def check_x(machine):\n    pass\n")
+    seen = []
+    for index in (1, 2, 3):
+        code, out = lab.run("g", shard=(index, 3), listing=True)
+        assert code == 0
+        seen += [line for line in out.splitlines() if line.startswith("g.")]
+    assert sorted(seen) == sorted(f"g.{n}" for n in ("one", "two", "three", "four", "five"))
+
+
+def test_a_shard_with_nothing_in_it_says_so(lab):
+    lab.write("check_g.py", "def check_one(machine):\n    pass\n")
+    code, out = lab.run(shard=(2, 2))
+    assert code == 2 and "There are no checks to run in part 2 of 2." in out

@@ -10,16 +10,23 @@ class Outcome(Enum):
     PASSED = "passed"
     FAILED = "failed"
     COULD_NOT_CHECK = "could-not-check"
+    # A check this run's machine cannot carry out — a restart on `--target
+    # here` — and so did not run (`errors.NotOnThisTarget`). Counted and listed,
+    # and it neither passes nor fails anything.
+    NOT_ON_THIS_TARGET = "not-on-this-target"
 
     @property
     def mark(self) -> str:
-        return {"passed": "✅", "failed": "❌", "could-not-check": "⚠️"}[self.value]
+        return {"passed": "✅", "failed": "❌", "could-not-check": "⚠️", "not-on-this-target": "⏭️"}[self.value]
 
     @property
     def words(self) -> str:
-        return {"passed": "passed", "failed": "failed", "could-not-check": "could not check"}[
-            self.value
-        ]
+        return {
+            "passed": "passed",
+            "failed": "failed",
+            "could-not-check": "could not check",
+            "not-on-this-target": "not on this target",
+        }[self.value]
 
 
 EXIT_PASSED = 0
@@ -28,17 +35,21 @@ EXIT_NOT_CHECKED = 2
 
 
 def exit_code(outcomes: Iterable[Outcome], lab_problems: int = 0) -> int:
-    """0 only when at least one check ran and every check passed.
+    """0 only when at least one check ran and every check that ran passed.
 
     A failure wins over anything the lab could not do, because a failure is
     evidence about uDeck and the rest is not. Otherwise anything short of a
     clean run — a check that could not be carried out, a clone that could not
     be cleaned up, or no checks at all — exits 2, never 0.
+
+    A check that is not for this target did not run, so it is left out of the
+    question either way: it does not make a run red, and a run of nothing else
+    has run nothing — 2, like any run that checked nothing.
     """
-    outcomes = list(outcomes)
-    if Outcome.FAILED in outcomes:
+    ran = [outcome for outcome in outcomes if outcome is not Outcome.NOT_ON_THIS_TARGET]
+    if Outcome.FAILED in ran:
         return EXIT_FAILED
-    if not outcomes or Outcome.COULD_NOT_CHECK in outcomes or lab_problems:
+    if not ran or Outcome.COULD_NOT_CHECK in ran or lab_problems:
         return EXIT_NOT_CHECKED
     return EXIT_PASSED
 

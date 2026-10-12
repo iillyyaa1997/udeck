@@ -356,3 +356,85 @@ def test_a_build_carrying_a_releases_key_is_held_to_the_same_rules(tmp_path):
         builder(Script(ignores_test_plugins=True), tmp_path, key=PublicKey("cmVsZWFzZQ==")).build("0.4.1", "1")
     with pytest.raises(LabError, match="without NSAllowsLocalNetworking"):
         builder(Script(local_networking=False), tmp_path, key=PublicKey("cmVsZWFzZQ==")).build("0.4.1", "1")
+
+
+# --- Binaries compiled elsewhere (`--prebuilt`) ---------------------------------------
+
+
+def test_a_build_from_prebuilt_binaries_says_where_they_are_and_keeps_every_other_rule(tmp_path):
+    script = Script()
+    lab_builder = builder(script, tmp_path)
+    lab_builder.prebuilt = tmp_path / "prebuilt"
+    build = lab_builder.build("0.4.1", "6")
+    options = dict(zip(script.calls[0][0][1:], script.calls[0][0][2:]))
+    assert options["--prebuilt"] == str(tmp_path / "prebuilt")
+    assert options["--test-feed"] == FEED and "--zip" in script.calls[0][0]
+    assert build.zip.is_file()
+    # And without it, nothing is said about prebuilt binaries at all.
+    plain = Script()
+    builder(plain, tmp_path).build("0.4.1", "7")
+    assert "--prebuilt" not in plain.calls[0][0]
+
+
+def test_prebuilt_binaries_are_taken_only_from_this_checkouts_commit(tmp_path):
+    from udeck_e2e.builds import prebuilt_problem
+
+    directory = tmp_path / "prebuilt"
+    directory.mkdir()
+    head = lambda root: "a" * 40  # noqa: E731
+    clean = lambda root: []  # noqa: E731
+    assert "has no uDeck, udeck-plugin" in prebuilt_problem(directory, tmp_path, head=head, changed=clean)
+    for name in ("uDeck", "udeck-plugin"):
+        (directory / name).write_bytes(b"binary")
+    assert "does not say which commit" in prebuilt_problem(directory, tmp_path, head=head, changed=clean)
+    (directory / "commit").write_text("b" * 40 + "\n")
+    assert prebuilt_problem(directory, tmp_path, head=head, changed=clean) == f"--prebuilt {directory} was compiled from bbbbbbbbbbbb, and this checkout is aaaaaaaaaaaa"
+    (directory / "commit").write_text("a" * 40 + "\n")
+    assert prebuilt_problem(directory, tmp_path, head=head, changed=clean) is None
+    assert "could not read this checkout's commit" in prebuilt_problem(directory, tmp_path, head=lambda root: None, changed=clean)
+
+
+def test_prebuilt_binaries_are_refused_under_a_working_copy_that_changed_what_they_are_compiled_from(tmp_path):
+    """The commit is the same, the code is not: a Mac's edited checkout must not
+    check the commit's binaries as its own (on a runner only prebuilt/ itself
+    is new, and it is not compiled from)."""
+    from udeck_e2e.builds import prebuilt_problem
+
+    directory = tmp_path / "prebuilt"
+    directory.mkdir()
+    for name in ("uDeck", "udeck-plugin"):
+        (directory / name).write_bytes(b"binary")
+    (directory / "commit").write_text("a" * 40 + "\n")
+    head = lambda root: "a" * 40  # noqa: E731
+    edited = ["Sources/uDeck/App.swift", "Package.resolved", "Sources/uDeck/Panel.swift", "Packages/X/Y.swift"]
+    assert prebuilt_problem(directory, tmp_path, head=head, changed=lambda root: edited) == (
+        f"--prebuilt {directory} was compiled from aaaaaaaaaaaa, and this working copy has changed "
+        "Sources/uDeck/App.swift, Package.resolved, Sources/uDeck/Panel.swift and 1 more since"
+    )
+    assert "could not read whether this checkout's sources changed" in prebuilt_problem(
+        directory, tmp_path, head=head, changed=lambda root: None
+    )
+
+
+def test_what_changed_is_read_out_of_git_for_the_compiled_paths_only(tmp_path):
+    """A real repository: an edit in Sources is seen, one in e2e/ and an untracked prebuilt/ are not."""
+    from udeck_e2e import builds
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    (tmp_path / "Sources").mkdir()
+    (tmp_path / "Sources" / "a.swift").write_text("let a = 1\n")
+    (tmp_path / "e2e").mkdir()
+    (tmp_path / "e2e" / "x.py").write_text("x = 1\n")
+    git("add", "-A")
+    git("-c", "user.name=lab", "-c", "user.email=lab@example.invalid", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "one")
+    (tmp_path / "e2e" / "x.py").write_text("x = 2\n")
+    (tmp_path / "prebuilt").mkdir()
+    (tmp_path / "prebuilt" / "uDeck").write_bytes(b"binary")
+    assert builds._changed(tmp_path) == []
+    (tmp_path / "Sources" / "a.swift").write_text("let a = 2\n")
+    (tmp_path / "Sources" / "b.swift").write_text("let b = 1\n")
+    assert builds._changed(tmp_path) == ["Sources/a.swift", "Sources/b.swift"]
+    assert builds._changed(tmp_path / "not-a-repository") is None

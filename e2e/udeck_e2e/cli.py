@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 import pytest
 
-from udeck_e2e import cleanup, config, interrupts, preflight
+from udeck_e2e import cleanup, config, here, interrupts, names, preflight, targets
 from udeck_e2e.ledger import RunLock, host_lock_path
 from udeck_e2e.errors import LabError
 from udeck_e2e.outcomes import EXIT_FAILED, EXIT_NOT_CHECKED
@@ -28,9 +29,12 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="e2e/run.sh",
         description=(
-            "Run uDeck's end-to-end checks in throwaway macOS virtual machines. "
-            "Exits 0 when every check passed, 1 when any check failed, and 2 when "
-            "the lab could not check something — or checked nothing."
+            "Run uDeck's end-to-end checks in throwaway macOS virtual machines — or, on a GitHub-hosted runner, "
+            "on the runner itself. "
+            "Exits 0 when every check that ran passed, 1 when any check failed, and 2 when "
+            "the lab could not check something — or checked nothing. A check not on this "
+            "target (--target here: one that needs a virtual machine) did not run: it is "
+            "listed, and leaves the exit code to the checks that did."
         ),
         epilog=(
             "Commands instead of checks: 'bake' makes the golden image a guest's machines "
@@ -87,6 +91,27 @@ def parser() -> argparse.ArgumentParser:
         default=None,
         help="the uDeck it is offered, written the same way",
     )
+    p.add_argument(
+        "--target",
+        choices=list(targets.TARGETS),
+        default=None,
+        help="where the checks run: 'tart', throwaway virtual machines (default), or 'here', this machine — "
+             "only on a GitHub-hosted runner, and refused anywhere else",
+    )
+    p.add_argument(
+        "--shard",
+        metavar="I/N",
+        default=None,
+        help="run only the I-th of N parts of the checks chosen, dealt in turn so that every check is in exactly one part",
+    )
+    p.add_argument(
+        "--prebuilt",
+        type=Path,
+        metavar="DIR",
+        default=None,
+        help="assemble the builds from binaries 'swift build -c release' already made in DIR, compiled from this "
+             "checkout's commit (DIR/commit says which) with its sources unchanged since, instead of compiling",
+    )
     p.add_argument("--golden", action="store_true", help="with cleanup: remove golden images too")
     # For the lab's own tests: run checks from somewhere else.
     p.add_argument("--checks-dir", type=Path, default=E2E_DIR / "checks", help=argparse.SUPPRESS)
@@ -121,11 +146,15 @@ def pytest_args(target_dir: Path, listing: bool) -> list[str]:
 # The flags whose names are not their destination's.
 FLAGS = {"from_side": "--from", "to_side": "--to"}
 
+# What `--target here` refuses beside it, because there each would do nothing:
+# there is one machine, the runner, and no guest to choose, keep or start ahead.
+NOT_WITH_HERE = ("guest", "vm", "jobs", "keep_on_failure")
+
 # Which options each command takes. An option a command would ignore is refused:
 # `cleanup --list` once deleted the kept clones it was asked to list.
 ALLOWED = {
-    "checks": {"list", "guest", "vm", "keep_on_failure", "jobs", "from_side", "to_side"},
-    "selfcheck": {"list", "guest", "vm", "keep_on_failure", "jobs"},
+    "checks": {"list", "guest", "vm", "keep_on_failure", "jobs", "from_side", "to_side", "target", "shard", "prebuilt"},
+    "selfcheck": {"list", "guest", "vm", "keep_on_failure", "jobs", "target", "prebuilt"},
     "bake": {"list", "guest"},
     "cleanup": {"list", "guest", "golden"},
 }
@@ -144,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
             ("list", args.list), ("guest", args.guest), ("vm", args.vm),
             ("keep_on_failure", args.keep_on_failure), ("golden", args.golden),
             ("jobs", args.jobs), ("from_side", args.from_side), ("to_side", args.to_side),
+            ("target", args.target), ("shard", args.shard), ("prebuilt", args.prebuilt),
         )
         if value not in (None, False)
     }  # fmt: skip
@@ -152,6 +182,28 @@ def main(argv: list[str] | None = None) -> int:
         flags = ", ".join(FLAGS.get(name, "--" + name.replace("_", "-")) for name in refused)
         print(f"{flags} does nothing with {'checks' if mode == 'checks' else repr(mode)}.", file=sys.stderr)
         return EXIT_NOT_CHECKED
+
+    target = args.target or targets.TART
+    if target == targets.HERE:
+        beside = sorted(given & set(NOT_WITH_HERE))
+        if beside:
+            flags = ", ".join(FLAGS.get(name, "--" + name.replace("_", "-")) for name in beside)
+            print(f"{flags} does nothing with --target here: the runner is the one machine.", file=sys.stderr)
+            return EXIT_NOT_CHECKED
+        # Asked before anything else is, a listing included: the answer to "may
+        # this machine become the guest" is no anywhere but a runner.
+        refused = here.refusal(os.environ)
+        if refused:
+            print(refused, file=sys.stderr)
+            return EXIT_NOT_CHECKED
+
+    shard = None
+    if args.shard is not None:
+        try:
+            shard = names.parse_shard(args.shard)
+        except names.ShardError as error:
+            print(str(error), file=sys.stderr)
+            return EXIT_NOT_CHECKED
 
     # The list says each update check's default pair; a pair given beside it would
     # be shown nowhere and checked against nothing.
@@ -173,7 +225,7 @@ def main(argv: list[str] | None = None) -> int:
         guests = [config.GUESTS[args.guest]] if args.guest else list(config.GUESTS.values())
         return run_cleanup(args.golden, guests, dry_run=args.list)
 
-    target = COMMAND_DIRS[command] if command else args.checks_dir.resolve()
+    checks_dir = COMMAND_DIRS[command] if command else args.checks_dir.resolve()
     plugin = LabPlugin(
         wanted=[] if command else args.names,
         listing=args.list,
@@ -183,12 +235,15 @@ def main(argv: list[str] | None = None) -> int:
         jobs=args.jobs or 1,
         keep_on_failure=args.keep_on_failure,
         repo_root=REPO_ROOT,
-        checks_dir=target,
+        checks_dir=checks_dir,
         runs_root=REPO_ROOT / ".build" / "e2e",
         from_side=args.from_side,
         to_side=args.to_side,
+        target=target,
+        shard=shard,
+        prebuilt=args.prebuilt.resolve() if args.prebuilt is not None else None,
     )
-    return run_pytest(plugin, pytest_args(target, args.list))
+    return run_pytest(plugin, pytest_args(checks_dir, args.list))
 
 
 def run_pytest(plugin: LabPlugin, args: list[str]) -> int:

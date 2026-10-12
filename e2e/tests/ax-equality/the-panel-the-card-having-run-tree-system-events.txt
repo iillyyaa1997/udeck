@@ -1,0 +1,17 @@
+0|AXWindow|AXSystemDialog|||||730;-2;|1100;792;
+1|AXGroup|AXHostingView|||||730;-2;|1100;792;
+2|AXButton||||||742;42;|43;23;
+2|AXButton||||||799;46;|8;14;
+2|AXButton||panel.refresh||||1699;43;|26;22;
+2|AXButton||panel.settings||||1730;43;|26;22;
+2|AXButton||panel.sendAway||||1761;43;|26;22;
+2|AXButton||panel.fullscreen||||1792;43;|26;22;
+2|AXScrollArea||||||742;73;|1076;705;
+3|AXStaticText||||Flaky||753;84;|512;15;
+3|AXScrollArea||||||753;107;|512;252;
+4|AXStaticText||||runs since install||753;107;|128;14;
+4|AXStaticText||||1||1257;107;|8;14;
+4|AXStaticText||||version||753;129;|50;14;
+4|AXStaticText||||steady||1222;129;|43;14;
+3|AXImage||arrow.down.right||||1260;354;|16;16;
+2|AXUnknown||||||1252;780;|56;5;

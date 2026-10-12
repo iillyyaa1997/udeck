@@ -116,8 +116,11 @@ that the panel opens when the pointer reaches the top edge, that a login item
 survives a reboot. Those run in `e2e/` — the lab — inside throwaway macOS
 virtual machines, so that checking them does not take over the screen you are
 working on. It needs an Apple Silicon Mac, [Tart](https://tart.run) and
-[uv](https://docs.astral.sh/uv/); it does not run in CI, where there is no
-nested virtualisation.
+[uv](https://docs.astral.sh/uv/) — or GitHub: push a branch named
+`lab/<anything>` (or run the **Lab** workflow from the Actions tab once it is on
+main) and the whole lab runs on GitHub's own macOS runners, each runner its own
+guest, in parallel, with every check's report kept as an artifact. It does not
+run on pull requests or on main.
 
 ```sh
 e2e/run.sh bake                # once: the golden image the machines are cloned from

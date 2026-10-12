@@ -9,6 +9,7 @@ never a verdict on uDeck.
 from __future__ import annotations
 
 import re
+import shlex
 import signal
 import threading
 import time
@@ -16,7 +17,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import IO, Any
 
-from udeck_e2e import config, interrupts
+from udeck_e2e import ax, config, interrupts
 from udeck_e2e.errors import LabError
 from udeck_e2e.guest import SSH
 from udeck_e2e.tart import VM_LIMIT_TEXT, Tart
@@ -34,6 +35,10 @@ VM_LIMIT_ADVICE = (
 
 
 class Machine:
+    # Which kind of machine this is (`--target`): a Tart guest, driven from the
+    # Mac that runs the lab. `here.HereMachine` is the other kind.
+    target = "tart"
+
     def __init__(
         self,
         *,
@@ -44,11 +49,16 @@ class Machine:
         work_dir: Path,
         note: Note,
         display: str | None = None,
+        helper: Path | None = None,
         screen_factory: Callable[[Address], Screen] = Screen,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.name = name
+        # The accessibility helper on this Mac (`ax.build`), and where it is in
+        # the guest once the machine has booted (`ax.ask` asks it there).
+        self.helper = helper
+        self.ax_path: str | None = None
         self.source = source
         self.tart = tart
         self.ssh = ssh
@@ -107,6 +117,7 @@ class Machine:
         self.ssh.host = address
         self.ssh.wait_up(f"waiting for SSH on {self.name}", alive=self.ensure_running)
         self.wait_for_desktop(f"waiting for {self.name}'s desktop")
+        self._install_the_helper()
         self._find_screen()
         self.wait_for_screen(f"waiting for {self.name}'s screen")
         self.keep_the_screen_in_use()
@@ -196,6 +207,32 @@ class Machine:
         if done.returncode != 0:
             lines = (done.stderr or done.stdout).strip().splitlines()
             raise LabError(f"giving {self.name} this run's SSH key", lines[-1] if lines else f"exit {done.returncode}")
+
+    def _install_the_helper(self) -> None:
+        """The accessibility helper put in the guest, and asked whether the guest lets it read the screen.
+
+        Over SSH, as everything that drives the interface is. What lets it read
+        uDeck's windows there is the guest's own grant to the SSH session (see
+        `e2e/README.md`, "The accessibility helper"), not anything about the
+        helper's path or build — so a helper rebuilt from a changed source is
+        trusted as the last one was, and one the guest does not trust is said
+        here, before any check reads a screen through it.
+        """
+        if self.helper is None:
+            return
+        step = f"putting the accessibility helper in {self.name}"
+        self.ssh.run(f"mkdir -p {shlex.quote(str(Path(ax.GUEST_PATH).parent))}", step)
+        self.ssh.copy_in(self.helper, ax.GUEST_PATH, step)
+        self.ssh.run(f"chmod 755 {shlex.quote(ax.GUEST_PATH)}", step)
+        self.ax_path = ax.GUEST_PATH
+        trusted = ax.ask(self, ["trusted"], f"asking whether {self.name} lets the accessibility helper read the screen")
+        if trusted.get("trusted") is not True:
+            self.ax_path = None
+            raise LabError(
+                step,
+                f"{self.name} does not let a command over SSH use the accessibility API ({trusted!r}), "
+                "so nothing on its screen can be read",
+            )
 
     def wait_for_desktop(self, step: str) -> None:
         """Until the user is logged in at the console and Finder is running."""

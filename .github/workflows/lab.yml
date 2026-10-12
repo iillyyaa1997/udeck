@@ -1,0 +1,204 @@
+name: Lab
+
+# uDeck's end-to-end lab (e2e/) on GitHub-hosted macOS runners, where the runner
+# itself is the guest (`e2e/run.sh --target here`): Apple silicon runners offer
+# no nested virtualisation, so there is no Tart there, and the checks that need
+# a virtual machine — a restart, a log out — say "not on this target" instead of
+# running. Everything else is the lab as it runs on a Mac with Tart.
+#
+# Never on pull requests and never on main: a lab that is still finding its feet
+# on runners must not paint main red, and a pull request from a fork must not
+# run code on a macOS runner it chose. Push a branch named lab/<anything>, or run
+# it from the Actions tab (workflow_dispatch) once this file is on main.
+on:
+  push:
+    branches: ["lab/**"]
+  workflow_dispatch:
+    inputs:
+      run:
+        description: "Checks or groups, as e2e/run.sh takes them (empty: all of them)"
+        required: false
+        default: ""
+      from:
+        description: "--from for the update checks: checkout, latest or a version such as 0.5.0 (empty: each check's own)"
+        required: false
+        default: ""
+      to:
+        description: "--to for the update checks, written the same way"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Which jobs run what. All of it by default, in five jobs — a free account
+  # runs at most five macOS jobs at once — with the plugins group, the longest,
+  # dealt into three parts (`--shard`). What was asked for, in one job, when
+  # something was.
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        env:
+          RUN: ${{ inputs.run }}
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+        run: |
+          set -euo pipefail
+          pair=()
+          if [ -n "$FROM" ]; then pair+=(--from "$FROM"); fi
+          if [ -n "$TO" ]; then pair+=(--to "$TO"); fi
+          pair_text="${pair[*]:-}"
+          if [ -n "$RUN" ]; then
+            matrix=$(jq -cn --arg run "$RUN" --arg pair "$pair_text" \
+              '[{name: $run, slug: "asked", args: ($run + " " + $pair)}]')
+          else
+            matrix=$(jq -cn --arg pair "$pair_text" '[
+              {name: "plugins 1/3", slug: "plugins-1", args: "plugins --shard 1/3"},
+              {name: "plugins 2/3", slug: "plugins-2", args: "plugins --shard 2/3"},
+              {name: "plugins 3/3", slug: "plugins-3", args: "plugins --shard 3/3"},
+              {name: "panel, settings, login", slug: "panel-settings-login", args: "panel settings login"},
+              {name: "updates", slug: "updates", args: ("updates " + $pair)}
+            ]')
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "$matrix" | jq .
+
+  # uDeck compiled once, for every job that runs checks: they assemble, sign and
+  # zip the builds a check asks for from these binaries (`--prebuilt`), which
+  # takes seconds, instead of each compiling it again.
+  builds:
+    name: Compile uDeck once
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Compile
+        run: |
+          set -euo pipefail
+          swift build -c release
+          swift build -c release --product udeck-plugin
+
+      # A tarball, because an artifact keeps neither a framework's symbolic
+      # links nor a binary's execute bit. Sparkle's sign_update rides along at
+      # the place the lab looks for it in a checkout.
+      - name: Pack the binaries
+        run: |
+          set -euo pipefail
+          mkdir prebuilt
+          ditto .build/release/uDeck prebuilt/uDeck
+          ditto .build/release/udeck-plugin prebuilt/udeck-plugin
+          ditto .build/release/Sparkle.framework prebuilt/Sparkle.framework
+          for bundle in .build/release/*.bundle; do
+            [ -e "$bundle" ] || continue
+            ditto "$bundle" "prebuilt/$(basename "$bundle")"
+          done
+          git rev-parse HEAD > prebuilt/commit
+          tar -czf prebuilt.tar.gz prebuilt .build/artifacts/sparkle/Sparkle/bin/sign_update
+          ls -l prebuilt prebuilt.tar.gz
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: prebuilt
+          path: prebuilt.tar.gz
+          retention-days: 3
+          if-no-files-found: error
+
+  lab:
+    name: ${{ matrix.name }}
+    needs: [plan, builds]
+    runs-on: macos-26
+    # The plugins group's longest part, with room: on Tart a third of it took
+    # about an hour, most of which was the walks the accessibility helper replaced.
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      # With every tag: an update check by a published release reads what the
+      # release can do out of its own source (`pairs`), by its tag.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: prebuilt
+
+      - name: Unpack the binaries
+        run: |
+          set -euo pipefail
+          tar -xzf prebuilt.tar.gz
+          rm prebuilt.tar.gz
+          test "$(cat prebuilt/commit)" = "$(git rev-parse HEAD)"
+
+      # uv, pinned by version and by the SHA-256 of its arm64 wheel as PyPI
+      # lists it, into a venv of the system's own Python: the lab runs its
+      # Python through it, as e2e/run.sh does on a Mac.
+      - name: Install uv
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -m venv "$RUNNER_TEMP/uv"
+          echo "uv==0.12.22 --hash=sha256:72516e1edef5950b556bdaf3b382f537e4249e06362378daa811a6eefc165a14" > "$RUNNER_TEMP/uv.txt"
+          "$RUNNER_TEMP/uv/bin/pip" install --quiet --disable-pip-version-check --only-binary :all: \
+            --require-hashes -r "$RUNNER_TEMP/uv.txt"
+          echo "$RUNNER_TEMP/uv/bin" >> "$GITHUB_PATH"
+
+      # The job's own token, which reads and nothing else, for the lab's questions
+      # to GitHub's API: a runner's address is shared, and the sixty an hour
+      # GitHub allows an address without one ran out there. It goes to
+      # api.github.com only, never to the guest (`releases.get`).
+      - name: Run the lab on this runner
+        env:
+          ARGS: ${{ matrix.args }}
+          UDECK_E2E_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          read -r -a args <<< "$ARGS"
+          ./e2e/run.sh --target here --prebuilt prebuilt "${args[@]}"
+
+      # The table into the job's summary, and a warning on the run's page for
+      # each check not on this target: those leave the exit code to the checks
+      # that ran, so a green job says here what it did not run.
+      - name: Say what each check came to
+        if: always()
+        env:
+          NAME: ${{ matrix.name }}
+        run: |
+          set -uo pipefail
+          run_dir="$(ls -d .build/e2e/[0-9]*Z 2>/dev/null | tail -1)"
+          export UV_PROJECT_ENVIRONMENT="$PWD/.build/e2e/venv"
+          uv run --frozen --project e2e python -m udeck_e2e.report "$run_dir" "$NAME" >> "$GITHUB_STEP_SUMMARY" || true
+          uv run --frozen --project e2e python -m udeck_e2e.report --annotations "$run_dir" || true
+
+      # Without the run's private keys: the one it signs its builds with, and the
+      # one an update check makes to sign with another key. An artifact of a
+      # public repository can be downloaded by anyone, and a run cut off by the
+      # job's timeout never reaches the lab's own removal of them.
+      - name: Keep the run's report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lab-${{ matrix.slug }}
+          path: |
+            .build/e2e/[0-9]*Z/
+            !.build/e2e/[0-9]*Z/signing/
+            !.build/e2e/[0-9]*Z/ssh/
+            !.build/e2e/[0-9]*Z/*/another-key/
+          retention-days: 14
+          if-no-files-found: warn

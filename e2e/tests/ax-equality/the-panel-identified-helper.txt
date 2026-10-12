@@ -1,0 +1,5 @@
+2|AXButton||panel.refresh||||1699;43;|26;22;|shown
+2|AXButton||panel.settings||||1730;43;|26;22;|shown
+2|AXButton||panel.sendAway||||1761;43;|26;22;|shown
+2|AXButton||panel.fullscreen||||1792;43;|26;22;|shown
+2|AXImage||square.grid.2x2||||1269;358;|23;23;|shown

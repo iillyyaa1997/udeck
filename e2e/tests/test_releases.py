@@ -149,6 +149,39 @@ def test_the_real_get_turns_a_body_cut_short_into_a_sentence_and_not_an_exceptio
         releases.get("https://github.com/x/appcast.xml", {})
 
 
+def test_a_token_goes_to_githubs_api_and_nowhere_else(monkeypatch):
+    """On a runner the job's read-only token raises the API's limit; it never leaves for another host, nor rides a redirect."""
+    asked = []
+
+    class Answered:
+        status = 200
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def opened(request, timeout):
+        asked.append(request)
+        return Answered()
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: SimpleNamespace(open=opened))
+    environ = {releases.TOKEN_VARIABLE: "ghs_x"}
+    releases.get(f"{config.GITHUB_API}/repos/o/r/releases/latest", {}, environ=environ)
+    releases.get("https://github.com/o/r/releases/latest/download/appcast.xml", {}, environ=environ)
+    releases.get(f"{config.GITHUB_API}.evil.example/x", {}, environ=environ)
+    releases.get(f"{config.GITHUB_API}/repos/o/r/releases/latest", {}, environ={})
+    first, second, third, fourth = asked
+    assert first.unredirected_hdrs.get("Authorization") == "Bearer ghs_x" and "Authorization" not in first.headers
+    assert not second.has_header("Authorization") and not third.has_header("Authorization")
+    assert not fourth.has_header("Authorization")
+
+
 def test_an_address_urllib_cannot_ask_is_a_sentence_too():
     with pytest.raises(ReleaseError, match="is not an address this Mac can ask"):
         releases.get("", {})

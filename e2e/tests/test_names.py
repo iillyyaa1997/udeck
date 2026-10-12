@@ -1,6 +1,6 @@
 import pytest
 
-from udeck_e2e.names import CheckNameError, check_name, select
+from udeck_e2e.names import CheckNameError, ShardError, check_name, parse_shard, select, shard
 
 
 def test_the_name_comes_from_the_file_and_the_function():
@@ -72,3 +72,40 @@ def test_anything_that_matches_nothing_is_an_error_listing_what_exists(wanted):
 def test_asking_for_a_check_when_there_are_none_says_so():
     with pytest.raises(CheckNameError, match="no checks yet"):
         select([], ["updates"])
+
+
+# --- Shards -------------------------------------------------------------------------------
+
+PLUGINS = [f"plugins.check-{n}" for n in range(28)]
+
+
+@pytest.mark.parametrize("count", [1, 2, 3, 4, 5, 28, 29])
+def test_every_check_is_in_exactly_one_shard(count):
+    parts = [shard(PLUGINS, index, count) for index in range(1, count + 1)]
+    dealt = [name for part in parts for name in part]
+    assert sorted(dealt) == sorted(PLUGINS) and len(dealt) == len(set(dealt))
+    sizes = [len(part) for part in parts]
+    assert max(sizes) - min(sizes) <= 1
+
+
+def test_a_shard_keeps_the_definition_order_and_is_the_same_every_time():
+    assert shard(PLUGINS, 2, 3) == [PLUGINS[i] for i in range(1, 28, 3)]
+    assert shard(PLUGINS, 2, 3) == shard(list(PLUGINS), 2, 3)
+    # Dealt in turn, so neighbours — a group's long checks often sit together — go to different parts.
+    assert shard(PLUGINS[:3], 1, 3) == [PLUGINS[0]] and shard(PLUGINS[:3], 3, 3) == [PLUGINS[2]]
+
+
+def test_a_shard_of_one_is_everything_and_more_shards_than_checks_leaves_some_empty():
+    assert shard(PLUGINS, 1, 1) == PLUGINS
+    assert shard(PLUGINS[:2], 3, 3) == []
+
+
+@pytest.mark.parametrize("text, parsed", [("1/3", (1, 3)), ("3/3", (3, 3)), ("1/1", (1, 1))])
+def test_a_shard_is_written_i_of_n(text, parsed):
+    assert parse_shard(text) == parsed
+
+
+@pytest.mark.parametrize("text", ["0/3", "4/3", "1/0", "3", "1/3/4", "a/3", "-1/3", "1 /3", "１/3", ""])
+def test_a_shard_that_is_not_one_of_its_parts_is_refused(text):
+    with pytest.raises(ShardError):
+        parse_shard(text)

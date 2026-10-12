@@ -705,7 +705,7 @@ def check_permissions_change_only_offers(machine, check_dir, lab):
 
         record = _operate(scene, f"plugin.{UPTIME}.update", "updating to 1.2.0", lambda r: r and r.get("version") == "1.2.0")
         expect(record is not None and not record.get("automatic"), f"after Update, installed.json says {record!r}")
-        card = _allow_and_read_the_card(scene, UPTIME, "after the update to 1.2.0")
+        card = _allow_and_read_the_card(scene, UPTIME, "after the update to 1.2.0", version="1.2.0")
         expect(card.get(VERSION_ROW) == "1.2.0", f"after the update to 1.2.0 the card is not 1.2.0's: {card}")
         grant = _expect_the_decision_for(machine, UPTIME, "1.2.0", "after allowing 1.2.0")
         expect(any(g.get("scope") == "uname" for g in grant.get("granted") or []),
@@ -1058,7 +1058,7 @@ def check_modified_locally(machine, check_dir, lab):
     millisecond by the file's time (0.7 to 0.9 s in R3's six runs,
     `walks.txt`) — and the row is read once that has happened. The order is
     the fix for the lab's own race, measured in R3 (.build/e2e/kept/, the runs
-    of 2026-10-11): one walk of Settings → Plugins takes 40 to 60 s, longer
+    of 2026-10-11): one walk of Settings → Plugins took 40 to 60 s, longer
     than the deadline, and a walk that crossed the change returned the row
     without its mark, with the old mark, or with the mark several times —
     the next walk read the truth each time (`race.txt`). R2's "mark None
@@ -2254,8 +2254,10 @@ def _wait_until(machine, identifier, satisfied, seconds, window=ui.SETTINGS_WIND
     """What the control says once `satisfied` by it — or what it said in a walk begun after the time was up (None when absent).
 
     A verdict against the control comes only from a walk that began at or
-    after the deadline. One walk of Settings → Plugins takes 40 to 60 s, much
-    longer than the deadlines here, and a walk takes the list of a pane's
+    after the deadline. One walk of Settings → Plugins took System Events 40 to
+    60 s, much longer than the deadlines here (the accessibility helper takes a
+    tenth of a second since 2026-10-12, and the rule stands: a walk still reads
+    a pane's controls one after another), and a walk takes the list of a pane's
     controls when it reaches it and reads each one after: a walk begun before
     uDeck changed the control and read after it returns the control as it
     was, twice over, or not at all. Measured in R3 (.build/e2e/kept/,
@@ -2646,8 +2648,8 @@ def _open_the_panel(machine, step):
     panel.press_the_chord(machine, config.HOTKEY_KEY_CODE, step)
 
 
-def _allow_and_read_the_card(scene, plugin, label):
-    """The panel opened, the plugin allowed on its card, and the card read once it has run.
+def _allow_and_read_the_card(scene, plugin, label, version=None):
+    """The panel opened, the plugin allowed on its card, and the card read once it has run — as `version`, if given.
 
     Every plugin placed here asks for something — the fixture declares
     `exec: sysctl` — and has not been allowed at this version, so a card that
@@ -2669,7 +2671,17 @@ def _allow_and_read_the_card(scene, plugin, label):
         ) from None
     machine.screenshot(scene.check_dir, f"{plugin} asks: {label}")
     machine.click(*allow.middle, f"allowing {plugin}: {label}")
-    card = _read_the_card(scene, plugin, label, lambda card: RUNS in card and card[RUNS] not in ("", "unknown"))
+    # A card that has run already says how many runs it has made — and after an
+    # update it still shows the last run of the version before until the new
+    # one has run (run 38213314297, permissions-change-only-offers: 1.0.0's rows
+    # read 0.2 s after Allow on 1.2.0). Read through System Events the read
+    # itself took long enough to hide that; read in a tenth of a second it does
+    # not, so a caller that asks about a version waits for that version's card.
+    card = _read_the_card(
+        scene, plugin, label,
+        lambda card: RUNS in card and card[RUNS] not in ("", "unknown") and (version is None or card.get(VERSION_ROW) == version),
+        "it had run" if version is None else f"it had run as {version}",
+    )  # fmt: skip
     _put_the_panel_away(machine, label)
     return card
 
@@ -2786,8 +2798,11 @@ def _panel_texts(machine, step):
     return ui.static_texts(machine, step, ui.PANEL)
 
 
-def _read_the_card(scene, plugin, label, ready):
-    """The card's rows as label → value, once `ready` says they are there, read out of the panel."""
+def _read_the_card(scene, plugin, label, ready, waited_for="it had run"):
+    """The card's rows as label → value, once `ready` says they are there, read out of the panel.
+
+    `waited_for` is what `ready` waits for, in the words the failure says it never said.
+    """
     machine = scene.machine
     deadline = machine.clock() + CARD_SECONDS
     card = {}
@@ -2807,7 +2822,7 @@ def _read_the_card(scene, plugin, label, ready):
     except OSError:
         pass
     if not ready(card):
-        raise CheckFailed(f"{plugin}'s card {label} never said it had run: the panel says {texts}")
+        raise CheckFailed(f"{plugin}'s card {label} never said {waited_for}: the panel says {texts}")
     return card
 
 

@@ -107,6 +107,15 @@ GOLDEN_DISPLAY = "2560x1440px"
 # The same screen in pixels, as a screenshot and the pointer see it.
 SCREEN_WIDTH, SCREEN_HEIGHT = (int(n) for n in GOLDEN_DISPLAY.removesuffix("px").split("x"))
 
+# The guest's screen, kept apart from the two above: on `--target here` they
+# become the runner's (`use_screen`), and these stay what the places below were
+# measured on.
+GOLDEN_WIDTH, GOLDEN_HEIGHT = SCREEN_WIDTH, SCREEN_HEIGHT
+
+# The menu bar's height in the guest, in points: the two panels measured there on
+# 2026-09-21 agree on it (`PAST_THE_PANEL` below).
+MENU_BAR = 30
+
 # Bump when the bake's steps change. A golden image baked by an older version,
 # or from a base image other than the pinned one, is refused by the pre-flight.
 BAKE_VERSION = 1
@@ -805,3 +814,68 @@ RELEASES_CACHE = Path(".build") / "e2e" / "releases"
 # release starts and again before it judges: the feed, following its redirects,
 # and the first bytes of the archive from wherever GitHub sends them.
 GUEST_GITHUB_SECONDS = 60
+
+
+# --- The places on another screen ----------------------------------------------
+#
+# Every place above was measured on the guest's 2560×1440 screen. A GitHub runner
+# offers at most 1920×1080 (measured, run 38209960064), and on `--target here`
+# the panel checks aim at the runner's own screen — so each place is also
+# written as what it is in uDeck's own geometry, and `use_screen` puts the
+# runner's numbers in its stead. Worked out on the golden screen the formulas
+# give back exactly the numbers measured there, which the lab's tests hold them
+# to; on any other screen they are worked out, not measured.
+#
+# uDeck's numbers they stand on (`PanelMetrics`, `PanelGeometry`, `GestureTuning`;
+# the lab's tests read them back out of the source): the open panel is
+# `openWidthFraction` of the screen's width, at most `openMaxWidth`, centred; its
+# content is `openHeightFraction` of the height between the menu bar and the
+# Dock, at most `openMaxHeight`, hung below the menu bar; the strip is the
+# anchor, `virtualAnchorWidth` wide and centred, grown by `stripSideMargin` on
+# each side; and what keeps a panel alive is its frame grown by
+# `peekKeepAliveInset`.
+OPEN_WIDTH_FRACTION, OPEN_MAX_WIDTH = 0.46, 1100.0
+OPEN_HEIGHT_FRACTION, OPEN_MAX_HEIGHT = 0.62, 760.0
+ANCHOR_WIDTH, STRIP_SIDE_MARGIN = 185.0, 24.0
+KEEP_ALIVE_INSET = 24.0
+
+
+def places(width: int, height: int, menu_bar: int = MENU_BAR, visible_bottom: int | None = None) -> dict[str, object]:
+    """Every screen-dependent place of the panel checks, for a screen `width` × `height` points.
+
+    `visible_bottom` is where the part of the screen windows may use ends, above
+    the Dock, counted from the top; the panel's height is a share of the space
+    between it and the menu bar.
+    """
+    import math
+
+    bottom = height if visible_bottom is None else visible_bottom
+    middle = width / 2
+    open_width = min(width * OPEN_WIDTH_FRACTION, OPEN_MAX_WIDTH)
+    open_left = round(middle - open_width / 2)
+    open_right = round(middle + open_width / 2)
+    content = min((bottom - menu_bar) * OPEN_HEIGHT_FRACTION, OPEN_MAX_HEIGHT)
+    panel_bottom = round(menu_bar + content)
+    half_strip = ANCHOR_WIDTH / 2 + STRIP_SIDE_MARGIN
+    strip = (math.ceil(middle - half_strip), math.ceil(middle + half_strip) - 1)
+    tab = (open_left + 35, menu_bar + 24)
+    # Left of what keeps the open panel alive and below it at once, and clear of
+    # the Dock: the guest's 1100 where there is room for it.
+    past = (min(200, round(open_left - KEEP_ALIVE_INSET) - 100), min(1100, bottom - 100))
+    return {
+        "SCREEN_WIDTH": width,
+        "SCREEN_HEIGHT": height,
+        "STRIP_COLUMNS": strip,
+        "WOBBLE_START_X": strip[0] - 12 * WOBBLE_SIDEWAYS,
+        "PAST_THE_PANEL": past,
+        "INSIDE_THE_PEEK": (width // 2, menu_bar + 40),
+        "IN_THE_MARGIN": (width // 2, panel_bottom + 12),
+        "THE_FIRST_TAB": tab,
+        "RENAME_IN_THE_TABS_MENU": (tab[0] + 40, tab[1] + 14),
+        "OUT_OF_THE_WAY": (open_right + 70, panel_bottom + 110),
+    }
+
+
+def use_screen(width: int, height: int, menu_bar: int = MENU_BAR, visible_bottom: int | None = None) -> None:
+    """The panel checks' places, worked out for this screen instead of the guest's (`places`)."""
+    globals().update(places(width, height, menu_bar, visible_bottom))

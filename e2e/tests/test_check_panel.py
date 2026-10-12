@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from fakes import Dropped, Failed, Lab, Machine, throw_output, wobble_output
+from fakes import Dropped, Failed, Lab, Machine, ax_answer, ax_texts, throw_output, wobble_output
 
 from udeck_e2e import app, config, panel
 from udeck_e2e.errors import CheckFailed, LabError
@@ -129,8 +129,16 @@ def a_machine(log_says, running="404", in_front=None, holds=None):
         "pgrep -x uDeck": running,
         "stat -f %Su": config.GUEST_USER,
         "frontmost": in_front if in_front is not None else [config.IN_FRONT_BEFORE_THE_PANEL, config.THE_DESKTOP],
-        "text area 1": holds if holds is not None else [BEFORE_THE_PANEL, AND_AFTER_IT_CLOSED],
+        "ax text ": _texts(holds if holds is not None else [BEFORE_THE_PANEL, AND_AFTER_IT_CLOSED]),
+        "ax move-window ": ax_answer(frame=[*config.OUT_OF_THE_WAY, 600, 400]),
     })  # fmt: skip
+
+
+def _texts(holds):
+    """What the document holds, one answer per question, as the helper answers `text`."""
+    if isinstance(holds, list):
+        return ax_texts(*holds)
+    return ax_texts(holds)[0]
 
 
 @pytest.fixture(autouse=True)
@@ -787,11 +795,14 @@ def test_the_key_after_escape_reaches_the_application_that_had_the_keyboard(monk
         config.AFTER_IT_CLOSED_KEY,
     ]
     assert machine.clicks == []
-    # The document is emptied and opened in the application before any of it.
+    # The document is emptied and opened in the application before any of it —
+    # a document of its own, new to the application, named after the one the lab uses.
     commands = machine.ssh.commands
-    emptied = next(i for i, c in enumerate(commands) if f": > {config.THE_DOCUMENT}" in c)
+    stem = config.THE_DOCUMENT.removesuffix(".txt")
+    emptied = next(i for i, c in enumerate(commands) if c.startswith(f": > {stem}-"))
     opened = next(i for i, c in enumerate(commands) if f"open -a {config.IN_FRONT_BEFORE_THE_PANEL}" in c)
-    assert emptied < opened and config.THE_DOCUMENT in commands[opened]
+    document = commands[emptied].removeprefix(": > ")
+    assert emptied < opened and commands[opened].endswith(f" {document}") and document.endswith(".txt")
 
 
 def test_a_uDeck_that_kept_the_keyboard_after_escape_fails(monkeypatch, lab, check_dir):
@@ -954,11 +965,11 @@ def test_the_application_from_before_the_panel_is_in_front_first_and_out_of_the_
     checks.check_a_click_past_the_panel(machine, check_dir, lab)
     commands = machine.ssh.commands
     opened = next(i for i, c in enumerate(commands) if f"open -a {config.IN_FRONT_BEFORE_THE_PANEL}" in c)
-    moved = next(i for i, c in enumerate(commands) if "set position" in c)
+    moved = next(i for i, c in enumerate(commands) if "ax move-window" in c)
     first_read = next(i for i, c in enumerate(commands) if "log show" in c)
     assert opened < moved < first_read, "the scene is set before the panel is shown"
     x, y = config.OUT_OF_THE_WAY
-    assert f"{{{x}, {y}}}" in commands[moved] and config.IN_FRONT_BEFORE_THE_PANEL in commands[moved]
+    assert commands[moved].endswith(f" move-window {config.IN_FRONT_BEFORE_THE_PANEL} {x} {y}")
 
 
 def test_a_click_past_the_panel_that_gave_the_keyboard_back_to_the_application_from_before_fails(

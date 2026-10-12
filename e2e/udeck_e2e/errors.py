@@ -43,6 +43,22 @@ class LabError(Exception):
         self.reason = reason
 
 
+class NotOnThisTarget(Exception):
+    """A check that cannot be carried out on the machine this run is using, said before it starts.
+
+    `--target here` runs the checks on the GitHub runner the lab itself runs on
+    (`here`), and some checks need what only a throwaway virtual machine gives:
+    a restart, a log out and back in, a machine nothing has ever run on. Such a
+    check is not run there at all, and its outcome says so — counted and listed,
+    never passed and never failed (`Outcome.NOT_ON_THIS_TARGET`). `reason` is
+    what it needs, in words: "a restart of the machine".
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class NotThere(LabError):
     """A control the lab waited for never appeared.
 

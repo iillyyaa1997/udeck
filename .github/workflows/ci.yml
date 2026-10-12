@@ -90,11 +90,12 @@ jobs:
           test "$left" -eq 0
           echo "no udeck-tests-* folder left behind"
 
-      # The lab in e2e/ drives real machines, and hosted runners have no nested
-      # virtualisation — but its own tests need neither Tart nor a machine, and
-      # they are the ones worth running everywhere: what they cover is the
-      # harness, where a mistake is invisible. A check that proves nothing looks
-      # exactly like a check that passed.
+      # The lab in e2e/ drives real machines — its checks run in lab.yml, on
+      # lab/ branches, each runner its own guest — but its own tests need
+      # neither Tart nor a machine, and they are the ones worth running
+      # everywhere: what they cover is the harness, where a mistake is
+      # invisible. A check that proves nothing looks exactly like a check that
+      # passed.
       - name: Install uv, which the lab runs its Python through
         run: brew install uv
 

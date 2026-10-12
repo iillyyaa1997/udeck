@@ -1,0 +1,42 @@
+6|AXColumn||ListColumn||||70;68;|124;1281;|shown
+5|AXCheckBox||plugins.runLog||0||225;138;|212;16;|shown
+5|AXButton||plugins.linkFolder||||225;208;|101;20;|shown
+5|AXButton||plugins.installFromLink||||334;208;|129;20;|shown
+5|AXTextField||link.field||||233;263;|460;22;|shown
+5|AXButton||link.lookUp||||701;264;|65;20;|shown
+5|AXButton||link.close||||774;264;|51;20;|shown
+5|AXButton||searchPath.row.0||||225;389;|560;23;|shown
+6|AXStaticText||searchPath.folder.0||/usr/local/bin||225;389;|560;23;|shown
+5|AXButton||searchPath.row.1||||225;413;|560;23;|shown
+6|AXStaticText||searchPath.folder.1||/opt/homebrew/bin||225;413;|560;23;|shown
+5|AXButton||searchPath.row.2||||225;437;|560;23;|shown
+6|AXStaticText||searchPath.folder.2||/usr/bin||225;437;|560;23;|shown
+5|AXButton||searchPath.row.3||||225;461;|560;23;|shown
+6|AXStaticText||searchPath.folder.3||/bin||225;461;|560;23;|shown
+5|AXButton||searchPath.row.4||||225;485;|560;23;|shown
+6|AXStaticText||searchPath.folder.4||/usr/sbin||225;485;|560;23;|shown
+5|AXButton||searchPath.row.5||||225;509;|560;23;|shown
+6|AXStaticText||searchPath.folder.5||/sbin||225;509;|560;23;|shown
+5|AXButton||searchPath.add||||225;540;|116;20;|shown
+5|AXButton||searchPath.remove||||347;540;|25;20;|shown
+5|AXButton||searchPath.up||||378;540;|27;20;|shown
+5|AXButton||searchPath.down||||411;540;|27;20;|shown
+5|AXButton||searchPath.restore||||444;540;|138;20;|shown
+5|AXStaticText||command.state||Not installed. Install command puts a link at ~/.local/bin/udeck-plugin to the copy inside uDeck — no administrator password — and it updates with uDeck.||225;631;|741;13;|shown
+5|AXButton||command.install||||225;653;|116;20;|shown
+5|AXCheckBox||catalogue.enabled||1||225;723;|126;16;|shown
+5|AXCheckBox||catalogue.autoUpdate||1||225;781;|251;16;|shown
+5|AXStaticText||catalogue.autoUpdateHelp||After each read of the catalogue, a verified plugin whose new version asks for exactly what it asks for now is updated without a press: its window stays, and so does your permission decision. A new version that asks for different permissions, a plugin you changed or put a file of your own into, and one you kept at an earlier version wait here for you to press Update.||225;805;|1308;26;|shown
+5|AXButton||catalogue.checkNow||||225;840;|83;20;|shown
+5|AXStaticText||catalogue.status||github.com/iillyyaa1997/udeck-plugins · checked 06:37||318;843;|266;13;|shown
+5|AXStaticText||catalogue.future-api.verified||Verified||425;873;|59;13;|shown
+5|AXLink||catalogue.future-api.details||||1498;871;|42;16;|shown
+5|AXStaticText||catalogue.future-api.state||Future contract 2.0.0 is written for plugin contract api 2; this uDeck speaks api 1. Update uDeck to install it.||225;929;|518;13;|shown
+5|AXStaticText||catalogue.future-udeck.verified||Verified||411;969;|59;13;|shown
+5|AXLink||catalogue.future-udeck.details||||1498;966;|42;16;|shown
+5|AXStaticText||catalogue.future-udeck.state||Future uDeck 1.4.0 needs uDeck 99.0.0 or later; this is uDeck 0.4.1. Update uDeck (Settings → About) to install it.||225;1025;|546;13;|shown
+5|AXStaticText||catalogue.linked.verified||Verified||367;1064;|59;13;|shown
+5|AXLink||catalogue.linked.details||||1498;1061;|42;16;|shown
+5|AXStaticText||catalogue.linked.state||plugins/linked/lib is a symbolic link; a plugin from a repository may contain only files and folders.||225;1120;|464;13;|shown
+5|AXStaticText||catalogue.uptime.verified||Verified||375;1160;|59;13;|shown
+5|AXButton||catalogue.uptime.install||||1488;1156;|52;20;|shown

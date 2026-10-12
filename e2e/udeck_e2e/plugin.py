@@ -22,9 +22,9 @@ from typing import IO, Any
 
 import pytest
 
-from udeck_e2e import builds, config, golden, names, pairs, preflight, releases
+from udeck_e2e import ax, builds, config, golden, here, names, pairs, preflight, releases, targets
 from udeck_e2e.config import Guest
-from udeck_e2e.errors import CheckFailed, FailedBeforeTheMachine, LabError
+from udeck_e2e.errors import CheckFailed, FailedBeforeTheMachine, LabError, NotOnThisTarget
 from udeck_e2e.guest import SSH, make_key
 from udeck_e2e.machine import Machine
 from udeck_e2e.tart import Tart
@@ -50,6 +50,29 @@ def real_preflight(guest: Guest, note: Note, jobs: int = 1) -> tuple[preflight.A
         "vms": [vm.name for vm in facts.vms],
     }
     return assessment, about
+
+
+def here_preflight(note: Note, prebuilt: Path | None, repo_root: Path, environ: dict[str, str] | None = None) -> tuple[preflight.Assessment, dict[str, Any]]:
+    """What `--target here` asks before it starts: that this is a GitHub-hosted runner, and the builds' binaries are this checkout's.
+
+    The refusal is asked again here although the command line asked it first:
+    nothing but this decides whether the machine running the lab is turned into
+    a guest.
+    """
+    import os
+    import platform
+
+    problems = []
+    refused = here.refusal(os.environ if environ is None else environ)
+    if refused:
+        problems.append(preflight.Problem(refused, "Run the lab against a Tart guest: leave out --target here."))
+    if prebuilt is not None:
+        problem = builds.prebuilt_problem(prebuilt, repo_root)
+        if problem:
+            problems.append(preflight.Problem(problem, "Build them from this checkout, or leave out --prebuilt."))
+    about = {"target": targets.HERE, "macos": platform.mac_ver()[0], "prebuilt": str(prebuilt) if prebuilt else None}
+    note(f"Checking on this runner, macOS {about['macos']}: the runner is the guest.")
+    return preflight.Assessment(problems, []), about
 
 
 def host_slept_at() -> str:
@@ -111,8 +134,25 @@ class LabPlugin:
         from_side: str | None = None,
         to_side: str | None = None,
         web: releases.Get | None = None,
+        target: str = targets.TART,
+        shard: tuple[int, int] | None = None,
+        prebuilt: Path | None = None,
+        build_helper: Callable[[Path, Note], Path] = ax.build,
+        run_here_preflight: Callable[..., tuple[preflight.Assessment, dict[str, Any]]] | None = None,
     ) -> None:
         self.wanted = wanted
+        # Where the checks run (`targets`), which part of them this run takes
+        # (`--shard`, `names.shard`), and the binaries the builds are assembled
+        # from when they were compiled elsewhere (`--prebuilt`, `builds`).
+        self.target = target
+        self.shard = shard
+        self.prebuilt = prebuilt
+        self.build_helper = build_helper
+        self.run_here_preflight = run_here_preflight or here_preflight
+        # The accessibility helper (`ax`), built once the pre-flight has passed.
+        self.ax_helper: Path | None = None
+        # The checks this target does not run, and why (`targets.needs_a_vm`).
+        self.not_here: dict[str, str] = {}
         self.listing = listing
         self.guest = guest
         self.mode = mode
@@ -221,7 +261,7 @@ class LabPlugin:
 
     # --- Machines ----------------------------------------------------------
 
-    def new_machine(self, label: str, source: str | None = None, display: str | None = None) -> Machine:
+    def new_machine(self, label: str, source: str | None = None, display: str | None = None) -> Any:
         """A machine for this run, named so the pre-flight can tell whose it is."""
         if self.run_dir is None:
             raise LabError("making a machine", "there is no run in progress")
@@ -229,6 +269,12 @@ class LabPlugin:
         source = source or self.guest.golden_vm
         if self.machine_factory is not None:
             return self.machine_factory(name=name, source=source, display=display, label=label)
+        if self.target == targets.HERE:
+            if self.ax_helper is None:
+                raise LabError("making the machine", "the accessibility helper was not built")
+            return here.HereMachine(
+                name="this runner", work_dir=self.run_dir / label, note=self.note, helper=self.ax_helper
+            )
         if self.tart is None or self.ssh_key is None:
             raise LabError("making a machine", "the pre-flight did not find Tart")
         return Machine(
@@ -239,6 +285,7 @@ class LabPlugin:
             work_dir=self.run_dir / label,
             note=self.note,
             display=display,
+            helper=self.ax_helper,
         )
 
     # --- Warming the next machine -------------------------------------------
@@ -366,6 +413,7 @@ class LabPlugin:
             feed_url=feed_url,
             key=builds.PublicKey(release_key) if release_key is not None else self.signing_key,
             note=self.note,
+            prebuilt=self.prebuilt,
         )
 
     def failed_in(self, scope: str, request: pytest.FixtureRequest) -> bool:
@@ -436,6 +484,12 @@ class LabPlugin:
         except names.CheckNameError as error:
             self.collection_errors.append(str(error))
             chosen = []
+        if self.shard is not None:
+            chosen = names.shard(chosen, *self.shard)
+        for name in chosen:
+            why = targets.not_here_because(getattr(by_name[name], "obj", None), self.target)
+            if why is not None:
+                self.not_here[name] = why
         self._ask_for_pairs(chosen, by_name)
 
         keep = [by_name[name] for name in chosen]
@@ -574,9 +628,20 @@ class LabPlugin:
             if after not in seen_twice
         }
 
+    @property
+    def vm_scope_mode(self) -> str:
+        """How long one machine lives: as --vm says on Tart; on `--target here` the run's whole length.
+
+        There is one machine on a runner — the runner — and nothing between two
+        checks on it that `--vm per-group` does not also leave to the checks: each
+        prepares what it stands on (an install, `~/.udeck` taken away, uDeck's
+        preferences forgotten), as on a guest one check hands to the next.
+        """
+        return "per-run" if self.target == targets.HERE else self.vm_mode
+
     def _label_for(self, node: Any) -> str:
         """The machine a check shares — itself, its group, or the whole run."""
-        scope = VM_SCOPES[self.vm_mode]
+        scope = VM_SCOPES[self.vm_scope_mode]
         if scope == "function":
             return self.names[node.nodeid]
         if scope == "module":
@@ -600,7 +665,7 @@ class LabPlugin:
             return
 
         if not self.names:
-            self.say("There are no checks to run.")
+            self.say("There are no checks to run" + (f" in part {self.shard[0]} of {self.shard[1]}." if self.shard else "."))
             self.stop(EXIT_NOT_CHECKED)
             return
 
@@ -629,9 +694,12 @@ class LabPlugin:
         self.record_event(
             "run-start",
             argv=sys.argv[1:],
-            guest=self.guest.key,
-            base_image=self.guest.base_image,
+            target=self.target,
+            guest=self.guest.key if self.target == targets.TART else None,
+            base_image=self.guest.base_image if self.target == targets.TART else None,
+            shard=list(self.shard) if self.shard else None,
             checks=list(self.names.values()),
+            not_on_this_target=self.not_here,
             repo=_git_state(self.repo_root),
         )
 
@@ -650,7 +718,10 @@ class LabPlugin:
             self.record_event("host", text=text)
 
         try:
-            assessment, about = self.run_preflight(self.guest, note, self.jobs)
+            if self.target == targets.HERE:
+                assessment, about = self.run_here_preflight(note, self.prebuilt, self.repo_root)
+            else:
+                assessment, about = self.run_preflight(self.guest, note, self.jobs)
         except Exception as error:  # noqa: BLE001 — reported, never swallowed
             assessment = preflight.Assessment(
                 [preflight.Problem(f"The pre-flight itself failed: {error!r}.", "This is a bug in the lab.")],
@@ -673,11 +744,23 @@ class LabPlugin:
                     "Free some space. The lab never lets Tart delete cached images to make room.",
                 )
             )
-        if not assessment.problems and self.mode != "bake":
+        if not assessment.problems and self.mode != "bake" and self.target == targets.TART:
             missing = golden.problem(self.guest, about.get("vms", []), self.state_dir)
             if missing:
                 assessment.problems.append(missing)
+        if not assessment.problems and self.prebuilt is not None and self.target == targets.TART:
+            problem = builds.prebuilt_problem(self.prebuilt, self.repo_root)
+            if problem:
+                assessment.problems.append(preflight.Problem(problem, "Build them from this checkout, or leave out --prebuilt."))
         if not assessment.problems and self.machine_factory is None:
+            # Built on this Mac for Tart's guests, and on the runner for itself.
+            try:
+                self.ax_helper = self.build_helper(self.runs_root, self.note)
+            except LabError as error:
+                assessment.problems.append(
+                    preflight.Problem(f"The accessibility helper could not be built: {error.reason}.", "This is a bug in the lab, or a toolchain the lab cannot use.")
+                )
+        if not assessment.problems and self.machine_factory is None and self.target == targets.TART:
             try:
                 self.tart = Tart(Path(about["tart"]), self.note)
                 self.ssh_key = make_key(self.run_dir / "ssh")
@@ -703,11 +786,15 @@ class LabPlugin:
 
         count = len(self.names)
         what = {"checks": "check", "selfcheck": "self-check", "bake": "bake"}[self.mode]
-        self.say(
-            f"Running {count} {what}{'' if count == 1 else 's'} on macOS {self.guest.key}"
+        where = (
+            f"this runner (macOS {about.get('macos', '?')})" if self.target == targets.HERE
+            else f"macOS {self.guest.key}"
             + (f", a machine {self.vm_mode.replace('-', ' ')}" if self.mode == "checks" else "")
-            + f" — report in {self.shown(self.run_dir)}/"
-        )
+        )  # fmt: skip
+        part = f", part {self.shard[0]} of {self.shard[1]}" if self.shard else ""
+        self.say(f"Running {count} {what}{'' if count == 1 else 's'} on {where}{part} — report in {self.shown(self.run_dir)}/")
+        for name, why in self.not_here.items():
+            self.say(f"   {name}: not on this target — {why}")
         for name in self.asked_pairs:
             self.say(f"   {name}: {self.pair_text(name)}")
 
@@ -740,6 +827,8 @@ class LabPlugin:
         guest would make it less true (`pairs.PairDefect`).
         """
         name = self.names.get(item.nodeid)
+        if name is not None and name in self.not_here:
+            raise NotOnThisTarget(self.not_here[name])
         if name is not None and name in self.pair_defects:
             raise FailedBeforeTheMachine(self.pair_defects[name].reason)
         if name is not None and name in self.pair_problems:
@@ -748,7 +837,7 @@ class LabPlugin:
 
     def stopped_before_its_machine(self, name: str) -> bool:
         """Whether a check ends in `pytest_runtest_setup` above, with no machine of its own or anyone's."""
-        return name in self.pair_defects or name in self.pair_problems
+        return name in self.pair_defects or name in self.pair_problems or name in self.not_here
 
     @pytest.fixture
     def pair(self, request: pytest.FixtureRequest) -> pairs.Resolved:
@@ -763,7 +852,7 @@ class LabPlugin:
         """The run itself, for the bake and anything else that makes its own machines."""
         return self
 
-    @pytest.fixture(scope=lambda fixture_name, config: VM_SCOPES[_lab(config).vm_mode])
+    @pytest.fixture(scope=lambda fixture_name, config: VM_SCOPES[_lab(config).vm_scope_mode])
     def machine(self, request: pytest.FixtureRequest) -> Any:
         """A clone of the golden image, booted to the desktop, removed afterwards.
 
@@ -771,7 +860,7 @@ class LabPlugin:
         does not know which: in the chained modes it must find out what state the
         machine is in, never assume it.
         """
-        scope = VM_SCOPES[self.vm_mode]
+        scope = VM_SCOPES[self.vm_scope_mode]
         label = self._label_for(request.node)
         machine = self._take_the_warm_one(label)
         if machine is None:
@@ -840,6 +929,25 @@ class LabPlugin:
             record.details.append(f"while cleaning up:\n{text}")
             return report
 
+        if excinfo.errisinstance(NotOnThisTarget) and call.when == "setup" and record.name in self.not_here:
+            # Not run, by design, on this target: stopped before anything of it
+            # started (`pytest_runtest_setup`), as its `targets.needs_a_vm` says.
+            record.outcome = Outcome.NOT_ON_THIS_TARGET
+            record.reason = str(excinfo.value.reason)
+            return report
+        if excinfo.errisinstance(NotOnThisTarget):
+            # A machine refused what a check asked of it half-way through
+            # (`HereMachine.reboot`): the check has already done part of what it
+            # does to the machine, so this is not "did not run" — the lab could
+            # not carry it out, until the check says up front what it needs.
+            record.details.append(report.longreprtext)
+            record.outcome = Outcome.COULD_NOT_CHECK
+            record.reason = (
+                f"this target refused {excinfo.value.reason} half-way through the check; "
+                "a check that needs it is marked targets.needs_a_vm, and this one is not"
+            )
+            return report
+
         # Setup and call cannot both fail: a check whose setup failed is not called.
         record.details.append(text)
         found_before = call.when == "setup" and excinfo.errisinstance(FailedBeforeTheMachine)
@@ -872,7 +980,7 @@ class LabPlugin:
 
     def _report(self, record: CheckRecord, finished: bool) -> None:
         record.reported = True
-        if record.outcome is not Outcome.PASSED and self.slept_at() != record.slept_at:
+        if record.outcome in (Outcome.FAILED, Outcome.COULD_NOT_CHECK) and self.slept_at() != record.slept_at:
             # A sleeping Mac freezes the guest mid-step; nothing that went wrong
             # afterwards is evidence about uDeck.
             record.details.append(f"(originally: {record.outcome.words}: {record.reason})")
@@ -894,6 +1002,8 @@ class LabPlugin:
             line += f" — {record.reason}"
         elif record.outcome is Outcome.COULD_NOT_CHECK:
             line += f" — could not check: {record.reason}"
+        elif record.outcome is Outcome.NOT_ON_THIS_TARGET:
+            line += f" — not on this target: {record.reason}"
         self.say(line)
         pair = self.pair_text(record.name)
         if pair is not None:

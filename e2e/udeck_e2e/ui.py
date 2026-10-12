@@ -7,11 +7,11 @@ accessibility API says it is.
 
 Both halves were measured in a guest (2026-09-17) and neither is the obvious one:
 
-* System Events' `entire contents` of uDeck's settings window returns nothing, so
-  no `whose value of attribute "AXIdentifier" is …` can reach a control. The tree
-  has to be walked child by child; the identifiers sit as deep as level 8.
-* Clicking an element through System Events (`click`, or `perform action
-  "AXPress"`) does *not* select a section of the settings window — the window
+* The tree has to be walked child by child: System Events' `entire contents` of
+  uDeck's settings window returned nothing, and the identifiers sit as deep as
+  level 8.
+* Clicking an element through the accessibility API (`click` in System Events,
+  `AXPress`) does *not* select a section of the settings window — the window
   stays where it was. A real click at the element's own coordinates does, and it
   goes through the same virtual pointing device a person's mouse would (Q15).
 
@@ -23,6 +23,19 @@ would look simpler and would quietly stop selecting anything. The pointer is
 also what the operator has. A click made this way goes through the machine's
 virtual pointing device, the same device the gesture checks push the panel open
 with, so a setting changed here is a setting changed the way he changes it.
+
+**Who answers *where*.** The lab's own accessibility helper (`e2e/guest/ax.swift`,
+`udeck_e2e.ax`), run where uDeck runs. Until 2026-10-12 it was System Events,
+asked with AppleScript over SSH, one Apple event per attribute per element — on
+Settings → Plugins a walk took 40 to 76 s and sometimes longer than the lab
+allows. The helper reads what System Events read (the same elements, the same
+attributes, the same text; its header says how that was measured, and
+`e2e/selfcheck/check_ax.py` holds the two against each other in a guest) and
+takes a tenth of a second. What it prints is turned into the lines this module
+has always handed its callers (`ax.dump`), so nothing that reads a walk changed.
+System Events is still what *types*: a keystroke is not something the
+accessibility API can make (`choose_folder`, `type_text`, and the chords in
+`probes`).
 
 **And some of uDeck's controls have no name at all.** On the Opening screen not
 one control carries an `AXIdentifier`, an `AXTitle` or an `AXDescription`
@@ -48,6 +61,18 @@ lab failing to press the control — so `press` walks the screen again and refus
 to return until the control says the click landed. Without it the miss travels:
 the check goes on to read a settings file nothing changed and pronounces on
 uDeck for a pointer that missed by a few points.
+
+**And on a small screen a control can be out of the pointer's reach.** The walk
+says, for each control, whether its middle is inside its window, every scroll
+area around it and the screen (`Element.shown`). In a Tart guest every settings
+pane the checks press in fits its window, and a click goes where the walk said,
+as it always has. On `--target here` the runner's screen is smaller than the
+guest's and Settings → Plugins is longer than its window there, so `click`
+scrolls the pane until the control is in view before it presses it (`in_view`) —
+and says so, as the lab's failure, if scrolling does not bring it there. Only
+for a settings window: the panel's own frame trails its animation (measured on
+a runner, run 38213314297, a card's Allow outside the frame the panel reported),
+and nothing in it scrolls out of reach.
 """
 
 from __future__ import annotations
@@ -57,7 +82,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from udeck_e2e import config
+from udeck_e2e import ax, config
 from udeck_e2e.errors import LabError, NotThere
 
 SETTINGS_WINDOW = "uDeck Settings"
@@ -74,370 +99,15 @@ OPENING = "opening"
 # About pane's at level 7; twelve leaves room without letting a loop run away.
 MAX_DEPTH = 12
 
-_FIND = """
-on findIt(e, wanted, depth)
-  try
-    tell application "System Events" to set theId to value of attribute "AXIdentifier" of e
-    if theId is wanted then return e
-  end try
-  if depth < %(depth)d then
-    try
-      tell application "System Events" to set kids to UI elements of e
-      repeat with k in kids
-        set found to findIt(k, wanted, depth + 1)
-        if found is not missing value then return found
-      end repeat
-    end try
-  end if
-  return missing value
-end findIt
-
-tell application "System Events" to tell process %(process)s
-  set w to first window whose name is %(window)s
-end tell
-set target to findIt(w, %(identifier)s, 0)
-if target is missing value then return "not found"
-tell application "System Events"
-  set p to value of attribute "AXPosition" of target
-  set s to value of attribute "AXSize" of target
-end tell
-return ((item 1 of p) as text) & "," & ((item 2 of p) as text) & "," & ((item 1 of s) as text) & "," & ((item 2 of s) as text)
-"""
-
-_LIST = """
-on describe(e, depth)
-  set out to {}
-  set theRole to ""
-  set theId to ""
-  try
-    tell application "System Events" to set theRole to role of e
-  end try
-  try
-    tell application "System Events" to set theId to value of attribute "AXIdentifier" of e
-  end try
-  if theId is not "" and theId is not missing value then set end of out to (theRole & " [" & theId & "]")
-  if depth < %(depth)d then
-    try
-      tell application "System Events" to set kids to UI elements of e
-      repeat with k in kids
-        set out to out & describe(k, depth + 1)
-      end repeat
-    end try
-  end if
-  return out
-end describe
-
-tell application "System Events" to tell process %(process)s
-  set w to first window whose name is %(window)s
-end tell
-set report to describe(w, 0)
-set text item delimiters to ", "
-return report as text
-"""
-
-_TEXTS = """
-on collect(e, depth)
-  set out to {}
-  try
-    tell application "System Events" to set theRole to role of e
-    if theRole is "AXStaticText" then
-      set theValue to ""
-      try
-        tell application "System Events" to set theValue to value of e
-      end try
-      if theValue is "" or theValue is missing value then
-        try
-          tell application "System Events" to set theValue to name of e
-        end try
-      end if
-      if theValue is not "" and theValue is not missing value then set end of out to theValue
-    end if
-  end try
-  if depth < %(depth)d then
-    try
-      tell application "System Events" to set kids to UI elements of e
-      repeat with k in kids
-        set out to out & collect(k, depth + 1)
-      end repeat
-    end try
-  end if
-  return out
-end collect
-
-tell application "System Events" to tell process %(process)s
-  set w to first window whose name is %(window)s
-end tell
-set report to collect(w, 0)
-set text item delimiters to " | "
-return report as text
-"""
-
-# Every attribute the walk asks for, in the order the dump prints them. Each one
-# is a separate Apple event against a separate element, so the list is a budget
-# as much as a list: the Opening screen is about sixty elements, and a walk of it
-# took roughly two seconds measured.
-#
-# `AXValue` is what makes an unnamed control recognisable: a checkbox reads "1"
-# or "0", so a row of them read together says which row it is.
-_TREE = """
-on attr(e, n)
-  set v to ""
-  try
-    tell application "System Events" to set v to value of attribute n of e
-  end try
-  if v is missing value then return ""
-  try
-    if class of v is list then
-      set t to ""
-      repeat with one in v
-        set t to t & (one as text) & ";"
-      end repeat
-      return t
-    end if
-    return v as text
-  on error
-    return "?"
-  end try
-end attr
-
-on describe(e, depth)
-  set out to {}
-  set end of out to (depth as text) & "|" & my attr(e, "AXRole") & "|" & my attr(e, "AXSubrole") ¬
-    & "|" & my attr(e, "AXIdentifier") & "|" & my attr(e, "AXTitle") & "|" & my attr(e, "AXValue") ¬
-    & "|" & my attr(e, "AXDescription") & "|" & my attr(e, "AXPosition") & "|" & my attr(e, "AXSize")
-  if depth < %(depth)d then
-    try
-      tell application "System Events" to set kids to UI elements of e
-      repeat with k in kids
-        set out to out & my describe(k, depth + 1)
-      end repeat
-    end try
-  end if
-  return out
-end describe
-
-tell application "System Events" to tell process %(process)s
-  set w to first window whose name is %(window)s
-end tell
-set report to my describe(w, 0)
-set text item delimiters to linefeed
-return report as text
-"""
-
-# The same walk, asked a parent at a time. `_TREE` reads eight attributes of
-# every element with eight Apple events each, and on Settings → Plugins every
-# one of those costs a fraction of a second — SwiftUI rebuilds the pane's rows to
-# answer (measured 2026-09-28: 89 elements, and one walk did not finish in
-# `config.UI_SECONDS`). Here each attribute is asked of all of a parent's
-# children in one event (`value of attribute … of every UI element`), and only a
-# column that cannot be asked that way — a child without the attribute — falls
-# back to asking each child. The lines are `_TREE`'s, in the same order.
-_TREE_BY_PARENT = """
-on txt(v)
-  if v is missing value then return ""
-  try
-    if class of v is list then
-      set t to ""
-      repeat with one in v
-        set t to t & (one as text) & ";"
-      end repeat
-      return t
-    end if
-    return v as text
-  on error
-    return "?"
-  end try
-end txt
-
-on attr(e, n)
-  try
-    tell application "System Events" to return my txt(value of attribute n of e)
-  on error
-    return ""
-  end try
-end attr
-
-on batch(e, n, k)
-  try
-    tell application "System Events" to set vs to value of attribute n of every UI element of e
-    if (count of vs) is k then
-      set out to {}
-      repeat with v in vs
-        set end of out to my txt(contents of v)
-      end repeat
-      return out
-    end if
-  end try
-  return missing value
-end batch
-
-on joined(depth, fields)
-  set text item delimiters to "|"
-  set t to (depth as text) & "|" & (fields as text)
-  set text item delimiters to ""
-  return t
-end joined
-
-on describe(e, depth, out)
-  set kids to {}
-  try
-    tell application "System Events" to set kids to UI elements of e
-  end try
-  set k to count of kids
-  if k is 0 then return out
-  set attrNames to {"AXRole", "AXSubrole", "AXIdentifier", "AXTitle", "AXValue", "AXDescription", "AXPosition", "AXSize"}
-  set cols to {}
-  repeat with n in attrNames
-    set end of cols to my batch(e, n as text, k)
-  end repeat
-  repeat with i from 1 to k
-    set kid to item i of kids
-    set fields to {}
-    repeat with j from 1 to count of attrNames
-      set c to item j of cols
-      if c is missing value then
-        set end of fields to my attr(kid, item j of attrNames)
-      else
-        set end of fields to item i of c
-      end if
-    end repeat
-    set end of out to my joined(depth, fields)
-    if depth < %(depth)d then set out to my describe(kid, depth + 1, out)
-  end repeat
-  return out
-end describe
-
-tell application "System Events" to tell process %(process)s
-  set w to first window whose name is %(window)s
-end tell
-set root to {}
-repeat with n in {"AXRole", "AXSubrole", "AXIdentifier", "AXTitle", "AXValue", "AXDescription", "AXPosition", "AXSize"}
-  set end of root to my attr(w, n as text)
-end repeat
-set report to my describe(w, 1, {my joined(0, root)})
-set text item delimiters to linefeed
-return report as text
-"""
-
-# Only the controls that carry an identifier, which is all the plugin checks ever
-# look for. Measured on Settings → Plugins on 2026-09-29 (.build/e2e/, the
-# diagnostic run beside 20260928-215137Z): 82 elements, and every attribute of
-# every one of them costs about a tenth of a second, because SwiftUI rebuilds
-# the pane's rows to answer — `_TREE` took 92 s, the same walk asked a parent at
-# a time 55 to 64 s, a `_FIND` of one identifier 20 s. So this asks every child
-# of a parent for its identifier in one event, and only the ones that have one
-# for the rest; and it stops at `%(depth)d`, because the pane is flat — every
-# row of it is a child of one scroll area — and asking a leaf for children it
-# does not have is the same tenth of a second each. The lines are `_TREE`'s.
-#
 # A value of several lines — the end of a plugin's standard error, under More —
-# is printed on one, each line break as `⏎` (`LINE_BREAK`): the line that
-# describes a control is one line, and `controls` refuses one that is not.
-LINE_BREAK = "⏎"
-
-_IDENTIFIED = """
-on oneLine(t)
-  set saved to text item delimiters
-  set text item delimiters to {return & linefeed, linefeed, return}
-  set parts to text items of t
-  set text item delimiters to "⏎"
-  set t to parts as text
-  set text item delimiters to saved
-  return t
-end oneLine
-
-on txt(v)
-  if v is missing value then return ""
-  try
-    if class of v is list then
-      set t to ""
-      repeat with one in v
-        set t to t & (one as text) & ";"
-      end repeat
-      return my oneLine(t)
-    end if
-    return my oneLine(v as text)
-  on error
-    return "?"
-  end try
-end txt
-
-on attr(e, n)
-  try
-    tell application "System Events" to return my txt(value of attribute n of e)
-  on error
-    return ""
-  end try
-end attr
-
-on describe(e, depth, out)
-  set kids to {}
-  try
-    tell application "System Events" to set kids to UI elements of e
-  end try
-  set k to count of kids
-  if k is 0 then return out
-  set ids to missing value
-  try
-    tell application "System Events" to set ids to value of attribute "AXIdentifier" of every UI element of e
-    if (count of ids) is not k then set ids to missing value
-  end try
-  repeat with i from 1 to k
-    set kid to item i of kids
-    if ids is missing value then
-      set theId to my attr(kid, "AXIdentifier")
-    else
-      set theId to my txt(contents of item i of ids)
-    end if
-    if theId is not "" then
-      set fields to {depth as text}
-      repeat with n in {"AXRole", "AXSubrole"}
-        set end of fields to my attr(kid, n as text)
-      end repeat
-      set end of fields to theId
-      repeat with n in {"AXTitle", "AXValue", "AXDescription", "AXPosition", "AXSize"}
-        set end of fields to my attr(kid, n as text)
-      end repeat
-      set text item delimiters to "|"
-      set end of out to (fields as text)
-      set text item delimiters to ""
-    end if
-    if depth < %(depth)d then set out to my describe(kid, depth + 1, out)
-  end repeat
-  return out
-end describe
-
-tell application "System Events" to tell process %(process)s
-  set w to first window whose name is %(window)s
-end tell
-set report to my describe(w, 1, {})
-set text item delimiters to linefeed
-return report as text
-"""
+# is printed on one, each line break as `⏎`: the line that describes a control
+# is one line, and `controls` refuses one that is not.
+LINE_BREAK = ax.LINE_BREAK
 
 # How deep `identified` looks. The Plugins pane's controls are at 5 (the dump
 # kept in .build/e2e/20260928-215137Z/plugins.install-fetches-one-folder/), the
 # panel's cards deeper; one level of room over the deepest seen.
 IDENTIFIED_DEPTH = 6
-
-_OPEN_SETTINGS = """
-tell application "System Events" to tell process %(process)s
-  click menu item %(item)s of menu 1 of menu bar item 1 of menu bar 1
-end tell
-return "opened"
-"""
-
-_WINDOWS = """
-tell application "System Events" to tell process %(process)s to get name of every window
-"""
-
-_MENU_ITEMS = """
-tell application "System Events" to tell process %(process)s
-  set titles to name of every menu item of menu 1 of menu bar item 1 of menu bar 1
-end tell
-set text item delimiters to ", "
-return titles as text
-"""
 
 # What the lab asks the guest — inside the guest — when the way into the
 # settings window is not there. `AppleLanguages` is the list macOS resolves an
@@ -447,24 +117,14 @@ return titles as text
 _GUEST_LANGUAGE = "defaults read -g AppleLanguages 2>/dev/null | tr -d ' \\n' || true"
 
 
-# The panel, as every script here addresses a window: not by a title — it has
+# The panel, as every question here addresses a window: not by a title — it has
 # none to find it by — but by the subrole uDeck gives it, `AXSystemDialog`
 # (docs/plugin-repository.md, "The lab's checks").
 PANEL = "the panel"
-_PANEL_WINDOW = 'first window whose subrole is "AXSystemDialog"'
-_NAMED_WINDOW = "first window whose name is %(window)s"
 
 
 def _applescript(script: str, **values: str) -> str:
-    """The script with its strings quoted as AppleScript literals.
-
-    `window=PANEL` is the one value that is not a string in the script: the panel
-    is found by its subrole, so the phrase that names a window by its title is
-    replaced whole.
-    """
-    if values.get("window") == PANEL:
-        script = script.replace(_NAMED_WINDOW, _PANEL_WINDOW)
-        values = {key: value for key, value in values.items() if key != "window"}
+    """The script with its strings quoted as AppleScript literals — for what System Events still does: typing."""
     quoted = {key: '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"' for key, value in values.items()}
     return script % {"depth": MAX_DEPTH, **quoted}
 
@@ -474,11 +134,15 @@ class Element:
     """Where a control is, in the coordinates a screenshot and the pointer use.
 
     The position and the size are all a click needs, and all `find` asks for.
-    The rest is filled in by `walk`, which reads every attribute of every
+    The rest is filled in by the walk, which reads every attribute of every
     element so that a control carrying no identifier can still be recognised —
     by its role, by what it reads, and by where it sits among its own kind.
     `identifier` is empty for all of those, which is the whole reason the walk
     exists.
+
+    `shown` is whether its middle was inside its window, every scroll area
+    around it and the screen when the walk read it (`in_view`). True where
+    nothing said otherwise — a walk recorded before the lab knew.
     """
 
     identifier: str
@@ -491,6 +155,7 @@ class Element:
     title: str = ""
     value: str = ""
     description: str = ""
+    shown: bool = True
 
     @property
     def middle(self) -> tuple[int, int]:
@@ -503,20 +168,17 @@ class Element:
         )
 
 
-def parse_element(identifier: str, answer: str) -> Element | None:
-    """`x,y,width,height` from the script, or None when it found nothing."""
-    answer = answer.strip()
-    if not answer or answer == "not found":
-        return None
-    parts = answer.split(",")
-    if len(parts) != 4:
-        raise ValueError(f"unexpected answer {answer!r}")
-    x, y, width, height = (int(float(part)) for part in parts)
-    return Element(identifier, x, y, width, height)
+def _element(found: ax.Walked) -> Element:
+    x, y, width, height = (int(n) for n in (found.frame or (0, 0, 0, 0)))
+    return Element(
+        identifier=found.identifier, x=x, y=y, width=width, height=height, role=found.role,
+        subrole=found.subrole, title=found.title, value=found.value, description=found.description,
+        shown=found.shown,
+    )  # fmt: skip
 
 
 def ask(machine: Any, script: str, step: str, seconds: float = config.UI_SECONDS) -> str:
-    """Run one AppleScript in the guest, over SSH — the only channel that may drive the interface."""
+    """Run one AppleScript in the guest — what the helper cannot do, which is type."""
     done = machine.ssh.run(f"osascript -e {shlex.quote(script)}", step, seconds=seconds, check=False)
     answer = (done.stdout or "").strip()
     if done.returncode != 0:
@@ -525,28 +187,35 @@ def ask(machine: Any, script: str, step: str, seconds: float = config.UI_SECONDS
     return answer
 
 
+def walk(machine: Any, step: str, window: str = SETTINGS_WINDOW, depth: int = MAX_DEPTH) -> list[ax.Walked]:
+    """Every element of `window`, in the walk's order, the window itself first."""
+    answer = ax.ask(machine, ["walk", PROCESS, ax.window_spec(window, PANEL), str(depth)], step)
+    try:
+        found, _ = ax.parse_walk(answer)
+    except ValueError as error:
+        raise LabError(step, f"the accessibility helper's walk could not be read: {error}") from None
+    return found
+
+
 def windows(machine: Any, step: str) -> list[str]:
-    return [name.strip() for name in ask(machine, _applescript(_WINDOWS, process=PROCESS), step).split(",") if name.strip()]
+    """The titles of uDeck's windows."""
+    return [title.strip() for title in ax.window_titles(machine, PROCESS, step) if title.strip()]
 
 
 def identifiers(machine: Any, step: str, window: str = SETTINGS_WINDOW) -> list[str]:
     """Every control in `window` that carries an identifier — for a report, or a reason."""
-    answer = ask(machine, _applescript(_LIST, process=PROCESS, window=window), step)
-    return [part.strip() for part in answer.split(",") if part.strip()]
+    return ax.identifiers(walk(machine, step, window))
 
 
 def static_texts(machine: Any, step: str, window: str = SETTINGS_WINDOW) -> list[str]:
     """Every sentence the window shows, in order — what a person would read on it."""
-    answer = ask(machine, _applescript(_TEXTS, process=PROCESS, window=window), step)
-    return [part.strip() for part in answer.split(" | ") if part.strip()]
+    return ax.static_texts(walk(machine, step, window))
 
 
 def find(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDOW) -> Element | None:
-    answer = ask(machine, _applescript(_FIND, process=PROCESS, window=window, identifier=identifier), step)
-    try:
-        return parse_element(identifier, answer)
-    except ValueError as error:
-        raise LabError(step, str(error)) from None
+    """The first control with this identifier, in the walk's order, or None."""
+    found = ax.first_with(walk(machine, step, window), identifier)
+    return None if found is None else _element(found)
 
 
 def wait_for(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDOW,
@@ -555,14 +224,14 @@ def wait_for(machine: Any, identifier: str, step: str, window: str = SETTINGS_WI
 
     The deadline raises `NotThere`, and only the deadline: a check that reads
     "the control never appeared" as something uDeck did must be able to tell it
-    apart from System Events refusing or the machine going away, which keep
+    apart from the helper refusing or the machine going away, which keep
     arriving as an ordinary `LabError` through `find`.
     """
     deadline = machine.clock() + seconds
     while True:
         element = find(machine, identifier, step, window)
         if element is not None:
-            return element
+            return _settled(machine, element, step, window, deadline)
         if machine.clock() >= deadline:
             raise NotThere(
                 step,
@@ -572,9 +241,106 @@ def wait_for(machine: Any, identifier: str, step: str, window: str = SETTINGS_WI
         machine.sleep(1)
 
 
+# How far apart two walks have to be that put a control in the same place
+# before the lab aims at it (`_settled`).
+SETTLED_SECONDS = 0.5
+
+
+def _settled(machine: Any, element: Element, step: str, window: str, deadline: float) -> Element:
+    """The control once it has stopped moving: two walks half a second apart put it in the same place.
+
+    The panel grows from a peek on a spring, and a sheet slides down, and a
+    control read while they move is read where it is passing through. Through
+    System Events a walk took seconds, which no animation outlasts; the helper
+    reads one in a tenth of a second, inside it — measured on a runner (run
+    38224850163, plugins.permissions-change-only-offers): Hold read as the panel
+    opened, clicked where it had been, and the action never started. A control
+    still moving at the deadline is taken where it was last.
+    """
+    while machine.clock() < deadline:
+        machine.sleep(SETTLED_SECONDS)
+        again = find(machine, element.identifier, step, window)
+        if again is None:
+            continue
+        if (again.x, again.y, again.width, again.height) == (element.x, element.y, element.width, element.height):
+            return again
+        element = again
+    return element
+
+
+# How many times the lab scrolls a pane to bring a control into view before it
+# gives up on reaching it.
+SCROLLS = 6
+
+
+def in_view(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDOW) -> Element:
+    """The control, scrolled into view on a machine that can scroll (`HereMachine.scroll`).
+
+    A pane is scrolled by most of its height at a time towards the control,
+    and walked again, until the walk says the control's middle is inside it. A
+    control it cannot bring there is the lab's failure, said with where it was.
+    A walk without the control — `wait_for` has just seen it, so a walk taken
+    while SwiftUI rebuilds the pane — is walked again until the control is
+    back; one still gone at the deadline is the lab's failure too, never
+    `NotThere`, which only `wait_for`'s own deadline raises.
+    """
+    deadline = machine.clock() + config.UI_APPEAR_SECONDS
+    attempt = 0
+    while True:
+        found = walk(machine, step, window)
+        target = ax.first_with(found, identifier)
+        if target is None:
+            if machine.clock() >= deadline:
+                raise LabError(
+                    step,
+                    f"'{identifier}' was in '{window}' and went from it while the lab scrolled to it, "
+                    f"not back within {config.UI_APPEAR_SECONDS:.0f}s; what is there: "
+                    f"{', '.join(ax.identifiers(found)) or 'nothing with an identifier'}",
+                )
+            machine.sleep(1)
+            continue
+        if target.shown:
+            return _element(target)
+        if attempt == SCROLLS:
+            break
+        scroll = getattr(machine, "scroll", None)
+        area = _pane_around(found, target)
+        if scroll is None or area is None or area.frame is None or target.frame is None:
+            raise LabError(
+                step,
+                f"'{identifier}' is at {_element(target).x},{_element(target).y}, outside what '{window}' shows, "
+                f"and {machine.name} cannot scroll it into view",
+            )
+        x, y, width, height = area.frame
+        middle_y = target.frame[1] + target.frame[3] / 2
+        # Content moves down for a positive distance: a control below the
+        # pane's middle wants a negative one. A pane's height at most at a time.
+        distance = max(-height * 0.8, min(height * 0.8, (y + height / 2) - middle_y))
+        scroll(int(x + width / 2), int(y + height / 2), int(distance), f"{step}: scrolling to '{identifier}'")
+        attempt += 1
+    raise LabError(step, f"'{identifier}' stayed outside what '{window}' shows after {SCROLLS} scrolls")
+
+
+def _pane_around(found: list[ax.Walked], target: ax.Walked) -> ax.Walked | None:
+    """The innermost scroll area the walk passed through on its way to `target`."""
+    ancestors: list[ax.Walked] = []
+    for element in found:
+        del ancestors[element.depth:]
+        if element is target:
+            return next((a for a in reversed(ancestors) if a.role == "AXScrollArea"), None)
+        ancestors.append(element)
+    return None
+
+
 def click(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDOW) -> Element:
-    """Find the control and click it with the machine's pointer, where a person would."""
+    """Find the control and click it with the machine's pointer, where a person would.
+
+    Scrolled into view first where the machine can scroll and the control is
+    out of reach in a settings window — the runner's small screen (`in_view`).
+    """
     element = wait_for(machine, identifier, step, window)
+    if not element.shown and window != PANEL and getattr(machine, "scroll", None) is not None:
+        element = in_view(machine, identifier, step, window)
     machine.click(*element.middle, f"{step}: '{identifier}'")
     return element
 
@@ -587,8 +353,12 @@ def open_settings(machine: Any, step: str, item: str = "Settings…") -> None:
     carries no identifier to find it by. So a guest that is not in English has
     no way in at all, and `open_settings_and_wait` says exactly that rather than
     timing out with a shrug.
+
+    Pressed through the accessibility API, as System Events' `click menu item`
+    pressed it: a menu's item has no place on the screen until the menu is open,
+    and what is asked here is the window, not the menu.
     """
-    ask(machine, _applescript(_OPEN_SETTINGS, process=PROCESS, item=item), step)
+    ax.ask(machine, ["press-menu-item", PROCESS, item], step)
 
 
 def menu_items(machine: Any, step: str) -> str:
@@ -599,9 +369,12 @@ def menu_items(machine: Any, step: str) -> str:
     second failure on top of the first would replace the reason with itself.
     """
     try:
-        return ask(machine, _applescript(_MENU_ITEMS, process=PROCESS), step) or "nothing"
+        titles = ax.ask(machine, ["menu", PROCESS], step).get("titles")
     except LabError as error:
         return f"(the menu could not be read: {error.reason})"
+    if not isinstance(titles, list):
+        return "(the menu could not be read)"
+    return ", ".join(str(title) for title in titles) or "nothing"
 
 
 def guest_language(machine: Any, step: str) -> str:
@@ -623,8 +396,8 @@ def open_settings_and_wait(machine: Any, step: str, item: str = "Settings…",
     """The settings window, opened and there — pressing the menu item again if it is not.
 
     The press is one shot, and it is made moments after uDeck was launched: a
-    status item that has not been put in the menu bar yet makes System Events
-    refuse, and a press that lands before the application is ready does nothing
+    status item that has not been put in the menu bar yet makes the press
+    refused, and a press that lands before the application is ready does nothing
     at all. Both are the lab being early rather than uDeck being wrong, so the
     press is repeated until the window is there — and pressing it again while it
     is open only brings it forward.
@@ -669,16 +442,10 @@ def open_settings_and_wait(machine: Any, step: str, item: str = "Settings…",
 def identified(machine: Any, step: str, window: str = SETTINGS_WINDOW, depth: int = IDENTIFIED_DEPTH) -> str:
     """The controls of `window` that carry an identifier, as `tree` prints them — and nothing else.
 
-    For the screens too slow to walk whole (`_IDENTIFIED`). `controls`, `element`
+    No deeper than `depth`, the window itself left out. `controls`, `element`
     and `says` read it exactly as they read `tree`.
     """
-    script = _applescript(_IDENTIFIED.replace("%(depth)d", str(depth)), process=PROCESS, window=window)
-    return ask(machine, script, step)
-
-
-def tree_by_parent(machine: Any, step: str, window: str = SETTINGS_WINDOW) -> str:
-    """`tree`, asked a parent at a time: the same lines, for a pane too slow to walk element by element."""
-    return ask(machine, _applescript(_TREE_BY_PARENT, process=PROCESS, window=window), step)
+    return ax.dump(walk(machine, step, window, depth), identified_only=True)
 
 
 def tree(machine: Any, step: str, window: str = SETTINGS_WINDOW) -> str:
@@ -688,7 +455,7 @@ def tree(machine: Any, step: str, window: str = SETTINGS_WINDOW) -> str:
     every sentence a check says about an unnamed control: which controls were
     there, what they read, and where the click went.
     """
-    return ask(machine, _applescript(_TREE, process=PROCESS, window=window), step)
+    return ax.dump(walk(machine, step, window))
 
 
 def _pair(text: str) -> tuple[int, int]:
@@ -700,13 +467,13 @@ def _pair(text: str) -> tuple[int, int]:
 def controls(dump: str, step: str = "reading uDeck's settings window") -> list[Element]:
     """The walk's lines as elements — and a line that will not read is an error.
 
-    The walk prints nine fields separated by `|`, so a control whose text holds
-    a `|` or a line break prints as something else: more fields than nine, or
-    two lines neither of which is a control. Dropped quietly, such a line is a
-    control missing from the screen — and the caller then says the only thing a
-    missing control can mean there, which is "the Opening screen did not
-    appear". That sentence is about SwiftUI, so the reader goes looking at
-    uDeck's views, and the truth was a pipe in a label.
+    The walk prints nine fields separated by `|` — ten since the helper, the
+    tenth `shown` or `hidden` (`Element.shown`) — so a control whose text holds
+    a `|` prints as something else: more fields than that. Dropped quietly, such
+    a line is a control missing from the screen — and the caller then says the
+    only thing a missing control can mean there, which is "the Opening screen
+    did not appear". That sentence is about SwiftUI, so the reader goes looking
+    at uDeck's views, and the truth was a pipe in a label.
 
     So a line that cannot be read comes out as the lab's failure with the line
     in it. Nothing here guesses at a broken line either: the rows are recognised
@@ -718,6 +485,9 @@ def controls(dump: str, step: str = "reading uDeck's settings window") -> list[E
         if not line.strip():
             continue
         parts = line.split("|")
+        shown = True
+        if len(parts) == 10 and parts[9] in ("shown", "hidden"):
+            shown = parts.pop() == "shown"
         if len(parts) != 9 or not parts[0].strip().isdigit():
             raise LabError(
                 step,
@@ -731,6 +501,7 @@ def controls(dump: str, step: str = "reading uDeck's settings window") -> list[E
             Element(
                 identifier=parts[3], x=x, y=y, width=width, height=height,
                 role=parts[1], subrole=parts[2], title=parts[4], value=parts[5], description=parts[6],
+                shown=shown,
             )
         )  # fmt: skip
     return found
@@ -924,35 +695,21 @@ PLUGINS = "plugins"
 # 1440 (`config.GOLDEN_DISPLAY`); this is most of it.
 SETTINGS_FRAME = (60, 40, 1500, 1360)
 
-_PLACE = """
-tell application "System Events" to tell process %(process)s
-  set w to first window whose name is %(window)s
-  set position of w to {%(x)d, %(y)d}
-  set size of w to {%(width)d, %(height)d}
-  set p to position of w
-  set s to size of w
-end tell
-return ((item 1 of p) as text) & "," & ((item 2 of p) as text) & "," & ((item 1 of s) as text) & "," & ((item 2 of s) as text)
-"""
-
-
 def place_settings(machine: Any, step: str, frame: tuple[int, int, int, int] = SETTINGS_FRAME,
                    window: str = SETTINGS_WINDOW) -> Element:
-    """The settings window moved and sized to `frame`, and where it says it ended up."""
+    """The settings window moved and sized to `frame`, and where it says it ended up.
+
+    The system keeps a window on its screen, so on a screen smaller than the
+    frame the window ends up smaller — and a control below its edge is then out
+    of a click's reach until its pane is scrolled (`in_view`).
+    """
     x, y, width, height = frame
-    script = _PLACE % {
-        "process": _applescript("%(p)s", p=PROCESS),
-        "window": _applescript("%(w)s", w=window),
-        "x": x, "y": y, "width": width, "height": height,
-    }  # fmt: skip
-    answer = ask(machine, script, step)
-    try:
-        placed = parse_element(window, answer)
-    except ValueError as error:
-        raise LabError(step, str(error)) from None
-    if placed is None:
+    answer = ax.ask(machine, ["place", PROCESS, ax.window_spec(window, PANEL), *(str(n) for n in (x, y, width, height))], step)
+    placed = answer.get("frame")
+    if not (isinstance(placed, list) and len(placed) == 4 and all(isinstance(n, (int, float)) for n in placed)):
         raise LabError(step, f"the settings window could not be placed: {answer!r}")
-    return placed
+    px, py, pw, ph = (int(n) for n in placed)
+    return Element(window, px, py, pw, ph)
 
 
 # How many times the Plugins section is clicked before the lab gives up on it.

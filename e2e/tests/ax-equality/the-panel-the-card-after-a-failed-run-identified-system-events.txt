@@ -1,0 +1,8 @@
+2|AXButton||panel.refresh||||1699;43;|26;22;
+2|AXButton||panel.settings||||1730;43;|26;22;
+2|AXButton||panel.sendAway||||1761;43;|26;22;
+2|AXButton||panel.fullscreen||||1792;43;|26;22;
+3|AXUnknown||card.flaky.failedDot||||753;88;|7;7;
+4|AXStaticText||card.flaky.lastRunFailed||Last run failed at 12:01: the producer exited with status 3||761;157;|365;13;
+4|AXStaticText||card.flaky.valuesFrom||showing values from 11:59||761;172;|155;13;
+3|AXImage||arrow.down.right||||1260;354;|16;16;

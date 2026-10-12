@@ -233,3 +233,14 @@ def test_a_dump_that_prints_no_identity_still_answers_the_old_way():
     assert all(not r.uuid for r in mine)
     assert login.pick(mine, "A").url == OTHER, "without identities, the enabled one decides"
     assert login.enabled_elsewhere(mine, "A") == []
+
+
+def test_the_record_names_one_path_however_sfltool_spells_it():
+    """macOS 27 prints a path, macOS 26.6.2 a file URL (run 38213314297): the same copy either way."""
+    from udeck_e2e.login import record_path
+
+    assert record_path("/Applications/uDeck.app") == "/Applications/uDeck.app"
+    assert record_path("file:///Applications/uDeck.app/") == "/Applications/uDeck.app"
+    assert record_path("file:///Users/runner/My%20Apps/uDeck.app/") == "/Users/runner/My Apps/uDeck.app"
+    assert record_path("(null)") == "" and record_path("") == ""
+    assert record_path("file:///") == "/"

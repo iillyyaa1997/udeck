@@ -26,6 +26,11 @@ from udeck_e2e.guest import parse_boot_time
 from udeck_e2e.releases import Answer, ReleaseError
 
 
+# Where the accessibility helper is in a guest (`ax.GUEST_PATH`), so that a test
+# can answer what is asked of it by the command's words: "ax text TextEdit".
+AX = "/Users/admin/.udeck-e2e/ax"
+
+
 def done(out="", rc=0):
     return subprocess.CompletedProcess([], rc, out, "")
 
@@ -108,6 +113,20 @@ class Guest:
                 if isinstance(answer, str) and "--style ndjson" in command:
                     return ndjson_of(answer)
                 return answer
+        # A window moved by the helper, which every check that brings an
+        # application forward asks for and none reads the answer of: where it
+        # ended up, as the helper says it.
+        moved = re.match(rf"^{re.escape(AX)} move-window \S+ (-?\d+) (-?\d+)$", command)
+        if moved:
+            return json.dumps({"frame": [int(moved[1]), int(moved[2]), 600, 400], "seconds": 0.01})
+        # And the application a check opened its document in, with that
+        # document's window in front.
+        if command in (f"{AX} windows {config.IN_FRONT_BEFORE_THE_PANEL}", f"{AX} focused {config.IN_FRONT_BEFORE_THE_PANEL}"):
+            opened = [c for c in self.commands if c.startswith(f"/usr/bin/open -a {config.IN_FRONT_BEFORE_THE_PANEL} ")]
+            name = opened[-1].split()[-1].strip("'").rsplit("/", 1)[-1] if opened else "Untitled"
+            if " focused " in command:
+                return json.dumps({"focused": name, "main": name, "frontmost": "true", "seconds": 0.01})
+            return json.dumps({"windows": [{"title": name, "subrole": "AXStandardWindow", "frame": None}], "seconds": 0.01})
         return None
 
     def _knows(self, command):
@@ -160,11 +179,55 @@ class Guest:
         self.copied.append((Path(local).name, remote))
 
 
+def ax_answer(**fields):
+    """What the accessibility helper prints: one JSON object."""
+    return json.dumps(fields)
+
+
+def ax_walk(dump, window="uDeck Settings"):
+    """A walk as the helper prints it, from a screen written the way the AppleScript walk printed it.
+
+    The tests write screens as the nine-field lines they were measured as. A
+    screen written without its window — the identified controls only — gets one
+    at depth 0, as every walk the helper prints starts with its window.
+    """
+    elements = []
+    for line in dump.splitlines():
+        if not line.strip():
+            continue
+        depth, role, subrole, identifier, title, value, description, position, size = line.split("|")[:9]
+        place = [float(n) for n in position.split(";") if n.strip()]
+        extent = [float(n) for n in size.split(";") if n.strip()]
+        elements.append({
+            "depth": int(depth), "role": role, "subrole": subrole, "identifier": identifier, "title": title,
+            "value": value.replace("⏎", "\n"), "description": description,
+            "frame": place + extent if len(place) == 2 and len(extent) == 2 else None,
+            "shown": True, "enabled": True,
+        })  # fmt: skip
+    if not elements or elements[0]["depth"] != 0:
+        elements.insert(0, {
+            "depth": 0, "role": "AXWindow", "subrole": "AXStandardWindow", "identifier": "", "title": window,
+            "value": "", "description": "", "frame": [0.0, 0.0, 2560.0, 1440.0], "shown": True, "enabled": None,
+        })  # fmt: skip
+    return json.dumps({"elements": elements, "seconds": 0.05})
+
+
+def as_the_lab_keeps_it(dump):
+    """A screen written as the tests write it, as the lab keeps a walk now: each line with `shown` after it."""
+    return "\n".join(f"{line}|shown" for line in dump.splitlines() if line.strip())
+
+
+def ax_texts(*texts):
+    """The helper's answers to `text`, one per question, from the documents' words."""
+    return [ax_answer(text=text) if isinstance(text, str) else text for text in texts]
+
+
 class Machine:
     """Everything a check asks of a machine, with a clock that only moves when it sleeps."""
 
     def __init__(self, answers=None):
         self.name = "udeck-e2e-probe"
+        self.ax_path = AX
         self.ssh = Guest(answers)
         self.now = 0.0
         self.shots = []

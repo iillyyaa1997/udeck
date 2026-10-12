@@ -166,16 +166,30 @@ class Answer:
 Get = Callable[[str, dict[str, str]], Answer]
 
 
-def get(url: str, headers: dict[str, str], seconds: float = config.GITHUB_SECONDS) -> Answer:
+# A token for GitHub's API, when the lab is given one: on a GitHub runner the job's
+# own read-only token (lab.yml). A runner's address is shared, and the sixty
+# questions an hour GitHub allows an address without a token were used up there
+# before the lab asked its two (run 38215534337, updates.a-published-release).
+TOKEN_VARIABLE = "UDECK_E2E_GITHUB_TOKEN"
+
+
+def get(url: str, headers: dict[str, str], seconds: float = config.GITHUB_SECONDS, environ: dict[str, str] | None = None) -> Answer:
     """GET, following redirects, with a deadline.
 
     Proxies come from the environment only: urllib would otherwise ask macOS for
     the system's proxy settings, and the lab reads nothing of this Mac's
     configuration it does not need.
+
+    A token in `TOKEN_VARIABLE` goes to GitHub's API and nowhere else: only
+    with a question to `config.GITHUB_API`, and as a header a redirect does not
+    carry on to wherever it leads.
     """
     opener = urllib.request.build_opener(urllib.request.ProxyHandler(urllib.request.getproxies_environment()))
+    token = (os.environ if environ is None else environ).get(TOKEN_VARIABLE, "").strip()
     try:
         request = urllib.request.Request(url, headers={"User-Agent": "udeck-e2e", **headers})
+        if token and url.startswith(config.GITHUB_API + "/"):
+            request.add_unredirected_header("Authorization", f"Bearer {token}")
         with opener.open(request, timeout=seconds) as response:
             return Answer(response.status, _lower(response.headers), response.read())
     except urllib.error.HTTPError as error:

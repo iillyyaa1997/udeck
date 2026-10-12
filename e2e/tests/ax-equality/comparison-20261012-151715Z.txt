@@ -1,0 +1,129 @@
+SAME  the panel — a card asking for consent — every element (ui.tree): System Events 3.584s, helper 0.162s, 20 items
+SAME  the panel — a card asking for consent — identified controls to depth 12 (ui.identified): System Events 2.279s, helper 0.162s, 9 items
+SAME  the panel — a card asking for consent — identifiers (ui.identifiers): System Events 1.514s, helper 0.154s, 9 items
+SAME  the panel — a card asking for consent — sentences (ui.static_texts): System Events 1.274s, helper 0.16s, 4 items
+SAME  the panel — a card asking for consent — 'panel.refresh' found (ui.find): System Events 0.715s, helper 0.222s
+SAME  the panel — a card asking for consent — 'panel.sendAway' found (ui.find): System Events 0.899s, helper 0.198s
+SAME  the panel — a card asking for consent — 'panel.fullscreen' found (ui.find): System Events 0.59s, helper 0.18s
+SAME  the panel — a card asking for consent — 'terminal' found (ui.find): System Events 0.797s, helper 0.205s
+SAME  the panel — a card asking for consent — 'consent.flaky.allow' found (ui.find): System Events 0.836s, helper 0.199s
+SAME  the panel — a card asking for consent — 'arrow.down.right' found (ui.find): System Events 0.891s, helper 0.16s
+SAME  the panel — the card having run — every element (ui.tree): System Events 2.903s, helper 0.192s, 17 items
+SAME  the panel — the card having run — identified controls to depth 12 (ui.identified): System Events 1.556s, helper 0.195s, 5 items
+SAME  the panel — the card having run — identifiers (ui.identifiers): System Events 1.458s, helper 0.197s, 5 items
+SAME  the panel — the card having run — sentences (ui.static_texts): System Events 0.933s, helper 0.177s, 5 items
+SAME  the panel — the card having run — 'panel.refresh' found (ui.find): System Events 0.449s, helper 0.316s
+SAME  the panel — the card having run — 'panel.settings' found (ui.find): System Events 0.465s, helper 0.301s
+SAME  the panel — the card having run — 'panel.sendAway' found (ui.find): System Events 0.503s, helper 0.193s
+SAME  the panel — the card having run — 'panel.fullscreen' found (ui.find): System Events 0.519s, helper 0.174s
+SAME  the panel — the card having run — 'arrow.down.right' found (ui.find): System Events 0.934s, helper 0.236s
+SAME  the panel — the card after a failed run — every element (ui.tree): System Events 3.96s, helper 0.186s, 20 items
+SAME  the panel — the card after a failed run — identified controls to depth 12 (ui.identified): System Events 2.322s, helper 0.3s, 8 items
+SAME  the panel — the card after a failed run — identifiers (ui.identifiers): System Events 1.47s, helper 0.212s, 8 items
+SAME  the panel — the card after a failed run — sentences (ui.static_texts): System Events 1.118s, helper 0.162s, 7 items
+SAME  the panel — the card after a failed run — 'panel.refresh' found (ui.find): System Events 0.425s, helper 0.181s
+SAME  the panel — the card after a failed run — 'panel.settings' found (ui.find): System Events 0.441s, helper 0.177s
+SAME  the panel — the card after a failed run — 'panel.fullscreen' found (ui.find): System Events 0.508s, helper 0.171s
+SAME  the panel — the card after a failed run — 'card.flaky.failedDot' found (ui.find): System Events 0.629s, helper 0.181s
+SAME  the panel — the card after a failed run — 'card.flaky.valuesFrom' found (ui.find): System Events 1.069s, helper 0.179s
+SAME  the panel — the card after a failed run — 'arrow.down.right' found (ui.find): System Events 1.058s, helper 0.183s
+DIFF  Settings → Plugins — More on a failed run — every element (ui.tree): System Events 109.545s, helper 0.288s, 132 items
+      System Events' walk could not be read: the walk printed a line that is not a control — 6 fields where every control has nine, so a control whose title or value holds a '|' or a line break would be lost and the screen would come back one row short: '5|AXStaticText||plugin.flaky.stderr||ValueError: told to fail'
+DIFF  Settings → Plugins — More on a failed run — identified controls to depth 6 (ui.identified): System Events 45.209s, helper 0.228s, 46 items
+      control: System Events read 47 and the helper 46
+      control #38: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 1050, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.future-udeck.verified', '', 'Verified', '', 411, 1145, 59, 13)
+      control #41: System Events ('5', 'AXStaticText', '', 'plugin.flaky.mark', '', 'Linked', '', 226, 279, 52, 13), the helper ('5', 'AXStaticText', '', 'catalogue.linked.verified', '', 'Verified', '', 367, 1240, 59, 13)
+      control #42: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 1050, 59, 13), the helper ('5', 'AXLink', '', 'catalogue.linked.details', '', '', '', 1483, 1237, 42, 16)
+      control #43: System Events ('5', 'AXLink', '', 'catalogue.linked.details', '', '', '', 1483, 1237, 42, 16), the helper ('5', 'AXStaticText', '', 'catalogue.linked.state', '', 'plugins/linked/lib is a symbolic link; a plugin from a repository may contain only files and folders.', '', 225, 1296, 464, 13)
+      control #44: System Events ('5', 'AXStaticText', '', 'catalogue.linked.state', '', 'plugins/linked/lib is a symbolic link; a plugin from a repository may contain only files and folders.', '', 225, 1296, 464, 13), the helper ('5', 'AXStaticText', '', 'catalogue.uptime.verified', '', 'Verified', '', 375, 1336, 59, 13)
+      control #45: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 1050, 59, 13), the helper ('5', 'AXButton', '', 'catalogue.uptime.install', '', '', '', 1473, 1332, 52, 20)
+      control #46: only System Events read ('5', 'AXButton', '', 'catalogue.uptime.install', '', '', '', 1473, 1332, 52, 20)
+DIFF  Settings → Plugins — More on a failed run — identifiers (ui.identifiers): System Events 28.259s, helper 0.224s, 51 items
+      identifier: System Events read 52 and the helper 51
+      identifier #43: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.future-udeck.verified]',)
+      identifier #46: System Events ('AXStaticText [plugin.flaky.mark]',), the helper ('AXStaticText [catalogue.linked.verified]',)
+      identifier #47: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXLink [catalogue.linked.details]',)
+      identifier #48: System Events ('AXLink [catalogue.linked.details]',), the helper ('AXStaticText [catalogue.linked.state]',)
+      identifier #49: System Events ('AXStaticText [catalogue.linked.state]',), the helper ('AXStaticText [catalogue.uptime.verified]',)
+      identifier #50: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXButton [catalogue.uptime.install]',)
+      identifier #51: only System Events read ('AXButton [catalogue.uptime.install]',)
+SAME  Settings → Plugins — More on a failed run — sentences (ui.static_texts): System Events 25.165s, helper 0.222s, 66 items
+SAME  Settings → Plugins — More on a failed run — 'ListColumn' found (ui.find): System Events 0.986s, helper 0.227s
+SAME  Settings → Plugins — More on a failed run — 'plugin.flaky.lastRun' found (ui.find): System Events 4.968s, helper 0.231s
+SAME  Settings → Plugins — More on a failed run — 'searchPath.folder.3' found (ui.find): System Events 6.745s, helper 0.229s
+SAME  Settings → Plugins — More on a failed run — 'searchPath.restore' found (ui.find): System Events 7.585s, helper 0.231s
+SAME  Settings → Plugins — More on a failed run — 'catalogue.future-api.details' found (ui.find): System Events 10.641s, helper 0.231s
+SAME  Settings → Plugins — More on a failed run — 'catalogue.uptime.install' found (ui.find): System Events 17.246s, helper 0.228s
+DIFF  Install from a link… sheet — a pull request looked up — every element (ui.tree): System Events 134.518s, helper 0.244s, 155 items
+      System Events' walk could not be read: the walk printed a line that is not a control — 6 fields where every control has nine, so a control whose title or value holds a '|' or a line break would be lost and the screen would come back one row short: '5|AXStaticText||plugin.flaky.stderr||ValueError: told to fail'
+DIFF  Install from a link… sheet — a pull request looked up — identified controls to depth 6 (ui.identified): System Events 79.17s, helper 0.247s, 60 items
+      control: System Events read 65 and the helper 60
+      control #12: System Events ('5', 'AXStaticText', '', 'link.mark', '', 'Unverified', '', 234, 290, 70, 13), the helper ('5', 'AXStaticText', '', 'link.asks-nothing.unverified', '', 'Unverified', '', 417, 354, 70, 13)
+      control #15: System Events ('5', 'AXStaticText', '', 'link.mark', '', 'Unverified', '', 234, 290, 70, 13), the helper ('5', 'AXStaticText', '', 'link.uptime.unverified', '', 'Unverified', '', 383, 431, 70, 13)
+      control #51: System Events ('5', 'AXStaticText', '', 'link.asks-nothing.asks', '', 'Asks for nothing', '', 233, 395, 79, 13), the helper ('5', 'AXStaticText', '', 'catalogue.future-api.state', '', 'Future contract 2.0.0 is written for plugin contract api 2; this uDeck speaks api 1. Update uDeck to install it.', '', 225, 1382, 518, 13)
+      control #52: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.state', '', 'Future contract 2.0.0 is written for plugin contract api 2; this uDeck speaks api 1. Update uDeck to install it.', '', 225, 1382, 518, 13), the helper ('5', 'AXStaticText', '', 'catalogue.future-udeck.verified', '', 'Verified', '', 411, 1421, 59, 13)
+      control #53: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 1326, 59, 13), the helper ('5', 'AXLink', '', 'catalogue.future-udeck.details', '', '', '', 1483, 1418, 42, 16)
+      control #54: System Events ('5', 'AXLink', '', 'catalogue.future-udeck.details', '', '', '', 1483, 1418, 42, 16), the helper ('5', 'AXStaticText', '', 'catalogue.future-udeck.state', '', 'Future uDeck 1.4.0 needs uDeck 99.0.0 or later; this is uDeck 0.4.1. Update uDeck (Settings → About) to install it.', '', 225, 1477, 546, 13)
+      control #55: System Events ('5', 'AXStaticText', '', 'link.asks-nothing.asks', '', 'Asks for nothing', '', 233, 395, 79, 13), the helper ('5', 'AXStaticText', '', 'catalogue.linked.verified', '', 'Verified', '', 367, 1516, 59, 13)
+      control #56: System Events ('5', 'AXStaticText', '', 'catalogue.future-udeck.state', '', 'Future uDeck 1.4.0 needs uDeck 99.0.0 or later; this is uDeck 0.4.1. Update uDeck (Settings → About) to install it.', '', 225, 1477, 546, 13), the helper ('5', 'AXLink', '', 'catalogue.linked.details', '', '', '', 1483, 1513, 42, 16)
+      control #57: System Events ('5', 'AXStaticText', '', 'plugin.flaky.mark', '', 'Linked', '', 226, 555, 52, 13), the helper ('5', 'AXStaticText', '', 'catalogue.linked.state', '', 'plugins/linked/lib is a symbolic link; a plugin from a repository may contain only files and folders.', '', 225, 1572, 464, 13)
+      control #58: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 1326, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.uptime.verified', '', 'Verified', '', 375, 1612, 59, 13)
+      control #59: System Events ('5', 'AXLink', '', 'catalogue.linked.details', '', '', '', 1483, 1513, 42, 16), the helper ('5', 'AXButton', '', 'catalogue.uptime.install', '', '', '', 1473, 1608, 52, 20)
+      control #60: only System Events read ('5', 'AXStaticText', '', 'link.asks-nothing.asks', '', 'Asks for nothing', '', 233, 395, 79, 13)
+      control #61: only System Events read ('5', 'AXStaticText', '', 'catalogue.linked.state', '', 'plugins/linked/lib is a symbolic link; a plugin from a repository may contain only files and folders.', '', 225, 1572, 464, 13)
+      control #62: only System Events read ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 1326, 59, 13)
+      control #63: only System Events read ('5', 'AXButton', '', 'catalogue.uptime.install', '', '', '', 1473, 1608, 52, 20)
+      control #64: only System Events read ('5', 'AXStaticText', '', 'link.uptime.asks', '', 'Asks to run ./hold.sh, run sysctl', '', 233, 472, 153, 13)
+DIFF  Install from a link… sheet — a pull request looked up — identifiers (ui.identifiers): System Events 44.314s, helper 0.252s, 65 items
+      identifier: System Events read 70 and the helper 65
+      identifier #17: System Events ('AXStaticText [link.mark]',), the helper ('AXStaticText [link.asks-nothing.unverified]',)
+      identifier #20: System Events ('AXStaticText [link.mark]',), the helper ('AXStaticText [link.uptime.unverified]',)
+      identifier #56: System Events ('AXStaticText [link.asks-nothing.asks]',), the helper ('AXStaticText [catalogue.future-api.state]',)
+      identifier #57: System Events ('AXStaticText [catalogue.future-api.state]',), the helper ('AXStaticText [catalogue.future-udeck.verified]',)
+      identifier #58: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXLink [catalogue.future-udeck.details]',)
+      identifier #59: System Events ('AXLink [catalogue.future-udeck.details]',), the helper ('AXStaticText [catalogue.future-udeck.state]',)
+      identifier #60: System Events ('AXStaticText [link.asks-nothing.asks]',), the helper ('AXStaticText [catalogue.linked.verified]',)
+      identifier #61: System Events ('AXStaticText [catalogue.future-udeck.state]',), the helper ('AXLink [catalogue.linked.details]',)
+      identifier #62: System Events ('AXStaticText [plugin.flaky.mark]',), the helper ('AXStaticText [catalogue.linked.state]',)
+      identifier #63: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.uptime.verified]',)
+      identifier #64: System Events ('AXLink [catalogue.linked.details]',), the helper ('AXButton [catalogue.uptime.install]',)
+      identifier #65: only System Events read ('AXStaticText [link.asks-nothing.asks]',)
+      identifier #66: only System Events read ('AXStaticText [catalogue.linked.state]',)
+      identifier #67: only System Events read ('AXStaticText [catalogue.future-api.verified]',)
+      identifier #68: only System Events read ('AXButton [catalogue.uptime.install]',)
+      identifier #69: only System Events read ('AXStaticText [link.uptime.asks]',)
+SAME  Install from a link… sheet — a pull request looked up — sentences (ui.static_texts): System Events 39.592s, helper 0.254s, 83 items
+SAME  Install from a link… sheet — a pull request looked up — 'ListColumn' found (ui.find): System Events 0.987s, helper 0.259s
+DIFF  Install from a link… sheet — a pull request looked up — 'link.asks-nothing.unverified' found (ui.find): System Events 28.876s, helper 0.302s
+      System Events None, the helper (417, 354, 70, 13)
+SAME  Install from a link… sheet — a pull request looked up — 'plugin.flaky.stderr' found (ui.find): System Events 12.421s, helper 0.241s
+SAME  Install from a link… sheet — a pull request looked up — 'searchPath.row.5' found (ui.find): System Events 14.423s, helper 0.248s
+SAME  Install from a link… sheet — a pull request looked up — 'catalogue.checkNow' found (ui.find): System Events 18.176s, helper 0.249s
+SAME  Install from a link… sheet — a pull request looked up — 'catalogue.uptime.install' found (ui.find): System Events 30.757s, helper 0.257s
+DIFF  Settings → Plugins — the question before Remove — every element (ui.tree): System Events 87.195s, helper 0.227s, 135 items
+      System Events' walk could not be read: the walk printed a line that is not a control — 6 fields where every control has nine, so a control whose title or value holds a '|' or a line break would be lost and the screen would come back one row short: '5|AXStaticText||plugin.flaky.stderr||ValueError: told to fail'
+DIFF  Settings → Plugins — the question before Remove — identified controls to depth 6 (ui.identified): System Events 43.979s, helper 0.22s, 48 items
+      control: System Events read 49 and the helper 48
+      control #40: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 1109, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.future-udeck.verified', '', 'Verified', '', 411, 1204, 59, 13)
+      control #43: System Events ('5', 'AXStaticText', '', 'plugin.flaky.mark', '', 'Linked', '', 226, 279, 52, 13), the helper ('5', 'AXStaticText', '', 'catalogue.linked.verified', '', 'Verified', '', 367, 1299, 59, 13)
+      control #44: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 1109, 59, 13), the helper ('5', 'AXLink', '', 'catalogue.linked.details', '', '', '', 1483, 1296, 42, 16)
+      control #45: System Events ('5', 'AXLink', '', 'catalogue.linked.details', '', '', '', 1483, 1296, 42, 16), the helper ('5', 'AXStaticText', '', 'catalogue.linked.state', '', 'plugins/linked/lib is a symbolic link; a plugin from a repository may contain only files and folders.', '', 225, 1355, 464, 13)
+      control #46: System Events ('5', 'AXStaticText', '', 'catalogue.linked.state', '', 'plugins/linked/lib is a symbolic link; a plugin from a repository may contain only files and folders.', '', 225, 1355, 464, 13), the helper ('5', 'AXStaticText', '', 'catalogue.uptime.verified', '', 'Verified', '', 375, 1395, 59, 13)
+      control #47: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 1109, 59, 13), the helper ('5', 'AXButton', '', 'catalogue.uptime.install', '', '', '', 1473, 1391, 52, 20)
+      control #48: only System Events read ('5', 'AXButton', '', 'catalogue.uptime.install', '', '', '', 1473, 1391, 52, 20)
+DIFF  Settings → Plugins — the question before Remove — identifiers (ui.identifiers): System Events 28.681s, helper 0.222s, 53 items
+      identifier: System Events read 54 and the helper 53
+      identifier #45: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.future-udeck.verified]',)
+      identifier #48: System Events ('AXStaticText [plugin.flaky.mark]',), the helper ('AXStaticText [catalogue.linked.verified]',)
+      identifier #49: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXLink [catalogue.linked.details]',)
+      identifier #50: System Events ('AXLink [catalogue.linked.details]',), the helper ('AXStaticText [catalogue.linked.state]',)
+      identifier #51: System Events ('AXStaticText [catalogue.linked.state]',), the helper ('AXStaticText [catalogue.uptime.verified]',)
+      identifier #52: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXButton [catalogue.uptime.install]',)
+      identifier #53: only System Events read ('AXButton [catalogue.uptime.install]',)
+SAME  Settings → Plugins — the question before Remove — sentences (ui.static_texts): System Events 25.962s, helper 0.227s, 67 items
+SAME  Settings → Plugins — the question before Remove — 'ListColumn' found (ui.find): System Events 0.968s, helper 0.224s
+SAME  Settings → Plugins — the question before Remove — 'plugin.flaky.confirm' found (ui.find): System Events 3.883s, helper 0.23s
+SAME  Settings → Plugins — the question before Remove — 'searchPath.row.3' found (ui.find): System Events 7.005s, helper 0.234s
+SAME  Settings → Plugins — the question before Remove — 'searchPath.down' found (ui.find): System Events 8.081s, helper 0.237s
+SAME  Settings → Plugins — the question before Remove — 'catalogue.future-api.details' found (ui.find): System Events 11.364s, helper 0.233s
+SAME  Settings → Plugins — the question before Remove — 'catalogue.uptime.install' found (ui.find): System Events 18.068s, helper 0.232s

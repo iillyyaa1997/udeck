@@ -1,0 +1,109 @@
+0|AXWindow|AXStandardWindow||uDeck Settings|||60;40;|1500;1309;|shown
+1|AXGroup|AXHostingView|||||60;68;|1500;1281;|shown
+2|AXSplitGroup||||||60;68;|1500;1281;|shown
+3|AXGroup|AXHostingView|||||60;68;|144;1281;|shown
+4|AXScrollArea||||||60;68;|144;1281;|shown
+5|AXOutline|||||Sidebar|60;68;|144;1281;|shown
+6|AXRow|AXOutlineRow|||||60;78;|144;28;|shown
+7|AXCell||||||70;78;|124;28;|shown
+8|AXStaticText||section.general||General||77;83;|71;18;|shown
+6|AXRow|AXOutlineRow|||||60;106;|144;28;|shown
+7|AXCell||||||70;106;|124;28;|shown
+8|AXStaticText||section.opening||Opening||77;111;|75;18;|shown
+6|AXRow|AXOutlineRow|||||60;134;|144;30;|shown
+7|AXCell||||||70;134;|124;30;|shown
+8|AXStaticText||section.look||Look||77;139;|53;20;|shown
+6|AXRow|AXOutlineRow|||||60;164;|144;28;|shown
+7|AXCell||||||70;164;|124;28;|shown
+8|AXStaticText||section.plugins||Plugins||79;169;|68;16;|shown
+6|AXRow|AXOutlineRow|||||60;192;|144;28;|shown
+7|AXCell||||||70;192;|124;28;|shown
+8|AXStaticText||section.about||About||78;197;|59;17;|shown
+6|AXColumn||ListColumn||||70;68;|124;1281;|shown
+3|AXSplitter||||144.0||204;68;|1;1281;|shown
+3|AXGroup|AXHostingView|||||205;68;|1355;1281;|shown
+4|AXScrollArea||||||205;68;|1355;1281;|shown
+5|AXStaticText||||Installed||225;87;|62;19;|shown
+5|AXCheckBox||||0||225;114;|289;16;|shown
+5|AXCheckBox||plugins.runLog||0||225;138;|212;16;|shown
+5|AXStaticText||||Every run of a linked plugin — when, why, how it ended, how long it took, the end of its standard error — goes into ~/.udeck/logs/<id>.log, at most 2 MB a plugin. Other plugins keep only their last run, in memory.||225;158;|1013;13;|shown
+5|AXStaticText||||~/.udeck/plugins||225;183;|99;13;|shown
+5|AXButton||||||1339;180;|111;20;|shown
+5|AXButton||||||1458;180;|82;20;|shown
+5|AXButton||plugins.linkFolder||||225;208;|101;20;|shown
+5|AXButton||plugins.installFromLink||||334;208;|129;20;|shown
+5|AXStaticText||||Nothing installed yet. uDeck shows nothing of its own — everything in the panel comes from a plugin.||225;235;|611;16;|shown
+5|AXStaticText||||A card with no lifetime of its own is treated as current for 60 s, dimmed after that, and blanked past 3× it.||225;259;|508;13;|shown
+5|AXStaticText||||Where to look for commands||225;296;|206;19;|shown
+5|AXButton||searchPath.row.0||||225;324;|560;23;|shown
+6|AXStaticText||searchPath.folder.0||/usr/local/bin||225;324;|560;23;|shown
+5|AXButton||searchPath.row.1||||225;348;|560;23;|shown
+6|AXStaticText||searchPath.folder.1||/opt/homebrew/bin||225;348;|560;23;|shown
+5|AXButton||searchPath.row.2||||225;372;|560;23;|shown
+6|AXStaticText||searchPath.folder.2||/usr/bin||225;372;|560;23;|shown
+5|AXButton||searchPath.row.3||||225;396;|560;23;|shown
+6|AXStaticText||searchPath.folder.3||/bin||225;396;|560;23;|shown
+5|AXButton||searchPath.row.4||||225;420;|560;23;|shown
+6|AXStaticText||searchPath.folder.4||/usr/sbin||225;420;|560;23;|shown
+5|AXButton||searchPath.row.5||||225;444;|560;23;|shown
+6|AXStaticText||searchPath.folder.5||/sbin||225;444;|560;23;|shown
+5|AXButton||searchPath.add||||225;475;|116;20;|shown
+5|AXButton||searchPath.remove||||347;475;|25;20;|shown
+5|AXButton||searchPath.up||||378;475;|27;20;|shown
+5|AXButton||searchPath.down||||411;475;|27;20;|shown
+5|AXButton||searchPath.restore||||444;475;|138;20;|shown
+5|AXStaticText||||A command written without a path (python3) is looked for in these folders, in this order. uDeck does not take PATH from your terminal. A change counts from the next run; nothing needs restarting.||225;502;|945;13;|shown
+5|AXStaticText||||The udeck-plugin command||225;539;|200;19;|shown
+5|AXStaticText||command.state||Not installed. Install command puts a link at ~/.local/bin/udeck-plugin to the copy inside uDeck — no administrator password — and it updates with uDeck.||225;566;|741;13;|shown
+5|AXButton||command.install||||225;588;|116;20;|shown
+5|AXStaticText||||Official catalogue||225;631;|126;19;|shown
+5|AXCheckBox||catalogue.enabled||1||225;658;|126;16;|shown
+5|AXStaticText||||uDeck reads the list of plugins in github.com/iillyyaa1997/udeck-plugins a few seconds after it starts and once a day, and when you press Check now — the list and each plugin's manifest, nothing else. A plugin's files are fetched when you press Install, and when a verified plugin updates itself. Off, uDeck makes no request about plugins at all; what is installed keeps running.||225;682;|1309;26;|shown
+5|AXCheckBox||catalogue.autoUpdate||1||225;716;|251;16;|shown
+5|AXStaticText||catalogue.autoUpdateHelp||After each read of the catalogue, a verified plugin whose new version asks for exactly what it asks for now is updated without a press: its window stays, and so does your permission decision. A new version that asks for different permissions, a plugin you changed or put a file of your own into, and one you kept at an earlier version wait here for you to press Update.||225;740;|1308;26;|shown
+5|AXButton||catalogue.checkNow||||225;775;|83;20;|shown
+5|AXStaticText||catalogue.status||github.com/iillyyaa1997/udeck-plugins · checked 06:37||318;778;|266;13;|shown
+5|AXStaticText||||Future contract||225;805;|101;16;|shown
+5|AXStaticText||||2.0.0||334;808;|26;13;|shown
+5|AXStaticText||||uDeck lab||368;808;|48;13;|shown
+5|AXStaticText||catalogue.future-api.verified||Verified||425;808;|59;13;|shown
+5|AXLink||catalogue.future-api.details||||1498;806;|42;16;|shown
+5|AXStaticText||||Written for a plugin contract this uDeck does not speak.||225;826;|316;15;|shown
+5|AXStaticText||||Asks for nothing||225;846;|79;13;|shown
+5|AXStaticText||||3 files · 701 B||314;846;|65;13;|shown
+5|AXLink||||||389;847;|78;13;|shown
+5|AXStaticText||catalogue.future-api.state||Future contract 2.0.0 is written for plugin contract api 2; this uDeck speaks api 1. Update uDeck to install it.||225;864;|518;13;|shown
+5|AXStaticText||||Future uDeck||225;900;|87;16;|shown
+5|AXStaticText||||1.4.0||320;903;|26;13;|shown
+5|AXStaticText||||uDeck lab||354;903;|48;13;|shown
+5|AXStaticText||catalogue.future-udeck.verified||Verified||411;904;|59;13;|shown
+5|AXLink||catalogue.future-udeck.details||||1498;901;|42;16;|shown
+5|AXStaticText||||Needs a uDeck that does not exist yet.||225;922;|219;15;|shown
+5|AXStaticText||||Asks for nothing||225;942;|79;13;|shown
+5|AXStaticText||||3 files · 674 B||314;942;|67;13;|shown
+5|AXLink||||||391;942;|78;13;|shown
+5|AXStaticText||catalogue.future-udeck.state||Future uDeck 1.4.0 needs uDeck 99.0.0 or later; this is uDeck 0.4.1. Update uDeck (Settings → About) to install it.||225;960;|546;13;|shown
+5|AXStaticText||||Linked||225;996;|43;16;|shown
+5|AXStaticText||||1.0.0||276;999;|26;13;|shown
+5|AXStaticText||||uDeck lab||310;999;|48;13;|shown
+5|AXStaticText||catalogue.linked.verified||Verified||367;999;|59;13;|shown
+5|AXLink||catalogue.linked.details||||1498;996;|42;16;|shown
+5|AXStaticText||||Holds a symbolic link.||225;1017;|123;15;|shown
+5|AXStaticText||||Asks for nothing||225;1037;|79;13;|shown
+5|AXStaticText||||3 files · 645 B||314;1037;|68;13;|shown
+5|AXLink||||||392;1037;|78;13;|shown
+5|AXStaticText||catalogue.linked.state||plugins/linked/lib is a symbolic link; a plugin from a repository may contain only files and folders.||225;1055;|464;13;|shown
+5|AXStaticText||||Uptime||225;1092;|47;16;|shown
+5|AXStaticText||||1.0.0||280;1095;|26;13;|shown
+5|AXStaticText||||Ilya Volkov||314;1095;|52;13;|shown
+5|AXStaticText||catalogue.uptime.verified||Verified||375;1095;|59;13;|shown
+5|AXButton||catalogue.uptime.install||||1488;1091;|52;20;|shown
+5|AXStaticText||||How long this Mac has been up, its load averages, and how many times the card has run since it was installed.||225;1116;|621;15;|shown
+5|AXStaticText||||Asks to run ./hold.sh, run sysctl||225;1136;|153;13;|shown
+5|AXStaticText||||5 files · 9 KB||388;1136;|62;13;|shown
+5|AXLink||||||460;1136;|78;13;|shown
+1|AXButton|AXCloseButton|||||70;47;|12;14;|shown
+1|AXButton|AXFullScreenButton|||||110;47;|12;14;|shown
+2|AXGroup||||||109;46;|14;16;|shown
+1|AXButton|AXMinimizeButton|||||90;47;|12;14;|shown
+1|AXStaticText||||uDeck Settings||758;45;|103;16;|shown

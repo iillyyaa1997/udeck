@@ -1,11 +1,16 @@
 """Driving the interface: what is asked of the guest, and what is done with the answer."""
 
+import json
+import shlex
 import subprocess
 
 import pytest
 
-from udeck_e2e import config, ui
+from fakes import as_the_lab_keeps_it, ax_walk
+from udeck_e2e import ax, config, ui
 from udeck_e2e.errors import LabError, NotThere
+
+AX = "/Users/admin/.udeck-e2e/ax"
 
 
 def done(args, rc=0, out="", err=""):
@@ -23,48 +28,74 @@ class Clock:
         self.now += seconds
 
 
+def _next(answers):
+    """One answer per question, the last one repeating."""
+    return answers.pop(0) if len(answers) > 1 else answers[0]
+
+
 class FakeGuest:
-    """Answers the walk in order; a listing and a tree answer separately.
+    """The accessibility helper and System Events, answering by what was asked.
 
-    The tree is told from the listing by `on attr(`, which only the walk asks
-    for: both scripts define a handler called `describe`, so the listing's own
-    discriminator would catch the walk as well and hand it the wrong answer.
-
-    The menu's titles and the guest's own language answer by what was asked
-    rather than by their turn in the queue: both are read only when the lab has
-    already failed, after any number of attempts, so a queued answer would
-    belong to whichever attempt happened to be last.
+    `walks` are screens written as the AppleScript walk printed them, one per
+    walk; `windows` the titles of uDeck's windows, one answer per question;
+    `presses` what pressing the menu item answers — "pressed" or a refusal as
+    (exit code, words). The menu's titles and the guest's own language answer by
+    what was asked rather than by their turn: both are read only when the lab
+    has already failed, after any number of attempts.
     """
 
-    def __init__(self, answers, listing="", tree="", menu="", language=""):
-        self.answers = list(answers)
-        self.listing = listing
-        self.tree = tree
+    def __init__(self, walks=None, windows=None, presses=None, menu=None, language="", typed="typed"):
+        self.walks = list(walks or [""])
+        self.windows = list(windows or [[ui.SETTINGS_WINDOW]])
+        self.presses = list(presses or ["pressed"])
         self.menu = menu
         self.language = language
+        self.typed = typed
         self.scripts = []
+        self.host = "192.168.64.2"
 
     def run(self, command, step, seconds=None, check=True):
         self.scripts.append(command)
-        if "on attr(" in command:
-            tree = self.tree.pop(0) if isinstance(self.tree, list) and len(self.tree) > 1 else self.tree
-            return done([], 0, tree[0] if isinstance(tree, list) else tree)
-        if "on describe(" in command:
-            return done([], 0, self.listing)
-        if "name of every menu item" in command:
-            return done([], 0, self.menu)
+        if command.startswith(AX + " "):
+            return self._helper(shlex.split(command)[1:])
         if "AppleLanguages" in command:
             return done([], 0, self.language)
-        answer = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
-        if isinstance(answer, tuple):
-            return done([], answer[0], answer[1], answer[2] if len(answer) > 2 else "")
-        return done([], 0, answer)
+        if command.startswith("osascript "):
+            return done([], 0, self.typed)
+        raise AssertionError(f"the lab asked the guest something no test expects: {command}")
+
+    def _helper(self, args):
+        name = args[0]
+        if name == "walk":
+            answer = _next(self.walks)
+            if isinstance(answer, tuple):
+                return done([], answer[0], "", answer[1])
+            return done([], 0, ax_walk(answer, window=args[2].removeprefix("title=")))
+        if name == "windows":
+            titles = _next(self.windows)
+            if isinstance(titles, tuple):
+                return done([], titles[0], "", titles[1])
+            return done([], 0, json.dumps({"windows": [{"title": t, "subrole": "", "frame": None} for t in titles]}))
+        if name == "press-menu-item":
+            answer = _next(self.presses)
+            if isinstance(answer, tuple):
+                return done([], answer[0], "", answer[1])
+            return done([], 0, json.dumps({"pressed": args[2]}))
+        if name == "menu":
+            if self.menu is None:
+                return done([], 1, "", "ax: uDeck has no menu bar")
+            return done([], 0, json.dumps({"titles": self.menu}))
+        if name == "place":
+            x, y, width, height = (int(n) for n in args[3:7])
+            return done([], 0, json.dumps({"frame": [x, y, width, min(height, 1400)]}))
+        raise AssertionError(f"the helper was asked something no test expects: {args}")
 
 
 class FakeMachine:
-    def __init__(self, *answers, listing="", tree="", menu="", language=""):
+    def __init__(self, **guest):
         self.name = "udeck-e2e-probe"
-        self.ssh = FakeGuest(answers, listing, tree, menu, language)
+        self.ax_path = AX
+        self.ssh = FakeGuest(**guest)
         self.clicks = []
         self._clock = Clock()
 
@@ -77,69 +108,90 @@ class FakeMachine:
     def sleep(self, seconds):
         self._clock.sleep(seconds)
 
+    def helper_calls(self, name):
+        return [s for s in self.ssh.scripts if s.startswith(f"{AX} {name} ")]
+
+
+# A settings window as the walk reads it, its About section in the sidebar.
+ABOUT = "\n".join([
+    "0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;",
+    "8|AXStaticText||section.about||About||808;355;|59;17;",
+    "5|AXButton||updates.checkNow||||955;455;|83;20;",
+])  # fmt: skip
+WITHOUT_INSTALL = "\n".join([
+    "0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;",
+    "5|AXButton||updates.checkNow||||955;455;|83;20;",
+    "5|AXCheckBox||updates.automatic||1||955;485;|83;20;",
+])  # fmt: skip
+
 
 def test_a_control_is_found_by_its_identifier_and_clicked_in_its_middle():
-    machine = FakeMachine("808,355,59,17")
+    machine = FakeMachine(walks=[ABOUT])
     element = ui.click(machine, "section.about", "opening About")
-    assert element == ui.Element("section.about", 808, 355, 59, 17)
+    assert (element.identifier, element.x, element.y, element.width, element.height) == ("section.about", 808, 355, 59, 17)
     assert machine.clicks == [(837, 363)]
-    # The identifier is quoted into the script, and the walk is bounded.
-    script = machine.ssh.scripts[0]
-    assert '"section.about"' in script and f"depth < {ui.MAX_DEPTH}" in script
-    assert '"uDeck Settings"' in script
+    # The helper is asked to walk uDeck's settings window, by its title, deep enough —
+    # twice, half a second apart, so that the click goes where the control has come to rest.
+    walked = machine.helper_calls("walk")
+    assert walked == [f"{AX} walk uDeck 'title=uDeck Settings' {ui.MAX_DEPTH}"] * 2
+    assert machine._clock.now == ui.SETTLED_SECONDS
 
 
 def test_a_control_that_never_appears_says_what_is_there_instead():
-    machine = FakeMachine("not found", listing="AXButton [updates.checkNow], AXCheckBox [updates.automatic]")
+    machine = FakeMachine(walks=[WITHOUT_INSTALL])
     with pytest.raises(LabError, match="updates.install' did not appear") as raised:
         ui.wait_for(machine, "updates.install", "installing", seconds=5)
-    assert "updates.checkNow" in raised.value.reason
+    assert "AXButton [updates.checkNow]" in raised.value.reason and "AXCheckBox [updates.automatic]" in raised.value.reason
     assert machine._clock.now >= 5
 
 
 def test_a_control_that_appears_a_moment_later_is_waited_for():
-    machine = FakeMachine("not found", "not found", "955,455,83,20")
+    machine = FakeMachine(walks=[WITHOUT_INSTALL.replace("updates.checkNow", "x"), WITHOUT_INSTALL])
     element = ui.wait_for(machine, "updates.checkNow", "checking", seconds=30)
     assert element.middle == (996, 465)
     assert 0 < machine._clock.now < 30
 
 
 def test_an_answer_the_lab_cannot_read_is_a_lab_error():
-    with pytest.raises(LabError, match="unexpected answer"):
-        ui.find(FakeMachine("955,455"), "updates.checkNow", "checking")
+    """A walk that is not one, from a helper that answered something else: the lab's failure, with the answer."""
+    machine = FakeMachine()
+    machine.ssh.run = lambda command, step, seconds=None, check=True: done([], 0, '{"elements": [{"depth": 0}]}')
+    with pytest.raises(LabError, match="could not be read"):
+        ui.find(machine, "updates.checkNow", "checking")
+    machine.ssh.run = lambda command, step, seconds=None, check=True: done([], 0, "755,455")
+    with pytest.raises(LabError, match="not JSON"):
+        ui.find(machine, "updates.checkNow", "checking")
 
 
-def test_system_events_refusing_is_a_lab_error_not_a_verdict():
-    machine = FakeMachine("x")
-    machine.ssh.run = lambda command, step, seconds=None, check=True: done(
-        [], 1, "", "execution error: System Events got an error: … (-1728)"
-    )
-    with pytest.raises(LabError, match="System Events refused"):
+def test_the_helper_refusing_is_a_lab_error_not_a_verdict():
+    machine = FakeMachine(walks=[(1, "ax: uDeck has no window called uDeck Settings; its windows: none")])
+    with pytest.raises(LabError, match="the accessibility helper refused: ax: uDeck has no window called") as raised:
         ui.identifiers(machine, "listing")
+    assert not isinstance(raised.value, NotThere)
 
 
 def test_the_settings_window_is_opened_from_the_applications_own_menu():
-    machine = FakeMachine("opened")
+    machine = FakeMachine()
     ui.open_settings(machine, "opening the settings")
-    script = machine.ssh.scripts[0]
-    assert '"Settings…"' in script and "menu bar item 1 of menu bar 1" in script
+    assert machine.ssh.scripts == [f"{AX} press-menu-item uDeck 'Settings…'"]
 
 
 def test_a_field_is_typed_into_by_system_events_in_udeck():
     """Install from a link…'s field: typed into the way choose_folder types a path, the text quoted as AppleScript."""
-    machine = FakeMachine("typed")
+    machine = FakeMachine()
     ui.type_text(machine, 'github.com/o/r/pull/3"x', "typing")
     script = machine.ssh.scripts[0]
     assert 'keystroke "github.com/o/r/pull/3\\"x"' in script and 'tell process "uDeck"' in script
 
 
-def test_every_script_asks_only_about_udeck():
-    machine = FakeMachine("", "", "")
+def test_every_question_asks_only_about_udeck():
+    machine = FakeMachine(walks=[ABOUT])
     ui.identifiers(machine, "listing")
     ui.find(machine, "updates.checkNow", "finding")
     ui.open_settings(machine, "opening")
-    for script in machine.ssh.scripts:
-        assert '"uDeck"' in script
+    ui.windows(machine, "listing windows")
+    for asked in machine.ssh.scripts:
+        assert shlex.split(asked)[2] == "uDeck"
 
 
 def test_only_the_control_never_appearing_is_NotThere():
@@ -149,11 +201,11 @@ def test_only_the_control_never_appearing_is_NotThere():
     second as the first: a click the lab could not make became "uDeck did not
     even offer it" and the check passed having pressed nothing.
     """
-    machine = FakeMachine("not found", listing="AXButton [updates.checkNow]")
+    machine = FakeMachine(walks=[WITHOUT_INSTALL])
     with pytest.raises(NotThere):
         ui.wait_for(machine, "updates.install", "installing", seconds=5)
 
-    refused = FakeMachine((1, "", "execution error: System Events got an error: … (-1728)"))
+    refused = FakeMachine(walks=[(1, "ax: no process called uDeck is running")])
     with pytest.raises(LabError) as raised:
         ui.wait_for(refused, "updates.install", "installing", seconds=5)
     assert not isinstance(raised.value, NotThere)
@@ -164,23 +216,20 @@ def test_only_the_control_never_appearing_is_NotThere():
 def test_the_settings_window_is_asked_for_again_until_it_is_there():
     """The menu press is made moments after uDeck was launched.
 
-    A status item that is not in the menu bar yet makes System Events refuse, and
+    A status item that is not in the menu bar yet makes the press refused, and
     a press that lands before the application is ready does nothing at all —
     both the lab being early, and both used to end the check as "could not check".
     """
     machine = FakeMachine(
-        (1, "", "execution error: System Events got an error: … (-1728)"),  # no menu yet
-        "opened",
-        "Something Else",                                                   # pressed, no window
-        "opened",
-        "uDeck Settings, Something Else",
+        presses=[(1, "ax: uDeck's menu bar has no item"), "pressed", "pressed"],  # no menu yet
+        windows=[["Something Else"], ["uDeck Settings", "Something Else"]],  # pressed, no window; then there
     )
     ui.open_settings_and_wait(machine, "opening uDeck's settings", seconds=30)
-    assert len([s for s in machine.ssh.scripts if "click menu item" in s]) == 3
+    assert len(machine.helper_calls("press-menu-item")) == 3
 
 
 def test_a_settings_window_that_never_opens_is_a_lab_problem():
-    machine = FakeMachine("opened", "Something Else")
+    machine = FakeMachine(windows=[["Something Else"]])
     with pytest.raises(LabError, match="did not open within"):
         ui.open_settings_and_wait(machine, "opening uDeck's settings", seconds=5)
     assert machine._clock.now >= 5
@@ -196,8 +245,8 @@ def test_a_guest_with_no_such_menu_item_says_which_language_it_is_in():
     language the guest answers with, and the titles it does offer.
     """
     machine = FakeMachine(
-        (1, "", "execution error: System Events got an error: Can't get menu item \"Settings…\". (-1719)"),
-        menu="О приложении uDeck, Настройки…, Завершить uDeck",
+        presses=[(1, "ax: uDeck's menu has no item called Settings…")],
+        menu=["О приложении uDeck", "Настройки…", "Завершить uDeck"],
         language="(ru,en)",
     )
     with pytest.raises(LabError) as raised:
@@ -209,12 +258,122 @@ def test_a_guest_with_no_such_menu_item_says_which_language_it_is_in():
 
 def test_a_guest_that_will_not_say_which_language_it_is_in_still_gives_a_reason():
     """Both of those are evidence, and evidence may not raise over a reason."""
-    machine = FakeMachine("opened", "Something Else")
-    machine.ssh.menu = ""
+    machine = FakeMachine(windows=[["Something Else"]], menu=[])
     with pytest.raises(LabError) as raised:
         ui.open_settings_and_wait(machine, "opening uDeck's settings", seconds=5)
     assert "the guest said nothing" in raised.value.reason
     assert "offers nothing" in raised.value.reason
+    refused = FakeMachine(windows=[["Something Else"]])
+    with pytest.raises(LabError) as raised:
+        ui.open_settings_and_wait(refused, "opening uDeck's settings", seconds=5)
+    assert "the menu could not be read: the accessibility helper refused: ax: uDeck has no menu bar" in raised.value.reason
+
+
+# --- Out of the pointer's reach ---------------------------------------------------------
+
+
+def _hidden(dump, identifier):
+    """The same screen with one control out of reach, as the helper says of it."""
+    walked = json.loads(ax_walk(dump))
+    for element in walked["elements"]:
+        if element["identifier"] == identifier:
+            element["shown"] = False
+    return json.dumps(walked)
+
+
+def test_on_a_machine_that_cannot_scroll_a_control_is_clicked_where_the_walk_said_as_it_always_was():
+    """A Tart guest: every pane the checks press in fits its window, and nothing
+    about a click changed with the helper — it goes where the walk said."""
+    machine = FakeMachine()
+    machine.ssh._helper = lambda args: done([], 0, _hidden(ABOUT, "updates.checkNow")) if args[0] == "walk" else None
+    ui.click(machine, "updates.checkNow", "checking")
+    assert machine.clicks == [(996, 465)]
+    # And a control read out of a kept walk keeps what the walk said of it.
+    (element,) = [e for e in ui.controls(ax.dump(ax.parse_walk(_hidden(ABOUT, "updates.checkNow"))[0])) if not e.shown]
+    assert element.identifier == "updates.checkNow" and element.middle == (996, 465)
+
+
+def test_the_panel_is_never_scrolled_even_where_the_machine_can_scroll():
+    """The panel's frame trails its animation (run 38213314297): what it reports
+    of its own reach is not a reason to scroll it, and nothing in it scrolls."""
+    machine = FakeMachine()
+    machine.ssh._helper = lambda args: done([], 0, _hidden(ABOUT, "updates.checkNow")) if args[0] == "walk" else None
+    machine.scroll = lambda *a: (_ for _ in ()).throw(AssertionError("scrolled the panel"))
+    ui.click(machine, "updates.checkNow", "allowing", ui.PANEL)
+    assert machine.clicks == [(996, 465)]
+
+
+def test_a_pane_that_scrolling_does_not_bring_the_control_into_is_the_labs_failure():
+    pane = "\n".join([
+        "0|AXWindow|AXStandardWindow||uDeck Settings|||60;40;|1500;961;",
+        "4|AXScrollArea||||||208;72;|1352;929;",
+        "5|AXButton||catalogue.uptime.install||||228;1200;|80;24;",
+    ])  # fmt: skip
+    machine = FakeMachine()
+    machine.ssh._helper = lambda args: done([], 0, _hidden(pane, "catalogue.uptime.install"))
+    scrolled = []
+    machine.scroll = lambda x, y, distance, step: scrolled.append(distance)
+    with pytest.raises(LabError, match="stayed outside what 'uDeck Settings' shows after 6 scrolls") as raised:
+        ui.click(machine, "catalogue.uptime.install", "installing")
+    assert not isinstance(raised.value, NotThere) and machine.clicks == [] and len(scrolled) == ui.SCROLLS
+
+
+def test_a_control_out_of_reach_is_scrolled_into_view_where_the_machine_can_scroll():
+    """`--target here`: the runner's screen is smaller than the guest's, and the
+    pane under the control is scrolled until the walk says it can be reached."""
+    pane = "\n".join([
+        "0|AXWindow|AXStandardWindow||uDeck Settings|||60;40;|1500;961;",
+        "4|AXScrollArea||||||208;72;|1352;929;",
+        "5|AXButton||catalogue.uptime.install||||228;1200;|80;24;",
+    ])  # fmt: skip
+    moved = pane.replace("228;1200;", "228;700;")
+    answers = [_hidden(pane, "catalogue.uptime.install")] * 3 + [ax_walk(moved)]
+    machine = FakeMachine()
+    machine.ssh._helper = lambda args: done([], 0, answers.pop(0) if len(answers) > 1 else answers[0])
+    scrolled = []
+    machine.scroll = lambda x, y, distance, step: scrolled.append((x, y, distance))
+    element = ui.click(machine, "catalogue.uptime.install", "installing")
+    assert (element.x, element.y) == (228, 700)
+    assert machine.clicks == [(268, 712)]
+    # At the pane's middle, and upward — the content moved up to bring a control below into view.
+    assert scrolled == [(884, 536, -675)]
+
+
+SCROLLED_PANE = "\n".join([
+    "0|AXWindow|AXStandardWindow||uDeck Settings|||60;40;|1500;961;",
+    "4|AXScrollArea||||||208;72;|1352;929;",
+    "5|AXButton||catalogue.uptime.install||||228;1200;|80;24;",
+])  # fmt: skip
+REBUILT_PANE = "\n".join([
+    "0|AXWindow|AXStandardWindow||uDeck Settings|||60;40;|1500;961;",
+    "4|AXScrollArea||||||208;72;|1352;929;",
+])  # fmt: skip
+
+
+def test_a_walk_that_misses_a_control_wait_for_just_saw_is_walked_again():
+    """SwiftUI rebuilding the pane between `wait_for` and the scroll (R3 saw a
+    walk come back with the panel half-made): the walk is taken again, and the
+    control is reached when it is back — not a ❌ about uDeck."""
+    answers = [_hidden(SCROLLED_PANE, "catalogue.uptime.install"), ax_walk(REBUILT_PANE), ax_walk(REBUILT_PANE),
+               ax_walk(SCROLLED_PANE.replace("228;1200;", "228;700;"))]
+    machine = FakeMachine()
+    machine.ssh._helper = lambda args: done([], 0, answers.pop(0) if len(answers) > 1 else answers[0])
+    scrolled = []
+    machine.scroll = lambda x, y, distance, step: scrolled.append(distance)
+    element = ui.in_view(machine, "catalogue.uptime.install", "installing")
+    assert (element.x, element.y) == (228, 700) and len(scrolled) == 1
+
+
+def test_a_control_that_goes_while_the_lab_scrolls_to_it_is_the_labs_failure_not_NotThere():
+    """`NotThere` is `wait_for`'s deadline and nothing else: the checks read it
+    as "uDeck does not offer it", and this control was offered a moment ago."""
+    answers = [_hidden(SCROLLED_PANE, "catalogue.uptime.install"), ax_walk(REBUILT_PANE)]
+    machine = FakeMachine()
+    machine.ssh._helper = lambda args: done([], 0, answers.pop(0) if len(answers) > 1 else answers[0])
+    machine.scroll = lambda *a: None
+    with pytest.raises(LabError, match="went from it while the lab scrolled to it") as raised:
+        ui.click(machine, "catalogue.uptime.install", "installing")
+    assert not isinstance(raised.value, NotThere) and machine.clicks == []
 
 
 # --- Controls that have no name -----------------------------------------------------
@@ -243,14 +402,9 @@ OPENING = "\n".join([
     "5|AXCheckBox||||1||1124;377;|205;16;",
 ])  # fmt: skip
 
-# What the sidebar's own identifier answers, so that choosing the section is a
-# click at coordinates like every other one.
-THE_SIDEBAR_ROW = "935,226,144,28"
-
-
 def opened_on_opening(tree=OPENING):
-    """A guest with the settings window open and the walk answering."""
-    return FakeMachine("opened", ui.SETTINGS_WINDOW, THE_SIDEBAR_ROW, tree=tree)
+    """A guest with the settings window open and the walk answering: twice to find Opening in the sidebar at rest, then `tree`."""
+    return FakeMachine(walks=[OPENING, OPENING, *(tree if isinstance(tree, list) else [tree])])
 
 
 def test_the_walk_reads_every_attribute_a_click_at_an_unnamed_control_needs():
@@ -315,7 +469,7 @@ def test_the_screen_names_each_control_by_the_setting_it_writes():
     # whatever the walk happened to print.
     assert screen.modifier(config.HOTKEY_MODIFIER_ROW[0]).x == 1124
     assert screen.switch(config.OPENING_SWITCHES[0]).y == 246
-    assert screen.dump == OPENING
+    assert screen.dump == as_the_lab_keeps_it(OPENING)
 
 
 def test_a_row_that_does_not_read_uDecks_defaults_is_not_the_row():
@@ -358,11 +512,10 @@ def test_a_screen_the_controls_never_appeared_on_is_the_labs_failure():
 def test_the_screen_is_waited_for_rather_than_slept_at():
     """One walk when the pane is there, more when it is not — and never a fixed
     pause, which would be a number nothing measured."""
-    machine = FakeMachine("opened", ui.SETTINGS_WINDOW, THE_SIDEBAR_ROW,
-                          tree=["0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;", OPENING])
+    machine = opened_on_opening(["0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;", OPENING])
     ui.opening(machine, "opening the settings")
-    assert len([s for s in machine.ssh.scripts if "on attr(" in s]) == 2
-    assert machine._clock.now == 1
+    assert len(machine.helper_calls("walk")) == 4, "two to find Opening in the sidebar at rest, two of the screen"
+    assert machine._clock.now == 1 + ui.SETTLED_SECONDS
 
 
 # The same screen with the retract switch off, which is what the walk reads
@@ -379,10 +532,10 @@ def test_an_unnamed_control_is_pressed_with_the_pointer_and_never_through_the_ap
     screen = ui.opening(machine, "opening the settings")
     after = ui.press(machine, screen.switch(config.THE_SWITCH), "turning the switch off")
     assert machine.clicks[-1] == (1124 + 303 // 2, 448 + 16 // 2)
-    assert not any("AXPress" in script for script in machine.ssh.scripts)
+    assert not any(" click " in script or "AXPress" in script for script in machine.ssh.scripts)
     # And what the control reads now, which is what says the click landed.
     assert (after.x, after.y, after.value) == (1124, 448, "0")
-    assert machine._clock.now == 0, "the control answered on the first walk after the click"
+    assert machine._clock.now == ui.SETTLED_SECONDS, "the control answered on the first walk after the click"
 
 
 def test_a_click_that_left_the_control_as_it_was_is_the_labs_failure():
@@ -411,13 +564,16 @@ def test_a_control_that_is_no_longer_on_the_screen_after_the_click_says_so():
 
 def test_a_value_of_several_lines_is_walked_on_one_line():
     """A plugin's stderr, under More, is a value of several lines; the walk prints each control on one line."""
-    script = ui._IDENTIFIED
-    assert 'set text item delimiters to {return & linefeed, linefeed, return}' in script
-    assert f'set text item delimiters to "{ui.LINE_BREAK}"' in script
-    assert script.count("return my oneLine(") == 2, "a list's text and a single value both"
+    walked = json.loads(ax_walk("5|AXStaticText||plugin.flaky.stderr||x||233;400;|300;26;"))
+    walked["elements"][1]["value"] = "Traceback\r\nValueError: told to fail\nand\rmore"
+    dump = ax.dump(ax.parse_walk(json.dumps(walked))[0], identified_only=True)
+    assert len(dump.splitlines()) == 1
+    (control,) = ui.controls(dump)
+    assert ui.says(control) == f"Traceback{ui.LINE_BREAK}ValueError: told to fail{ui.LINE_BREAK}and{ui.LINE_BREAK}more"
+    # And a line the old walk wrote, nine fields, still reads.
     row = f"5|AXStaticText||plugin.flaky.stderr||Traceback{ui.LINE_BREAK}ValueError: told to fail||233;400;|300;26;"
     (control,) = ui.controls(row)
-    assert ui.says(control) == f"Traceback{ui.LINE_BREAK}ValueError: told to fail"
+    assert ui.says(control) == f"Traceback{ui.LINE_BREAK}ValueError: told to fail" and control.shown
 
 
 def test_the_settings_window_is_reached_by_its_russian_names_when_uDeck_speaks_russian():
@@ -430,3 +586,17 @@ def test_a_folder_is_chosen_by_typing_its_path_into_go_to_folder():
     assert 'keystroke "g" using {command down, shift down}' in script
     assert 'keystroke "/Users/admin/udeck-e2e-work/it\'s mine"' in script
     assert script.count("key code 36") == 2, "Return to go there, Return for the panel's own button"
+
+
+def test_a_control_still_moving_is_aimed_at_only_once_it_has_come_to_rest():
+    """The panel grows on a spring and a sheet slides down: a control read while
+    they move is read where it is passing through (run 38224850163)."""
+    moving = [ABOUT.replace("808;355;", f"808;{y};") for y in (300, 330, 355, 355)]
+    machine = FakeMachine(walks=moving)
+    element = ui.click(machine, "section.about", "opening About")
+    assert element.y == 355 and machine.clicks == [(837, 363)]
+    assert len(machine.helper_calls("walk")) == 4
+    # And one that never stops moving is taken where it was last, at the deadline.
+    restless = FakeMachine(walks=[ABOUT.replace("808;355;", f"808;{y};") for y in range(300, 400)])
+    element = ui.wait_for(restless, "section.about", "opening About", seconds=2)
+    assert restless._clock.now >= 2 and element.y < 400

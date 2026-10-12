@@ -1,0 +1,14 @@
+0|AXWindow|AXSystemDialog|||||730;-2;|1100;792;|shown
+1|AXGroup|AXHostingView|||||730;-2;|1100;792;|shown
+2|AXButton||||||742;42;|48;23;|shown
+2|AXButton||||||804;46;|8;14;|shown
+2|AXButton||panel.refresh||||1699;43;|26;22;|shown
+2|AXButton||panel.settings||||1730;43;|26;22;|shown
+2|AXButton||panel.sendAway||||1761;43;|26;22;|shown
+2|AXButton||panel.fullscreen||||1792;43;|26;22;|shown
+2|AXImage||square.grid.2x2||||1269;358;|23;23;|shown
+2|AXStaticText||||No plugins installed||1213;397;|133;17;|shown
+2|AXStaticText||||uDeck shows nothing by itself — everything in the panel comes from a plugin. Put one in ~/.udeck/plugins to begin.||1100;428;|360;30;|shown
+2|AXButton||||||1115;472;|165;23;|shown
+2|AXButton||||||1288;472;|158;23;|shown
+2|AXUnknown||||||1252;780;|56;5;|shown

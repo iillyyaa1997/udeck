@@ -12,6 +12,7 @@
 #                             [--test-feed URL --test-key PUBLIC_KEY]
 #                             [--test-plugins BASE_URL]
 #                             [--out DIR] [--version X.Y.Z] [--build N] [--zip]
+#                             [--prebuilt DIR]
 #
 # --debug bundles the debug build instead of the release one, into
 # dist/uDeck-debug.app. It exists because a bare `.build/debug/uDeck` is not an
@@ -43,6 +44,12 @@
 # so an unpacked copy on this Mac could take the release's login item merely by
 # being launched. It is unpacked inside the test machine and nowhere else.
 #
+# --prebuilt DIR assembles the bundle from binaries already compiled into DIR —
+# uDeck, udeck-plugin, Sparkle.framework and any resource bundles, as
+# `swift build -c release` leaves them — instead of compiling. The lab's GitHub
+# workflow compiles once and hands the same binaries to every job that runs
+# checks; the lab itself refuses a DIR compiled from another commit.
+#
 # The bundle carries the udeck-plugin command too, at Contents/Helpers/udeck-plugin,
 # built from the same checkout and signed with the bundle: Settings → Plugins →
 # "Install command" links it into ~/.local/bin, so the command a person types is
@@ -72,6 +79,7 @@ OUT="dist"
 SET_VERSION=""
 SET_BUILD=""
 MAKE_ZIP=0
+PREBUILT=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --sign) IDENTITY="$2"; shift 2 ;;
@@ -85,6 +93,7 @@ while [ $# -gt 0 ]; do
         --version) SET_VERSION="$2"; shift 2 ;;
         --build) SET_BUILD="$2"; shift 2 ;;
         --zip) MAKE_ZIP=1; shift ;;
+        --prebuilt) PREBUILT="$2"; shift 2 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -129,9 +138,21 @@ if [ -n "$TEST_PLUGINS" ]; then
     fi
 fi
 
+if [ -n "$PREBUILT" ] && [ "$CONFIG" = "debug" ]; then
+    echo "--prebuilt takes release binaries; drop --debug" >&2
+    exit 2
+fi
+if [ -n "$PREBUILT" ] && [ ! -f "$PREBUILT/uDeck" ]; then
+    echo "--prebuilt $PREBUILT has no uDeck in it" >&2
+    exit 2
+fi
+
 if [ "$CONFIG" = "debug" ]; then
     APP="$OUT/uDeck-debug.app"
     BUILT="./.build/debug/uDeck"
+elif [ -n "$PREBUILT" ]; then
+    APP="$OUT/uDeck.app"
+    BUILT="$PREBUILT/uDeck"
 else
     APP="$OUT/uDeck.app"
     BUILT="./.build/release/uDeck"
@@ -143,7 +164,9 @@ PLIST="Sources/uDeck/Support/Info.plist"
 VERSION="${SET_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")}"
 
 echo "==> Building uDeck $VERSION for $CONFIG"
-if [ "$CONFIG" = "debug" ]; then
+if [ -n "$PREBUILT" ]; then
+    echo "==> Taking the binaries compiled in $PREBUILT"
+elif [ "$CONFIG" = "debug" ]; then
     swift build
     swift build --product udeck-plugin
 else

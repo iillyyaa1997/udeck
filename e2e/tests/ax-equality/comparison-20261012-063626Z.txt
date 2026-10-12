@@ -1,0 +1,128 @@
+SAME  Settings open — uDeck's windows (ui.windows): System Events 0.425s, helper 0.136s, 1 items
+SAME  Settings open — uDeck's menu (ui.menu_items): System Events 0.202s, helper 0.127s
+SAME  Settings → General — every element (ui.tree): System Events 6.506s, helper 0.173s, 39 items
+SAME  Settings → General — identified controls to depth 6 (ui.identified): System Events 1.536s, helper 0.188s, 3 items
+SAME  Settings → General — identifiers (ui.identifiers): System Events 2.212s, helper 0.162s, 8 items
+SAME  Settings → General — sentences (ui.static_texts): System Events 1.66s, helper 0.149s, 9 items
+SAME  Settings → General — 'ListColumn' found (ui.find): System Events 0.994s, helper 0.184s
+SAME  Settings → General — 'general.openAtLogin' found (ui.find): System Events 1.422s, helper 0.161s
+SAME  Settings → General — 'general.opensWhich' found (ui.find): System Events 1.232s, helper 0.159s
+SAME  Settings → Opening — every element (ui.tree): System Events 12.779s, helper 0.231s, 57 items
+SAME  Settings → Opening — identified controls to depth 6 (ui.identified): System Events 3.217s, helper 0.184s, 1 items
+SAME  Settings → Opening — identifiers (ui.identifiers): System Events 4.34s, helper 0.232s, 6 items
+SAME  Settings → Opening — sentences (ui.static_texts): System Events 3.211s, helper 0.19s, 17 items
+SAME  Settings → Opening — 'ListColumn' found (ui.find): System Events 0.955s, helper 0.171s
+DIFF  Settings → Look — every element (ui.tree): System Events 48.823s, helper 0.214s, 105 items
+      control: System Events read 106 and the helper 105
+      control #67: System Events ('5', 'AXStaticText', '', '', '', '100 %', '', 897, 419, 32, 13), the helper ('5', 'AXStaticText', '', '', '', '100 %', '', 897, 545, 32, 13)
+      control #86: System Events ('5', 'AXStaticText', '', '', '', '100 %', '', 897, 419, 32, 13), the helper ('5', 'AXStaticText', '', '', '', '100 %', '', 897, 710, 32, 13)
+      control #103: System Events ('3', 'AXGroup', '', '', '', '', '', 109, 46, 14, 16), the helper ('1', 'AXButton', 'AXMinimizeButton', '', '', '', '', 90, 47, 12, 14)
+      control #104: System Events ('1', 'AXButton', 'AXMinimizeButton', '', '', '', '', 90, 47, 12, 14), the helper ('1', 'AXStaticText', '', '', '', 'uDeck Settings', '', 758, 45, 103, 16)
+      control #105: only System Events read ('1', 'AXStaticText', '', '', '', 'uDeck Settings', '', 758, 45, 103, 16)
+SAME  Settings → Look — identified controls to depth 6 (ui.identified): System Events 7.191s, helper 0.21s, 1 items
+SAME  Settings → Look — identifiers (ui.identifiers): System Events 13.842s, helper 0.21s, 6 items
+SAME  Settings → Look — sentences (ui.static_texts): System Events 10.028s, helper 0.215s, 32 items
+SAME  Settings → Look — 'ListColumn' found (ui.find): System Events 1.082s, helper 0.213s
+DIFF  Settings → Plugins — every element (ui.tree): System Events 63.91s, helper 0.205s, 109 items
+      control: System Events read 110 and the helper 109
+      control #77: System Events ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 368, 808, 48, 13), the helper ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 354, 903, 48, 13)
+      control #78: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 808, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.future-udeck.verified', '', 'Verified', '', 411, 904, 59, 13)
+      control #81: System Events ('5', 'AXStaticText', '', '', '', 'Asks for nothing', '', 225, 846, 79, 13), the helper ('5', 'AXStaticText', '', '', '', 'Asks for nothing', '', 225, 942, 79, 13)
+      control #87: System Events ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 368, 808, 48, 13), the helper ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 310, 999, 48, 13)
+      control #88: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 808, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.linked.verified', '', 'Verified', '', 367, 999, 59, 13)
+      control #91: System Events ('5', 'AXStaticText', '', '', '', 'Asks for nothing', '', 225, 846, 79, 13), the helper ('5', 'AXStaticText', '', '', '', 'Asks for nothing', '', 225, 1037, 79, 13)
+      control #96: System Events ('5', 'AXStaticText', '', '', '', '1.0.0', '', 276, 999, 26, 13), the helper ('5', 'AXStaticText', '', '', '', '1.0.0', '', 280, 1095, 26, 13)
+      control #98: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 808, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.uptime.verified', '', 'Verified', '', 375, 1095, 59, 13)
+      control #107: System Events ('3', 'AXGroup', '', '', '', '', '', 109, 46, 14, 16), the helper ('1', 'AXButton', 'AXMinimizeButton', '', '', '', '', 90, 47, 12, 14)
+      control #108: System Events ('1', 'AXButton', 'AXMinimizeButton', '', '', '', '', 90, 47, 12, 14), the helper ('1', 'AXStaticText', '', '', '', 'uDeck Settings', '', 758, 45, 103, 16)
+      control #109: only System Events read ('1', 'AXStaticText', '', '', '', 'uDeck Settings', '', 758, 45, 103, 16)
+DIFF  Settings → Plugins — identified controls to depth 6 (ui.identified): System Events 28.502s, helper 0.224s, 39 items
+      control #31: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 808, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.future-udeck.verified', '', 'Verified', '', 411, 904, 59, 13)
+      control #34: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 808, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.linked.verified', '', 'Verified', '', 367, 999, 59, 13)
+      control #37: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 808, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.uptime.verified', '', 'Verified', '', 375, 1095, 59, 13)
+DIFF  Settings → Plugins — identifiers (ui.identifiers): System Events 20.424s, helper 0.204s, 44 items
+      identifier #36: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.future-udeck.verified]',)
+      identifier #39: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.linked.verified]',)
+      identifier #42: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.uptime.verified]',)
+SAME  Settings → Plugins — sentences (ui.static_texts): System Events 17.903s, helper 0.198s, 56 items
+SAME  Settings → Plugins — 'ListColumn' found (ui.find): System Events 0.927s, helper 0.2s
+SAME  Settings → Plugins — 'searchPath.row.2' found (ui.find): System Events 2.935s, helper 0.197s
+SAME  Settings → Plugins — 'searchPath.folder.5' found (ui.find): System Events 3.467s, helper 0.201s
+SAME  Settings → Plugins — 'catalogue.enabled' found (ui.find): System Events 4.719s, helper 0.191s
+SAME  Settings → Plugins — 'catalogue.future-api.state' found (ui.find): System Events 7.555s, helper 0.19s
+SAME  Settings → Plugins — 'catalogue.uptime.install' found (ui.find): System Events 11.849s, helper 0.192s
+SAME  Settings → About — every element (ui.tree): System Events 9.343s, helper 0.181s, 47 items
+SAME  Settings → About — identified controls to depth 6 (ui.identified): System Events 2.318s, helper 0.146s, 3 items
+SAME  Settings → About — identifiers (ui.identifiers): System Events 3.184s, helper 0.174s, 8 items
+SAME  Settings → About — sentences (ui.static_texts): System Events 2.598s, helper 0.151s, 19 items
+SAME  Settings → About — 'ListColumn' found (ui.find): System Events 0.924s, helper 0.15s
+SAME  Settings → About — 'updates.automatic' found (ui.find): System Events 1.382s, helper 0.157s
+SAME  Settings → About — 'updates.checkNow' found (ui.find): System Events 1.6s, helper 0.158s
+DIFF  Install from a link… sheet — every element (ui.tree): System Events 67.913s, helper 0.217s, 114 items
+      control #81: System Events ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 368, 873, 48, 13), the helper ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 354, 968, 48, 13)
+      control #82: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 873, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.future-udeck.verified', '', 'Verified', '', 411, 969, 59, 13)
+      control #85: System Events ('5', 'AXStaticText', '', '', '', 'Asks for nothing', '', 225, 911, 79, 13), the helper ('5', 'AXStaticText', '', '', '', 'Asks for nothing', '', 225, 1007, 79, 13)
+      control #91: System Events ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 368, 873, 48, 13), the helper ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 310, 1064, 48, 13)
+      control #92: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 873, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.linked.verified', '', 'Verified', '', 367, 1064, 59, 13)
+      control #95: System Events ('5', 'AXStaticText', '', '', '', 'Asks for nothing', '', 225, 911, 79, 13), the helper ('5', 'AXStaticText', '', '', '', 'Asks for nothing', '', 225, 1102, 79, 13)
+      control #100: System Events ('5', 'AXStaticText', '', '', '', '1.0.0', '', 276, 1064, 26, 13), the helper ('5', 'AXStaticText', '', '', '', '1.0.0', '', 280, 1160, 26, 13)
+      control #102: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 873, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.uptime.verified', '', 'Verified', '', 375, 1160, 59, 13)
+DIFF  Install from a link… sheet — identified controls to depth 6 (ui.identified): System Events 29.592s, helper 0.188s, 42 items
+      control #34: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 873, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.future-udeck.verified', '', 'Verified', '', 411, 969, 59, 13)
+      control #37: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 873, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.linked.verified', '', 'Verified', '', 367, 1064, 59, 13)
+      control #40: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Verified', '', 425, 873, 59, 13), the helper ('5', 'AXStaticText', '', 'catalogue.uptime.verified', '', 'Verified', '', 375, 1160, 59, 13)
+DIFF  Install from a link… sheet — identifiers (ui.identifiers): System Events 20.069s, helper 0.198s, 47 items
+      identifier #39: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.future-udeck.verified]',)
+      identifier #42: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.linked.verified]',)
+      identifier #45: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.uptime.verified]',)
+SAME  Install from a link… sheet — sentences (ui.static_texts): System Events 18.311s, helper 0.197s, 57 items
+SAME  Install from a link… sheet — 'ListColumn' found (ui.find): System Events 0.973s, helper 0.28s
+SAME  Install from a link… sheet — 'searchPath.folder.0' found (ui.find): System Events 3.369s, helper 0.242s
+SAME  Install from a link… sheet — 'searchPath.folder.4' found (ui.find): System Events 3.851s, helper 0.19s
+SAME  Install from a link… sheet — 'command.install' found (ui.find): System Events 5.107s, helper 0.193s
+SAME  Install from a link… sheet — 'catalogue.future-api.state' found (ui.find): System Events 7.986s, helper 0.203s
+SAME  Install from a link… sheet — 'catalogue.uptime.install' found (ui.find): System Events 12.535s, helper 0.202s
+SAME  the panel — every element (ui.tree): System Events 2.287s, helper 0.161s, 14 items
+SAME  the panel — identified controls to depth 12 (ui.identified): System Events 1.26s, helper 0.137s, 5 items
+SAME  the panel — identifiers (ui.identifiers): System Events 0.927s, helper 0.133s, 5 items
+SAME  the panel — sentences (ui.static_texts): System Events 0.692s, helper 0.138s, 2 items
+SAME  the panel — 'panel.refresh' found (ui.find): System Events 0.379s, helper 0.155s
+SAME  the panel — 'panel.settings' found (ui.find): System Events 0.416s, helper 0.149s
+SAME  the panel — 'panel.sendAway' found (ui.find): System Events 0.466s, helper 0.158s
+SAME  the panel — 'panel.fullscreen' found (ui.find): System Events 0.475s, helper 0.158s
+SAME  the panel — 'square.grid.2x2' found (ui.find): System Events 0.513s, helper 0.138s
+SAME  the panel open — uDeck's windows (ui.windows): System Events 0.187s, helper 0.122s, 1 items
+SAME  the panel open — uDeck's menu (ui.menu_items): System Events 0.19s, helper 0.126s
+SAME  TextEdit — what the document holds (probes.typed_into): System Events 0.205s, helper 0.129s
+SAME  TextEdit — the window moved (probes.move_window): System Events 0.531s, helper 0.122s
+SAME  Russian Settings → General — every element (ui.tree): System Events 6.241s, helper 0.253s, 39 items
+SAME  Russian Settings → General — identified controls to depth 6 (ui.identified): System Events 1.463s, helper 0.143s, 3 items
+SAME  Russian Settings → General — identifiers (ui.identifiers): System Events 2.167s, helper 0.154s, 8 items
+SAME  Russian Settings → General — sentences (ui.static_texts): System Events 1.631s, helper 0.15s, 9 items
+SAME  Russian Settings → General — 'ListColumn' found (ui.find): System Events 0.948s, helper 0.155s
+SAME  Russian Settings → General — 'general.openAtLogin' found (ui.find): System Events 1.095s, helper 0.16s
+SAME  Russian Settings → General — 'general.opensWhich' found (ui.find): System Events 1.16s, helper 0.154s
+DIFF  Russian Settings → Plugins — every element (ui.tree): System Events 69.127s, helper 0.203s, 110 items
+      control #77: System Events ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 368, 808, 48, 13), the helper ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 354, 903, 48, 13)
+      control #78: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Проверен', '', 425, 808, 71, 13), the helper ('5', 'AXStaticText', '', 'catalogue.future-udeck.verified', '', 'Проверен', '', 411, 904, 71, 13)
+      control #81: System Events ('5', 'AXStaticText', '', '', '', 'Ничего не просит', '', 225, 846, 90, 13), the helper ('5', 'AXStaticText', '', '', '', 'Ничего не просит', '', 225, 942, 90, 13)
+      control #87: System Events ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 368, 808, 48, 13), the helper ('5', 'AXStaticText', '', '', '', 'uDeck lab', '', 310, 999, 48, 13)
+      control #88: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Проверен', '', 425, 808, 71, 13), the helper ('5', 'AXStaticText', '', 'catalogue.linked.verified', '', 'Проверен', '', 367, 999, 71, 13)
+      control #91: System Events ('5', 'AXStaticText', '', '', '', 'Ничего не просит', '', 225, 846, 90, 13), the helper ('5', 'AXStaticText', '', '', '', 'Ничего не просит', '', 225, 1037, 90, 13)
+      control #96: System Events ('5', 'AXStaticText', '', '', '', '1.0.0', '', 276, 999, 26, 13), the helper ('5', 'AXStaticText', '', '', '', '1.0.0', '', 280, 1095, 26, 13)
+      control #98: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Проверен', '', 425, 808, 71, 13), the helper ('5', 'AXStaticText', '', 'catalogue.uptime.verified', '', 'Проверен', '', 375, 1095, 71, 13)
+DIFF  Russian Settings → Plugins — identified controls to depth 6 (ui.identified): System Events 34.21s, helper 0.202s, 39 items
+      control #31: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Проверен', '', 425, 808, 71, 13), the helper ('5', 'AXStaticText', '', 'catalogue.future-udeck.verified', '', 'Проверен', '', 411, 904, 71, 13)
+      control #34: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Проверен', '', 425, 808, 71, 13), the helper ('5', 'AXStaticText', '', 'catalogue.linked.verified', '', 'Проверен', '', 367, 999, 71, 13)
+      control #37: System Events ('5', 'AXStaticText', '', 'catalogue.future-api.verified', '', 'Проверен', '', 425, 808, 71, 13), the helper ('5', 'AXStaticText', '', 'catalogue.uptime.verified', '', 'Проверен', '', 375, 1095, 71, 13)
+DIFF  Russian Settings → Plugins — identifiers (ui.identifiers): System Events 22.248s, helper 0.221s, 44 items
+      identifier #36: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.future-udeck.verified]',)
+      identifier #39: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.linked.verified]',)
+      identifier #42: System Events ('AXStaticText [catalogue.future-api.verified]',), the helper ('AXStaticText [catalogue.uptime.verified]',)
+SAME  Russian Settings → Plugins — sentences (ui.static_texts): System Events 18.284s, helper 0.225s, 56 items
+SAME  Russian Settings → Plugins — 'ListColumn' found (ui.find): System Events 1.002s, helper 0.225s
+SAME  Russian Settings → Plugins — 'searchPath.row.2' found (ui.find): System Events 3.066s, helper 0.213s
+SAME  Russian Settings → Plugins — 'searchPath.folder.5' found (ui.find): System Events 3.727s, helper 0.24s
+SAME  Russian Settings → Plugins — 'catalogue.enabled' found (ui.find): System Events 5.296s, helper 0.208s
+SAME  Russian Settings → Plugins — 'catalogue.future-api.state' found (ui.find): System Events 7.762s, helper 0.232s
+SAME  Russian Settings → Plugins — 'catalogue.uptime.install' found (ui.find): System Events 12.841s, helper 0.255s

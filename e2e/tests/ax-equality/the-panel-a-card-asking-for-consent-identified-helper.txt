@@ -1,0 +1,9 @@
+2|AXButton||panel.refresh||||1699;43;|26;22;|shown
+2|AXButton||panel.settings||||1730;43;|26;22;|shown
+2|AXButton||panel.sendAway||||1761;43;|26;22;|shown
+2|AXButton||panel.fullscreen||||1792;43;|26;22;|shown
+3|AXImage||clock.badge.questionmark||||1254;86;|13;11;|shown
+4|AXImage||terminal||||754;131;|11;9;|shown
+4|AXButton||consent.flaky.allow||||753;183;|103;23;|shown
+4|AXButton||consent.flaky.decline||||863;183;|66;23;|shown
+3|AXImage||arrow.down.right||||1260;354;|16;16;|shown

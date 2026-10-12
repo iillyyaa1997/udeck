@@ -102,8 +102,10 @@ def install(machine, archive: Path, note: Note) -> None:
     )
     app = f"{GUEST_APPLICATIONS}/{APP}"
     owner = machine.ssh.run(f"stat -f %Su {shlex.quote(app)}", step).stdout.strip()
-    if owner != config.GUEST_USER:
-        raise LabError(step, f"{app} belongs to {owner}, not to {config.GUEST_USER}")
+    # The guest's user, or on `--target here` the runner's (`here.HereMachine.user`).
+    user = getattr(machine, "user", config.GUEST_USER)
+    if owner != user:
+        raise LabError(step, f"{app} belongs to {owner}, not to {user}")
     quarantined = machine.ssh.ask(f"xattr -p com.apple.quarantine {shlex.quote(app)}", step)
     if quarantined.returncode == 0:
         raise LabError(step, f"{app} carries a quarantine attribute: {quarantined.stdout.strip()}")

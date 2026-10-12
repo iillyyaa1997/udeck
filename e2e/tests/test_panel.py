@@ -16,9 +16,9 @@ import re
 from pathlib import Path
 
 import pytest
-from fakes import Dropped, Failed, Machine, throw_output, wobble_output
+from fakes import AX, Dropped, Failed, Machine, ax_answer, throw_output, wobble_output
 
-from udeck_e2e import config, panel, probes
+from udeck_e2e import config, panel, probes, ui
 from udeck_e2e.errors import LabError
 
 ATTACHED = "Timestamp               Ty Process[PID:TID]\n"
@@ -922,13 +922,28 @@ def test_a_system_events_that_would_not_say_is_the_labs_failure():
 
 
 def test_a_window_is_moved_by_its_process_and_to_the_place_named():
-    machine = Machine({})
+    """By the accessibility helper, window 1 of the process, as System Events moved it."""
+    machine = Machine({"ax move-window": ax_answer(frame=[1900, 900, 600, 400])})
     probes.move_window(machine, "TextEdit", (1900, 900), "moving")
     moved = machine.ssh.commands[0]
-    assert 'tell process "TextEdit" to set position of window 1 to {1900, 900}' in moved
-    refused = Machine({"set position": Failed(code=1, said="Invalid index")})
-    with pytest.raises(LabError, match="Invalid index"):
+    assert moved == f"{AX} move-window TextEdit 1900 900"
+    refused = Machine({"move-window": Failed(code=1, said="ax: TextEdit has no window")})
+    with pytest.raises(LabError, match="TextEdit has no window"):
         probes.move_window(refused, "TextEdit", (1900, 900), "moving")
+
+
+def test_what_a_document_holds_is_read_by_the_helper_and_a_refusal_is_the_labs():
+    """`typed_into`: the helper's `text`, stripped as osascript's answer was; a
+    window it cannot read raises, so "" never stands for a key that did not arrive."""
+    machine = Machine({"ax text TextEdit": ax_answer(text="ax\n")})
+    assert probes.typed_into(machine, "TextEdit", "reading") == "ax"
+    assert machine.ssh.commands == [f"{AX} text TextEdit"]
+    refused = Machine({"ax text": Failed(code=1, said="ax: TextEdit's front window has no text area")})
+    with pytest.raises(LabError, match="has no text area"):
+        probes.typed_into(refused, "TextEdit", "reading")
+    dropped = Machine({"ax text": Dropped})
+    with pytest.raises(LabError, match="SSH"):
+        probes.typed_into(dropped, "TextEdit", "reading")
 
 
 # --- The keyboard shortcut ------------------------------------------------------------
@@ -1253,3 +1268,105 @@ def test_the_switch_the_lab_changes_is_one_of_them_and_is_uDecks_own_key():
     assert f"public var {config.THE_SWITCH}: Bool" in (
         Path(panel.__file__).resolve().parents[2] / "Sources" / "UDeckCore" / "Configuration" / "AppSettings.swift"
     ).read_text()
+
+
+# --- The places on another screen (`config.places`, `--target here`) ----------------------
+
+
+def test_the_places_stand_on_uDecks_own_numbers():
+    """What `config.places` works the places out from, read back out of uDeck's source."""
+    assert config.OPEN_WIDTH_FRACTION == _metric("openWidthFraction")
+    assert config.OPEN_MAX_WIDTH == _metric("openMaxWidth")
+    assert config.OPEN_HEIGHT_FRACTION == _metric("openHeightFraction")
+    assert config.OPEN_MAX_HEIGHT == _metric("openMaxHeight")
+    assert config.ANCHOR_WIDTH == _default("virtualAnchorWidth")
+    assert config.STRIP_SIDE_MARGIN == _default("stripSideMargin")
+    assert config.KEEP_ALIVE_INSET == _default("peekKeepAliveInset")
+
+
+def test_worked_out_on_the_guests_screen_the_places_are_the_ones_measured_there():
+    """Every place the panel checks aim at was measured on 2560×1440; the formulas
+    give each of them back exactly, so on Tart nothing a check aims at moved."""
+    for name, value in config.places(config.GOLDEN_WIDTH, config.GOLDEN_HEIGHT, config.MENU_BAR, 1370).items():
+        assert value == getattr(config, name), name
+
+
+def test_on_a_runners_screen_every_place_keeps_its_reason():
+    """1920×1080 with a 24-point menu bar and the Dock from 1006 down, as measured on a
+    runner (run 38209960064: the open panel 883 wide and 635 tall there). Each place is
+    still where its reason puts it — worked out, not measured."""
+    width, height, menu_bar, bottom = 1920, 1080, 24, 1006
+    places = config.places(width, height, menu_bar, bottom)
+    open_width = min(width * _metric("openWidthFraction"), _metric("openMaxWidth"))
+    content = min((bottom - menu_bar) * _metric("openHeightFraction"), _metric("openMaxHeight"))
+    left, right, panel_bottom = width / 2 - open_width / 2, width / 2 + open_width / 2, menu_bar + content
+    assert round(open_width) == 883 and round(panel_bottom) == 633, "the panel the runner drew"
+    inset = _default("peekKeepAliveInset")
+    x, y = places["PAST_THE_PANEL"]
+    assert x < left - inset and y > panel_bottom + inset and y < bottom, "left of what keeps it alive, below it, above the Dock"
+    x, y = places["IN_THE_MARGIN"]
+    assert panel_bottom < y < panel_bottom + inset and x == width // 2
+    x, y = places["OUT_OF_THE_WAY"]
+    assert x > right and y > panel_bottom
+    x, y = places["THE_FIRST_TAB"]
+    assert left < x < right and menu_bar < y < panel_bottom
+    first, last = places["STRIP_COLUMNS"]
+    assert first + last == width - 1 + (1 if width % 2 else 0) or abs((first + last) / 2 - width / 2) <= 1
+    assert places["WOBBLE_START_X"] < first
+    assert menu_bar < places["INSIDE_THE_PEEK"][1] < menu_bar + _metric("peekHeight")
+
+
+def test_a_document_is_typed_into_only_once_its_own_window_is_in_front():
+    """On a shared machine the application is in front already when its document is asked for (run 38215534337)."""
+    machine = Machine({
+        "frontmost": config.IN_FRONT_BEFORE_THE_PANEL,
+        f"ax windows {config.IN_FRONT_BEFORE_THE_PANEL}": [
+            ax_answer(windows=[{"title": "Untitled", "subrole": "", "frame": None}]),
+            ax_answer(windows=[{"title": "udeck-e2e-where-the-keyboard-went.txt — Edited", "subrole": "", "frame": None}]),
+        ],
+        f"ax focused {config.IN_FRONT_BEFORE_THE_PANEL}": [
+            ax_answer(focused="Untitled", main="Untitled", frontmost="true"),
+            ax_answer(focused="udeck-e2e-where-the-keyboard-went.txt", main="udeck-e2e-where-the-keyboard-went.txt", frontmost="true"),
+        ],
+    })
+    panel.bring_forward(machine, config.IN_FRONT_BEFORE_THE_PANEL, "bringing it forward", document=config.THE_DOCUMENT)
+    # A second for the window, a second for the focus, and half a second to see it stay.
+    assert machine.now == 2 + ui.SETTLED_SECONDS
+    never = Machine({
+        "frontmost": config.IN_FRONT_BEFORE_THE_PANEL,
+        f"ax windows {config.IN_FRONT_BEFORE_THE_PANEL}": ax_answer(windows=[{"title": "Untitled", "subrole": "", "frame": None}]),
+    })
+    with pytest.raises(LabError, match="front window is \\['Untitled'\\], not the document"):
+        panel.bring_forward(never, config.IN_FRONT_BEFORE_THE_PANEL, "bringing it forward", document=config.THE_DOCUMENT)
+    assert panel.is_the_document("udeck-e2e-where-the-keyboard-went", "udeck-e2e-where-the-keyboard-went.txt")
+    # Without a document, any window will do — but there has to be one to move.
+    windowless = Machine({
+        "frontmost": config.IN_FRONT_BEFORE_THE_PANEL,
+        f"ax windows {config.IN_FRONT_BEFORE_THE_PANEL}": [ax_answer(windows=[]), ax_answer(windows=[{"title": "Untitled", "subrole": "", "frame": None}])],
+    })
+    panel.bring_forward_before_the_panel(windowless, lambda text: None)
+    assert windowless.now == 1 + ui.SETTLED_SECONDS
+    # And the Finder, which a check brings forward with no window to move, is not waited on for one.
+    finder = Machine({"frontmost": config.THE_DESKTOP})
+    panel.bring_forward(finder, config.THE_DESKTOP, "bringing the Finder forward")
+    assert not [c for c in finder.ssh.commands if " windows " in c]
+    assert not panel.is_the_document("Untitled", "udeck-e2e-where-the-keyboard-went.txt")
+
+
+def test_a_document_opens_in_an_application_started_afresh_where_one_was_left_running():
+    """On a shared machine a check before left TextEdit running with its Open panel up,
+    and keys into the document went nowhere (runs 38215534337 to 38233896126)."""
+    machine = Machine({
+        "frontmost": config.IN_FRONT_BEFORE_THE_PANEL,
+        f"pgrep -x {config.IN_FRONT_BEFORE_THE_PANEL}": ["404", "404", ""],
+    })
+    panel.bring_forward(machine, config.IN_FRONT_BEFORE_THE_PANEL, "bringing it forward", document="/tmp/doc.txt")
+    commands = machine.ssh.commands
+    ended = commands.index(f"/usr/bin/pkill -x {config.IN_FRONT_BEFORE_THE_PANEL}; exit 0")
+    restored = commands.index("/usr/bin/defaults write com.apple.TextEdit ApplePersistenceIgnoreState -bool true")
+    opened = next(i for i, c in enumerate(commands) if c.startswith("/usr/bin/open -a"))
+    assert ended < restored < opened
+    # Not running, as on a fresh guest: nothing is ended and nothing written.
+    fresh = Machine({"frontmost": config.IN_FRONT_BEFORE_THE_PANEL})
+    panel.bring_forward(fresh, config.IN_FRONT_BEFORE_THE_PANEL, "bringing it forward", document="/tmp/doc.txt")
+    assert not [c for c in fresh.ssh.commands if "pkill" in c or "defaults write" in c]

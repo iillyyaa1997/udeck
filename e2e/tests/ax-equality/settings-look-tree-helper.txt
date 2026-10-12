@@ -1,0 +1,105 @@
+0|AXWindow|AXStandardWindow||uDeck Settings|||60;40;|1500;1309;|shown
+1|AXGroup|AXHostingView|||||60;68;|1500;1281;|shown
+2|AXSplitGroup||||||60;68;|1500;1281;|shown
+3|AXGroup|AXHostingView|||||60;68;|144;1281;|shown
+4|AXScrollArea||||||60;68;|144;1281;|shown
+5|AXOutline|||||Sidebar|60;68;|144;1281;|shown
+6|AXRow|AXOutlineRow|||||60;78;|144;28;|shown
+7|AXCell||||||70;78;|124;28;|shown
+8|AXStaticText||section.general||General||77;83;|71;18;|shown
+6|AXRow|AXOutlineRow|||||60;106;|144;28;|shown
+7|AXCell||||||70;106;|124;28;|shown
+8|AXStaticText||section.opening||Opening||77;111;|75;18;|shown
+6|AXRow|AXOutlineRow|||||60;134;|144;30;|shown
+7|AXCell||||||70;134;|124;30;|shown
+8|AXStaticText||section.look||Look||77;139;|54;20;|shown
+6|AXRow|AXOutlineRow|||||60;164;|144;28;|shown
+7|AXCell||||||70;164;|124;28;|shown
+8|AXStaticText||section.plugins||Plugins||79;169;|66;16;|shown
+6|AXRow|AXOutlineRow|||||60;192;|144;28;|shown
+7|AXCell||||||70;192;|124;28;|shown
+8|AXStaticText||section.about||About||78;197;|59;17;|shown
+6|AXColumn||ListColumn||||70;68;|124;1281;|shown
+3|AXSplitter||||144.0||204;68;|1;1281;|shown
+3|AXGroup|AXHostingView|||||205;68;|1355;1281;|shown
+4|AXScrollArea||||||205;68;|1355;1281;|shown
+5|AXStaticText||||States||225;88;|31;13;|shown
+5|AXStaticText||||Editing every state||481;88;|90;13;|shown
+5|AXButton||||||225;109;|236;219;|shown
+6|AXButton||||||232;116;|48;25;|shown
+6|AXButton||||||286;116;|70;25;|shown
+6|AXButton||||||362;116;|49;25;|shown
+6|AXButton||||||232;147;|80;25;|shown
+6|AXButton||||||318;147;|135;39;|shown
+6|AXButton||||||232;192;|135;39;|shown
+6|AXButton||||||232;237;|135;39;|shown
+6|AXButton||||||232;282;|135;39;|shown
+5|AXStaticText||||Disk||663;163;|27;15;|shown
+5|AXStaticText||||78 GB free||705;164;|62;13;|shown
+5|AXStaticText||||startup volume · of 460 GB||663;184;|153;15;|shown
+5|AXStaticText||||last checked a minute ago||663;204;|155;13;|shown
+5|AXRadioGroup||||?||481;275;|220;22;|shown
+6|AXRadioButton|AXSegment|||1|Light look|479;274;|112;24;|shown
+6|AXRadioButton|AXSegment|||0|Dark look|591;274;|111;24;|shown
+5|AXStaticText||||Presets||713;278;|46;16;|shown
+5|AXMenuButton|||Light|||771;276;|150;20;|shown
+5|AXStaticText||||Shows||591;328;|40;16;|shown
+5|AXStaticText||||Drop here to set up on its own||225;336;|236;27;|shown
+5|AXRadioGroup||||?||643;326;|300;22;|shown
+6|AXRadioButton|AXSegment|||0|System|641;325;|102;24;|shown
+6|AXRadioButton|AXSegment|||1|Manual|743;325;|100;24;|shown
+6|AXRadioButton|AXSegment|||0|By the clock|843;325;|101;24;|shown
+5|AXRadioGroup||||?||643;354;|160;22;|shown
+6|AXRadioButton|AXSegment|||1|Light|641;353;|82;24;|shown
+6|AXRadioButton|AXSegment|||0|Dark|723;353;|81;24;|shown
+5|AXCheckBox||||1||225;373;|136;14;|shown
+5|AXStaticText||||Visible||590;416;|41;16;|shown
+5|AXSlider||||1.0||643;416;|230;20;|shown
+6|AXValueIndicator||||1.0||863;414;|12;28;|shown
+5|AXStaticText||||100 %||897;419;|32;13;|shown
+5|AXStaticText||||Glass||597;463;|34;16;|shown
+5|AXRadioGroup||||?||643;461;|200;22;|shown
+6|AXRadioButton|AXSegment|||1|Regular|641;460;|102;24;|shown
+6|AXRadioButton|AXSegment|||0|Clear|743;460;|101;24;|shown
+5|AXStaticText||||At 72 % tint these two barely differ — the tint covers the material. Turn it down to tell them apart.||643;506;|381;26;|shown
+5|AXStaticText||||Amount||583;542;|48;16;|shown
+5|AXSlider||||1.0||643;542;|230;20;|shown
+6|AXValueIndicator||||1.0||863;540;|12;28;|shown
+5|AXStaticText||||100 %||897;545;|32;13;|shown
+5|AXStaticText||||Tint||607;574;|24;16;|shown
+5|AXCheckBox||||1||643;576;|14;14;|shown
+5|AXRadioGroup||||?||667;572;|180;22;|shown
+6|AXRadioButton|AXSegment|||1|Lighter|665;571;|92;24;|shown
+6|AXRadioButton|AXSegment|||0|Darker|757;571;|91;24;|shown
+5|AXStaticText||||Strength||578;604;|53;16;|shown
+5|AXSlider||||0.72||643;604;|230;20;|shown
+6|AXValueIndicator||||0.72||801;602;|12;28;|shown
+5|AXStaticText||||72 %||903;607;|26;13;|shown
+5|AXStaticText||||Tint colour||566;634;|65;16;|shown
+5|AXCheckBox||||0||643;633;|14;14;|shown
+5|AXStaticText||||Text||605;677;|26;16;|shown
+5|AXRadioGroup||||?||643;675;|200;22;|shown
+6|AXRadioButton|AXSegment|||0|Light|641;674;|102;24;|shown
+6|AXRadioButton|AXSegment|||1|Dark|743;674;|101;24;|shown
+5|AXStaticText||||Brightness||566;707;|65;16;|shown
+5|AXSlider||||1.0||643;707;|230;20;|shown
+6|AXValueIndicator||||1.0||863;705;|12;28;|shown
+5|AXStaticText||||100 %||897;710;|32;13;|shown
+5|AXStaticText||||Colour||590;737;|41;16;|shown
+5|AXCheckBox||||0||643;736;|14;14;|shown
+5|AXStaticText||||Density||585;780;|46;16;|shown
+5|AXRadioGroup||||?||643;778;|260;22;|shown
+6|AXRadioButton|AXSegment|||0|Compact|641;777;|89;24;|shown
+6|AXRadioButton|AXSegment|||1|Normal|730;777;|87;24;|shown
+6|AXRadioButton|AXSegment|||0|Cozy|817;777;|88;24;|shown
+5|AXStaticText||||Text size||578;810;|53;16;|shown
+5|AXSlider||||0.25||643;810;|230;20;|shown
+6|AXValueIndicator||||0.25||697;808;|12;28;|shown
+5|AXStaticText||||12.0 pt||893;813;|36;13;|shown
+5|AXTextField||||||481;859;|180;22;|shown
+5|AXButton||||||669;860;|46;20;|shown
+1|AXButton|AXCloseButton|||||70;47;|12;14;|shown
+1|AXButton|AXFullScreenButton|||||110;47;|12;14;|shown
+2|AXGroup||||||109;46;|14;16;|shown
+1|AXButton|AXMinimizeButton|||||90;47;|12;14;|shown
+1|AXStaticText||||uDeck Settings||758;45;|103;16;|shown
