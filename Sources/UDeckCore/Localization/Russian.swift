@@ -248,6 +248,8 @@ struct Russian: Vocabulary {
         case .catalogueLinkedHere(let id): "\(id) подключён здесь ссылкой на вашу папку"
         case .catalogueInstalledUnverified(let ref): "Здесь установлен из \(Self.lineFrom(ref)): не проверен"
         case .catalogueSwitchToVerified(let version): "Перейти на проверенную \(version)"
+        case .catalogueMergedDiffers: "влит, и проверенная версия отличается"
+        case .catalogueClosedUnmerged: "закрыт без слияния"
         case .catalogueRefusal(let refusal): Self.refusal(refusal)
         case .catalogueFileUnreachable(let path, let reason):
             "\(path) не удалось скачать: \(reason); ничего не установлено."
@@ -265,6 +267,12 @@ struct Russian: Vocabulary {
         case .pluginFrom(let source, let commit): "Из \(source), коммит \(commit)"
         case .pluginFromPullRequest(let number, let commit): "запрос на слияние #\(number), коммит \(commit)"
         case .pluginFromBranch(let name, let commit): "ветка \(name), коммит \(commit)"
+        case .pluginPullRequestMergedDiffers(let number):
+            "Запрос на слияние #\(number) влит, и проверенная версия отличается — обновить"
+        case .pluginPullRequestMergedNothingOffered(let number):
+            "Запрос на слияние #\(number) влит; проверенной версии здесь не предлагается, плагин продолжает работать"
+        case .pluginPullRequestClosed(let number):
+            "Запрос на слияние #\(number) закрыт без слияния; плагин продолжает работать"
         case .pluginPinned: "Оставлен на этой версии — о новых всё равно сообщается"
         case .pluginUpdatedByItself(let date): "Обновился сам \(date)"
         case .pluginUpdateByItselfFailed(let version):
@@ -384,6 +392,7 @@ struct Russian: Vocabulary {
         case .windowNotInPluginsFolder(let id, let path): "\(id) нет в \(path)"
         case .windowWillNotRun(let id): "\(id) не запустится:"
         case .windowReinstall: "Переустановить"
+        case .windowReinstallBrings(let copy): "«Переустановить» вернёт: \(Self.copy(copy)). Этот код никто не проверял."
 
         // Что плагин может попросить
         case .capabilityRead(let glob): "читать файлы по маске \(glob)"

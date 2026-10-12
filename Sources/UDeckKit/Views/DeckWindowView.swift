@@ -184,6 +184,12 @@ struct DeckWindowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            // What **Reinstall** puts back, when that is code nobody verified:
+            // a pull request's or a branch's copy, named.
+            if reinstallable, let says = model.reinstallSays(window.pluginID) {
+                note(strings(says), tint: theme.dim)
+                    .accessibilityIdentifier("window.\(window.pluginID.rawValue).reinstallSays")
+            }
             if let shown = confirmingReinstall {
                 // The same warning, by the same rule, as every other button
                 // that replaces a folder: something of the operator's goes to

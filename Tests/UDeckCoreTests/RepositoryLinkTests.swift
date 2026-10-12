@@ -370,14 +370,15 @@ struct PullRequestTests {
     static let merge = "7403916a2b2c84e4bcb1c1e5aa01c4f5d0c26c7b"
 
     static func answer(number: Int = 3, state: String = "open", merged: Bool? = false, mergeCommit: String? = merge,
-                       head: String = head, repository: String? = "\"someone/udeck-plugins\"") -> Data {
+                       head: String = head, repository: String? = "\"someone/udeck-plugins\"",
+                       base: String = #"{"ref": "main", "sha": "8868da0f1b26000000000000000000000000000a"}"#) -> Data {
         let repo = repository.map { #"{"full_name": \#($0), "fork": true}"# } ?? "null"
         return Data(#"""
             {"number": \#(number), "state": "\#(state)", "title": "A fix", "draft": false,
              "merged": \#(merged.map(String.init) ?? "null"),
              "merge_commit_sha": \#(mergeCommit.map { "\"\($0)\"" } ?? "null"),
              "head": {"label": "someone:fix", "ref": "fix", "sha": "\#(head)", "repo": \#(repo)},
-             "base": {"ref": "main", "sha": "8868da0f1b26000000000000000000000000000a"}}
+             "base": \#(base)}
             """#.utf8)
     }
 
@@ -385,7 +386,18 @@ struct PullRequestTests {
     func open() {
         let read = PullRequest.read(Self.answer(), asked: 3)
         #expect(read == PullRequest(number: 3, state: .open, merged: false, mergeCommit: nil, head: Self.head,
-                                    headRef: "fix", headRepository: "someone/udeck-plugins", title: "A fix"))
+                                    headRef: "fix", headRepository: "someone/udeck-plugins", title: "A fix", base: "main"))
+    }
+
+    /// Only a merge into the default branch is what was verified (`Adoption`),
+    /// so the branch it was opened against is read with the rest.
+    @Test("the branch it was opened against, and merged into: base.ref; nothing when GitHub does not say")
+    func base() {
+        let next = PullRequest.read(Self.answer(state: "closed", merged: true, base: #"{"ref": "next", "sha": null}"#), asked: 3)
+        #expect(next?.base == "next" && next?.merged == true && next?.mergeCommit == Self.merge)
+        #expect(PullRequest.read(Self.answer(base: "null"), asked: 3)?.base == nil)
+        #expect(PullRequest.read(Self.answer(base: #"{"sha": null}"#), asked: 3)?.base == nil)
+        #expect(PullRequest.read(Self.answer(base: #"{"ref": ""}"#), asked: 3)?.base == nil)
     }
 
     @Test("merged: the commit it was merged as; closed unmerged: none; a deleted fork: no repository")

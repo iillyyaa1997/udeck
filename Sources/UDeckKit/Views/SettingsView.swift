@@ -1154,9 +1154,12 @@ private struct PluginSettingsSection: View {
             }
             LinkInstallSheet(model: model, open: $linkSheetOpen)
 
-            if model.plugins.isEmpty {
+            // Only when there is no row at all: a plugin whose folder has
+            // gone has one, Missing, below.
+            if PluginsPane.saysNothingInstalled(folders: model.plugins.count, missing: missingIDs.count) {
                 Text(strings(.pluginsNothingInstalled))
                     .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("plugins.nothingInstalled")
             }
 
             ForEach(model.plugins, id: \.id) { plugin in
@@ -1213,6 +1216,7 @@ private struct PluginRow: View {
                         set: { model.setEnabled($0, for: manifest.id) }
                     ))
                     .labelsHidden()
+                    .accessibilityIdentifier("plugin.\(plugin.folderName).enabled")
                 }
                 Button(expanded ? strings(.pluginLess) : strings(.pluginMore)) { expanded.toggle() }
                     .accessibilityIdentifier("plugin.\(plugin.folderName).more")

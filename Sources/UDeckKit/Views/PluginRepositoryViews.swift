@@ -302,7 +302,8 @@ struct CatalogueRowView: View {
         case .installed(let offer): OfferText.text(offer, strings, asksDifferently: model.updateAsksDifferently(id))
         case .unverified:
             (state.unverifiedLine(ref: model.installed.plugins[id]?.ref ?? PluginRef(kind: "", name: nil), id: id,
-                                  path: model.pluginsDirectoryDisplayPath) ?? []).map { strings($0) }.joined(separator: " — ")
+                                  path: model.pluginsDirectoryDisplayPath,
+                                  lifecycle: model.pullRequestLifecycle(of: id)) ?? []).map { strings($0) }.joined(separator: " — ")
         }
     }
 
@@ -414,6 +415,22 @@ struct InstalledRepositoryControls: View {
                     }
                 }
             }
+            // What became of the pull request the copy came from: merged as
+            // something else — the verified version offered — or closed
+            // without being merged, the plugin running on.
+            if let record, let number = record.ref.pullRequestNumber, let lifecycle = model.pullRequestLifecycle(of: id),
+               let phrase = lifecycle.rowPhrase(number: number) {
+                HStack(spacing: 8) {
+                    Text(strings(phrase)).font(.caption).bold()
+                        .foregroundStyle(lifecycle == .closed ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("plugin.\(id).pullRequest")
+                    if lifecycle == .mergedDiffers, let page = model.whatChanged(id) {
+                        Button(strings(.catalogueWhatChanged)) { openURL(page) }
+                            .buttonStyle(.link).font(.caption)
+                    }
+                }
+            }
             buttons
             if let confirming {
                 confirmation(confirming)
@@ -488,6 +505,12 @@ struct InstalledRepositoryControls: View {
                 }
                 .disabled(busy)
                 .accessibilityIdentifier("plugin.\(id).update")
+            } else if model.verifiedVersionOffered(id) != nil {
+                // *The verified version differs — update*: the catalogue's
+                // copy, after the warning that names both.
+                Button(strings(.catalogueUpdate)) { press(.update) }
+                    .disabled(busy)
+                    .accessibilityIdentifier("plugin.\(id).update")
             }
             if let record, standing.offersReinstall(readsCatalogue: model.settings.readsOfficialCatalogue) {
                 Button(strings(.catalogueReinstall(version: record.version))) { press(.reinstall) }
@@ -543,11 +566,12 @@ struct InstalledRepositoryControls: View {
 
     /// The verified version **Switch to verified** puts in the place of a
     /// branch's or a pull request's copy: the catalogue's, when it has the
-    /// plugin and it can be installed here (`CatalogueRowState.unverified`).
+    /// plugin and it can be installed here (`CatalogueRowState.unverified`) —
+    /// offered as **Update** instead once its pull request was merged as
+    /// something else (`verifiedVersionOffered`).
     private var switchToVerified: String? {
-        guard model.settings.readsOfficialCatalogue, let entry = model.catalogue?.entry(id),
-              case .unverified(let version, nil, _) = model.rowState(for: entry) else { return nil }
-        return version
+        guard model.verifiedVersionOffered(id) == nil else { return nil }
+        return model.verifiedVersion(for: id)
     }
 
     private func isOlder(_ offer: UpdateOffer) -> Bool {

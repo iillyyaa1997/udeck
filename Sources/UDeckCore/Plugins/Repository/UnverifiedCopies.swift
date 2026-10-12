@@ -96,6 +96,19 @@ extension InstalledRecord {
     /// The page of the branch or the pull request the copy came from —
     /// nil for the default branch's.
     public var refPage: URL? { repository.page(of: ref) }
+
+    /// What a window of this copy says beside **Reinstall** once its folder
+    /// has gone: which copy **Reinstall** puts back, and from where, when that
+    /// is code nobody verified — *Reinstall puts back 1.0.1 from pull request
+    /// #3 at a1b2c3d: code nobody verified* — so that the button does not put a
+    /// pull request's code back unsaid. Nil for the default branch's copy, and
+    /// for a copy whose tree is the one the catalogue's head has
+    /// (`headTree`): that is what was merged, and it comes back **Verified**
+    /// (`Adoption`).
+    public func reinstallSays(headTree: String?) -> Phrase? {
+        guard !isOfficialDefault, tree != headTree else { return nil }
+        return .windowReinstallBrings(CopyName.of(origin, commit: commit, version: version))
+    }
 }
 
 extension UpdateOffer {
@@ -114,12 +127,16 @@ extension UpdateOffer {
 extension CatalogueRowState {
     /// What the catalogue row of an id installed from a branch or a pull
     /// request says under its name, in order: where the copy here came from,
-    /// unverified (*Installed here from pull request #3: unverified*); that
-    /// its folder is not in `path`, when it is gone; and why the verified copy
-    /// cannot be installed here, when it cannot. Nil for every other state.
-    public func unverifiedLine(ref: PluginRef, id: String, path: String) -> [Phrase]? {
+    /// unverified (*Installed here from pull request #3: unverified*); what
+    /// became of that pull request, when it was merged as something else or
+    /// closed (`lifecycle`); that its folder is not in `path`, when it is
+    /// gone; and why the verified copy cannot be installed here, when it
+    /// cannot. Nil for every other state.
+    public func unverifiedLine(ref: PluginRef, id: String, path: String,
+                               lifecycle: PullRequestLifecycle? = nil) -> [Phrase]? {
         guard case .unverified(_, let refusal, let folderGone) = self else { return nil }
         return [.catalogueInstalledUnverified(ref: ref)]
+            + (lifecycle?.cataloguePhrase.map { [$0] } ?? [])
             + (folderGone ? [.catalogueMissing(id: id, path: path)] : [])
             + (refusal.map { [.catalogueRefusal($0)] } ?? [])
     }

@@ -206,6 +206,11 @@ extension DeckModel {
                                               installedCommits: installed.commits)
         DeckLog.plugins.info("the official catalogue: \(String(describing: outcome), privacy: .public)")
         catalogueState = catalogueStore.state()
+        // In the same read, after the catalogue: what became of the pull
+        // request each copy installed from one came from.
+        if case .refreshed(let head, _) = outcome {
+            await followPullRequests(head: head, unrequested: unrequested)
+        }
         await reloadCatalogue()
         reverify()
         // A read that succeeded: every update waiting is asked about anew — one
@@ -214,6 +219,44 @@ extension DeckModel {
         var succeeded = false
         if case .refreshed = outcome { succeeded = true }
         autoUpdates.read(succeeded: succeeded, hashing: reverifications)
+    }
+
+    /// What became of the pull request each copy installed from one came
+    /// from — merged, closed, open — asked through the official repository,
+    /// one request each, after a read of the catalogue that succeeded
+    /// (`PullRequestFollower`): never for a copy whose tree the new head has,
+    /// which is what was merged (`Adoption`), and, in a read nobody asked for,
+    /// not while the reserve for the operator is all that is left.
+    func followPullRequests(head: String, unrequested: Bool) async {
+        let installed = self.installed
+        let fromPullRequests = installed.plugins.values.contains { !$0.isOfficialDefault && $0.ref.pullRequestNumber != nil }
+        guard fromPullRequests || !followed.pulls.isEmpty else { return }
+        let store = catalogueStore
+        let headTrees = await Self.trees(at: head, in: store)
+        let follower = PullRequestFollower(provider: provider, store: store, limits: limits)
+        let outcome = await follower.follow(installed, headTrees: headTrees, unrequested: unrequested)
+        // What an install, an adoption or a removal said while it asked stands
+        // for that copy (`PullRequestFollower.Outcome.merged`).
+        let kept = outcome.merged(into: followed, askedAbout: installed, installed: self.installed)
+        followed = kept
+        if kept != outcome.followed { saveFollowed() }
+        DeckLog.plugins.info("pull requests asked about: \(outcome.asked.joined(separator: ", "), privacy: .public); left as they were: \(outcome.leftAsTheyWere.joined(separator: ", "), privacy: .public)")
+        catalogueState.rateLimit = limits.current
+        persistRateLimit()
+    }
+
+    /// The tree of each plugin's folder at `commit`, from the cached listing,
+    /// away from the main thread.
+    nonisolated static func trees(at commit: String, in store: CatalogueStore) async -> [String: String] {
+        store.listing(commit).map { $0.plugins.mapValues(\.tree) } ?? [:]
+    }
+
+    func saveFollowed() {
+        do {
+            try catalogueStore.save(followed: followed)
+        } catch {
+            DeckLog.plugins.error("what was heard of pull requests could not be kept: \(String(describing: error), privacy: .public)")
+        }
     }
 
     /// The catalogue as the cache holds it now, read away from the main thread
@@ -254,9 +297,47 @@ extension DeckModel {
         CatalogueRowState.of(entry, record: installed.plugins[entry.id], folderExists: folderExists(entry.id))
     }
 
-    /// How many updates are waiting.
+    /// How many updates are waiting: the verified copies' — and a pull
+    /// request's copy whose pull request was merged as something else, which
+    /// is offered the verified version (`verifiedVersionOffered`).
     public var updatesWaiting: Int {
-        installed.plugins.keys.filter { updateOffer(for: $0)?.isWaiting == true && folderExists($0) }.count
+        installed.plugins.keys.filter { id in
+            folderExists(id) && (updateOffer(for: id)?.isWaiting == true || verifiedVersionOffered(id) != nil)
+        }.count
+    }
+
+    /// What became of the pull request `id`'s copy came from, as last heard
+    /// (`PullRequestLifecycle`) — nil for any other copy, and before anything
+    /// was heard.
+    public func pullRequestLifecycle(of id: String) -> PullRequestLifecycle? {
+        let record = installed.plugins[id]
+        return PullRequestLifecycle.of(record, followed: followed.pull(of: id, record: record),
+                                       defaultBranch: catalogue?.branch ?? catalogueState.defaultBranch,
+                                       verifiedOffered: verifiedVersion(for: id) != nil)
+    }
+
+    /// The verified version a copy of code nobody verified can be switched
+    /// to: the catalogue's, when it has the plugin and it can be installed
+    /// here (`CatalogueRowState.unverified`) — nil otherwise.
+    public func verifiedVersion(for id: String) -> String? {
+        guard settings.readsOfficialCatalogue, let entry = catalogue?.entry(id),
+              case .unverified(let version, nil, _) = rowState(for: entry) else { return nil }
+        return version
+    }
+
+    /// The verified version offered as an update — *the verified version
+    /// differs — update* — to a pull request's copy whose pull request was
+    /// merged as something else than the copy (`PullRequestLifecycle`).
+    /// Offered, never made by itself.
+    public func verifiedVersionOffered(_ id: String) -> String? {
+        guard pullRequestLifecycle(of: id) == .mergedDiffers else { return nil }
+        return verifiedVersion(for: id)
+    }
+
+    /// What a window of `id` says beside **Reinstall** of what it puts back,
+    /// when that is code nobody verified (`InstalledRecord.reinstallSays`).
+    public func reinstallSays(_ id: PluginIdentifier) -> Phrase? {
+        installed.plugins[id.rawValue]?.reinstallSays(headTree: catalogue?.entry(id.rawValue)?.listing.tree)
     }
 
     /// Whether the version the catalogue's head has for `id` asks for other
@@ -340,7 +421,19 @@ extension DeckModel {
         reverifyTask = Task {
             guard let trees = await Reverification.trees(of: folders) else { return }
             guard asked == reverifications else { return }
-            let found = Reverification.of(plugins, installed: installed, trees: trees,
+            // A copy of a branch or a pull request that is what was merged —
+            // at the head, or as its pull request was merged — is recorded as
+            // the default branch's, Verified, with nothing downloaded and
+            // nothing swapped (`Adoption`); never while an install, update or
+            // removal runs — the next hashing after it asks again — nor before
+            // the catalogue is read.
+            var records = installed
+            var adopted: [String: String] = [:]
+            if busyPlugin == nil, installedProblem == nil, catalogueWasRead, let catalogue {
+                (records, adopted) = Adoption.apply(installed, trees: trees, branch: Adoption.DefaultBranch(catalogue),
+                                                    followed: followed, now: Date())
+            }
+            let found = Reverification.of(plugins, installed: records, trees: trees,
                                           head: catalogueWasRead ? .read(catalogue?.commit) : .notReadYet, now: Date())
             if found.standings != standings { standings = found.standings }
             // What code held to its tree runs on from now (`requiredTree`):
@@ -352,9 +445,19 @@ extension DeckModel {
                 treesOnDisk = hashed
                 if moved { restartPolling() }
             }
-            if let records = found.records, installedProblem == nil {
-                installed = records
+            if installedProblem == nil, let written = found.records ?? (adopted.isEmpty ? nil : records) {
+                installed = written
                 save(JSONFileStore<InstalledPlugins>(url: paths.installedFile), installed, named: "installed plugins")
+            }
+            if !adopted.isEmpty {
+                for (id, commit) in adopted.sorted(by: { $0.key < $1.key }) {
+                    DeckLog.plugins.info("\(id, privacy: .public) is what was merged, at \(commit, privacy: .public): recorded as the default branch's, verified; nothing was downloaded")
+                    followed.pulls[id] = nil
+                }
+                saveFollowed()
+                // Held to its version now, not its tree: its loop is planned
+                // on that.
+                restartPolling()
             }
             // After a read of the catalogue: on standings hashed since.
             autoUpdates.hashed(asked)
@@ -727,8 +830,16 @@ extension DeckModel {
         let request = InstallRequest(
             operation: operation, id: identifier, sourceRepository: catalogueAddress,
             repository: origin.repository, ref: origin.ref, commit: commit, folder: folder, version: version,
-            headCommit: catalogue?.commit, automatic: automatic
+            headCommit: catalogue?.commit, headTree: catalogue?.entry(id)?.listing.tree,
+            defaultBranch: catalogue?.branch ?? catalogueState.defaultBranch, automatic: automatic
         )
+        // What **Look up** heard of the pull request this copy comes from, if
+        // that is where it comes from: kept with what is heard of it later, so
+        // that its row says at once whether it was merged or closed.
+        var heard: PullRequest?
+        if case .resolved(let resolution)? = linkLookup, resolution.origin == origin, resolution.commit == commit {
+            heard = resolution.pullRequest
+        }
         let installer = installer(fetchingFrom: provider)
         let store = catalogueStore
         // The copy the permission decision was made for, read before the swap.
@@ -752,6 +863,7 @@ extension DeckModel {
                 DeckLog.plugins.info("\(id, privacy: .public) \(record.version, privacy: .public) is in place")
                 // Before the plugin runs again: it is quiet until `resume`.
                 carryTheDecision(of: identifier, from: before, to: record, asking: staged.plugin.manifest)
+                await keepWhatWasHeard(heard, of: id, for: record)
                 reloadInstalled()
                 discoverPlugins()
             } catch {
@@ -768,6 +880,20 @@ extension DeckModel {
                 discoverPlugins()
             }
         }
+    }
+
+    /// What **Look up** heard of the pull request a copy was just installed
+    /// from — `pull`, nil when it was not looked up — kept as what is known of
+    /// it (`FollowedRefs.keep`), with the cached listing of the commit it was
+    /// merged as, if there is one.
+    private func keepWhatWasHeard(_ pull: PullRequest?, of id: String, for record: InstalledRecord) async {
+        let mergeListing = await Self.listing(pull?.merged == true ? pull?.mergeCommit : nil, in: catalogueStore)
+        var kept = followed
+        kept.keep(pull, heardAtInstall: record, of: id, defaultBranch: catalogue?.branch ?? catalogueState.defaultBranch,
+                  mergeListing: mergeListing, now: Date())
+        guard kept != followed else { return }
+        followed = kept
+        saveFollowed()
     }
 
     /// The copy at `plugins/<id>` as the permission decision knows it: its
@@ -862,6 +988,10 @@ extension DeckModel {
         }
         snapshots[id.rawValue] = nil
         histories[id.rawValue] = nil
+        if followed.pulls[id.rawValue] != nil {
+            followed.pulls[id.rawValue] = nil
+            saveFollowed()
+        }
     }
 
     // MARK: - Linked folders

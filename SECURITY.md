@@ -32,14 +32,17 @@ What uDeck genuinely controls is what uDeck itself does on a plugin's behalf:
 - a plugin's environment is built by uDeck, not inherited, so nothing in the
   shell that started uDeck reaches it.
 
-**"Verified" in the plugin catalogue** means the plugin was installed from the
-official repository's `main` and the folder on disk is still exactly what was
-merged there — a maintainer read it before merging. It is the strongest thing
-uDeck can honestly say about a plugin, and it does not mean safe. A plugin
-installed from anywhere else, or changed on disk, carries no such mark; one
-installed from a branch or a pull request of the official repository —
-**Install from a link…** — says **Unverified** in Settings and on its card,
-and asks before it runs whenever its content changes.
+**"Verified" in the plugin catalogue** means the folder on disk is exactly what
+was merged into the official repository's `main` — a maintainer read it before
+merging: installed from there, or installed from a branch or a pull request
+whose folder was then merged unchanged, which uDeck tells by the folder's git
+tree being the one `main` has, and records as `main`'s without downloading
+anything. It is the strongest thing uDeck can honestly say about a plugin, and
+it does not mean safe. A plugin installed from anywhere else, or changed on
+disk, carries no such mark; one installed from a branch or a pull request of
+the official repository — **Install from a link…** — says **Unverified** in
+Settings and on its card until that, and asks before it runs whenever its
+content changes.
 
 If you would not run a stranger's shell script, do not install a stranger's
 plugin.
@@ -58,7 +61,7 @@ In scope, and treated as vulnerabilities:
 - uDeck installing plugin files other than the ones the official repository
   lists at the commit it showed — a file that does not match its hash, a folder
   that does not add up — or marking a plugin **Verified** that is not exactly
-  what was merged;
+  what was merged, a pull request's copy included;
 - a plugin updating itself when it should only have been offered: a new version
   asking for different permissions than the installed one, a copy that was not
   **Verified**, one you kept at an earlier version, one holding a file of yours,
@@ -94,7 +97,9 @@ launch and both with a switch to turn them off:
   plugin's files when you press Install, Update, Reinstall or pick an earlier
   version, the pull request or the branch a link names when you press Look up
   in Install from a link… — its head, its listing and the manifests there that
-  are not the catalogue's — and, after a read, the files of a **Verified** plugin whose new
+  are not the catalogue's — in each read, the pull request a plugin installed
+  from one came from, unless `main` has it as it is, and once it is merged into
+  `main` the listing of the commit it was merged as — and, after a read, the files of a **Verified** plugin whose new
   version asks for exactly the permissions it asks for now: such a plugin
   updates itself, keeping your permission decision. Anything else is only
   offered. Off with Settings → Plugins → *Update verified plugins by

@@ -117,6 +117,7 @@ public struct PluginHistory: Codable, Equatable, Sendable {
 ///
 /// ```
 /// state.json            default branch, head and its ETag, the last refresh, the last error, the limit
+/// followed.json         what was last heard of the pull request each copy installed from one came from
 /// trees/<commit>.json   the listing of one commit
 /// blobs/<blob sha>      passports, manifests and translations, stored under their own hash
 /// history/<id>.json     a plugin's earlier versions, valid while the head commit is unchanged
@@ -137,6 +138,7 @@ public struct CatalogueStore: Sendable {
 
     private var fileManager: FileManager { .default }
     private var stateStore: JSONFileStore<CatalogueState> { .init(url: directory.appendingPathComponent("state.json")) }
+    private var followedStore: JSONFileStore<FollowedRefs> { .init(url: directory.appendingPathComponent("followed.json")) }
     private var trees: URL { directory.appendingPathComponent("trees", isDirectory: true) }
     private var blobs: URL { directory.appendingPathComponent("blobs", isDirectory: true) }
     private var histories: URL { directory.appendingPathComponent("history", isDirectory: true) }
@@ -152,6 +154,19 @@ public struct CatalogueStore: Sendable {
 
     public func save(_ state: CatalogueState) throws {
         try stateStore.save(state)
+    }
+
+    // MARK: - Followed pull requests
+
+    /// What was last heard of the pull request each copy installed from one
+    /// came from, or nothing. A file that will not parse is started over, as
+    /// the state is.
+    public func followed() -> FollowedRefs {
+        (try? followedStore.load()) ?? FollowedRefs()
+    }
+
+    public func save(followed: FollowedRefs) throws {
+        try followedStore.save(followed)
     }
 
     // MARK: - Listings

@@ -1,10 +1,22 @@
 # The fixture commits off the main line, each with the fixture commit it was
-# made on: a pull request's head, a branch's commit. Each folder named here is
-# the whole repository at that commit, as for `history`; the fake
-# (e2e/guest/fake-github.py) hashes them into real git ids with that parent,
-# and serves them by id — a branch or a pull request in `state.json` points at
-# one by its name.
+# made on: a pull request's head, a branch's commit, a squash merge. Each
+# folder named here is the whole repository at that commit, as for `history`;
+# the fake (e2e/guest/fake-github.py) hashes them into real git ids with that
+# parent, and serves them by id — a branch, a pull request or `main` in
+# `state.json` points at one by its name. A third name is the folder a commit
+# takes its content from, when that is another commit's: a new commit, on its
+# own parent, with the same tree.
 #
 # pr3: pull request #3's head, made on c1 — uptime 1.0.1, asking for what 1.0.0
 # asks, and asks-nothing, a new plugin asking for no permission at all.
 pr3 c1
+# s1: pull request #3 squash-merged onto c1 as exactly its head — pr3's content,
+# so every plugin folder in it has pr3's tree (plugins.a-merged-pull-request-becomes-verified).
+s1 c1 pr3
+# s2: pull request #3 squash-merged onto c1 with a maintainer's change — uptime
+# 1.0.2, asking for what 1.0.1 asks; asks-nothing as in pr3
+# (plugins.merged-with-changes-offers-the-verified).
+s2 c1
+# m1: the default branch moved on past s1 — uptime changed again, to s2's 1.0.2
+# (plugins.merged-then-moved-on-becomes-verified).
+m1 s1 s2

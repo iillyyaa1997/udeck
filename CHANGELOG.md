@@ -10,6 +10,27 @@ for what that promises.
 
 ## [Unreleased]
 
+- **A merged pull request becomes Verified.** A plugin installed from a pull
+  request — or a branch — of the official repository whose folder is exactly
+  what `main` now has, by its git tree, is recorded as `main`'s and marked
+  **Verified**, with nothing downloaded and nothing swapped: its window, its
+  cache and your permission decision stay, and the card does not ask again.
+  After each read of the catalogue uDeck asks GitHub, one request each, what
+  became of the pull request every such copy came from — not for one `main`
+  already has — and keeps the answer in `catalogue/official/followed.json`.
+  Merged into `main`, and `main` moved on before uDeck looked: the copy is
+  recorded at the commit it was merged as, and the update `main` has follows as
+  for any verified plugin. Merged with changes: its row says *Pull request #3 was
+  merged, and the verified version differs — update*, an update waiting for a
+  press, never made by itself — or, with no verified version to offer, that
+  none is offered and the plugin keeps running. Merged into another branch:
+  nothing there is verified, and the copy stays **Unverified**. Closed without
+  being merged: its row says so, and the plugin keeps running; opened again, it
+  is not said. The installer applies the same rule,
+  so that a pull request's copy put back that is exactly what `main` has comes
+  back **Verified**. A window of a pull request's or a branch's copy whose folder
+  has gone says what **Reinstall** puts back, and Settings no longer says
+  *Nothing installed yet* above a **Missing** row.
 - **Install from a link…** Settings → Plugins takes a link to a pull request or
   a branch of the official repository, pasted as the browser shows it, and
   lists the plugins there that are not what the catalogue has — new, or

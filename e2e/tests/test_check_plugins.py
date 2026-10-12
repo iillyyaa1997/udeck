@@ -559,3 +559,108 @@ def test_a_verdict_at_the_deadline_comes_from_a_walk_begun_after_it(monkeypatch)
     machine = _Walks([stale], seconds=2)
     assert checks._wait_until(machine, "plugin.uptime.mark", modified, 15) == "Verified"
     assert machine.now >= 15 and machine.read == 6, "short walks go on until one begins at the deadline"
+
+
+# --- A pull request merged or closed (stage 3) ------------------------------------------------
+
+
+def test_the_merges_the_checks_make_are_the_fixtures():
+    """s1 is pr3 squashed onto c1 — every plugin folder pr3's; s2 changes uptime alone; m1 is s2's content on s1."""
+    paths = {name: FACTS["commits"][name]["paths"] for name in ("pr3", "s1", "s2", "m1")}
+    assert FACTS["parents"]["s1"] == FACTS["parents"]["s2"] == "c1" and FACTS["parents"]["m1"] == "s1"
+    plugins = lambda name: {p: e["sha"] for p, e in paths[name].items() if p.startswith("plugins/") and p.count("/") == 1}  # noqa: E731
+    assert plugins("s1") == plugins("pr3"), "merged as exactly its head"
+    differ = {p for p in plugins("s2") if plugins("s2")[p] != plugins("pr3").get(p)}
+    assert differ == {"plugins/uptime"}, "merged with a change to uptime alone"
+    assert plugins("m1") == plugins("s2") and FACTS["commits"]["m1"]["sha"] != FACTS["commits"]["s2"]["sha"]
+    manifest = json.loads((plugin_repository.FIXTURES / "s2" / "plugins" / "uptime" / "manifest.json").read_text())
+    assert manifest["version"] == "1.0.2", "what AVAILABLE and the update to the verified version name"
+
+
+class _Telling:
+    def __init__(self):
+        self.told = []
+
+    def tell(self, step, **changes):
+        self.told.append(changes)
+
+
+def test_a_merge_is_the_pull_request_closed_merged_as_the_commit_and_its_branch_gone():
+    scene = type("Scene", (), {"github": _Telling()})()
+    checks._merge(scene, "s1", "squash-merging")
+    checks._merge(scene, "s1", "and moving on", main="m1")
+    first, second = scene.github.told
+    assert first["main"] == "s1" and second["main"] == "m1" and first["branches"] == {} == second["branches"]
+    for told in (first, second):
+        pull = told["pulls"][checks.PULL]
+        assert (pull["state"], pull["merged"], pull["merge_commit"], pull["head"]) == ("closed", True, "s1", "pr3")
+        assert pull["head_repo"] == checks.FORK, "the rest of the pull request as it was"
+        assert "base" not in pull, "into main, as the fake says when nothing else is named"
+    # Into another branch: that branch at the commit, main where the check says, the pull request's base that branch.
+    checks._merge(scene, "s1", "merging into next", main="c1", into=checks.NEXT)
+    third = scene.github.told[-1]
+    assert third["main"] == "c1" and third["branches"] == {checks.NEXT: "s1"}
+    assert third["pulls"][checks.PULL]["base"] == checks.NEXT and third["pulls"][checks.PULL]["merge_commit"] == "s1"
+    with pytest.raises(ValueError):
+        checks._merge(scene, "s1", "merging into next with main not said", into=checks.NEXT)
+
+
+def test_the_words_the_merge_and_close_checks_wait_for_are_uDecks_own():
+    english = _source("Sources", "UDeckCore", "Localization", "English.swift")
+    assert '"' + checks.MERGED_DIFFERS.format(number="\\(number)") + '"' in english
+    assert '"' + checks.CLOSED_UNMERGED.format(number="\\(number)") + '"' in english
+    assert f'case .catalogueMergedDiffers: "{checks.CATALOGUE_MERGED_DIFFERS}"' in english
+    assert f'case .catalogueClosedUnmerged: "{checks.CATALOGUE_CLOSED}"' in english
+    assert 'case .windowReinstallBrings(let copy): "Reinstall puts back \\(Self.copy(copy)): code nobody verified."' in english
+    assert 'case .branch(let branch, let commit, let version): "\\(version) from branch \\(branch) at \\(commit)"' in english
+    assert checks.REINSTALL_BRINGS == "Reinstall puts back {version} from branch {name} at {commit}: code nobody verified."
+    assert 'case .catalogueAvailable(let version): "' + checks.AVAILABLE.format(version="\\(version)") + '"' in english
+    assert 'count == 1 ? "1 update is waiting"' in english
+    # Swift's own tests hold the same sentences, word for word.
+    swift = _source("Tests", "UDeckCoreTests", "AdoptionTests.swift")
+    assert f'"{checks.MERGED_DIFFERS.format(number=3)}"' in swift and f'"{checks.CLOSED_UNMERGED.format(number=3)}"' in swift
+    assert f'"{checks.REINSTALL_BRINGS.format(version="1.0.1", name="fix/uptime", commit="a1b2c3d")}"' in swift
+
+
+def test_the_controls_the_merge_and_close_checks_press_and_read_are_the_views_own():
+    views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift")
+    for identifier in ('"plugin.\\(id).pullRequest"', '"plugin.\\(id).update"', '"catalogue.updatesWaiting"',
+                       '"plugin.\\(id).mark"', '"plugin.\\(id).offer"', '"plugin.\\(id).remove"', '"catalogue.checkNow"'):
+        assert identifier in views, identifier
+    settings = _source("Sources", "UDeckKit", "Views", "SettingsView.swift")
+    for identifier in ('"plugins.nothingInstalled"', '"plugin.\\(plugin.folderName).enabled"', '"plugin.\\(plugin.folderName).more"',
+                       '"plugin.\\(manifest.id).allow"', '"plugin.\\(manifest.id).decline"', '"plugin.\\(manifest.id).asksNothing"'):
+        assert identifier in settings, identifier
+    assert '"window.\\(window.pluginID.rawValue).reinstallSays"' in _source("Sources", "UDeckKit", "Views", "DeckWindowView.swift")
+    store = _source("Sources", "UDeckCore", "Plugins", "Repository", "CatalogueStore.swift")
+    assert checks.FOLLOWED == checks.UDECK_HOME + "/catalogue/official/followed.json"
+    assert 'appendingPathComponent("followed.json")' in store and "paths: UDeckPaths, source: String = InstalledPlugins.officialSource" in store
+
+
+def test_a_folder_read_twice_unchanged_is_the_same_text():
+    """`_identity` reads every name with its inode and time, sorted: the same command each time, and a folder gone is red."""
+    asked = []
+
+    class Shell:
+        def __init__(self, stdout, returncode=0):
+            self.stdout, self.returncode = stdout, returncode
+
+        def ask(self, command, step):
+            asked.append(command)
+            return type("Done", (), {"stdout": self.stdout, "returncode": self.returncode, "stderr": ""})()
+
+    machine = type("Guest", (), {"ssh": Shell("12 1.5 .\n13 1.5 ./uptime.sh\n")})()
+    assert checks._identity(machine, "uptime", "before") == "12 1.5 .\n13 1.5 ./uptime.sh\n"
+    assert asked[-1] == "cd ~/.udeck/plugins/uptime && find . -exec /usr/bin/stat -f '%i %Fm %N' {} + | LC_ALL=C sort"
+    machine = type("Guest", (), {"ssh": Shell("", returncode=1)})()
+    with pytest.raises(CheckFailed):
+        checks._identity(machine, "uptime", "after")
+
+
+def test_the_copy_a_record_says_is_all_of_it_but_what_was_last_found():
+    record = {"ref": {"kind": "pr", "name": "3"}, "commit": "c", "tree": "t", "version": "1.0.1",
+              "verification": {"status": "unverified", "checkedAgainst": "h1"}}
+    moved = {**record, "verification": {"status": "unverified", "checkedAgainst": "h2"}}
+    assert checks._the_copy(record) == checks._the_copy(moved), "the head moved: the same copy"
+    assert checks._the_copy({**record, "commit": "d"}) != checks._the_copy(record)
+    assert checks._the_copy(None) == {}

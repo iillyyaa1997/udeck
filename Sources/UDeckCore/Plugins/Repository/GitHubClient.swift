@@ -44,7 +44,7 @@ public struct CommitSummary: Codable, Equatable, Sendable {
 /// only — a fork can be deleted, and its pull request's head is still read
 /// through the repository it was opened against, by commit.
 public struct PullRequest: Equatable, Sendable {
-    public enum State: String, Sendable {
+    public enum State: String, Codable, Sendable {
         case open
         case closed
     }
@@ -63,9 +63,13 @@ public struct PullRequest: Equatable, Sendable {
     /// That repository, `owner/repo` — nil when it was deleted.
     public var headRepository: String?
     public var title: String
+    /// The branch it was opened against, and merged into when it was merged
+    /// — nil when the host did not say. Only a merge into the default branch
+    /// is what was verified (`Adoption`).
+    public var base: String?
 
     public init(number: Int, state: State, merged: Bool, mergeCommit: String?, head: String, headRef: String,
-                headRepository: String?, title: String) {
+                headRepository: String?, title: String, base: String? = nil) {
         self.number = number
         self.state = state
         self.merged = merged
@@ -74,6 +78,7 @@ public struct PullRequest: Equatable, Sendable {
         self.headRef = headRef
         self.headRepository = headRepository
         self.title = title
+        self.base = base
     }
 
     /// GitHub's answer to `GET /repos/{o}/{r}/pulls/{n}`, or nil when it is
@@ -82,6 +87,7 @@ public struct PullRequest: Equatable, Sendable {
     static func read(_ data: Data, asked number: Int) -> PullRequest? {
         struct Repository: Decodable { var full_name: String? }
         struct Head: Decodable { var sha: String; var ref: String?; var repo: Repository? }
+        struct Base: Decodable { var ref: String? }
         struct Answer: Decodable {
             var number: Int
             var state: String
@@ -89,6 +95,7 @@ public struct PullRequest: Equatable, Sendable {
             var merge_commit_sha: String?
             var title: String?
             var head: Head
+            var base: Base?
         }
         guard let answer = try? JSONDecoder().decode(Answer.self, from: data), answer.number == number,
               let state = State(rawValue: answer.state), GitHash.isObjectID(answer.head.sha) else { return nil }
@@ -96,7 +103,8 @@ public struct PullRequest: Equatable, Sendable {
         let mergeCommit = merged ? answer.merge_commit_sha.flatMap { GitHash.isObjectID($0) ? $0 : nil } : nil
         return PullRequest(number: number, state: state, merged: merged, mergeCommit: mergeCommit,
                            head: answer.head.sha, headRef: answer.head.ref ?? "",
-                           headRepository: answer.head.repo?.full_name, title: answer.title ?? "")
+                           headRepository: answer.head.repo?.full_name, title: answer.title ?? "",
+                           base: answer.base?.ref.flatMap { $0.isEmpty ? nil : $0 })
     }
 }
 

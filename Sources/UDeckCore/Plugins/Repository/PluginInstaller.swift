@@ -91,6 +91,12 @@ public struct InstallRequest: Codable, Equatable, Sendable {
     public var version: String
     /// The head of the default branch, which the new copy is verified against.
     public var headCommit: String?
+    /// The tree the head has for this plugin's folder, and the default
+    /// branch's name: a copy of a branch or a pull request whose folder is
+    /// exactly that tree is what was merged, and is recorded as the default
+    /// branch's at the head, **Verified** (`Adoption`).
+    public var headTree: String?
+    public var defaultBranch: String?
     /// Whether uDeck makes it by itself — a verified plugin updating itself
     /// (`AutoUpdate`) — rather than for a press. The record says so, and the
     /// swap replaces only uDeck's own copy: anything else at the place by
@@ -99,7 +105,8 @@ public struct InstallRequest: Codable, Equatable, Sendable {
 
     public init(operation: Operation, id: PluginIdentifier, source: String = InstalledPlugins.officialSource,
                 sourceRepository: RepositoryAddress, repository: RepositoryAddress, ref: PluginRef, commit: String,
-                folder: PluginListing, version: String, headCommit: String?, automatic: Bool = false) {
+                folder: PluginListing, version: String, headCommit: String?, headTree: String? = nil,
+                defaultBranch: String? = nil, automatic: Bool = false) {
         self.operation = operation
         self.id = id
         self.source = source
@@ -110,6 +117,8 @@ public struct InstallRequest: Codable, Equatable, Sendable {
         self.folder = folder
         self.version = version
         self.headCommit = headCommit
+        self.headTree = headTree
+        self.defaultBranch = defaultBranch
         self.automatic = automatic
     }
 
@@ -510,10 +519,21 @@ public struct PluginInstaller: Sendable {
         )
         // Verified only from the official source's default branch; a branch,
         // a pull request — anything else — is code nobody verified, however
-        // it was put back: Reinstall and Back to of such a copy included.
+        // it was put back: Reinstall and Back to of such a copy included —
+        // unless its folder is exactly what the head has, which is what was
+        // merged: then it is recorded as the default branch's (`Adoption`).
         if record.isOfficialDefault {
             record.verification = PluginVerification(status: .verified, by: InstalledPlugins.officialSource,
                                                      checkedAgainst: request.headCommit ?? request.commit, checkedAt: at)
+        } else if let head = request.headCommit, let headTree = request.headTree {
+            // The folder put in place is exactly the listed tree: it was hashed
+            // in staging (`checkStaged`).
+            let branch = Adoption.DefaultBranch(repository: request.sourceRepository, name: request.defaultBranch,
+                                                head: head, trees: [request.id.rawValue: headTree])
+            if case .adopt(let commit) = Adoption.verdict(request.id.rawValue, record: record, treeOnDisk: record.tree,
+                                                         branch: branch, pull: nil) {
+                record = Adoption.adopted(record, at: commit, branch: branch, now: at)
+            }
         }
         return record
     }

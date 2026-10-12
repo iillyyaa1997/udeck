@@ -243,6 +243,8 @@ struct English: Vocabulary {
         case .catalogueLinkedHere(let id): "\(id) is linked here, to a folder of your own"
         case .catalogueInstalledUnverified(let ref): "Installed here from \(Self.line(ref)): unverified"
         case .catalogueSwitchToVerified(let version): "Switch to verified \(version)"
+        case .catalogueMergedDiffers: "merged, and the verified version differs"
+        case .catalogueClosedUnmerged: "closed without being merged"
         case .catalogueRefusal(let refusal): refusal.message
         case .catalogueFileUnreachable(let path, let reason):
             "\(path) could not be fetched: \(reason); nothing was installed."
@@ -260,6 +262,12 @@ struct English: Vocabulary {
         case .pluginFrom(let source, let commit): "From \(source) at \(commit)"
         case .pluginFromPullRequest(let number, let commit): "pull request #\(number) at \(commit)"
         case .pluginFromBranch(let name, let commit): "branch \(name) at \(commit)"
+        case .pluginPullRequestMergedDiffers(let number):
+            "Pull request #\(number) was merged, and the verified version differs — update"
+        case .pluginPullRequestMergedNothingOffered(let number):
+            "Pull request #\(number) was merged; no verified version is offered here, and the plugin keeps running"
+        case .pluginPullRequestClosed(let number):
+            "Pull request #\(number) was closed without being merged; the plugin keeps running"
         case .pluginPinned: "Kept at this version — newer ones are still shown"
         case .pluginUpdatedByItself(let date): "Updated by itself on \(date)"
         case .pluginUpdateByItselfFailed(let version):
@@ -379,6 +387,7 @@ struct English: Vocabulary {
         case .windowNotInPluginsFolder(let id, let path): "\(id) is not in \(path)"
         case .windowWillNotRun(let id): "\(id) will not run:"
         case .windowReinstall: "Reinstall"
+        case .windowReinstallBrings(let copy): "Reinstall puts back \(Self.copy(copy)): code nobody verified."
 
         // What a plugin may ask for
         case .capabilityRead(let glob): "read files matching \(glob)"

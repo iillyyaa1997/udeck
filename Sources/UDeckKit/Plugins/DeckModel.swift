@@ -43,6 +43,10 @@ public final class DeckModel {
     public internal(set) var treesOnDisk = HashedTrees()
     /// The official catalogue as the cache holds it, shown at once.
     public internal(set) var catalogue: Catalogue?
+    /// What was last heard of the pull request each copy installed from one
+    /// came from — merged, closed, open — asked at the catalogue's moments
+    /// (`PullRequestFollower`) and kept in `catalogue/official/followed.json`.
+    public internal(set) var followed: FollowedRefs
     public internal(set) var catalogueState: CatalogueState
     public internal(set) var catalogueRefreshing = false
     /// The one install, update or removal running, if any. They run one after
@@ -237,6 +241,7 @@ public final class DeckModel {
         let store = CatalogueStore(paths: paths)
         let catalogueState = store.state()
         self.catalogueState = catalogueState
+        followed = store.followed()
         limits = RateLimitRecorder(catalogueState.rateLimit)
         self.problems = problems
 

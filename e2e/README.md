@@ -19,7 +19,7 @@ the last section.
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, the accessibility helper that reads uDeck's windows, a
 > self-check, the builds a check needs, a fake GitHub for the plugin catalogue,
-> the same lab on a GitHub runner, and fifty-eight checks of uDeck itself in five groups
+> the same lab on a GitHub runner, and sixty-three checks of uDeck itself in five groups
 > (`e2e/run.sh --list`). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
 > itself as it ships, and by itself again once an operator who switched that off
@@ -32,11 +32,12 @@ the last section.
 > it was opened — with its wrong-chord control and a check that the combination
 > dies with uDeck. `login`: "Open at Login", through a restart and an update, and
 > switched off. `settings`: two changes made in uDeck's own window, and whether
-> they hold across a restart. `plugins`: the twenty-eight checks of
+> they hold across a restart. `plugins`: the thirty-three checks of
 > docs/plugin-repository.md — the catalogue, installing, updating, a verified
 > plugin updating itself and an update asking for other permissions only
 > offered, earlier versions, removing, each refusal, installing from a pull
-> request and a branch, a linked folder, and what Settings offers
+> request and a branch, that pull request merged — as exactly the copy, with
+> changes, after `main` moved on — or closed, a linked folder, and what Settings offers
 > somebody writing a plugin: Link a folder…, the run log's switch, a failed run
 > on a fresh card, Install command, Where to look for commands, and all of it
 > in Russian — against a fake GitHub in the guest.
@@ -1809,7 +1810,7 @@ problem.
 
 ### Plugins from a repository
 
-Twenty-eight checks, one per row of the table in docs/plugin-repository.md ("The
+Thirty-three checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"). None of them talks to github.com — in the lab only the update
 checks given a published release do, `updates.a-published-release` by default.
 A fake GitHub runs inside the guest (`e2e/guest/fake-github.py`, the guest's
@@ -1826,7 +1827,11 @@ link), `c2` the same with `uptime` 1.1.0, asking for what 1.0.0 asks, and `c3`
 with `uptime` 1.2.0, asking for one command more. Off it, as `parents` names
 them with the commit each was made on: `pr3`, made on `c1`, a pull request's
 head — `uptime` 1.0.1, asking for what 1.0.0 asks, and `asks-nothing`, a new
-plugin asking for no permission at all. The fake hashes them into real git
+plugin asking for no permission at all; `s1`, that pull request squash-merged
+onto `c1` as exactly its head — `pr3`'s content, which a third name on its line
+gives it, so it has no folder of its own; `s2`, the same merge with a
+maintainer's change, `uptime` 1.0.2; and `m1`, `s2`'s content made on `s1`,
+`main` moved on past the merge. The fake hashes them into real git
 blob, tree and commit ids itself — there is no git in the guest — and the lab's
 own tests hold its hashing against `git hash-object`, `git write-tree` and `git
 commit-tree`, parents included. uDeck's Swift then has to agree with it, file by file and folder
@@ -1881,6 +1886,21 @@ of its runs is read before and after; its removal is a click, and what it
 leaves of the working copy is read over SSH before and after, every name and
 every byte. Every install, update, earlier
 version, removal and switch is a click.
+
+**A pull request merged or closed** (`plugins.a-merged-pull-request-becomes-verified`,
+`merged-with-changes-offers-the-verified`, `merged-then-moved-on-becomes-verified`,
+`merged-into-another-branch-stays-unverified`, `a-closed-pull-request-keeps-running`)
+installs `uptime` from pull request #3 as below, and then merges or closes it the
+way GitHub does, in one rewrite of the fake's state: `main` moved to the squash
+commit (`s1`, `s2`) or past it (`m1`), the pull request closed and merged as that
+commit, its branch gone — or merged into `next` instead, the pull request's `base`
+saying so and `main` staying where it was — or closed unmerged, and opened again. **Check now** is pressed, and the oracles are the
+same three: the log says what uDeck asked about the pull request and that it
+fetched no file of `uptime`; `installed.json`, the folder's inodes and times
+(`stat` over SSH, before and after) and `catalogue/official/followed.json` say
+what it did to the disk — the record rewritten and nothing else; and the row,
+the catalogue row and the card say **Verified**, the offer of the verified
+version, or that the pull request was closed.
 
 **Installing from a link** (`plugins.install-from-a-pull-request`,
 `-from-a-branch`, `unverified-asks-even-for-nothing`,

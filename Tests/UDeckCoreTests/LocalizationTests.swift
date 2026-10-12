@@ -112,6 +112,9 @@ struct LocalizationTests {
                                 to: .verified(version: "1.0.0", repository: "github.com/o/r"), toTrash: true),
         .catalogueInstalledUnverified(ref: .pullRequest(3)), .catalogueSwitchToVerified(version: "1.0.0"),
         .pluginFromPullRequest(number: 3, commit: "a1b2c3d"), .pluginFromBranch(name: "fix/uptime", commit: "a1b2c3d"),
+        .catalogueMergedDiffers, .catalogueClosedUnmerged, .pluginPullRequestMergedDiffers(number: 3),
+        .pluginPullRequestClosed(number: 3), .pluginPullRequestMergedNothingOffered(number: 3),
+        .windowReinstallBrings(.pullRequest(number: 3, commit: "a1b2c3d", version: "1.0.1")),
         .linkInstall, .linkHelp(official: "github.com/o/r"), .linkField, .linkLookUp, .linkReading, .linkClose, .linkOff,
         .linkRefused(.empty, official: "github.com/o/r"), .linkRefused(.notALink, official: "github.com/o/r"),
         .linkRefused(.notGitHub(host: "gitlab.com"), official: "github.com/o/r"),
@@ -209,7 +212,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 358,
+        #expect(Self.all.count == 364,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

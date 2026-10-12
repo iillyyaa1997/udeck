@@ -90,7 +90,7 @@ def test_pull_request_3s_head_is_c1_with_uptime_changed_and_a_plugin_that_asks_f
     """`pr3`, made on c1: uptime 1.0.1 asking for what 1.0.0 asks, and asks-nothing, asking for no permission at all."""
     root = plugin_repository.FIXTURES
     repository = fake_github.Repository(str(root))
-    assert repository.parents == {"pr3": "c1"}
+    assert repository.parents["pr3"] == "c1"
     assert repository.commits["pr3"].parent is repository.commits["c1"]
     plugins = root / "pr3" / "plugins"
     assert sorted(p.name for p in plugins.iterdir()) == ["asks-nothing", "future-api", "future-udeck", "linked", "uptime"]
@@ -110,14 +110,39 @@ def test_pull_request_3s_head_is_c1_with_uptime_changed_and_a_plugin_that_asks_f
     assert c1.at("plugins/uptime") != pr3.at("plugins/uptime")
 
 
+def test_pull_request_3_merged_squashed_as_its_head_with_a_change_and_main_moving_on():
+    """s1: pr3's content on c1. s2: pr3 with uptime 1.0.2, asking for what 1.0.1 asks. m1: s2's content on s1."""
+    root = plugin_repository.FIXTURES
+    repository = fake_github.Repository(str(root))
+    assert repository.parents == {"pr3": "c1", "s1": "c1", "s2": "c1", "m1": "s1"}
+    assert repository.contents == {"s1": "pr3", "m1": "s2"}, "s1 and m1 have no folder of their own"
+    assert not (root / "s1").exists() and not (root / "m1").exists()
+    commits = repository.commits
+    # Squashed as exactly its head: another commit, on another parent, with the same tree.
+    assert commits["s1"].snapshot.root == commits["pr3"].snapshot.root and commits["s1"].sha != commits["pr3"].sha
+    assert commits["s1"].parent is commits["c1"] and commits["m1"].parent is commits["s1"]
+    # Squashed with a maintainer's change: uptime alone differs from pr3's, as 1.0.2 asking for the same.
+    pr3, s2 = commits["pr3"].snapshot, commits["s2"].snapshot
+    differ = {path.split("/")[1] for path in set(pr3.paths) | set(s2.paths)
+              if path.startswith("plugins/") and pr3.at(path) != s2.at(path)}  # fmt: skip
+    assert differ == {"uptime"}
+    uptime = json.loads((root / "s2" / "plugins" / "uptime" / "manifest.json").read_text())
+    assert uptime["version"] == "1.0.2" and uptime["permissions"] == {"exec": ["sysctl", "./hold.sh"]}
+    assert "version=1.0.2\n" in (root / "s2" / "plugins" / "uptime" / "uptime.sh").read_text()
+    assert commits["m1"].snapshot.root == s2.root
+
+
 def test_a_parents_file_that_names_what_is_not_there_is_refused(tmp_path):
     root = tmp_path / "repository"
     shutil.copytree(plugin_repository.FIXTURES, root, symlinks=True)
     for text, complaint in (
         ("pr3 c9\n", "which no line before it names"),
         ("pr3\n", "is not a commit and the commit it was made on"),
+        ("pr3 c1 pr3 c2\n", "is not a commit and the commit it was made on"),
         ("pr3 c1\npr3 c1\n", "named twice"),
         ("c2 c1\n", "named twice"),
+        ("s9 c1 nowhere\n", "takes its content from nowhere, which is no folder here"),
+        ("s9 c1\n", "takes its content from s9, which is no folder here"),
     ):
         (root / "parents").write_text(text)
         with pytest.raises(ValueError, match=complaint):
@@ -170,14 +195,16 @@ def test_every_fixture_commit_hashes_as_git_hashes_it(tmp_path):
         made = git(*args, cwd=work, env=env)
         assert commit.sha == made, name
         parent = made
-    # Off the main line: each with the commit it was made on as its parent.
+    # Off the main line: each with the commit it was made on as its parent, and
+    # its content from its own folder or the one `parents` names.
     assert repository.parents, "the fixtures have commits off the main line"
     for name, on in repository.parents.items():
         commit = repository.commits[name]
         for child in work.iterdir():
             if child.name != ".git":
                 shutil.rmtree(child) if child.is_dir() and not child.is_symlink() else child.unlink()
-        shutil.copytree(plugin_repository.FIXTURES / name, work, symlinks=True, dirs_exist_ok=True)
+        shutil.copytree(plugin_repository.FIXTURES / repository.contents.get(name, name), work, symlinks=True,
+                        dirs_exist_ok=True)
         git("add", "-A", cwd=work)
         tree = git("write-tree", cwd=work)
         assert commit.snapshot.root == tree, name
@@ -421,7 +448,8 @@ def test_the_lab_can_ask_the_fake_what_it_holds_and_what_it_was_told(served):
     assert state["main"] == "c2" and state["alter"] == ["x"] and state["limit_until"] is None
     _, _, facts = served.json("/lab/facts")
     assert facts["history"] == ["c1", "c2", "c3"] and len(facts["commits"]["c2"]["sha"]) == 40
-    assert facts["parents"] == {"pr3": "c1"} and len(facts["commits"]["pr3"]["sha"]) == 40
+    assert facts["parents"] == {"pr3": "c1", "s1": "c1", "s2": "c1", "m1": "s1"} and len(facts["commits"]["pr3"]["sha"]) == 40
+    assert facts["contents"] == {"s1": "pr3", "m1": "s2"}
     assert state["branches"] == {} and state["pulls"] == {}
 
 
@@ -516,6 +544,36 @@ def test_a_commit_off_the_main_line_is_served_by_its_id_listing_files_and_histor
     assert [commit["sha"] for commit in body] == [pr3["sha"], c1]
     _, _, body = served.json(f"{API}/commits?sha=main&path=plugins/asks-nothing")
     assert body == []
+
+
+def test_a_pull_request_merged_and_main_moved_past_it(served):
+    """The squash merge is one rewrite: main at m1, pull request #3 closed and merged as s1, the commit before m1."""
+    facts = served.fake.repository.facts()["commits"]
+    pr3, s1, m1 = facts["pr3"], facts["s1"], facts["m1"]
+    served.state(main="m1", pulls={"3": {"head": "pr3", "state": "closed", "merged": True, "merge_commit": "s1"}})
+    assert served.get(f"{API}/commits/main", SHA_ONLY)[2].decode() == m1["sha"]
+    _, _, body = served.json(f"{API}/pulls/3")
+    assert body["merged"] is True and body["merge_commit_sha"] == s1["sha"] and body["head"]["sha"] == pr3["sha"]
+    # The commit it was merged as is listed as any commit is, with the head's tree of uptime.
+    status, _, body = served.json(f"{API}/git/trees/{s1['sha']}?recursive=1")
+    entries = {entry["path"]: entry for entry in body["tree"]}
+    assert status == 200 and entries["plugins/uptime"]["sha"] == pr3["paths"]["plugins/uptime"]["sha"]
+    assert m1["paths"]["plugins/uptime"]["sha"] != pr3["paths"]["plugins/uptime"]["sha"]
+    # And main's history passes through it: uptime changed at m1, at s1 and at c1.
+    _, _, body = served.json(f"{API}/commits?sha=main&path=plugins/uptime")
+    assert [commit["sha"] for commit in body] == [m1["sha"], s1["sha"], facts["c1"]["sha"]]
+    # Merged into another branch than main: its base is that branch, at the commit it was merged as.
+    served.state(main="c1", branches={"next": "s1"},
+                 pulls={"3": {"head": "pr3", "state": "closed", "merged": True, "merge_commit": "s1", "base": "next"}})
+    _, _, body = served.json(f"{API}/pulls/3")
+    assert body["merged"] is True and body["merge_commit_sha"] == s1["sha"]
+    assert body["base"]["ref"] == "next" and body["base"]["sha"] == s1["sha"] and body["base"]["label"].endswith(":next")
+    assert served.get(f"{API}/commits/main", SHA_ONLY)[2].decode() == facts["c1"]["sha"], "main where it was"
+    # Closed unmerged, and opened again: one rewrite each.
+    served.state(main="c1", pulls={"3": {"head": "pr3", "state": "closed", "merged": False}})
+    assert served.json(f"{API}/pulls/3")[2]["state"] == "closed"
+    served.state(main="c1", pulls={"3": {"head": "pr3", "state": "open", "merged": False}})
+    assert served.json(f"{API}/pulls/3")[2]["state"] == "open"
 
 
 # --- Reading the log -----------------------------------------------------------------------

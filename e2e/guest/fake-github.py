@@ -14,7 +14,10 @@ do) — so a lab build of uDeck is pointed here through its
 **Its content is fixture folders, one per commit** (`e2e/fixtures/plugin-repository/`):
 a folder per commit, a file listing the main line oldest first (`history`),
 each the parent of the next, and a file naming the commits off it with the
-commit each was made on (`parents`) — a pull request's head, a branch's commit.
+commit each was made on (`parents`) — a pull request's head, a branch's commit,
+a squash merge — and, where it is another commit's content again, the folder
+it takes it from: a pull request squash-merged as exactly its head is a new
+commit, on another parent, with the same tree.
 The fake computes real git blob, tree and commit ids from them itself — there
 is no git in the guest — so a plugin installed from it hashes, in uDeck's
 Swift, to the id this Python gave it, or the install is refused. Two
@@ -235,7 +238,9 @@ def read_lines(path: str) -> list[str]:
 
 class Repository:
     """Every fixture commit with its parent: the main line in the order `history`
-    gives, each the parent of the next, and the commits `parents` names off it."""
+    gives, each the parent of the next, and the commits `parents` names off it —
+    each line `<commit> <made on> [<content>]`, the content being the folder of
+    the commit's own name unless a third name says whose folder it is."""
 
     def __init__(self, root: str) -> None:
         names = read_lines(os.path.join(root, "history"))
@@ -250,20 +255,28 @@ class Repository:
         # Off the main line: dated after all of it, one day apart, in the
         # order the file gives — each made on a commit named before it.
         self.parents: dict[str, str] = {}
+        # The folder each commit off the main line takes its content from,
+        # where that is not its own.
+        self.contents: dict[str, str] = {}
         for index, line in enumerate(read_lines(os.path.join(root, "parents"))):
-            name, _, on = line.partition(" ")
-            name, on = name.strip(), on.strip()
-            if not name or not on or " " in on:
+            fields = line.split()
+            if len(fields) not in (2, 3):
                 raise ValueError(f"{root}/parents: {line!r} is not a commit and the commit it was made on")
+            name, on = fields[0], fields[1]
+            content = fields[2] if len(fields) == 3 else name
             if name in self.commits:
                 raise ValueError(f"{root}/parents: {name} is named twice")
             if on not in self.commits:
                 raise ValueError(f"{root}/parents: {name} is made on {on}, which no line before it names")
-            self._add(root, name, self.commits[on], FIRST_COMMIT_TIME + (len(names) + index) * COMMIT_SPACING)
+            if not os.path.isdir(os.path.join(root, content)):
+                raise ValueError(f"{root}/parents: {name} takes its content from {content}, which is no folder here")
+            self._add(root, name, self.commits[on], FIRST_COMMIT_TIME + (len(names) + index) * COMMIT_SPACING, content)
             self.parents[name] = on
+            if content != name:
+                self.contents[name] = content
 
-    def _add(self, root: str, name: str, parent: Commit | None, when: int) -> Commit:
-        commit = Commit(name, Snapshot(os.path.join(root, name)), parent, when)
+    def _add(self, root: str, name: str, parent: Commit | None, when: int, content: str | None = None) -> Commit:
+        commit = Commit(name, Snapshot(os.path.join(root, content or name)), parent, when)
         self.commits[name] = commit
         self.by_sha[commit.sha] = commit
         return commit
@@ -303,6 +316,7 @@ class Repository:
             "default_branch": DEFAULT_BRANCH,
             "history": self.names,
             "parents": self.parents,
+            "contents": self.contents,
             "commits": {
                 name: {
                     "sha": commit.sha,
@@ -469,7 +483,8 @@ class Fake:
 
     def pull(self, number: str, headers: dict, state: dict) -> tuple[int, dict, bytes]:
         """A pull request as GitHub's `GET /pulls/{n}` answers it — the fields uDeck reads, and the head and base
-        GitHub always sends. A number the lab did not name is 404."""
+        GitHub always sends: the base is `main` unless the lab names another branch (`base`), the one it was opened
+        against and merged into. A number the lab did not name is 404."""
         given = (state.get("pulls") or {}).get(number) if number.isdigit() else None
         head = self.repository.commits.get(str(given.get("head"))) if isinstance(given, dict) else None
         if head is None:
@@ -478,7 +493,8 @@ class Fake:
         merge = self.repository.commits.get(str(given.get("merge_commit"))) if merged else None
         head_repo = given.get("head_repo", self.owner_repo)
         head_ref = str(given.get("head_ref") or f"pull-{number}")
-        base = self.repository.resolve(DEFAULT_BRANCH, state)
+        base_ref = str(given.get("base") or DEFAULT_BRANCH)
+        base = self.repository.resolve(base_ref, state)
         body = {
             "number": int(number),
             "state": str(given.get("state") or "open"),
@@ -497,8 +513,8 @@ class Fake:
                 "repo": {"full_name": head_repo, "fork": head_repo != self.owner_repo} if head_repo else None,
             },
             "base": {
-                "label": f"{self.owner_repo.split('/')[0]}:{DEFAULT_BRANCH}",
-                "ref": DEFAULT_BRANCH,
+                "label": f"{self.owner_repo.split('/')[0]}:{base_ref}",
+                "ref": base_ref,
                 "sha": base.sha if base else None,
                 "repo": {"full_name": self.owner_repo, "fork": False},
             },

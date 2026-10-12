@@ -250,7 +250,11 @@ uDeck reads it from `api.github.com` and `raw.githubusercontent.com`, anonymousl
 * and when you press **Look up** in **Install from a link…**, the pull request
   or the branch of that repository the link names — its head, its listing and
   the manifests of the plugins there that are not the catalogue's — and, when
-  you press **Install** there, that plugin's files.
+  you press **Install** there, that plugin's files;
+* and, in each read, for a plugin installed from a pull request that the
+  catalogue does not have as it is, that pull request — whether it was merged
+  or closed — and, once merged into `main`, the listing of the commit it was
+  merged as.
 
 A read is usually one or two requests, each carrying `User-Agent:
 uDeck/<version>` and the network address any request carries. **Verified
@@ -264,7 +268,10 @@ one you kept at an earlier version are only offered, for you to press
 installed from a pull request or a branch is **Unverified** — on its row in
 Settings, in the list it came from and on its card — asks before it runs, even
 when it asks for nothing, and again whenever its code changes, and is never
-updated by itself. **Settings →
+updated by itself. Once exactly that folder is merged into the repository, it
+is **Verified** — nothing downloaded, nothing asked again — and updates as a
+verified plugin does; merged with changes, its row offers the verified version,
+and closed without being merged, its row says so and it keeps running. **Settings →
 Plugins → Update verified plugins by themselves** turns that off, and every
 update waits for a press. **Settings → Plugins → Official catalogue** turns all
 of it off: uDeck then makes no request about plugins at all, the plugins you

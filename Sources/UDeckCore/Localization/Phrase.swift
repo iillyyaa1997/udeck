@@ -279,6 +279,10 @@ public enum Phrase: Sendable, Equatable {
     /// puts the row's verified copy in its place.
     case catalogueInstalledUnverified(ref: PluginRef)
     case catalogueSwitchToVerified(version: String)
+    /// After *Installed here from pull request #3: unverified*, what became
+    /// of the pull request (`PullRequestLifecycle.cataloguePhrase`).
+    case catalogueMergedDiffers
+    case catalogueClosedUnmerged
 
     /// Every refusal names the plugin, what is wrong, and what would fix it.
     case catalogueRefusal(RepositoryRefusal)
@@ -302,6 +306,13 @@ public enum Phrase: Sendable, Equatable {
     /// commit, seven characters of it.
     case pluginFromPullRequest(number: Int, commit: String)
     case pluginFromBranch(name: String, commit: String)
+    /// What became of the pull request a copy came from, under its mark
+    /// (`PullRequestLifecycle.rowPhrase`): merged as something else than the
+    /// copy — the verified version offered, never made by itself, or none to
+    /// offer here — or closed without being merged.
+    case pluginPullRequestMergedDiffers(number: Int)
+    case pluginPullRequestMergedNothingOffered(number: Int)
+    case pluginPullRequestClosed(number: Int)
     case pluginPinned
     /// A copy a verified plugin put in place by itself (`AutoUpdate`), and
     /// one it could not: tried again at the next read of the catalogue.
@@ -403,6 +414,9 @@ public enum Phrase: Sendable, Equatable {
     case windowNotInPluginsFolder(id: String, path: String)
     case windowWillNotRun(id: String)
     case windowReinstall
+    /// Beside **Reinstall** on such a window, when what it puts back is code
+    /// nobody verified: which copy, from where (`InstalledRecord.reinstallSays`).
+    case windowReinstallBrings(CopyName)
 
     // MARK: - What a plugin may ask for
 
