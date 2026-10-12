@@ -1033,6 +1033,29 @@ def choose_folder(machine: Any, path: str, step: str) -> None:
     ask(machine, _applescript(_CHOOSE_FOLDER, process=PROCESS, path=path), step, seconds=config.UI_APPEAR_SECONDS)
 
 
+# --- A field typed into ---------------------------------------------------------------
+
+_TYPE = """
+tell application "System Events" to tell process %(process)s
+  set frontmost to true
+  keystroke %(text)s
+end tell
+return "typed"
+"""
+
+
+def type_text(machine: Any, text: str, step: str) -> None:
+    """`text` typed into the field uDeck has focused, the way a person types it.
+
+    From inside the guest through System Events, as every chord and the folder
+    panel's path are (`choose_folder`): keys over VNC do not survive the trip.
+    The field is focused first by a click of the pointer at it (`click`), and
+    what it holds afterwards is for the caller to read back — its value is in
+    the walk — never this function's to assume.
+    """
+    ask(machine, _applescript(_TYPE, process=PROCESS, text=text), step, seconds=config.UI_APPEAR_SECONDS)
+
+
 def element(dump: str, identifier: str, step: str = "reading the screen") -> Element | None:
     """The control with this identifier in a walk, or None."""
     for row in controls(dump, step):

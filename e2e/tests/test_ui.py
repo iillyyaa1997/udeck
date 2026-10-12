@@ -125,6 +125,14 @@ def test_the_settings_window_is_opened_from_the_applications_own_menu():
     assert '"Settings…"' in script and "menu bar item 1 of menu bar 1" in script
 
 
+def test_a_field_is_typed_into_by_system_events_in_udeck():
+    """Install from a link…'s field: typed into the way choose_folder types a path, the text quoted as AppleScript."""
+    machine = FakeMachine("typed")
+    ui.type_text(machine, 'github.com/o/r/pull/3"x', "typing")
+    script = machine.ssh.scripts[0]
+    assert 'keystroke "github.com/o/r/pull/3\\"x"' in script and 'tell process "uDeck"' in script
+
+
 def test_every_script_asks_only_about_udeck():
     machine = FakeMachine("", "", "")
     ui.identifiers(machine, "listing")

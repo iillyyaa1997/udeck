@@ -27,10 +27,11 @@ see the last section.
 > it was opened — with its wrong-chord control and a check that the combination
 > dies with uDeck. `login`: "Open at Login", through a restart and an update, and
 > switched off. `settings`: two changes made in uDeck's own window, and whether
-> they hold across a restart. `plugins`: the twenty-four checks of
+> they hold across a restart. `plugins`: the twenty-eight checks of
 > docs/plugin-repository.md — the catalogue, installing, updating, a verified
 > plugin updating itself and an update asking for other permissions only
-> offered, earlier versions, removing, each refusal, a linked folder, and what Settings offers
+> offered, earlier versions, removing, each refusal, installing from a pull
+> request and a branch, a linked folder, and what Settings offers
 > somebody writing a plugin: Link a folder…, the run log's switch, a failed run
 > on a fresh card, Install command, Where to look for commands, and all of it
 > in Russian — against a fake GitHub in the guest.
@@ -1583,7 +1584,7 @@ problem.
 
 ### Plugins from a repository
 
-Twenty-four checks, one per row of the table in docs/plugin-repository.md ("The
+Twenty-eight checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"). None of them talks to github.com — in the lab only the update
 checks given a published release do, `updates.a-published-release` by default.
 A fake GitHub runs inside the guest (`e2e/guest/fake-github.py`, the guest's
@@ -1655,6 +1656,41 @@ of its runs is read before and after; its removal is a click, and what it
 leaves of the working copy is read over SSH before and after, every name and
 every byte. Every install, update, earlier
 version, removal and switch is a click.
+
+**Installing from a link** (`plugins.install-from-a-pull-request`,
+`-from-a-branch`, `unverified-asks-even-for-nothing`,
+`switch-to-verified-names-both`) starts the fake with pull request #3 at `pr3`,
+opened from a fork, `someone/udeck-plugins`, and the branch `fix/uptime` at
+the same commit. The link is typed into **Install from a link…**'s field the
+way a person types one — a click of the pointer into the field, then the keys
+from inside the guest through System Events (`ui.type_text`) — and read back
+from the field before **Look up** is pressed. The oracles are the same three:
+the fake's log, from **Look up** on, says what uDeck asked for and that none
+of it named the fork; `installed.json` says where the copy came from; and the
+sheet, the row and the card's header say **Unverified**. The sheet is closed
+before the rows under it are read.
+
+**A walk that crosses a change does not say what is on the screen.** One
+walk of Settings → Plugins takes 40 to 76 s on a loaded Mac — longer than every
+deadline the plugin checks wait — and a walk takes the list of a pane's
+controls when it reaches it and reads each one after. Measured on 2026-10-11
+(`.build/e2e/kept/`): in six runs of `plugins.modified-locally` with its walks
+timed (`walks.txt`), a line appended to `uptime.sh` was in `installed.json` 0.7
+to 0.9 s later; and in two runs that changed the file at a chosen moment inside
+one walk, five times each (`race.txt`), a change 0.5 s into the walk left that
+walk without the row's mark (2 of 2) — R2's *mark None*, 2 runs of 6, while
+the screen said Modified locally — at 3 and 8 s with the old mark (4 of 4),
+at 1.5 and 5 s with the mark four or five times (4 of 4); the walk after it read
+what the record said, 10 of 10. So `plugins.modified-locally` reads the disk
+first and the row after, and `_wait_until` judges a control only by a walk
+begun at or after its deadline: the control has to say it by then.
+
+The walks are as slow with R2's uDeck: those six runs built it (43 controls in
+their walks, and no **Install from a link…**), and walked in 40 to 76 s. On
+2026-10-10 `plugins.limit-is-explained` reached its install 100 to 115 s after
+using the limit up; on 2026-10-11, 159 and 205 s — past the 150 s reset it had,
+twice. Its reset is now seven minutes away: five walks of the slowest
+measured, with room (`LIMIT_SECONDS`).
 
 **What Settings offers somebody writing a plugin**, one check each, every one a
 row of the same table:

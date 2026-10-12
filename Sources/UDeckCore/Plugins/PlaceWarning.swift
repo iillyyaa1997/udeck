@@ -40,6 +40,35 @@ public enum PlaceWarning {
         return .catalogueUpdateOverChanges(id: id, version: version)
     }
 
+    /// A copy uDeck installed taken by a copy from another line of history
+    /// (`ShownPlace.Switch`) — **Install** on a row listed from a link over
+    /// the verified copy, **Switch to verified** over a pull request's, **Back
+    /// to** or an earlier version across the two: both copies named, with
+    /// the source and the ref of each, and — when the copy there holds
+    /// something of the operator's (`toTrash`) — that it goes to the Trash.
+    /// Said in place of every other warning of the same button: a switch
+    /// over a link is no switch, and has the link's own.
+    public static func switching(id: String, _ switching: ShownPlace.Switch, toTrash: Bool) -> Phrase {
+        .catalogueSwitchConfirm(id: id, from: switching.from, to: switching.to, toTrash: toTrash)
+    }
+
+    /// What the warning of `button` says of `place` — every button that
+    /// takes a plugin's place, in one: a switch of source first, then a
+    /// link, then what the button says of a copy holding the operator's
+    /// work. `version` is what comes, `link` where a link there leads as
+    /// Settings writes it, `path` the plugins folder as Settings writes it.
+    public static func of(_ place: ShownPlace.Place, button: ShownPlace.Button, id: String, path: String,
+                          link: String?) -> Phrase {
+        if let switching = place.switching, link == nil {
+            return Self.switching(id: id, switching, toTrash: place.fate == .toTrash)
+        }
+        switch button {
+        case .remove: return removal(id: id, link: link, toTrash: place.fate == .toTrash)
+        case .install: return replacement(id: id, path: path, link: link)
+        case .replaceCopy: return replacingCopy(id: id, version: place.arriving ?? "", link: link)
+        }
+    }
+
     /// **Link a folder…** of `folder` over what is at its id now
     /// (`PluginLink.Occupant`), in the plugins folder `path` — nil when
     /// nothing has to be said: the id is free, or already linked to that

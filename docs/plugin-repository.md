@@ -1239,6 +1239,104 @@ One install, update or removal runs at a time. They are rare, and doing them
 one after another is what keeps `installed.json` and the plugins folder from
 ever being written by two of them at once.
 
+### Installing from a branch or a pull request
+
+**Install from a link…** in Settings → Plugins, next to **Link a folder…**,
+takes a github.com link pasted as the browser shows it — `https://` and `www.`
+or not — and reads what it names before anything is asked of GitHub
+(`RepositoryLink` in UDeckCore):
+
+* a pull request of the official repository, `github.com/<official>/pull/3`,
+  and any page under it — `…/files`, `…/commits`;
+* a branch of it, `…/tree/<branch>`, and any folder under it: the branch is
+  everything before the last `plugins/<id>`, so `…/tree/fix/uptime/plugins/uptime`
+  is `uptime` on `fix/uptime` — a name holding a `/` reads as itself — and
+  only that plugin is listed; when it is what the catalogue has, or is not
+  there at all, the sheet says that of it — *"uptime in branch fix/uptime is
+  what the catalogue already has"*, *"Branch fix/uptime has no
+  plugins/uptime"* — not of every plugin on the branch;
+* its own page, or its default branch: that is the catalogue, and the sheet
+  says so — *"That is the default branch of github.com/…: its plugins are the
+  catalogue below, verified."*
+
+Everything else is refused before a request, each refusal saying what the link
+is and what to paste instead: one commit — `…/commit/<sha>`, or `…/tree/<sha>`,
+GitHub's *Browse files* at a commit (*"Installing a single commit is not
+possible yet"*, stage 5); another host; another repository's pull request; a
+name git does not allow for a branch; a page that names no branch and no pull
+request. A branch of another repository, or its own page — a fork's included —
+is refused too: *"github.com/someone/udeck-plugins is not
+github.com/iillyyaa1997/udeck-plugins. Installing from another repository — a
+fork included — is not possible yet."*
+
+**Look up** then asks GitHub, always through the official repository
+(`RefResolver`): for a pull request `GET /repos/{o}/{r}/pulls/{n}`, which says
+its head, its state and whether it was merged in one answer; for a branch its
+head, `GET /repos/{o}/{r}/commits/refs/heads/<branch>`; then the listing of
+that commit, unless the cache has it, and from the raw host, at that commit,
+the manifests of the plugins there whose tree is not the one the catalogue's
+head has for the same id — new there, or changed. Two requests to the API,
+and nothing for the default branch, which the catalogue already knows. A pull
+request opened from a fork is read the same way, by commit, through the
+official repository: its head is there whoever opened it, even after the fork
+is deleted, so nothing is ever asked of the fork, and the fork's name is not
+recorded.
+
+**The sheet** under the button says the line of history and the commit it was
+read at — *Pull request #3 at a1b2c3d*, *Branch fix/uptime at a1b2c3d* — with
+a link to its page, a pull request's title as its author wrote it, and whether
+it was merged or closed without being merged; then *"Nobody verified what is
+listed here: it is not what the repository merged…"*, and one row per plugin,
+each marked **Unverified**, with what it asks for and **Install**. **Install**
+takes the plugin's folder at that commit, exactly as **Install** on a
+catalogue row takes it — [the same steps](#what-happens-when-install-is-pressed),
+from `plugins/<id>/` at the commit, through the official repository's raw
+host, no API request — and records `ref` `pr` and the number, or `branch` and
+its name, `unverified`, by nobody. Installed, the plugin asks before it runs,
+even when it asks for nothing, and again whenever its code changes ([Consent
+for unverified code](#consent-for-unverified-code)).
+
+**Over a copy from another line of history** — the verified copy, most often —
+**Install** says first what goes and what comes, both sources and the ref:
+*"uptime is the verified 1.0.0 from github.com/iillyyaa1997/udeck-plugins;
+installing 1.0.1 from pull request #3 at a1b2c3d replaces it. Its windows and
+settings stay. Nobody verified the code that comes: it asks before it runs,
+unless you allowed exactly that code before."* — the decision there was stays
+in `grants.json`, but code nobody verified runs only on a decision made for
+its tree ([Consent for unverified code](#consent-for-unverified-code)). Nothing
+changes until that is confirmed, and only while it still says what is there
+(`ShownPlace.Switch`).
+The verified copy becomes `previous`, so **Back to 1.0.0** puts it back — with
+the same warning the other way round. The same pull request at a later head is
+the same line: no warning, an update.
+
+**Switch to verified.** The catalogue row of an id installed from a branch or a
+pull request says *"Installed here from pull request #3: unverified"* and
+offers **Switch to verified 1.0.0** — on the plugin's own row too — which puts
+the catalogue's copy in its place after the warning that names both: *"uptime
+is 1.0.1 from pull request #3 at a1b2c3d; installing the verified 1.0.0 from
+github.com/iillyyaa1997/udeck-plugins replaces it. Its windows, settings and
+your permission decision stay."* The pull request's copy becomes `previous`.
+Its folder gone, the catalogue row still says so — *"Installed here from pull
+request #3: unverified — uptime is not in ~/.udeck/plugins"* — and **Switch to
+verified** puts the verified copy where nothing is, without a warning, since
+nothing there is replaced; the row never offers **Reinstall**, which would put
+the pull request's code back under its **Verified**. **Reinstall** on the
+plugin's own row does that, beside *pull request #3 at a1b2c3d*. **Earlier versions…** on such a copy lists the default
+branch's history, and choosing a line is the same switch, said the same way.
+Nothing offers such a copy an update against the catalogue's head: a branch's
+or a pull request's copy is not an older version of the verified one, it does
+not count among the updates waiting, and it never updates by itself.
+
+**Official catalogue** governs this as it governs every request about
+plugins: off, **Install from a link…** is greyed out and says why, and
+plugins installed from a link keep running.
+
+> **Later — stage 3.** Following the branch or the pull request a copy came
+> from: its head asked at the catalogue's moments, a new head offered as an
+> update with *What changed*, history rewritten said, a pull request merged or
+> closed said on the row. Branches of forks of the official repository.
+
 ### Git's two hashes, computed by uDeck
 
 uDeck identifies content the way git does, because that is what both GitHub and
@@ -1471,9 +1569,15 @@ changes of yours, goes to the Trash); over a folder of your own, that it goes
 to the Trash; over another link, that the link is pointed at the new folder and
 the one it led to stays as it is.
 
-> **Later — stages 3 and 4.** Over a copy from another source, a branch or a
-> pull request, the same confirmation names both sources, and the Settings row
-> always says where the copy on disk came from.
+Over a copy from another line of history — a branch's or a pull request's copy
+in the verified copy's place, or the other way round — every button that would
+replace it says first what goes and what comes, both sources and the ref
+([Installing from a branch or a pull request](#installing-from-a-branch-or-a-pull-request)),
+and the Settings row says where the copy on disk came from: *From
+github.com/iillyyaa1997/udeck-plugins at 5c3e0d2*, or **Unverified** · *pull
+request #3 at a1b2c3d*, with a link to its page.
+
+> **Later — stage 4.** The same of a copy from another source.
 
 ---
 
@@ -1695,8 +1799,10 @@ branch's is held to its tree (`ConsentBasis` in UDeckCore).
   failure, until the folder is hashed again; its poll loop and its card stay
   as they were meanwhile, so a hashing that finds the same tree changes
   nothing, and new content stops the loop and asks. A change counts from when
-  the folder watcher reports it, a fraction of a second after it is made: a
-  run that starts inside that fraction runs on the decision before it. A copy
+  the folder watcher reports it, once writes in the folder pause — in the lab,
+  0.7 to 0.9 s after one line was appended, as `installed.json` said it
+  (`plugins.modified-locally`, 2026-10-11) — and a run that starts before then
+  runs on the decision before it. A copy
   uDeck puts in place counts as changed from that moment, and runs only on a
   decision for its own tree.
 * A folder that would not hash — a file in it cannot be read — is never
@@ -1705,18 +1811,30 @@ branch's is held to its tree (`ConsentBasis` in UDeckCore).
 * While `installed.json` cannot be read, nothing says where any copy came
   from: every folder but a link is held to its tree, and asks — a broken file
   only ever asks for more.
+* The card says where the code comes from, above what it asks: *"Nobody
+  verified this code: it comes from pull request #3 of
+  github.com/iillyyaa1997/udeck-plugins, not from what the repository merged.
+  uDeck asks again whenever it changes."* — *branch fix/uptime* for a branch,
+  *changed on this Mac since* once it was edited — and the window's header
+  says **Unverified** whatever the card shows ([Verified, trusted,
+  unverified](#verified-trusted-unverified)). While `installed.json` cannot be
+  read it says that nothing says where the code came from.
 * A plugin that asks for nothing is asked too: *"asks-nothing asks for
-  nothing, but its code is unverified"*, with **Allow and run** and **Decline**.
-  **Decline** switches it off, since a decision with nothing in it would let it
-  run; switched on again, it asks again.
+  nothing, but its code is unverified"*, with **Allow and run** and **Decline**
+  on its card, and **Allow** and **Decline** under its row's **More** in
+  Settings. **Decline** switches it off, since a decision with nothing in it
+  would let it run; switched on again, it asks again.
 * A local edit to an unverified copy asks again, as any new content does.
 
 The gate is `PermissionGate.launchDecision` and `mayRun` in the plugin format,
 given the tree required (`requiredTree`); without one — `udeck-plugin run`, a
 verified plugin — it is the rule it always was.
 
-> **Later — stage 3.** Installing from a branch or a pull request, and an
-> unverified plugin only ever being offered an update, with *What changed*.
+Installing such a copy is [Installing from a branch or a pull
+request](#installing-from-a-branch-or-a-pull-request).
+
+> **Later — stage 3.** An unverified plugin only ever being offered an update
+> of its branch or pull request, with *What changed*.
 
 ---
 
@@ -1764,7 +1882,7 @@ read it*. That is what these marks answer — and each says whose word it is.
 | **A folder of your own** — `folder` | Put into `~/.udeck/plugins` by anyone but uDeck. uDeck claims nothing about it. | 1 |
 | **Modified locally** — `pencil` | Installed from a repository, but the folder has changed since. Whatever mark it had is gone. | 1 |
 | **Trusted source: \<name\>** — `checkmark.shield` | Installed from the default branch of a repository the operator explicitly trusted (**Trust** on the source, as `brew trust` works for Homebrew). The guarantee is that source's owner's, not uDeck's — a different mark, so nobody mistakes one for the other. | 4 |
-| **Unverified** — `exclamationmark.triangle` | From a branch, a pull request, a fork, a specific commit, or the default branch of a source nobody trusted. Nobody vouches for it. Shown on the card's header as well as in Settings. | 3, 4 |
+| **Unverified** — `exclamationmark.triangle` | From a branch, a pull request, a fork, a specific commit, or the default branch of a source nobody trusted. Nobody vouches for it. Shown on the card's header as well as in Settings. | 3 (a branch or a pull request of the official repository); 4 |
 
 In the official repository **only what is merged is verified**; its branches and
 pull requests are unverified like anybody else's.
@@ -1772,6 +1890,21 @@ pull requests are unverified like anybody else's.
 **"Verified" does not mean safe.** It means a person read the code and merged
 it. It is the strongest thing uDeck can honestly say about a plugin, and
 nothing more than that.
+
+**Where Unverified is said**, for a copy installed from a branch or a pull
+request: on its row in Settings — **Unverified** · *pull request #3 at
+a1b2c3d*, or *branch fix/uptime at a1b2c3d*, with a link to that page; a copy
+changed on disk since is marked **Modified locally** there instead, beside the
+same *pull request #3 at a1b2c3d* — that mark takes the place of every other —
+and a copy whose folder has gone **Missing**; on every row **Install from a
+link…** lists; on the catalogue row of the same id, *"Installed here from pull
+request #3: unverified"*, its folder there or not, beside **Switch to
+verified**; on the header of each of its windows, changed on disk or not —
+a window of a copy whose folder has gone says only that it is not in
+~/.udeck/plugins; and on its card's question, which says where the code comes
+from.
+`CatalogueRowState`, `PluginStanding.cardSaysUnverified` and `ConsentSource` in
+UDeckCore decide the last three.
 
 So that the seal means one thing only: the **"Asks for nothing"** line in
 Settings, which today wears a `checkmark.seal`, loses it and becomes plain text.
@@ -1801,6 +1934,12 @@ repository. What that means, exactly:
   old; and whenever **Check now** is pressed.
 * **When the operator presses Install, Update or Earlier versions**, the files
   that needs.
+* **When the operator presses Look up in Install from a link…**, the pull
+  request or the branch the link names, its listing unless it is cached, and
+  the manifests of the plugins there that are not the catalogue's — through
+  the official repository, two requests to the API ([Installing from a branch
+  or a pull request](#installing-from-a-branch-or-a-pull-request)) — and, when
+  **Install** is pressed there, that plugin's files.
 * **After a read that finds an update a verified plugin makes by itself**
   ([Automatic updates](#automatic-updates)), that plugin's files at the head —
   no more than **Update** would fetch, and only while **Update verified plugins
@@ -1939,9 +2078,13 @@ guest's `~/.udeck` over SSH.
 | `plugins.refuses-what-it-cannot-run` | Fixtures with `api: 2` and `minUDeck: "99.0.0"` are listed with their reasons and no **Install**, and nothing of theirs but the manifest was ever requested. |
 | `plugins.refuses-changed-files` | With the fake altering one file, the install is refused with the "arrived different" message; there is no `plugins/uptime` and nothing left in `staging/`. |
 | `plugins.refuses-a-link` | A fixture whose listing has a symbolic link is listed as not installable, naming the path. |
-| `plugins.limit-is-explained` | With the limit used up for two and a half minutes, **Check now** shows the message and the reset time; after a second **Check now** and an install of a plugin already listed — which works — the log shows no API request until the reset; after it, **Check now** reaches the API again. |
-| `plugins.catalogue-off-means-no-network` | Switched off and relaunched, uDeck makes no request to the fake for two minutes. |
-| `plugins.modified-locally` | A line appended to an installed file over SSH makes the row say **Modified locally** within seconds, and **Verified** is gone. |
+| `plugins.limit-is-explained` | With the limit used up for seven minutes — five walks of the slowest measured, 76 s — **Check now** shows the message and the reset time; after a second **Check now** and an install of a plugin already listed — which works — the log shows no API request until the reset; after it, **Check now** reaches the API again. |
+| `plugins.catalogue-off-means-no-network` | Switched off, **Install from a link…** says why it does nothing; relaunched, uDeck makes no request to the fake for two minutes. |
+| `plugins.modified-locally` | A line appended to an installed file over SSH makes `installed.json` say `modified` within seconds — 0.7 to 0.9 s, measured — and then the row **Modified locally**, with **Verified** gone. The disk is read first: one walk of Settings → Plugins takes 40 to 76 s, and a walk that crosses the change returns the row's mark as it was, several times, or not at all — R2's two failures of six — while the walk after it reads the truth (e2e/README.md). |
+| `plugins.install-from-a-pull-request` | Pull request #3, opened from the fork `someone/udeck-plugins`, pasted as `github.com/iillyyaa1997/udeck-plugins/pull/3` into **Install from a link…**: the sheet says *Pull request #3 at …* and lists `asks-nothing` and `uptime` — what differs from the catalogue's head — and the log holds the pull request, its listing and those two manifests at its head, through the official repository; **Install** on `uptime` fetches every file of `plugins/uptime/` once, from the base's raw host at the head's commit, and asks the API nothing; nothing is asked of the fork. The folder hashes to `pr3`'s tree, `installed.json` says `ref {pr, "3"}`, `unverified`, by `null`; the row says **Unverified** · *pull request #3 at …* with a link to its page; placed on a tab, the card's header says **Unverified**, and its question says where the code comes from. Screenshots of the sheet, the row and the card. |
+| `plugins.install-from-a-branch` | The link into `plugins/uptime` on `fix/uptime`, a branch whose name holds a `/`: the sheet lists `uptime` alone, and from **Look up** to the end of the install the log holds the branch's head by `refs/heads/fix/uptime`, its listing and files of `plugins/uptime/` at its commit — nothing else; the record says `ref {branch, "fix/uptime"}`, `unverified`, by `null`, and the row **Unverified** · *branch fix/uptime at …*. Its folder taken away over SSH, the catalogue row says *Installed here from branch fix/uptime: unverified — uptime is not in ~/.udeck/plugins* and offers **Switch to verified** — the plugin's row too — and no **Reinstall**; pressed, the verified copy goes in without a warning, with the branch's as `previous`. |
+| `plugins.unverified-asks-even-for-nothing` | `asks-nothing`, installed from the pull request and placed on a tab: its card asks — *Asks nothing asks for nothing, but its code is unverified*, and where the code comes from — and its count of runs is not in its cache: it has not run. **Allow** runs it, and `grants.json` holds the decision for 1.0.0 and for its tree; a line appended to `run.sh` over SSH asks again; **Decline** then switches it off (`plugin-settings.json`), and its count of runs is what it was before the edit: the changed code never ran. |
+| `plugins.switch-to-verified-names-both` | The verified `uptime` 1.0.0 installed, placed with a setting value and allowed; **Install** on the pull request's `uptime` first says *uptime is the verified 1.0.0 from github.com/…; installing 1.0.1 from pull request #3 at … replaces it. Its windows and settings stay. Nobody verified the code that comes: it asks before it runs…*, and while that is up the folder and the record are as they were; confirmed, the record is the pull request's, with the verified copy as `previous`. **Switch to verified 1.0.0** on the row warns the other way round and again changes nothing until it is confirmed; then the row says **Verified**, the record is `main`'s at `c1`, the window and the setting value are where they were, and the card runs 1.0.0 without asking. |
 | `plugins.window-survives-a-broken-manifest` | A placed plugin's manifest broken over SSH keeps its window in `layout.json`, which says what is wrong; fixed, the card comes back without being added again. |
 | `plugins.every-replacement-warns-first` | Over a folder with a `.env` put in over SSH — for **Reinstall**, also a line appended to `uptime.sh` — **Reinstall**, **Update** on the catalogue row, **Back to 1.0.0** and **Remove** each say first that the copy goes to the Trash; confirmed, each does what it says, and every `.env` is in the guest's Trash and no longer in the folder. |
 | `plugins.an-update-ends-a-running-action` | With the fixture card's **Hold** action running, **Update** ends it before it replaces the folder: the action wrote that it was ended and never that its folder changed under it, nothing of it runs afterwards, and 1.1.0 is in place. |
@@ -2025,6 +2168,19 @@ never the network. What they cover:
   (`RefResolver`), against a provider of the test's own that counts its
   requests; and a pull request as GitHub answers it, through the client's own
   transport (`GitHubClient.pull`);
+* installing from a link (`InstallFromLinkTests`): **Install** on a row the
+  link listed — onto nothing at once, recorded as the pull request's or the
+  branch's, unverified; over the verified copy, the warning that names both
+  sources and the ref, nothing changed until it is confirmed, the verified
+  copy kept as `previous`; over a folder of the operator's own or a link,
+  their own warnings; which lines of history are the same and so no switch;
+  the catalogue row of an id installed from a pull request and its **Switch
+  to verified**, its warning, and no update offered against the head; where
+  a copy came from as its row says it, and its page; when the card's header
+  says **Unverified**; what the card says of where the code comes from, never
+  *sandbox*; why a link names nothing to install, in both languages; and a
+  run held to its tree not started on a decision for another tree, or before
+  its folder is hashed (`PollExecutionTests`);
 * which windows the layout keeps;
 * what Settings → Plugins decides before it draws: which warning **Remove**,
   **Replace…**, **Update**, **Reinstall**, **Back to**, **Install this
@@ -2145,8 +2301,11 @@ owner sets the branch protection.
   pull request, forks included (built underneath: `installed.json` keeps a
   branch's and a pull request's ref, and every button that puts a copy back
   keeps it, [`installed.json`](#installedjson); a github.com link read and
-  resolved, `RepositoryLink` and `RefResolver`, which nothing in Settings
-  offers yet); **Unverified**, on the card too; consent for
+  resolved, `RepositoryLink` and `RefResolver`; and on top of them **Install
+  from a link…**, [Installing from a branch or a pull
+  request](#installing-from-a-branch-or-a-pull-request), with **Switch to
+  verified**); **Unverified**, on the card too (built: [Where Unverified is
+  said](#verified-trusted-unverified)); consent for
   every new content (built: [Consent for unverified code](#consent-for-unverified-code));
   **Verified** computed from content, with the switch to
   the merged version when a pull request lands; automatic daily updates for

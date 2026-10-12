@@ -33,7 +33,8 @@ public struct RefResolver: Sendable {
     /// What a link comes to.
     public enum Outcome: Equatable, Sendable {
         /// The official repository, or its default branch: its catalogue, as
-        /// Settings lists it — and the plugin the link went into, if any.
+        /// Settings lists it — and the plugin the link went into, if the
+        /// catalogue's head has it.
         case catalogue(plugin: String?)
         /// A branch or a pull request.
         case resolved(Resolution)
@@ -54,14 +55,18 @@ public struct RefResolver: Sendable {
         /// The pull request, for a pull request: its state, whether it was
         /// merged, where it came from, its title.
         public var pullRequest: PullRequest?
+        /// The plugin whose folder the link went into, if it went into one:
+        /// what an empty list is said of (`LinkRefusal.head`).
+        public var plugin: String?
 
         public init(origin: PluginOrigin, commit: String, listing: CommitListing, entries: [CatalogueEntry],
-                    pullRequest: PullRequest?) {
+                    pullRequest: PullRequest?, plugin: String? = nil) {
             self.origin = origin
             self.commit = commit
             self.listing = listing
             self.entries = entries
             self.pullRequest = pullRequest
+            self.plugin = plugin
         }
     }
 
@@ -102,7 +107,10 @@ public struct RefResolver: Sendable {
         case .branch(let name, let named):
             let known: String?
             if let defaultBranch { known = defaultBranch } else { known = try await provider.defaultBranch() }
-            if name == known { return .catalogue(plugin: named) }
+            // The catalogue's: named only when the catalogue's head has it,
+            // so that nothing says a plugin is in the catalogue below when it
+            // is not.
+            if name == known { return .catalogue(plugin: named.flatMap { head?.plugins[$0] == nil ? nil : $0 }) }
             plugin = named
             let answer: HeadAnswer
             do {
@@ -125,7 +133,7 @@ public struct RefResolver: Sendable {
             listing.plugins[id].map { Catalogue.entry(id, $0, store: store, udeck: udeck, language: language) }
         }
         return .resolved(Resolution(origin: origin, commit: commit, listing: listing, entries: entries,
-                                    pullRequest: pullRequest))
+                                    pullRequest: pullRequest, plugin: plugin))
     }
 
     /// The plugin folders of `listing` whose tree is not the one `head` has

@@ -47,6 +47,17 @@ struct PermissionRequestView: View {
                 }
             }
 
+            // Where code nobody verified comes from — the pull request or the
+            // branch, and that it is not what the repository merged — so the
+            // question is about that code, said where it is asked (`ConsentSource`).
+            if let source = model.consentSource(for: pluginID) {
+                Text(strings(source))
+                    .font(.system(size: 9.5))
+                    .foregroundStyle(theme.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("consent.\(pluginID.rawValue).source")
+            }
+
             Text(strings(.permissionsUnsandboxed))
                 .font(.system(size: 9.5))
                 .foregroundStyle(theme.dim)

@@ -213,6 +213,38 @@ struct PollExecutionTests {
                 "the producer must not have run at all")
     }
 
+    /// R2's last review (K1): with `requiredTree` dropped from the gate in
+    /// `attempt`, every row of these tests stayed green — none passed a tree.
+    /// For **Refresh** and the panel's own refresh this check is the one in
+    /// UDeckCore between code nobody verified and a run.
+    @Test("held to its tree, a producer runs only on a decision for that tree; another tree, or none hashed yet, and it does not run")
+    func heldToItsTree() async {
+        let temp = TemporaryDirectory()
+        temp.writePlugin(folder: "asks-nothing", manifest: """
+        { "id": "asks-nothing", "name": "Asks nothing", "version": "1.0.0", "api": 1, "kind": "poll",
+          "run": ["./run.sh"], "interval": 5, "timeout": 2 }
+        """, script: (name: "run.sh", body: "#!/bin/sh\ntouch \"$UDECK_CACHE_DIR/ran\"\necho '{\"rows\": []}'\n", executable: true))
+        let plugin = discovery.load(temp.url.appendingPathComponent("plugins/asks-nothing"))
+        let ran = temp.paths.cache(forPlugin: plugin.manifest!.id).appendingPathComponent("ran")
+        let tree = String(repeating: "a", count: 40)
+        let grant = PluginGrant(decidedForVersion: "1.0.0", decidedForTree: tree)
+        func attempt(_ required: String?) async -> PollAttempt {
+            await executor.attempt(plugin: plugin, grant: grant, enabled: true, settings: PluginSettings(), paths: temp.paths,
+                                   searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light,
+                                   reason: .manual, language: "en", requiredTree: required)
+        }
+        for required in [String(repeating: "b", count: 40), PermissionGate.treeNotHashedYet] {
+            let outcome = await attempt(required)
+            guard case .failure(let failure) = outcome.execution, case .notPermitted(.awaitingDecision(let pending)) = failure.reason
+            else { Issue.record("held to another tree than \(required), it waits for a decision: \(outcome.execution)"); continue }
+            #expect(pending.isEmpty && outcome.run == nil)
+            #expect(!FileManager.default.fileExists(atPath: ran.path), "the producer must not have run at all")
+        }
+        let allowed = await attempt(tree)
+        guard case .card = allowed.execution else { Issue.record("decided for this tree, it runs: \(allowed.execution)"); return }
+        #expect(FileManager.default.fileExists(atPath: ran.path))
+    }
+
     @Test("a producer that exits non-zero is reported with its status")
     func nonZeroExitIsReported() async {
         let temp = TemporaryDirectory()

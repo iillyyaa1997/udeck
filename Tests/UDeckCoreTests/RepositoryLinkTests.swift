@@ -207,11 +207,20 @@ struct RefResolverTests {
         guard case .resolved(let one) = try await resolve(.branch("feature/x", plugin: "uptime"), with: provider) else {
             Issue.record("a branch resolves"); return
         }
-        #expect(one.entries.map(\.id) == ["uptime"])
+        #expect(one.entries.map(\.id) == ["uptime"] && one.plugin == "uptime")
         guard case .resolved(let same) = try await resolve(.branch("feature/x", plugin: "cpu"), with: provider) else {
             Issue.record("a branch resolves"); return
         }
-        #expect(same.entries.isEmpty, "cpu there is what the head has")
+        #expect(same.entries.isEmpty && same.plugin == "cpu", "cpu there is what the head has")
+        #expect(LinkRefusal.head(of: same).last == .linkNothingDiffers(ref: .branch("feature/x"), plugin: "cpu"))
+        guard case .resolved(let none) = try await resolve(.branch("feature/x", plugin: "gone"), with: provider) else {
+            Issue.record("a branch resolves"); return
+        }
+        #expect(none.entries.isEmpty && LinkRefusal.head(of: none).last == .linkPluginNotThere(ref: .branch("feature/x"), plugin: "gone"))
+        guard case .resolved(let whole) = try await resolve(.branch("feature/x", plugin: nil), with: provider) else {
+            Issue.record("a branch resolves"); return
+        }
+        #expect(whole.plugin == nil)
         // Nothing to compare with: everything there is new.
         guard case .resolved(let all) = try await resolve(.branch("feature/x", plugin: nil), with: provider, head: nil) else {
             Issue.record("a branch resolves"); return
@@ -224,6 +233,10 @@ struct RefResolverTests {
         let provider = Provider(commits: [Self.head], branches: ["main": Self.head.commit])
         #expect(try await resolve(.officialRepository, with: provider) == .catalogue(plugin: nil))
         #expect(try await resolve(.branch("main", plugin: "uptime"), with: provider) == .catalogue(plugin: "uptime"))
+        #expect(try await resolve(.branch("main", plugin: "gone"), with: provider) == .catalogue(plugin: nil),
+                "a plugin the catalogue's head does not have is not said to be in the catalogue below")
+        #expect(try await resolve(.branch("main", plugin: "uptime"), with: provider, head: nil) == .catalogue(plugin: nil),
+                "nothing to look in: nothing said of the plugin")
         #expect(provider.asked.isEmpty)
         #expect(try await resolve(.branch("main", plugin: nil), with: provider, defaultBranch: nil) == .catalogue(plugin: nil))
         #expect(provider.asked == ["default branch"])

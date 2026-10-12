@@ -384,3 +384,178 @@ def test_a_download_is_a_plugins_files_and_not_its_manifest():
     assert checks._files_fetched(heard, "uptime") == []
     fetched = [_request(f"{raw}/plugins/uptime/uptime.sh"), _request(f"{raw}/plugins/uptime/hold.sh", status=404)]
     assert checks._files_fetched(heard + fetched, "uptime") == fetched
+
+
+# --- Installing from a link (stage 3) --------------------------------------------------------
+
+
+def test_the_pull_request_and_the_branch_the_checks_paste_are_the_fixtures_pr3():
+    """pr3 is made on c1 and differs from it in uptime and asks-nothing alone: the two the link sheet lists."""
+    assert FACTS["parents"]["pr3"] == "c1"
+    assert checks.PULLS[checks.PULL]["head"] == "pr3" and checks.BRANCHES[checks.BRANCH] == "pr3"
+    assert checks.PULLS[checks.PULL]["head_repo"] == checks.FORK != config.PLUGINS_REPOSITORY, "a fork's pull request"
+    paths = {name: FACTS["commits"][name]["paths"] for name in ("c1", "pr3")}
+    folders = {name: {p.split("/")[1] for p in found if p.startswith("plugins/") and p.count("/") == 1} for name, found in paths.items()}
+    assert folders["pr3"] - folders["c1"] == {checks.ASKS_NOTHING}
+    differ = {f for f in folders["pr3"] if paths["c1"].get(f"plugins/{f}", {}).get("sha") != paths["pr3"][f"plugins/{f}"]["sha"]}
+    assert differ == {checks.ASKS_NOTHING, checks.UPTIME}
+    assert "/" in checks.BRANCH and checks.BRANCH_LINK.endswith(f"/tree/{checks.BRANCH}/plugins/{checks.UPTIME}")
+    assert not checks.PULL_LINK.startswith("http"), "pasted as a person copies it from an address bar, without the scheme"
+
+
+def test_the_asks_nothing_plugin_says_what_the_check_reads():
+    manifest = json.loads((plugin_repository.FIXTURES / "pr3" / "plugins" / checks.ASKS_NOTHING / "manifest.json").read_text())
+    assert manifest["name"] == checks.ASKS_NOTHING_NAME and "permissions" not in manifest
+    script = (plugin_repository.FIXTURES / "pr3" / "plugins" / checks.ASKS_NOTHING / "run.sh").read_text()
+    assert 'count_file="${UDECK_CACHE_DIR:-/tmp}/runs"' in script, "counted in uDeck's cache, which the check reads"
+    assert checks.RAN.format(n="%s") in script
+
+
+def test_the_words_the_link_checks_wait_for_are_uDecks_own():
+    """What the four checks of installing from a link read: in English.swift, or held equal to it by the Swift tests."""
+    english = _source("Sources", "UDeckCore", "Localization", "English.swift")
+    assert f'case .pluginMarkUnverified: "{checks.UNVERIFIED}"' in english
+    assert 'case .pluginFromPullRequest(let number, let commit): "' + checks.FROM_THE_PULL_REQUEST.format(
+        number="\\(number)", commit="\\(commit)") + '"' in english
+    assert 'case .pluginFromBranch(let name, let commit): "' + checks.FROM_THE_BRANCH.format(
+        name="\\(name)", commit="\\(commit)") + '"' in english
+    assert '"' + checks.ASKS_NOTHING_UNVERIFIED.format(name="\\(name)") + '"' in english
+    assert '"Nobody verified this code: it comes from \\(Self.line(ref)) of \\(repository)"' in english
+    assert 'said = "pull request #\\(number)"' in english
+    # The sentences Swift's own tests hold the English to, word for word.
+    swift = _source("Tests", "UDeckCoreTests", "InstallFromLinkTests.swift")
+    assert f'== "{checks.LINK_HEAD.format(number=3, commit="a1b2c3d")}"' in swift
+    official = config.PLUGINS_REPOSITORY
+    from_verified = checks.SWITCH_FROM_VERIFIED.format(id="uptime", old="1.0.0", repository=official, new="1.0.1",
+                                                       number=3, commit="a1b2c3d")
+    to_verified = checks.SWITCH_TO_VERIFIED.format(id="uptime", old="1.0.1", number=3, commit="a1b2c3d", new="1.0.0",
+                                                   repository=official)
+    flat = re.sub(r'"\s*\+\s*"', "", swift)
+    assert from_verified in flat and to_verified in flat
+    # The catalogue row of a copy whose folder has gone, and the link sheet with the catalogue off.
+    assert '"' + checks.INSTALLED_HERE_UNVERIFIED.format(line="\\(Self.line(ref))") + '"' in english
+    assert 'case .catalogueMissing(let id, let path): "\\(id) is not in \\(path)"' in english
+    assert checks.NOT_IN_THE_PLUGINS_FOLDER == "{id} is not in " + checks.UDECK_HOME + "/plugins"
+    gone = checks.INSTALLED_HERE_UNVERIFIED.format(line="pull request #3") + " — " + checks.NOT_IN_THE_PLUGINS_FOLDER.format(id="uptime")
+    assert f'== "{gone}"' in flat
+    assert '"' + checks.LINK_OFF + '"' in english
+
+
+def test_the_controls_the_link_checks_press_and_read_are_the_views_own():
+    views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift")
+    for identifier in ('"plugins.installFromLink"', '"link.field"', '"link.lookUp"', '"link.close"', '"link.head"',
+                       '"link.refused"', '"link.catalogue"', '"link.\\(id).install"', '"link.\\(id).confirm"',
+                       '"link.\\(id).confirmText"', '"link.\\(id).problem"', '"plugin.\\(id).switchToVerified"',
+                       '"plugin.\\(id).refPage"', '"plugin.\\(id).from"', '"plugin.\\(id).confirmText"',
+                       '"catalogue.\\(id).switchToVerified"', '"catalogue.\\(id).state"', '"catalogue.\\(id).reinstall"',
+                       '"link.off"'):
+        assert identifier in views, identifier
+    assert '"card.\\(window.pluginID.rawValue).unverified"' in _source("Sources", "UDeckKit", "Views", "DeckWindowView.swift")
+    assert '"consent.\\(pluginID.rawValue).source"' in _source("Sources", "UDeckKit", "Views", "PermissionRequestView.swift")
+
+
+def test_only_the_requests_named_pass_and_every_file_once_when_asked():
+    commit = "e" * 40
+    raw = f"/raw/{config.PLUGINS_REPOSITORY}/{commit}"
+    api = f"/api/repos/{config.PLUGINS_REPOSITORY}/pulls/3"
+    heard = [_request(api, host="api"), _request(f"{raw}/plugins/uptime/uptime.sh"), _request(f"{raw}/plugins/uptime/hold.sh")]
+    checks._expect_only(heard, commit, api={api}, raw={"plugins/uptime/uptime.sh", "plugins/uptime/hold.sh"},
+                        what="x", every=True)
+    for stray in (_request(f"/raw/{checks.FORK}/{commit}/plugins/uptime/uptime.sh"),
+                  _request(f"/raw/{config.PLUGINS_REPOSITORY}/{'f' * 40}/plugins/uptime/uptime.sh"),
+                  _request(f"{raw}/plugins/cpu/manifest.json"),
+                  _request(f"/api/repos/{config.PLUGINS_REPOSITORY}/commits/main", host="api")):
+        with pytest.raises(CheckFailed):
+            checks._expect_only(heard + [stray], commit, api={api},
+                                raw={"plugins/uptime/uptime.sh", "plugins/uptime/hold.sh"}, what="x")
+    with pytest.raises(CheckFailed):
+        checks._expect_only(heard[:2], commit, api={api}, raw={"plugins/uptime/uptime.sh", "plugins/uptime/hold.sh"},
+                            what="x", every=True)
+    with pytest.raises(CheckFailed):
+        checks._expect_only(heard + heard[1:2], commit, api={api},
+                            raw={"plugins/uptime/uptime.sh", "plugins/uptime/hold.sh"}, what="x", every=True)
+
+
+def test_an_unverified_record_is_the_official_sources_at_its_ref_and_nobodys_guarantee():
+    record = _record(ref={"kind": "pr", "name": "3"}, version="1.0.1",
+                     verification={"status": "unverified", "by": None, "checkedAgainst": "a" * 40, "checkedAt": "x"})
+    checks._expect_an_unverified_record(record, ref={"kind": "pr", "name": "3"}, commit="a" * 40, version="1.0.1")
+    for change in ({"verification": {"status": "verified", "by": "official"}},
+                   {"verification": {"status": "unverified"}},
+                   {"ref": {"kind": "default", "name": "main"}},
+                   {"repository": {"provider": "github", "host": "github.com", "path": checks.FORK}}):
+        with pytest.raises(CheckFailed):
+            checks._expect_an_unverified_record({**record, **change}, ref={"kind": "pr", "name": "3"}, commit="a" * 40,
+                                                version="1.0.1")
+
+
+class _Shell:
+    """A guest whose `cat` of one file answers `text`."""
+
+    def __init__(self, text):
+        self.text = text
+        self.asked = []
+
+    def ask(self, command, step):
+        self.asked.append(command)
+        return type("Done", (), {"stdout": self.text, "returncode": 0})()
+
+
+def test_a_count_of_runs_is_a_number_or_nothing():
+    """What the asks-nothing check compares across the edit: the plugin's own count, read as a number."""
+    for text, count in (("1\n", 1), ("12", 12), ("", None), ("x\n", None), ("-1", None), ("١", None)):
+        machine = type("Guest", (), {"ssh": _Shell(text)})()
+        assert checks._count_of_runs(machine, "~/.udeck/cache/asks-nothing/runs") == count, text
+        assert machine.ssh.asked == ["cat ~/.udeck/cache/asks-nothing/runs 2>/dev/null || true"]
+
+
+def test_the_limit_holds_five_of_the_slowest_walks_measured():
+    """Check now, its message, the pane kept, Check now again and the install: five walks of 76 s, R3's slowest."""
+    assert checks.LIMIT_SECONDS >= 5 * 76
+
+
+class _Walks:
+    """A machine whose screen is read from a list of walks, each taking `seconds`."""
+
+    def __init__(self, walks, seconds=40):
+        self.walks = list(walks)
+        self.seconds = seconds
+        self.now = 0.0
+        self.read = 0
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+def test_a_verdict_at_the_deadline_comes_from_a_walk_begun_after_it(monkeypatch):
+    """R3's measurement: one walk outlasts the deadline, and a walk that crossed a change returns the control
+    it replaced as it was, or not at all — so a walk begun before the deadline decides nothing against it."""
+    mark = "5|AXStaticText||plugin.uptime.mark||Modified locally||226;279;|93;13;"
+    stale = "5|AXStaticText||plugin.uptime.mark||Verified||226;279;|93;13;"
+
+    def read(machine, step, window=None):
+        machine.read += 1
+        found = machine.walks.pop(0) if len(machine.walks) > 1 else machine.walks[0]
+        machine.now += machine.seconds
+        return found
+
+    monkeypatch.setattr(checks, "_read_the_screen", read)
+    modified = lambda said: said == "Modified locally"  # noqa: E731
+    for first in ("", stale):
+        machine = _Walks([first, mark])
+        assert checks._wait_until(machine, "plugin.uptime.mark", modified, 15) == "Modified locally" and machine.read == 2, \
+            "missing, or as it was: the walk crossed the change"
+    machine = _Walks([""])
+    assert checks._wait_until(machine, "plugin.uptime.mark", modified, 15) is None and machine.read == 2, \
+        "still missing in a walk begun after the deadline: believed"
+    machine = _Walks([stale])
+    assert checks._wait_until(machine, "plugin.uptime.mark", modified, 15) == "Verified" and machine.read == 2
+    machine = _Walks([mark])
+    assert checks._wait_until(machine, "plugin.uptime.mark", modified, 15) == "Modified locally" and machine.read == 1, \
+        "satisfied at once: no walk more"
+    machine = _Walks([stale], seconds=2)
+    assert checks._wait_until(machine, "plugin.uptime.mark", modified, 15) == "Verified"
+    assert machine.now >= 15 and machine.read == 6, "short walks go on until one begins at the deadline"

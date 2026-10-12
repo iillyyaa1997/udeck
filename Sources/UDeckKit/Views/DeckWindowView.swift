@@ -94,6 +94,18 @@ struct DeckWindowView: View {
                 .foregroundStyle(theme.text)
                 .lineLimit(1)
 
+            // Code nobody verified — a branch's or a pull request's copy —
+            // says so on its window too, not only in Settings: the card is
+            // where its output is read and trusted.
+            if model.cardSaysUnverified(window.pluginID) {
+                Label(strings(.pluginMarkUnverified), systemImage: "exclamationmark.triangle")
+                    .font(theme.chipFont)
+                    .foregroundStyle(theme.warn)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .accessibilityIdentifier("card.\(window.pluginID.rawValue).unverified")
+            }
+
             Spacer(minLength: 0)
 
             if let chip = presentation.card?.chip {

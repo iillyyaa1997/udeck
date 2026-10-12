@@ -465,33 +465,51 @@ struct ShownPlaceTests {
 
         // Back to: from where the copy it replaced came — recorded, or the
         // source's own repository for a copy recorded before there was one.
+        // Another pull request is another line of history: the press warns
+        // first, naming both (R3), and the press on the warning goes there.
         let elsewhere = RepositoryAddress(path: "someone/udeck-plugins")
         records.plugins["uptime"]?.previous = PreviousCopy(ref: .pullRequest(2), commit: String(repeating: "9", count: 40),
                                                            tree: String(repeating: "7", count: 40), version: "0.9.0")
-        guard case .atCommit(.earlier, _, _, let back)
-                = ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: nil) else {
-            Issue.record("Back to over uDeck's own copy goes ahead"); return
+        guard case .atCommit(.earlier, _, _, let back) = throughTheSwitch({
+            ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: $0)
+        }) else {
+            Issue.record("Back to over uDeck's own copy goes ahead once warned"); return
         }
         #expect(back == PluginOrigin(repository: .official, ref: .pullRequest(2)))
         records.plugins["uptime"]?.previous?.repository = elsewhere
-        guard case .atCommit(.earlier, _, _, let backElsewhere)
-                = ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: nil) else {
-            Issue.record("Back to over uDeck's own copy goes ahead"); return
+        guard case .atCommit(.earlier, _, _, let backElsewhere) = throughTheSwitch({
+            ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: $0)
+        }) else {
+            Issue.record("Back to over uDeck's own copy goes ahead once warned"); return
         }
         #expect(backElsewhere == PluginOrigin(repository: elsewhere, ref: .pullRequest(2)))
 
         // An earlier version is a version the default branch had, whatever is on disk.
         let line = PluginHistory.Line(version: "0.8.0", commit: String(repeating: "8", count: 40), date: nil, manifest: nil)
-        #expect(ShownPlace.earlier("uptime", line: line, source: .official, branch: "main", in: paths, installed: records,
-                                   shown: nil)
+        #expect(throughTheSwitch({ ShownPlace.earlier("uptime", line: line, source: .official, branch: "main", in: paths,
+                                                      installed: records, shown: $0) })
                 == .atCommit(.earlier, commit: line.commit, version: "0.8.0", from: Self.official))
         // Update and Install from the catalogue: its repository, its default branch.
         let published = catalogue(repository)
-        guard case .install(_, _, _, _, let fromCatalogue)
-                = ShownPlace.update("uptime", catalogue: published, in: paths, installed: records, shown: nil) else {
-            Issue.record("Update over uDeck's own copy goes ahead"); return
+        guard case .install(_, _, _, _, let fromCatalogue) = throughTheSwitch({
+            ShownPlace.update("uptime", catalogue: published, in: paths, installed: records, shown: $0)
+        }) else {
+            Issue.record("Update over uDeck's own copy goes ahead once warned"); return
         }
         #expect(fromCatalogue == Self.official)
+    }
+
+    /// A press, and — when it is the warning of a switch from one line of
+    /// history to another, as every press across two must be first — the
+    /// press on that warning.
+    func throughTheSwitch(_ press: (ShownPlace.Place?) -> ShownPlace.Step) -> ShownPlace.Step {
+        let first = press(nil)
+        guard case .ask(let shown) = first else {
+            Issue.record("across two lines of history the first press warns: \(first)")
+            return first
+        }
+        #expect(shown.switching != nil, "the warning names both copies")
+        return press(shown)
     }
 
     /// For code nobody verified, **Allow** grants for the tree the card

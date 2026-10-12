@@ -157,11 +157,18 @@ public enum ShownPlace {
         /// **Remove**. A version is only what a manifest says: the repository
         /// can publish another tree under the one the warning named.
         public var copy: String?
+        /// A copy uDeck installed taken by a copy from another line of history
+        /// — the verified copy by a pull request's, a branch's by the verified
+        /// one: both, as the warning names them. Nil when what comes follows
+        /// the line the copy there came from, or nothing uDeck installed is
+        /// there.
+        public var switching: Switch?
 
-        public init(fate: Fate, arriving: String?, copy: String? = nil) {
+        public init(fate: Fate, arriving: String?, copy: String? = nil, switching: Switch? = nil) {
             self.fate = fate
             self.arriving = arriving
             self.copy = copy
+            self.switching = switching
         }
 
         /// Where the link leads, when a link is what is there.
@@ -171,11 +178,15 @@ public enum ShownPlace {
 
         /// What a button that takes `plugins/<id>` would do now, with
         /// `record` the plugin's record as uDeck holds it, and `arrival` what
-        /// the button would put there. The one way a button asks: what it
-        /// puts there says the version and the copy together.
+        /// the button would put there, `from` where it comes. The one way a
+        /// button asks: what it puts there says the version and the copy
+        /// together — and, when it comes from another line of history than
+        /// the copy there, both of them (`Switch`).
         public static func now(_ id: String, in paths: UDeckPaths, record: InstalledRecord?,
-                               bringing arrival: Arrival) -> Place {
-            now(id, in: paths, record: record, arriving: arrival.version, copy: arrival.copy)
+                               bringing arrival: Arrival, from origin: PluginOrigin? = nil) -> Place {
+            var place = now(id, in: paths, record: record, arriving: arrival.version, copy: arrival.copy)
+            place.switching = Switch.of(record: record, fate: place.fate, arrival: arrival, from: origin)
+            return place
         }
 
         /// As `now(_:in:record:bringing:)`, given the version and the copy
@@ -197,17 +208,58 @@ public enum ShownPlace {
         }
     }
 
+    /// A copy uDeck installed, from one line of history, replaced by a copy
+    /// from another: the verified copy by a branch's or a pull request's, or
+    /// one of those by the verified copy — what the warning names, both
+    /// sources and the ref (*uptime is the verified 1.1.0 from github.com/…;
+    /// installing 1.0.1 from pull request #3 at a1b2c3d replaces it*). One
+    /// copy per id: what is there goes, and its windows, settings and
+    /// permission decision stay — which the decision then holds for is the
+    /// new copy's to say (`ConsentBasis`).
+    public struct Switch: Equatable, Sendable {
+        /// The copy there now, by its record.
+        public var from: CopyName
+        /// The copy that comes.
+        public var to: CopyName
+
+        public init(from: CopyName, to: CopyName) {
+            self.from = from
+            self.to = to
+        }
+
+        /// The switch a button bringing `arrival` from `origin` makes of
+        /// `record`'s copy, whose place's fate is `fate` — nil when nothing
+        /// comes, when no copy uDeck installed is there (nothing at all, a
+        /// link, a folder of the operator's own), and when what comes follows
+        /// the same line of history (`PluginOrigin.followsTheSameLine`).
+        static func of(record: InstalledRecord?, fate: Place.Fate, arrival: Arrival, from origin: PluginOrigin?) -> Switch? {
+            guard let record, let origin, let version = arrival.version,
+                  fate == .deleted || fate == .toTrash,
+                  !record.origin.followsTheSameLine(as: origin) else { return nil }
+            let commit: String
+            switch arrival {
+            case .atCommit(_, let at): commit = at
+            case .atHead, .nothing: commit = ""
+            }
+            return Switch(from: CopyName.of(record.origin, commit: record.commit, version: record.version),
+                          to: CopyName.of(origin, commit: commit, version: version))
+        }
+    }
+
     /// Which button: what it warns of decides when it asks first.
     public enum Button: Equatable, Sendable {
         /// **Remove**: it always asks first.
         case remove
-        /// **Install**, and **Replace…** on a catalogue row: first over a link
-        /// or over a folder holding something of the operator's.
+        /// **Install**, and **Replace…** on a catalogue row or a row listed
+        /// from a link: first over a link, over a folder holding something of
+        /// the operator's, or over a copy from another line of history.
         case install
-        /// **Update**, **Switch to**, **Reinstall**, **Back to** and an
-        /// earlier version: first over a copy holding something of the
-        /// operator's, or over a link — one put where the copy was while
-        /// the warning was up included: the link goes, not the copy.
+        /// **Update**, **Switch to**, **Switch to verified**, **Reinstall**,
+        /// **Back to** and an earlier version: first over a copy holding
+        /// something of the operator's, over a copy from another line of
+        /// history than the one that comes, or over a link — one put where
+        /// the copy was while the warning was up included: the link goes, not
+        /// the copy.
         case replaceCopy
     }
 
@@ -219,11 +271,13 @@ public enum ShownPlace {
         case ask(Place)
     }
 
-    /// Whether `button` warns first of `now`.
+    /// Whether `button` warns first of `now`: **Remove** always; any other
+    /// over a link, over something of the operator's, and over a copy from
+    /// another line of history than the one that comes (`Switch`).
     public static func warns(_ button: Button, of now: Place) -> Bool {
         switch button {
         case .remove: true
-        case .install, .replaceCopy: now.fate == .toTrash || now.link != nil
+        case .install, .replaceCopy: now.fate == .toTrash || now.link != nil || now.switching != nil
         }
     }
 
@@ -240,7 +294,8 @@ public enum ShownPlace {
     /// Whether the warning `shown` says what is there `now`, and names the
     /// copy that comes now, byte for byte.
     public static func holds(_ shown: Place, now: Place) -> Bool {
-        guard same(shown.arriving, now.arriving), same(shown.copy, now.copy) else { return false }
+        guard same(shown.arriving, now.arriving), same(shown.copy, now.copy),
+              same(shown.switching, now.switching) else { return false }
         switch (shown.fate, now.fate) {
         case (.nothing, .nothing), (.toTrash, .toTrash), (.deleted, .deleted): return true
         case (.linkGoes(let one), .linkGoes(let other)): return same(one, other)
@@ -264,8 +319,10 @@ public enum ShownPlace {
         /// The warning, of what is there now; nothing is done.
         case ask(Place)
         /// `operation` of the plugin's folder as the catalogue lists it at
-        /// `commit`: **Install**, **Replace…**, **Update**, **Switch to** —
-        /// `from` the catalogue's repository and its default branch.
+        /// `commit`: **Install**, **Replace…**, **Update**, **Switch to** and
+        /// **Switch to verified** — `from` the catalogue's repository and its
+        /// default branch — or as a link listed it (**Install from a
+        /// link…**), from that branch or pull request.
         case install(InstallRequest.Operation, commit: String, folder: PluginListing, version: String,
                      from: PluginOrigin)
         /// `operation` at `commit`, whose listing is read first, `from` the
@@ -293,7 +350,7 @@ public enum ShownPlace {
         guard let catalogue, let entry = catalogue.entry(id) else { return .nothing }
         let version = entry.manifest?.version ?? ""
         let now = Place.now(id, in: paths, record: installed.plugins[id],
-                            bringing: .atHead(version: version, tree: entry.listing.tree))
+                            bringing: .atHead(version: version, tree: entry.listing.tree), from: origin(of: catalogue))
         if case .ask(let place) = press(.install, shown: shown, now: now) { return .ask(place) }
         let operation: InstallRequest.Operation = installed.plugins[id] != nil
             ? .update : (PluginInstaller.folderIsTaken(id, in: paths) ? .replace : .install)
@@ -309,7 +366,7 @@ public enum ShownPlace {
         guard let catalogue, let entry = catalogue.entry(id) else { return .nothing }
         let version = entry.manifest?.version ?? ""
         let now = Place.now(id, in: paths, record: installed.plugins[id],
-                            bringing: .atHead(version: version, tree: entry.listing.tree))
+                            bringing: .atHead(version: version, tree: entry.listing.tree), from: origin(of: catalogue))
         if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
         return .install(.update, commit: catalogue.commit, folder: entry.listing, version: version,
                         from: origin(of: catalogue))
@@ -350,9 +407,31 @@ public enum ShownPlace {
     static func atCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
                          from origin: PluginOrigin, in paths: UDeckPaths, installed: InstalledPlugins,
                          shown: Place?) -> Step {
-        let now = Place.now(id, in: paths, record: installed.plugins[id], bringing: .atCommit(version: version, commit: commit))
+        let now = Place.now(id, in: paths, record: installed.plugins[id], bringing: .atCommit(version: version, commit: commit),
+                            from: origin)
         if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
         return .atCommit(operation, commit: commit, version: version, from: origin)
+    }
+
+    /// **Install** on a plugin **Install from a link…** listed: its folder at
+    /// the commit the link was read at (`RefResolver.Resolution`), from that
+    /// branch or pull request — the commit is the copy its warning names. An
+    /// update of a copy uDeck installed, which becomes `previous`, so that
+    /// **Back to** puts it back; a replace of a folder of the operator's own;
+    /// an install onto nothing. Over a copy from another line of history —
+    /// the verified copy, most often — the warning that names both comes
+    /// first (`Switch`).
+    public static func installFromLink(_ id: String, resolution: RefResolver.Resolution, in paths: UDeckPaths,
+                                       installed: InstalledPlugins, shown: Place?) -> Step {
+        guard let entry = resolution.entries.first(where: { same($0.id, id) }) else { return .nothing }
+        let version = entry.manifest?.version ?? ""
+        let now = Place.now(id, in: paths, record: installed.plugins[id],
+                            bringing: .atCommit(version: version, commit: resolution.commit), from: resolution.origin)
+        if case .ask(let place) = press(.install, shown: shown, now: now) { return .ask(place) }
+        let operation: InstallRequest.Operation = installed.plugins[id] != nil
+            ? .update : (PluginInstaller.folderIsTaken(id, in: paths) ? .replace : .install)
+        return .install(operation, commit: resolution.commit, folder: entry.listing, version: version,
+                        from: resolution.origin)
     }
 
     /// **Remove**: nothing comes, and it always asks first.
@@ -447,6 +526,14 @@ public enum ShownPlace {
         switch (one, other) {
         case (nil, nil): true
         case (let one?, let other?): same(one, other)
+        default: false
+        }
+    }
+
+    static func same(_ one: Switch?, _ other: Switch?) -> Bool {
+        switch (one, other) {
+        case (nil, nil): true
+        case (let one?, let other?): CopyName.same(one.from, other.from) && CopyName.same(one.to, other.to)
         default: false
         }
     }

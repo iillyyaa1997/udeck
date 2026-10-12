@@ -52,6 +52,40 @@ public enum HistoryLoad: Equatable, Sendable {
     case failed(OperationProblem)
 }
 
+/// What a link pasted into **Install from a link…** came to.
+public enum LinkLookup: Equatable, Sendable {
+    /// Being asked of GitHub.
+    case reading
+    /// Nothing to install, and why, in the operator's words (`LinkRefusal`).
+    case refused(Phrase)
+    /// A request that got no good answer — the limit, the network — said as
+    /// every such problem in Settings is.
+    case failed(OperationProblem)
+    /// The official repository's default branch — the catalogue, verified —
+    /// and the plugin the link went into, if any.
+    case catalogue(plugin: String?)
+    /// A branch or a pull request, at the commit it was read at, and the
+    /// plugins there that are not what the catalogue's head has.
+    case resolved(RefResolver.Resolution)
+
+    /// One line for uDeck's log: what it came to, without the listing.
+    var logged: String {
+        switch self {
+        case .reading: "reading"
+        case .refused(let phrase): "refused: \(phrase)"
+        case .failed(let problem): "failed: \(problem)"
+        case .catalogue(let plugin): "the catalogue" + (plugin.map { " (\($0))" } ?? "")
+        case .resolved(let resolution):
+            "\(resolution.origin.ref.kind) \(resolution.origin.ref.name ?? "") at \(resolution.commit): "
+                + (resolution.entries.map(\.id).joined(separator: ", ").nilIfEmpty ?? "nothing new")
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
+}
+
 extension DeckModel {
     // MARK: - The source
 
@@ -212,7 +246,7 @@ extension DeckModel {
     /// not install it or there is no catalogue to compare with.
     public func updateOffer(for id: String) -> UpdateOffer? {
         guard let record = installed.plugins[id], let catalogue else { return nil }
-        return UpdateOffer.of(record, head: catalogue.entry(id))
+        return UpdateOffer.offered(record, head: catalogue.entry(id))
     }
 
     /// A catalogue row's state.
@@ -244,8 +278,33 @@ extension DeckModel {
     /// Whether something sits at `plugins/<id>` — asked the way the swap
     /// will find it, so a folder spelt `Uptime` on a volume that ignores case
     /// is offered **Replace…** rather than an **Install** that would take it.
+    ///
+    /// The disk answers, and SwiftUI does not watch the disk: `standings` is
+    /// read too, so that a view asking this is drawn again when a folder comes
+    /// or goes — every reading of the plugins folder that finds one gone, or
+    /// a new one, writes it. Without it the catalogue row of a copy whose
+    /// folder was taken away went on saying what it said with the folder there
+    /// (R3's lab, .build/e2e/kept/20261012-001204Z, plugins.install-from-a-branch,
+    /// 04-at-the-end.png), while the plugin's own row said **Missing**.
     public func folderExists(_ id: String) -> Bool {
-        PluginInstaller.folderIsTaken(id, in: paths)
+        _ = standings[id]
+        return PluginInstaller.folderIsTaken(id, in: paths)
+    }
+
+    /// Whether a window of `id` says **Unverified** in its header: a branch's
+    /// or a pull request's copy (`PluginStanding.cardSaysUnverified`).
+    public func cardSaysUnverified(_ id: PluginIdentifier) -> Bool {
+        PluginStanding.cardSaysUnverified(standings[id.rawValue], record: installed.plugins[id.rawValue],
+                                          linked: plugin(withID: id)?.isLinked ?? false)
+    }
+
+    /// What the card asking about `id` says of where its code comes from —
+    /// for a decision held to its tree; nil for one held to its version
+    /// (`ConsentSource`).
+    public func consentSource(for id: PluginIdentifier) -> Phrase? {
+        ConsentSource.of(installed.plugins[id.rawValue], basis: consentBasis(of: id),
+                         recordsReadable: installedProblem == nil,
+                         changedHere: standings[id.rawValue] == .modifiedLocally)
     }
 
     /// The page where a plugin's folder is read, at a commit.
@@ -500,6 +559,84 @@ extension DeckModel {
             // Removal has its own call; no step but `remove`'s answers this.
             return .goAhead
         }
+    }
+
+    // MARK: - Install from a link…
+
+    /// **Look up** on a link pasted into **Install from a link…**: read for
+    /// what it names (`RepositoryLink`) — a refusal is said at once, without a
+    /// request — and then asked of GitHub through the official repository
+    /// (`RefResolver`): one request for a pull request or a branch's head,
+    /// one for its listing unless the cache has it, and the manifests of the
+    /// plugins there that differ from the catalogue's head. Off, **Official
+    /// catalogue** governs this too: uDeck makes no request about plugins,
+    /// and says why nothing is looked up.
+    public func lookUpLink(_ text: String) {
+        linkLookups += 1
+        let asked = linkLookups
+        guard settings.readsOfficialCatalogue else {
+            linkLookup = .refused(.linkOff)
+            return
+        }
+        let official = catalogueAddress
+        let link: RepositoryLink
+        switch RepositoryLink.read(text, official: official) {
+        case .failure(let refusal):
+            linkLookup = .refused(.linkRefused(refusal, official: official.description))
+            return
+        case .success(let read):
+            link = read
+        }
+        linkLookup = .reading
+        let resolver = RefResolver(provider: provider, store: catalogueStore, limits: limits)
+        let store = catalogueStore
+        let head = catalogue?.commit
+        let branch = catalogueState.defaultBranch ?? catalogue?.branch
+        let language = strings.language.rawValue
+        let udeck = self.udeck
+        DeckLog.plugins.info("looking up a link: \(String(describing: link), privacy: .public)")
+        Task {
+            let came: LinkLookup
+            do {
+                let listing = await Self.listing(head, in: store)
+                switch try await resolver.resolve(link, defaultBranch: branch, head: listing, udeck: udeck,
+                                                  language: language) {
+                case .catalogue(let plugin): came = .catalogue(plugin: plugin)
+                case .resolved(let resolution): came = .resolved(resolution)
+                }
+            } catch {
+                came = LinkRefusal.phrase(error, official: official).map(LinkLookup.refused) ?? .failed(OperationProblem(error))
+            }
+            DeckLog.plugins.info("the link came to \(came.logged, privacy: .public)")
+            catalogueState.rateLimit = limits.current
+            persistRateLimit()
+            guard asked == linkLookups else { return }
+            linkLookup = came
+        }
+    }
+
+    /// The listing of the catalogue's head, from the cache, away from the
+    /// main thread — what a link's plugins are compared with.
+    nonisolated static func listing(_ commit: String?, in store: CatalogueStore) async -> CommitListing? {
+        commit.flatMap { store.listing($0) }
+    }
+
+    /// The sheet closed: what it said goes, and an answer still on its way
+    /// is not shown.
+    public func closeLinkLookup() {
+        linkLookups += 1
+        linkLookup = nil
+    }
+
+    /// **Install** on a plugin the link listed: its folder at the commit the
+    /// link was read at, from that branch or pull request — over a copy from
+    /// another line of history, after the warning that names both
+    /// (`ShownPlace.installFromLink`).
+    @discardableResult
+    public func installFromLink(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
+        guard settings.readsOfficialCatalogue, case .resolved(let resolution)? = linkLookup else { return .goAhead }
+        return act(ShownPlace.installFromLink(id, resolution: resolution, in: paths, installed: installed, shown: shown),
+                   id: id)
     }
 
     /// Reads a plugin's earlier versions from its folder's history.

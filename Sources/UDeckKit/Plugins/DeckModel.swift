@@ -53,6 +53,11 @@ public final class DeckModel {
     public internal(set) var operationProblems: [String: OperationProblem] = [:]
     /// Earlier versions, as they were read.
     public internal(set) var histories: [String: HistoryLoad] = [:]
+    /// What **Install from a link…** came to, while its sheet is open: the
+    /// link being asked about, why it names nothing to install, the
+    /// catalogue, or the plugins at a branch or a pull request
+    /// (`lookUpLink`).
+    public internal(set) var linkLookup: LinkLookup?
     /// When the installed plugins are asked whether they update themselves,
     /// and which of them failed to since the catalogue was last read — said on
     /// their rows, and not tried again before the next read
@@ -85,6 +90,9 @@ public final class DeckModel {
     /// Whether the catalogue has been read since launch — nil or not. Until it
     /// has, no record's verification is written again (`Reverification.Head`).
     @ObservationIgnored var catalogueWasRead = false
+    /// Which **Look up** is the latest: an answer to an earlier one, or to
+    /// one closed since, is not shown over it.
+    @ObservationIgnored var linkLookups = 0
     /// Which hashing of the installed plugins is the latest asked for: one that
     /// ends after a later one began is not applied over it (`reverify`).
     @ObservationIgnored var reverifications = 0

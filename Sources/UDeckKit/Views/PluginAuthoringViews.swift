@@ -50,8 +50,15 @@ func chooseFolder(message: String, prompt: String, done: @escaping @MainActor (U
 /// under its manifest's id. A free id is linked at once; a taken one is linked
 /// only after the warning says what becomes of what is there
 /// (`PlaceWarning.linking`), as **Replace…** does.
-struct LinkFolderControls: View {
+///
+/// `beside` is what stands next to the button on its row — **Install from a
+/// link…** — so that the pane is no taller for it until its sheet opens: the
+/// lab's window is as tall as the guest's screen above the Dock, and a control
+/// pushed below its lower edge has a place and no pixel to click (measured in
+/// R3, plugins.every-replacement-warns-first, a row 28 points taller).
+struct LinkFolderControls<Beside: View>: View {
     @Bindable var model: DeckModel
+    @ViewBuilder var beside: Beside
     @Environment(\.strings) private var strings
     /// What the last press came to.
     @State private var outcome: DeckModel.FolderLinking?
@@ -60,13 +67,16 @@ struct LinkFolderControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Button(strings(.linkFolder)) {
-                chooseFolder(message: strings(.linkFolderPanelMessage), prompt: strings(.linkFolderLink)) { folder in
-                    link(folder, confirmed: nil)
+            HStack(spacing: 8) {
+                Button(strings(.linkFolder)) {
+                    chooseFolder(message: strings(.linkFolderPanelMessage), prompt: strings(.linkFolderLink)) { folder in
+                        link(folder, confirmed: nil)
+                    }
                 }
+                .disabled(model.busyPlugin != nil)
+                .accessibilityIdentifier("plugins.linkFolder")
+                beside
             }
-            .disabled(model.busyPlugin != nil)
-            .accessibilityIdentifier("plugins.linkFolder")
 
             if let outcome {
                 said(outcome)

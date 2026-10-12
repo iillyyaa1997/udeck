@@ -1118,6 +1118,8 @@ private struct PluginSettingsSection: View {
     @Bindable var model: DeckModel
     @Binding var selected: String?
     @Environment(\.strings) private var strings
+    /// Whether **Install from a link…**'s sheet is open.
+    @State private var linkSheetOpen = false
 
     var body: some View {
         SettingsGroup(strings(.pluginsInstalled)) {
@@ -1145,7 +1147,12 @@ private struct PluginSettingsSection: View {
                 Button(strings(.pluginsLookAgain)) { model.discoverPlugins() }
             }
 
-            LinkFolderControls(model: model)
+            // **Install from a link…** next to **Link a folder…**, on its
+            // row; its sheet, when it is open, under them.
+            LinkFolderControls(model: model) {
+                LinkInstallButton(model: model, open: $linkSheetOpen)
+            }
+            LinkInstallSheet(model: model, open: $linkSheetOpen)
 
             if model.plugins.isEmpty {
                 Text(strings(.pluginsNothingInstalled))
@@ -1317,7 +1324,32 @@ private struct PluginRow: View {
     @ViewBuilder
     private func permissions(_ manifest: PluginManifest) -> some View {
         let requested = manifest.permissions.capabilities
-        if requested.isEmpty {
+        if requested.isEmpty, case .awaitingDecision = model.launchDecision(for: manifest.id),
+           !model.waitsForItsTree(manifest.id), !model.folderWouldNotHash(manifest.id) {
+            // Code nobody verified, asking for nothing, is asked whether it
+            // may run at all — here as on its card.
+            VStack(alignment: .leading, spacing: 3) {
+                Text(strings(.permissionsAsksNothingUnverified(name: manifest.name)))
+                    .font(.caption)
+                    .accessibilityIdentifier("plugin.\(manifest.id).asksNothing")
+                if let source = model.consentSource(for: manifest.id) {
+                    Text(strings(source)).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    let tree = model.consentTree(for: manifest.id)
+                    Button(strings(.actionAllow)) {
+                        model.decidePermissions(for: manifest.id, allow: true, shown: [], shownTree: tree)
+                    }
+                    .accessibilityIdentifier("plugin.\(manifest.id).allow")
+                    Button(strings(.actionDecline)) {
+                        model.decidePermissions(for: manifest.id, allow: false, shown: [], shownTree: tree)
+                    }
+                    .accessibilityIdentifier("plugin.\(manifest.id).decline")
+                }
+                .padding(.top, 2)
+            }
+        } else if requested.isEmpty {
             // Plain text, and no seal: a seal means one thing in uDeck — a
             // maintainer of the official repository read the plugin — and a
             // plugin asking for nothing is not a plugin somebody checked.

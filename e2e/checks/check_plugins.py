@@ -1,6 +1,6 @@
 """Plugins from a repository: the catalogue, installing, updating, removing — and saying no.
 
-Twenty-four checks, one per row of the table in docs/plugin-repository.md ("The
+Twenty-eight checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"), and all of them against the same two things: a release build of
 this checkout, and a fake GitHub served inside the guest
 (`plugin_repository.FakeGitHub`, `e2e/guest/fake-github.py`) whose content is
@@ -90,8 +90,14 @@ SILENCE_SECONDS = 120
 # How far ahead the fake says the limit resets. The table asks for "no API
 # request before the reset", so the check listens until then: short enough to
 # listen to whole, long enough for a Check now, an install and a second Check
-# now to happen inside it on a busy guest.
-LIMIT_SECONDS = 150
+# now to happen inside it on a busy guest. Each of those is a walk of Settings
+# → Plugins or a search through it, and a walk took 40 to 76 s in R3 — with
+# R2's uDeck too (.build/e2e/kept/20261011-142556Z…145510Z, walks.txt, 43
+# controls and no Install from a link…). From the limit to the install took
+# 100 to 115 s on 2026-10-10 and 159 and 205 s on 2026-10-11, so 150 s left the
+# install past the reset twice (20261011-160328Z, -222503Z): seven minutes
+# holds five walks of the slowest measured, with room.
+LIMIT_SECONDS = 420
 
 # What the rows say, in the guest's English (Q43): English.swift.
 AVAILABLE_1_1_0 = "1.1.0 available"
@@ -230,6 +236,47 @@ TICK_SECONDS = 60
 # as Swift describes them.
 DOES_NOT_UPDATE_ITSELF = "{id} does not update itself: {reason}"
 UPDATES_ITSELF_LATER = "{id} updates itself later: {wait}"
+
+# Installing from a link (stage 3). Pull request #3 of the fake's repository is
+# the fixture pr3, made on c1 — uptime 1.0.1, asking for what 1.0.0 asks, and
+# asks-nothing, new, asking for nothing at all — opened from a fork, whose head
+# the base serves by commit as GitHub does (e2e/fixtures/plugin-repository/parents);
+# the branch fix/uptime is at the same commit.
+ASKS_NOTHING = "asks-nothing"
+ASKS_NOTHING_NAME = "Asks nothing"
+PULL = "3"
+FORK = "someone/udeck-plugins"
+BRANCH = "fix/uptime"
+PULLS = {
+    PULL: {"head": "pr3", "head_repo": FORK, "head_ref": "uptime-1.0.1", "state": "open", "merged": False,
+           "merge_commit": None, "title": "uptime 1.0.1, and a plugin that asks for nothing"},
+}  # fmt: skip
+BRANCHES = {BRANCH: "pr3"}
+# As a person pastes them: without a scheme, and into a plugin's folder on a
+# branch whose name holds a '/'.
+PULL_LINK = f"github.com/{config.PLUGINS_REPOSITORY}/pull/{PULL}"
+BRANCH_LINK = f"https://github.com/{config.PLUGINS_REPOSITORY}/tree/{BRANCH}/plugins/{UPTIME}"
+# What uDeck says of it, in the guest's English (English.swift: pluginMarkUnverified,
+# pluginFromPullRequest, pluginFromBranch, linkHead, catalogueSwitchConfirm with what
+# stays after it, permissionsAsksNothingUnverified, permissionsUnverifiedSource,
+# catalogueInstalledUnverified, catalogueMissing, linkOff).
+UNVERIFIED = "Unverified"
+FROM_THE_PULL_REQUEST = "pull request #{number} at {commit}"
+FROM_THE_BRANCH = "branch {name} at {commit}"
+LINK_HEAD = "Pull request #{number} at {commit}"
+SWITCH_FROM_VERIFIED = ("{id} is the verified {old} from github.com/{repository}; installing {new} from "
+                        "pull request #{number} at {commit} replaces it. Its windows and settings stay. Nobody verified "
+                        "the code that comes: it asks before it runs, unless you allowed exactly that code before.")
+SWITCH_TO_VERIFIED = ("{id} is {old} from pull request #{number} at {commit}; installing the verified {new} from "
+                      "github.com/{repository} replaces it. Its windows, settings and your permission decision stay.")
+ASKS_NOTHING_UNVERIFIED = "{name} asks for nothing, but its code is unverified"
+INSTALLED_HERE_UNVERIFIED = "Installed here from {line}: unverified"
+NOT_IN_THE_PLUGINS_FOLDER = "{id} is not in ~/.udeck/plugins"
+LINK_OFF = "The official catalogue is off, so uDeck makes no request about plugins: switch it on to install from a link."
+NOBODY_VERIFIED = "Nobody verified this code: it comes from pull request #{number} of github.com/{repository}"
+# What asks-nothing's card says (e2e/fixtures/plugin-repository/pr3/plugins/asks-nothing/run.sh),
+# and where it counts its runs.
+RAN = "ran {n} times"
 
 
 # --- The checks -------------------------------------------------------------------------
@@ -951,14 +998,16 @@ def check_catalogue_off_means_no_network(machine, check_dir, lab):
 
     The control comes first, on the same machine: switched on, as it ships, the
     fake heard uDeck read the catalogue at launch. Then the switch is turned off
-    in Settings → Plugins, the file is read for it, uDeck is ended, its catalogue
+    in Settings → Plugins, the file is read for it, **Install from a link…**
+    says why it does nothing, uDeck is ended, its catalogue
     cache is taken away — so that a uDeck that ignored the switch would read the
     catalogue at launch again, rather than stay quiet because it read it a minute
     ago — and uDeck is started and listened to for `SILENCE_SECONDS`. A silence
     counts only if the fake still answers at the end of it.
 
-    **Red for**: a switch that is not saved, and a uDeck that reads the catalogue
-    at launch whatever the switch says.
+    **Red for**: a switch that is not saved, **Install from a link…** that does
+    not say it is off with it, and a uDeck that reads the catalogue at launch
+    whatever the switch says.
     """
     scene = _prepare(machine, check_dir, lab, main="c1")
     try:
@@ -976,6 +1025,8 @@ def check_catalogue_off_means_no_network(machine, check_dir, lab):
         saved = _wait_for_disk(machine, lambda: (_read_json(machine, SETTINGS) or {}).get("officialCatalogue") is False,
                                config.SETTINGS_SAVE_SECONDS)  # fmt: skip
         expect(saved, f"the switch was turned off and {SETTINGS} says {(_read_json(machine, SETTINGS) or {}).get('officialCatalogue')!r}")
+        said = _wait_until(machine, "link.off", lambda said: said == LINK_OFF, config.UI_CHANGE_SECONDS)
+        expect(said == LINK_OFF, f"with the official catalogue off, Install from a link… says {said!r} of why it does nothing")
 
         app.quit_app(machine, "ending uDeck")
         machine.ssh.run(f"rm -rf {UDECK_HOME}/catalogue", "taking away the catalogue uDeck read")
@@ -1002,6 +1053,20 @@ def check_catalogue_off_means_no_network(machine, check_dir, lab):
 def check_modified_locally(machine, check_dir, lab):
     """A line appended to an installed file over SSH makes the row say **Modified locally** within seconds.
 
+    Two oracles, one after the other. uDeck noticing is read on the disk — its
+    record's verification turns `modified` within `NOTICED_SECONDS`, to the
+    millisecond by the file's time (0.7 to 0.9 s in R3's six runs,
+    `walks.txt`) — and the row is read once that has happened. The order is
+    the fix for the lab's own race, measured in R3 (.build/e2e/kept/, the runs
+    of 2026-10-11): one walk of Settings → Plugins takes 40 to 60 s, longer
+    than the deadline, and a walk that crossed the change returned the row
+    without its mark, with the old mark, or with the mark several times —
+    the next walk read the truth each time (`race.txt`). R2's "mark None
+    within 15 s", 2 runs of 6 while the screen and the record said Modified
+    locally, was the first of those. A walk begun after the record says so
+    starts after the change, and `_wait_until` judges only by a walk begun
+    after its deadline.
+
     **Red for**: a uDeck that does not hash the folder again when it changes, or
     keeps the **Verified** mark on a folder that is no longer what was merged.
     """
@@ -1012,16 +1077,282 @@ def check_modified_locally(machine, check_dir, lab):
         mark = _wait_until(machine, f"plugin.{UPTIME}.mark", lambda said: said and VERIFIED in said, NOTICED_SECONDS)
         if mark is None or VERIFIED not in mark:
             raise LabError("before the change", f"the installed row's mark is {mark!r}, not {VERIFIED!r}, before anything changed")
-        machine.ssh.run(
-            f"printf '# a line the operator added\\n' >> {UDECK_HOME}/plugins/{UPTIME}/uptime.sh",
+        changed = _guest_time_after(
+            machine, f"printf '# a line the operator added\\n' >> {UDECK_HOME}/plugins/{UPTIME}/uptime.sh",
             "changing an installed file",
         )
+        noticed = _wait_for_disk(machine, lambda: _status(machine, UPTIME) == "modified", NOTICED_SECONDS)
+        took = _mtime_of(machine, INSTALLED) - changed
+        _keep(check_dir, "noticed.txt", f"installed.json written {took:+.3f}s after the change; status {_status(machine, UPTIME)!r}\n")
+        expect(noticed, f"{NOTICED_SECONDS}s after a line was added to uptime.sh, installed.json still says "
+                        f"{_status(machine, UPTIME)!r}: uDeck did not hash the folder again")
         mark = _wait_until(machine, f"plugin.{UPTIME}.mark", lambda said: said and MODIFIED in said, NOTICED_SECONDS)
         _keep_the_pane(machine, check_dir, lab, "after-the-change.txt")
         expect(
             mark is not None and MODIFIED in mark and VERIFIED not in mark,
-            f"{NOTICED_SECONDS}s after a line was added to uptime.sh, the row's mark says {mark!r}, not {MODIFIED!r}",
+            f"uDeck recorded uptime as modified {took:.1f}s after a line was added to uptime.sh, and its row's mark "
+            f"says {mark!r}, not {MODIFIED!r}",
         )
+    finally:
+        scene.close()
+
+
+def check_install_from_a_pull_request(machine, check_dir, lab):
+    """A fork's pull request pasted as `github.com/<official>/pull/3`: only its plugins' files, through the base, and Unverified everywhere.
+
+    Pull request #3 comes from a fork, `someone/udeck-plugins`, and uDeck reads
+    it through the official repository by commit, never from the fork. The
+    log, from **Look up**: one request for the pull request and one for its
+    listing, then the manifests of the plugins there that differ from the
+    catalogue's head — asks-nothing and uptime, not the two the head has
+    alike — at the head's commit; from **Install** on uptime, every file of
+    `plugins/uptime/` once, from the base's raw host at the head's commit, and
+    no API request. The disk: the folder hashes to pr3's tree, and
+    `installed.json` says `ref {pr, "3"}`, `unverified`, by nobody. The screen:
+    the link sheet, the row — *Unverified · pull request #3 at …* — and, placed
+    on a tab, the card's header saying **Unverified** and its question saying
+    where the code comes from.
+
+    **Red for**: a pull request read from the fork, a copy fetched beyond its
+    folder, a pull request's copy recorded as the default branch's or as
+    Verified, and a card that does not say it is unverified.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", pulls=PULLS)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        head = scene.github.commit("pr3")
+        looked, dump = _look_up(scene, PULL_LINK, "the pull request")
+        said = ui.says(ui.element(dump, "link.head"))
+        expect(said == LINK_HEAD.format(number=PULL, commit=head[:7]),
+               f"the link sheet says {said!r} of {PULL_LINK}, not {LINK_HEAD.format(number=PULL, commit=head[:7])!r}")  # fmt: skip
+        listed = sorted(row.identifier.split(".")[1] for row in ui.controls(dump) if row.identifier.endswith(".install")
+                        and row.identifier.startswith("link."))  # fmt: skip
+        expect(listed == [ASKS_NOTHING, UPTIME],
+               f"the link sheet offers {listed} to install: pr3 differs from c1 in {ASKS_NOTHING} and {UPTIME} only")
+        _expect_only(looked, head,
+                     api={f"/api/repos/{config.PLUGINS_REPOSITORY}/pulls/{PULL}",
+                          f"/api/repos/{config.PLUGINS_REPOSITORY}/git/trees/{head}"},
+                     raw={f"plugins/{ASKS_NOTHING}/manifest.json", f"plugins/{UPTIME}/manifest.json"},
+                     what="looking up the pull request")  # fmt: skip
+
+        record, asked = _install_from_the_link(scene, UPTIME, "the pull request")
+        files = scene.github.files("pr3", f"plugins/{UPTIME}")
+        _expect_only(asked, head, api=set(), raw=set(files), what=f"installing {UPTIME} from the pull request",
+                     every=True)
+        tree = scene.github.tree_in_guest(f"{UDECK_HOME}/plugins/{UPTIME}", "hashing the installed folder")
+        expect(tree == scene.github.tree("pr3", f"plugins/{UPTIME}"),
+               f"the folder uDeck installed hashes to {tree}, not pr3's plugins/{UPTIME}")
+        _expect_an_unverified_record(record, ref={"kind": "pr", "name": PULL}, commit=head, version="1.0.1")
+
+        _close_the_link_sheet(scene, "after installing")
+        _expect_the_row_says(scene, UPTIME, FROM_THE_PULL_REQUEST.format(number=PULL, commit=head[:7]), "the row")
+
+        _place(scene, UPTIME)
+        _the_card_says_unverified(scene, UPTIME, "placed on an empty tab")
+    finally:
+        scene.close()
+
+
+def check_install_from_a_branch(machine, check_dir, lab):
+    """A branch of the official repository, linked into a plugin's folder: its head, its listing and that plugin's files — nothing else.
+
+    The link goes into `plugins/uptime` on `fix/uptime`, a branch whose name
+    holds a `/`, so the sheet lists uptime alone. The log, from **Look up**
+    to the end of the install, holds the branch's head, by `refs/heads/`,
+    its listing, and files of `plugins/uptime/` at that commit — and nothing
+    else at all: not the default branch, not another plugin's manifest. The
+    record says `ref {branch, "fix/uptime"}`, `unverified`, by nobody, and the
+    row *Unverified · branch fix/uptime at …*. Then its folder is taken away
+    over SSH: the catalogue row of uptime still says the copy here is the
+    branch's, unverified, and that it is gone, and offers **Switch to
+    verified** — on the plugin's own row too — which puts the verified copy
+    where nothing is, without a warning, the branch's copy becoming
+    `previous`.
+
+    **Red for**: a branch read as anything but `refs/heads/<name>`, a name with
+    a `/` cut at the wrong place, a branch's copy recorded as verified, and a
+    gone copy's catalogue row that says only that it is missing — under its
+    **Verified** — with a **Reinstall** that puts the branch's code back.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", branches=BRANCHES)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        head = scene.github.commit("pr3")
+        looked, dump = _look_up(scene, BRANCH_LINK, "the branch")
+        listed = sorted(row.identifier.split(".")[1] for row in ui.controls(dump) if row.identifier.endswith(".install")
+                        and row.identifier.startswith("link."))  # fmt: skip
+        expect(listed == [UPTIME], f"a link into plugins/{UPTIME} on {BRANCH} lists {listed}, not {UPTIME} alone")
+        record, asked = _install_from_the_link(scene, UPTIME, "the branch")
+        files = scene.github.files("pr3", f"plugins/{UPTIME}")
+        _expect_only(looked + asked, head,
+                     api={f"/api/repos/{config.PLUGINS_REPOSITORY}/commits/refs/heads/{BRANCH}",
+                          f"/api/repos/{config.PLUGINS_REPOSITORY}/git/trees/{head}"},
+                     raw=set(files), what="looking up the branch and installing from it")  # fmt: skip
+        _expect_an_unverified_record(record, ref={"kind": "branch", "name": BRANCH}, commit=head, version="1.0.1")
+        _close_the_link_sheet(scene, "after installing")
+        _expect_the_row_says(scene, UPTIME, FROM_THE_BRANCH.format(name=BRANCH, commit=head[:7]), "the row")
+
+        machine.ssh.run(f"rm -rf {UDECK_HOME}/plugins/{UPTIME}", "taking the branch's copy away")
+        # uDeck reads the folder again within a second; a walk begun before that
+        # would cross the change and only cost another walk (`_wait_until`).
+        machine.sleep(config.SETTLE_SECONDS)
+        gone = f"{INSTALLED_HERE_UNVERIFIED.format(line=f'branch {BRANCH}')} — {NOT_IN_THE_PLUGINS_FOLDER.format(id=UPTIME)}"
+        state = _wait_until(machine, f"catalogue.{UPTIME}.state", lambda said: said == gone, NOTICED_SECONDS)
+        dump = _keep_the_pane(machine, check_dir, lab, "the-folder-gone.txt")
+        expect(state == gone, f"with the branch's copy gone, {UPTIME}'s catalogue row says {state!r}, not {gone!r}")
+        offered = [f"{row}.{UPTIME}.switchToVerified" for row in ("catalogue", "plugin")]
+        expect(all(ui.element(dump, button) is not None for button in offered),
+               f"with the branch's copy gone, Switch to verified is not offered on both rows: "
+               f"{[row.identifier for row in ui.controls(dump) if UPTIME in row.identifier]}")  # fmt: skip
+        expect(ui.element(dump, f"catalogue.{UPTIME}.reinstall") is None,
+               f"the catalogue row of {UPTIME}, the branch's copy gone, offers Reinstall")
+        verified = _operate(scene, f"catalogue.{UPTIME}.switchToVerified", "Switch to verified, the folder gone",
+                            lambda r: r is not None and (r.get("ref") or {}).get("kind") == "default")
+        expect(verified is not None and (verified.get("verification") or {}).get("status") == "verified"
+               and ((verified.get("previous") or {}).get("ref") or {}).get("kind") == "branch",
+               f"Switch to verified, the branch's copy gone, left {_read_json(machine, INSTALLED)!r}: no verified copy "
+               f"over the branch's record, or no warning-free install where nothing was")  # fmt: skip
+    finally:
+        scene.close()
+
+
+def check_unverified_asks_even_for_nothing(machine, check_dir, lab):
+    """The pull request's plugin that asks for nothing does not run until **Allow**, which is held to its tree; a line added asks again.
+
+    asks-nothing, installed from pull request #3 and placed on a tab, asks on
+    its card — *Asks nothing asks for nothing, but its code is unverified*,
+    with where the code comes from — and its count of runs, kept in uDeck's
+    cache of it, is not there: it has not run. **Allow** runs it, and
+    `grants.json` holds the decision for its version and for the tree its
+    folder hashes to. A line appended to `run.sh` over SSH is new content:
+    the card asks again. **Decline** then switches it off — a decision with
+    nothing in it would let it run (`plugin-settings.json`) — and its count of
+    runs, read with the panel away before the edit, is what it was: the
+    edited code never ran on the decision made for the code before it.
+
+    **Red for**: a gate that lets code nobody verified run because it asks
+    for nothing, a decision not held to the tree, and an edit that runs on the
+    decision made before it.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", pulls=PULLS)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        _look_up(scene, PULL_LINK, "the pull request")
+        record, _ = _install_from_the_link(scene, ASKS_NOTHING, "the pull request")
+        _expect_an_unverified_record(record, ref={"kind": "pr", "name": PULL}, commit=scene.github.commit("pr3"),
+                                     version="1.0.0", plugin=ASKS_NOTHING)
+        _place(scene, ASKS_NOTHING)
+        runs = f"{UDECK_HOME}/cache/{ASKS_NOTHING}/runs"
+
+        found, texts = _the_card_asks(scene, ASKS_NOTHING, "before anything was allowed")
+        question = ASKS_NOTHING_UNVERIFIED.format(name=ASKS_NOTHING_NAME)
+        expect(any(question in text for text in texts), f"{ASKS_NOTHING}'s card does not say {question!r}: {texts}")
+        source = ui.says(found.get(f"consent.{ASKS_NOTHING}.source"))
+        expect(NOBODY_VERIFIED.format(number=PULL, repository=config.PLUGINS_REPOSITORY) in source,
+               f"{ASKS_NOTHING}'s card says {source!r} of where its code comes from")
+        expect(not _exists(machine, runs), f"{ASKS_NOTHING} has run before anybody allowed it: {runs} is there")
+
+        machine.click(*found[f"consent.{ASKS_NOTHING}.allow"].middle, f"allowing {ASKS_NOTHING}")
+        ran = _wait_for_disk(machine, lambda: _exists(machine, runs), CARD_SECONDS)
+        expect(ran, f"{ASKS_NOTHING} was allowed and did not run within {CARD_SECONDS}s")
+        tree = scene.github.tree("pr3", f"plugins/{ASKS_NOTHING}")
+        grant = ((_read_json(machine, GRANTS) or {}).get("byPlugin") or {}).get(ASKS_NOTHING) or {}
+        expect(grant.get("decidedForTree") == tree and grant.get("decidedForVersion") == "1.0.0",
+               f"after Allow, {GRANTS} holds {grant!r} for {ASKS_NOTHING}: the decision is held to its version "
+               f"and to the tree it was made for, {tree}")
+        _, texts = _wait_for_the_card(machine, lambda found, texts: any(RAN.format(n=1) in t for t in texts), CARD_SECONDS)
+        machine.screenshot(scene.check_dir, f"{ASKS_NOTHING} allowed")
+        expect(any(RAN.format(n=1) in t for t in texts), f"after Allow, {ASKS_NOTHING}'s card says {texts}")
+        _put_the_panel_away(machine, "after Allow")
+        # With the panel away nothing runs (the switch to keep plugins running
+        # is off, as it ships), so this is the count the edited code must not move.
+        counted = _count_of_runs(machine, runs)
+        expect(counted is not None and counted >= 1, f"after Allow, {runs} says {counted!r}, not a count of its runs")
+
+        machine.ssh.run(f"printf '# a line the operator added\\n' >> {UDECK_HOME}/plugins/{ASKS_NOTHING}/run.sh",
+                        "changing the plugin's code")
+        found, texts = _the_card_asks(scene, ASKS_NOTHING, "after a line was added")
+        machine.click(*found[f"consent.{ASKS_NOTHING}.decline"].middle, f"declining {ASKS_NOTHING}")
+        off = _wait_for_disk(machine, lambda: ASKS_NOTHING in (((_read_json(machine, PLUGIN_SETTINGS) or {}).get("disabled")) or []),
+                             NOTICED_SECONDS)  # fmt: skip
+        expect(off, f"Decline of {ASKS_NOTHING}, which asks for nothing, left it switched on: "
+                    f"{_read_json(machine, PLUGIN_SETTINGS)!r}")
+        after = _count_of_runs(machine, runs)
+        expect(after == counted, f"{ASKS_NOTHING}'s code was changed and nobody allowed it again, and it ran: its count went "
+                                 f"from {counted} to {after!r} between the edit and Decline")
+        _put_the_panel_away(machine, "after Decline")
+    finally:
+        scene.close()
+
+
+def check_switch_to_verified_names_both(machine, check_dir, lab):
+    """A pull request's copy over the verified one, and back with **Switch to verified**: each warning names both, nothing changes until it is confirmed.
+
+    The verified uptime 1.0.0 is installed from the catalogue, placed with a
+    setting value, and allowed. **Install** on uptime listed from pull request
+    #3 warns first — *uptime is the verified 1.0.0 from github.com/…;
+    installing 1.0.1 from pull request #3 at … replaces it* — and while the
+    warning is up the folder and the record are what they were. Confirmed, the
+    record is the pull request's and its `previous` the verified copy.
+    **Switch to verified 1.0.0** on its row warns the other way round, and
+    again nothing changes until it is confirmed. Then the row says
+    **Verified**, the record is the default branch's at c1, the window is the
+    one it was, the setting value is kept, and the card runs 1.0.0 without
+    asking — the decision made for that version holds again.
+
+    **Red for**: a switch of source made without a word, or with a warning
+    that names one copy only, a button that acts before it is confirmed, and a
+    switch that loses the window, the settings or the decision.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", pulls=PULLS)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        _place(scene, UPTIME, setting_value=True)
+        _allow_and_read_the_card(scene, UPTIME, "the verified copy")
+        window = _the_window(machine, UPTIME, "reading the window before the switches")
+        values = ((_read_json(machine, PLUGIN_SETTINGS) or {}).get("values") or {}).get(UPTIME)
+        head = scene.github.commit("pr3")
+        c1 = scene.github.commit("c1")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        _look_up(scene, PULL_LINK, "the pull request")
+        _expect_a_warning_that_changes_nothing(
+            scene, f"link.{UPTIME}", "Install on the pull request's uptime",
+            SWITCH_FROM_VERIFIED.format(id=UPTIME, old="1.0.0", repository=config.PLUGINS_REPOSITORY, new="1.0.1",
+                                        number=PULL, commit=head[:7]),
+            tree=scene.github.tree("c1", f"plugins/{UPTIME}"))  # fmt: skip
+        record = _operate(scene, f"link.{UPTIME}.confirm", "confirming the switch to the pull request",
+                          lambda r: r is not None and (r.get("ref") or {}).get("kind") == "pr")
+        expect(record is not None, f"the switch to the pull request was confirmed and installed.json says {_read_json(machine, INSTALLED)!r}")
+        previous = record.get("previous") or {}
+        expect(previous.get("commit") == c1 and (previous.get("ref") or {}).get("kind") == "default"
+               and previous.get("version") == "1.0.0",
+               f"after the switch, the record's previous is {previous!r}, not the verified 1.0.0 at c1")  # fmt: skip
+        _close_the_link_sheet(scene, "after the switch")
+        _keep_the_pane(machine, check_dir, lab, "the-pull-requests-copy.txt")
+
+        _expect_a_warning_that_changes_nothing(
+            scene, f"plugin.{UPTIME}", "Switch to verified",
+            SWITCH_TO_VERIFIED.format(id=UPTIME, old="1.0.1", number=PULL, commit=head[:7], new="1.0.0",
+                                      repository=config.PLUGINS_REPOSITORY),
+            tree=scene.github.tree("pr3", f"plugins/{UPTIME}"), button=f"plugin.{UPTIME}.switchToVerified")  # fmt: skip
+        record = _operate(scene, f"plugin.{UPTIME}.confirm", "confirming Switch to verified",
+                          lambda r: r is not None and (r.get("ref") or {}).get("kind") == "default")
+        expect(record is not None and record.get("commit") == c1
+               and (record.get("verification") or {}).get("status") == "verified",
+               f"after Switch to verified, installed.json says {record!r}")  # fmt: skip
+        mark = _wait_until(machine, f"plugin.{UPTIME}.mark", lambda said: said == VERIFIED, NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "verified-again.txt")
+        expect(mark == VERIFIED, f"after Switch to verified, the row's mark says {mark!r}")
+        expect(_the_window(machine, UPTIME, "reading the window after the switches") == window,
+               f"the switches moved or replaced {UPTIME}'s window")
+        kept = ((_read_json(machine, PLUGIN_SETTINGS) or {}).get("values") or {}).get(UPTIME)
+        expect(kept == values and values, f"the switches lost {UPTIME}'s setting values: {values!r} before, {kept!r} after")
+        _the_card_without_asking(scene, UPTIME, "1.0.0", "verified again")
     finally:
         scene.close()
 
@@ -1920,13 +2251,28 @@ def _press(machine, identifier, what, window=ui.SETTINGS_WINDOW):
 
 
 def _wait_until(machine, identifier, satisfied, seconds, window=ui.SETTINGS_WINDOW, present=False):
-    """What the control says once `satisfied` by it — or what it last said when the time is up (None when absent)."""
+    """What the control says once `satisfied` by it — or what it said in a walk begun after the time was up (None when absent).
+
+    A verdict against the control comes only from a walk that began at or
+    after the deadline. One walk of Settings → Plugins takes 40 to 60 s, much
+    longer than the deadlines here, and a walk takes the list of a pane's
+    controls when it reaches it and reads each one after: a walk begun before
+    uDeck changed the control and read after it returns the control as it
+    was, twice over, or not at all. Measured in R3 (.build/e2e/kept/,
+    `plugins.modified-locally`, `race.txt`): a line appended to `uptime.sh`
+    at a chosen moment inside one walk left that walk without the row's mark,
+    with the old mark, or with the mark several times, while the next walk
+    read **Modified locally** each time. So the deadline is as fine as the
+    walk: the control has to say it by the time a walk begun after the
+    deadline reads it.
+    """
     deadline = machine.clock() + seconds
     while True:
+        began = machine.clock()
         dump = _read_the_screen(machine, f"reading {identifier}", window)
         found = ui.element(dump, identifier)
         said = None if found is None else (ui.says(found) if not present else ui.says(found) or identifier)
-        if satisfied(said) or machine.clock() >= deadline:
+        if satisfied(said) or began >= deadline:
             return said
         machine.sleep(1)
 
@@ -1971,6 +2317,12 @@ def _read_json(machine, path, step="reading uDeck's files"):
 
 def _exists(machine, path, step="looking in ~/.udeck"):
     return machine.ssh.ask(f"test -e {path}", step).returncode == 0
+
+
+def _count_of_runs(machine, path):
+    """The count a plugin keeps of its runs at `path`, as a number; None when there is none, or it is not a number."""
+    text = machine.ssh.ask(f"cat {path} 2>/dev/null || true", "reading the plugin's count of its runs").stdout.strip()
+    return int(text) if text.isascii() and text.isdigit() else None
 
 
 def _keep_the_pane(machine, check_dir, lab, name, window=ui.SETTINGS_WINDOW):
@@ -2087,6 +2439,152 @@ def _hold_log(machine):
 
 def _hold_is_running(machine):
     return machine.ssh.ask("/usr/bin/pgrep -f hold.sh", "asking whether the action runs").returncode == 0
+
+
+def _status(machine, plugin):
+    """`installed.json`'s verification status of `plugin`, or None."""
+    record = ((_read_json(machine, INSTALLED) or {}).get("plugins") or {}).get(plugin) or {}
+    return (record.get("verification") or {}).get("status")
+
+
+def _look_up(scene, link, label):
+    """`link` typed into **Install from a link…** and looked up: uDeck's requests from the press on, and the walk once it says what it came to."""
+    machine = scene.machine
+    dump = _read_the_screen(machine, f"looking for the link sheet: {label}")
+    if ui.element(dump, "link.field") is None:
+        _press(machine, "plugins.installFromLink", f"pressing Install from a link…: {label}")
+    try:
+        field = ui.wait_for(machine, "link.field", f"waiting for the link field: {label}")
+    except NotThere as error:
+        raise CheckFailed(f"Install from a link… offers no field to paste a link into: {error.reason}") from None
+    machine.click(*field.middle, f"putting the cursor in the link field: {label}")
+    ui.type_text(machine, link, f"typing {link}: {label}")
+    typed = _wait_until(machine, "link.field", lambda said: said == link, config.UI_CHANGE_SECONDS)
+    if typed != link:
+        raise LabError(f"typing the link: {label}", f"the field reads {typed!r} after {link!r} was typed into it")
+    before = _count(scene)
+    _press(machine, "link.lookUp", f"pressing Look up: {label}")
+    deadline = machine.clock() + OPERATION_SECONDS
+    while True:
+        dump = _read_the_screen(machine, f"reading what the link came to: {label}")
+        found = {row.identifier for row in ui.controls(dump)}
+        if found & {"link.head", "link.refused", "link.catalogue"} or machine.clock() >= deadline:
+            break
+        machine.sleep(1)
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-link-sheet-{label.replace(' ', '-')}.txt")
+    if "link.head" not in found:
+        said = ui.says(ui.element(dump, "link.refused")) or ui.says(ui.element(dump, "link.catalogue"))
+        raise CheckFailed(f"{link} came to {said or 'nothing'} within {OPERATION_SECONDS}s; uDeck asked "
+                          f"{described(_since(scene, before))}")
+    return _since(scene, before), dump
+
+
+def _install_from_the_link(scene, plugin, label):
+    """**Install** pressed on `plugin`'s row in the link sheet: the record it left, and uDeck's requests from the click on."""
+    before = _count(scene)
+    record = _operate(scene, f"link.{plugin}.install", f"installing {plugin} from the link: {label}",
+                      lambda r: r is not None and not ((r.get("ref") or {}).get("kind") in (None, "default")), plugin)
+    asked = _since(scene, before)
+    if record is None:
+        problem = ui.reads(scene.machine, f"link.{plugin}.problem", "reading why it was not installed")
+        raise CheckFailed(f"Install on {plugin} from {label} put no record of it in installed.json within "
+                          f"{OPERATION_SECONDS}s; the row says {problem!r}; uDeck asked {described(asked)}")
+    return record, asked
+
+
+def _close_the_link_sheet(scene, label):
+    """The link sheet closed, so that the rows below it are read alone (`_row_of`)."""
+    _press(scene.machine, "link.close", f"closing the link sheet: {label}")
+    scene.machine.sleep(config.SETTLE_SECONDS)
+
+
+def _expect_only(heard, commit, api, raw, what, every=False):
+    """uDeck's requests `heard` are the API paths `api` and the raw files `raw` of the official repository at `commit` — nothing else, from no other repository; `every` raw file once, when asked."""
+    stray = []
+    files = []
+    for request in heard:
+        if request.is_api and request.path in api:
+            continue
+        found = request.raw_file()
+        if found is not None and found[0] == commit and found[1] in raw:
+            files.append(found[1])
+            continue
+        stray.append(request)
+    expect(not stray, f"{what}, uDeck also asked {described(stray)}; it asks for {sorted(api)} and the files "
+                      f"{sorted(raw)} at {commit[:7]}, through {config.PLUGINS_REPOSITORY}, and nothing else")
+    if every:
+        missing = sorted(set(raw) - set(files))
+        twice = sorted({path for path in files if files.count(path) > 1})
+        expect(not missing and not twice,
+               f"{what}, uDeck never fetched {missing} and fetched {twice} more than once")  # fmt: skip
+
+
+def _expect_an_unverified_record(record, ref, commit, version, plugin=UPTIME):
+    """A record of the official source's copy from a branch or a pull request: where it came from, and nobody's guarantee."""
+    wanted = {"source": "official", "ref": ref, "commit": commit, "version": version,
+              "repository": {"provider": "github", "host": "github.com", "path": config.PLUGINS_REPOSITORY}}  # fmt: skip
+    wrong = {key: record.get(key, "(missing)") for key, value in wanted.items() if record.get(key, "(missing)") != value}
+    expect(not wrong, f"installed.json says {wrong} of {plugin}, where the install from the link has to have written "
+                      f"{({k: wanted[k] for k in wrong})}")
+    verification = record.get("verification") or {}
+    expect(verification.get("status") == "unverified" and "by" in verification and verification.get("by") is None,
+           f"installed.json's verification of {plugin} is {verification!r}: unverified, by nobody")  # fmt: skip
+
+
+def _expect_the_row_says(scene, plugin, source, label):
+    """`plugin`'s row in Settings: **Unverified**, and where the copy came from."""
+    machine = scene.machine
+    mark = _wait_until(machine, f"plugin.{plugin}.mark", lambda said: said == UNVERIFIED, NOTICED_SECONDS)
+    dump = _keep_the_pane(machine, scene.check_dir, scene.lab, f"{label.replace(' ', '-')}.txt")
+    said = ui.says(ui.element(dump, f"plugin.{plugin}.from"))
+    expect(mark == UNVERIFIED and said == source,
+           f"{plugin}'s row says {mark!r} · {said!r}, not {UNVERIFIED!r} · {source!r}")  # fmt: skip
+    expect(ui.element(dump, f"plugin.{plugin}.refPage") is not None,
+           f"{plugin}'s row offers no link to the page it came from")
+
+
+def _the_card_asks(scene, plugin, label):
+    """The panel opened, and `plugin`'s card read once it asks for consent: its controls by identifier, and its texts."""
+    machine = scene.machine
+    _open_the_panel(machine, f"opening the panel: {label}")
+    allow = f"consent.{plugin}.allow"
+    dump, texts = _wait_for_the_card(machine, lambda found, texts: allow in found, CARD_SECONDS + NOTICED_SECONDS)
+    machine.screenshot(scene.check_dir, f"{plugin} asks: {label}")
+    _keep(scene.check_dir, f"card-{label.replace(' ', '-')}.txt", "\n".join(texts) + "\n\n" + dump)
+    found = {row.identifier: row for row in ui.controls(dump) if row.identifier}
+    expect(allow in found, f"{plugin}, {label}, does not ask for consent on its card; the panel says {texts}")
+    header = ui.says(found.get(f"card.{plugin}.unverified"))
+    expect(header == UNVERIFIED, f"{plugin}'s card, {label}, says {header!r} in its header, not {UNVERIFIED!r}")
+    return found, texts
+
+
+def _the_card_says_unverified(scene, plugin, label):
+    """`plugin`'s card asks, saying where its code comes from and **Unverified** in its header; allowed, it runs and still says so."""
+    found, texts = _the_card_asks(scene, plugin, label)
+    source = ui.says(found.get(f"consent.{plugin}.source"))
+    expect(NOBODY_VERIFIED.format(number=PULL, repository=config.PLUGINS_REPOSITORY) in source,
+           f"{plugin}'s card says {source!r} of where its code comes from")
+    scene.machine.click(*found[f"consent.{plugin}.allow"].middle, f"allowing {plugin}: {label}")
+    card = _read_the_card(scene, plugin, label, lambda card: RUNS in card and card[RUNS] not in ("", "unknown"))
+    dump = ui.identified(scene.machine, "reading the card's header", ui.PANEL, depth=ui.MAX_DEPTH)
+    header = ui.says(ui.element(dump, f"card.{plugin}.unverified"))
+    scene.machine.screenshot(scene.check_dir, f"{plugin}'s card header: {label}")
+    _put_the_panel_away(scene.machine, label)
+    expect(header == UNVERIFIED, f"{plugin}'s card, allowed and running, says {header!r} in its header, not {UNVERIFIED!r}")
+    return card
+
+
+def _expect_a_warning_that_changes_nothing(scene, row, what, words, tree, button=None):
+    """`button` (the row's Install) pressed: its warning says `words`, and the folder, which hashes to `tree`, and the record are as they were."""
+    machine = scene.machine
+    before = _read_json(machine, INSTALLED)
+    _press(machine, button or f"{row}.install", f"pressing {what}")
+    warning = _wait_until(machine, f"{row}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-warning-{what.split()[0].lower()}.txt")
+    expect(warning is not None and words in warning, f"{what} said {warning!r} before replacing anything; it has to say {words!r}")
+    expect(_read_json(machine, INSTALLED) == before, f"while the warning of {what} was up, installed.json changed")
+    now = scene.github.tree_in_guest(f"{UDECK_HOME}/plugins/{UPTIME}", "hashing the folder under the warning")
+    expect(now == tree, f"while the warning of {what} was up, the folder became {now}, not {tree}")
 
 
 def _expect_a_whole_record(record, commit, tree, version, pinned, previous):
@@ -2499,6 +2997,17 @@ def _wait_for_the_card(machine, ready, seconds, expect_it=True):
 
 def _identified(dump, identifier):
     return ui.element(dump, identifier) is not None
+
+
+def _guest_time_after(machine, command, step):
+    """The guest's clock, to the millisecond, read right after `command` ran there."""
+    said = machine.ssh.run(f"{command} >/dev/null && /usr/bin/python3 -c 'import time; print(\"%.3f\" % time.time())'", step)
+    return float(said.stdout.strip())
+
+
+def _mtime_of(machine, path):
+    """When `path` in the guest was last written, by the guest's clock, to the millisecond."""
+    return float(machine.ssh.run(f"/usr/bin/stat -f %Fm {path}", f"reading when {path} was written").stdout.strip())
 
 
 def _keep(check_dir, name, text):

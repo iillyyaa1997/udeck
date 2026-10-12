@@ -188,6 +188,13 @@ public enum Phrase: Sendable, Equatable {
     /// The card of a plugin held to its tree whose folder would not hash —
     /// a file in it cannot be read: nothing can be decided for it.
     case permissionsFolderUnreadable(name: String)
+    /// Where code nobody verified comes from, on the card that asks about it
+    /// (`ConsentSource`): the branch or the pull request, its repository, and
+    /// whether it was changed on this Mac since it was installed.
+    case permissionsUnverifiedSource(ref: PluginRef, repository: String, changedHere: Bool)
+    /// The same while `installed.json` cannot be read: nothing says where any
+    /// copy came from, so every one is asked about by its content.
+    case permissionsSourceUnknown
     case permissionsUnsandboxed
     case permissionsAllowAndRun
 
@@ -261,8 +268,17 @@ public enum Phrase: Sendable, Equatable {
     case catalogueRemoveConfirm(id: String)
     case catalogueRemoveOwnConfirm(id: String)
     case catalogueRemoveLinkConfirm(id: String, target: String)
+    /// A copy uDeck installed taken by a copy from another line of history
+    /// (`PlaceWarning.switching`): both named, and the Trash when the copy
+    /// there holds the operator's changes.
+    case catalogueSwitchConfirm(id: String, from: CopyName, to: CopyName, toTrash: Bool)
     /// A catalogue row whose id is linked here, to a folder of the operator's.
     case catalogueLinkedHere(id: String)
+    /// A catalogue row whose id is installed from a branch or a pull request
+    /// (`CatalogueRowState.unverified`): what is there, and the button that
+    /// puts the row's verified copy in its place.
+    case catalogueInstalledUnverified(ref: PluginRef)
+    case catalogueSwitchToVerified(version: String)
 
     /// Every refusal names the plugin, what is wrong, and what would fix it.
     case catalogueRefusal(RepositoryRefusal)
@@ -281,6 +297,11 @@ public enum Phrase: Sendable, Equatable {
     case pluginMarkModified
     case pluginMarkMissing
     case pluginFrom(source: String, commit: String)
+    /// Where code nobody verified came from, beside its **Unverified** mark
+    /// (`InstalledRecord.fromPhrase`): the pull request or the branch, and the
+    /// commit, seven characters of it.
+    case pluginFromPullRequest(number: Int, commit: String)
+    case pluginFromBranch(name: String, commit: String)
     case pluginPinned
     /// A copy a verified plugin put in place by itself (`AutoUpdate`), and
     /// one it could not: tried again at the next read of the catalogue.
@@ -304,6 +325,33 @@ public enum Phrase: Sendable, Equatable {
     case linkFolderOverOwn(id: String, path: String, folder: String, toTrash: Bool)
     case linkFolderOverLink(id: String, destination: String, folder: String)
     case linkFolderRefused(FolderLinkRefusal)
+
+    /// **Install from a link…**: the button, what it is for, the field, and
+    /// what a link pasted comes to — the line of history and the commit it
+    /// was read at, the plugins there that are not the catalogue's, or why
+    /// there is nothing to install (`LinkRefusal`). `official` is the official
+    /// repository, as `github.com/owner/repo`.
+    case linkInstall
+    case linkHelp(official: String)
+    case linkField
+    case linkLookUp
+    case linkReading
+    case linkClose
+    case linkOff
+    case linkRefused(RepositoryLink.Refusal, official: String)
+    case linkNotFound(RepositoryLink, official: String)
+    case linkOtherRepository(repository: String, official: String)
+    case linkIsTheCatalogue(official: String, plugin: String?)
+    case linkHead(ref: PluginRef, commit: String)
+    case linkPullRequestMerged
+    case linkPullRequestClosed
+    /// Nothing there differs from the catalogue's head: every plugin, or —
+    /// for a link into one plugin's folder — that plugin.
+    case linkNothingDiffers(ref: PluginRef, plugin: String? = nil)
+    /// A link into a plugin's folder that the branch or the pull request
+    /// does not have.
+    case linkPluginNotThere(ref: PluginRef, plugin: String)
+    case linkUnverifiedNote
 
     /// The run log of linked folders (Q127): its switch, what it does, and
     /// the button that shows the logs.

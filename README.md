@@ -246,7 +246,11 @@ uDeck reads it from `api.github.com` and `raw.githubusercontent.com`, anonymousl
   whenever **Check now** is pressed there;
 * and when you press **Install**, **Update**, **Reinstall**, **Back to** or
   **Earlier versions**, the files that needs — so GitHub learns which plugin;
-* and, after a read, the files of a **Verified** plugin that updates itself.
+* and, after a read, the files of a **Verified** plugin that updates itself;
+* and when you press **Look up** in **Install from a link…**, the pull request
+  or the branch of that repository the link names — its head, its listing and
+  the manifests of the plugins there that are not the catalogue's — and, when
+  you press **Install** there, that plugin's files.
 
 A read is usually one or two requests, each carrying `User-Agent:
 uDeck/<version>` and the network address any request carries. **Verified
@@ -256,7 +260,11 @@ that plugin's files and puts it in place, its window and your permission
 decision kept, and its row says *Updated by itself*. A new version asking for
 different permissions, a plugin you changed or put a file of your own into, and
 one you kept at an earlier version are only offered, for you to press
-**Update**; nothing else is downloaded or installed by itself. **Settings →
+**Update**; nothing else is downloaded or installed by itself. A plugin
+installed from a pull request or a branch is **Unverified** — on its row in
+Settings, in the list it came from and on its card — asks before it runs, even
+when it asks for nothing, and again whenever its code changes, and is never
+updated by itself. **Settings →
 Plugins → Update verified plugins by themselves** turns that off, and every
 update waits for a press. **Settings → Plugins → Official catalogue** turns all
 of it off: uDeck then makes no request about plugins at all, the plugins you

@@ -10,6 +10,26 @@ for what that promises.
 
 ## [Unreleased]
 
+- **Install from a link…** Settings → Plugins takes a link to a pull request or
+  a branch of the official repository, pasted as the browser shows it, and
+  lists the plugins there that are not what the catalogue has — new, or
+  changed — each marked **Unverified**. **Install** takes one exactly as a
+  catalogue row does, at the commit the link was read at, through the official
+  repository: a pull request opened from a fork is read by commit there, never
+  from the fork. A link to one commit, another host or another repository is
+  refused with what it is, before anything is asked. Over the verified copy,
+  **Install** first says what goes and what comes — *uptime is the verified
+  1.0.0 from github.com/…; installing 1.0.1 from pull request #3 at a1b2c3d
+  replaces it*, and that the code that comes asks before it runs — and
+  **Switch to verified 1.0.0**, on the catalogue row and on the plugin's own,
+  goes back the same way, its folder there or gone; the copy replaced is kept
+  as **Back to**. **Unverified** is said on the plugin's row, with the pull
+  request or the branch and a link to its page, on the header of each of its
+  windows, and on its card's question, which says where the code comes from;
+  a plugin that asks for nothing can be allowed or declined in Settings too.
+  Such a copy is never offered an update against the catalogue, and never
+  updates by itself. Off with **Official catalogue**, as every request about
+  plugins.
 - **Verified plugins update themselves.** After a read of the official
   catalogue that finds a new version of a **Verified** plugin asking for
   exactly the permissions the installed one asks for, uDeck puts it in place
@@ -36,9 +56,8 @@ for what that promises.
   Anything else asks on the card, as before. `installed.json` gains an
   `automatic: true` on a copy uDeck put in place by itself; a uDeck from before
   reads it and skips the key.
-- **Code nobody verified asks before every new content, underneath.** The
-  ground for installing from a branch or a pull request, which nothing in
-  Settings offers yet. `installed.json` keeps a branch's or a pull request's
+- **Code nobody verified asks before every new content.** What installing
+  from a branch or a pull request stands on. `installed.json` keeps a branch's or a pull request's
   ref (`branch`, `pr`) and the status `unverified`, and every button that puts a
   copy back — **Reinstall**, **Back to** — keeps the ref the copy came from, so
   that a pull request's copy is never recorded as the default branch's, and so

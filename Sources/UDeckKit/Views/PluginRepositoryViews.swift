@@ -235,6 +235,16 @@ struct CatalogueRowView: View {
                 Button(strings(.windowReinstall)) { press(.reinstall) }
                     .disabled(model.busyPlugin != nil)
                     .accessibilityIdentifier("catalogue.\(id).reinstall")
+            case .unverified(let version, nil, _):
+                // Code nobody verified is in this id's place: the row's copy
+                // is the verified one, offered as the switch it is — always
+                // after the warning that names both (`ShownPlace.Switch`);
+                // its folder gone, nothing is replaced and nothing warns.
+                Button(strings(.catalogueSwitchToVerified(version: version))) { press(.update) }
+                    .disabled(model.busyPlugin != nil)
+                    .accessibilityIdentifier("catalogue.\(id).switchToVerified")
+            case .unverified:
+                EmptyView()
             case .cannotInstall:
                 Button(strings(.catalogueDetails)) { details.toggle() }
                     .buttonStyle(.link)
@@ -277,7 +287,7 @@ struct CatalogueRowView: View {
 
     private var isTrouble: Bool {
         switch state {
-        case .cannotInstall, .missing: true
+        case .cannotInstall, .missing, .unverified: true
         case .installed(.cannotRun): true
         default: false
         }
@@ -290,26 +300,28 @@ struct CatalogueRowView: View {
         case .folderOfYourOwn: model.linkedFolder(id) == nil ? strings(.catalogueOwnFolder(id: id)) : strings(.catalogueLinkedHere(id: id))
         case .missing: strings(.catalogueMissing(id: id, path: model.pluginsDirectoryDisplayPath))
         case .installed(let offer): OfferText.text(offer, strings, asksDifferently: model.updateAsksDifferently(id))
+        case .unverified:
+            (state.unverifiedLine(ref: model.installed.plugins[id]?.ref ?? PluginRef(kind: "", name: nil), id: id,
+                                  path: model.pluginsDirectoryDisplayPath) ?? []).map { strings($0) }.joined(separator: " — ")
         }
     }
 
     private func confirmation(_ confirmation: Confirmation) -> some View {
         let shown = confirmation.shown
         let version = shown.arriving ?? ""
-        let text: String
         let button: String
+        // A link there goes, and the folder it leads to stays; a folder of
+        // the operator's own goes to the Trash; a copy from another line of
+        // history is named beside the one that comes (`PlaceWarning.of`).
+        let text = strings(PlaceWarning.of(shown, button: confirmation.then == .install ? .install : .replaceCopy, id: id,
+                                           path: model.pluginsDirectoryDisplayPath,
+                                           link: shown.link.map { model.displayPath($0) }))
         switch confirmation.then {
         case .install:
-            // A link there goes, and the folder it leads to stays; a folder
-            // of the operator's own goes to the Trash (`PlaceWarning`).
-            text = strings(PlaceWarning.replacement(id: id, path: model.pluginsDirectoryDisplayPath,
-                                                    link: shown.link.map { model.displayPath($0) }))
             button = strings(.catalogueReplace)
         case .update:
-            text = strings(PlaceWarning.replacingCopy(id: id, version: version, link: shown.link.map { model.displayPath($0) }))
-            button = strings(.catalogueUpdate)
+            button = shown.switching != nil ? strings(.catalogueSwitchToVerified(version: version)) : strings(.catalogueUpdate)
         case .reinstall:
-            text = strings(PlaceWarning.replacingCopy(id: id, version: version, link: shown.link.map { model.displayPath($0) }))
             button = strings(.catalogueReinstall(version: version))
         }
         return VStack(alignment: .leading, spacing: 5) {
@@ -351,8 +363,10 @@ struct InstalledRepositoryControls: View {
     }
 
     /// **Remove**, or a button that replaces the folder — pressed over a copy
-    /// holding something of the operator's.
-    enum Action: Equatable { case remove, update, reinstall, backTo }
+    /// holding something of the operator's, or over a copy from another line
+    /// of history: **Switch to verified** over a branch's or a pull request's
+    /// copy always names both.
+    enum Action: Equatable { case remove, update, reinstall, backTo, switchToVerified }
 
     private var record: InstalledRecord? { model.installed.plugins[id] }
     private var standing: PluginStanding { model.standing(of: id) }
@@ -365,10 +379,19 @@ struct InstalledRepositoryControls: View {
             HStack(spacing: 8) {
                 mark
                 if let record {
-                    Text(strings(.pluginFrom(source: record.repository.description,
-                                             commit: String(record.commit.prefix(7)))))
+                    // *Unverified · pull request #3 at a1b2c3d*: where code
+                    // nobody verified came from, beside its mark, and its page.
+                    if !record.isOfficialDefault, model.linkedFolder(id) == nil {
+                        Text("·").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(strings(record.fromPhrase))
                         .font(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("plugin.\(id).from")
+                    if let page = record.refPage {
+                        Button(strings(.catalogueOpenOnGitHub)) { openURL(page) }
+                            .buttonStyle(.link).font(.caption)
+                            .accessibilityIdentifier("plugin.\(id).refPage")
+                    }
                 }
             }
             if record?.pinned == true {
@@ -471,6 +494,11 @@ struct InstalledRepositoryControls: View {
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).reinstall")
             }
+            if let verified = switchToVerified {
+                Button(strings(.catalogueSwitchToVerified(version: verified))) { press(.switchToVerified) }
+                    .disabled(busy)
+                    .accessibilityIdentifier("plugin.\(id).switchToVerified")
+            }
             if let previous = record?.previous, model.settings.readsOfficialCatalogue {
                 Button(strings(.catalogueBackTo(version: previous.version))) { press(.backTo) }
                     .disabled(busy)
@@ -504,12 +532,22 @@ struct InstalledRepositoryControls: View {
         case .update: came = model.update(id, shown: shown)
         case .reinstall: came = model.reinstall(id, shown: shown)
         case .backTo: came = model.backToPrevious(id, shown: shown)
+        case .switchToVerified: came = model.update(id, shown: shown)
         }
         if case .ask(let now) = came {
             confirming = Confirmation(shown: now, then: action)
         } else {
             confirming = nil
         }
+    }
+
+    /// The verified version **Switch to verified** puts in the place of a
+    /// branch's or a pull request's copy: the catalogue's, when it has the
+    /// plugin and it can be installed here (`CatalogueRowState.unverified`).
+    private var switchToVerified: String? {
+        guard model.settings.readsOfficialCatalogue, let entry = model.catalogue?.entry(id),
+              case .unverified(let version, nil, _) = model.rowState(for: entry) else { return nil }
+        return version
     }
 
     private func isOlder(_ offer: UpdateOffer) -> Bool {
@@ -523,24 +561,19 @@ struct InstalledRepositoryControls: View {
     private func confirmation(_ confirmation: Confirmation) -> some View {
         let shown = confirmation.shown
         let version = shown.arriving ?? ""
-        let text: String
+        // Over the operator's changes, the Trash; over a link — one put there
+        // while this row was up, too — only the link goes; across two lines
+        // of history, both named (`PlaceWarning.of`).
+        let text = strings(PlaceWarning.of(shown, button: confirmation.then == .remove ? .remove : .replaceCopy, id: id,
+                                           path: model.pluginsDirectoryDisplayPath,
+                                           link: shown.link.map { model.displayPath($0) }))
         let button: String
         switch confirmation.then {
-        case .remove:
-            text = strings(PlaceWarning.removal(id: id, link: shown.link.map { model.displayPath($0) },
-                                                toTrash: shown.fate == .toTrash))
-            button = strings(.catalogueRemove)
-        // Over the operator's changes, the Trash; over a link — one put there
-        // while this row was up, too — only the link goes.
-        case .update:
-            text = strings(PlaceWarning.replacingCopy(id: id, version: version, link: shown.link.map { model.displayPath($0) }))
-            button = strings(.catalogueUpdate)
-        case .reinstall:
-            text = strings(PlaceWarning.replacingCopy(id: id, version: version, link: shown.link.map { model.displayPath($0) }))
-            button = strings(.catalogueReinstall(version: version))
-        case .backTo:
-            text = strings(PlaceWarning.replacingCopy(id: id, version: version, link: shown.link.map { model.displayPath($0) }))
-            button = strings(.catalogueBackTo(version: version))
+        case .remove: button = strings(.catalogueRemove)
+        case .update: button = strings(.catalogueUpdate)
+        case .reinstall: button = strings(.catalogueReinstall(version: version))
+        case .backTo: button = strings(.catalogueBackTo(version: version))
+        case .switchToVerified: button = strings(.catalogueSwitchToVerified(version: version))
         }
         return VStack(alignment: .leading, spacing: 5) {
             Text(text).font(.caption).fixedSize(horizontal: false, vertical: true)
@@ -641,8 +674,8 @@ struct HistoryList: View {
 
     private func confirmation(_ line: PluginHistory.Line, shown: ShownPlace.Place) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(strings(PlaceWarning.replacingCopy(id: id, version: shown.arriving ?? line.version,
-                                                    link: shown.link.map { model.displayPath($0) })))
+            Text(strings(PlaceWarning.of(shown, button: .replaceCopy, id: id, path: model.pluginsDirectoryDisplayPath,
+                                         link: shown.link.map { model.displayPath($0) })))
                 .font(.caption).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("plugin.\(id).history.confirmText")
             HStack {
@@ -671,6 +704,258 @@ struct MissingPluginRow: View {
             InstalledRepositoryControls(model: model, id: id, versionOnDisk: nil)
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Install from a link…
+
+/// **Install from a link…** (stage 3), on **Link a folder…**'s row: it opens
+/// the link sheet under them, or closes it. Greyed out with **Official
+/// catalogue** off: uDeck makes no request about plugins then, and the sheet
+/// says why (`LinkInstallSheet`).
+struct LinkInstallButton: View {
+    @Bindable var model: DeckModel
+    @Binding var open: Bool
+    @Environment(\.strings) private var strings
+
+    var body: some View {
+        Button(strings(.linkInstall)) {
+            open.toggle()
+            if !open { model.closeLinkLookup() }
+        }
+        .disabled(!model.settings.readsOfficialCatalogue)
+        .accessibilityIdentifier("plugins.installFromLink")
+    }
+}
+
+/// The link sheet: a link to a pull request or a branch of the official
+/// repository pasted, read and asked of GitHub, and then the plugins there
+/// that are not what the catalogue has, new or changed, each with **Install**
+/// and the **Unverified** mark. A sheet in the pane rather than a window of
+/// its own: it says where the copy will come from right where the operator
+/// installs it. With **Official catalogue** off, only why the button does
+/// nothing.
+struct LinkInstallSheet: View {
+    @Bindable var model: DeckModel
+    @Binding var open: Bool
+    @Environment(\.strings) private var strings
+    @Environment(\.openURL) private var openURL
+    @State private var text = ""
+
+    var body: some View {
+        Group {
+            if !model.settings.readsOfficialCatalogue {
+                Text(strings(.linkOff))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("link.off")
+            } else if open {
+                sheet
+            }
+        }
+        // Settings closed, or another section chosen: what the sheet said
+        // goes with it, and an answer still on its way is not shown.
+        .onDisappear { close() }
+    }
+
+    private func close() {
+        open = false
+        text = ""
+        model.closeLinkLookup()
+    }
+
+    private var sheet: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(strings(.linkHelp(official: model.catalogueAddress.description)))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                TextField(strings(.linkField), text: $text)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 460)
+                    .onSubmit { model.lookUpLink(text) }
+                    .accessibilityIdentifier("link.field")
+                Button(strings(.linkLookUp)) { model.lookUpLink(text) }
+                    .disabled(model.linkLookup == .reading)
+                    .accessibilityIdentifier("link.lookUp")
+                Button(strings(.linkClose)) { close() }
+                    .accessibilityIdentifier("link.close")
+            }
+            lookup
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
+    }
+
+    @ViewBuilder private var lookup: some View {
+        switch model.linkLookup {
+        case nil:
+            EmptyView()
+        case .reading?:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(strings(.linkReading)).font(.caption).foregroundStyle(.secondary)
+            }
+        case .refused(let phrase)?:
+            Text(strings(phrase))
+                .font(.caption).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("link.refused")
+        case .failed(let problem)?:
+            ProblemText(problem: problem).accessibilityIdentifier("link.refused")
+        case .catalogue(let plugin)?:
+            Text(strings(.linkIsTheCatalogue(official: model.catalogueAddress.description, plugin: plugin)))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("link.catalogue")
+        case .resolved(let resolution)?:
+            resolved(resolution)
+        }
+    }
+
+    @ViewBuilder private func resolved(_ resolution: RefResolver.Resolution) -> some View {
+        let said = LinkRefusal.head(of: resolution)
+        HStack(spacing: 8) {
+            Label(strings(.pluginMarkUnverified), systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.orange)
+                .accessibilityIdentifier("link.mark")
+            if let head = said.first {
+                Text(strings(head)).font(.caption).bold()
+                    .accessibilityIdentifier("link.head")
+            }
+            if let page = resolution.origin.repository.page(of: resolution.origin.ref) {
+                Button(strings(.catalogueOpenOnGitHub)) { openURL(page) }
+                    .buttonStyle(.link).font(.caption)
+                    .accessibilityIdentifier("link.page")
+            }
+        }
+        // The pull request's own title: its author's words, as they wrote them.
+        if let title = resolution.pullRequest?.title, !title.isEmpty {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("link.title")
+        }
+        ForEach(Array(said.dropFirst().enumerated()), id: \.offset) { index, phrase in
+            Text(strings(phrase))
+                .font(.caption).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("link.said.\(index)")
+        }
+        if !resolution.entries.isEmpty {
+            Text(strings(.linkUnverifiedNote))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("link.note")
+        }
+        ForEach(resolution.entries) { entry in
+            LinkRowView(model: model, entry: entry, resolution: resolution)
+            Divider()
+        }
+    }
+}
+
+/// One plugin a link listed: a catalogue row's facts — none of them cost a
+/// download — the **Unverified** mark, and **Install**, which takes the
+/// folder at the commit the link was read at. Over a copy from another line
+/// of history the warning names both first (`ShownPlace.installFromLink`).
+struct LinkRowView: View {
+    @Bindable var model: DeckModel
+    var entry: CatalogueEntry
+    var resolution: RefResolver.Resolution
+    @Environment(\.strings) private var strings
+    /// The warning up on this row: its button is held to it (`ShownPlace`).
+    @State private var confirming: ShownPlace.Place?
+
+    private var id: String { entry.id }
+    private var manifest: PluginManifest? { entry.manifest(in: strings.language.rawValue) }
+
+    /// Whether the copy installed at this id is this one: this line of
+    /// history, at this commit.
+    private var installedHere: Bool {
+        guard let record = model.installed.plugins[id] else { return false }
+        return record.origin == resolution.origin && record.commit == resolution.commit
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(entry.name(in: strings.language.rawValue)).font(.headline)
+                if let manifest {
+                    Text(manifest.version).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    if let author = manifest.author { Text(author).font(.caption).foregroundStyle(.secondary) }
+                }
+                Label(strings(.pluginMarkUnverified), systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+                    .accessibilityIdentifier("link.\(id).unverified")
+                Spacer()
+                action
+            }
+            if let description = manifest?.description {
+                Text(description).font(.callout).fixedSize(horizontal: false, vertical: true)
+            }
+            Text(asks).font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("link.\(id).asks")
+            if let refusal = entry.verdict.refusals.first {
+                Text(strings(.catalogueRefusal(refusal)))
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("link.\(id).state")
+            } else if installedHere {
+                Text(strings(.catalogueInstalled)).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("link.\(id).state")
+            }
+            if let confirming {
+                confirmation(confirming)
+            }
+            if let problem = model.operationProblems[id] {
+                ProblemText(problem: problem).accessibilityIdentifier("link.\(id).problem")
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    private var asks: String {
+        let requested = manifest?.permissions.capabilities ?? []
+        guard !requested.isEmpty else { return strings(.permissionsAsksNothing) }
+        return strings(.catalogueAsksTo(requested.map { strings($0.summaryPhrase) }.joined(separator: ", ")))
+    }
+
+    @ViewBuilder private var action: some View {
+        if model.busyPlugin == id {
+            ProgressView().controlSize(.small)
+            Text(strings(.catalogueWorking)).font(.caption).foregroundStyle(.secondary)
+        } else if entry.verdict.refusals.isEmpty, entry.manifest != nil, !installedHere {
+            Button(strings(.catalogueInstall)) { press() }
+                .disabled(model.busyPlugin != nil)
+                .accessibilityIdentifier("link.\(id).install")
+        }
+    }
+
+    private func press(shown: ShownPlace.Place? = nil) {
+        if case .ask(let now) = model.installFromLink(id, shown: shown) {
+            confirming = now
+        } else {
+            confirming = nil
+        }
+    }
+
+    private func confirmation(_ shown: ShownPlace.Place) -> some View {
+        // Over a copy uDeck installed, what a replacing button says of it; over
+        // something of the operator's own, what Replace… says (`PlaceWarning.of`).
+        let replacing = model.installed.plugins[id] != nil
+        return VStack(alignment: .leading, spacing: 5) {
+            Text(strings(PlaceWarning.of(shown, button: replacing ? .replaceCopy : .install, id: id,
+                                         path: model.pluginsDirectoryDisplayPath,
+                                         link: shown.link.map { model.displayPath($0) })))
+                .font(.caption).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("link.\(id).confirmText")
+            HStack {
+                Button(strings(.catalogueInstall), role: .destructive) { press(shown: shown) }
+                    .accessibilityIdentifier("link.\(id).confirm")
+                Button(strings(.actionCancel)) { confirming = nil }
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.1)))
     }
 }
 

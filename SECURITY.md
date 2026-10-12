@@ -36,7 +36,10 @@ What uDeck genuinely controls is what uDeck itself does on a plugin's behalf:
 official repository's `main` and the folder on disk is still exactly what was
 merged there — a maintainer read it before merging. It is the strongest thing
 uDeck can honestly say about a plugin, and it does not mean safe. A plugin
-installed from anywhere else, or changed on disk, carries no such mark.
+installed from anywhere else, or changed on disk, carries no such mark; one
+installed from a branch or a pull request of the official repository —
+**Install from a link…** — says **Unverified** in Settings and on its card,
+and asks before it runs whenever its content changes.
 
 If you would not run a stranger's shell script, do not install a stranger's
 plugin.
@@ -50,7 +53,8 @@ In scope, and treated as vulnerabilities:
   capabilities are declined, or code nobody verified — a copy from a branch or
   a pull request — running on a decision made for other content, or before
   you were asked about it (a change counts from when the folder watcher
-  reports it, a fraction of a second after it is made);
+  reports it, once writes in the folder pause — under a second after one
+  write, as measured in the lab);
 - uDeck installing plugin files other than the ones the official repository
   lists at the commit it showed — a file that does not match its hash, a folder
   that does not add up — or marking a plugin **Verified** that is not exactly
@@ -88,7 +92,9 @@ launch and both with a switch to turn them off:
   the last 24 hours, once a day while uDeck runs, when Settings → Plugins is
   opened on a list more than an hour old, when you press Check now, and the
   plugin's files when you press Install, Update, Reinstall or pick an earlier
-  version — and, after a read, the files of a **Verified** plugin whose new
+  version, the pull request or the branch a link names when you press Look up
+  in Install from a link… — its head, its listing and the manifests there that
+  are not the catalogue's — and, after a read, the files of a **Verified** plugin whose new
   version asks for exactly the permissions it asks for now: such a plugin
   updates itself, keeping your permission decision. Anything else is only
   offered. Off with Settings → Plugins → *Update verified plugins by

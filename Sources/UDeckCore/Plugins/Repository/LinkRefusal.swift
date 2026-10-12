@@ -1,0 +1,51 @@
+import Foundation
+
+/// Why **Install from a link…** lists nothing to install, as Settings says it
+/// — each refusal naming what the link was, why it is not read, and what to
+/// paste instead — decided here, where the sentences are tested.
+public enum LinkRefusal {
+    /// What Settings says of `error`, thrown reading a pasted link
+    /// (`RepositoryLink.Refusal`) or asking GitHub about it
+    /// (`RefResolver.Refusal`), `official` being the official repository —
+    /// nil for any other error: a request that got no answer, the limit, a
+    /// listing that could not be read, which Settings says the way it says
+    /// every such problem.
+    public static func phrase(_ error: any Error, official: RepositoryAddress) -> Phrase? {
+        switch error {
+        case let refusal as RepositoryLink.Refusal:
+            .linkRefused(refusal, official: official.description)
+        case RefResolver.Refusal.notFound(let link):
+            .linkNotFound(link, official: official.description)
+        case RefResolver.Refusal.forkNotYet(let address):
+            .linkOtherRepository(repository: address.description, official: official.description)
+        default:
+            nil
+        }
+    }
+
+    /// What a resolved link says above its list: the line of history and the
+    /// commit it was read at (`linkHead`), whether a pull request was merged
+    /// or closed, and — when nothing there differs from the catalogue's head —
+    /// that there is nothing to install from it: of every plugin there, or of
+    /// the one plugin a link into its folder named, which may not be there
+    /// at all.
+    public static func head(of resolution: RefResolver.Resolution) -> [Phrase] {
+        var said: [Phrase] = [.linkHead(ref: resolution.origin.ref, commit: String(resolution.commit.prefix(7)))]
+        if let pull = resolution.pullRequest {
+            if pull.merged {
+                said.append(.linkPullRequestMerged)
+            } else if pull.state == .closed {
+                said.append(.linkPullRequestClosed)
+            }
+        }
+        if resolution.entries.isEmpty {
+            let ref = resolution.origin.ref
+            if let plugin = resolution.plugin, resolution.listing.plugins[plugin] == nil {
+                said.append(.linkPluginNotThere(ref: ref, plugin: plugin))
+            } else {
+                said.append(.linkNothingDiffers(ref: ref, plugin: resolution.plugin))
+            }
+        }
+        return said
+    }
+}

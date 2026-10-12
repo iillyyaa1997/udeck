@@ -153,6 +153,12 @@ struct English: Vocabulary {
         case .permissionsPluginAsksTo(let name): "\(name) asks to:"
         case .permissionsAsksNothingUnverified(let name): "\(name) asks for nothing, but its code is unverified"
         case .permissionsFolderUnreadable(let name): "uDeck could not read every file in \(name)'s folder, so it does not run it"
+        case .permissionsUnverifiedSource(let ref, let repository, let changedHere):
+            "Nobody verified this code: it comes from \(Self.line(ref)) of \(repository)"
+                + (changedHere ? ", changed on this Mac since" : "")
+                + ", not from what the repository merged. uDeck asks again whenever it changes."
+        case .permissionsSourceUnknown:
+            "uDeck cannot read ~/.udeck/installed.json, so nothing says where this code came from: it is asked about by what it is, and again whenever it changes."
         case .permissionsUnsandboxed:
             "uDeck runs this plugin as you, without a sandbox. Allowing it means agreeing to run this program; declining means uDeck never starts it."
         case .permissionsAllowAndRun: "Allow and run"
@@ -230,7 +236,13 @@ struct English: Vocabulary {
             "Remove \(id)? Its folder is moved to the Trash — it may be your only copy — and its cache, your permission decision, its settings and every window of it go."
         case .catalogueRemoveLinkConfirm(let id, let target):
             "Remove the link \(id)? Only the link goes: the folder it leads to, \(target), stays exactly as it is. What uDeck kept of the plugin goes with the link — its cache and run log, your permission decision, its settings and every window of it."
+        case .catalogueSwitchConfirm(let id, let from, let to, let toTrash):
+            (toTrash
+                ? "\(id) is \(Self.copy(from)), with changes of yours. Your changes to \(id) will be moved to the Trash, and \(Self.copy(to)) installed in its place. "
+                : "\(id) is \(Self.copy(from)); installing \(Self.copy(to)) replaces it. ") + Self.staysAfterSwitching(to: to)
         case .catalogueLinkedHere(let id): "\(id) is linked here, to a folder of your own"
+        case .catalogueInstalledUnverified(let ref): "Installed here from \(Self.line(ref)): unverified"
+        case .catalogueSwitchToVerified(let version): "Switch to verified \(version)"
         case .catalogueRefusal(let refusal): refusal.message
         case .catalogueFileUnreachable(let path, let reason):
             "\(path) could not be fetched: \(reason); nothing was installed."
@@ -246,6 +258,8 @@ struct English: Vocabulary {
         case .pluginMarkModified: "Modified locally"
         case .pluginMarkMissing: "Missing"
         case .pluginFrom(let source, let commit): "From \(source) at \(commit)"
+        case .pluginFromPullRequest(let number, let commit): "pull request #\(number) at \(commit)"
+        case .pluginFromBranch(let name, let commit): "branch \(name) at \(commit)"
         case .pluginPinned: "Kept at this version — newer ones are still shown"
         case .pluginUpdatedByItself(let date): "Updated by itself on \(date)"
         case .pluginUpdateByItselfFailed(let version):
@@ -270,6 +284,38 @@ struct English: Vocabulary {
         case .linkFolderOverLink(let id, let destination, let folder):
             "\(id) is a link to \(destination) now. Linking points it at \(folder) instead; the folder it leads to now stays exactly as it is."
         case .linkFolderRefused(let refusal): Self.linkRefusal(refusal)
+        case .linkInstall: "Install from a link…"
+        case .linkHelp(let official):
+            "Paste the link of a pull request or a branch of \(official). uDeck asks GitHub about it and lists the plugins there that are not what the catalogue has — new, or changed. Nobody verified them."
+        case .linkField: "github.com/…/pull/3 or …/tree/branch"
+        case .linkLookUp: "Look up"
+        case .linkReading: "Asking GitHub…"
+        case .linkClose: "Close"
+        case .linkOff:
+            "The official catalogue is off, so uDeck makes no request about plugins: switch it on to install from a link."
+        case .linkRefused(let refusal, let official): Self.linkRefusal(refusal, official: official)
+        case .linkNotFound(let link, let official):
+            switch link {
+            case .pullRequest(let number): "\(official) has no pull request #\(number)."
+            case .branch(let name, _): "\(official) has no branch \(name) — it may have been deleted."
+            default: "\(official) has nothing at that link."
+            }
+        case .linkOtherRepository(let repository, let official):
+            "\(repository) is not \(official). Installing from another repository — a fork included — is not possible yet."
+        case .linkIsTheCatalogue(let official, let plugin):
+            plugin.map { "That is \($0) on the default branch of \(official): it is in the catalogue below, verified." }
+                ?? "That is the default branch of \(official): its plugins are the catalogue below, verified."
+        case .linkHead(let ref, let commit): "\(Self.line(ref, capitalised: true)) at \(commit)"
+        case .linkPullRequestMerged:
+            "This pull request was merged. What is listed is its head as it was proposed; what the repository merged is in the catalogue."
+        case .linkPullRequestClosed: "This pull request was closed without being merged."
+        case .linkNothingDiffers(let ref, let plugin):
+            plugin.map { "\($0) in \(Self.line(ref)) is what the catalogue already has: there is nothing to install from it." }
+                ?? "Every plugin in \(Self.line(ref)) is what the catalogue already has: there is nothing to install from it."
+        case .linkPluginNotThere(let ref, let plugin):
+            "\(Self.line(ref, capitalised: true)) has no plugins/\(plugin): there is nothing to install from it."
+        case .linkUnverifiedNote:
+            "Nobody verified what is listed here: it is not what the repository merged. A plugin installed from here asks before it runs — even one that asks for nothing — and again whenever its code changes."
         case .runLogSwitch: "Keep a run log for linked folders"
         case .runLogHelp(let path):
             "Every run of a linked plugin — when, why, how it ended, how long it took, the end of its standard error — goes into \(path)/<id>.log, at most 2 MB a plugin. Other plugins keep only their last run, in memory."
@@ -452,6 +498,62 @@ struct English: Vocabulary {
         case .launch: "at launch"
         case .interval: "on its interval"
         case .manual: "asked for"
+        }
+    }
+
+    /// A branch or a pull request, as a sentence names it: *pull request #3*,
+    /// *branch fix/uptime*.
+    static func line(_ ref: PluginRef, capitalised: Bool = false) -> String {
+        let said: String
+        if let number = ref.pullRequestNumber {
+            said = "pull request #\(number)"
+        } else if ref.kind == PluginRef.branchKind {
+            said = "branch \(ref.name ?? "")"
+        } else if ref.isDefault {
+            said = "the default branch"
+        } else {
+            said = [ref.kind, ref.name].compactMap { $0 }.joined(separator: " ")
+        }
+        guard capitalised, let first = said.first else { return said }
+        return first.uppercased() + said.dropFirst()
+    }
+
+    /// What stays when a copy from another line of history comes, by the copy
+    /// that comes: a verified copy runs on the decision there is, as its
+    /// version allows; code nobody verified is held to its tree
+    /// (`ConsentBasis`), so it asks before it runs — unless that very code
+    /// was allowed before.
+    static func staysAfterSwitching(to copy: CopyName) -> String {
+        if case .verified = copy { return "Its windows, settings and your permission decision stay." }
+        return "Its windows and settings stay. Nobody verified the code that comes: it asks before it runs, unless you allowed exactly that code before."
+    }
+
+    /// A copy as a warning names it (`CopyName`).
+    static func copy(_ name: CopyName) -> String {
+        switch name {
+        case .verified(let version, let repository): "the verified \(version) from \(repository)"
+        case .pullRequest(let number, let commit, let version): "\(version) from pull request #\(number) at \(commit)"
+        case .branch(let branch, let commit, let version): "\(version) from branch \(branch) at \(commit)"
+        case .other(let commit, let version): "\(version) at \(commit)"
+        }
+    }
+
+    /// Why a pasted link is not read (`RepositoryLink.Refusal`).
+    static func linkRefusal(_ refusal: RepositoryLink.Refusal, official: String) -> String {
+        switch refusal {
+        case .empty: "Paste the link of a pull request or a branch of \(official)."
+        case .notALink:
+            "That is not a github.com link. Paste the link of a pull request or a branch of \(official), as the browser shows it."
+        case .notGitHub(let host):
+            "\(host) is not GitHub. Plugins come from \(official) for now; other hosts come later, as sources of their own."
+        case .commit(let sha):
+            "That is the link of one commit" + (sha.isEmpty ? "" : ", \(sha.prefix(7))")
+                + ". Installing a single commit is not possible yet: paste the link of its pull request or its branch."
+        case .otherRepositoryPullRequest(let repository, let number):
+            "Pull request #\(number) of \(repository) is not one of \(official)'s. Installing from another repository is not possible yet."
+        case .notABranch(let name): "\(name) is not a name git allows for a branch."
+        case .unsupported:
+            "That page names no pull request and no branch. Paste the link of a pull request (…/pull/3) or a branch (…/tree/name)."
         }
     }
 

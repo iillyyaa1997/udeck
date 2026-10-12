@@ -186,6 +186,16 @@ public enum CatalogueRowState: Equatable, Sendable {
     case installed(UpdateOffer)
     /// Installed from here, and its folder is gone: **Reinstall**.
     case missing
+    /// Installed from a branch or a pull request — code nobody verified — in
+    /// the place of the copy this row offers, which is verified: **Switch to
+    /// verified** `version`. When that copy cannot be installed here,
+    /// `refusal` says why and nothing is offered; the copy on disk keeps
+    /// running either way. `folderGone`: its folder is gone too, and the row
+    /// says that as well — **Switch to verified** then puts the verified copy
+    /// where nothing is, and **Reinstall** on the plugin's own row puts the
+    /// pull request's back, saying where it comes from. Never **Reinstall**
+    /// here: a catalogue row's button brings the catalogue's copy.
+    case unverified(version: String, refusal: RepositoryRefusal?, folderGone: Bool = false)
 
     public static func of(
         _ entry: CatalogueEntry,
@@ -193,7 +203,17 @@ public enum CatalogueRowState: Equatable, Sendable {
         folderExists: Bool
     ) -> CatalogueRowState {
         if let record {
-            return folderExists ? .installed(UpdateOffer.of(record, head: entry)) : .missing
+            // Code nobody verified is said first, its folder there or not: a
+            // row that said only "missing" offered **Reinstall**, which put the
+            // pull request's copy back under the row's **Verified** (R3's
+            // review).
+            guard record.isOfficialDefault else {
+                let refusal = entry.verdict.refusals.first
+                    ?? (entry.manifest == nil ? .noManifest(path: "plugins/\(entry.id)/manifest.json") : nil)
+                return .unverified(version: entry.manifest?.version ?? "?", refusal: refusal, folderGone: !folderExists)
+            }
+            guard folderExists else { return .missing }
+            return .installed(UpdateOffer.of(record, head: entry))
         }
         if let first = entry.verdict.refusals.first { return .cannotInstall(first) }
         if entry.manifest == nil { return .cannotInstall(.noManifest(path: "plugins/\(entry.id)/manifest.json")) }
