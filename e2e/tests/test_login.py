@@ -244,3 +244,140 @@ def test_the_record_names_one_path_however_sfltool_spells_it():
     assert record_path("file:///Users/runner/My%20Apps/uDeck.app/") == "/Users/runner/My Apps/uDeck.app"
     assert record_path("(null)") == "" and record_path("") == ""
     assert record_path("file:///") == "/"
+
+
+# --- What the guest's log says was done with the record --------------------------------
+#
+# Lines as they were read in a macOS 27 guest on 2026-10-12 (runs 20261012-180909Z and
+# -181746Z), shortened only where `<private>` stood.
+
+SWITCHED_ON = (
+    "2026-10-12 18:11:49.441 Df backgroundtaskmanagementd[291:961] [com.apple.backgroundtaskmanagement:main] "
+    "registerLaunchItem: pid=809, uid=501, type=app, url=(null), config=(null)\n"
+)
+SWITCHED_OFF = (
+    "2026-10-12 18:22:35.672 Df backgroundtaskmanagementd[261:1aef] [com.apple.backgroundtaskmanagement:main] "
+    "unregisterLaunchItem: pid=809, uid=501, type=app, url=(null)\n"
+)
+UDECK_STARTED = (
+    "2026-10-12 18:11:42.472 Df uDeck[809:17dc] [com.apple.runningboard:connection] "
+    "Identity resolved as app<application.place.unicorns.udeck.525647.525652(501)>\n"
+)
+LAUNCHER = (
+    "2026-10-12 18:12:50.951 Df loginwindow[167:515] [com.apple.loginwindow.logging:Standard] "
+    "-[LoginItemsLauncher main] | enter, safeboot = 0\n"
+)
+AUTOLAUNCH = (
+    "2026-10-12 18:12:50.975 Df loginwindow[167:515] [com.apple.loginwindow.logging:Standard] "
+    "LaunchItemsInSharedFileListRef |                 performAutolaunch, launching: /Applications/uDeck.app, shouldHide: 0\n"
+)
+AS_A_LOGIN_ITEM = (
+    "2026-10-12 18:12:50.977 I  loginwindow[167:515] [com.apple.launchservices:entrypoint] LSOpenApplication(appParameters(v=1 "
+    "flags=0x800201 appRef=NULL-FSRef refCon=0x0 env=(null) args=(null) event=<NSAppleEventDescriptor: 'aevt'\\134'oapp'{ 'prdt':'lgit' }>)\n"
+)
+LAUNCHED = (
+    "2026-10-12 18:12:51.063 I  CoreServicesUIAgent[347:801] [com.apple.launchservices:open] _LSLaunchRB(place.unicorns.udeck "
+    "<private>, event=aevt/oapp, args=- 0x810200/dontSwitch async  opts=LSOpen2Options(preferRunning )\n"
+)
+# macOS putting back what was running at the restart (probe.tal): the same LaunchServices
+# event, another open event, and no login items launcher naming the copy.
+REOPENED = (
+    "2026-10-12 18:25:52.863 I  loginwindow[165:349] [com.apple.launchservices:entrypoint] LSOpenApplication(appParameters(v=1 "
+    "flags=0x801100 appRef=NULL-FSRef refCon=0x0 env=(null) args=(null) event=<NSAppleEventDescriptor: 'aevt'\\134'oapp'{ ~'rsto':'yes ' }>)\n"
+    "2026-10-12 18:25:52.910 I  CoreServicesUIAgent[344:818] [com.apple.launchservices:open] _LSLaunchRB(place.unicorns.udeck "
+    "<private>, event=aevt/oapp, args=- 0x801100/ opts=LSOpen2Options(preferRunning )\n"
+)
+BOOT = "2026-10-12 18:12:37"
+
+
+def _seen(text, known=(), boot=BOOT):
+    return login.Witnesses(tuple(login.log_lines("Timestamp               Ty Process[PID:TID]\n" + text)), frozenset(known), boot)
+
+
+def test_a_line_is_read_without_the_subsystem_in_front_of_what_was_said():
+    (line,) = login.log_lines(SWITCHED_ON)
+    assert (line.process, line.pid) == ("backgroundtaskmanagementd", 291)
+    assert line.said.startswith("registerLaunchItem: pid=809")
+
+
+def test_a_registration_is_uDecks_by_its_pid_whether_the_lab_or_the_log_knew_it():
+    assert _seen(SWITCHED_ON, known={809}).registrations()
+    assert _seen(UDECK_STARTED + SWITCHED_ON).registrations(), "uDeck's own start names its pid"
+    assert not _seen(SWITCHED_ON).registrations(), "a pid nothing says is uDeck's is not uDeck"
+    assert _seen(SWITCHED_ON).others_registering()
+
+
+def test_switching_it_off_is_not_a_registration():
+    """`unregisterLaunchItem` ends with the same words; counted, the control would call
+    switching off a second registration."""
+    assert len(_seen(SWITCHED_ON + SWITCHED_OFF, known={809}).registrations()) == 1
+
+
+def test_the_record_opening_uDeck_is_three_lines_in_a_row_after_the_boot():
+    seen = _seen(SWITCHED_ON + LAUNCHER + AUTOLAUNCH + AS_A_LOGIN_ITEM + LAUNCHED, known={809})
+    assert seen.launcher_ran()
+    assert seen.opened_at_login() == ["/Applications/uDeck.app"]
+    assert seen.asked_at_login() == ["/Applications/uDeck.app"]
+
+
+@pytest.mark.parametrize(
+    "lines, why",
+    [
+        (LAUNCHER + AUTOLAUNCH + LAUNCHED, "not asked for as a login item"),
+        (LAUNCHER + AUTOLAUNCH + AS_A_LOGIN_ITEM, "never launched"),
+        (LAUNCHER + AS_A_LOGIN_ITEM + LAUNCHED, "no launcher naming the copy"),
+        (LAUNCHER + REOPENED, "macOS putting back what was running"),
+        (LAUNCHED + LAUNCHER + AUTOLAUNCH + AS_A_LOGIN_ITEM, "the launch came first"),
+    ],
+)
+def test_anything_less_is_not_the_record_opening_uDeck(lines, why):
+    assert _seen(lines).opened_at_login() == [], why
+
+
+def test_the_record_opening_uDeck_is_held_to_the_login_item_s_flags_and_to_coming_next():
+    """The launch has to carry the login item's flags, not macOS putting back what was
+    running (`0x801100/`), and LaunchServices has to be asked as a login item by the next
+    thing loginwindow says after the launcher names the copy — `LSOpenApplication` names
+    no application, so coming next is what ties it to the copy."""
+    tal_launch = LAUNCHED.replace("args=- 0x810200/dontSwitch async", "args=- 0x801100/")
+    assert _seen(LAUNCHER + AUTOLAUNCH + AS_A_LOGIN_ITEM + tal_launch).opened_at_login() == []
+    # The first launch of uDeck after the ask is the one read, and it is the putting back.
+    assert _seen(LAUNCHER + AUTOLAUNCH + AS_A_LOGIN_ITEM + tal_launch + LAUNCHED).opened_at_login() == []
+    between = LAUNCHER.replace("18:12:50.951", "18:12:50.976")
+    assert _seen(LAUNCHER + AUTOLAUNCH + between + AS_A_LOGIN_ITEM + LAUNCHED).opened_at_login() == []
+
+
+def test_two_logins_after_the_boot_are_counted_as_two():
+    """A guest's clock can be anywhere (one in the series read 2026-09-17): the lines of
+    another boot read as this one's show up as a second run of the launcher."""
+    assert _seen(LAUNCHER).launcher_runs() == 1
+    assert _seen(LAUNCHER + LAUNCHER.replace("18:12:50.951", "18:13:10.000")).launcher_runs() == 2
+    assert _seen("").launcher_runs() == 0
+
+
+def test_only_what_happened_after_the_boot_counts():
+    """The login of the boot before the check is not this one."""
+    before = AUTOLAUNCH.replace("18:12:50.975", "18:10:00.000") + AS_A_LOGIN_ITEM.replace("18:12:50.977", "18:10:00.001")
+    seen = _seen(LAUNCHER.replace("18:12:50.951", "18:09:59.000") + before + LAUNCHED.replace("18:12:51.063", "18:10:00.002"))
+    assert not seen.launcher_ran() and seen.opened_at_login() == [] and seen.launches() == []
+
+
+def test_the_generation_s_movers_are_counted_as_evidence():
+    use = (
+        "2026-10-12 18:11:54.256 Df backgroundtaskmanagementd[291:961] [com.apple.backgroundtaskmanagement:main] "
+        "noteUseOfItemWithIdentifier: identifier=2.place.unicorns.udeck, uid=501\n"
+    )
+    theme = (
+        "2026-10-12 18:11:43.954 Df ThemeWidgetControlViewService[836:185e] [com.apple.runningboard:connection] Identity "
+        "resolved as xpcservice<com.apple.appkit.xpc.ThemeWidgetControlViewService([app<application.place.unicorns.udeck.1.2(501)>:809])>\n"
+    )
+    seen = _seen(SWITCHED_ON + use * 3 + theme, known={809})
+    assert (seen.uses(), seen.theme_widgets()) == (3, 1)
+    assert seen.evidence() == "1 registration(s) by uDeck, 3 noteUseOfItem, 1 ThemeWidgetControlViewService started for uDeck"
+
+
+def test_the_log_is_asked_for_exactly_the_lines_the_witnesses_read():
+    """Each kind of line the witnesses read is in the predicate the guest is asked with."""
+    for words in ("registerLaunchItem: pid=", "LoginItemsLauncher main] | enter", "performAutolaunch, launching: ",
+                  "LSOpenApplication(", "_LSLaunchRB(", "Identity resolved as ", "noteUseOfItemWithIdentifier"):
+        assert words in login.LOG_PREDICATE, words

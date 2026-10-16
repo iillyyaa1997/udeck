@@ -293,6 +293,8 @@ class Lab:
 
     def __init__(self, tmp_path):
         self.notes = []
+        # Where the checks run (`targets`): a Tart guest, unless a test says otherwise.
+        self.target = "tart"
         # A checkout of its own: nothing here may reach the real one, the way
         # `test_make_app` is the only test allowed to (see its own guard).
         self.repo_root = tmp_path / "repo"

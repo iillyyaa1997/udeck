@@ -21,6 +21,7 @@ check did.
 """
 
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
@@ -229,13 +230,76 @@ def test_a_throw_that_left_the_pointer_short_of_the_edge_is_not_a_verdict(monkey
     assert not isinstance(raised.value, CheckFailed)
 
 
+def pushed_in(arrived, posted):
+    """What the guest's push script prints after a throw and a push: when the throw's last
+    report and each of the push's were posted, on the push's own clock."""
+    return json.dumps({
+        "uid": 501, "euid": 501, "throw": ["KERN_SUCCESS"], "push": ["KERN_SUCCESS"], "thrown": 12,
+        "from": [1280.0, 720.0], "at": [1280.0, 0.0], "pinned": True,
+        "track": [[1280.0, 0.0, round(t + 0.003, 4)] for t in posted], "arrived": arrived, "posted": posted,
+    })  # fmt: skip
+
+
+# The push as a Tart guest makes it: 2.6 ms after the arrival, then 5.5 ms a report.
+IN_TIME = pushed_in(-0.003, [0.0, 0.0055, 0.011, 0.0165, 0.022])
+# As a GitHub runner made it in run 38321541276 — reports read back 0.018, 0.036 and
+# 0.061 s into the push — after a sleep of 10 ms behind the arriving report.
+TOO_SLOW = pushed_in(-0.010, [0.0, 0.018, 0.036, 0.061, 0.074])
+
+
 def test_the_push_check_is_not_satisfied_by_a_dwell(monkeypatch, lab, check_dir):
     """The panel opened, but by the path that only needs the pointer to be
     somewhere — which is what this check exists to tell apart."""
     at_the_edge(monkeypatch)
     machine = prepared(monkeypatch, ATTACHED + DWELL + REVEAL)
+    machine.ssh.answers["push-pointer"] = IN_TIME
     with pytest.raises(CheckFailed, match="opened by dwell first"):
         checks.check_push(machine, check_dir, lab)
+
+
+def test_a_dwell_that_beat_a_push_made_too_late_is_not_a_verdict(monkeypatch, lab, check_dir):
+    """A race the lab ran one side of. The fourth report — the one that carries uDeck's
+    threshold at the least it may make of the push — posted 0.071 s after the throw
+    arrived is later than a dwell owed at 0.06 s, less a frame: a uDeck with a working
+    push path opens by the dwell then too."""
+    at_the_edge(monkeypatch)
+    machine = prepared(monkeypatch, ATTACHED + DWELL + REVEAL)
+    machine.ssh.answers["push-pointer"] = TOO_SLOW
+    with pytest.raises(LabError, match="too slow on this machine") as raised:
+        checks.check_push(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+    assert "posted 0.071 s after the throw arrived" in raised.value.reason
+    assert panel.Push.reports_to_clear() == 4
+
+
+def test_a_push_whose_timing_was_not_said_cannot_make_a_dwell_red(monkeypatch, lab, check_dir):
+    at_the_edge(monkeypatch)
+    for said in ("", json.dumps({"track": [], "push": ["KERN_SUCCESS"]})):
+        machine = prepared(monkeypatch, ATTACHED + DWELL + REVEAL)
+        machine.ssh.answers["push-pointer"] = said
+        with pytest.raises(LabError) as raised:
+            checks.check_push(machine, check_dir, lab)
+        assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_push_that_won_is_a_pass_whatever_its_pace(monkeypatch, lab, check_dir):
+    """The lab made a push against the edge and uDeck heard it: how fast the reports came
+    is a question only for a dwell that came first."""
+    at_the_edge(monkeypatch)
+    for said in (TOO_SLOW, ""):
+        machine = prepared(monkeypatch, ATTACHED + PUSH + REVEAL)
+        machine.ssh.answers["push-pointer"] = said
+        checks.check_push(machine, check_dir, lab)
+
+
+def test_the_labs_push_is_made_in_time_in_a_guest():
+    """The numbers the push is posted with, at the guest's pace, carry the threshold well
+    before the dwell — so a dwell first in a Tart guest stays red."""
+    pause = config.PUSH_PAUSE_SECONDS + 0.0005
+    posted = [n * pause for n in range(config.PUSH_STEPS)]
+    push = panel.Push(pushed_in(-(config.THROW_PAUSE_SECONDS + 0.0006), posted), "pushing")
+    assert config.PUSH_STEPS >= panel.Push.reports_to_clear()
+    assert push.in_time() and push.cleared() < config.DWELL_DURATION_SECONDS / 2
 
 
 def test_a_push_that_uDeck_never_answered_fails(monkeypatch, lab, check_dir):
@@ -442,6 +506,27 @@ def test_a_wobble_taken_for_a_push_is_red_however_little_it_carried(monkeypatch,
     machine = wobbled(monkeypatch, ATTACHED + IDLE + PUSH + REVEAL, SHORT, short)
     with pytest.raises(CheckFailed, match="taken for a push"):
         checks.check_a_wobble_short_of_the_edge(machine, check_dir, lab)
+
+
+def test_neither_wobble_can_check_where_uDeck_hears_the_reports_folded(lab, check_dir):
+    """On a GitHub runner the wobble's reports reach uDeck folded into one event a
+    frame (run 38293532813): the edge half failed over a working push and the other
+    half would pass over a broken one. Both say they could not check, before they
+    do anything to the machine — and they are run there, not skipped: the panel job
+    keeps saying what it could not check."""
+    from udeck_e2e import targets
+
+    lab.target = targets.HERE
+    for check in (checks.check_a_wobble_short_of_the_edge, checks.check_the_same_wobble_at_the_edge):
+        assert targets.what_it_needs(check) is None
+        machine = Machine()
+        with pytest.raises(LabError) as raised:
+            check(machine, check_dir, lab)
+        assert raised.value.reason == checks.REPORTS_ONE_BY_ONE
+        assert "folded" in raised.value.reason and "38293532813" in raised.value.reason
+        assert machine.ssh.commands == [] and machine.ssh.copied == [] and machine.pointer == []
+    others = [name for name in dir(checks) if name.startswith("check_")]
+    assert not [name for name in others if targets.what_it_needs(getattr(checks, name))]
 
 
 def test_the_same_wobble_at_the_edge_opens_the_panel_by_the_push(monkeypatch, lab, check_dir):
@@ -1404,6 +1489,12 @@ def test_a_panel_that_comes_back_as_a_peek_after_a_margin_click_and_a_switch_fai
 
 REGISTERED = "2026-09-18 18:20:00.500 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] hotkey ⌃⌥U registered\n"
 ANOTHER_SHORTCUT = REGISTERED.replace("⌃⌥U", "⌃⌥J")
+REFUSED = (
+    "2026-09-18 18:20:00.500 E  uDeck[404:1a2b] [place.unicorns.udeck:panel] hotkey ⌃⌥U refused by the system "
+    "(status -9878) — most likely already taken by another application\n"
+)
+# uDeck's first line as it starts, in the millisecond it says what became of its shortcut.
+STARTED = "2026-09-18 18:20:00.500 Db uDeck[404:1a2b] [place.unicorns.udeck:plugins] read the plugins folder: 0 found\n"
 # The two lines the shortcut answers with, in the order it writes them: shown,
 # and promoted to a panel that is being worked in.
 OPENED_BY_THE_HOTKEY = REVEAL + PROMOTED
@@ -1449,12 +1540,80 @@ def test_a_uDeck_that_never_took_the_shortcut_fails_before_it_is_pressed(monkeyp
     same combination, and the window server gives it to whoever asked first. Such
     a uDeck is silent for the chord exactly as a uDeck that ignores it is, so the
     check asks uDeck what it holds before it presses anything."""
-    machine = prepared(monkeypatch, growing(NOTHING, OPENED_BY_THE_HOTKEY))
+    machine = prepared(monkeypatch, growing(REFUSED, OPENED_BY_THE_HOTKEY))
     with pytest.raises(CheckFailed, match="uDeck says it holds") as raised:
         checks.check_the_hotkey(machine, check_dir, lab)
     assert config.THE_HOTKEY in str(raised.value)
     assert chords(machine) == [], "and nothing was pressed at a uDeck that would not have heard it"
     assert machine.now >= config.GESTURE_ANSWER_SECONDS
+
+
+def test_a_uDeck_that_started_in_the_window_and_said_nothing_of_its_shortcut_fails(monkeypatch, lab, check_dir):
+    """Its start is in the window, so what it did not say there it did not say."""
+    machine = prepared(monkeypatch, NOTHING)
+    machine.ssh.answers["log show"] = [ATTACHED + STARTED + IDLE, ATTACHED + STARTED + IDLE + OPENED_BY_THE_HOTKEY]
+    with pytest.raises(CheckFailed, match="uDeck says it holds"):
+        checks.check_the_hotkey(machine, check_dir, lab)
+    assert chords(machine) == []
+
+
+def window_after_the_start(monkeypatch, before):
+    """A guest whose window on uDeck's log began after uDeck started — every read of it
+    holds only the gate — and whose log from ten seconds earlier holds `before`."""
+    machine = prepared(monkeypatch, ATTACHED + IDLE)
+    # Asked before the general answers: the fake guest takes the first pattern that matches.
+    machine.ssh.answers = {
+        "--start '2026-09-18 18:19:50'": before,
+        "-v-10S": "2026-09-18 18:19:50",
+        **machine.ssh.answers,
+    }
+    return machine
+
+
+def test_a_window_that_missed_uDecks_start_cannot_say_what_it_holds(monkeypatch, lab, check_dir):
+    """Run 38321541276, panel.the-hotkey-dies-with-udeck: the window began with
+    `idle: outsideStrip`, 130 ms into a uDeck the check had started after opening it, and
+    held neither its first read of the plugins folder nor anything about its shortcut.
+    That is the lab's window, not uDeck — and the ten seconds before it are read and kept
+    to say why. Every check that starts uDeck holding the shortcut asks it."""
+    before = ATTACHED + STARTED + REGISTERED
+    for check in (
+        checks.check_the_hotkey,
+        checks.check_the_hotkey_closes_what_the_gesture_opened,
+        checks.check_the_hotkey_dies_with_udeck,
+    ):
+        # Every read of the window holds only the gate; the read from ten seconds
+        # earlier holds the start.
+        machine = window_after_the_start(monkeypatch, before)
+        with pytest.raises(LabError, match="does not hold uDeck starting") as raised:
+            check(machine, check_dir, lab)
+        assert not isinstance(raised.value, CheckFailed), check.__name__
+        assert "hotkey ⌃⌥U registered" in raised.value.reason, "what the ten seconds before held is said"
+        assert (check_dir / "before-the-window.log").read_text().count("registered") == 1
+        assert chords(machine) == []
+
+    machine = window_after_the_start(monkeypatch, ATTACHED)
+    with pytest.raises(LabError, match="hold no start of uDeck either"):
+        checks.check_the_hotkey(machine, check_dir, lab)
+
+
+def test_a_uDeck_that_died_without_a_word_of_its_shortcut_fails_however_the_window_began(
+    monkeypatch, lab, check_dir
+):
+    """The same silent window, with uDeck gone by the time it is read: the silence is
+    uDeck's, and the wait for its shortcut asks whether it is still there before the
+    window is ever blamed."""
+    for check in (
+        checks.check_the_hotkey,
+        checks.check_the_hotkey_closes_what_the_gesture_opened,
+        checks.check_the_hotkey_dies_with_udeck,
+    ):
+        machine = window_after_the_start(monkeypatch, ATTACHED + STARTED + REGISTERED)
+        # Running when it was started, gone afterwards.
+        machine.ssh.answers["pgrep -x uDeck"] = ["404", ""]
+        with pytest.raises(CheckFailed, match="uDeck was not running when its answer to uDeck starting"):
+            check(machine, check_dir, lab)
+        assert chords(machine) == [], check.__name__
 
 
 def test_a_uDeck_holding_some_other_shortcut_fails(monkeypatch, lab, check_dir):
@@ -1502,13 +1661,28 @@ def how_it_started(monkeypatch, machine, run):
     pointer left in the strip by whatever ran before opens the panel by the
     gesture, which between the launch and the mark is a reveal no check asked
     for and none of them would see.
+
+    "launch" is recorded only a second or more after the mark, "launch at once"
+    otherwise: the log's own times can run behind the guest's `date`, and a start
+    in the first fraction of the mark's second fell before the window on a runner
+    (run 38849366574, `_launch_inside_the_window`).
     """
     order = []
     taking_the_mark = panel.GestureLog.mark
-    monkeypatch.setattr(app, "launch",
-                        lambda machine_, step="starting uDeck": order.append("launch") or {"404"})
-    monkeypatch.setattr(panel.GestureLog, "mark",
-                        lambda self, step: (order.append("mark"), taking_the_mark(self, step))[1])
+    marked_at = []
+
+    def launch(machine_, step="starting uDeck"):
+        waited = bool(marked_at) and machine.now - marked_at[-1] >= 1
+        order.append("launch" if waited else "launch at once")
+        return {"404"}
+
+    def mark(self, step):
+        order.append("mark")
+        marked_at.append(machine.now)
+        return taking_the_mark(self, step)
+
+    monkeypatch.setattr(app, "launch", launch)
+    monkeypatch.setattr(panel.GestureLog, "mark", mark)
     moving = machine.move_pointer
     machine.move_pointer = lambda x, y, step: order.append("park") or moving(x, y, step)
     run()
@@ -1717,7 +1891,7 @@ def test_the_hotkey_at_a_gesture_panel_needs_a_peek_before_it_presses_anything(m
 
 
 def test_the_hotkey_at_a_gesture_panel_reads_the_shortcut_uDeck_holds_first(monkeypatch, lab, check_dir):
-    machine = prepared(monkeypatch, growing(NOTHING, REVEAL, CLOSED_BY_THE_HOTKEY))
+    machine = prepared(monkeypatch, growing(REFUSED, REVEAL, CLOSED_BY_THE_HOTKEY))
     with pytest.raises(CheckFailed, match="uDeck says it holds"):
         checks.check_the_hotkey_closes_what_the_gesture_opened(machine, check_dir, lab)
     assert chords(machine) == []
@@ -2062,18 +2236,8 @@ def test_the_control_starts_uDeck_inside_the_window_it_reads(monkeypatch, lab, c
     began. The launch belongs after the mark, and the parking before it."""
     machine = prepared(monkeypatch, ATTACHED + IDLE)
     # One list, so the three are ordered against each other rather than each being
-    # merely present. The clock cannot do it: nothing sleeps between the mark and the
-    # launch, so both fall at the same second.
-    order = []
-    taking_the_mark = panel.GestureLog.mark
-    monkeypatch.setattr(app, "launch",
-                        lambda machine_, step="starting uDeck": order.append("launch") or {"404"})
-    monkeypatch.setattr(panel.GestureLog, "mark",
-                        lambda self, step: (order.append("mark"), taking_the_mark(self, step))[1])
-    moving = machine.move_pointer
-    machine.move_pointer = lambda x, y, step: order.append("park") or moving(x, y, step)
-
-    checks.check_middle_of_the_screen(machine, check_dir, lab)
+    # merely present — and the launch a second after the mark (`how_it_started`).
+    order = how_it_started(monkeypatch, machine, lambda: checks.check_middle_of_the_screen(machine, check_dir, lab))
 
     assert machine.prepared_with_launch is False, "the preparation must not start uDeck for this control"
     # Parked, then marked, then started: the first sample uDeck takes is the one it

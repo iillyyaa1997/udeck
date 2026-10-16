@@ -12,7 +12,11 @@ What decides them is never the switch in uDeck's window — an application asked
 is right has been asked nothing — and never System Events' list of "login items", which is
 a different list (measured 2026-09-18: deleting uDeck from it emptied it while
 `SMAppService` went on reporting exactly as before). It is the Background Task Management
-database, which is what macOS acts on at login, read with `sfltool dumpbtm`.
+database, which is what macOS acts on at login, read with `sfltool dumpbtm` — for what the
+record *is* — and the guest's own log, for what was *done* with it: uDeck registering itself,
+and the record opening uDeck at login (`login.Witnesses`). The record's generation, which
+used to stand in for both, is kept beside them as evidence only: macOS moves it as uDeck
+starts and exits, not at either of those (README, "Open at Login").
 """
 
 from udeck_e2e import app, login, targets, ui, updates
@@ -106,9 +110,16 @@ def check_registers(machine, check_dir, lab):
 
 @targets.needs_a_vm("a restart of the machine")
 def check_survives_a_restart(machine, check_dir, lab):
-    """A machine that restarts comes back with uDeck running, and nobody started it."""
+    """A machine that restarts comes back with uDeck running, opened by its login record.
+
+    Who opened it is read where macOS writes it down (`login.Witnesses`): after the boot,
+    loginwindow's login items launcher opening this copy by its path, and LaunchServices
+    launching uDeck for it with the event a login item is opened with — and, across the
+    whole check, no registration from uDeck but the one the switch made.
+    """
+    since = login.clock(machine)
     _prepare(machine, check_dir, lab)
-    switched_on = _switch_on(machine, check_dir, lab)
+    switched_on, before = _switch_on(machine, check_dir, lab)
 
     # Quit before restarting, and the reason is the whole verdict. macOS reopens
     # applications that were running when the session ended — its Transparent App
@@ -135,7 +146,7 @@ def check_survives_a_restart(machine, check_dir, lab):
     if not pids:
         raise CheckFailed(
             f"the machine restarted and uDeck did not open; the system's record says "
-            f"{_record_or_why_not(machine, check_dir)}"
+            f"{_record_or_why_not(machine, check_dir)}{_what_the_login_did(machine, check_dir, since, before)}"
         )
 
     # Nothing in this check launches uDeck after the restart, so the process that is there
@@ -158,34 +169,35 @@ def check_survives_a_restart(machine, check_dir, lab):
            if elsewhere else ""),
     )
     _expect_the_same_record(after, switched_on, "the restart")
-    # Opening an application at login rewrites its record exactly once. Measured on
-    # 2026-09-21, six restarts out of six with uDeck quit first and nothing reopened by
-    # macOS: generation 1 before, 2 after, the same row. That makes the generation the
-    # witness for *who* brought uDeck back, three ways:
-    #
-    # * unchanged — the record was not acted on, so whatever opened uDeck was not it, and
-    #   this run says nothing about whether it would have. The lab's failure, not uDeck's.
-    # * one more — the record opened it. What this check is for.
-    # * more than that — uDeck registered itself again on top, which it must not do: it
-    #   registers only when asked.
-    #
-    # A correction worth keeping: this used to demand the generation stand still, from a
-    # measurement on 2026-09-19 that said 1 before and 1 after. Every one of those runs had
-    # left uDeck running across the restart, so the record was never what opened it — the
-    # assertion had encoded the wrong reason for the check being green.
-    rewrites = after.generation - switched_on.generation
-    if rewrites == 0:
+
+    # Who brought uDeck back, and whether uDeck registered itself on top, used to be read
+    # off the generation: "+1 is the record opening it, more is uDeck registering again".
+    # Measured on 2026-10-12, it answers neither — it moves on `noteUseOfItem`, which
+    # macOS writes as uDeck starts and as it exits, here at the lab's own quit before the
+    # restart or not at all — and it failed 6 readings of 28 in the round before, the two
+    # whose logs were kept with no registration after the switch (README, "Open at
+    # Login"). So both are read in the log, and the generation is only said.
+    said = _witnesses(machine, check_dir, since, before, pids, step="reading who opened uDeck after the restart")
+    _expect_no_registration_after_the_switch(said)
+    _expect_one_login(said, "telling the login record's doing from anything else's across the restart",
+                      f"whether the login items launcher opened uDeck cannot be read: {_launches(said)}")
+    opened = said.opened_at_login()
+    if not opened:
+        # uDeck is running and the record did not open it: something else did, and this
+        # run says nothing about whether the record would have. The lab's failure.
         raise LabError(
             "telling the login record's doing from anything else's across the restart",
-            f"uDeck came back, and its record was not touched — generation {after.generation} "
-            f"before and after — so the record is not what opened it, and this run says nothing "
-            f"about whether it would have: {after.describe()}",
+            f"uDeck came back, and the login items launcher did not open it — it opened "
+            f"{said.asked_at_login() or 'nothing'} — so the record is not what brought it back, and this run "
+            f"says nothing about whether it would have: {_launches(said)}",
         )
     expect(
-        rewrites == 1,
-        f"the restart left the record at generation {after.generation}, up from "
-        f"{switched_on.generation} — opening it at login rewrites it once, so uDeck "
-        f"registered itself again on top, and it registers only when asked: {after.describe()}",
+        opened == [THIS_COPY],
+        f"the login record opened {opened} after the restart, not the copy that was switched on ({THIS_COPY})",
+    )
+    lab.note(
+        f"   the login items launcher opened {THIS_COPY} after the restart; the record is at generation "
+        f"{after.generation}, up from {switched_on.generation} (evidence only: {said.evidence()})"
     )
     # The pids the wait already read, not a fresh look: an SSH hiccup in a note must not
     # turn a check that has passed both its verdicts into a lab error.
@@ -200,23 +212,26 @@ def check_off_stays_off(machine, check_dir, lab):
     where nothing was ever registered would also come back without uDeck, and would prove
     only that the lab can watch a machine do nothing.
 
-    Two different things can make uDeck open here, and they are told apart by the
-    generation. Measured in a guest on 2026-09-19: unregistering does not remove the row
-    at once — the dump shows it `[disabled] generation 2` straight after the click and
-    stops showing it about half a minute later — while the database file on disk still
-    names uDeck throughout. One run in five then came back from the restart with the row
-    *enabled at generation 1*: the registration that was there before the switch, not a
-    new one. So a record back at the old generation is macOS returning to the state it
-    had on disk, and a record at a new generation would be something registering again —
-    which for uDeck would be a bug of its own, since it registers only when asked.
+    It reads the same witness as the check above (`login.Witnesses`), and the witness has
+    to be able to say yes in this very boot for its no to mean anything: the login items
+    launcher has to be seen running after the restart — it runs at every login, items or
+    none — and then not opening uDeck.
 
-    So the two readings get the two different outcomes. The old generation is the lab
-    saying it could not check: the boot acted on a database that predates the switch, so
-    the control's premise never held and nothing was decided about uDeck either way. A
-    later one, or an unreadable record, is uDeck's to answer for.
+    One thing can open uDeck here without uDeck being at fault, and the log tells it apart.
+    Measured in a guest on 2026-09-19: unregistering does not remove the row at once — the
+    dump shows it `[disabled]` straight after the click and stops showing it about half a
+    minute later — while the database file on disk still names uDeck throughout. One run in
+    five then came back from the restart with the row *enabled again*: the registration
+    that was there before the switch, not a new one. So a record enabled after the restart,
+    with no registration from uDeck after the switch, is macOS returning to the state it had
+    on disk — the boot never acted on the switching off, the control's premise did not
+    hold, and the lab says it could not check. A registration from uDeck after the switch is
+    uDeck's to answer for, since it registers only when asked. That used to be told apart by
+    the generation, which counts other things too (README, "Open at Login").
     """
+    since = login.clock(machine)
     _prepare(machine, check_dir, lab)
-    switched_on = _switch_on(machine, check_dir, lab)
+    switched_on, before = _switch_on(machine, check_dir, lab)
 
     ui.click(machine, "general.openAtLogin", "switching Open at Login off again")
     machine.sleep(3)
@@ -257,27 +272,65 @@ def check_off_stays_off(machine, check_dir, lab):
     # Same order, same reason: uDeck opening here is the failure this control exists to
     # catch, and neither the screenshot nor the database may be able to swallow it.
     _evidence(machine, check_dir, "after the restart", lab)
-    after, said = _collect_or_why_not(machine, check_dir, uuid=switched_on.uuid)
-    if pids and after is not None and after.enabled and after.generation == switched_on.generation:
-        # Not a verdict, and the sentence itself is why: it says the database came back as
-        # it stood before the switch. A control whose premise did not hold has checked
-        # nothing — the boot never acted on the switching off this is about — and calling
-        # that ❌ blames uDeck in the same breath as explaining that uDeck is not the
-        # cause, which sends the next person hunting a bug that is not there. The other
-        # reading is still ❌ below: a record at a *later* generation is something having
-        # registered, and uDeck registers only when asked.
+    after, record = _collect_or_why_not(machine, check_dir, uuid=switched_on.uuid)
+    # The log is the oracle here, and still nothing that can raise may stand between uDeck
+    # running and the sentence that says so: a log that cannot be read is said in it.
+    try:
+        said = _witnesses(machine, check_dir, since, before, pids, step="reading who opened what after the restart")
+        unread = ""
+    except LabError as error:
+        said, unread = None, error.reason
+    registered = said.registrations() if said is not None else []
+    again = registered[1:]
+    expect(
+        not again,
+        f"uDeck registered itself again after it was switched on, and it registers only when asked: "
+        f"{'; '.join(str(line) for line in again)}",
+    )
+    # Read only from a log that holds one login: with another boot's lines among them, what
+    # was opened may be that boot's (`_expect_one_login`, below, says so once uDeck's own
+    # life has been read).
+    opened = said.opened_at_login() if said is not None and said.launcher_runs() <= 1 else []
+    if opened and after is not None and after.enabled:
+        # Not a verdict, and the sentence itself is why: the record came back enabled and
+        # nothing registered it after the switch, so the boot acted on the database as it
+        # stood before the switching off this control is about. Calling that ❌ blames
+        # uDeck in the same breath as explaining that uDeck is not the cause.
         raise LabError(
             "watching a machine that was switched off come back",
-            f"uDeck opened, and the system's record is the one from before the switch, "
-            f"unchanged: {said}. The restart came back with the database as it stood "
-            f"before, not with the change — macOS's doing rather than uDeck registering "
-            f"again, which would carry a later generation — so the machine never acted on "
-            f"the switching off this control is about",
+            f"the login record opened uDeck, and it is enabled again: {record}. "
+            + (
+                "Nothing registered it after the switch — the log holds the switch's own registration and no "
+                "other — so the restart came back with the database as it stood before the switching off, "
+                "macOS's doing rather than uDeck's, and the machine never acted on the switching off this "
+                "control is about"
+                if registered
+                else "The log holds no registration from uDeck at all, not even the switch's, so whether "
+                "something registered it again cannot be read"
+            ),
         )
     expect(
-        not pids,
-        f"uDeck opened at login although it had been switched off; the record says {said}",
+        not opened,
+        f"the login record opened {opened} at login although it had been switched off; the record says {record}",
     )
+    expect(
+        not pids,
+        f"uDeck opened at login although it had been switched off, and not by its record: "
+        f"{_launches(said) if said is not None else f'the log could not be read ({unread})'}; "
+        f"the record says {record}",
+    )
+    if said is None:
+        raise LabError("watching a machine that was switched off come back", f"the guest's log could not be read: {unread}")
+    if not registered:
+        raise LabError(
+            "reading uDeck's registrations in the guest's log",
+            "the log holds no `registerLaunchItem` from uDeck since the check began — not even the one the "
+            "switch made — so its holding none after the switch says nothing",
+        )
+    _expect_one_login(said, "watching a machine that was switched off come back",
+                      "the login items launcher not opening uDeck is not something this log can show; "
+                      f"the record says {record}")
+    lab.note(f"   the login items launcher ran and opened {said.asked_at_login() or 'nothing'} ({said.evidence()})")
 
 
 @targets.needs_a_vm(NEVER_SWITCHED_ON)
@@ -293,10 +346,11 @@ def check_survives_an_update(machine, check_dir, lab):
     at all is what `updates.sparkle` is for. So a failure to offer or to install is the
     lab being unable to carry this check out, never a verdict about uDeck.
     """
+    since = login.clock(machine)
     feed = updates.Feed(machine, lab.note)
     try:
         builder = _prepare(machine, check_dir, lab, feed)
-        before = _switch_on(machine, check_dir, lab)
+        before, pids = _switch_on(machine, check_dir, lab)
 
         newer = builder.build(*NEWER)
         signature = updates.sign(newer.zip, lab.signing_key, updates.find_sign_update(lab.repo_root))
@@ -322,19 +376,19 @@ def check_survives_an_update(machine, check_dir, lab):
         )
         expect(after.enabled, f"the record did not survive the update: {after.describe()}")
         _expect_the_same_record(after, before, "the update")
-        # Unlike a restart, an update *does* move the generation, and by exactly one:
-        # measured in a guest on 2026-09-19, 1 before and 2 after, with the row's UUID
-        # unchanged — macOS re-filing the record because the bundle at the path was
-        # replaced. Anything beyond that is what the docstring above is about: an
-        # application registering itself again, which is what makes macOS post "Login Item
-        # Added" at every login.
-        expect(
-            after.generation <= before.generation + 1,
-            f"the update left the record at generation {after.generation}, up from "
-            f"{before.generation} — an update rewrites it once, so uDeck registered itself "
-            f"again on top of it: {after.describe()}",
+        # Whether uDeck registered itself again on top of the update is read where macOS
+        # writes it down — what the docstring above is about, and what makes macOS post
+        # "Login Item Added" at every login. It used to be read off the generation, "an
+        # update rewrites it once": measured on 2026-10-12, an update moves it by one, or
+        # by two or three when uDeck's exit races Sparkle's relaunch, with no
+        # registration anywhere in the log (README, "Open at Login").
+        relaunched = app.running_pids(machine, "reading the pid uDeck came back as after the update")
+        said = _witnesses(machine, check_dir, since, pids, relaunched, step="reading what the update did to the record")
+        _expect_no_registration_after_the_switch(said)
+        lab.note(
+            f"   the record came through as: {after.describe()}, up from generation {before.generation} "
+            f"(evidence only: {said.evidence()})"
         )
-        lab.note(f"   the record came through as: {after.describe()}")
     finally:
         feed.collect_log(check_dir)
         feed.stop()
@@ -369,7 +423,12 @@ def _prepare(machine, check_dir, lab, feed=None):
 
 
 def _switch_on(machine, check_dir, lab):
-    """Switch it on and refuse to go on unless the system agrees that it is on."""
+    """Switch it on and refuse to go on unless the system agrees that it is on.
+
+    Answers the record and the pids uDeck ran as when it was switched on: the
+    registration that switch makes names uDeck by its pid alone (`login.Witnesses`).
+    """
+    pids = app.running_pids(machine, "reading the pid uDeck runs as before it is switched on")
     ui.click(machine, "general.openAtLogin", "switching Open at Login on")
     machine.sleep(3)
     machine.screenshot(check_dir, "switched on")
@@ -378,7 +437,7 @@ def _switch_on(machine, check_dir, lab):
         # The rest of the check is about what happens to a record that is there.
         raise LabError("switching Open at Login on", f"the system did not take it: {_describe(record)}")
     lab.note(f"   the system now has: {record.describe()}")
-    return record
+    return record, pids
 
 
 def _install_the_update(machine, check_dir, lab, seconds=240):
@@ -425,6 +484,78 @@ def _wait_until_it_opens(machine, seconds):
         if machine.clock() >= deadline:
             return set()
         machine.sleep(5)
+
+
+def _witnesses(machine, check_dir, since, *pids, step="reading the guest's log"):
+    """What the guest's log says was done with the record since the check began (`login.Witnesses`).
+
+    Kept beside the check's other evidence as `login-log.txt`, and read with every pid
+    the lab itself saw uDeck run as; the boot is the guest's last, so "after the
+    restart" means after it.
+    """
+    known = frozenset(int(pid) for group in pids for pid in group if str(pid).isdigit())
+    return login.witnesses(machine, check_dir, since, step, known=known, boot=login.boot_clock(machine))
+
+
+def _expect_no_registration_after_the_switch(said):
+    """uDeck registered itself exactly once: when it was switched on.
+
+    The switch's own registration has to be there for the absence of any other to
+    mean anything — a log that holds no registration at all is a log that cannot
+    show one, and that is the lab's failure, not a pass.
+    """
+    registered = said.registrations()
+    if not registered:
+        raise LabError(
+            "reading uDeck's registrations in the guest's log",
+            "the log holds no `registerLaunchItem` from uDeck since the check began — not even the one the "
+            "switch made — so its holding none after the switch says nothing",
+        )
+    again = registered[1:]
+    expect(
+        not again,
+        f"uDeck registered itself again after it was switched on, and it registers only when asked: "
+        f"{'; '.join(str(line) for line in again)} (the switch's own: {registered[0]})",
+    )
+
+
+def _expect_one_login(said, step, otherwise):
+    """The log since the boot holds exactly one login: the launcher ran once, after the boot.
+
+    None is a log that cannot show what the login did. More than one is another boot's
+    login read as this one's — "after the boot" is read on the guest's clock, which can
+    be anywhere (`login.Witnesses.launcher_runs`) — and what it opened or did not open
+    could be that boot's.
+    """
+    runs = said.launcher_runs()
+    if runs == 0:
+        raise LabError(step, f"the guest's log has no `LoginItemsLauncher main` after the boot, so {otherwise}")
+    if runs > 1:
+        raise LabError(
+            step,
+            f"the guest's log has {runs} runs of the login items launcher after the boot, where one login "
+            f"writes one: lines of another boot are read as this one's, so {otherwise}",
+        )
+
+
+def _launches(said):
+    """Every launch of uDeck the log holds after the boot, for a sentence."""
+    launches = said.launches()
+    return "LaunchServices launched uDeck " + ("; ".join(line.said for line in launches) if launches else "never")
+
+
+def _what_the_login_did(machine, check_dir, since, before):
+    """For the sentence that says uDeck did not come back: what the login items launcher did.
+
+    Evidence, so it says what went wrong instead of raising (`_record_or_why_not`).
+    """
+    try:
+        said = _witnesses(machine, check_dir, since, before, step="reading what the login did")
+    except LabError as error:
+        return f" (the guest's log could not be read: {error.reason})"
+    runs = said.launcher_runs()
+    launcher = "is not in the log" if runs == 0 else "ran" if runs == 1 else f"ran {runs} times, another boot's among them"
+    return f"; the login items launcher {launcher} and opened {said.asked_at_login() or 'nothing'}"
 
 
 def _evidence(machine, check_dir, step, lab):

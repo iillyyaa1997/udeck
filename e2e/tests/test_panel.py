@@ -516,6 +516,8 @@ def test_the_strip_the_lab_reads_the_wobble_against_is_uDecks():
 def test_the_push_threshold_the_lab_reads_the_wobble_against_is_uDecks():
     assert config.EDGE_PUSH_DISTANCE == _default("edgePushDistance")
     assert config.EDGE_PUSH_WINDOW_SECONDS == _default("edgePushWindow")
+    # And the dwell the push at the edge races (`panel.Push`).
+    assert config.DWELL_DURATION_SECONDS == _default("dwellDuration")
 
 
 def test_the_wobble_short_of_the_edge_rocks_inside_the_strip_and_never_pinned():

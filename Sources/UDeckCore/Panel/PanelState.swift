@@ -354,7 +354,8 @@ public enum ApplicationSwitch {
 /// it before uDeck took it.
 ///
 /// Only when the operator closed the panel *and uDeck is still in front* at the
-/// moment it lets go.
+/// moment it lets go — and, when he closed it by clicking somewhere else, only
+/// once that click has brought nothing else forward (below).
 ///
 /// A panel that was clicked into has made uDeck the frontmost application, so
 /// Escape and ⌘W pressed at one find it in front and the application from
@@ -393,11 +394,266 @@ public enum ApplicationSwitch {
 /// collapsing on an app switch turned off, the Finder switched to with the panel
 /// held open, a click past the panel onto it — and TextEdit came back over the
 /// Finder.
+///
+/// **So a click past the panel heard while uDeck is in front waits for its
+/// answer.** Asking whether uDeck is still in front was a stand-in for "the
+/// click has already moved the keyboard", and it holds only while the
+/// workspace's news of the click arrives before the click monitor does. On a
+/// GitHub runner it never did: the monitor closed the panel first, the workspace
+/// still named uDeck as in front, and uDeck brought TextEdit back over the
+/// Finder the click had chosen — 12 clicks of 12, the news of the Finder coming
+/// 53 to 141 ms after the panel had gone (`panel.a-click-past-the-panel`, runs
+/// 38243017720 and 38288544383). A person sees that on any Mac where the monitor
+/// wins: a click on another window past a panel he was working in puts the
+/// panel away and brings back the application from before it, over the window
+/// he clicked.
+///
+/// Bringing nothing back after such a click is wrong the other way. A click on
+/// the Dock — its separator, or the Downloads stack — brings no application
+/// forward at all, and a uDeck that only let go left the keyboard with nobody:
+/// the next key reached no document, 4 clicks of 4, with TextEdit named in
+/// front all along (Tart, 20261016-055254Z, probe.dock-gap and probe.dock-stack,
+/// each twice).
+///
+/// And bringing it back half a second later whatever the click did puts away
+/// what the click opened, which no application coming forward announces: the
+/// Downloads stack, open after the click while nothing was brought back, was
+/// closed with TextEdit back after half a second, 2 readings of 2 each (Tart,
+/// 20261016-055254Z and -060209Z); a stack open 2 s after the click was gone by
+/// 5 s with TextEdit back at 3 s in 3 readings of 4 (-141357Z, -142347Z); and
+/// the Dock's menu, coming 1353 ms after the click with TextEdit already back,
+/// faded at once (-140156Z).
+///
+/// So the click monitor's road says only that a click was heard, and the click
+/// is given `answerSeconds` to answer. An application coming forward is one
+/// answer, the news the monitor was ahead of, and it leaves that application in
+/// front. A window the click opened is the other — another process's, not on
+/// screen before the click, near where it landed (`opened(by:among:)`) — and
+/// the application from before comes back only once no such window is on
+/// screen. A click that does neither in `answerSeconds` brings it back then
+/// (`afterTheClick`). The workspace's own road of the same click is the news,
+/// and brings nothing back.
+///
+/// What the window server shows is all uDeck reads, and some things a click
+/// opens are not in it: the Dock draws its stacks — the "Open in Finder" of an
+/// empty folder, a fan of five files, a fan of forty — inside its own window,
+/// which covers the whole screen at level 20 before any click, so not one
+/// window came or went with them, and that window kept every key the window
+/// server gives (Tart, 20261016-141357Z, -142347Z and -143757Z; a runner, run
+/// 38915483520). The application from before comes back after `answerSeconds`
+/// with such a stack on screen, and the stack was gone by the screenshot 5 s
+/// after the click in 20 readings of 26 (Tart, 20261016-144410Z; run
+/// 38918223759). The Dock's menus are windows of their own, of DockHelper, and
+/// are waited for: open 2 s and 5 s after the click until Escape, 14 readings
+/// of 14 (the same runs).
 public enum KeyboardHandback {
-    public static func restoresPreviousApplication(after reason: CollapseReason, uDeckIsInFront: Bool) -> Bool {
-        reason == .dismissed && uDeckIsInFront
+    /// Who closed the panel, as far as the keyboard is concerned.
+    public enum Closing: String, Sendable {
+        /// Anything but a click past the panel: Escape, ⌘W, the shortcut.
+        case atThePanel
+        /// A click past the panel, heard by uDeck's own click monitor: what it
+        /// landed on, and whether that comes forward, is not known yet.
+        case byAClickHeard
+        /// A click past the panel, known by the workspace's news that another
+        /// application came forward on it.
+        case byAClickThatBroughtAnotherForward
+    }
+
+    /// What becomes of the application from before.
+    public enum Handback: String, Sendable {
+        /// It stays where it is, and whatever is in front keeps the keyboard.
+        case leave
+        /// It comes back now.
+        case restore
+        /// It comes back once the click has answered (`afterTheClick`): not if
+        /// another application comes forward, not while a window the click
+        /// opened is on screen, and after `answerSeconds` if neither happens.
+        case restoreUnlessAnotherComesForward
+    }
+
+    /// How long a click past the panel heard by the click monitor is given to
+    /// answer — an application coming forward, or a window opening — before the
+    /// application from before comes back.
+    ///
+    /// The news of an application was measured 53 to 141 ms behind the monitor
+    /// on a GitHub runner (runs 38243017720 and 38288544383), and once 232 ms
+    /// behind the click in a whole lab run. A window takes longer when the
+    /// process drawing it has to start first: the Dock's menu came 255 ms after
+    /// a right click with DockHelper already running, and 1251 and 1353 ms after
+    /// it with DockHelper started by that click (Tart, 20261016-141357Z,
+    /// -142347Z and -140156Z). Two seconds is above all of them; it is chosen,
+    /// not measured, and it is also how long a click that answers nothing — the
+    /// Dock's separator — leaves the keyboard with nobody.
+    public static let answerSeconds: TimeInterval = 2
+
+    public static func handback(after reason: CollapseReason, closing: Closing, uDeckIsInFront: Bool) -> Handback {
+        guard reason == .dismissed, uDeckIsInFront else { return .leave }
+        switch closing {
+        case .atThePanel: return .restore
+        case .byAClickHeard: return .restoreUnlessAnotherComesForward
+        case .byAClickThatBroughtAnotherForward: return .leave
+        }
+    }
+
+    // MARK: - What the click opened
+
+    /// A window on screen, as the window server describes any window to any
+    /// application without asking a permission: whose it is, how high it floats
+    /// and where it is — never its title or anything in it.
+    public struct Window: Equatable, Sendable {
+        /// The window server's number for it, which no other window has while
+        /// it lives.
+        public var number: UInt32
+        /// The process it belongs to.
+        public var ownerPID: Int32
+        /// That process's name, which the window server gives without a
+        /// permission too.
+        public var ownerName: String
+        /// Its window level: 0 is where applications' ordinary windows are; the
+        /// Dock's own window is at 20 and the menus DockHelper draws for it at
+        /// 101.
+        public var layer: Int
+        /// Where it is, in AppKit's screen coordinates — the ones a click's
+        /// location comes in (`QuartzCoordinates`).
+        public var bounds: CGRect
+
+        public init(number: UInt32, ownerPID: Int32, ownerName: String, layer: Int, bounds: CGRect) {
+            self.number = number
+            self.ownerPID = ownerPID
+            self.ownerName = ownerName
+            self.layer = layer
+            self.bounds = bounds
+        }
+    }
+
+    /// A click past the panel that uDeck's click monitor heard before any news
+    /// of it, and what was on screen before it.
+    public struct HeardClick: Equatable, Sendable {
+        /// Where the button went down, in AppKit's screen coordinates.
+        public var point: CGPoint
+        /// The windows on screen before the click, by number: read when uDeck
+        /// last took the keyboard, which is before any click that can close the
+        /// panel. Not when the monitor hears the click: that can come hundreds
+        /// of milliseconds after the button (`ApplicationSwitch.LastHeard`),
+        /// later than the Dock's menu (255 ms).
+        public var before: Set<UInt32>
+        /// uDeck's own process, whose windows the click did not open.
+        public var uDeck: Int32
+        /// The application waiting to come back, whose windows would come back
+        /// with it and are not something the click opened.
+        public var earlier: Int32
+
+        public init(point: CGPoint, before: Set<UInt32>, uDeck: Int32, earlier: Int32) {
+            self.point = point
+            self.before = before
+            self.uDeck = uDeck
+            self.earlier = earlier
+        }
+    }
+
+    /// How far from the click a window that was not there before it may be and
+    /// still be what the click opened, in points. The Dock's menu was measured
+    /// 41 points above a click on the middle of its icon, and the highlight
+    /// DockHelper puts over the icon covers the click itself (Tart,
+    /// 20261016-140156Z); the rest is room for a larger Dock. Chosen.
+    public static let aroundTheClick: CGFloat = 100
+
+    /// How often the windows on screen are read until the click has answered.
+    /// A reading took 0.6 to 1.7 ms at the median in a Tart guest, and up to
+    /// 297 ms once (20261016-141357Z and -142347Z). Chosen.
+    public static let windowsPollSeconds: TimeInterval = 0.1
+
+    /// The windows a click past the panel opened that are on screen now: another
+    /// process's — neither uDeck's nor the application waiting to come back, nor
+    /// the window server's own — not on screen before the click, and under the
+    /// click or within `aroundTheClick` of it.
+    ///
+    /// The window server's own windows answer no click: on a GitHub runner its
+    /// `StatusIndicator`, the dot by the clock that says the screen is being
+    /// recorded, came and went every few seconds while the lab took its
+    /// screenshots (run 38915483520), and one that came after uDeck took the
+    /// keyboard would have held the handback for as long as it stayed.
+    public static func opened(by click: HeardClick, among windows: [Window]) -> [Window] {
+        windows.filter { window in
+            window.ownerPID != click.uDeck
+                && window.ownerPID != click.earlier
+                && window.ownerName != windowServer
+                && !click.before.contains(window.number)
+                && distance(from: click.point, to: window.bounds) <= aroundTheClick
+        }
+    }
+
+    /// The name the window server's own process goes by among the owners of
+    /// windows.
+    public static let windowServer = "Window Server"
+
+    /// How far a point is from a rectangle: 0 inside it or on its edge.
+    static func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
+        let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
+        let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
+        return (dx * dx + dy * dy).squareRoot()
+    }
+
+    /// What a click past the panel heard before any news of it comes to so far.
+    public enum AfterTheClick: String, Sendable {
+        /// Nothing yet: no application has come forward and nothing the click
+        /// opened is on screen, and the click still has time to answer.
+        case waitForAnAnswer
+        /// A window the click opened is on screen: a menu of the Dock, another
+        /// application's panel that took no front.
+        case waitForWhatItOpened
+        /// What the click opened has gone, or it opened nothing in
+        /// `answerSeconds`: the application from before comes back.
+        case restore
+    }
+
+    /// `waited` seconds after uDeck let go on the click, with `opened` what the
+    /// click opened that is on screen now (`opened(by:among:)`) and
+    /// `openedBefore` whether any reading before this one found something. An
+    /// application coming forward is the other answer, and ends the wait before
+    /// this is asked.
+    public static func afterTheClick(waited: TimeInterval, opened: [Window], openedBefore: Bool) -> AfterTheClick {
+        if !opened.isEmpty { return .waitForWhatItOpened }
+        if openedBefore { return .restore }
+        return waited < answerSeconds ? .waitForAnAnswer : .restore
+    }
+
+    // MARK: - The panel shown again
+
+    /// Whom the panel, shown, takes the keyboard from.
+    public enum TakesTheKeyboard<Application> {
+        /// Nobody: uDeck has it already, and whoever it took it from last time
+        /// is still the one to give it back to.
+        case alreadyUDecks
+        /// This application — none, when nothing is in front — which is the one
+        /// to come back when the panel goes.
+        case from(Application?)
+    }
+
+    /// Whom showing the panel takes the keyboard from: the application the
+    /// workspace names in front, unless that is uDeck.
+    ///
+    /// Except while a click past the panel waits for its answer
+    /// (`afterTheClick`): uDeck has let go of the keyboard, nothing has come
+    /// back yet, and the workspace goes on naming uDeck in front — every
+    /// handback after a click on the Dock's separator or its stack said "with
+    /// uDeck in front" two seconds after uDeck let go (Tart, 20261016-144410Z;
+    /// run 38918223759). The keyboard is with nobody then, and a panel shown in
+    /// that time, by the shortcut or the gesture, takes it from the application
+    /// `waiting` to come back, which comes back when the panel goes. Taken for
+    /// uDeck in front, the panel took the keyboard from nobody and its closing
+    /// gave it back to nobody. With nothing named in front at all, the same:
+    /// the application waiting, rather than nobody.
+    public static func takesTheKeyboard<Application>(
+        front: Application?, frontIsUDeck: Bool, waiting: Application?
+    ) -> TakesTheKeyboard<Application> {
+        guard frontIsUDeck else { return .from(front ?? waiting) }
+        guard let waiting else { return .alreadyUDecks }
+        return .from(waiting)
     }
 }
+
+extension KeyboardHandback.TakesTheKeyboard: Equatable where Application: Equatable {}
 
 /// The panel's state, and the rules that move it between phases.
 ///

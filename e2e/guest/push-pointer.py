@@ -76,6 +76,15 @@ Where the pointer was before anything is posted is printed as `from`, so that
 the lab can tell how many reports the throw needed to reach the edge and hold it
 against how many it sent (`thrown`).
 
+When each report of the push was posted is printed as `posted`, and when the
+throw's report that arrived at the edge was as `arrived` (negative: before the
+push began), both in seconds on the same clock as `track`. The push at the edge
+is a race with the dwell, which uDeck owes 0.06 s after the pointer stops, and
+on a GitHub runner `time.sleep` stretches every pause — the 2 ms after the
+arriving report to 10 ms at the median and up to 46 (run 38288544383) — so how
+long after the arrival the push came is measured rather than assumed
+(`panel.Push`).
+
 The throw stops the moment the pointer is within `pinned` pixels of the top,
 which is why `throw-cap` is a cap and not a count. That is not tidiness. uDeck
 counts upward movement made while the pointer was *already* pinned, so a throw
@@ -233,7 +242,8 @@ def main(argv):
     system = ctypes.CDLL(None)
     where = pointer_reader()
     said = {"uid": system.getuid(), "euid": system.geteuid(), "throw": [], "push": [],
-            "thrown": 0, "from": None, "at": None, "pinned": None, "track": []}  # fmt: skip
+            "thrown": 0, "from": None, "at": None, "pinned": None, "track": [],
+            "arrived": None, "posted": []}  # fmt: skip
     if said["euid"] == 0:
         # Said rather than refused: the run is the measurement, and a refusal
         # here would hide the kernel's own answer from whoever reads the report.
@@ -261,7 +271,9 @@ def main(argv):
         # not one report more. uDeck does not count the movement that *arrives* at
         # the edge — the throw is not a push — but it counts everything after, so a
         # throw that overshoots would be the push this check is supposed to make.
+        arrived = None
         for _ in range(throw_cap):
+            posted = time.monotonic()
             said["throw"].append(named(post(library, connect.value, throw_delta)))
             said["thrown"] += 1
             time.sleep(throw_pause)
@@ -269,6 +281,7 @@ def main(argv):
             if at is not None and at[1] <= pinned:
                 said["at"] = [round(at[0], 1), round(at[1], 1)]
                 said["pinned"] = True
+                arrived = posted
                 break
         else:
             if throw_cap:
@@ -280,8 +293,11 @@ def main(argv):
         # The push: movement reported while the pointer can go no higher — or,
         # with `wobble`, rocking between two rows while it slides along.
         began = time.monotonic()
+        if arrived is not None:
+            said["arrived"] = round(arrived - began, 4)
         for step in range(steps):
             upward = delta if not wobble or step % 2 == 0 else -delta
+            said["posted"].append(round(time.monotonic() - began, 4))
             said["push"].append(named(post(library, connect.value, upward, sideways)))
             time.sleep(pause)
             at = where()

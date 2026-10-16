@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from udeck_e2e import ax, config, plugin_repository, ui
-from udeck_e2e.errors import CheckFailed
+from udeck_e2e.errors import CheckFailed, LabError
 
 
 def _load():
@@ -754,3 +754,33 @@ def test_the_controls_the_follow_checks_press_and_read_are_the_views_own():
     store = _source("Sources", "UDeckCore", "Plugins", "Repository", "FollowedRefs.swift")
     for key in ("branches", "notCheckedSince", "history"):
         assert f"public var {key}:" in store, key
+
+
+def test_the_card_is_clicked_where_it_came_to_rest_not_where_it_was_passing(monkeypatch):
+    """Measured on runners (runs 38317811235, 38318963221): the card read while the panel
+    was still growing put Decline 26 to 36 points right of where it came to rest, and the
+    click meant for it landed past its edge, 4 readings of 7. The card is read again half a
+    second apart until Allow stands where it stood, and that reading is the one returned."""
+
+    def card(x):
+        return (
+            f"4|AXButton||consent.asks-nothing.allow||||{x};215;|103;23;|hidden\n"
+            f"4|AXButton||consent.asks-nothing.decline||||{x + 110};215;|66;23;|hidden"
+        )
+
+    readings = [card(577), card(560), card(541), card(541)]
+    machine = type("Guest", (), {"now": 0.0})()
+    machine.clock = lambda: machine.now
+    machine.sleep = lambda seconds: setattr(machine, "now", machine.now + seconds)
+    monkeypatch.setattr(ui, "identified", lambda m, step, window, depth: readings.pop(0))
+    monkeypatch.setattr(checks, "_panel_texts", lambda m, step: ["Asks nothing"])
+    dump, texts = checks._once_it_stands_still(machine, readings.pop(0), [], "consent.asks-nothing.allow", 10)
+    assert ui.element(dump, "consent.asks-nothing.decline").x == 651 and texts == ["Asks nothing"]
+    assert machine.now == 3 * ui.SETTLED_SECONDS, "three readings after the first: 560, then 541 twice"
+
+    readings = [card(577), card(560), card(545), card(530)]
+    machine.now = 0.0
+    with pytest.raises(LabError, match="still moving") as raised:
+        checks._once_it_stands_still(machine, readings.pop(0), [], "consent.asks-nothing.allow", 1.0)
+    assert not isinstance(raised.value, CheckFailed), "a card the lab cannot aim at is not uDeck's failure"
+    assert "545" in raised.value.reason

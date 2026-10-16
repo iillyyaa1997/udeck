@@ -556,21 +556,192 @@ struct KeyboardHandbackTests {
     /// front at the moment Escape closed a held panel.
     @Test("Escape and ⌘W bring back the application from before, because uDeck is still in front")
     func aDismissalFromUDeckRestores() {
-        #expect(KeyboardHandback.restoresPreviousApplication(after: .dismissed, uDeckIsInFront: true))
+        #expect(KeyboardHandback.handback(after: .dismissed, closing: .atThePanel, uDeckIsInFront: true) == .restore)
+    }
+
+    /// Escape, ⌘W or the shortcut closing a panel while the workspace names
+    /// another application in front — a peek, which takes the keyboard without
+    /// taking the front: that application keeps it, and nothing is brought back
+    /// over it. On a GitHub runner Escape at a peek found TextEdit in front, left
+    /// it there, and TextEdit had the next key (`panel.escape`,
+    /// `panel.the-key-after-escape`, run 38321541276).
+    @Test("a dismissal with another application in front brings nothing back over it")
+    func aDismissalWithAnotherApplicationInFrontDoesNotRestore() {
+        for closing in [KeyboardHandback.Closing.atThePanel, .byAClickHeard, .byAClickThatBroughtAnotherForward] {
+            #expect(KeyboardHandback.handback(after: .dismissed, closing: closing, uDeckIsInFront: false) == .leave)
+        }
     }
 
     /// Measured in the guest on 2026-09-21, before this rule: TextEdit in front,
     /// the panel held, a click past it onto the desktop — and two seconds later
-    /// TextEdit was back over the Finder the click had brought forward.
-    @Test("a click that already moved the keyboard is not overruled")
+    /// TextEdit was back over the Finder the click had brought forward. The
+    /// workspace's news of the click is the click having chosen.
+    @Test("a click whose news says it brought another application forward is not overruled")
     func aClickPastThePanelIsNotOverruled() {
-        #expect(!KeyboardHandback.restoresPreviousApplication(after: .dismissed, uDeckIsInFront: false))
+        for inFront in [true, false] {
+            #expect(KeyboardHandback.handback(
+                after: .dismissed, closing: .byAClickThatBroughtAnotherForward, uDeckIsInFront: inFront
+            ) == .leave)
+        }
     }
 
-    @Test("an interruption never brings anything back, in front or not")
+    /// Both halves of the click monitor's road. On a GitHub runner, 12 clicks of
+    /// 12 (run 38288544383), the monitor closed the held panel before the
+    /// workspace said the Finder had come forward, so uDeck was still in front —
+    /// and bringing TextEdit back then put it over the Finder the click had
+    /// chosen. On a Tart guest a click on the Dock brought nothing forward, and
+    /// with nothing brought back the next key reached nobody, 4 clicks of 4
+    /// (20261016-055254Z). So the application from before waits for the click's
+    /// answer.
+    @Test("a click heard before its news waits for its answer before bringing anything back")
+    func aClickHeardBeforeItsNewsWaitsForItsAnswer() {
+        #expect(KeyboardHandback.handback(
+            after: .dismissed, closing: .byAClickHeard, uDeckIsInFront: true
+        ) == .restoreUnlessAnotherComesForward)
+        // Longer than the latest answer seen — the news of an application 232 ms
+        // after the click, the Dock's menu 1353 ms after it with DockHelper
+        // started by the click — and short enough that a click that answers
+        // nothing gives the keyboard back before a person has long to wait.
+        #expect(KeyboardHandback.answerSeconds > 1.353)
+        #expect(KeyboardHandback.answerSeconds <= 3)
+        #expect(KeyboardHandback.windowsPollSeconds > 0 && KeyboardHandback.windowsPollSeconds <= 0.25)
+    }
+
+    // What the click opened, in the shapes measured in a Tart guest on
+    // 2026-10-16 (20261016-140156Z), in AppKit's coordinates of its 2560×1440
+    // screen: the Dock's own window, at level 20 and covering the whole screen
+    // since before any click, and the menu a right click on the Finder's icon
+    // opened, which DockHelper draws at level 101 just above the icon, with a
+    // highlight at level 3 over the icon itself.
+    static let uDeck: Int32 = 781
+    static let textEdit: Int32 = 815
+    static let click = CGPoint(x: 500, y: 47)
+    static let dock = KeyboardHandback.Window(
+        number: 14, ownerPID: 359, ownerName: "Dock", layer: 20, bounds: CGRect(x: 0, y: 0, width: 2560, height: 1440)
+    )
+    static let menu = KeyboardHandback.Window(
+        number: 41, ownerPID: 969, ownerName: "DockHelper", layer: 101, bounds: CGRect(x: 461, y: 89, width: 179, height: 226)
+    )
+    static let highlight = KeyboardHandback.Window(
+        number: 40, ownerPID: 969, ownerName: "DockHelper", layer: 3, bounds: CGRect(x: 467, y: 5, width: 68, height: 84)
+    )
+    static let heard = KeyboardHandback.HeardClick(point: click, before: [14, 34], uDeck: uDeck, earlier: textEdit)
+
+    static func window(
+        _ number: UInt32, of owner: Int32, named name: String = "Someone", at bounds: CGRect, layer: Int = 101
+    ) -> KeyboardHandback.Window {
+        KeyboardHandback.Window(number: number, ownerPID: owner, ownerName: name, layer: layer, bounds: bounds)
+    }
+
+    @Test("what a click opened is another process's window that was not there before, near where it landed")
+    func whatAClickOpened() {
+        let near = CGRect(x: 461, y: 89, width: 179, height: 226)
+        let table: [(String, KeyboardHandback.Window, Bool)] = [
+            ("the Dock's menu, just above the click", Self.menu, true),
+            ("the highlight over the icon, under the click", Self.highlight, true),
+            ("the Dock's own window, there before the click", Self.dock, false),
+            ("uDeck's own window", Self.window(50, of: Self.uDeck, at: near), false),
+            ("a window of the application waiting to come back", Self.window(51, of: Self.textEdit, at: near), false),
+            ("the window server's indicator", Self.window(52, of: 165, named: "Window Server", at: near, layer: 2147483630), false),
+            ("an ordinary window that came with the click", Self.window(53, of: 900, at: near, layer: 0), true),
+            ("a window exactly 100 points away", Self.window(54, of: 900, at: CGRect(x: 600, y: 40, width: 10, height: 10)), true),
+            ("a window 101 points away", Self.window(55, of: 900, at: CGRect(x: 601, y: 40, width: 10, height: 10)), false),
+            ("a window across the screen", Self.window(56, of: 900, at: CGRect(x: 1753, y: 1051, width: 29, height: 28)), false),
+        ]
+        for (what, window, isOpened) in table {
+            let opened = KeyboardHandback.opened(by: Self.heard, among: [Self.dock, window])
+            #expect(opened == (isOpened ? [window] : []), "\(what)")
+        }
+    }
+
+    @Test("the click has an answer: a window it opened holds the application from before until it goes")
+    func whatTheClickOpenedHoldsTheHandback() {
+        let answer = KeyboardHandback.answerSeconds
+        let table: [(String, TimeInterval, [KeyboardHandback.Window], Bool, KeyboardHandback.AfterTheClick)] = [
+            ("nothing yet, at once", 0.1, [], false, .waitForAnAnswer),
+            ("nothing yet, just before the time is up", answer - 0.01, [], false, .waitForAnAnswer),
+            ("nothing at all once the time is up: the Dock's separator", answer, [], false, .restore),
+            ("a menu open early", 0.3, [Self.menu], false, .waitForWhatItOpened),
+            ("a menu still open long after", answer * 10, [Self.menu, Self.highlight], true, .waitForWhatItOpened),
+            ("the menu gone before the time is up: Escape", 0.9, [], true, .restore),
+            ("the menu gone after it", answer * 7, [], true, .restore),
+        ]
+        for (what, waited, opened, openedBefore, then) in table {
+            #expect(KeyboardHandback.afterTheClick(waited: waited, opened: opened, openedBefore: openedBefore) == then, "\(what)")
+        }
+    }
+
+    /// The readings of one click on the Dock's menu as uDeck took them on
+    /// 2026-10-16 in a Tart guest (20261016-142347Z): nothing for a second and a
+    /// quarter while DockHelper started, the menu and its highlight until Escape
+    /// put them away, then nothing — and only then is TextEdit to come back.
+    @Test("a click's readings in order: wait while nothing came yet, wait while its menu is open, then bring back")
+    func aMenuOfTheDockFromOpeningToEscape() {
+        let readings: [(TimeInterval, [KeyboardHandback.Window])] = [
+            (0.1, [Self.dock]), (1.2, [Self.dock]),
+            (1.3, [Self.dock, Self.menu, Self.highlight]),
+            (3.0, [Self.dock, Self.menu, Self.highlight]),
+            (5.0, [Self.dock, Self.menu, Self.highlight]),
+            (5.1, [Self.dock]),
+        ]
+        var openedBefore = false
+        var said: [KeyboardHandback.AfterTheClick] = []
+        for (waited, onScreen) in readings {
+            let opened = KeyboardHandback.opened(by: Self.heard, among: onScreen)
+            said.append(KeyboardHandback.afterTheClick(waited: waited, opened: opened, openedBefore: openedBefore))
+            openedBefore = openedBefore || !opened.isEmpty
+        }
+        #expect(said == [
+            .waitForAnAnswer, .waitForAnAnswer,
+            .waitForWhatItOpened, .waitForWhatItOpened, .waitForWhatItOpened,
+            .restore,
+        ])
+    }
+
+    /// A panel shown again — by the shortcut or the gesture — while a click past
+    /// it waits for its answer. uDeck has let go, and the workspace still names
+    /// it in front: every handback after a click on the Dock's separator said
+    /// "with uDeck in front" two seconds after the let-go (Tart,
+    /// 20261016-144410Z; run 38918223759). Taken for uDeck in front, that panel
+    /// took the keyboard from nobody, and its closing gave it back to nobody.
+    @Test("a panel shown while a click waits for its answer takes the keyboard from the application waiting to come back")
+    func aPanelShownWhileAClickWaits() {
+        typealias Taking = KeyboardHandback.TakesTheKeyboard<String>
+        let table: [(String, String?, Bool, String?, Taking)] = [
+            ("another application in front, as at any panel", "TextEdit", false, nil, .from("TextEdit")),
+            ("nothing in front", nil, false, nil, .from(nil)),
+            ("nothing named in front while TextEdit waits to come back", nil, false, "TextEdit", .from("TextEdit")),
+            ("uDeck in front: a peek becoming a working panel", "uDeck", true, nil, .alreadyUDecks),
+            ("uDeck named in front while TextEdit waits to come back", "uDeck", true, "TextEdit", .from("TextEdit")),
+            ("the waiting application named in front", "TextEdit", false, "TextEdit", .from("TextEdit")),
+            ("a third application named in front, its news on the way", "Finder", false, "TextEdit", .from("Finder")),
+        ]
+        for (what, front, frontIsUDeck, waiting, taking) in table {
+            #expect(
+                KeyboardHandback.takesTheKeyboard(front: front, frontIsUDeck: frontIsUDeck, waiting: waiting) == taking,
+                "\(what)"
+            )
+        }
+    }
+
+    @Test("how far a click is from a window: nothing inside it, the straight distance outside")
+    func distanceFromAClick() {
+        let rect = CGRect(x: 10, y: 10, width: 20, height: 20)
+        #expect(KeyboardHandback.distance(from: CGPoint(x: 15, y: 15), to: rect) == 0)
+        #expect(KeyboardHandback.distance(from: CGPoint(x: 30, y: 30), to: rect) == 0)
+        #expect(KeyboardHandback.distance(from: CGPoint(x: 15, y: 40), to: rect) == 10)
+        #expect(KeyboardHandback.distance(from: CGPoint(x: 0, y: 15), to: rect) == 10)
+        #expect(KeyboardHandback.distance(from: CGPoint(x: 33, y: 34), to: rect) == 5)
+    }
+
+    @Test("an interruption never brings anything back, in front or not, however it closed")
     func anInterruptionNeverRestores() {
         for inFront in [true, false] {
-            #expect(!KeyboardHandback.restoresPreviousApplication(after: .interrupted, uDeckIsInFront: inFront))
+            for closing in [KeyboardHandback.Closing.atThePanel, .byAClickHeard, .byAClickThatBroughtAnotherForward] {
+                #expect(KeyboardHandback.handback(
+                    after: .interrupted, closing: closing, uDeckIsInFront: inFront
+                ) == .leave)
+            }
         }
     }
 }

@@ -149,6 +149,34 @@ public final class PanelController {
     /// actually took it.
     private(set) var didActivateForKeyboard = false
 
+    /// The application from before, waiting to come back after a click past the
+    /// panel that uDeck heard before any news of where it went — unless another
+    /// application comes forward first, and not while something the click opened
+    /// is still on screen (`KeyboardHandback.afterTheClick`).
+    private var pendingHandback: PendingHandback?
+
+    /// The windows on screen when uDeck last took the keyboard, by number: what
+    /// was there before any click that closes the panel
+    /// (`KeyboardHandback.HeardClick.before`).
+    private var windowsBeforeAnyClick: Set<UInt32>?
+
+    private struct PendingHandback {
+        let application: NSRunningApplication
+        let click: KeyboardHandback.HeardClick
+        /// When uDeck let go, on the uptime clock.
+        let since: TimeInterval
+        /// The next reading of the windows on screen.
+        var timer: Timer
+        /// What the click opened at the last reading, by number — so that the
+        /// log says when that changes, not at every reading.
+        var opened: [UInt32] = []
+        /// Whether any reading has found something the click opened.
+        var openedBefore = false
+    }
+
+    /// Where the windows on screen are read from (`WindowsOnScreen`).
+    var readWindowsOnScreen: () -> [KeyboardHandback.Window] = WindowsOnScreen.read
+
     /// Told to whoever needs to react — the model stops polling when nobody is
     /// looking, and refreshes everything when somebody is.
     public var onPhaseChange: ((PanelPhase) -> Void)?
@@ -667,7 +695,12 @@ public final class PanelController {
             DeckLog.panel.debug("a click outside uDeck but not past the panel, so it stays")
             return
         }
-        apply(.closeRequested)
+        // Said, so that the keyboard is not handed back over whatever the click
+        // chose: this road often arrives before the workspace's news of it, while
+        // uDeck still reads as in front, and the handback waits for that news —
+        // and, where the click landed, for whatever it opened to go
+        // (`KeyboardHandback`).
+        apply(.closeRequested, closing: .byAClickHeard, clickAt: location)
     }
 
     /// Whether the pointer is past the panel — the question itself is
@@ -718,6 +751,18 @@ public final class PanelController {
 
     private func handleApplicationActivated(pid: pid_t?) {
         guard let pid else { return }
+
+        // Whoever came forward, the click uDeck let go on chose it, and nothing
+        // is brought back over it — uDeck itself included, coming forward for a
+        // panel shown again.
+        if let pending = pendingHandback {
+            cancelPendingHandback()
+            let after = Self.milliseconds(ProcessInfo.processInfo.systemUptime - pending.since)
+            let name = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "pid \(pid)"
+            DeckLog.panel.debug(
+                "\(name, privacy: .public) came forward \(after, privacy: .public) ms after uDeck let go on a click past the panel, so \(pending.application.localizedName ?? "nothing", privacy: .public) is not brought back"
+            )
+        }
 
         // uDeck activating itself must not collapse uDeck. Without this the
         // panel would retract the instant it took focus to accept a keystroke —
@@ -776,7 +821,9 @@ public final class PanelController {
                 )
             }
         }
-        apply(verdict.event)
+        // A `closeRequested` here is the other road of a click past the panel,
+        // and it is the news that the click brought another application forward.
+        apply(verdict.event, closing: verdict.event == .closeRequested ? .byAClickThatBroughtAnotherForward : .atThePanel)
     }
 
     /// An age as whole milliseconds, for the log.
@@ -807,7 +854,16 @@ public final class PanelController {
 
     // MARK: - Applying state
 
-    private func apply(_ event: PanelEvent) {
+    /// `closing` is the caller saying whether the event is the operator clicking
+    /// somewhere else, and by which of the two roads that click reached uDeck —
+    /// which decides whether, and when, the keyboard goes back to the
+    /// application from before (`KeyboardHandback`); `clickAt` is where that
+    /// click was, when uDeck heard it itself.
+    private func apply(
+        _ event: PanelEvent,
+        closing: KeyboardHandback.Closing = .atThePanel,
+        clickAt point: CGPoint? = nil
+    ) {
         let before = state.phase
         let changed = state.apply(event, collapseOnAppSwitch: settings.collapseOnAppSwitch)
         guard changed else {
@@ -829,7 +885,7 @@ public final class PanelController {
             recognizer.suppressUntilPointerLeaves()
             peekExit.reset()
             exitTimer?.invalidate()
-            releaseKeyboard(after: state.collapseReason)
+            releaseKeyboard(after: state.collapseReason, closing: closing, clickAt: point)
         }
 
         pointer.panelVisible = state.phase.isVisible
@@ -974,6 +1030,18 @@ public final class PanelController {
     /// whether it worked — and only then does the least intrusive thing that
     /// makes typing possible.
     private func takeKeyboard() {
+        // A panel shown again within a click's wait for its answer: uDeck is
+        // taking the keyboard itself, and nothing is to come back over it now —
+        // the application that was waiting comes back when this panel goes
+        // (`KeyboardHandback.takesTheKeyboard`).
+        let waiting = pendingHandback?.application
+        cancelPendingHandback()
+
+        // What is on screen before any click that can close this panel — the
+        // windows a later click past it is to be told apart from
+        // (`KeyboardHandback.HeardClick.before`).
+        windowsBeforeAnyClick = Set(readWindowsOnScreen().map(\.number))
+
         // Whether uDeck is the application in front, asked of the workspace
         // rather than of `NSApp`.
         //
@@ -982,15 +1050,40 @@ public final class PanelController {
         // read `active=true` — so the activation below never ran, the keyboard
         // stayed where it was, and nothing was ever restored on the way out.
         // The same shape of mistake as `isKeyWindow`, in the same place.
+        //
+        // Named in front is not holding the keyboard while a click past the
+        // panel waits for its answer: uDeck has let go, and the workspace goes
+        // on naming it (`KeyboardHandback.takesTheKeyboard`).
         let frontmost = NSWorkspace.shared.frontmostApplication
-        let alreadyInFront = frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+        let taking = KeyboardHandback.takesTheKeyboard(
+            front: frontmost,
+            frontIsUDeck: frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier,
+            waiting: waiting
+        )
+        let alreadyInFront = taking == .alreadyUDecks
 
         // Only while somebody else has it. Taking the keyboard twice — once for
         // the peek and again when the peek becomes a working panel — would
         // otherwise record uDeck as the application to go back to, and going
         // back to yourself is staying.
-        if !alreadyInFront {
-            applicationToRestore = frontmost
+        if case .from(let application) = taking {
+            applicationToRestore = application
+        }
+        if let waiting, !alreadyInFront {
+            DeckLog.panel.debug(
+                "the panel showed while a click past it waited for its answer, so uDeck takes the keyboard from \(self.applicationToRestore?.localizedName ?? "nothing", privacy: .public), which comes back when the panel goes (\(waiting.localizedName ?? "nothing", privacy: .public) was waiting)"
+            )
+            // Out first, or it does not become key. uDeck's `NSApp.deactivate()`
+            // at the let-go, with nothing else coming forward, leaves AppKit
+            // active and naming the panel its key window while the panel says it
+            // is not key — and ordering it front again changes neither. Measured:
+            // the panel the shortcut opened then said `key=false` and Escape
+            // never reached it, 2 of 2 in a Tart guest (20261016-165622Z,
+            // -171102Z) and 12 of 12 on a runner (run 38933545091); ordered out
+            // first, it said `key=true`, Escape closed it and the next key reached
+            // TextEdit, 2 of 2 in a Tart guest (20261016-171102Z, -171905Z) and
+            // 12 of 12 on a runner (run 38938650252).
+            panel.orderOut(nil)
         }
         panel.makeKeyAndOrderFront(nil)
 
@@ -1022,9 +1115,10 @@ public final class PanelController {
     /// that was in front *before* uDeck back over it would be uDeck answering a
     /// choice it was not asked about. The reason for the collapse does not say
     /// that on its own: a click past the panel is a dismissal and a choice at
-    /// once, so whether uDeck is still in front is asked too — see
+    /// once, so whoever closed the panel says whether it was one and by which
+    /// road, and whether uDeck is still in front is asked too — see
     /// `KeyboardHandback`.
-    private func releaseKeyboard(after reason: CollapseReason) {
+    private func releaseKeyboard(after reason: CollapseReason, closing: KeyboardHandback.Closing, clickAt point: CGPoint?) {
         // No `resignKey()` here: `NSWindow` documents it as something the
         // system calls, never the application. Ordering the panel out is what
         // actually gives up key status.
@@ -1037,11 +1131,39 @@ public final class PanelController {
         // reason, and asked before the deactivation below — after it uDeck is
         // not in front by definition.
         let front = NSWorkspace.shared.frontmostApplication
-        let uDeckIsInFront = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier
-        let shouldRestore = KeyboardHandback.restoresPreviousApplication(after: reason, uDeckIsInFront: uDeckIsInFront)
+        let me = ProcessInfo.processInfo.processIdentifier
+        let uDeckIsInFront = front?.processIdentifier == me
+        let handback = KeyboardHandback.handback(after: reason, closing: closing, uDeckIsInFront: uDeckIsInFront)
+        let how = switch closing {
+        case .atThePanel: ""
+        case .byAClickHeard: " by a click past the panel"
+        case .byAClickThatBroughtAnotherForward: " by a click past the panel that brought another application forward"
+        }
+        let wait = Self.milliseconds(KeyboardHandback.answerSeconds)
+        let then = switch handback {
+        case .leave: "leaving it there"
+        case .restore: "bringing back \(previous?.localizedName ?? "nothing")"
+        case .restoreUnlessAnotherComesForward:
+            "bringing back \(previous?.localizedName ?? "nothing") once the click has answered: not if another application comes forward, not while a window it opened is on screen, and in \(wait) ms if neither"
+        }
         DeckLog.panel.debug(
-            "gave the keyboard back after \(reason.rawValue, privacy: .public) with \(front?.localizedName ?? "nothing", privacy: .public) in front, so \(shouldRestore ? "bringing back \(previous?.localizedName ?? "nothing")" : "leaving it there", privacy: .public)"
+            "gave the keyboard back after \(reason.rawValue, privacy: .public)\(how, privacy: .public) with \(front?.localizedName ?? "nothing", privacy: .public) in front, so \(then, privacy: .public)"
         )
+
+        // What was on screen before the click: whatever is on screen later and
+        // was not then, near where the click landed, is what the click opened.
+        // Read when uDeck took the keyboard; only if that reading is missing,
+        // now, before uDeck lets go of anything.
+        let heard: KeyboardHandback.HeardClick? = if handback == .restoreUnlessAnotherComesForward, let previous {
+            KeyboardHandback.HeardClick(
+                point: point ?? NSEvent.mouseLocation,
+                before: windowsBeforeAnyClick ?? Set(readWindowsOnScreen().map(\.number)),
+                uDeck: me,
+                earlier: previous.processIdentifier
+            )
+        } else {
+            nil
+        }
 
         // Let go of the keyboard before handing it anywhere.
         //
@@ -1054,8 +1176,100 @@ public final class PanelController {
         panel.makeFirstResponder(nil)
         NSApp.deactivate()
 
-        guard shouldRestore else { return }
-        previous?.activate()
+        guard let previous else { return }
+        switch handback {
+        case .leave:
+            return
+        case .restore:
+            previous.activate()
+        case .restoreUnlessAnotherComesForward:
+            // Measured on Tart: after a click on the Dock nothing comes forward,
+            // and without this the next key reached nobody (`KeyboardHandback`).
+            guard let heard else { return }
+            cancelPendingHandback()
+            pendingHandback = PendingHandback(
+                application: previous,
+                click: heard,
+                since: ProcessInfo.processInfo.systemUptime,
+                timer: lookAtTheClick(after: KeyboardHandback.windowsPollSeconds)
+            )
+        }
+    }
+
+    private func lookAtTheClick(after seconds: TimeInterval) -> Timer {
+        Self.commonModeTimer(every: seconds, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handBackAfterTheClick() }
+        }
+    }
+
+    /// What the click uDeck let go on has answered so far, read every
+    /// `KeyboardHandback.windowsPollSeconds` until it is decided: an application
+    /// coming forward ends it (`handleApplicationActivated`), and otherwise the
+    /// application from before comes back, as it does after Escape — once
+    /// nothing the click opened is on screen, and once the click has had
+    /// `KeyboardHandback.answerSeconds` to open anything at all. A menu of the
+    /// Dock, or another application's panel that takes no front, is the click's
+    /// answer, and bringing an application forward over it puts it away.
+    ///
+    /// The workspace is asked each time too, in case its news is still on its
+    /// way: another application named in front stays there. The application
+    /// from before, named in front, is brought back all the same: after a click
+    /// on the Dock System Events named TextEdit in front while the next key
+    /// reached nobody.
+    private func handBackAfterTheClick() {
+        guard var pending = pendingHandback else { return }
+        let front = NSWorkspace.shared.frontmostApplication
+        let me = ProcessInfo.processInfo.processIdentifier
+        let waited = ProcessInfo.processInfo.systemUptime - pending.since
+        let ms = Self.milliseconds(waited)
+        let earlier = pending.application.localizedName ?? "nothing"
+        if let front, front.processIdentifier != me, front.processIdentifier != pending.application.processIdentifier {
+            cancelPendingHandback()
+            DeckLog.panel.debug(
+                "no news of the click past the panel in \(ms, privacy: .public) ms, but \(front.localizedName ?? "another application", privacy: .public) is in front, so leaving it there"
+            )
+            return
+        }
+        let opened = KeyboardHandback.opened(by: pending.click, among: readWindowsOnScreen())
+        switch KeyboardHandback.afterTheClick(waited: waited, opened: opened, openedBefore: pending.openedBefore) {
+        case .waitForAnAnswer:
+            pending.timer = lookAtTheClick(after: KeyboardHandback.windowsPollSeconds)
+            pendingHandback = pending
+        case .waitForWhatItOpened:
+            let numbers = opened.map(\.number)
+            if numbers != pending.opened {
+                DeckLog.panel.debug(
+                    "\(ms, privacy: .public) ms after the click past the panel no application has come forward, and what the click opened is on screen — \(Self.describe(opened), privacy: .public) — so \(earlier, privacy: .public) waits for it to go"
+                )
+            }
+            pending.opened = numbers
+            pending.openedBefore = true
+            pending.timer = lookAtTheClick(after: KeyboardHandback.windowsPollSeconds)
+            pendingHandback = pending
+        case .restore:
+            cancelPendingHandback()
+            let opening = pending.openedBefore
+                ? "and what the click opened has gone"
+                : "and the click opened nothing that is on screen"
+            DeckLog.panel.debug(
+                "no application came forward in \(ms, privacy: .public) ms after the click past the panel, \(opening, privacy: .public), with \(front?.localizedName ?? "nothing", privacy: .public) in front, so bringing back \(earlier, privacy: .public)"
+            )
+            pending.application.activate()
+        }
+    }
+
+    /// Windows as the log names them: whose, how high, and where — the window
+    /// server's own numbers, in AppKit's coordinates.
+    private static func describe(_ windows: [KeyboardHandback.Window]) -> String {
+        windows.map { window in
+            let b = window.bounds
+            return "window \(window.number) of \(window.ownerName) (pid \(window.ownerPID)) at level \(window.layer), \(Int(b.minX)),\(Int(b.minY)) \(Int(b.width))x\(Int(b.height))"
+        }.joined(separator: "; ")
+    }
+
+    private func cancelPendingHandback() {
+        pendingHandback?.timer.invalidate()
+        pendingHandback = nil
     }
 
     // MARK: - Introspection, for the smoke test and the settings screen

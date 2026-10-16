@@ -83,6 +83,12 @@ CARD_SECONDS = 30
 # a re-hash. Fifteen is several times what that takes.
 NOTICED_SECONDS = 15
 
+# From the card first asking to its standing still (`_once_it_stands_still`): ten
+# readings half a second apart, its own time rather than what the wait for the card
+# left over. Chosen, not measured; every card of run 38320594808 (18) came to rest
+# within the shared deadline it had before.
+CARD_SETTLES_SECONDS = 5
+
 # How long uDeck with the catalogue switched off is listened to (the table's own
 # two minutes).
 SILENCE_SECONDS = 120
@@ -3410,11 +3416,28 @@ def _expect_the_row_says(scene, plugin, source, label):
 
 
 def _the_card_asks(scene, plugin, label):
-    """The panel opened, and `plugin`'s card read once it asks for consent: its controls by identifier, and its texts."""
+    """The panel opened, and `plugin`'s card read once it asks for consent and stands still: its controls by identifier, and its texts.
+
+    Still, because the checks click **Allow** and **Decline** where this read
+    them, and the panel grows from the shortcut on a spring: a card read while
+    it grows is read where it is passing through (`ui._settled`, the same rule
+    for one control). Measured on GitHub runners on 2026-10-12, once the lab's
+    helper stopped walking into the settings window's title-bar buttons, the
+    readings that failed read the card 26 to 36 points right of where it came to
+    rest, and the click meant for the 66-point **Decline** landed past its edge:
+    4 readings of 7 of `plugins.unverified-asks-even-for-nothing` (runs
+    38317811235, 38318963221), against 0 of 6 on the tree before (38319657054),
+    where the card was read within 11 points of rest. Why the panel was still
+    moving later than before is not measured; the likeliest difference is the
+    three `ThemeWidgetControlViewService` those walks used to start in uDeck
+    first (README, "The accessibility helper"). A card still moving after
+    `CARD_SETTLES_SECONDS` of its own is not clicked at all.
+    """
     machine = scene.machine
     _open_the_panel(machine, f"opening the panel: {label}")
     allow = f"consent.{plugin}.allow"
     dump, texts = _wait_for_the_card(machine, lambda found, texts: allow in found, CARD_SECONDS + NOTICED_SECONDS)
+    dump, texts = _once_it_stands_still(machine, dump, texts, allow, machine.clock() + CARD_SETTLES_SECONDS)
     machine.screenshot(scene.check_dir, f"{plugin} asks: {label}")
     _keep(scene.check_dir, f"card-{label.replace(' ', '-')}.txt", "\n".join(texts) + "\n\n" + dump)
     found = {row.identifier: row for row in ui.controls(dump) if row.identifier}
@@ -3758,6 +3781,36 @@ def _put_the_panel_away(machine, label):
 
 def _panel_texts(machine, step):
     return ui.static_texts(machine, step, ui.PANEL)
+
+
+def _once_it_stands_still(machine, dump, texts, identifier, deadline):
+    """The panel read again, half a second apart, until `identifier` stands where it stood.
+
+    `ui._settled`'s rule, for a reading of the whole card rather than of one
+    control: the dump and the texts that come back are one reading, taken with
+    the control where the one before had it. Unlike `ui._settled` it does not
+    take a card still moving at the deadline where it was last: the checks click
+    Allow and Decline where this read them, and a click that misses becomes a
+    sentence about uDeck ("Decline … left it switched on"). That is the lab not
+    knowing where the card is, so "could not check".
+    """
+
+    def place(reading):
+        found = ui.element(reading, identifier)
+        return None if found is None else (found.x, found.y, found.width, found.height)
+
+    while machine.clock() < deadline:
+        machine.sleep(ui.SETTLED_SECONDS)
+        again = ui.identified(machine, "reading the panel again", ui.PANEL, depth=ui.MAX_DEPTH)
+        again_texts = _panel_texts(machine, "reading the panel's texts again")
+        if place(again) is not None and place(again) == place(dump):
+            return again, again_texts
+        dump, texts = again, again_texts
+    raise LabError(
+        f"waiting for {identifier} to stand still",
+        f"the card was still moving when the time for it ran out — {identifier} last at {place(dump)} — so "
+        "where Allow and Decline are, which the check clicks, is not known",
+    )
 
 
 def _read_the_card(scene, plugin, label, ready, waited_for="it had run"):

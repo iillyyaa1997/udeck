@@ -303,8 +303,36 @@ def test_where_the_pointer_went_after_every_report_of_the_push_is_printed(monkey
     code, said, _ = run(monkeypatch, capsys, [0, -60, 0, 2, 6, -2, 0, 3, 1], ROCKING, start=PLACED)
     assert code == 0
     assert [entry[:2] for entry in said["track"]] == [list(at) for at in ROCKING]
-    # One clock reading when the push begins, then one per report.
-    assert [entry[2] for entry in said["track"]] == [0.01, 0.02, 0.03, 0.04, 0.05, 0.06]
+    # One clock reading when the push begins, then two per report: as it is
+    # posted (`posted`), and once the pointer has been read back after it.
+    assert [entry[2] for entry in said["track"]] == [0.02, 0.04, 0.06, 0.08, 0.1, 0.12]
+    assert said["posted"] == [0.01, 0.03, 0.05, 0.07, 0.09, 0.11]
+    assert said["arrived"] is None, "no throw, so nothing arrived"
 
     thrown = run(monkeypatch, capsys, [30, -60, 0, 2, 5, -12, 0, 0, 0], DESCENT)[1]
     assert len(thrown["track"]) == 5, "the throw is not part of the track, only the push after it"
+
+
+def test_when_the_throw_arrived_and_each_report_of_the_push_was_posted_is_printed(monkeypatch, capsys):
+    """The push at the edge is a race with the dwell, which starts when the throw's
+    last report arrives; on a GitHub runner the sleep after that report took up to
+    46 ms (run 38288544383). So the script says when, on the push's own clock, the
+    arriving report was posted — before the push began, so negative — and when
+    each report of the push was, and `panel.Push` reads the race off them."""
+    ticks = iter(5 + float(n) / 1000 for n in range(1000))
+    monkeypatch.setattr(push_pointer.time, "monotonic", lambda: next(ticks))
+    code, said, kernel = run(monkeypatch, capsys, [30, -60, 0, 2, 5, -12, 0, 0, 0], DESCENT)
+    assert code == 0
+    assert said["thrown"] == 12 and kernel.posted == [-60] * 12 + [-12] * 5
+    # Twelve throw reports read the clock as they are posted (5.000 to 5.011), the
+    # push begins at 5.012, and each of its reports reads it twice.
+    assert said["arrived"] == -0.001
+    assert said["posted"] == [0.001, 0.003, 0.005, 0.007, 0.009]
+    assert [entry[2] for entry in said["track"]] == [0.002, 0.004, 0.006, 0.008, 0.01]
+
+
+def test_a_throw_that_never_arrived_says_so_by_leaving_the_arrival_out(monkeypatch, capsys):
+    code, said, _ = run(monkeypatch, capsys, [3, -60, 0, 2, 5, -12, 0, 0, 0], DESCENT)
+    assert code == 0
+    assert said["pinned"] is False and said["arrived"] is None
+    assert len(said["posted"]) == 5

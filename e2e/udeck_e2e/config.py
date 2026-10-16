@@ -341,6 +341,14 @@ INSIDE_THE_STRIP_Y = 5
 # against GestureTuning.swift.
 EDGE_PUSH_DISTANCE = 24.0
 EDGE_PUSH_WINDOW_SECONDS = 0.25
+# uDeck's dwell (`dwellDuration`): how long the pointer rests in the strip before the
+# panel opens by it, and so how soon after the throw arrives the push at the edge has
+# to have carried the threshold (`panel.Push`). Held against GestureTuning.swift.
+DWELL_DURATION_SECONDS = 0.06
+# One frame of the display. On a GitHub runner the pointer's reports reach uDeck one
+# event a frame (`check_panel.REPORTS_ONE_BY_ONE`), so a report may be heard a frame
+# after it was posted; `panel.Push` leaves the dwell that frame.
+FRAME_SECONDS = 1 / 60
 
 # How many times `EDGE_PUSH_DISTANCE` the wobble's upward travel inside the strip
 # has to reach within one window before "it was not a push" means anything. Two,
@@ -383,6 +391,11 @@ WOBBLE_SIDEWAYS = 2
 # the travel the wobble actually made rather than trusting this.
 WOBBLE_STEPS = 100
 WOBBLE_PAUSE_SECONDS = THROW_PAUSE_SECONDS
+# All of the above is a Tart guest's. On a GitHub runner neither wobble can check: the
+# sleep after each report took 10 ms there, and with the pace made right by the clock
+# the reports still reached uDeck folded, one event a frame, the ups and downs
+# cancelled inside them (`check_panel.REPORTS_ONE_BY_ONE`; README, "Upward movement
+# short of the edge").
 
 # Where the wobble starts across: twelve of its reports left of the strip,
 # x 1140. Outside it, for the reason above. Twelve is not a threshold of

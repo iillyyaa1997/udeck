@@ -292,6 +292,21 @@ element lists. A SwiftUI button lists `AXAttributedDescription` and not
 read something new. Values become text as AppleScript made them: `1.0` for a
 whole real, twelve significant digits otherwise, places cut to whole points.
 
+**It does not go inside the window's own title-bar buttons**, and that is the
+one place it reads less than System Events did. Asking the full-screen button
+for its children makes uDeck start three of AppKit's
+`ThemeWidgetControlViewService` for itself and keep them until it exits —
+measured in a macOS 27 guest on 2026-10-12, counting them after every step on a
+uDeck started afresh (runs 20261012-180909Z and -181746Z): none for the window's
+own children, three the moment a walk reached depth 2, whether the helper asked
+every attribute at once, only the listed ones, or one at a time, and three when
+System Events asked that button for its `UI elements`; none at any depth with
+the buttons listed and not entered (`windowButtons` in `guest/ax.swift`). No
+check reads the title bar, and the comparison with System Events already left
+what is inside those buttons out (`ax.without_the_title_bar`). It mattered to
+the login checks, which read what macOS writes as uDeck exits ("Open at Login",
+below).
+
 **What lets it read the screen over SSH** is the golden image's own grant, not
 anything about the helper: the guest's TCC database grants Accessibility,
 AppleEvents, PostEvent and ScreenCapture to `/usr/libexec/sshd-keygen-wrapper`
@@ -325,7 +340,15 @@ update (run 38213314297, plugins.permissions-change-only-offers), and a check
 that asks about a version now waits for that version's card
 (`_allow_and_read_the_card`); TextEdit was in front a moment before it had a
 window, and the lab now waits for the window (`panel.bring_forward`). None of
-them changed what a check asserts.
+them changed what a check asserts. One more came out once the helper stopped
+going inside the title-bar buttons (below): the consent card a plugin check
+clicks **Allow** and **Decline** on was read while the panel was still growing,
+26 to 36 points right of where it came to rest, and the click meant for the
+66-point **Decline** landed past it — 4 readings of 7 of
+`plugins.unverified-asks-even-for-nothing` on runners (runs 38317811235,
+38318963221), 0 of 6 on the tree before (38319657054). The card is now read
+again until it stands still (`_the_card_asks`), as one control always was
+(`ui._settled`).
 
 ## On a GitHub runner (`--target here`)
 
@@ -394,7 +417,12 @@ so on a machine one of them has switched it on the other's click switches it off
 target**: listed with what it needs, counted in the summary, and neither a pass
 nor a failure. It leaves the exit code to the checks that ran — a run whose
 other checks all passed exits 0, and says what it did not run — and a run of
-nothing else has checked nothing and exits 2.
+nothing else has checked nothing and exits 2. A check that runs on a runner and
+cannot make there what it asks about says so as ⚠️ **could not check**, which
+does set the exit code: the two wobbles (`panel.a-wobble-short-of-the-edge`,
+`panel.the-same-wobble-at-the-edge`), whose reports reach uDeck folded on a
+runner, one event a frame — "Upward movement short of the edge" below — so the
+panel job ends 2 on every runner until the lab can post a wobble uDeck hears.
 
 **`.github/workflows/lab.yml`** runs the whole lab this way on every push to a
 branch named `lab/<anything>`, and from the Actions tab (workflow_dispatch:
@@ -1062,6 +1090,29 @@ Before it asks uDeck anything, the check reads back where the pointer ended up.
 A push against an edge the pointer never reached would prove nothing, and that
 is a lab failure — "could not check" — not a verdict about uDeck.
 
+**And a push made after the dwell was owed proves nothing either.** The push is a
+race with the dwell, which uDeck owes 0.06 s after the throw's last report leaves
+the pointer at the edge, and the lab runs one side of it: at the least uDeck may
+make of the lab's reports (half a point a unit, below), the fourth of the five
+carries the threshold. In a Tart guest that came 28 ms after the arrival
+(20261016-050548Z).
+On a GitHub runner `time.sleep` stretches every pause — the 2 ms after the
+arriving report to 10 ms at the median and up to 46 (run 38288544383), the 5 ms
+between the push's reports to 9 to 28 (8 pushes, runs 38321541276, 38843591803)
+— and `panel.push` was red once in the whole lab on a runner, the panel opening
+by the dwell, with the push's reports read back 0.018, 0.036, 0.061 and 0.074 s
+into it (38321541276). How long after the arrival that push began was not written
+down then. The script now says when the arriving report and each report of the
+push were posted (`arrived`, `posted`), and a panel opened by the dwell is red
+only when the report that carries the threshold was posted a frame short of the
+dwell or sooner after the arrival — on a runner the reports reach uDeck one event
+a frame — and "could not check" otherwise (`panel.Push`). A panel opened by the
+push is a pass whatever the pace. The half a point is the cautious reading: in
+12 pushes on runners with the timings written down (run 38849366574) the push
+began 6 to 13 ms after the arrival and its fourth report came 44 to 87 ms after
+it, past the dwell's 60 in 10 of them — and the panel opened by the push 12
+times of 12.
+
 `panel.middle-of-the-screen` is their control: the pointer held in the middle of
 the screen and pushed at there, where neither the passage of time nor an upward
 shove means anything. And because "nothing happened" is free when nothing is
@@ -1163,6 +1214,44 @@ ships kept in `.build/e2e/kept/` — `20260926-211629Z`, `-220316Z`, `-225415Z`,
 one window was 76, 78, 76, 82 and 82 points short of the edge, against the 48
 asked of it, and 52, 62, 60, 68 and 58 at it, with the dwell and the push every
 time.
+
+**On a GitHub runner neither wobble can check** (⚠️, `REPORTS_ONE_BY_ONE` in
+the checks, said before either does anything), and not for want of trying. At
+first both could not check there for another reason, the
+wobble making 28 to 42 points of upward travel inside a window against the 48
+asked: `time.sleep(0.002)` after each report took 10 ms at the median on a
+runner (2 to 46 ms, three runners, run 38288544383) against 2.6 ms in a Tart
+guest (20261012-181746Z), so a hundred reports took 0.87 to 0.91 s on a runner
+and 0.30 s in the guest; posting one took 0.1 to 0.4 ms at the median and reading
+the pointer back under 0.05 ms on both, and raising the script's QoS to
+user-interactive changed nothing on the runner. Holding each pause
+by the clock instead of sleeping brought the runner to the guest's pace — a
+hundred reports in 0.22 to 0.32 s, 76 to 88 points of travel, 12 runs of each
+check (run 38291813812) — and then the wobble short of the edge passed 12 times
+of 12 and the one at the edge *failed* 12 times of 12, the panel opening by the
+dwell. A build of uDeck that logged every movement it heard (run 38293532813,
+never committed) said why, and it is not the pace: on a runner the hundred
+reports reached uDeck as 16 to 19 events, 16 to 17 ms apart — one a frame — each
+the sum of the reports since the one before, so the ups and the downs cancelled
+inside them and uDeck heard 20 to 32 points of upward movement while pinned out
+of the 84 to 88 the script posted. So on a runner the movement uDeck hears is not
+the wobble: the edge half fails over a working push path, and the half short of
+the edge would pass over a uDeck that took any upward movement for a push, since
+it heard next to none. Posted a report a frame instead, a wobble carries at most
+seven ups of two points in a window, far short of what it asks. In a Tart guest
+the same build, posting at the pace it always has, heard them one by one — 108
+and 83 events for the two wobbles' hundred reports, 2.9 ms apart at the median,
+two points up or down each — and the wobbles opened the panel by the dwell and
+by the push (20261012-192542Z): which is what the measurements above rest on.
+The pause stayed a sleep: the posting pace is not what was missing. A faster
+throw on a runner opened the panel by the push once in eighteen throws after the
+change (runs 38291813812, 38293532813), with nothing moving after it; posted at
+that pace again by a build of uDeck that logged every movement it heard, 24
+throws (run 38849385683) opened by the dwell 23 times and could not check once
+(the script read the pointer back one report late and sent a report against the
+edge), uDeck hearing each throw as one event or two in the 20 whose logs were
+kept. The one push in 42 at
+that pace was not seen again, and why it came is not known.
 
 The travel is asked only of a wobble that was not taken for a push. Once the
 push opens the panel the pointer does not always keep following the reports — in
@@ -1335,7 +1424,156 @@ peek — on its own only what `PanelState` does after `closeRequested`, and wort
 asking beside the next check, where the same held panel interrupted instead has
 to come back whole.
 
-`panel.a-switch-with-no-click` is that check. The panel is held, the pointer is
+**On a GitHub runner this check found uDeck wrong, 12 times of 12.** In a Tart
+guest the workspace's news of the Finder reaches uDeck before its own click
+monitor does; on a runner the monitor came first every time, the news 53 to 141
+ms behind it (uDeck's handback line to its `otherAppActivated` line), and
+uDeck — still reading as in front when the monitor closed the panel — brought
+TextEdit back over the Finder the click had chosen (runs
+38243017720 and 38288544383; `gave the keyboard back after dismissed with uDeck
+in front, so bringing back TextEdit`). It was not a race in the lab: whether
+uDeck is still in front was standing in for "the click has already moved the
+keyboard", and it is that only when the news wins. What a person sees, wherever
+the monitor wins, is a click on another window that puts the panel away and
+brings back the application from before it, over the window he clicked. The
+first fix had a click past the panel bring nothing back, by either road, and
+this check passed on a runner 12 times of 12 after it, and
+`panel.a-click-past-a-restored-panel` beside it 12 of 12 (run 38291813812).
+
+**That fix was wrong the other way, and only probes saw it.** A click past a
+panel being worked in that brings no application forward at all — on the Dock's
+separator or its Downloads stack, in a Tart guest — left the keyboard with
+nobody: uDeck let go with itself in front, no news came, and the next key
+reached no document, 4 clicks of 4, though System Events named TextEdit in front
+throughout (20261016-055254Z, probe.dock-gap and probe.dock-stack, each twice).
+The rule before that fix would have brought TextEdit back there, as it does
+after Escape — read off the code, not run on the Dock. The second fix had
+uDeck's own click monitor bring the application from before back half a second
+after the click unless another application came forward by then, and that put
+away what the click had opened: the Downloads stack was open after the click on
+the first fix's build and closed on the second's, 2 readings of 2 each
+(20261016-055254Z and -060209Z, the screenshots after the click). An application
+coming forward closes a stack of the Dock in most readings, not in all: in
+probes that waited three seconds instead, the stack was open at 2 s, TextEdit
+came back at 3.0 s, and the stack was gone by 5 s in 3 readings of 4
+(20261016-141357Z and -142347Z).
+
+**So the click monitor's road now waits for the click's answer**
+(`KeyboardHandback`). The workspace's news of the click is the click having
+chosen, and brings nothing back. The monitor says only that a click was heard,
+and the click has two seconds to answer: another application coming forward ends
+the wait and leaves that application in front, and a window the click opened —
+another process's, not on screen when uDeck last took the keyboard, within 100
+points of the click — holds the application from before back until it has gone.
+A click that does neither brings it back after the two seconds. uDeck reads the
+windows from the window server every 100 ms until it is decided, and the owner,
+level and bounds it reads need no permission: it read them in a Tart guest and
+on a runner without Screen Recording — TextEdit's window title, which the window
+server withholds without it, came back empty (20261016-140156Z, run
+38915483520). What it finds is in its log (`what the click opened is on screen —
+window 40 of DockHelper (pid 963) at level 101, …`). The Swift tests "a click
+heard before its news waits for its answer before bringing anything back", "what
+a click opened is another process's window that was not there before, near where
+it landed" and "the click has an answer: a window it opened holds the
+application from before until it goes" hold the rule; nine mutants of it fail
+them.
+
+**A panel shown again while the click waits** — by the shortcut, measured;
+the gesture takes the same path in the code and was not run — takes the keyboard from the application waiting to come back, and gives it
+back to that application when it goes (`KeyboardHandback.takesTheKeyboard`).
+The workspace goes on naming uDeck in front while the click waits, and a uDeck
+that read that as already having the keyboard took it from nobody: on the build
+before, the shortcut pressed under a second after a click on the Dock's
+separator opened the panel with `took the keyboard: key=false … activated=false`,
+Escape did not reach it, and the key after it reached no document, 2 probes of
+2 in a Tart guest (20261016-163356Z). Taking it from the waiting application
+was not enough alone: uDeck's own `NSApp.deactivate()` at the let-go, with
+nothing else coming forward, leaves AppKit naming the panel its key window
+while the panel is not key, and the panel shown again said `key=false` — the
+shortcut pressed again still closed it and TextEdit had the next key, 12 of 12
+on a runner, but Escape never reached it, 12 of 12 (run 38933545091), and 2 of
+2 in a Tart guest (20261016-165622Z, -171102Z). Ordered out before it is made
+key, the panel shown again is key: Escape closed it and TextEdit had the next
+key, 12 of 12 on a runner (run 38938650252) and 2 of 2 in a Tart guest
+(20261016-171102Z, -171905Z), and so did the shortcut pressed again, 12 of 12
+and 1 of 1 (-171905Z). These are probes
+(`probe.reopen-escape`, `probe.reopen-hotkey`, on throwaway branches), not
+checks. The Swift test "a panel shown while a click waits for its answer takes
+the keyboard from the application waiting to come back" holds which application
+that is; three mutants of it fail it. Nothing but those probes holds the
+ordering out.
+
+What the probes found the window server shows, in a Tart guest and on a runner
+(scratch probes, not checks): the Dock's own window covers the whole screen at
+level 20 before any click — 2560×1440 in the guest, 1920×1080 on the runner — so
+"a window above the ordinary level under the click" is the Dock itself after
+every click on it. A right click on the Finder's icon in the Dock opens a menu
+that is a window of its own, DockHelper's at level 101 just above the icon, with
+a highlight at level 3 over the icon: it came 551 to 1353 ms after the click on
+the first Dock menu of a fresh machine, and 101 to 255 ms after it on a later
+one (20261016-140156Z, -141357Z, -142347Z, -144410Z; runs 38915483520,
+38918223759). A stack opens no window and changes none: its "Open in Finder"
+when the folder is empty, a fan of five files and a fan of forty are drawn
+inside the Dock's own window, which kept every key the window server gives —
+level, alpha, bounds, memory — while the stack was open (20261016-143757Z).
+Nothing else uDeck can read without a permission changed with it either, in a
+diagnostic build in a Tart guest (20261016-164137Z): the workspace sent no
+notification, the Dock stayed an inactive application without the menu bar,
+the menu bar stayed TextEdit's, and of the distributed notifications the two
+HIToolbox sends when a menu is tracked came with the Dock's menu and not with a
+stack. uDeck's observer of every distributed notification added nothing —
+those two came once each, not twice — so it says nothing either way. None of
+the sources checked without a permission — the workspace, the Dock's
+activation, the menu bar's owner, HIToolbox's named notifications — told a
+stack from nothing; distributed notifications by other names were not checked.
+So uDeck brings the application from before back after the two seconds with
+the stack on screen. The window server's own windows are not
+read as the click's: on a runner its `StatusIndicator` by the clock came and
+went every few seconds while the lab recorded the screen (run 38915483520).
+
+Measured with this rule, Dock clicks past a panel being worked in, TextEdit
+before it (`probe.dock-*`, screenshots 2 s and 5 s after the click; "open" is
+the icon's square in a screenshot differing from the one before the click by 32
+to 90 levels on average — the chevron of an open stack, the menu's highlight —
+against 0.6 to 1.2 for a closed one, and a few of each were looked at):
+
+- **The Dock's menu stays open until Escape**, then TextEdit comes back and has
+  the next key: in a Tart guest 2 of 2, open in both screenshots, the menu seen
+  101 and 848 ms after the click and TextEdit back 7.5 and 8.7 s after it, once
+  Escape had closed the menu (20261016-144410Z); on a runner 12 of 12, open in
+  both screenshots, seen 101 to 938 ms after the click, TextEdit back 6.2 to
+  7.1 s after it (run 38918223759).
+- **A click on the separator** brings TextEdit back 2.04 to 2.06 s after the
+  click, and the next key reaches its document: 1 of 1 in a Tart guest, 12 of 12
+  on a runner.
+- **A stack does not stay open.** TextEdit comes back 2.04 to 2.09 s after the
+  click, and the stack was still on screen in the 5 s screenshot in 1 of the 2
+  Tart readings with this rule and 5 of the 24 runner readings (the empty
+  Downloads 1 of 12, five files 4 of 12); in the 2 s screenshot, taken as
+  TextEdit was coming back, it was open in 2 of 2 and 22 of 24. Escape closed
+  any stack still open, and the next key reached TextEdit's document every
+  time.
+
+The click past the panel onto the desktop is unchanged by it: in a Tart guest
+the news came 34 ms after the click, first; on a runner the monitor came first
+12 clicks of 12, and the Finder stayed in front 12 of 12 — its news ended the
+wait 72 to 159 ms after uDeck let go in 11, and in the twelfth the workspace
+already named the Finder at uDeck's first reading, 102 ms after it (run
+38918228585). `panel.a-click-past-a-restored-panel`,
+`panel.a-switch-with-no-click`, `panel.escape` and `panel.the-key-after-escape`
+passed there 12 of 12 each, and all five in a Tart guest (20261016-144410Z).
+
+A click on the menu bar past the panel is not that case, though it looks like
+one. An empty spot of it and its clock both bring forward the application whose
+menu bar it is, TextEdit here: uDeck heard of it 3 to 4 ms after the click,
+closed the panel by that news and left TextEdit in front, on the build before
+the second fix and on the second fix's (20261016-045136Z and -060209Z, probes
+rather than checks). TextEdit had the next key every time: "ax" after the menu
+bar and "Ax" after the clock in -045136Z, "ax" after the menu bar in -060209Z.
+This build takes the same road on that news and was not run there.
+
+`panel.a-switch-with-no-click` is the next check, the held panel interrupted
+instead. The panel is held, the pointer is
 left past it — exactly where a click that dismissed it would have been — and the
 Finder is brought forward over SSH with `open -a` and no click at all. The
 panel has to close on `otherAppActivated` and come back `open` at the next
@@ -1397,11 +1635,11 @@ interrupts a held panel the same way, which leaves the Finder in front, shows
 the panel again — restored straight to `open`, never clicked — and clicks past
 it onto the desktop, the Finder's, already in front. Nothing comes forward, the
 monitor is the only messenger, and a uDeck that had lost it never closes the
-panel: `panel.a-click-past-the-panel` cannot see that, because there the
-workspace's news wins the race. That the monitor really was alone is checked
-rather than assumed — if uDeck says the workspace told it anything in the two
-seconds after the click, the check says it could not isolate the monitor instead
-of passing.
+panel: `panel.a-click-past-the-panel` cannot see that, because there, in a Tart
+guest, the workspace's news wins the race. That the monitor really was alone is
+checked rather than assumed — if uDeck says the workspace told it anything in
+the two seconds after the click, the check says it could not isolate the monitor
+instead of passing.
 
 **Both of those came out of the same click meaning two different things on
 different days.** Which road wins is decided by whether the click brings an
@@ -1411,7 +1649,9 @@ the Finder was not already in front — after a peek had been clicked into, and
 after a panel restored over TextEdit alike — and none at all when it was.
 `ApplicationSwitch` in `UDeckCore` now reads the news rather than taking it at
 face value, so both roads mean the same dismissal, and these two checks hold
-each road down from the outside.
+each road down from the outside. On a GitHub runner the monitor won even when the
+click brought the Finder forward (above), which is where the two roads turned
+out to hand the keyboard back differently.
 
 `panel.escape` presses a key, which is the lab's only action with no
 coordinates, and asks three things of it: `peek -> collapsed on escape`, that
@@ -1520,12 +1760,37 @@ Measured on 2026-09-23: that line arrived on each of five fresh machines, in the
 `panel` category, which is the window the phases come in too — three machines in
 `.build/e2e/20260923-212036Z` and two in `-212549Z`.
 
+**A window that missed uDeck starting cannot say what uDeck holds.** uDeck's
+first line as it starts is its first read of the plugins folder, in the same
+millisecond as what became of its shortcut — 17 of the 18 windows of these
+checks kept on Tart and on runners since 2026-10-12 begin with the two
+(`panel.launched_in_the_window`). The eighteenth, on a runner, began with
+`idle: outsideStrip` some 130 ms into a uDeck the check had started after
+opening it, held neither line, and the check said uDeck held no shortcut
+(`panel.the-hotkey-dies-with-udeck`, run 38321541276; it passed in the 8 other
+readings on runners, 6 of them in 38843591803). So when the window holds
+nothing uDeck said of its shortcut and not its start either, the check could
+not check, and it reads the ten seconds before the window into
+`before-the-window.log` and says whether uDeck's start is there. The first time
+it asked, on a runner (run 38849366574, `panel.the-hotkey`), it was: the window
+was marked 04:22:31 before uDeck was started, and uDeck's first two lines were
+stamped 04:22:30.931 and .932. The mark is the guest's `date` to the second, and
+the log's own times ran behind it by more than the launch took, so a start in
+the first fraction of the mark's second was filed before the window. The checks
+that start uDeck inside their window now wait a second after the mark before
+they launch it (`_launch_inside_the_window`): before that, the window of
+`panel.the-hotkey`, `-closes-what-the-gesture-opened` or `-dies-with-udeck`
+missed uDeck's start 2 times in 51 readings on runners, and after it 0 times in
+72 (run 38852770561, each of the 72 opening on uDeck's first read of the
+plugins folder). A uDeck that started inside the window and said nothing of its
+shortcut, or said it was refused, is still red.
+
 It also **parks the pointer before uDeck starts**, and so do the other four. A
 pointer left in the strip by whatever ran before opens the panel by the gesture
 in a fraction of a second, and on a machine shared between checks (`--vm
 per-group`, `per-run`) that reveal lands between the launch and the mark, where
 no read here would ever see it — leaving a shortcut check pressing a chord at a
-panel that was already up. Park, mark, launch, in all five.
+panel that was already up. Park, mark, a second's wait, launch, in all five.
 
 What `panel.the-hotkey` does **not** ask is where the keyboard went: it presses
 the chord and reads two phases, types nothing and reads no document, so a uDeck
@@ -1664,6 +1929,104 @@ build that answered any hot key at all behaves here exactly like this one. What
 used to be listed beside it — the shortcut being registered again when the
 operator changes it (`PanelController.settingsChanged`) — is now
 `settings.the-shortcut-changes-at-once-and-survives`, below.
+
+### Open at Login
+
+Four checks, all of them on a machine of their own (`login.registers` and
+`login.survives-an-update` need one Open at Login was never switched on in, the
+other two a restart, so none of them runs on a GitHub runner).
+`login.registers` switches it on and reads the system's database for a record
+naming this copy; `login.survives-a-restart` switches it on, quits uDeck, leaves
+the machine alone for 30 s, restarts it and waits for uDeck to come back;
+`login.off-stays-off` switches it on and off again and restarts, and uDeck must
+not come back; `login.survives-an-update` switches it on and lets uDeck update
+itself. What the record *is* — enabled, the same row, naming this copy — is read
+in the Background Task Management database (`sfltool dumpbtm`). What was *done*
+with it is read where macOS writes it down, in the guest's unified log
+(`login.Witnesses`), and two things are read there:
+
+- **uDeck registered itself again**: `backgroundtaskmanagementd` writing
+  `registerLaunchItem: pid=<uDeck's>, …, type=app` after the switch's own. The
+  switch writes exactly one; switching it off writes `unregisterLaunchItem`; an
+  update and a restart write none. The switch's own has to be in the log, or the
+  log's silence after it means nothing and the check could not check. That the
+  line comes when uDeck does register again was measured, not assumed: a build
+  of uDeck that called `SMAppService.mainApp.register()` at every launch while
+  switched on (never committed) made `login.survives-a-restart` red — the record
+  opened it as pid 436 and `registerLaunchItem: pid=436` followed 0.4 s later
+  (2026-10-16, run 20261016-041921Z).
+- **The record opened uDeck at login**: after the boot, `loginwindow`'s login
+  items launcher `LaunchItemsInSharedFileListRef | performAutolaunch, launching:
+  /Applications/uDeck.app` — the copy, by its path — then, as the next thing
+  loginwindow says, LaunchServices asked to open it as a login item,
+  `LSOpenApplication(… flags=0x800201 … event=<… 'aevt'\134'oapp'{
+  'prdt':'lgit' }>)`, which names no application and is held to the launcher by
+  coming next; then the next launch of uDeck LaunchServices writes, with the
+  login item's flags, `_LSLaunchRB(place.unicorns.udeck <private>,
+  event=aevt/oapp, args=- 0x810200/dontSwitch async …)`. `_LSLaunchRB …
+  event=aevt/oapp` alone is not the record's: macOS reopening what was running at
+  the restart writes the same, with `0x801100/` and an open event of `{
+  ~'rsto':'yes ' }`, and no `performAutolaunch` (caught in -181746Z). The lab's
+  own `open -a` writes `event=-, args=- 0x8000000/` and Sparkle's relaunch
+  `event=-, args=- 0x48000040/`. Switched off, the launcher still runs and opens
+  nothing (`LaunchItemsInSharedFileListRef | count = 0`), so
+  `login.off-stays-off` reads the same witness and needs the launcher seen
+  running after the boot before its "nothing opened" counts — exactly once: two
+  runs of it are another boot's lines read as this one's, since "after the boot"
+  is read on the guest's clock, and one machine of the series read 2026-09-17
+  (-200502Z, where the boot's time still kept the first boot's launcher out).
+  All of it measured in a macOS 27 guest on 2026-10-12 with the lab's own probes
+  (20261012-180909Z, -181746Z, not kept); every one of the 31 restarts and 16
+  restarts switched off of the series reads the same through the stricter
+  reading. The switched-off login was caught again on 2026-10-16 and kept as a
+  report outside the repository (20261016-045136Z, probe.off: the launcher once,
+  `count = 0` three times, nothing launched); macOS reopening uDeck was not
+  caught again in four restarts with uDeck left running (probe.tal, the same
+  run), so the `0x801100/` reading stands on -181746Z alone.
+
+**The generation is evidence now, not a witness — it was the wrong one.** Until
+2026-10-12 the two checks read who had acted on the record off its generation: a
+restart moving it by one was "the record opened uDeck", by more "uDeck registered
+itself again"; an update moving it by more than one, the same. The lesson kept
+from September said: wait 30 s after quitting, restart, and the generation going
+up by one is the witness that the record opened uDeck. That was measured wrong.
+macOS moves the generation on `noteUseOfItem`, which it writes as uDeck starts
+and as it exits — once usually, three times when uDeck's exit races Sparkle's
+relaunch and a `checkTasksAllowedInBackground` — so across a restart it moved at
+the lab's own quit, before the restart, in 9 instrumented restarts of 9 (the
+round before this one, 20261012-151209Z among them), and in one probe of this
+round it did not move at all although the log shows the record opening uDeck
+(20261012-180909Z, generation 1 before and after). An update moved it from 1 to 3
+in another probe with no registration from uDeck after the switch. In the round
+before, the generation failed 6 readings of 28 with the lab's own helper and 0 of
+15 with the System Events lab before it, and the two of those six whose logs were
+kept had no registration from uDeck after the switch either. The 30 s wait
+stays — it is what keeps macOS from reopening uDeck by itself, which is a
+different question (`SETTLE_BEFORE_RESTART_SECONDS`) — and every check still says
+the generation it saw, beside the verdict.
+
+**And the helper had made the extra rewrites more frequent.** It used to walk
+inside the window's title-bar buttons, which makes uDeck start three
+`ThemeWidgetControlViewService` and keep them until it exits ("The
+accessibility helper", above); under the System Events lab before it, the round
+before found uDeck had started none, in 0 of its 6 logs. Measured on one Mac,
+one machine at a time, alternating, with the checks above and only the helper
+changed (2026-10-12, runs 20261012-184607Z to -222712Z and -183655Z, kept as
+reports outside the repository): with the helper that walked into the buttons,
+uDeck started the service in 30 readings of 30, and the generation moved by more
+than one in 6 of them — `login.survives-a-restart` 4 of 15, by two three times
+and by three once, `login.survives-an-update` 2 of 15 — in all 30 the log held
+one `noteUseOfItem` more than the steps the generation took (the first is at
+uDeck's launch, before there is a record to move), and the switch's own
+registration and no other; with the helper that does not, it started
+none in the 48 readings whose log was kept, and the generation moved by exactly
+one in 32 of 32 (one-sided Fisher p ≈ 0.01). Every one of those 62 restarts and
+updates passed on the log's witnesses, as did `login.off-stays-off` 16 times of
+16 and `login.registers` 15 of 16 (the sixteenth could not check: Tart's VNC
+server crashed under it). Why the service sends uDeck's exit through
+`noteUseOfItem` two or three times is not known — what was measured is that the
+extra ones came only with the service there — and nothing the checks decide by
+reads them now.
 
 ### The settings the operator changed
 

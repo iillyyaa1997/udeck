@@ -334,7 +334,10 @@ def differences(old: list[tuple[str, ...]], new: list[tuple[str, ...]], what: st
 # The window's own buttons in its title bar. What System Events listed inside
 # them differs from `AXChildren` by one group in the full-screen button
 # (measured in a guest, run 20261012-063626Z), and none of it is uDeck's: no
-# check reads the title bar.
+# check reads the title bar. The helper no longer goes inside them at all
+# (`windowButtons` in guest/ax.swift, which says why), so a walk of its lists
+# them and nothing below them; the walks recorded in tests/ax-equality are from
+# before that.
 WINDOW_BUTTONS = frozenset({"AXCloseButton", "AXMinimizeButton", "AXFullScreenButton", "AXZoomButton"})
 
 

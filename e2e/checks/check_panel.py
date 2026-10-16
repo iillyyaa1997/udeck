@@ -165,10 +165,32 @@ start of it, is the lab's, and those are "could not check".
 import shlex
 import uuid
 
-from udeck_e2e import app, config, panel, probes, updates
+from udeck_e2e import app, config, panel, probes, targets, updates
 from udeck_e2e.errors import LabError, expect
 
 VERSION = ("0.4.1", "6")
+
+# What the two wobbles need and a GitHub runner does not give: uDeck hearing the
+# wobble's reports one by one. Measured on 2026-10-12 with a build of uDeck that logged
+# every movement it heard (run 38293532813, never committed): on a runner the hundred
+# reports of a wobble reached uDeck as 16 to 19 events, 16 to 17 ms apart — one a frame
+# — each carrying the sum of the reports since the one before, so the ups and the downs
+# cancelled inside them. Posted at the guest's own pace (a hundred in 0.22 to 0.32 s,
+# 76 to 88 points of upward travel, run 38291813812), uDeck heard 20 to 32 points of
+# it going up while pinned, and the wobble at the edge opened the panel by the dwell 18
+# times of 18; and the wobble short of the edge, which uDeck heard as next to no upward
+# movement at all, would have passed over a uDeck that counted every upward movement as
+# a push. Posted slower, a report per frame, no wobble can carry what the checks ask
+# for. In a Tart guest the same build heard the same reports one by one, 2.9 ms apart at
+# the median, and the two wobbles opened the panel by the dwell and by the push
+# (20261012-192542Z). So on a runner both say they could not check, before they do
+# anything (`_where_uDeck_hears_each_report`): neither a pass nor a failure there would
+# be about uDeck, and "could not check" keeps the panel job saying so.
+REPORTS_ONE_BY_ONE = (
+    "on a GitHub runner uDeck hears the pointer's reports folded, one event a frame, and a wobble's ups and "
+    "downs cancel inside them before uDeck hears them (run 38293532813), so neither a pass nor a failure here "
+    "would be about uDeck; a Tart guest delivers them one by one"
+)
 
 
 def check_dwell(machine, check_dir, lab):
@@ -210,6 +232,11 @@ def check_push(machine, check_dir, lab):
     last one mean anything: it throws the pointer at the edge, reads back that
     the pointer is *actually* against it — a push at an edge the pointer never
     reached would prove nothing — and only then asks uDeck which path fired.
+
+    A panel opened by the dwell is asked one thing more before it is red: whether
+    the lab's push came in time to win the race (`panel.Push`). On a GitHub runner
+    the pauses between reports stretch, and this check was red once on a push
+    whose fourth report was read back 0.061 s into it (run 38321541276).
     """
     log = _prepare(machine, check_dir, lab)
     since = log.mark("noting when the gesture begins")
@@ -234,6 +261,10 @@ def check_push(machine, check_dir, lab):
         # fails, and `fired[0]` on an empty list would raise inside the guard that
         # exists to keep it from ever being empty here.
         opened_by = fired[0] if fired else "nothing"
+        if fired[:1] == ["dwell"]:
+            # A race the lab may have lost on its own: on a GitHub runner the pauses
+            # stretch, and a push made after the dwell was owed proves nothing.
+            panel.Push(pushed, "pushing against the top edge").expect_it_was_made_in_time()
         expect(
             fired[:1] == ["push"],
             f"the panel opened by {opened_by} first, not by the push — "
@@ -269,7 +300,7 @@ def check_middle_of_the_screen(machine, check_dir, lab):
     panel.park_in_the_middle(machine)
     since = log.mark("noting when the control begins")
     try:
-        app.launch(machine)
+        _launch_inside_the_window(machine)
         machine.screenshot(check_dir, "uDeck running")
         machine.sleep(config.DWELL_SECONDS)
         pushed = panel.push_upward(machine, "pushing up in the middle of the screen")
@@ -324,6 +355,7 @@ def check_a_wobble_short_of_the_edge(machine, check_dir, lab):
     82 points (20260926-211629Z, -220316Z, -225415Z, 20260927-140526Z, -141957Z),
     against the 48 asked of it.
     """
+    _where_uDeck_hears_each_report(lab)
     log = _prepare(machine, check_dir, lab)
     since = log.mark("noting when the wobble begins")
     try:
@@ -371,6 +403,7 @@ def check_the_same_wobble_at_the_edge(machine, check_dir, lab):
     verdict, whether it could have been one — the same question the first half
     asks of every pass.
     """
+    _where_uDeck_hears_each_report(lab)
     log = _prepare(machine, check_dir, lab)
     since = log.mark("noting when the wobble begins")
     try:
@@ -567,6 +600,22 @@ def check_a_click_past_the_panel(machine, check_dir, lab):
     from an interruption, which neither can alone — and a click read as an
     interruption is the bug this check was written for (the race in
     `ApplicationSwitch`, fixed 2026-09-21).
+
+    **On a GitHub runner the click's two roads arrive the other way round, and
+    that is where this check found uDeck's handback wrong.** In a Tart guest the
+    workspace's news of the Finder comes first; on a runner uDeck's own click
+    monitor did, 12 clicks of 12, the news 53 to 141 ms behind it — and uDeck,
+    still reading as in front when the monitor closed the panel, brought TextEdit
+    back over the Finder the click had chosen, 12 times of 12 (runs 38243017720,
+    38288544383). A person sees that wherever the monitor wins: a click on another
+    window puts the panel away and brings back the application from before it,
+    over the window he clicked. The monitor's closing now waits for the click's
+    answer before it brings anything back (`KeyboardHandback`, "a click heard
+    before its news waits for its answer before bringing anything back" in
+    PanelStateTests.swift), and this check is what says the Finder still wins
+    that wait on a runner: 12 times of 12, by its news 72 to 159 ms after uDeck
+    let go in 11 and by the workspace already naming it at uDeck's first look,
+    102 ms after, in the twelfth (run 38918228585).
     """
     log = _prepare(machine, check_dir, lab)
     story = panel.Story(machine, log, check_dir, lab.note)
@@ -676,7 +725,8 @@ def check_a_click_past_a_restored_panel(machine, check_dir, lab):
     then the monitor is the only messenger (PanelController's
     `outsideClickMonitor`), and a uDeck that had lost it would never close the
     panel. panel.a-click-past-the-panel cannot see that: its click activates the
-    Finder, and the workspace's news of it wins the race.
+    Finder, and in a Tart guest the workspace's news of it wins the race (on a
+    GitHub runner the monitor does — that check says what it found there).
 
     So the Finder is put in front first, by the same switch with no click as
     panel.a-switch-with-no-click, and the panel that switch interrupted is shown
@@ -1202,7 +1252,7 @@ def check_the_hotkey_again(machine, check_dir, lab):
     panel.park_in_the_middle(machine)
     story = panel.Story(machine, log, check_dir, lab.note)
     try:
-        app.launch(machine)
+        _launch_inside_the_window(machine)
         machine.screenshot(check_dir, "uDeck running")
         story.take("uDeck starting")
         application = _a_document_in_front(machine, lab)
@@ -1340,7 +1390,7 @@ def check_a_chord_that_is_not_the_hotkey(machine, check_dir, lab):
     panel.park_in_the_middle(machine)
     story = panel.Story(machine, log, check_dir, lab.note)
     try:
-        app.launch(machine)
+        _launch_inside_the_window(machine)
         machine.screenshot(check_dir, "uDeck running")
         story.take("uDeck starting")
         panel.press_the_chord(
@@ -1513,6 +1563,18 @@ def check_the_hotkey_dies_with_udeck(machine, check_dir, lab):
 # --- What all seventeen do ----------------------------------------------------------
 
 
+def _where_uDeck_hears_each_report(lab):
+    """Both wobbles, before anything is done: on a GitHub runner they could not check (`REPORTS_ONE_BY_ONE`).
+
+    "Could not check" and not "not on this target": the wobbles need nothing a runner
+    refuses — they run there, and what uDeck hears of them is not the wobble. That is
+    the lab unable to make the movement it asks about, which is what ⚠️ says, and the
+    panel job keeps saying it rather than turning green over two checks it never had.
+    """
+    if lab.target == targets.HERE:
+        raise LabError("wobbling along the strip", REPORTS_ONE_BY_ONE)
+
+
 def _prepare(machine, check_dir, lab, launch=True):
     """A lab build of uDeck installed and running, and its own messages being kept.
 
@@ -1579,11 +1641,68 @@ def _a_uDeck_holding_the_hotkey(machine, story, check_dir):
     The same ordering, and the same reason, as the control in the middle of the
     screen.
     """
-    app.launch(machine)
+    _launch_inside_the_window(machine)
     machine.screenshot(check_dir, "uDeck running")
     said = panel.answer(machine, story, "uDeck starting", panel.registered_hotkeys)
+    if not panel.said_of_its_shortcut(said) and not panel.launched_in_the_window(said):
+        _say_the_window_missed_the_start(machine, story, check_dir, said)
     panel.expect_it_holds(said, config.THE_HOTKEY)
     return said
+
+
+def _launch_inside_the_window(machine):
+    """Start uDeck a second after the window on its log was marked, so that its start is inside it.
+
+    The mark is the guest's `date` to the second, and the log's own times can run
+    behind it. Measured on a runner (run 38849366574, panel.the-hotkey): a window
+    marked 04:22:31 before uDeck was started held none of uDeck's start, and the ten
+    seconds before it did — `read the plugins folder` and `hotkey ⌃⌥U registered`
+    stamped 04:22:30.931 and .932. A start in the first fraction of the mark's second,
+    read on a clock that far behind, falls before the window. A second's wait puts
+    the start at least a second past the start of the mark's second, more than the
+    log's clock was ever seen behind.
+    """
+    machine.sleep(1)
+    app.launch(machine)
+
+
+def _say_the_window_missed_the_start(machine, story, check_dir, said):
+    """A window on uDeck's log that does not hold uDeck starting cannot say what it took.
+
+    uDeck says what became of its shortcut once, as it starts, and in the same
+    millisecond as its first read of the plugins folder (`panel.launched_in_the_window`).
+    A window without either has missed the start — on runners once in nine readings
+    of panel.the-hotkey-dies-with-udeck (run 38321541276; the others 38243017720,
+    38317811235 and 6 in 38843591803), the window beginning some 130 ms into a uDeck
+    this check had started after opening it — and "uDeck holds nothing" from it would
+    be the lab's silence read as uDeck's. The ten seconds before the window are read
+    and kept beside the report (`before-the-window.log`), and the reason says whether
+    uDeck's start is there. The first time this was asked it was: stamped just before
+    the window's mark although the mark was taken before the launch
+    (`_launch_inside_the_window`, which now waits a second for it).
+
+    Only ever reached with uDeck running. A uDeck that started and died before it
+    wrote a line leaves the same silent window, and that silence is uDeck's: the
+    wait for its shortcut that came before this asked whether it is still there
+    (`panel.answer`), and it failed there.
+    """
+    step = "reading what uDeck said as it started, before the window"
+    earlier = machine.ssh.run(
+        f"/bin/date -j -v-10S -f '%Y-%m-%d %H:%M:%S' {shlex.quote(story.since)} '+%Y-%m-%d %H:%M:%S'", step
+    ).stdout.strip()
+    before = story.log.collect(check_dir, earlier, step, name="before-the-window.log")
+    started = [line for line in panel.said_by_uDeck(before) if panel.LAUNCHED in line or "hotkey " in line]
+    where = (
+        f"in the ten seconds before it, uDeck's log holds {panel.short(chr(10).join(started))}"
+        if started
+        else "and the ten seconds before it hold no start of uDeck either"
+    )
+    raise LabError(
+        "reading the shortcut uDeck took as it started",
+        f"the window on uDeck's log, from {story.since}, does not hold uDeck starting — it begins with "
+        f"{panel.short(chr(10).join(panel.said_by_uDeck(said)[:1]))} — so what uDeck said of its shortcut is "
+        f"outside it; {where} (before-the-window.log)",
+    )
 
 
 def _press_the_hotkey(machine, story, label, ready):

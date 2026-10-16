@@ -26,7 +26,8 @@
 // both ways came out identical but for the digits of one slider's value). The
 // checks were written against System Events' answers, so this helper gives
 // those answers. `e2e/selfcheck/check_ax.py` holds the two walks against each
-// other in a guest.
+// other in a guest. And one place it reads less, on purpose: nothing inside the
+// window's own title-bar buttons (`windowButtons`, below).
 //
 // What it prints is one JSON object on standard output. A refusal is a line on
 // standard error and exit 1 (2 for a command line it cannot read), as osascript
@@ -259,15 +260,38 @@ func children(_ element: AXUIElement) -> [AXUIElement] { elements(attribute(elem
 
 func displayBounds() -> CGRect { CGDisplayBounds(CGMainDisplayID()) }
 
+/// The window's own buttons in its title bar. A walk lists them and never goes
+/// inside them.
+///
+/// Asking the full-screen button for its children makes the application start
+/// three of AppKit's `ThemeWidgetControlViewService` for itself, and keep them
+/// until it exits: measured in a macOS 27 guest on 2026-10-12 (run
+/// 20261012-181746Z, `ThemeWidgetControlViewService` counted after every step,
+/// each on a uDeck started afresh) — none for the window's own children, three
+/// the moment a walk reached depth 2, whether it asked every attribute at once,
+/// only the listed ones, one at a time, or was System Events asking for that
+/// button's `UI elements`; none at any depth with the buttons not entered. With
+/// them there, macOS rewrote uDeck's login record more than once at its exits
+/// in 6 readings of 30, and never in 32 without them (README, "Open at Login").
+/// Nothing the lab reads is in there: its checks read no title bar, and the
+/// comparison with System Events left what is inside these buttons out already
+/// (`ax.without_the_title_bar`).
+let windowButtons: Set<String> = ["AXCloseButton", "AXMinimizeButton", "AXFullScreenButton", "AXZoomButton"]
+
 /// Every element from `root` down, preorder, `root` at depth 0, an element's
-/// children listed while its depth is below `maxDepth` (`ui._TREE`'s shape).
-/// What a click can reach narrows at the window and at every scroll area.
+/// children listed while its depth is below `maxDepth` (`ui._TREE`'s shape) —
+/// all but the title-bar buttons' (`windowButtons`). What a click can reach
+/// narrows at the window and at every scroll area.
 func walk(_ root: AXUIElement, maxDepth: Int) -> [[String: Any]] {
     var out: [[String: Any]] = []
     func visit(_ element: AXUIElement, _ depth: Int, _ clip: CGRect) {
         let described = describe(element, depth: depth, clip: clip)
         out.append(described.record)
         guard depth < maxDepth else { return }
+        if described.role == "AXButton", let subrole = described.record["subrole"] as? String,
+           windowButtons.contains(subrole) {
+            return
+        }
         var inner = clip
         if let frame = described.frame, depth == 0 || described.role == "AXScrollArea" {
             inner = clip.intersection(frame)

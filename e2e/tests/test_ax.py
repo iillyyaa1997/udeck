@@ -201,3 +201,23 @@ def test_a_compile_that_fails_leaves_nothing_the_next_run_would_take_for_done(tm
 def test_the_helper_source_is_the_one_in_the_guest_folder():
     assert ax.SOURCE.name == "ax.swift" and ax.SOURCE.parent.name == "guest" and ax.SOURCE.is_file()
     assert ax.TARGET.startswith("arm64-apple-macos")
+
+
+def test_the_helper_never_goes_inside_the_buttons_the_comparison_leaves_out():
+    """Asking the full-screen button for its children makes uDeck start three
+    `ThemeWidgetControlViewService` and keep them until it exits (run
+    20261012-181746Z), so the helper's walk lists the window's own buttons and
+    stops there. The buttons it stops at are the ones `without_the_title_bar`
+    takes out of both readings when the two walks are compared — one list in two
+    languages, held together here — and the walk returns before it asks a
+    button's `AXChildren`, which is the request that starts them."""
+    source = ax.SOURCE.read_text()
+    declared = source.split("let windowButtons: Set<String> = [", 1)[1].split("]", 1)[0]
+    assert {name.strip().strip('"') for name in declared.split(",")} == set(ax.WINDOW_BUTTONS)
+    walk = source.split("func walk(", 1)[1].split("\n}\n", 1)[0]
+    stop, children = walk.index("windowButtons.contains"), walk.index("children(element)")
+    assert stop < children, "the walk asks a title-bar button for its children before it stops"
+    # And the condition ends the visit: its body is a bare `return`, so a walk that
+    # only looked at the subrole and went on would not pass.
+    body = walk[stop:].split("{", 1)[1].split("}", 1)[0]
+    assert body.strip() == "return", f"the title-bar button's visit goes on: {body.strip()!r}"

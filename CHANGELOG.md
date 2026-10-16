@@ -129,6 +129,22 @@ for what that promises.
   check since udeck-plugins#2; and, in the CI example, which commit is the
   base: the first parent of GitHub's merge of the pull request, and the target
   branch's tip on GitLab.
+- **A click past a held panel leaves you where you clicked.** When uDeck heard
+  the click before macOS said which application it had brought forward, the
+  panel went away and the application that was in front before it came back
+  over the window you had just clicked — on a GitHub-hosted Mac 12 clicks of
+  12. uDeck now gives such a click two seconds to answer. An application it
+  brings forward stays in front. A menu it opens without bringing one forward —
+  the one the Dock shows for an icon — stays open, and the earlier application
+  comes back once the menu has closed. A click that does neither, on the Dock's
+  separator for one, brings the earlier application back after the two seconds,
+  as Escape, ⌘W and the shortcut bring it back at once at a panel you were
+  working in, so the next key still has somewhere to go. The panel opened again
+  while a click waits, by the shortcut (measured; the gesture takes the same
+  path in the code), takes the keyboard as it always does, and gives it back to that earlier application. A Dock stack is the
+  exception: the Dock draws it inside its own window, and nothing uDeck reads
+  without a permission has been found to tell it from a click on nothing, so the earlier application comes back after the two seconds with the stack
+  open, and that usually closes it.
 
 ## [0.6.1] — 2026-10-08
 

@@ -12,7 +12,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from fakes import Dropped, Lab, Machine
+from fakes import Dropped, Failed, Lab, Machine
+from test_login import AS_A_LOGIN_ITEM, AUTOLAUNCH, LAUNCHED, LAUNCHER, REOPENED
 
 from udeck_e2e import app, login, ui
 from udeck_e2e.errors import CheckFailed, LabError
@@ -45,9 +46,25 @@ ON_AGAIN = ON.replace("Generation: 1", "Generation: 3")
 # What an update legitimately does to the row, measured in a guest on 2026-09-19:
 # macOS re-files it once because the bundle at the path was replaced.
 ON_REFILED = ON.replace("Generation: 1", "Generation: 2")
-# And what opening it at login does, measured on 2026-09-21: six restarts in six with
-# uDeck quit first, each one rewriting the record exactly once. A record unchanged
-# across a restart was not what opened uDeck.
+# What the guest's log says was done with the record (`login.Witnesses`), in the lines
+# measured on 2026-10-12 — the pid is the fake's own uDeck, "404". The switch registers
+# uDeck once; a registration after it is uDeck registering itself again.
+REGISTERED = (
+    "2026-10-12 18:11:49.441 Df backgroundtaskmanagementd[291:961] [com.apple.backgroundtaskmanagement:main] "
+    "registerLaunchItem: pid=404, uid=501, type=app, url=(null), config=(null)\n"
+)
+SWITCH = (
+    "2026-10-12 18:11:42.472 Df uDeck[404:17dc] [com.apple.runningboard:connection] "
+    "Identity resolved as app<application.place.unicorns.udeck.525647.525652(501)>\n" + REGISTERED
+)
+AGAIN = REGISTERED.replace("18:11:49.441", "18:12:55.000")
+# A login that opened uDeck by its record, after the boot (`BOOTED`).
+OPENED_AT_LOGIN = LAUNCHER + AUTOLAUNCH + AS_A_LOGIN_ITEM + LAUNCHED
+# A login whose launcher ran and opened nothing.
+NOTHING_AT_LOGIN = LAUNCHER
+BOOTED = "2026-10-12 18:12:37"
+# The generation the record came back with across a restart, which is evidence and no
+# longer a verdict: it moves at uDeck's starts and exits, measured on 2026-10-12.
 ON_OPENED = ON.replace("Generation: 1", "Generation: 2")
 
 # The row's own identity. Two dumps that agree on everything a path can show and
@@ -71,12 +88,17 @@ def check_dir(tmp_path):
     return path
 
 
-def a_machine(dumps, running="404"):
-    """A guest whose login database answers `dumps` in turn."""
+def a_machine(dumps, running="404", log=SWITCH + OPENED_AT_LOGIN):
+    """A guest whose login database answers `dumps` in turn, and whose log since the check
+    began says `log` — by default the switch's registration and a login that opened uDeck."""
     return Machine({
         "sfltool dumpbtm": dumps,
         "pgrep -x uDeck": running,
         "stat -f %Su": "admin",
+        "/usr/bin/log show": "Timestamp               Ty Process[PID:TID]\n" + log if isinstance(log, str) else log,
+        "/bin/date -r": BOOTED,
+        "/bin/date '+%Y": "2026-10-12 18:11:40",
+        "sysctl -n kern.boottime": "{ sec = 1760292757, usec = 0 } Mon Oct 12 18:12:37 2026",
     })  # fmt: skip
 
 
@@ -202,8 +224,9 @@ def test_an_unreadable_database_does_not_hide_uDeck_not_coming_back(lab, check_d
 
 
 def test_the_restart_check_asks_the_guest_nothing_after_it_has_passed(lab, check_dir, monkeypatch):
-    """A note is not worth a lab error: the pids printed are the ones already read."""
-    machine = a_machine([ON, ON_OPENED], running=["404", Dropped])
+    """A note is not worth a lab error: the pids printed are the ones already read — one
+    look before the switch (`_switch_on`), one after the restart, and none after that."""
+    machine = a_machine([ON, ON_OPENED], running=["404", "404", Dropped])
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     checks.check_survives_a_restart(machine, check_dir, lab)
     assert any("404" in note for note in lab.notes)
@@ -238,7 +261,7 @@ def test_the_restart_check_quits_uDeck_before_restarting(lab, check_dir, monkeyp
 def test_the_control_quits_uDeck_before_restarting(lab, check_dir, monkeypatch):
     """Where it was caught: two restarts in twelve came back with uDeck running and
     the record correctly disabled, and the control called that uDeck's doing."""
-    machine = a_machine([ON, OFF, OFF], running="")
+    machine = a_machine([ON, OFF, OFF], running="", log=SWITCH + NOTHING_AT_LOGIN)
     order = _watch_the_order(monkeypatch, machine)
     checks.check_off_stays_off(machine, check_dir, lab)
     assert [what for what, _ in order] == ["quit", "reboot"]
@@ -249,11 +272,11 @@ def test_both_restart_checks_leave_the_machine_alone_before_restarting(lab, chec
     10 with no wait and none at all at twenty seconds or more. What the checks buy with
     the wait is the difference between a verdict and a coin toss, so the wait is not a
     tidy-up and has a test."""
-    for check, dumps, running in (
-        (checks.check_survives_a_restart, [ON, ON_OPENED], "404"),
-        (checks.check_off_stays_off, [ON, OFF, OFF], ""),
+    for check, dumps, running, log in (
+        (checks.check_survives_a_restart, [ON, ON_OPENED], "404", SWITCH + OPENED_AT_LOGIN),
+        (checks.check_off_stays_off, [ON, OFF, OFF], "", SWITCH + NOTHING_AT_LOGIN),
     ):
-        machine = a_machine(dumps, running=running)
+        machine = a_machine(dumps, running=running, log=log)
         order = _watch_the_order(monkeypatch, machine)
         check(machine, check_dir, lab)
         (_, quit_at), (_, reboot_at) = order[0], order[1]
@@ -310,7 +333,7 @@ def test_the_control_passes_on_its_own_row_with_another_copy_switched_off_beside
         _two_copies(LIVE_ON, quiet_other),
         _two_copies(("A", "/Applications/uDeck.app", False, 2), quiet_other),
         _two_copies(("A", "/Applications/uDeck.app", False, 2), quiet_other),
-    ], running="")
+    ], running="", log=SWITCH + NOTHING_AT_LOGIN)
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     checks.check_off_stays_off(machine, check_dir, lab)
 
@@ -359,26 +382,90 @@ def test_a_record_another_copy_has_taken_fails_the_restart(lab, check_dir, monke
 
 
 def test_a_restart_the_record_did_not_open_is_not_a_verdict(lab, check_dir, monkeypatch):
-    """uDeck came back and its record was not touched. Opening an application at login
-    rewrites the record once — measured six times in six — so an untouched one was not
-    what opened it, and nothing here is about whether it would have.
+    """uDeck came back and the login items launcher did not open it: something else did,
+    and nothing here is about whether the record would have.
 
-    This is the case that used to *pass*: earlier runs left uDeck running across the
-    restart, came back with the generation unchanged, and were green."""
-    machine = a_machine([ON, ON])
+    It used to be told by the generation standing still, and that was the wrong witness:
+    measured on 2026-10-12, the generation moves at uDeck's exits — at the lab's own quit
+    before the restart — and once not at all across a restart the record did open uDeck."""
+    machine = a_machine([ON, ON_OPENED], log=SWITCH + NOTHING_AT_LOGIN)
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
-    with pytest.raises(LabError, match="not what opened it") as raised:
+    with pytest.raises(LabError, match="the login items launcher did not open it") as raised:
         checks.check_survives_a_restart(machine, check_dir, lab)
     assert not isinstance(raised.value, CheckFailed)
 
 
+def test_macOS_putting_uDeck_back_is_not_the_record_opening_it(lab, check_dir, monkeypatch):
+    """LaunchServices writes the same `event=aevt/oapp` launch when macOS reopens what was
+    running (probe.tal, 2026-10-12): without the launcher naming the copy as a login item,
+    that launch is not the record's."""
+    machine = a_machine([ON, ON_OPENED], log=SWITCH + LAUNCHER + REOPENED)
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(LabError, match="did not open it"):
+        checks.check_survives_a_restart(machine, check_dir, lab)
+
+
+def test_a_restart_whose_login_is_not_in_the_log_is_not_a_verdict(lab, check_dir, monkeypatch):
+    machine = a_machine([ON, ON_OPENED], log=SWITCH + REOPENED)
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(LabError, match="no `LoginItemsLauncher main` after the boot"):
+        checks.check_survives_a_restart(machine, check_dir, lab)
+
+
+def test_a_restart_whose_log_holds_two_logins_is_not_a_verdict(lab, check_dir, monkeypatch):
+    """Two runs of the launcher after the boot are another boot's lines read as this one's."""
+    other = LAUNCHER.replace("18:12:50.951", "18:12:40.000")
+    for check, dumps, running in (
+        (checks.check_survives_a_restart, [ON, ON_OPENED], "404"),
+        (checks.check_off_stays_off, [ON, OFF, OFF], ""),
+    ):
+        machine = a_machine(dumps, running=running, log=SWITCH + other + OPENED_AT_LOGIN)
+        monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+        with pytest.raises(LabError, match="2 runs of the login items launcher") as raised:
+            check(machine, check_dir, lab)
+        assert not isinstance(raised.value, CheckFailed), check.__name__
+
+
 def test_a_record_registered_again_across_a_restart_fails(lab, check_dir, monkeypatch):
-    """Opening it at login rewrites the record once; two rewrites is uDeck registering
-    itself again on top, and it registers only when asked."""
-    machine = a_machine([ON, ON_AGAIN])
+    """uDeck registers only when asked: a registration after the switch's own is it
+    registering itself again, whatever the generation says."""
+    machine = a_machine([ON, ON_OPENED], log=SWITCH + OPENED_AT_LOGIN + AGAIN)
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     with pytest.raises(CheckFailed, match="registered itself again"):
         checks.check_survives_a_restart(machine, check_dir, lab)
+
+
+def test_a_generation_that_moved_more_than_once_is_not_a_registration(lab, check_dir, monkeypatch):
+    """The reading that used to fail this check 3 times in 13 (2026-10-12): generation 1 to
+    4 across a restart, and no registration from uDeck in the log after the switch."""
+    machine = a_machine([ON, ON.replace("Generation: 1", "Generation: 4")])
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    checks.check_survives_a_restart(machine, check_dir, lab)
+    assert any("evidence only" in note and "generation 4" in note for note in lab.notes)
+
+
+def test_a_log_without_the_switch_s_own_registration_proves_nothing_about_the_rest(lab, check_dir, monkeypatch):
+    """Silence after the switch means something only in a log that shows the switch."""
+    machine = a_machine([ON, ON_OPENED], log=OPENED_AT_LOGIN)
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(LabError, match="not even the one the switch made") as raised:
+        checks.check_survives_a_restart(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_the_record_opening_another_copy_fails_the_restart(lab, check_dir, monkeypatch):
+    elsewhere = AUTOLAUNCH.replace("/Applications/uDeck.app", "/Users/x/Applications/uDeck.app")
+    machine = a_machine([ON, ON_OPENED], log=SWITCH + LAUNCHER + elsewhere + AS_A_LOGIN_ITEM + LAUNCHED)
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(CheckFailed, match="not the copy that was switched on"):
+        checks.check_survives_a_restart(machine, check_dir, lab)
+
+
+def test_the_restart_check_keeps_the_log_it_read(lab, check_dir, monkeypatch):
+    machine = a_machine([ON, ON_OPENED])
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    checks.check_survives_a_restart(machine, check_dir, lab)
+    assert "performAutolaunch" in (check_dir / "login-log.txt").read_text()
 
 
 def test_a_different_row_wearing_the_same_path_fails_the_restart(lab, check_dir, monkeypatch):
@@ -412,7 +499,7 @@ def test_the_check_refuses_to_restart_a_machine_it_could_not_switch_on(lab, chec
 
 
 def test_switched_off_and_restarted_it_stays_away(lab, check_dir, monkeypatch):
-    machine = a_machine([ON, OFF, OFF], running="")
+    machine = a_machine([ON, OFF, OFF], running="", log=SWITCH + NOTHING_AT_LOGIN)
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     checks.check_off_stays_off(machine, check_dir, lab)
     assert machine.now >= checks.NOTHING_OPENS_SECONDS, "nothing happening is only worth something after a while"
@@ -425,7 +512,7 @@ def test_the_control_keeps_the_reading_it_decided_on(lab, check_dir, monkeypatch
     only dump it used to keep was the one from switching on — which shows the record
     enabled, the opposite of the verdict.
     """
-    machine = a_machine([ON, OFF, OFF], running="")
+    machine = a_machine([ON, OFF, OFF], running="", log=SWITCH + NOTHING_AT_LOGIN)
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     checks.check_off_stays_off(machine, check_dir, lab)
     # Named, not "some file with the right word in it": the run keeps a post-restart dump
@@ -454,18 +541,52 @@ def test_the_control_switches_it_on_first(lab, check_dir, monkeypatch):
 
 
 def test_a_control_where_uDeck_opens_anyway_fails(lab, check_dir, monkeypatch):
-    """The record after the restart is the switched-off one, so nothing about the system
-    explains uDeck running — the plain verdict, not the one about macOS returning to an
-    older database. Matched on the tail, because the other sentence begins the same way."""
-    machine = a_machine([ON, OFF, OFF], running="909")
+    """uDeck is running after the restart, nothing reopened it and its record did not open
+    it: still the failure the control is for, said with what launched it."""
+    machine = a_machine([ON, OFF, OFF], running="909", log=SWITCH + NOTHING_AT_LOGIN)
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
-    with pytest.raises(CheckFailed, match="switched off; the record says"):
+    with pytest.raises(CheckFailed, match="although it had been switched off, and not by its record"):
         checks.check_off_stays_off(machine, check_dir, lab)
+
+
+def test_the_record_opening_uDeck_although_switched_off_fails(lab, check_dir, monkeypatch):
+    """The witness of the check above, the other way round: the launcher opened uDeck from a
+    record that reads switched off."""
+    machine = a_machine([ON, OFF, OFF], running="909", log=SWITCH + OPENED_AT_LOGIN)
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(CheckFailed, match="although it had been switched off; the record says"):
+        checks.check_off_stays_off(machine, check_dir, lab)
+
+
+def test_the_control_has_to_see_the_launcher_run_to_say_it_opened_nothing(lab, check_dir, monkeypatch):
+    """A log that holds no login at all says "nothing was opened" of every machine."""
+    machine = a_machine([ON, OFF, OFF], running="", log=SWITCH)
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(LabError, match="no `LoginItemsLauncher main` after the boot") as raised:
+        checks.check_off_stays_off(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_log_that_cannot_be_read_does_not_hide_uDeck_opening_when_it_was_off(lab, check_dir, monkeypatch):
+    """The log is the control's oracle, and uDeck running after a restart it was switched
+    off for is still the failure the control is for when that oracle is gone."""
+    machine = a_machine([ON, OFF, OFF], running="909", log=Failed(1, "log: Could not open the store"))
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(CheckFailed, match="the log could not be read"):
+        checks.check_off_stays_off(machine, check_dir, lab)
+
+
+def test_a_log_that_cannot_be_read_is_no_pass_for_the_control(lab, check_dir, monkeypatch):
+    machine = a_machine([ON, OFF, OFF], running="", log=Failed(1, "log: Could not open the store"))
+    monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
+    with pytest.raises(LabError, match="could not be read") as raised:
+        checks.check_off_stays_off(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
 
 
 def test_a_screenshot_that_fails_does_not_hide_uDeck_opening_when_it_was_off(lab, check_dir, monkeypatch):
     """The control's own failure — uDeck opening anyway — must reach the report."""
-    machine = a_machine([ON, OFF, OFF], running="909")
+    machine = a_machine([ON, OFF, OFF], running="909", log=SWITCH + NOTHING_AT_LOGIN)
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     machine.screenshot_fails = LabError("taking a screenshot", "the machine is gone")
     machine.screenshot_fails_at = "after the restart"
@@ -474,35 +595,34 @@ def test_a_screenshot_that_fails_does_not_hide_uDeck_opening_when_it_was_off(lab
 
 
 def test_an_unreadable_database_does_not_hide_uDeck_opening_when_it_was_off(lab, check_dir, monkeypatch):
-    machine = a_machine([ON, OFF, Dropped], running="909")
+    machine = a_machine([ON, OFF, Dropped], running="909", log=SWITCH + NOTHING_AT_LOGIN)
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
     with pytest.raises(CheckFailed, match="opened at login although"):
         checks.check_off_stays_off(machine, check_dir, lab)
 
 
-def test_a_record_back_at_the_old_generation_is_not_a_verdict_about_uDeck(lab, check_dir, monkeypatch):
-    """Measured twice on 2026-09-19: the restart comes back with the row enabled at the
-    generation it had *before* the switch — the database as it stood on disk, not uDeck
-    registering again. The control's premise did not hold, so it checked nothing: the boot
-    acted on a database that predates the switching off it is about.
-
-    It used to be ❌, which blamed uDeck in the same sentence that explained uDeck was not
-    the cause."""
-    machine = a_machine([ON, OFF, ON], running="909")
+def test_a_record_enabled_again_with_no_registration_is_not_a_verdict_about_uDeck(lab, check_dir, monkeypatch):
+    """Measured twice on 2026-09-19: the restart comes back with the row enabled as it was
+    *before* the switch-off — the database as it stood on disk, not uDeck registering
+    again. The control's premise did not hold, so it checked nothing: the boot acted on a
+    database that predates the switching off it is about. What tells it from uDeck
+    registering is the log — no registration after the switch's own — where it used to
+    be the generation."""
+    machine = a_machine([ON, OFF, ON], running="909", log=SWITCH + OPENED_AT_LOGIN)
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
-    with pytest.raises(LabError, match="the one from before the switch, unchanged") as raised:
+    with pytest.raises(LabError, match="it is enabled again") as raised:
         checks.check_off_stays_off(machine, check_dir, lab)
     assert not isinstance(raised.value, CheckFailed), "a lab failure, never a sentence about uDeck"
     assert "never acted on the switching off" in raised.value.reason
 
 
-def test_a_record_back_at_a_later_generation_is_still_uDeck_s_to_answer_for(lab, check_dir, monkeypatch):
-    """The other half: something registered again after the switch-off. uDeck registers
-    only when asked, so that would be a bug of its own and must not be explained away as
-    the system restoring an old state."""
-    machine = a_machine([ON, OFF, ON_AGAIN], running="909")
+def test_a_registration_after_the_switch_is_still_uDeck_s_to_answer_for(lab, check_dir, monkeypatch):
+    """The other half: something registered uDeck after the switch-off. uDeck registers only
+    when asked, so that is a bug of its own and must not be explained away as the system
+    restoring an old state — whatever the record and its generation say."""
+    machine = a_machine([ON, OFF, ON_AGAIN], running="909", log=SWITCH + OPENED_AT_LOGIN + AGAIN)
     monkeypatch.setattr(machine, "reboot", lambda: None, raising=False)
-    with pytest.raises(CheckFailed, match="opened at login although it had been switched off; the record says"):
+    with pytest.raises(CheckFailed, match="registered itself again"):
         checks.check_off_stays_off(machine, check_dir, lab)
 
 
@@ -562,13 +682,23 @@ def test_the_one_rewrite_an_update_makes_is_not_a_failure(lab, check_dir, update
     checks.check_survives_an_update(machine, check_dir, lab)
 
 
-def test_a_record_the_update_racked_up_generations_on_fails(lab, check_dir, update_flow, monkeypatch):
-    """What the docstring has always promised and the code never did: an application that
-    registers itself again on top of the update, which is what makes macOS post "Login
-    Item Added" at every login."""
-    machine = a_machine([ON, ON_AGAIN])
+def test_generations_an_update_racked_up_with_no_registration_are_not_a_failure(lab, check_dir, update_flow, monkeypatch):
+    """The reading that failed this check 3 times in 15 on 2026-10-12: generation 1 to 4,
+    and in the log three `noteUseOfItem` at uDeck's exit racing Sparkle's relaunch and no
+    registration from uDeck after the switch. The generation is said, not judged."""
+    machine = a_machine([ON, ON.replace("Generation: 1", "Generation: 4")], log=SWITCH)
     versions(monkeypatch, checks.VERSION, checks.NEWER)
-    with pytest.raises(CheckFailed, match="registered itself"):
+    checks.check_survives_an_update(machine, check_dir, lab)
+    assert any("evidence only" in note for note in lab.notes)
+
+
+def test_a_registration_on_top_of_the_update_fails(lab, check_dir, update_flow, monkeypatch):
+    """What the docstring has always promised: an application that registers itself again
+    on top of the update, which is what makes macOS post "Login Item Added" at every login —
+    read where macOS writes it down."""
+    machine = a_machine([ON, ON_REFILED], log=SWITCH + AGAIN)
+    versions(monkeypatch, checks.VERSION, checks.NEWER)
+    with pytest.raises(CheckFailed, match="registered itself again"):
         checks.check_survives_an_update(machine, check_dir, lab)
 
 

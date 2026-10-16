@@ -65,6 +65,7 @@ check that says it.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import shlex
@@ -218,6 +219,42 @@ def registered_hotkeys(lines: str) -> list[str]:
     uDeck inside the window on its log for that reason.
     """
     return [match.group(1) for match in _REGISTERED.finditer(lines)]
+
+
+# The first thing uDeck writes as it starts, in the same millisecond as what it
+# says of its shortcut (`DeckModel.discoverPlugins`, then `HotKeyMonitor.apply`).
+# It is written again whenever the folder is read again, so only one *before*
+# uDeck's first word about the gesture is its start.
+LAUNCHED = "read the plugins folder:"
+_GESTURE_WORD = re.compile(r"\[" + re.escape(SUBSYSTEM) + r":gesture\] (idle: |fired by )")
+# Anything `HotKeyMonitor.apply` says: registered, refused, cannot be registered, disabled.
+_SHORTCUT_WORD = re.compile(r"\[" + re.escape(SUBSYSTEM) + r":panel\] hotkey ")
+
+
+def said_of_its_shortcut(lines: str) -> list[str]:
+    """Every line in which uDeck says what became of its shortcut, whatever became of it."""
+    return [line for line in lines.splitlines() if _SHORTCUT_WORD.search(line)]
+
+
+def launched_in_the_window(lines: str) -> bool:
+    """Whether the window on uDeck's log holds uDeck starting: its first read of the
+    plugins folder before anything it said about the gesture.
+
+    Of the 309 windows the lab kept on Tart and on runners from 2026-10-12 to -16, 211
+    begin with that read and `hotkey ⌃⌥U registered`, in one millisecond; so do 17 of
+    the 18 kept of the checks that start uDeck inside their window (panel.the-hotkey,
+    -closes-what-the-gesture-opened, -dies-with-udeck, the control). The eighteenth, on
+    a runner, began with `idle: outsideStrip`, some 130 ms after uDeck started, and held
+    neither (run 38321541276, panel.the-hotkey-dies-with-udeck): what uDeck said as it
+    started was outside the window.
+    """
+    said = said_by_uDeck(lines)
+    for line in said:
+        if LAUNCHED in line:
+            return True
+        if _GESTURE_WORD.search(line):
+            return False
+    return False
 
 
 def opened_ready_to_type(lines: str) -> bool:
@@ -541,6 +578,75 @@ def push_upward(
         step,
     )
     return done.stdout.strip()
+
+
+class Push:
+    """The push at the edge as the guest's script made it, and whether it came in time to be one.
+
+    `panel.push` is a race with the dwell, and the lab runs one side of it. The dwell is
+    owed `config.DWELL_DURATION_SECONDS` after the throw's last report leaves the pointer
+    at the edge; the push wins only if its reports have carried uDeck's threshold before
+    then — at the least uDeck may make of them, half a point a unit (`WOBBLE_MARGIN`), the
+    fourth of the five. In a Tart guest that was 28 ms after the arrival (20261016-050548Z). On a GitHub
+    runner `time.sleep` stretches the pauses — the 2 ms after the arriving report to 10 ms
+    at the median and up to 46 (run 38288544383), the 5 ms between the push's reports to
+    9 to 28, 24 at the median (8 pushes, runs 38321541276, 38843591803) — so the fourth
+    report can come after the dwell is owed, and
+    the panel opening by the dwell then says nothing about uDeck. In run 38321541276 the
+    push's reports were read back 0.018, 0.036, 0.061 and 0.074 s into the push, and the
+    panel opened by the dwell — `panel.push` red on a race the lab had likely lost (how
+    long after the arrival the push began was not written down then; it is now).
+
+    So "the dwell came first" is uDeck's failure only when the push was made in time: the
+    report that clears the threshold posted a frame short of the dwell or sooner after the
+    arrival (`config.FRAME_SECONDS`, since a runner hands uDeck its reports one event a
+    frame). Otherwise the check could not check. A panel opened by the push is a pass
+    whatever the pace — the lab made a push against the edge, and uDeck heard it.
+    """
+
+    def __init__(self, said: str, step: str) -> None:
+        try:
+            read = json.loads(said)
+            arrived = read.get("arrived")
+            self.arrived = None if arrived is None else float(arrived)
+            self.posted = [float(seconds) for seconds in read.get("posted") or []]
+        except (ValueError, TypeError, AttributeError):
+            raise LabError(step, f"the guest's push script said something the lab cannot read: {said!r}") from None
+        self.step = step
+
+    @staticmethod
+    def reports_to_clear() -> int:
+        """How many of the push's reports carry uDeck's threshold at the least uDeck may make of them."""
+        return math.ceil(config.WOBBLE_MARGIN * config.EDGE_PUSH_DISTANCE / abs(config.PUSH_DELTA))
+
+    def cleared(self) -> float | None:
+        """Seconds from the arriving report to the report that clears the threshold; None if either is missing."""
+        needed = self.reports_to_clear()
+        if self.arrived is None or len(self.posted) < needed:
+            return None
+        return self.posted[needed - 1] - self.arrived
+
+    def in_time(self) -> bool:
+        cleared = self.cleared()
+        return cleared is not None and cleared <= config.DWELL_DURATION_SECONDS - config.FRAME_SECONDS
+
+    def expect_it_was_made_in_time(self) -> None:
+        """Before a panel opened by the dwell is uDeck's failure: the push came soon enough to win."""
+        if self.in_time():
+            return
+        cleared = self.cleared()
+        when = (
+            "the script did not say when the throw arrived or when the push's reports were posted"
+            if cleared is None
+            else f"the report that carries uDeck's threshold was posted {cleared:.3f} s after the throw arrived"
+        )
+        raise LabError(
+            self.step,
+            f"the panel opened by the dwell first, but {when}, and the dwell is owed "
+            f"{config.DWELL_DURATION_SECONDS:g} s after it — less a frame for a report heard late, "
+            f"{config.DWELL_DURATION_SECONDS - config.FRAME_SECONDS:.3f} s: the lab's push was too slow on this "
+            "machine to say anything about uDeck's",
+        )
 
 
 class Wobble:
