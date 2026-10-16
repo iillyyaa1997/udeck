@@ -41,6 +41,22 @@ passes; the lab's own tests hold this one against git itself.
                                                          many; a commit that is not there is 404
     GET /raw/{o}/{r}/{commit}/{path}                     one file, standing in for raw.githubusercontent.com
 
+A fork the lab names (`forks` below) answers on the same host, from the same
+commits — a fork shares its network's objects — with branches of its own:
+
+    GET /api/repos/{fork}                                its description: `fork`, and the repository it was
+                                                         forked from (`parent`) and its network's root
+                                                         (`source`) — or `fork` false, a repository of its own
+    GET /api/repos/{fork}/commits/{ref}                  its branches' heads, with the ETag and 304, and any
+                                                         commit's id
+    GET /api/repos/{fork}/git/trees/{sha}[?recursive=1]  a listing
+    GET /api/repos/{fork}/compare/{base}...{head}        two commits compared
+    GET /raw/{fork}/{commit}/{path}                      one file
+
+Every request to any of them spends the same hourly limit, as GitHub counts what
+an address asks whichever repository it asks about. A repository the lab does
+not name is 404.
+
 API answers carry `x-ratelimit-remaining` and `x-ratelimit-reset`, and the
 remaining count goes down with every API request, as GitHub's does. Raw answers
 carry none, as GitHub's do not (measured, per the document).
@@ -57,6 +73,13 @@ afresh on every request:
                                                     commit; head_repo null is a deleted fork, absent
                                                     the repository itself; merge_commit is read only
                                                     when merged; refs/pull/{n}/head follows head
+    {"forks": {"someone/udeck-plugins": {"branches": {"x": "pr3"}}}}
+                                                    other repositories on the host, each a fork of this
+                                                    one with branches of its own, each at a fixture
+                                                    commit (one left out is deleted); "fork": false makes
+                                                    it a repository of its own, "source" and "parent" a
+                                                    fork of something else, "default_branch" names its
+                                                    default (main)
     {"limit_until": 1790000000}                     the hourly limit is used up until then:
                                                     403 with remaining 0 and that reset
     {"spent": 50}                                   that many of the hour's requests already spent by
@@ -68,7 +91,7 @@ afresh on every request:
 Moving a branch's head, force-pushing it, merging or closing a pull request is
 one rewrite of the file: a head at another fixture commit — one that does not
 descend from the one before, for a force push — `state` and `merged` changed, a
-branch left out.
+branch left out; a fork's branch the same way, inside `forks`.
 
 **It keeps an access log**, one JSON object per line and per request — method,
 host, path, query, status, and the headers that decide an answer — which is the
@@ -308,6 +331,17 @@ class Repository:
             return self.commits.get(str(branches[name]))
         return None if name != ref else self.by_sha.get(ref)
 
+    def resolve_in_fork(self, ref: str, fork: dict) -> Commit | None:
+        """A ref of a fork, as GitHub resolves one there: its own branches — bare or as `refs/heads/{b}` — or any
+        commit's id; a fork's pull requests are not the lab's to name."""
+        branches = fork.get("branches") or {}
+        name = ref[len("refs/heads/") :] if ref.startswith("refs/heads/") else ref
+        if ref.startswith("refs/") and not ref.startswith("refs/heads/"):
+            return None
+        if name in branches:
+            return self.commits.get(str(branches[name]))
+        return None if name != ref else self.by_sha.get(ref)
+
     def compare(self, base: Commit, head: Commit) -> tuple[str, int, int, Commit | None]:
         """(status, ahead_by, behind_by, merge base) as GitHub's compare says them, through the parents: `ahead` when
         `head` continues `base`, `behind` when `base` continues `head`, `identical`, or `diverged` from the newest
@@ -367,7 +401,8 @@ def read_state(root: str, default_main: str) -> dict:
     Broken is not guessed at: the lab writes the file whole and renames it into
     place, and reads it back through `/lab/state` before it relies on it.
     """
-    state = {"main": default_main, "branches": {}, "pulls": {}, "limit_until": None, "spent": 0, "alter": [], "truncated": False}
+    state = {"main": default_main, "branches": {}, "pulls": {}, "forks": {}, "limit_until": None, "spent": 0, "alter": [],
+             "truncated": False}
     try:
         with open(os.path.join(root, "state.json")) as file:
             given = json.load(file)
@@ -476,11 +511,23 @@ class Fake:
         status, extra, body = self.api_answer(path, query, headers, state)
         return status, {**extra, **limits}, body
 
+    def fork(self, owner_repo: str, state: dict) -> dict | None:
+        """What the lab says of `owner/repo` as another repository on the host — None when it names none."""
+        given = (state.get("forks") or {}).get(owner_repo)
+        return given if isinstance(given, dict) else None
+
     def api_answer(self, path: str, query: dict, headers: dict, state: dict) -> tuple[int, dict, bytes]:
-        prefix = f"/repos/{self.owner_repo}"
-        if path != prefix and not path.startswith(prefix + "/"):
+        parts = path.split("/")
+        # "", "repos", owner, repo, ...
+        if len(parts) < 4 or parts[1] != "repos":
             return self.json(404, {"message": "Not Found"})
-        rest = path[len(prefix) :]
+        owner_repo = f"{parts[2]}/{parts[3]}"
+        rest = path[len(f"/repos/{owner_repo}") :]
+        if owner_repo != self.owner_repo:
+            fork = self.fork(owner_repo, state)
+            if fork is None:
+                return self.json(404, {"message": "Not Found"})
+            return self.fork_answer(owner_repo, fork, rest, query, headers, state)
         if rest in ("", "/"):
             return self.json(
                 200, {"full_name": self.owner_repo, "default_branch": DEFAULT_BRANCH, "private": False, "fork": False}
@@ -498,8 +545,31 @@ class Fake:
             return self.compare(rest[len("/compare/") :], state)
         return self.json(404, {"message": "Not Found"})
 
-    def commit(self, ref: str, headers: dict, state: dict) -> tuple[int, dict, bytes]:
-        commit = self.repository.resolve(ref, state)
+    def fork_answer(self, owner_repo: str, fork: dict, rest: str, query: dict, headers: dict,
+                    state: dict) -> tuple[int, dict, bytes]:
+        """A fork's answers: its description, its branches' heads, any listing and comparison of the network's
+        commits. Its pull requests, and its folders' histories, are not the lab's: 404."""
+        if rest in ("", "/"):
+            description = {"full_name": owner_repo, "default_branch": str(fork.get("default_branch") or DEFAULT_BRANCH),
+                           "private": False, "fork": bool(fork.get("fork", True))}  # fmt: skip
+            if description["fork"]:
+                description["parent"] = {"full_name": str(fork.get("parent") or self.owner_repo)}
+                description["source"] = {"full_name": str(fork.get("source") or self.owner_repo)}
+            return self.json(200, description)
+        if rest.startswith("/commits/"):
+            return self.commit(rest[len("/commits/") :], headers, state, fork=fork)
+        if rest.startswith("/git/trees/"):
+            recursive = query.get("recursive", ["0"])[0] not in ("", "0", "false")
+            return self.tree(rest[len("/git/trees/") :], recursive, bool(state.get("truncated")))
+        if rest.startswith("/compare/"):
+            return self.compare(rest[len("/compare/") :], state, fork=fork)
+        return self.json(404, {"message": "Not Found"})
+
+    def resolved(self, ref: str, state: dict, fork: dict | None) -> Commit | None:
+        return self.repository.resolve(ref, state) if fork is None else self.repository.resolve_in_fork(ref, fork)
+
+    def commit(self, ref: str, headers: dict, state: dict, fork: dict | None = None) -> tuple[int, dict, bytes]:
+        commit = self.resolved(ref, state, fork)
         if commit is None:
             return self.json(422, {"message": f"No commit found for SHA: {ref}"})
         etag = f'"{commit.sha}"'
@@ -562,13 +632,13 @@ class Fake:
             return 304, {"ETag": etag}, b""
         return status, {**extra, "ETag": etag}, data
 
-    def compare(self, spec: str, state: dict) -> tuple[int, dict, bytes]:
+    def compare(self, spec: str, state: dict, fork: dict | None = None) -> tuple[int, dict, bytes]:
         """`GET /compare/{base}...{head}` as GitHub answers it: the status, how many commits each side has that the
         other does not, the newest commit both have, the commits `head` has — and no files, which uDeck does not read.
-        Either side a commit id or a ref; one that is not there is 404, as GitHub's."""
+        Either side a commit id or a ref — of the fork, asked of a fork; one that is not there is 404, as GitHub's."""
         base_ref, dots, head_ref = spec.partition("...")
-        base = self.repository.resolve(base_ref, state) if dots else None
-        head = self.repository.resolve(head_ref, state) if dots else None
+        base = self.resolved(base_ref, state, fork) if dots else None
+        head = self.resolved(head_ref, state, fork) if dots else None
         if base is None or head is None:
             return self.json(404, {"message": "Not Found"})
         status, ahead, behind, merge_base = self.repository.compare(base, head)
@@ -635,10 +705,11 @@ class Fake:
     def raw(self, rest: str) -> tuple[int, dict, bytes]:
         parts = rest.split("/")
         owner_repo = "/".join(parts[:2])
-        if owner_repo != self.owner_repo or len(parts) < 4:
-            return 404, {"Content-Type": "text/plain; charset=utf-8"}, b"404: Not Found"
         state = self.state()
-        commit = self.repository.resolve(parts[2], state)
+        fork = None if owner_repo == self.owner_repo else self.fork(owner_repo, state)
+        if (owner_repo != self.owner_repo and fork is None) or len(parts) < 4:
+            return 404, {"Content-Type": "text/plain; charset=utf-8"}, b"404: Not Found"
+        commit = self.resolved(parts[2], state, fork)
         path = "/".join(parts[3:])
         found = commit.snapshot.at(path) if commit else None
         if found is None or found[0] == MODE_FOLDER:

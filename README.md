@@ -248,12 +248,14 @@ uDeck reads it from `api.github.com` and `raw.githubusercontent.com`, anonymousl
   **Earlier versions**, the files that needs — so GitHub learns which plugin;
 * and, after a read, the files of a **Verified** plugin that updates itself;
 * and when you press **Look up** in **Install from a link…**, the pull request
-  or the branch of that repository the link names — its head, its listing and
+  or the branch of that repository the link names, or the branch of a fork of
+  it — whether it is one, asked of the fork first — its head, its listing and
   the manifests of the plugins there that are not the catalogue's — and, when
-  you press **Install** there, that plugin's files;
+  you press **Install** there, that plugin's files, a fork's from the fork;
 * and, in each read, for a plugin installed from a pull request or a branch
   that the catalogue does not have as it is, that pull request — where its head
-  is, whether it was merged or closed — or that branch's head; once the head
+  is, whether it was merged or closed — or that branch's head, a fork's asked
+  of the fork; once the head
   moved, its listing and the plugin's manifest there, and, when the plugin
   changed there, one comparison with what is installed; and, once merged into
   `main`, the listing of the commit it was merged as.
@@ -267,7 +269,8 @@ decision kept, and its row says *Updated by itself*. A new version asking for
 different permissions, a plugin you changed or put a file of your own into, and
 one you kept at an earlier version are only offered, for you to press
 **Update**; nothing else is downloaded or installed by itself. A plugin
-installed from a pull request or a branch is **Unverified** — on its row in
+installed from a pull request or a branch — a fork's branch included, named
+with its fork — is **Unverified** — on its row in
 Settings, in the list it came from and on its card — asks before it runs, even
 when it asks for nothing, and again whenever its code changes, and is never
 updated by itself: its row offers what its pull request or branch has now,

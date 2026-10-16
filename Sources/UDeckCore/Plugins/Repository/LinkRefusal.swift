@@ -16,8 +16,8 @@ public enum LinkRefusal {
             .linkRefused(refusal, official: official.description)
         case RefResolver.Refusal.notFound(let link):
             .linkNotFound(link, official: official.description)
-        case RefResolver.Refusal.forkNotYet(let address):
-            .linkOtherRepository(repository: address.description, official: official.description)
+        case RefResolver.Refusal.notAFork(let address):
+            .linkNotAFork(repository: address.description, official: official.description)
         default:
             nil
         }
@@ -31,9 +31,10 @@ public enum LinkRefusal {
     /// install from it: of every plugin there, or of the one plugin a link
     /// into its folder named, which may not be there at all. A merge into a
     /// branch GitHub did not name, or while the default branch is not known,
-    /// is said as a merge.
+    /// is said as a merge. A fork's branch is named with its fork, every time.
     public static func head(of resolution: RefResolver.Resolution) -> [Phrase] {
-        var said: [Phrase] = [.linkHead(ref: resolution.origin.ref, commit: String(resolution.commit.prefix(7)))]
+        let fork = resolution.fork
+        var said: [Phrase] = [.linkHead(ref: resolution.origin.ref, commit: String(resolution.commit.prefix(7)), fork: fork)]
         if let pull = resolution.pullRequest {
             if pull.merged, let base = pull.base, let defaultBranch = resolution.defaultBranch, base != defaultBranch {
                 said.append(.linkPullRequestMergedElsewhere(base: base))
@@ -46,9 +47,9 @@ public enum LinkRefusal {
         if resolution.entries.isEmpty {
             let ref = resolution.origin.ref
             if let plugin = resolution.plugin, resolution.listing.plugins[plugin] == nil {
-                said.append(.linkPluginNotThere(ref: ref, plugin: plugin))
+                said.append(.linkPluginNotThere(ref: ref, plugin: plugin, fork: fork))
             } else {
-                said.append(.linkNothingDiffers(ref: ref, plugin: resolution.plugin))
+                said.append(.linkNothingDiffers(ref: ref, plugin: resolution.plugin, fork: fork))
             }
         }
         return said

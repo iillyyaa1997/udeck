@@ -469,7 +469,9 @@ shell and its curl too, so there the check is as sound as the registry that
 image is pulled from.
 
 This is how a CI job reads it: the five values by `sed`, then the file held
-to the five lines they make, byte for byte. A test holds it to
+to the five lines they make, byte for byte — through a file of its own, made
+from a template in `TMPDIR` (`/tmp` without one), which puts it there whichever
+`mktemp` makes it, and taken away whatever the answer. A test holds it to
 `udeck-plugin`'s own reading on a corpus of good and bad files, run by `sh` and
 by `bash`, with a Mac's sed and with GNU's:
 
@@ -487,7 +489,7 @@ read_udeck_plugin_lock() {
     linux_x86_64=$(udeck_lock_value linux-x86_64 '[0-9a-f]{64}' "$1")
     linux_aarch64=$(udeck_lock_value linux-aarch64 '[0-9a-f]{64}' "$1")
     image=$(udeck_lock_value image 'sha256:[0-9a-f]{64}' "$1")
-    udeck_lock_expected=$(mktemp) || return 1
+    udeck_lock_expected=$(mktemp "${TMPDIR:-/tmp}/udeck-lock.XXXXXX") || return 1
     printf 'version=%s\nmacos-universal=%s\nlinux-x86_64=%s\nlinux-aarch64=%s\nimage=%s\n' \
         "$version" "$macos_universal" "$linux_x86_64" "$linux_aarch64" "$image" > "$udeck_lock_expected"
     # Each value matched, and the file is the five lines they make: an empty
@@ -541,7 +543,7 @@ the base, never from the checkout, which holds the pull request's:
 # pipeline of a merge request's branch has no base to read it from — its own
 # lock file would choose the check that judges it: run the check in merge
 # request pipelines, not there.
-lock="$(mktemp)"
+lock="$(mktemp "${TMPDIR:-/tmp}/udeck-lock.XXXXXX")"
 git show "$BASE_SHA:.github/udeck-plugin.lock" > "$lock" || exit 1
 read_udeck_plugin_lock "$lock" || exit 1
 base="${UDECK_PLUGIN_DOWNLOAD_BASE:-https://github.com/iillyyaa1997/udeck/releases/download}"
@@ -1269,44 +1271,71 @@ or not — and reads what it names before anything is asked of GitHub
   plugins/uptime"* — not of every plugin on the branch;
 * its own page, or its default branch: that is the catalogue, and the sheet
   says so — *"That is the default branch of github.com/…: its plugins are the
-  catalogue below, verified."*
+  catalogue below, verified."*;
+* a branch of a fork of it, `github.com/<owner>/<repo>/tree/<branch>`, and
+  any folder under it, read the same way — and a fork's own page,
+  `github.com/<owner>/<repo>`, which stands for its default branch.
 
 Everything else is refused before a request, each refusal saying what the link
 is and what to paste instead: one commit — `…/commit/<sha>`, or `…/tree/<sha>`,
 GitHub's *Browse files* at a commit (*"Installing a single commit is not
-possible yet"*, stage 5); another host; another repository's pull request; a
-name git does not allow for a branch; a page that names no branch and no pull
-request. A branch of another repository, or its own page — a fork's included —
-is refused too: *"github.com/someone/udeck-plugins is not
-github.com/iillyyaa1997/udeck-plugins. Installing from another repository — a
-fork included — is not possible yet."*
+possible yet"*, stage 5); another host; another repository's pull request —
+*"… Paste the link of its branch instead: a branch of a fork of
+github.com/iillyyaa1997/udeck-plugins can be installed from."*; a name git does
+not allow for a branch; a page that names no branch and no pull request.
+Whether another repository is a fork of the official one only GitHub can say,
+so that is asked first (below), and a repository that is not — one of its
+own, or a fork of something else — is refused once it has said so:
+*"github.com/someone/elsewhere is not a fork of
+github.com/iillyyaa1997/udeck-plugins. Plugins come from
+github.com/iillyyaa1997/udeck-plugins and its forks for now; other
+repositories come later, as sources of their own."* (stage 4).
 
-**Look up** then asks GitHub, always through the official repository
-(`RefResolver`): for a pull request `GET /repos/{o}/{r}/pulls/{n}`, which says
-its head, its state and whether it was merged in one answer; for a branch its
-head, `GET /repos/{o}/{r}/commits/refs/heads/<branch>`; then the listing of
-that commit, unless the cache has it, and from the raw host, at that commit,
-the manifests of the plugins there whose tree is not the one the catalogue's
-head has for the same id — new there, or changed. Two requests to the API,
-and nothing for the default branch, which the catalogue already knows. A pull
-request opened from a fork is read the same way, by commit, through the
-official repository: its head is there whoever opened it, even after the fork
-is deleted, so nothing is ever asked of the fork, and the fork's name is not
-recorded.
+**Look up** then asks GitHub (`RefResolver`) — through the official
+repository, for its pull requests and its branches: for a pull request `GET
+/repos/{o}/{r}/pulls/{n}`, which says its head, its state and whether it was
+merged in one answer; for a branch its head, `GET
+/repos/{o}/{r}/commits/refs/heads/<branch>`; then the listing of that commit,
+unless the cache has it, and from the raw host, at that commit, the manifests
+of the plugins there whose tree is not the one the catalogue's head has for
+the same id — new there, or changed. Two requests to the API, and nothing for
+the default branch, which the catalogue already knows. A pull request opened
+from a fork is read the same way, by commit, through the official repository:
+its head is there whoever opened it, even after the fork is deleted, so
+nothing is ever asked of the fork, and the fork's name is not recorded.
+
+**A branch of a fork** is read from the fork itself: whether GitHub serves a
+commit of a fork that no pull request names through the official repository
+was never measured. First `GET /repos/{owner}/{repo}`, one request, whose
+answer says whether it is a fork and of which network — `fork` true, and
+`source.full_name` the official repository, however many forks deep it is
+(fields **measured** when stage 3 was designed: `AmanShaikhTech10/Hello-World`
+answers `fork` true and `octocat/Hello-World` as its `parent` and its
+`source`); anything else is refused there, and nothing more is asked of it.
+Then the fork's branch's head, `GET /repos/{owner}/{repo}/commits/refs/heads/<branch>`
+— of a fork's own page, the default branch its description names — its
+listing, and the manifests from the raw host, at
+`{owner}/{repo}/<commit>/<path>`: three requests to the API, all of the fork,
+through a client for it on the same host that counts against the same limit,
+since GitHub counts what an address asks whichever repository it asks about
+(`GitHubClient.client(for:)`). The fork is named as GitHub names it in that
+answer — renamed, or spelt in another case, its own name from then on.
 
 **The sheet** under the button says the line of history and the commit it was
-read at — *Pull request #3 at a1b2c3d*, *Branch fix/uptime at a1b2c3d* — with
-a link to its page, a pull request's title as its author wrote it, and whether
+read at — *Pull request #3 at a1b2c3d*, *Branch fix/uptime at a1b2c3d*,
+*Branch x of someone/udeck-plugins at a1b2c3d* — with a link to its page, a
+pull request's title as its author wrote it, and whether
 it was merged or closed without being merged; then *"Nobody verified what is
 listed here: it is not what the repository merged…"*, and one row per plugin,
 each marked **Unverified**, with what it asks for and **Install**. **Install**
 takes the plugin's folder at that commit, exactly as **Install** on a
 catalogue row takes it — [the same steps](#what-happens-when-install-is-pressed),
-from `plugins/<id>/` at the commit, through the official repository's raw
-host, no API request — and records `ref` `pr` and the number, or `branch` and
-its name, `unverified`, by nobody. Installed, the plugin asks before it runs,
-even when it asks for nothing, and again whenever its code changes ([Consent
-for unverified code](#consent-for-unverified-code)).
+from `plugins/<id>/` at the commit, from the raw host of the repository the
+line is in — the official one's, or the fork's — and no API request — and
+records `ref` `pr` and the number, or `branch` and its name, `unverified`, by
+nobody, with `repository` the fork for a fork's branch. Installed, the plugin
+asks before it runs, even when it asks for nothing, and again whenever its code
+changes ([Consent for unverified code](#consent-for-unverified-code)).
 
 **Over a copy from another line of history** — the verified copy, most often —
 **Install** says first what goes and what comes, both sources and the ref:
@@ -1347,7 +1376,23 @@ its pull request is merged, what was merged, below.
 plugins: off, **Install from a link…** is greyed out and says why, and
 plugins installed from a link keep running.
 
-> **Later — stage 3.** Branches of forks of the official repository.
+**A fork's copy** is named with its fork wherever its line of history is
+named — *Unverified · branch x of someone/udeck-plugins at a1b2c3d* on its row,
+*Installed here from branch x of someone/udeck-plugins: unverified* on the
+catalogue's, *Changed in branch x of someone/udeck-plugins, still 1.0.1*, a
+warning's *1.0.1 from branch x of someone/udeck-plugins at a1b2c3d* — so that
+the official repository's `x` and a fork's `x` are never one name: one in the
+place of the other is a switch of source, and its warning names both. It is
+followed in the fork ([Following the branch or the pull request a copy came
+from](#following-the-branch-or-the-pull-request-a-copy-came-from)), its *What
+changed* opens the fork's compare page, and **Back to** puts a fork's copy back
+from the fork, by the `repository` its `previous` keeps. A fork's copy whose
+folder is exactly what the catalogue's head has is what was merged, and becomes
+the default branch's, **Verified**, like any other (`Adoption`). A fork's
+default branch is never taken as the official one's (`PluginOrigin.mayBeTaken`).
+
+> **Later — stage 4.** Other repositories — one of their own, or a fork of
+> something else — as sources of their own, with **Trust**.
 
 ### When the pull request is merged or closed
 
@@ -1441,8 +1486,10 @@ UDeckCore, tested there.
 A copy installed from a branch or a pull request is offered what its own line
 of history has now — never the catalogue's head, which is another line — and
 never anything by itself. It is asked at the catalogue's own moments, in the
-same read, after the catalogue and its pull request's state, through the
-official repository (`RefFollower`):
+same read, after the catalogue and its pull request's state — a pull request,
+and a branch of the official repository, through the official repository; a
+fork's branch through the fork, its head, its listing and its comparison
+alike, counted against the same limit (`RefFollower`):
 
 * **A pull request**: the same `GET /repos/{o}/{r}/pulls/{n}` that says
   whether it was merged or closed says where its head is.
@@ -1514,9 +1561,15 @@ official repository (`RefFollower`):
   that failed.
 * **A copy installed from a branch through [Install from a
   link…](#installing-from-a-branch-or-a-pull-request)** is followed from the
-  head **Look up** heard — the commit installed — whatever a read heard of
-  the branch before: an older head, or no branch at all. Put back or updated
-  along it, what was heard of the branch stands.
+  head **Look up** heard — the commit installed — as heard when **Look up**
+  heard it, whatever a read heard of the branch before that: an older head,
+  or no branch at all. What a read heard after it — the sheet can stay open
+  across the daily read — is newer and stands: the branch deleted, or at
+  another head, which its row offers. A pull request's the same way: closed
+  after **Look up**, it is said closed (`FollowedRefs.keep`). Put back or
+  updated along it, what was heard of the line stands. What was heard of a
+  branch is held to its repository: the official repository's `x` is not a
+  fork's `x`.
 
 What was heard is kept in `catalogue/official/followed.json` beside what was
 heard of pull requests — a branch's head, or that it is gone; whether a new
@@ -1639,7 +1692,7 @@ its hash be compared at all.
 | `version` | integer | The format of this file. Currently `1`. |
 | `plugins` | object | Keyed by plugin id — the same id as the folder. |
 | `source` | string | The source it was installed from. `official` in stage 1. |
-| `repository` | object | Where that source pointed when the plugin was installed: `provider` (`github`; later `gitlab`), `host`, and `path` (`owner/repo`). A copy, so that the record still says where the plugin came from after the source is renamed or removed. |
+| `repository` | object | Where that source pointed when the plugin was installed: `provider` (`github`; later `gitlab`), `host`, and `path` (`owner/repo`). A copy, so that the record still says where the plugin came from after the source is renamed or removed. For a copy of a branch of a fork, the fork — as GitHub named it when it was looked up — on the source's host; the `source` is still `official`. |
 | `ref.kind` | string | `default` — the source's default branch; `branch` — another branch; `pr` — a pull request. Reserved for later: `commit`. A kind uDeck does not know is read as it is written, and is unverified. |
 | `ref.name` | string or null | The default branch's name (`main`); the branch's name; the pull request's number, as a string. |
 | `commit` | 40 hex characters | The commit the files were taken from. |
@@ -2083,7 +2136,7 @@ read it*. That is what these marks answer — and each says whose word it is.
 | **A folder of your own** — `folder` | Put into `~/.udeck/plugins` by anyone but uDeck. uDeck claims nothing about it. | 1 |
 | **Modified locally** — `pencil` | Installed from a repository, but the folder has changed since. Whatever mark it had is gone. | 1 |
 | **Trusted source: \<name\>** — `checkmark.shield` | Installed from the default branch of a repository the operator explicitly trusted (**Trust** on the source, as `brew trust` works for Homebrew). The guarantee is that source's owner's, not uDeck's — a different mark, so nobody mistakes one for the other. | 4 |
-| **Unverified** — `exclamationmark.triangle` | From a branch, a pull request, a fork, a specific commit, or the default branch of a source nobody trusted. Nobody vouches for it. Shown on the card's header as well as in Settings. | 3 (a branch or a pull request of the official repository); 4 |
+| **Unverified** — `exclamationmark.triangle` | From a branch, a pull request, a fork, a specific commit, or the default branch of a source nobody trusted. Nobody vouches for it. Shown on the card's header as well as in Settings. | 3 (a branch or a pull request of the official repository, a branch of a fork of it); 4 |
 
 In the official repository **only what is merged is verified**; its branches and
 pull requests are unverified like anybody else's.
@@ -2094,7 +2147,8 @@ nothing more than that.
 
 **Where Unverified is said**, for a copy installed from a branch or a pull
 request: on its row in Settings — **Unverified** · *pull request #3 at
-a1b2c3d*, or *branch fix/uptime at a1b2c3d*, with a link to that page; a copy
+a1b2c3d*, *branch fix/uptime at a1b2c3d*, or — a fork's — *branch x of
+someone/udeck-plugins at a1b2c3d*, with a link to that page; a copy
 changed on disk since is marked **Modified locally** there instead, beside the
 same *pull request #3 at a1b2c3d* — that mark takes the place of every other —
 and a copy whose folder has gone **Missing**; on every row **Install from a
@@ -2143,12 +2197,16 @@ repository. What that means, exactly:
 * **When the operator presses Look up in Install from a link…**, the pull
   request or the branch the link names, its listing unless it is cached, and
   the manifests of the plugins there that are not the catalogue's — through
-  the official repository, two requests to the API ([Installing from a branch
-  or a pull request](#installing-from-a-branch-or-a-pull-request)) — and, when
-  **Install** is pressed there, that plugin's files.
+  the official repository, two requests to the API; of a fork's branch, of the
+  fork, three, the first asking whether it is a fork of the official
+  repository at all ([Installing from a branch or a pull
+  request](#installing-from-a-branch-or-a-pull-request)) — and, when
+  **Install** is pressed there, that plugin's files, from the repository the
+  line is in.
 * **After a read of the catalogue**, for each copy installed from a branch or
   a pull request whose tree the new head does not have, that pull request, or
-  that branch's head asked with the commit installed — one request to the API
+  that branch's head asked with the commit installed — of the fork, for a
+  fork's branch, and so its listing and its comparison — one request to the API
   each ([When the pull request is merged or
   closed](#when-the-pull-request-is-merged-or-closed)); once a head moved, its
   listing, once, and the copy's manifest there from the raw host, and when the
@@ -2264,11 +2322,18 @@ standard library.
   on the main line or off it; `GET /repos/{o}/{r}/commits?sha=&path=`, parent
   by parent; and raw files at `/{o}/{r}/{commit}/{path}` under a second prefix
   standing in for the raw host. API answers carry `x-ratelimit-remaining` and
-  `x-ratelimit-reset`, and the remaining count goes down — a `304` too.
+  `x-ratelimit-reset`, and the remaining count goes down — a `304` too. A fork
+  the lab names answers on the same host, from the same commits — a fork shares
+  its network's objects — with branches of its own: its description (`fork`,
+  `parent`, `source`, or `fork` false for a repository of its own), its
+  branches' heads, any listing, comparison and raw file; every request to it
+  spends the same hourly count. A repository the lab names none of is `404`.
 * **The lab drives it** by rewriting a small state file over SSH: which commit
   `main` is at; which commit each other branch is at, a branch left out being
   deleted; each pull request's head, state, merge commit and the repository it
-  came from — a deleted fork's is none; "the limit is used up until T" (`403`
+  came from — a deleted fork's is none; the forks on the host, each with its
+  branches, and which of them is a repository of its own instead, or a fork of
+  something else; "the limit is used up until T" (`403`
   with `remaining: 0`); "this many of the hour's requests were spent by
   something else on the connection" (`spent`: what is left says so, and runs
   out that much sooner); "answer this file with different bytes"; "say the
@@ -2317,6 +2382,7 @@ guest's `~/.udeck` over SSH.
 | `plugins.modified-locally` | A line appended to an installed file over SSH makes `installed.json` say `modified` within seconds — 0.7 to 0.9 s, measured — and then the row **Modified locally**, with **Verified** gone. The disk is read first: one walk of Settings → Plugins takes 40 to 76 s, and a walk that crosses the change returns the row's mark as it was, several times, or not at all — R2's two failures of six — while the walk after it reads the truth (e2e/README.md). |
 | `plugins.install-from-a-pull-request` | Pull request #3, opened from the fork `someone/udeck-plugins`, pasted as `github.com/iillyyaa1997/udeck-plugins/pull/3` into **Install from a link…**: the sheet says *Pull request #3 at …* and lists `asks-nothing` and `uptime` — what differs from the catalogue's head — and the log holds the pull request, its listing and those two manifests at its head, through the official repository; **Install** on `uptime` fetches every file of `plugins/uptime/` once, from the base's raw host at the head's commit, and asks the API nothing; nothing is asked of the fork. The folder hashes to `pr3`'s tree, `installed.json` says `ref {pr, "3"}`, `unverified`, by `null`; the row says **Unverified** · *pull request #3 at …* with a link to its page; placed on a tab, the card's header says **Unverified**, and its question says where the code comes from. Screenshots of the sheet, the row and the card. |
 | `plugins.install-from-a-branch` | The link into `plugins/uptime` on `fix/uptime`, a branch whose name holds a `/`: the sheet lists `uptime` alone, and from **Look up** to the end of the install the log holds the branch's head by `refs/heads/fix/uptime`, its listing and files of `plugins/uptime/` at its commit — nothing else; the record says `ref {branch, "fix/uptime"}`, `unverified`, by `null`, and the row **Unverified** · *branch fix/uptime at …*. Placed on a tab and its folder taken away over SSH, its window says beside **Reinstall** *Reinstall puts back 1.0.1 from branch fix/uptime at …: code nobody verified.*; Settings does not say *Nothing installed yet* above its **Missing** row; the catalogue row says *Installed here from branch fix/uptime: unverified — uptime is not in ~/.udeck/plugins* and offers **Switch to verified** — the plugin's row too — and no **Reinstall**; pressed, the verified copy goes in without a warning, with the branch's as `previous`. |
+| `plugins.install-from-a-fork-branch` | The control first: a link into `plugins/uptime` on `x` of `someone/elsewhere`, a repository of its own, is refused — *"github.com/someone/elsewhere is not a fork of github.com/iillyyaa1997/udeck-plugins. …"* — and the log holds its description, `GET /repos/someone/elsewhere`, and nothing after it: no head, no listing, no file. Then the link into `plugins/uptime` on `x` of the fork `someone/udeck-plugins`, at `pr3` — the official repository has no `x`: from **Look up** to the end of the install the log holds the fork's description, the head of its `x` by `refs/heads/x`, its listing and files of `plugins/uptime/` at that commit from the fork's raw host — every file once on **Install** — and nothing of the official repository; the sheet says *Branch x of someone/udeck-plugins at …*; the folder hashes to `pr3`'s tree; the record says `repository` the fork, `ref {branch, "x"}`, `unverified`, by `null`; the row **Unverified** · *branch x of someone/udeck-plugins at …*. The fork moves `x` on to `p2`: **Check now** asks the fork for `x` with `If-None-Match` and `pr3`, lists `p2` there and compares `pr3...p2` there once, asks the official repository nothing about it, and the row says *Changed in branch x of someone/udeck-plugins, still 1.0.1* with **Update** and *What changed*; **Update** takes every file of `plugins/uptime/` at `p2` once, from the fork, and the row says *… at* `p2`. Screenshots of the refusal, the sheet, the row and the offer. |
 | `plugins.unverified-asks-even-for-nothing` | `asks-nothing`, installed from the pull request and placed on a tab: its card asks — *Asks nothing asks for nothing, but its code is unverified*, and where the code comes from — and its count of runs is not in its cache: it has not run. **Allow** runs it, and `grants.json` holds the decision for 1.0.0 and for its tree; a line appended to `run.sh` over SSH asks again, and **Decline** on the card switches it off (`plugin-settings.json`), its count of runs what it was before the edit: the changed code never ran. Switched on in Settings, its row asks the same under **More**, and **Decline** there switches it off again, the count unchanged; switched on once more, **Allow** there holds the decision for the edited tree and runs it. |
 | `plugins.a-merged-pull-request-becomes-verified` | `uptime` installed from pull request #3, placed and allowed — `followed.json` holding what **Look up** heard, open at `pr3`, and the log one question about the pull request, **Look up**'s; the fake squash-merges it as `s1` — `main` there, the pull request closed and merged as `s1`, every plugin folder with `pr3`'s tree. After **Check now**: `installed.json` says `main` at `s1`, **Verified** by `official`, the tree and version it had; the row says **Verified**; every file of the folder has the inode and the time it had; the log holds no file of `uptime` and no question about the pull request; `followed.json` no longer holds it; the window and the decision are as they were, and the card runs 1.0.1 without asking, with no **Unverified** in its header. |
 | `plugins.merged-with-changes-offers-the-verified` | `uptime` installed from pull request #3; the fake squash-merges it as `s2`, `uptime` 1.0.2. After **Check now** the log holds one question about the pull request and no file of `uptime`, and the record is as it was; the row says *Pull request #3 was merged, and the verified version differs — update* with **Update**, the catalogue row *… unverified — merged, and the verified version differs* with its button saying **Update** as well — as wide as the plugin row's, since the walk reads no button's words, and kept as a screenshot — and Settings *1 update is waiting*. **Update** first names both copies and changes nothing until it is confirmed; then the record is `main`'s at `s2`, **Verified**, 1.0.2, with the pull request's copy as `previous`. |
@@ -2464,7 +2530,30 @@ never the network. What they cover:
   the verified copy they are recorded as (`ShownPlace.recordedAs`); and a pull
   request merged into another branch as the link sheet says it
   (`LinkRefusal.head`), and a commit GitHub no longer has, put back, as it is
-  said (`InstallFromLinkTests`);
+  said (`InstallFromLinkTests`); what **Look up** heard kept at install only
+  over what a read heard before it, and as heard when it heard it — a branch
+  deleted, or moved on, or a pull request closed by a read after it, standing
+  (`keptAtInstall`);
+* branches of forks (`ForkTests`): GitHub's description of a repository read,
+  and whether it is a fork of the official repository — a fork of a fork, the
+  name in another case, a fork of another network, one of its own, no source
+  named; a client for a fork on the same host, none for another host or a path
+  that is not `owner/repo`, and one limit for both, through the client's own
+  transport (`GitHubClient.client(for:)`); a fork's link asked of the fork and
+  nothing of the official repository — its branch, its own page's default
+  branch, renamed — and refused after one question when it is no fork, not
+  there, or its branch is not; the installer fetching every file from the
+  fork, and never a fork's default branch; a fork's branch followed in the
+  fork, what was heard held to its repository; and the fork named in every
+  sentence that names its line, in both languages, in the warnings of a switch
+  across lines — **Switch to verified**, an earlier version, **Reinstall** —
+  and in **Back to** from the fork; and *What changed* opening the fork's own
+  compare page;
+* the temporary folder a run was given (`TemporaryFolderTests`, and the
+  `home:` line of `udeck-plugin run` in `RunPluginTests`): `TMPDIR` when it
+  names a folder by its full path, the system's otherwise — and the `TMPDIR` a
+  plugin is handed; the lock file's reader making its file from a template in
+  `TMPDIR` (`PluginLockTests`);
 * which windows the layout keeps;
 * what Settings → Plugins decides before it draws: which warning **Remove**,
   **Replace…**, **Update**, **Reinstall**, **Back to**, **Install this
@@ -2601,7 +2690,11 @@ owner sets the branch protection.
   [Updating](#updating)); the branch or the pull request a copy came from
   followed, its new head offered with *What changed*, and history rewritten on
   it detected and said (built: [Following the branch or the pull request a copy
-  came from](#following-the-branch-or-the-pull-request-a-copy-came-from)).
+  came from](#following-the-branch-or-the-pull-request-a-copy-came-from)); a
+  branch of a fork of the official repository, read, installed, followed and
+  named from the fork itself, and any other repository refused once GitHub has
+  said it is no fork of it (built: [Installing from a branch or a pull
+  request](#installing-from-a-branch-or-a-pull-request)).
 * **Stage 4 — own and private sources.** `~/.udeck/sources.json`; GitLab,
   gitlab.com and self-hosted; tokens pasted from a pre-filled creation page, or
   **Sign in** — GitHub and gitlab.com by device flow, a self-hosted GitLab with

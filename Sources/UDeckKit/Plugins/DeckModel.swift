@@ -213,7 +213,7 @@ public final class DeckModel {
         // reads a folder half-way through one.
         let recovered = PluginInstaller(
             paths: paths, discovery: PluginDiscovery(searchPath: []), trash: trash,
-            fetch: { _, _ in throw ProviderError.unreachable("nothing is fetched while recovering") }
+            fetch: { _, _, _ in throw ProviderError.unreachable("nothing is fetched while recovering") }
         ).recover()
 
         // Every store is loaded the same way: a missing file is a first run, a

@@ -276,8 +276,10 @@ public enum Phrase: Sendable, Equatable {
     case catalogueLinkedHere(id: String)
     /// A catalogue row whose id is installed from a branch or a pull request
     /// (`CatalogueRowState.unverified`): what is there, and the button that
-    /// puts the row's verified copy in its place.
-    case catalogueInstalledUnverified(ref: PluginRef)
+    /// puts the row's verified copy in its place. `fork` is the fork a branch
+    /// is in, `owner/repo`, when it is a fork's (`PluginOrigin.fork`) — the
+    /// same in every phrase below that names a line of history.
+    case catalogueInstalledUnverified(ref: PluginRef, fork: String? = nil)
     case catalogueSwitchToVerified(version: String)
     /// After *Installed here from pull request #3: unverified*, what became
     /// of the pull request (`PullRequestLifecycle.cataloguePhrase`).
@@ -305,7 +307,7 @@ public enum Phrase: Sendable, Equatable {
     /// (`InstalledRecord.fromPhrase`): the pull request or the branch, and the
     /// commit, seven characters of it.
     case pluginFromPullRequest(number: Int, commit: String)
-    case pluginFromBranch(name: String, commit: String)
+    case pluginFromBranch(name: String, commit: String, fork: String? = nil)
     /// What became of the pull request a copy came from, under its mark
     /// (`PullRequestLifecycle.rowPhrase`): merged as something else than the
     /// copy — the verified version offered, never made by itself, or none to
@@ -317,17 +319,17 @@ public enum Phrase: Sendable, Equatable {
     /// (`RefOffer`), under its mark: a newer version, other files under the
     /// same one, an older one, its folder no longer there — and that the head
     /// which brings it does not continue what is installed (`HistoryRewrite`).
-    case pluginRefAvailable(ref: PluginRef, version: String)
-    case pluginRefChangedStill(ref: PluginRef, version: String)
-    case pluginRefNowHas(ref: PluginRef, version: String)
-    case pluginRefGone(ref: PluginRef, id: String)
-    case pluginRefRewritten(ref: PluginRef)
+    case pluginRefAvailable(ref: PluginRef, version: String, fork: String? = nil)
+    case pluginRefChangedStill(ref: PluginRef, version: String, fork: String? = nil)
+    case pluginRefNowHas(ref: PluginRef, version: String, fork: String? = nil)
+    case pluginRefGone(ref: PluginRef, id: String, fork: String? = nil)
+    case pluginRefRewritten(ref: PluginRef, fork: String? = nil)
     /// The branch a copy came from is not there any more; the plugin keeps
     /// running.
-    case pluginBranchGone(name: String)
+    case pluginBranchGone(name: String, fork: String? = nil)
     /// The last read did not ask about the branch or the pull request a copy
     /// came from — the reserve, a limit, a request that failed — since `at`.
-    case pluginRefNotCheckedSince(ref: PluginRef, at: String)
+    case pluginRefNotCheckedSince(ref: PluginRef, at: String, fork: String? = nil)
     case pluginPinned
     /// A copy a verified plugin put in place by itself (`AutoUpdate`), and
     /// one it could not: tried again at the next read of the catalogue.
@@ -356,7 +358,8 @@ public enum Phrase: Sendable, Equatable {
     /// what a link pasted comes to — the line of history and the commit it
     /// was read at, the plugins there that are not the catalogue's, or why
     /// there is nothing to install (`LinkRefusal`). `official` is the official
-    /// repository, as `github.com/owner/repo`.
+    /// repository, as `github.com/owner/repo`; `fork`, a fork's `owner/repo`
+    /// when the branch is a fork's.
     case linkInstall
     case linkHelp(official: String)
     case linkField
@@ -366,9 +369,12 @@ public enum Phrase: Sendable, Equatable {
     case linkOff
     case linkRefused(RepositoryLink.Refusal, official: String)
     case linkNotFound(RepositoryLink, official: String)
-    case linkOtherRepository(repository: String, official: String)
+    /// A repository that is not a fork of the official one — a repository of
+    /// its own, or a fork of another — `github.com/owner/repo`: a source of
+    /// its own, which comes later.
+    case linkNotAFork(repository: String, official: String)
     case linkIsTheCatalogue(official: String, plugin: String?)
-    case linkHead(ref: PluginRef, commit: String)
+    case linkHead(ref: PluginRef, commit: String, fork: String? = nil)
     case linkPullRequestMerged
     /// Merged into `base`, another branch than the default one: nothing of it
     /// is verified, and the catalogue does not have it.
@@ -379,10 +385,10 @@ public enum Phrase: Sendable, Equatable {
     case linkPullRequestClosed
     /// Nothing there differs from the catalogue's head: every plugin, or —
     /// for a link into one plugin's folder — that plugin.
-    case linkNothingDiffers(ref: PluginRef, plugin: String? = nil)
+    case linkNothingDiffers(ref: PluginRef, plugin: String? = nil, fork: String? = nil)
     /// A link into a plugin's folder that the branch or the pull request
     /// does not have.
-    case linkPluginNotThere(ref: PluginRef, plugin: String)
+    case linkPluginNotThere(ref: PluginRef, plugin: String, fork: String? = nil)
     case linkUnverifiedNote
 
     /// The run log of linked folders (Q127): its switch, what it does, and

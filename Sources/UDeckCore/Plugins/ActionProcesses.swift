@@ -32,7 +32,7 @@ public final class ActionProcesses: @unchecked Sendable {
     /// with uDeck's own home folder and the temporary folder it was given.
     public static func environment(for id: PluginIdentifier, directory: URL?, searchPath: [String]) -> [String: String] {
         PluginEnvironment.action(id: id, directory: directory, searchPath: searchPath, home: NSHomeDirectory(),
-                                 temporaryDirectory: ProcessInfo.processInfo.environment["TMPDIR"])
+                                 temporaryDirectory: TemporaryFolder.path)
     }
 
     /// Starts an action of `plugin`: stdin, stdout and stderr at `/dev/null`,

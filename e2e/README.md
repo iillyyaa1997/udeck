@@ -32,11 +32,11 @@ the last section.
 > it was opened — with its wrong-chord control and a check that the combination
 > dies with uDeck. `login`: "Open at Login", through a restart and an update, and
 > switched off. `settings`: two changes made in uDeck's own window, and whether
-> they hold across a restart. `plugins`: the thirty-six checks of
+> they hold across a restart. `plugins`: the thirty-seven checks of
 > docs/plugin-repository.md — the catalogue, installing, updating, a verified
 > plugin updating itself and an update asking for other permissions only
 > offered, earlier versions, removing, each refusal, installing from a pull
-> request and a branch, that pull request merged — as exactly the copy, with
+> request, a branch and a branch of a fork, that pull request merged — as exactly the copy, with
 > changes, after `main` moved on — or closed, the pull request and the branch
 > followed — a new head offered, a history rewritten said, a branch deleted
 > said — a linked folder, and what Settings offers
@@ -2175,7 +2175,7 @@ problem.
 
 ### Plugins from a repository
 
-Thirty-six checks, one per row of the table in docs/plugin-repository.md ("The
+Thirty-seven checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"). None of them talks to github.com — in the lab only the update
 checks given a published release do, `updates.a-published-release` by default.
 A fake GitHub runs inside the guest (`e2e/guest/fake-github.py`, the guest's
@@ -2185,7 +2185,11 @@ pull request (`refs/heads/{b}`, `refs/pull/{n}/head`) with its `ETag` and
 `304`, a pull request (`/pulls/{n}`), two commits compared through their
 parents (`/compare/{a}...{b}`: ahead, behind, identical or diverged), a tree
 with and without `recursive=1`, a folder's history — and a raw file host
-beside it. Its content
+beside it; and, for each fork the lab names, the same on the same host — the
+fork's description, `fork` and the repository its network grew from
+(`source`), its own branches' heads, any listing, comparison and raw file of
+the network's commits — every request spending the one hourly count, as
+GitHub's do. Its content
 is the fixture commits in `e2e/fixtures/plugin-repository/`. On the main line,
 in the order `history` gives: `c1` holds
 `uptime` 1.0.0 and the three plugins uDeck must refuse (`future-api` with
@@ -2211,7 +2215,9 @@ by folder, or nothing installs.
 **The lab drives the fake by rewriting a small state file over SSH**: which
 commit `main` is at, which commit each other branch is at (a branch left out
 is deleted), each pull request's head, state and merge commit and the
-repository it came from, "the limit is used up until T" (`403` with
+repository it came from, the forks on the host and their branches — one of
+them made a repository of its own instead (`"fork": false`) — "the limit is
+used up until T" (`403` with
 `x-ratelimit-remaining: 0`), "this many of the hour's requests were spent
 elsewhere" (`spent`, so that a read at launch finds the reserve all that is
 left), "answer this file with different bytes", "say the listing is
@@ -2286,7 +2292,13 @@ from the field before **Look up** is pressed. The oracles are the same three:
 the fake's log, from **Look up** on, says what uDeck asked for and that none
 of it named the fork; `installed.json` says where the copy came from; and the
 sheet, the row and the card's header say **Unverified**. The sheet is closed
-before the rows under it are read.
+before the rows under it are read. `plugins.install-from-a-fork-branch` starts
+it with a fork of its own, `someone/udeck-plugins`, whose branch `x` is at
+`pr3` — the official repository has no `x` — and a repository of its own,
+`someone/elsewhere`: the log says that the latter was asked for its description
+and nothing more, and that everything of the former — its description, its
+head, its listing, its files, its following and its comparison — was asked of
+the fork and nothing of it of the official repository.
 
 **A walk that crosses a change does not say what is on the screen.** One
 walk of Settings → Plugins takes 40 to 76 s on a loaded Mac — longer than every

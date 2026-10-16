@@ -151,6 +151,60 @@ public struct Comparison: Equatable, Sendable {
     }
 }
 
+/// A repository as its host describes it, `GET /repos/{o}/{r}`: its name, its
+/// default branch, and whether it is a fork — and, of a fork, the repository
+/// its network grew from (`source`) and the one it was forked from
+/// (`parent`), `owner/repo` each, as GitHub names them (fields **measured**
+/// when stage 3 was designed: `AmanShaikhTech10/Hello-World` answers `fork`
+/// true and `octocat/Hello-World` as both).
+public struct RepositoryDescription: Equatable, Sendable {
+    /// `owner/repo` as the host spells it now — nil when it did not say.
+    public var fullName: String?
+    public var defaultBranch: String
+    public var fork: Bool
+    /// The root of a fork's network: the repository every fork in it was
+    /// made from, however many forks deep.
+    public var source: String?
+    /// The repository it was forked from.
+    public var parent: String?
+
+    public init(fullName: String?, defaultBranch: String, fork: Bool, source: String? = nil, parent: String? = nil) {
+        self.fullName = fullName
+        self.defaultBranch = defaultBranch
+        self.fork = fork
+        self.source = source
+        self.parent = parent
+    }
+
+    /// Whether this is a fork of `official` — directly, or a fork of a fork:
+    /// a fork whose network's root is it, `owner/repo` compared whatever its
+    /// case, as GitHub compares it. Not the official repository itself, not
+    /// a repository of its own, and not a fork of anything else.
+    public func isFork(of official: RepositoryAddress) -> Bool {
+        guard fork, let source else { return false }
+        return source.lowercased() == official.path.lowercased()
+    }
+
+    /// GitHub's answer, or nil when it is not one: no default branch, or a
+    /// `fork` that is not a yes or a no.
+    static func read(_ data: Data) -> RepositoryDescription? {
+        struct Named: Decodable { var full_name: String? }
+        struct Answer: Decodable {
+            var full_name: String?
+            var default_branch: String
+            var fork: Bool?
+            var source: Named?
+            var parent: Named?
+        }
+        guard let answer = try? JSONDecoder().decode(Answer.self, from: data), !answer.default_branch.isEmpty else {
+            return nil
+        }
+        return RepositoryDescription(fullName: answer.full_name, defaultBranch: answer.default_branch,
+                                     fork: answer.fork ?? false, source: answer.source?.full_name,
+                                     parent: answer.parent?.full_name)
+    }
+}
+
 /// What uDeck asks of a repository host. GitHub implements it now; GitLab's
 /// client implements the same questions in stage 4, through its own API.
 public protocol RepositoryProvider: Sendable {
@@ -158,6 +212,9 @@ public protocol RepositoryProvider: Sendable {
 
     /// The repository's default branch.
     func defaultBranch() async throws -> String
+    /// The repository as the host describes it — its default branch, and
+    /// whether it is a fork, and of which.
+    func describe() async throws -> RepositoryDescription
     /// The commit `branch` points at, unless it is still `etag`.
     func head(of branch: String, ifNoneMatch etag: String?) async throws -> HeadAnswer
     /// A tree object: the whole repository at a commit when `recursive`, one
@@ -178,9 +235,30 @@ public protocol RepositoryProvider: Sendable {
     func folderPage(_ path: String, commit: String) -> URL?
     /// Where a person reads what changed between two commits.
     func comparePage(from: String, to: String) -> URL?
+
+    /// The same host's provider for `repository` — this one, for its own —
+    /// asking the same API and raw host, and counted against the same limit:
+    /// what a branch of a fork is read through. Nil for a repository on
+    /// another host, or one its host could not name.
+    func provider(for repository: RepositoryAddress) -> (any RepositoryProvider)?
 }
 
-/// The rate-limit state every request of one source reads and updates.
+extension RepositoryProvider {
+    /// One file of `repository` at `commit`, from its raw host — through this
+    /// provider when that is its repository, through the same host's provider
+    /// for it otherwise (`provider(for:)`), and never from another host:
+    /// what the installer fetches a copy's files with, from the repository
+    /// its request names (`InstallRequest.repository`).
+    public func file(of repository: RepositoryAddress, at path: String, commit: String) async throws -> Data {
+        guard let line = provider(for: repository) else { throw ProviderError.notFound }
+        return try await line.file(at: path, commit: commit)
+    }
+}
+
+/// The rate-limit state every request of one source reads and updates — its
+/// own repository's and its forks' alike, since the host counts what an
+/// address asks, whichever repository it asks about
+/// (`GitHubClient.client(for:)`).
 ///
 /// A class behind a lock rather than a value, because a refresh and an install
 /// can overlap — an install needs only raw files and may run while the API is
@@ -259,8 +337,8 @@ public struct GitHubEndpoints: Equatable, Sendable {
 /// `X-GitHub-Api-Version: 2022-11-28`. Nothing carries a token or a cookie,
 /// and each request gives up after 30 seconds.
 public struct GitHubClient: RepositoryProvider {
-    public let endpoints: GitHubEndpoints
-    public let address: RepositoryAddress
+    public private(set) var endpoints: GitHubEndpoints
+    public private(set) var address: RepositoryAddress
     private let session: URLSession
     private let userAgent: String
     private let limits: RateLimitRecorder
@@ -303,13 +381,17 @@ public struct GitHubClient: RepositoryProvider {
     // MARK: - The questions
 
     public func defaultBranch() async throws -> String {
+        try await describe().defaultBranch
+    }
+
+    /// `GET /repos/{o}/{r}` — one request, which says the default branch and
+    /// whether it is a fork, and of which, together.
+    public func describe() async throws -> RepositoryDescription {
         let (data, _) = try await api(repositoryPath)
-        struct Repository: Decodable { var default_branch: String }
-        guard let answer = try? JSONDecoder().decode(Repository.self, from: data),
-              !answer.default_branch.isEmpty else {
+        guard let description = RepositoryDescription.read(data) else {
             throw ProviderError.badAnswer("the repository's description has no default branch")
         }
-        return answer.default_branch
+        return description
     }
 
     public func head(of branch: String, ifNoneMatch etag: String?) async throws -> HeadAnswer {
@@ -405,6 +487,28 @@ public struct GitHubClient: RepositoryProvider {
 
     public func comparePage(from: String, to: String) -> URL? {
         URL(string: "https://\(address.host)/\(endpoints.repository)/compare/\(from)...\(to)")
+    }
+
+    public func provider(for repository: RepositoryAddress) -> (any RepositoryProvider)? {
+        client(for: repository)
+    }
+
+    /// This client for another repository on the same host: the same API and
+    /// raw host, the same session, and the same limit (`RateLimitRecorder`) —
+    /// GitHub counts what an address asks, whichever repository it asks
+    /// about, so a fork's answers spend what the official repository's do,
+    /// and a limit either learns of stops both. Nil for another host or
+    /// provider, and for a path that is not GitHub's `owner/repo`
+    /// (`RepositoryLink.isOwner`, `isRepository`): nothing else goes into a
+    /// request's path.
+    public func client(for repository: RepositoryAddress) -> GitHubClient? {
+        guard repository.provider == address.provider, repository.host == address.host else { return nil }
+        let parts = repository.path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 2, RepositoryLink.isOwner(parts[0]), RepositoryLink.isRepository(parts[1]) else { return nil }
+        var client = self
+        client.endpoints.repository = repository.path
+        client.address = RepositoryAddress(provider: address.provider, host: address.host, path: repository.path)
+        return client
     }
 
     // MARK: - Asking

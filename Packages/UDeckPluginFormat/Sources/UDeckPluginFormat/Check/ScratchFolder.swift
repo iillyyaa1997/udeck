@@ -15,10 +15,12 @@ import Musl
 /// index `Git.attributes` reads a commit's attributes through, the uDeck folder
 /// `udeck-plugin run` hands a plugin when it is given none, and the file curl
 /// writes a release's asset to for `udeck-plugin pin`. It sits in
-/// `udeck-plugin-<uid>` in the temporary folder — one of the command's own, so
-/// that taking away what stopped runs left reads that folder and not the
-/// whole temporary folder, which on a busy machine holds tens of thousands of
-/// entries; one per user, since on Linux the temporary folder is shared.
+/// `udeck-plugin-<uid>` in the temporary folder the command was given —
+/// `TMPDIR`, or the system's without one (`TemporaryFolder`) — one of the
+/// command's own, so that taking away what stopped runs left reads that
+/// folder and not the whole temporary folder, which on a busy machine holds
+/// tens of thousands of entries; one per user, since on Linux the temporary
+/// folder is shared.
 ///
 /// It is taken away when the command is done with it — and not when the
 /// command is stopped first, by a signal or a CI job's timeout. So its name
@@ -40,9 +42,9 @@ enum ScratchFolder {
     static let leftAfter: Double = 3600
 
     /// Where the check keeps its folders: `udeck-plugin-<uid>` in the
-    /// temporary folder.
+    /// temporary folder the command was given (`TemporaryFolder`).
     static var home: URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("udeck-plugin-\(getuid())", isDirectory: true)
+        TemporaryFolder.url.appendingPathComponent("udeck-plugin-\(getuid())", isDirectory: true)
     }
 
     /// A new folder in `parent`, its name starting with `prefix`.

@@ -31,7 +31,8 @@ public enum PluginTrial {
         public var language: String
         public var reason: RefreshReason
         /// Where the command was started from: `TMPDIR` for the producer, as
-        /// uDeck hands it its own, and `CFFIXED_USER_HOME` and `HOME` for the
+        /// uDeck hands it its own — the system's temporary folder without one
+        /// (`TemporaryFolder`) — and `CFFIXED_USER_HOME` and `HOME` for the
         /// home folder it is handed (`homes`).
         public var environment: [String: String]
         /// Where the account's home folder is: the producer's `HOME` is the
@@ -142,7 +143,9 @@ public enum PluginTrial {
             reason: options.reason,
             language: options.language,
             home: Self.home(options),
-            temporaryDirectory: options.environment["TMPDIR"]
+            // The shell's own, as uDeck hands its own — or, as uDeck does
+            // without one, the system's.
+            temporaryDirectory: TemporaryFolder.path(given: options.environment["TMPDIR"])
         )
 
         let before = FolderSnapshot.of(plugin.directory)

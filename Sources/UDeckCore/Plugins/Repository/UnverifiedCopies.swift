@@ -8,27 +8,31 @@ import Foundation
 
 /// A copy of a plugin as a sentence names it — where it came from, and which
 /// one: *the verified 1.1.0 from github.com/…*, *1.0.1 from pull request #3 at
-/// a1b2c3d*, *1.0.1 from branch fix/uptime at a1b2c3d*. What a warning that
-/// puts a copy from one line of history in the place of a copy from another
-/// says of each (`ShownPlace.Switch`): both sources and the ref, before
-/// anything is replaced.
+/// a1b2c3d*, *1.0.1 from branch fix/uptime at a1b2c3d*, *1.0.1 from branch fix
+/// of someone/udeck-plugins at a1b2c3d*. What a warning that puts a copy from
+/// one line of history in the place of a copy from another says of each
+/// (`ShownPlace.Switch`): both sources and the ref, before anything is
+/// replaced.
 public enum CopyName: Equatable, Sendable {
     /// From the source's default branch, whose copies are verified.
     case verified(version: String, repository: String)
     /// From pull request `number`, at `commit` — its first seven characters.
     case pullRequest(number: Int, commit: String, version: String)
-    /// From branch `name`, at `commit`.
-    case branch(name: String, commit: String, version: String)
+    /// From branch `name`, at `commit` — of `fork`, `owner/repo`, when it is a
+    /// fork's branch (`PluginOrigin.fork`).
+    case branch(name: String, commit: String, version: String, fork: String? = nil)
     /// From a line of history this uDeck does not know, at `commit`.
     case other(commit: String, version: String)
 
-    /// `version` at `commit`, from `origin`.
-    public static func of(_ origin: PluginOrigin, commit: String, version: String) -> CopyName {
+    /// `version` at `commit`, from `origin`, `official` being the official
+    /// repository: a branch of another repository is named with its fork.
+    public static func of(_ origin: PluginOrigin, commit: String, version: String,
+                          official: RepositoryAddress? = nil) -> CopyName {
         let short = String(commit.prefix(7))
         if origin.ref.isDefault { return .verified(version: version, repository: origin.repository.description) }
         if let number = origin.ref.pullRequestNumber { return .pullRequest(number: number, commit: short, version: version) }
         if origin.ref.kind == PluginRef.branchKind, let name = origin.ref.name {
-            return .branch(name: name, commit: short, version: version)
+            return .branch(name: name, commit: short, version: version, fork: origin.fork(official: official))
         }
         return .other(commit: short, version: version)
     }
@@ -40,8 +44,8 @@ public enum CopyName: Equatable, Sendable {
             ShownPlace.same(v1, v2) && ShownPlace.same(r1, r2)
         case (.pullRequest(let n1, let c1, let v1), .pullRequest(let n2, let c2, let v2)):
             n1 == n2 && ShownPlace.same(c1, c2) && ShownPlace.same(v1, v2)
-        case (.branch(let b1, let c1, let v1), .branch(let b2, let c2, let v2)):
-            ShownPlace.same(b1, b2) && ShownPlace.same(c1, c2) && ShownPlace.same(v1, v2)
+        case (.branch(let b1, let c1, let v1, let f1), .branch(let b2, let c2, let v2, let f2)):
+            ShownPlace.same(b1, b2) && ShownPlace.same(c1, c2) && ShownPlace.same(v1, v2) && ShownPlace.same(f1, f2)
         case (.other(let c1, let v1), .other(let c2, let v2)):
             ShownPlace.same(c1, c2) && ShownPlace.same(v1, v2)
         default:
@@ -51,6 +55,19 @@ public enum CopyName: Equatable, Sendable {
 }
 
 extension PluginOrigin {
+    /// The fork a branch is in, `owner/repo`, as a sentence names it after the
+    /// branch — *branch fix of someone/udeck-plugins* — when it is not the
+    /// official repository's (`official`) own, whatever case it is spelt in.
+    /// Nil for the official repository's branches, for a pull request — read
+    /// through the official repository, whoever opened it — for the default
+    /// branch, and when the official repository is not known.
+    public func fork(official: RepositoryAddress?) -> String? {
+        guard ref.kind == PluginRef.branchKind, let official else { return nil }
+        let same = repository.provider == official.provider && repository.host == official.host
+            && repository.path.lowercased() == official.path.lowercased()
+        return same ? nil : repository.path
+    }
+
     /// Whether a copy from `other` follows the same line of history as a copy
     /// from here: the source's default branch — whatever its repository is
     /// called now, a rename is no other source — or the same branch, or the
@@ -80,15 +97,17 @@ extension RepositoryAddress {
 extension InstalledRecord {
     /// Where the copy came from, as its row in Settings says it beside its
     /// mark: *From github.com/… at 5c3e0d2* for the source's default branch;
-    /// *pull request #3 at a1b2c3d* or *branch fix/uptime at a1b2c3d* for
-    /// code nobody verified, after **Unverified**.
-    public var fromPhrase: Phrase {
+    /// *pull request #3 at a1b2c3d*, *branch fix/uptime at a1b2c3d* or —
+    /// a fork's branch — *branch fix of someone/udeck-plugins at a1b2c3d* for
+    /// code nobody verified, after **Unverified**; `official` being the
+    /// official repository.
+    public func fromPhrase(official: RepositoryAddress?) -> Phrase {
         let commit = String(self.commit.prefix(7))
         if let number = ref.pullRequestNumber {
             return .pluginFromPullRequest(number: number, commit: commit)
         }
         if ref.kind == PluginRef.branchKind, let name = ref.name {
-            return .pluginFromBranch(name: name, commit: commit)
+            return .pluginFromBranch(name: name, commit: commit, fork: origin.fork(official: official))
         }
         return .pluginFrom(source: repository.description, commit: commit)
     }
@@ -104,10 +123,11 @@ extension InstalledRecord {
     /// pull request's code back unsaid. Nil for the default branch's copy, and
     /// for a copy whose tree is the one the catalogue's head has
     /// (`headTree`): that is what was merged, and it comes back **Verified**
-    /// (`Adoption`).
-    public func reinstallSays(headTree: String?) -> Phrase? {
+    /// (`Adoption`). A fork's branch is named with its fork, `official` being
+    /// the official repository.
+    public func reinstallSays(headTree: String?, official: RepositoryAddress? = nil) -> Phrase? {
         guard !isOfficialDefault, tree != headTree else { return nil }
-        return .windowReinstallBrings(CopyName.of(origin, commit: commit, version: version))
+        return .windowReinstallBrings(CopyName.of(origin, commit: commit, version: version, official: official))
     }
 }
 
@@ -131,11 +151,12 @@ extension CatalogueRowState {
     /// became of that pull request, when it was merged as something else or
     /// closed (`lifecycle`); that its folder is not in `path`, when it is
     /// gone; and why the verified copy cannot be installed here, when it
-    /// cannot. Nil for every other state.
-    public func unverifiedLine(ref: PluginRef, id: String, path: String,
+    /// cannot. Nil for every other state. `fork` is the fork the branch is
+    /// in, when it is one's (`PluginOrigin.fork`).
+    public func unverifiedLine(ref: PluginRef, fork: String? = nil, id: String, path: String,
                                lifecycle: PullRequestLifecycle? = nil) -> [Phrase]? {
         guard case .unverified(_, let refusal, let folderGone) = self else { return nil }
-        return [.catalogueInstalledUnverified(ref: ref)]
+        return [.catalogueInstalledUnverified(ref: ref, fork: fork)]
             + (lifecycle?.cataloguePhrase.map { [$0] } ?? [])
             + (folderGone ? [.catalogueMissing(id: id, path: path)] : [])
             + (refusal.map { [.catalogueRefusal($0)] } ?? [])
@@ -219,14 +240,15 @@ public struct RefOffer: Equatable, Sendable {
     /// *1.0.2 available in pull request #3*, *Changed in branch fix/uptime,
     /// still 1.0.1*, *Pull request #3 now has 1.0.0*, *uptime is no longer in
     /// pull request #3; the plugin keeps running*, or why the version there
-    /// cannot run here — one line, its parts joined.
-    public func said(ref: PluginRef, id: String) -> [Phrase] {
+    /// cannot run here — one line, its parts joined; a fork's branch named
+    /// with its `fork`.
+    public func said(ref: PluginRef, fork: String? = nil, id: String) -> [Phrase] {
         switch offer {
         case .current: []
-        case .newer(let version): [.pluginRefAvailable(ref: ref, version: version)]
-        case .changedStill(let version): [.pluginRefChangedStill(ref: ref, version: version)]
-        case .older(let version): [.pluginRefNowHas(ref: ref, version: version)]
-        case .goneFromRepository: [.pluginRefGone(ref: ref, id: id)]
+        case .newer(let version): [.pluginRefAvailable(ref: ref, version: version, fork: fork)]
+        case .changedStill(let version): [.pluginRefChangedStill(ref: ref, version: version, fork: fork)]
+        case .older(let version): [.pluginRefNowHas(ref: ref, version: version, fork: fork)]
+        case .goneFromRepository: [.pluginRefGone(ref: ref, id: id, fork: fork)]
         case .cannotRun(let version, let reason):
             switch reason {
             case .apiNotSpoken(_, _, let api): [.catalogueUpdateNeedsAPI(version: version, api: api)]
@@ -340,23 +362,27 @@ public struct UnverifiedRow: Equatable, Sendable {
     }
 
     /// What the plugin's row says under its mark, in order, `ref` being where
-    /// the copy came from and `time` how a moment is written: what became of
-    /// its pull request; its branch gone; its line's history rewritten; what
-    /// its line offers; and since when that line was not checked.
-    public func said(ref: PluginRef, id: String, time: (Date) -> String) -> [Said] {
+    /// the copy came from — of `fork`, when that is a fork's branch
+    /// (`PluginOrigin.fork`) — and `time` how a moment is written: what became
+    /// of its pull request; its branch gone; its line's history rewritten;
+    /// what its line offers; and since when that line was not checked.
+    public func said(ref: PluginRef, fork: String? = nil, id: String, time: (Date) -> String) -> [Said] {
         var said: [Said] = []
         if let number = ref.pullRequestNumber, let phrase = lifecycle?.rowPhrase(number: number) {
             said.append(Said(suffix: "pullRequest", phrase: [phrase]))
         }
         if branchGone, ref.kind == PluginRef.branchKind, let name = ref.name {
-            said.append(Said(suffix: "branchGone", phrase: [.pluginBranchGone(name: name)]))
+            said.append(Said(suffix: "branchGone", phrase: [.pluginBranchGone(name: name, fork: fork)]))
         }
         if let lineOffer {
-            if lineOffer.rewritten { said.append(Said(suffix: "rewritten", phrase: [.pluginRefRewritten(ref: ref)])) }
-            said.append(Said(suffix: "offer", phrase: lineOffer.said(ref: ref, id: id)))
+            if lineOffer.rewritten {
+                said.append(Said(suffix: "rewritten", phrase: [.pluginRefRewritten(ref: ref, fork: fork)]))
+            }
+            said.append(Said(suffix: "offer", phrase: lineOffer.said(ref: ref, fork: fork, id: id)))
         }
         if let notCheckedSince {
-            said.append(Said(suffix: "notChecked", phrase: [.pluginRefNotCheckedSince(ref: ref, at: time(notCheckedSince))]))
+            said.append(Said(suffix: "notChecked",
+                             phrase: [.pluginRefNotCheckedSince(ref: ref, at: time(notCheckedSince), fork: fork)]))
         }
         return said
     }

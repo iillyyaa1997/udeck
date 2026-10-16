@@ -166,7 +166,7 @@ struct English: Vocabulary {
         // Plugins from a repository
         case .pluginsOfficialCatalogue: "Official catalogue"
         case .pluginsOfficialCatalogueHelp(let source):
-            "uDeck reads the list of plugins in \(source) a few seconds after it starts, once a day, when you open this pane and the list is more than an hour old, and when you press Check now — the list and each plugin's manifest; for a plugin installed from a branch or a pull request, also where that branch or pull request is now and, once it has moved, its list of files, that plugin's manifest there and one comparison with what is installed. A plugin's files are fetched when you press Install, and when a verified plugin updates itself. Off, uDeck makes no request about plugins at all; what is installed keeps running."
+            "uDeck reads the list of plugins in \(source) a few seconds after it starts, once a day, when you open this pane and the list is more than an hour old, and when you press Check now — the list and each plugin's manifest; for a plugin installed from a branch or a pull request, also where that branch or pull request is now — a fork's branch asked of the fork — and, once it has moved, its list of files, that plugin's manifest there and one comparison with what is installed. A plugin's files are fetched when you press Install, and when a verified plugin updates itself. Off, uDeck makes no request about plugins at all; what is installed keeps running."
         case .catalogueCheckNow: "Check now"
         case .catalogueChecked(let source, let time): "\(source) · checked \(time)"
         case .catalogueNeverRead(let source): "\(source) · not read yet"
@@ -241,7 +241,7 @@ struct English: Vocabulary {
                 ? "\(id) is \(Self.copy(from)), with changes of yours. Your changes to \(id) will be moved to the Trash, and \(Self.copy(to)) installed in its place. "
                 : "\(id) is \(Self.copy(from)); installing \(Self.copy(to)) replaces it. ") + Self.staysAfterSwitching(to: to)
         case .catalogueLinkedHere(let id): "\(id) is linked here, to a folder of your own"
-        case .catalogueInstalledUnverified(let ref): "Installed here from \(Self.line(ref)): unverified"
+        case .catalogueInstalledUnverified(let ref, let fork): "Installed here from \(Self.line(ref, fork: fork)): unverified"
         case .catalogueSwitchToVerified(let version): "Switch to verified \(version)"
         case .catalogueMergedDiffers: "merged, and the verified version differs"
         case .catalogueClosedUnmerged: "closed without being merged"
@@ -261,21 +261,23 @@ struct English: Vocabulary {
         case .pluginMarkMissing: "Missing"
         case .pluginFrom(let source, let commit): "From \(source) at \(commit)"
         case .pluginFromPullRequest(let number, let commit): "pull request #\(number) at \(commit)"
-        case .pluginFromBranch(let name, let commit): "branch \(name) at \(commit)"
+        case .pluginFromBranch(let name, let commit, let fork): "branch \(name)\(Self.of(fork)) at \(commit)"
         case .pluginPullRequestMergedDiffers(let number):
             "Pull request #\(number) was merged, and the verified version differs — update"
         case .pluginPullRequestMergedNothingOffered(let number):
             "Pull request #\(number) was merged; no verified version is offered here, and the plugin keeps running"
         case .pluginPullRequestClosed(let number):
             "Pull request #\(number) was closed without being merged; the plugin keeps running"
-        case .pluginRefAvailable(let ref, let version): "\(version) available in \(Self.line(ref))"
-        case .pluginRefChangedStill(let ref, let version): "Changed in \(Self.line(ref)), still \(version)"
-        case .pluginRefNowHas(let ref, let version): "\(Self.line(ref, capitalised: true)) now has \(version)"
-        case .pluginRefGone(let ref, let id): "\(id) is no longer in \(Self.line(ref)); the plugin keeps running"
-        case .pluginRefRewritten(let ref):
-            "The history of \(Self.line(ref)) was rewritten: its new head does not continue what is installed"
-        case .pluginBranchGone(let name): "Branch \(name) no longer exists; the plugin keeps running"
-        case .pluginRefNotCheckedSince(let ref, let at): "\(Self.line(ref, capitalised: true)) not checked since \(at)"
+        case .pluginRefAvailable(let ref, let version, let fork): "\(version) available in \(Self.line(ref, fork: fork))"
+        case .pluginRefChangedStill(let ref, let version, let fork): "Changed in \(Self.line(ref, fork: fork)), still \(version)"
+        case .pluginRefNowHas(let ref, let version, let fork): "\(Self.line(ref, capitalised: true, fork: fork)) now has \(version)"
+        case .pluginRefGone(let ref, let id, let fork):
+            "\(id) is no longer in \(Self.line(ref, fork: fork)); the plugin keeps running"
+        case .pluginRefRewritten(let ref, let fork):
+            "The history of \(Self.line(ref, fork: fork)) was rewritten: its new head does not continue what is installed"
+        case .pluginBranchGone(let name, let fork): "Branch \(name)\(Self.of(fork)) no longer exists; the plugin keeps running"
+        case .pluginRefNotCheckedSince(let ref, let at, let fork):
+            "\(Self.line(ref, capitalised: true, fork: fork)) not checked since \(at)"
         case .pluginPinned: "Kept at this version — newer ones are still shown"
         case .pluginUpdatedByItself(let date): "Updated by itself on \(date)"
         case .pluginUpdateByItselfFailed(let version):
@@ -302,7 +304,7 @@ struct English: Vocabulary {
         case .linkFolderRefused(let refusal): Self.linkRefusal(refusal)
         case .linkInstall: "Install from a link…"
         case .linkHelp(let official):
-            "Paste the link of a pull request or a branch of \(official). uDeck asks GitHub about it and lists the plugins there that are not what the catalogue has — new, or changed. Nobody verified them."
+            "Paste the link of a pull request or a branch of \(official), or of a branch of a fork of it. uDeck asks GitHub about it and lists the plugins there that are not what the catalogue has — new, or changed. Nobody verified them."
         case .linkField: "github.com/…/pull/3 or …/tree/branch"
         case .linkLookUp: "Look up"
         case .linkReading: "Asking GitHub…"
@@ -314,14 +316,16 @@ struct English: Vocabulary {
             switch link {
             case .pullRequest(let number): "\(official) has no pull request #\(number)."
             case .branch(let name, _): "\(official) has no branch \(name) — it may have been deleted."
+            case .forkBranch(let repository, let name, _): "\(repository) has no branch \(name) — it may have been deleted."
+            case .forkRepository(let repository): "\(repository) could not be found — or it is private."
             default: "\(official) has nothing at that link."
             }
-        case .linkOtherRepository(let repository, let official):
-            "\(repository) is not \(official). Installing from another repository — a fork included — is not possible yet."
+        case .linkNotAFork(let repository, let official):
+            "\(repository) is not a fork of \(official). Plugins come from \(official) and its forks for now; other repositories come later, as sources of their own."
         case .linkIsTheCatalogue(let official, let plugin):
             plugin.map { "That is \($0) on the default branch of \(official): it is in the catalogue below, verified." }
                 ?? "That is the default branch of \(official): its plugins are the catalogue below, verified."
-        case .linkHead(let ref, let commit): "\(Self.line(ref, capitalised: true)) at \(commit)"
+        case .linkHead(let ref, let commit, let fork): "\(Self.line(ref, capitalised: true, fork: fork)) at \(commit)"
         case .linkPullRequestMerged:
             "This pull request was merged. What is listed is its head as it was proposed; what the repository merged is in the catalogue."
         case .catalogueCommitGone(let commit):
@@ -329,11 +333,11 @@ struct English: Vocabulary {
         case .linkPullRequestMergedElsewhere(let base):
             "This pull request was merged into \(base), not the default branch: what is listed is its head, and nothing of it is verified."
         case .linkPullRequestClosed: "This pull request was closed without being merged."
-        case .linkNothingDiffers(let ref, let plugin):
-            plugin.map { "\($0) in \(Self.line(ref)) is what the catalogue already has: there is nothing to install from it." }
-                ?? "Every plugin in \(Self.line(ref)) is what the catalogue already has: there is nothing to install from it."
-        case .linkPluginNotThere(let ref, let plugin):
-            "\(Self.line(ref, capitalised: true)) has no plugins/\(plugin): there is nothing to install from it."
+        case .linkNothingDiffers(let ref, let plugin, let fork):
+            plugin.map { "\($0) in \(Self.line(ref, fork: fork)) is what the catalogue already has: there is nothing to install from it." }
+                ?? "Every plugin in \(Self.line(ref, fork: fork)) is what the catalogue already has: there is nothing to install from it."
+        case .linkPluginNotThere(let ref, let plugin, let fork):
+            "\(Self.line(ref, capitalised: true, fork: fork)) has no plugins/\(plugin): there is nothing to install from it."
         case .linkUnverifiedNote:
             "Nobody verified what is listed here: it is not what the repository merged. A plugin installed from here asks before it runs — even one that asks for nothing — and again whenever its code changes."
         case .runLogSwitch: "Keep a run log for linked folders"
@@ -523,13 +527,14 @@ struct English: Vocabulary {
     }
 
     /// A branch or a pull request, as a sentence names it: *pull request #3*,
-    /// *branch fix/uptime*.
-    static func line(_ ref: PluginRef, capitalised: Bool = false) -> String {
+    /// *branch fix/uptime*, *branch fix of someone/udeck-plugins* — a fork's
+    /// branch, `fork` its `owner/repo`.
+    static func line(_ ref: PluginRef, capitalised: Bool = false, fork: String? = nil) -> String {
         let said: String
         if let number = ref.pullRequestNumber {
             said = "pull request #\(number)"
         } else if ref.kind == PluginRef.branchKind {
-            said = "branch \(ref.name ?? "")"
+            said = "branch \(ref.name ?? "")" + of(fork)
         } else if ref.isDefault {
             said = "the default branch"
         } else {
@@ -549,12 +554,18 @@ struct English: Vocabulary {
         return "Its windows and settings stay. Nobody verified the code that comes: it asks before it runs, unless you allowed exactly that code before."
     }
 
+    /// What follows a fork's branch's name: *of someone/udeck-plugins*;
+    /// nothing for the official repository's own.
+    static func of(_ fork: String?) -> String {
+        fork.map { " of \($0)" } ?? ""
+    }
+
     /// A copy as a warning names it (`CopyName`).
     static func copy(_ name: CopyName) -> String {
         switch name {
         case .verified(let version, let repository): "the verified \(version) from \(repository)"
         case .pullRequest(let number, let commit, let version): "\(version) from pull request #\(number) at \(commit)"
-        case .branch(let branch, let commit, let version): "\(version) from branch \(branch) at \(commit)"
+        case .branch(let branch, let commit, let version, let fork): "\(version) from branch \(branch)\(of(fork)) at \(commit)"
         case .other(let commit, let version): "\(version) at \(commit)"
         }
     }
@@ -562,16 +573,16 @@ struct English: Vocabulary {
     /// Why a pasted link is not read (`RepositoryLink.Refusal`).
     static func linkRefusal(_ refusal: RepositoryLink.Refusal, official: String) -> String {
         switch refusal {
-        case .empty: "Paste the link of a pull request or a branch of \(official)."
+        case .empty: "Paste the link of a pull request or a branch of \(official), or of a branch of a fork of it."
         case .notALink:
             "That is not a github.com link. Paste the link of a pull request or a branch of \(official), as the browser shows it."
         case .notGitHub(let host):
-            "\(host) is not GitHub. Plugins come from \(official) for now; other hosts come later, as sources of their own."
+            "\(host) is not GitHub. Plugins come from \(official) and its forks for now; other hosts come later, as sources of their own."
         case .commit(let sha):
             "That is the link of one commit" + (sha.isEmpty ? "" : ", \(sha.prefix(7))")
                 + ". Installing a single commit is not possible yet: paste the link of its pull request or its branch."
         case .otherRepositoryPullRequest(let repository, let number):
-            "Pull request #\(number) of \(repository) is not one of \(official)'s. Installing from another repository is not possible yet."
+            "Pull request #\(number) of \(repository) is not one of \(official)'s. Paste the link of its branch instead: a branch of a fork of \(official) can be installed from."
         case .notABranch(let name): "\(name) is not a name git allows for a branch."
         case .unsupported:
             "That page names no pull request and no branch. Paste the link of a pull request (…/pull/3) or a branch (…/tree/name)."

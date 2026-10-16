@@ -225,8 +225,10 @@ public enum RecoveredOperation: Equatable, Sendable {
 /// 1. The listing is checked against rules 1–8 — no request needed.
 /// 2. A staging folder is opened with `intent.json` in it.
 /// 3. The plugin's files, and only those, are downloaded from the raw host at
-///    the commit, four at a time; each is hashed as it arrives and must match
-///    its blob id; each is written with the permissions its mode says.
+///    the commit, of the repository the request names — the official one's,
+///    or a fork's for a fork's branch — four at a time; each is hashed as it
+///    arrives and must match its blob id; each is written with the permissions
+///    its mode says.
 /// 4. The staged folder is hashed as git would and compared with the listed
 ///    tree: that proves the set of files is complete and nothing extra is there.
 /// 5. `PluginDiscovery.load` checks it — the same function the folder scan
@@ -242,7 +244,8 @@ public struct PluginInstaller: Sendable {
     public let discovery: PluginDiscovery
     public let trash: any PluginTrash
     public let renames: FolderRenames
-    private let fetch: @Sendable (_ path: String, _ commit: String) async throws -> Data
+    /// One file: from `repository`'s raw host, at `path` and `commit`.
+    private let fetch: @Sendable (_ repository: RepositoryAddress, _ path: String, _ commit: String) async throws -> Data
     private let now: @Sendable () -> Date
 
     /// Four files at a time, each retried twice, the whole install at most five
@@ -256,7 +259,7 @@ public struct PluginInstaller: Sendable {
         discovery: PluginDiscovery,
         trash: any PluginTrash = SystemTrash(),
         renames: FolderRenames = .system,
-        fetch: @escaping @Sendable (String, String) async throws -> Data,
+        fetch: @escaping @Sendable (RepositoryAddress, String, String) async throws -> Data,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.paths = paths
@@ -349,7 +352,8 @@ public struct PluginInstaller: Sendable {
                 let entry = files[next]
                 next += 1
                 group.addTask {
-                    let data = try await fetchWithRetries("\(base)/\(entry.path)", commit: request.commit)
+                    let data = try await fetchWithRetries("\(base)/\(entry.path)", commit: request.commit,
+                                                          from: request.repository)
                     try place(data, as: entry, in: folder, base: base)
                 }
             }
@@ -360,12 +364,12 @@ public struct PluginInstaller: Sendable {
         }
     }
 
-    private func fetchWithRetries(_ path: String, commit: String) async throws -> Data {
+    private func fetchWithRetries(_ path: String, commit: String, from repository: RepositoryAddress) async throws -> Data {
         var last = ""
         for attempt in 1...Self.attempts {
             try Task.checkCancellation()
             do {
-                return try await fetch(path, commit)
+                return try await fetch(repository, path, commit)
             } catch ProviderError.rawRateLimited(let until) {
                 throw InstallError.rawRateLimited(until: until)
             } catch is CancellationError {

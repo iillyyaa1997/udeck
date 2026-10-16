@@ -306,7 +306,8 @@ struct CatalogueRowView: View {
         case .missing: strings(.catalogueMissing(id: id, path: model.pluginsDirectoryDisplayPath))
         case .installed(let offer): OfferText.text(offer, strings, asksDifferently: model.updateAsksDifferently(id))
         case .unverified:
-            (state.unverifiedLine(ref: model.installed.plugins[id]?.ref ?? PluginRef(kind: "", name: nil), id: id,
+            (state.unverifiedLine(ref: model.installed.plugins[id]?.ref ?? PluginRef(kind: "", name: nil),
+                                  fork: model.installed.plugins[id]?.origin.fork(official: model.catalogueAddress), id: id,
                                   path: model.pluginsDirectoryDisplayPath,
                                   lifecycle: model.unverifiedRow(of: id)?.lifecycle) ?? []).map { strings($0) }.joined(separator: " — ")
         }
@@ -397,7 +398,7 @@ struct InstalledRepositoryControls: View {
                     if !record.isOfficialDefault, model.linkedFolder(id) == nil {
                         Text("·").font(.caption).foregroundStyle(.secondary)
                     }
-                    Text(strings(record.fromPhrase))
+                    Text(strings(record.fromPhrase(official: model.catalogueAddress)))
                         .font(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("plugin.\(id).from")
                     if let page = record.refPage {
@@ -435,7 +436,8 @@ struct InstalledRepositoryControls: View {
             // that head rewrote its history, and since when its line was not
             // checked (`UnverifiedRow.said`).
             if let record, let unverified {
-                ForEach(unverified.said(ref: record.ref, id: id, time: { Clock.text($0, strings) }), id: \.suffix) { said in
+                ForEach(unverified.said(ref: record.ref, fork: record.origin.fork(official: model.catalogueAddress), id: id,
+                                        time: { Clock.text($0, strings) }), id: \.suffix) { said in
                     HStack(spacing: 8) {
                         Text(said.phrase.map { strings($0) }.joined(separator: " — ")).font(.caption)
                             .bold(said.suffix != "notChecked")

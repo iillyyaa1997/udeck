@@ -71,13 +71,14 @@ let package = Package(
             exclude: ["Fixtures", "Corpus"]
         ),
 
-        // How long reading and running take, and whatever keeps a core busy
-        // for a second. Apart from the tests above so that uDeck's top-level
-        // `swift test`, which builds those but not these, never runs them
-        // beside its test of the host's CPU time.
+        // How long reading and running take, whatever keeps a core busy for a
+        // second, and a run that has to beat its own timeout. Apart from the
+        // tests above so that uDeck's top-level `swift test`, which builds
+        // those but not these, never runs them beside its test of the host's
+        // CPU time, nor beside each other.
         .testTarget(
             name: "UDeckPluginFormatTimingTests",
-            dependencies: ["UDeckPluginFormat", "UDeckPluginFormatFixtures"]
+            dependencies: ["UDeckPluginFormat", "UDeckPluginFormatFixtures", "UDeckPluginCommand"]
         ),
     ]
 )

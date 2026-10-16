@@ -258,10 +258,10 @@ struct RefResolverTests {
             _ = try await resolve(.branch("gone", plugin: nil), with: provider)
         }
         let fork = RepositoryAddress(path: "someone/udeck-plugins")
-        await #expect(throws: RefResolver.Refusal.forkNotYet(fork)) {
+        await #expect(throws: RefResolver.Refusal.notAFork(fork)) {
             _ = try await resolve(.forkBranch(fork, branch: "x", plugin: nil), with: provider)
         }
-        await #expect(throws: RefResolver.Refusal.forkNotYet(fork)) {
+        await #expect(throws: RefResolver.Refusal.notAFork(fork)) {
             _ = try await resolve(.forkRepository(fork), with: provider)
         }
         #expect(provider.asked == ["pull 9", "head refs/heads/gone"], "nothing is asked about a fork yet")
@@ -289,9 +289,14 @@ struct RefResolverTests {
 /// it was asked, in order. A head asked with `If-None-Match` answers
 /// unchanged when it is that commit, as GitHub's `304`; two commits are
 /// compared by what the test says of them (`comparisons`), and a commit the
-/// test does not name in one is not there.
+/// test does not name in one is not there. The same host's other
+/// repositories — a fork — are providers of their own (`others`), each with
+/// its own log, which `provider(for:)` answers; any other is not there.
 final class Provider: RepositoryProvider, @unchecked Sendable {
-    let address = RepositoryAddress(path: "iillyyaa1997/udeck-plugins")
+    let address: RepositoryAddress
+    /// What `GET /repos/{o}/{r}` says of it; nil: not there.
+    let description: RepositoryDescription?
+    let others: [RepositoryAddress: Provider]
     private let lock = NSLock()
     private var log: [String] = []
     private var fetched: [String] = []
@@ -306,11 +311,25 @@ final class Provider: RepositoryProvider, @unchecked Sendable {
     static let until = Date(timeIntervalSince1970: 1_790_003_600)
 
     init(commits: [FakeRepository], branches: [String: String] = [:], pulls: [Int: PullRequest] = [:],
-         comparisons: [String: Comparison] = [:]) {
+         comparisons: [String: Comparison] = [:], address: RepositoryAddress = .official,
+         description: RepositoryDescription? = RepositoryDescription(fullName: nil, defaultBranch: "main", fork: false),
+         others: [Provider] = []) {
         self.commits = Dictionary(uniqueKeysWithValues: commits.map { ($0.commit, $0) })
         self.branches = branches
         self.pulls = pulls
         self.comparisons = comparisons
+        self.address = address
+        self.description = description
+        self.others = Dictionary(uniqueKeysWithValues: others.map { ($0.address, $0) })
+    }
+
+    /// A fork of the official repository at `path`, as GitHub describes one.
+    static func fork(_ path: String = "someone/udeck-plugins", commits: [FakeRepository], branches: [String: String] = [:],
+                     comparisons: [String: Comparison] = [:], defaultBranch: String = "main", fullName: String? = nil,
+                     source: String = "iillyyaa1997/udeck-plugins") -> Provider {
+        Provider(commits: commits, branches: branches, comparisons: comparisons, address: RepositoryAddress(path: path),
+                 description: RepositoryDescription(fullName: fullName ?? path, defaultBranch: defaultBranch, fork: true,
+                                                    source: source, parent: source))
     }
 
     /// Requests beginning with one of these get no answer at all.
@@ -352,6 +371,16 @@ final class Provider: RepositoryProvider, @unchecked Sendable {
     func defaultBranch() async throws -> String {
         try ask("default branch")
         return "main"
+    }
+
+    func describe() async throws -> RepositoryDescription {
+        try ask("describe")
+        guard let description else { throw ProviderError.notFound }
+        return description
+    }
+
+    func provider(for repository: RepositoryAddress) -> (any RepositoryProvider)? {
+        repository == address ? self : others[repository]
     }
 
     func head(of branch: String, ifNoneMatch etag: String?) async throws -> HeadAnswer {
@@ -494,15 +523,23 @@ final class StubAnswers: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var answers: [String: Answer] = [:]
     nonisolated(unsafe) private static var requests: [String: [URLRequest]] = [:]
+    nonisolated(unsafe) private static var headers: [String: @Sendable (URLRequest) -> [String: String]] = [:]
 
     static func answer(_ host: String, with answer: @escaping Answer) {
         lock.withLock { answers[host] = answer }
+    }
+
+    /// Headers every answer to `host` carries besides its type: what the
+    /// limit says, as GitHub's API answers say it.
+    static func headers(_ host: String, _ make: @escaping @Sendable (URLRequest) -> [String: String]) {
+        lock.withLock { headers[host] = make }
     }
 
     static func forget(_ host: String) {
         lock.withLock {
             answers[host] = nil
             requests[host] = nil
+            headers[host] = nil
         }
     }
 
@@ -515,13 +552,14 @@ final class StubAnswers: URLProtocol, @unchecked Sendable {
 
     override func startLoading() {
         let host = request.url?.host ?? ""
-        let answer = Self.lock.withLock { () -> Answer? in
+        let (answer, extra) = Self.lock.withLock { () -> (Answer?, (@Sendable (URLRequest) -> [String: String])?) in
             Self.requests[host, default: []].append(request)
-            return Self.answers[host]
+            return (Self.answers[host], Self.headers[host])
         }
         let (status, body) = answer?(request) ?? (599, Data())
+        let fields = (extra?(request) ?? [:]).merging(["Content-Type": "application/json"]) { given, _ in given }
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
-                                       headerFields: ["Content-Type": "application/json"])!
+                                       headerFields: fields)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: body)
         client?.urlProtocolDidFinishLoading(self)

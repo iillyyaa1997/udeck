@@ -105,7 +105,8 @@ struct AdoptionTests {
         #expect(after.isOfficialDefault)
         #expect(PluginStanding.of(record: after, folderExists: true, treeOnDisk: Self.copy) == .verified)
         #expect(PluginStanding.cardSaysUnverified(.verified, record: after, linked: false) == false)
-        #expect(after.fromPhrase == .pluginFrom(source: "github.com/iillyyaa1997/udeck-plugins", commit: "2222222"))
+        #expect(after.fromPhrase(official: .official) == .pluginFrom(source: "github.com/iillyyaa1997/udeck-plugins",
+                                                                     commit: "2222222"))
         // Written and read back as any record of the default branch.
         let data = try JSONFileStore<InstalledPlugins>.encoder.encode(InstalledPlugins(plugins: ["uptime": after]))
         #expect(try JSONFileStore<InstalledPlugins>.decoder.decode(InstalledPlugins.self, from: data).plugins["uptime"] == after)
@@ -193,7 +194,7 @@ struct AdoptionTests {
         return PluginInstaller(
             paths: udeck.paths, discovery: PluginDiscovery(searchPath: ["/bin", "/usr/bin"], udeck: SemanticVersion("0.7.0")),
             trash: TestTrash(in: udeck.url),
-            fetch: { path, _ in
+            fetch: { _, path, _ in
                 guard let data = files[path] else { throw ProviderError.notFound }
                 return data
             },
@@ -539,7 +540,8 @@ struct PullRequestFollowerTests {
                 "not the copy at the head or the default branch's")
         #expect(outcome.asked == ["branch", "merged", "uptime"] && outcome.leftAsTheyWere.isEmpty)
         #expect(outcome.followed.pulls.keys.sorted() == ["merged", "uptime"])
-        #expect(outcome.followed.branches["branch"] == FollowedBranch(name: "fix/uptime", head: nil, checkedAt: AdoptionTests.at),
+        #expect(outcome.followed.branches["branch"] == FollowedBranch(name: "fix/uptime", repository: .official, head: nil,
+                                                                      checkedAt: AdoptionTests.at),
                 "a branch that is not there: said")
         #expect(outcome.followed.pulls["uptime"]?.state == .closed && outcome.followed.pulls["uptime"]?.merged == false)
         #expect(outcome.followed.pulls["merged"]?.mergeTree == Self.merge.plugin("merged").tree)

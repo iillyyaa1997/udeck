@@ -21,7 +21,8 @@ the feed out of uDeck's account.
 beside it), which the fake reads on every request: which commit `main` points
 at, which commit each other branch points at, each pull request's head, state,
 merge and the repository it came from — by fixture commit name, the pull
-requests keyed by their number as a string, as JSON keeps it — whether the
+requests keyed by their number as a string, as JSON keeps it — the forks on the
+host, each with branches of its own (or a repository of its own instead), whether the
 hourly limit is used up and until when, which files to answer with different
 bytes, whether to say the listing is truncated. Each change is read back
 through the fake itself (`/lab/state`) before a check relies on it: a state

@@ -227,6 +227,12 @@ struct PluginLockTests {
         let seds = reader.components(separatedBy: "sed ").count - 1
         #expect(seds > 0 && reader.components(separatedBy: "LC_ALL=C sed ").count - 1 == seds,
                 "every sed in the reader runs as LC_ALL=C sed")
+        // Its file is made from a template in TMPDIR, which puts it there
+        // whichever mktemp makes it — the folder each run below is given, and
+        // the one that is held empty after them. Checked before anything runs.
+        let mktemps = reader.components(separatedBy: "mktemp").count - 1
+        try #require(mktemps > 0 && reader.components(separatedBy: #"mktemp "${TMPDIR:-/tmp}/"#).count - 1 == mktemps,
+                     "every mktemp in the reader is given a template in TMPDIR")
         let temp = TemporaryDirectory()
         let script = temp.url.appendingPathComponent("read.sh")
         // Every file in one run of the shell, each answer ended by a line of

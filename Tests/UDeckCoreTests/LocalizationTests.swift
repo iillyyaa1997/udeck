@@ -128,13 +128,31 @@ struct LocalizationTests {
         .linkRefused(.unsupported(page: "issues"), official: "github.com/o/r"),
         .linkNotFound(.pullRequest(9), official: "github.com/o/r"), .linkNotFound(.branch("gone", plugin: nil), official: "github.com/o/r"),
         .linkNotFound(.officialRepository, official: "github.com/o/r"),
-        .linkOtherRepository(repository: "github.com/someone/r", official: "github.com/o/r"),
+        .linkNotAFork(repository: "github.com/someone/r", official: "github.com/o/r"),
         .linkIsTheCatalogue(official: "github.com/o/r", plugin: nil), .linkIsTheCatalogue(official: "github.com/o/r", plugin: "uptime"),
         .linkHead(ref: .pullRequest(3), commit: "a1b2c3d"), .linkHead(ref: .branch("fix/uptime"), commit: "a1b2c3d"),
         .linkPullRequestMerged, .linkPullRequestMergedElsewhere(base: "next"), .linkPullRequestClosed,
         .catalogueCommitGone(commit: "a1b2c3d"),
         .linkNothingDiffers(ref: .pullRequest(3)), .linkUnverifiedNote,
         .linkNothingDiffers(ref: .branch("fix/uptime"), plugin: "uptime"), .linkPluginNotThere(ref: .branch("fix/uptime"), plugin: "gone"),
+
+        // Branches of forks (stage 3, R7): every phrase that names a line, with its fork.
+        .pluginFromBranch(name: "x", commit: "a1b2c3d", fork: "someone/r"),
+        .catalogueInstalledUnverified(ref: .branch("x"), fork: "someone/r"),
+        .pluginRefAvailable(ref: .branch("x"), version: "1.1.0", fork: "someone/r"),
+        .pluginRefChangedStill(ref: .branch("x"), version: "1.0.1", fork: "someone/r"),
+        .pluginRefNowHas(ref: .branch("x"), version: "1.0.0", fork: "someone/r"),
+        .pluginRefGone(ref: .branch("x"), id: "uptime", fork: "someone/r"),
+        .pluginRefRewritten(ref: .branch("x"), fork: "someone/r"), .pluginBranchGone(name: "x", fork: "someone/r"),
+        .pluginRefNotCheckedSince(ref: .branch("x"), at: "14:02", fork: "someone/r"),
+        .windowReinstallBrings(.branch(name: "x", commit: "a1b2c3d", version: "1.0.1", fork: "someone/r")),
+        .catalogueSwitchConfirm(id: "uptime", from: .branch(name: "x", commit: "a1b2c3d", version: "1.0.1", fork: "someone/r"),
+                                to: .branch(name: "x", commit: "b2c3d4e", version: "1.0.2"), toTrash: false),
+        .linkHead(ref: .branch("x"), commit: "a1b2c3d", fork: "someone/r"),
+        .linkNothingDiffers(ref: .branch("x"), plugin: "uptime", fork: "someone/r"),
+        .linkPluginNotThere(ref: .branch("x"), plugin: "gone", fork: "someone/r"),
+        .linkNotFound(.forkBranch(RepositoryAddress(path: "someone/r"), branch: "x", plugin: nil), official: "github.com/o/r"),
+        .linkNotFound(.forkRepository(RepositoryAddress(path: "someone/r")), official: "github.com/o/r"),
 
         .pluginLastRun(at: "21:04:05", reason: .interval, duration: 0.21, result: .card),
         .pluginLastRun(at: "21:04:05", reason: .launch, duration: 0.21, result: .failure(.exited(code: 3))),
@@ -218,7 +236,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 373,
+        #expect(Self.all.count == 389,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

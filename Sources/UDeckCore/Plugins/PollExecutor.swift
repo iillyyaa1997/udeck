@@ -120,7 +120,7 @@ public struct PollExecutor: Sendable {
             reason: reason,
             language: language,
             home: NSHomeDirectory(),
-            temporaryDirectory: ProcessInfo.processInfo.environment["TMPDIR"]
+            temporaryDirectory: TemporaryFolder.path
         )
     }
 }

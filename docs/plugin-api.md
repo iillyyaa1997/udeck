@@ -469,7 +469,7 @@ variable should fall back to your declared default rather than crash.
 | `UDECK_REFRESH_REASON` | `launch`, `interval` or `manual`: see below. |
 | `UDECK_LANG` | The language the panel is currently speaking, as a code: `en`, `ru`. Answer in it if you can, and fall back to whatever you write in if you cannot. |
 | `PATH` | uDeck's configured search path, not the one it inherited. |
-| `HOME`, `LANG`, `LC_ALL`, `TMPDIR` | `LANG` and `LC_ALL` are set to `en_US.UTF-8` so a producer can print UTF-8 without configuring a locale. |
+| `HOME`, `LANG`, `LC_ALL`, `TMPDIR` | `LANG` and `LC_ALL` are set to `en_US.UTF-8` so a producer can print UTF-8 without configuring a locale. `TMPDIR` is uDeck's own, as it is written, or the system's temporary folder when uDeck was started without one. |
 
 `UDECK_REFRESH_REASON` says why this run is happening. `interval` is your
 `interval` passing; `manual` is the operator asking — the panel opening, the
@@ -805,7 +805,8 @@ folder, with the environment above built the way uDeck builds it — every
 `UDECK_` variable, the search path, the account's home folder as `HOME` (as
 uDeck hands it: `CFFIXED_USER_HOME` when that is set, then the account's own,
 and the shell's `HOME` only for an account without one), and of the shell's
-own only `TMPDIR`, as uDeck passes on its own — under `timeout`, in a process
+own only `TMPDIR` — or the system's temporary folder without one — as uDeck
+passes on its own — under `timeout`, in a process
 group of its own, with the output limit. Then it says how the run
 ended and how long it took, prints its standard error — the last 64 KiB of it,
 which is what uDeck keeps, and how much came before — the card as uDeck
@@ -814,8 +815,9 @@ have let pass without a word: fields it ignores (`stat`, `tll`), row types it
 does not draw, what it cuts to the limits above, standard output dropped past
 the limit, a card printed and then a run past `timeout`, files the run wrote
 into the plugin's own folder. It asks for no permission; it says what uDeck
-would ask. `UDECK_CACHE_DIR` is in a folder made for the run unless
-`--home <folder>` names one — a uDeck folder — whose `plugin-settings.json`, if
+would ask. `UDECK_CACHE_DIR` is in a folder made for the run — in
+`udeck-plugin-<uid>` in `TMPDIR`, or in the system's temporary folder without
+one, as the `home:` line says — unless `--home <folder>` names one — a uDeck folder — whose `plugin-settings.json`, if
 there is one, gives the settings' values and whose `settings.json` the search
 path; `--lang` and `--reason` set `UDECK_LANG` and `UDECK_REFRESH_REASON`. It
 runs on a Mac only: uDeck's way of running a process is the Mac's.

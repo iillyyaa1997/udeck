@@ -137,7 +137,7 @@ struct TimingTests {
     /// by halving now: four times the plugins take about four times as long.
     @Test("a repository is checked in time proportional to its plugin folders, not to their square")
     func repositoryIsLinear() throws {
-        let scratch = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let scratch = TemporaryFolder.url
             .appendingPathComponent("udeck-timing-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
         let small = try Self.repository(1_000, in: scratch)

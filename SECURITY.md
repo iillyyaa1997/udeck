@@ -40,7 +40,8 @@ tree being the one `main` has, and records as `main`'s without downloading
 anything. It is the strongest thing uDeck can honestly say about a plugin, and
 it does not mean safe. A plugin installed from anywhere else, or changed on
 disk, carries no such mark; one installed from a branch or a pull request of
-the official repository — **Install from a link…** — says **Unverified** in
+the official repository, or from a branch of a fork of it — **Install from a
+link…** — says **Unverified** in
 Settings and on its card until that, and asks before it runs whenever its
 content changes.
 
@@ -53,15 +54,18 @@ In scope, and treated as vulnerabilities:
 
 - anything letting a plugin get past a gate uDeck does claim to enforce — an
   action running without its `exec` grant, a plugin launching while its
-  capabilities are declined, or code nobody verified — a copy from a branch or
-  a pull request — running on a decision made for other content, or before
+  capabilities are declined, or code nobody verified — a copy from a branch, a
+  fork's branch or a pull request — running on a decision made for other
+  content, or before
   you were asked about it (a change counts from when the folder watcher
   reports it, once writes in the folder pause — under a second after one
   write, as measured in the lab);
 - uDeck installing plugin files other than the ones the official repository
-  lists at the commit it showed — a file that does not match its hash, a folder
-  that does not add up — or marking a plugin **Verified** that is not exactly
-  what was merged, a pull request's copy included;
+  — or the fork a branch is in — lists at the commit it showed — a file that
+  does not match its hash, a folder that does not add up — or marking a plugin
+  **Verified** that is not exactly what was merged, a pull request's or a
+  fork's copy included; or reading a repository that is no fork of the official
+  one past its description;
 - a plugin updating itself when it should only have been offered: a new version
   asking for different permissions than the installed one, a copy that was not
   **Verified** — a new head of the branch or the pull request it came from
@@ -97,9 +101,12 @@ launch and both with a switch to turn them off:
   opened on a list more than an hour old, when you press Check now, and the
   plugin's files when you press Install, Update, Reinstall or pick an earlier
   version, the pull request or the branch a link names when you press Look up
-  in Install from a link… — its head, its listing and the manifests there that
-  are not the catalogue's — in each read, the pull request or the branch a
-  plugin installed from one came from, unless `main` has it as it is — and, once
+  in Install from a link… — for a branch of another repository on github.com,
+  first whether it is a fork of `iillyyaa1997/udeck-plugins`, and then, only if
+  it is, everything after this of the fork itself — its head, its listing and
+  the manifests there that are not the catalogue's — in each read, the pull
+  request or the branch a plugin installed from one came from, a fork's of the
+  fork, unless `main` has it as it is — and, once
   its head moved, that head's listing and the plugin's manifest there, and one
   comparison with what is installed when the plugin changed there — and once
   it is merged into `main` the listing of the commit it was merged as — and, after a read, the files of a **Verified** plugin whose new

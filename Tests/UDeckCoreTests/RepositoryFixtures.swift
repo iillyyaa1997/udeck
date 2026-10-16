@@ -6,6 +6,7 @@ import UDeckPluginFormatFixtures
 final class FetchLog: @unchecked Sendable {
     private let lock = NSLock()
     private var asked: [String] = []
+    private var from: [RepositoryAddress] = []
     private var override: [String: Data] = [:]
     private var failing: Set<String> = []
     let repository: FakeRepository
@@ -30,10 +31,17 @@ final class FetchLog: @unchecked Sendable {
         failing.insert(path)
     }
 
-    var fetch: @Sendable (String, String) async throws -> Data {
-        { [self] path, _ in
+    /// The repositories each file was asked of, in the order they were asked.
+    var repositories: [RepositoryAddress] {
+        lock.lock(); defer { lock.unlock() }
+        return from
+    }
+
+    var fetch: @Sendable (RepositoryAddress, String, String) async throws -> Data {
+        { [self] askedOf, path, _ in
             let (altered, fails) = lock.withLock { () -> (Data?, Bool) in
                 asked.append(path)
+                from.append(askedOf)
                 return (override[path], failing.contains(path))
             }
             if fails { throw ProviderError.unreachable("no route") }

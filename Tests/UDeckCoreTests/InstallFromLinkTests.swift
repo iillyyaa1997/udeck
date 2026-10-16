@@ -50,7 +50,7 @@ struct InstallFromLinkTests {
         return PluginInstaller(
             paths: paths, discovery: PluginDiscovery(searchPath: ["/bin", "/usr/bin"], udeck: SemanticVersion("0.7.0")),
             trash: trash,
-            fetch: { path, commit in
+            fetch: { _, path, commit in
                 guard let data = byCommit[commit]?[path] else { throw ProviderError.notFound }
                 return data
             },
@@ -129,7 +129,7 @@ struct InstallFromLinkTests {
         #expect(record.previous == nil && !record.pinned)
         #expect(PluginStanding.of(record: record, folderExists: true, treeOnDisk: record.tree) == .unverified)
         #expect(ConsentBasis.of(record, linked: false, recordsReadable: true) == .tree)
-        #expect(record.fromPhrase == .pluginFromPullRequest(number: 3, commit: "a1b2c3d"))
+        #expect(record.fromPhrase(official: .official) == .pluginFromPullRequest(number: 3, commit: "a1b2c3d"))
         #expect(record.refPage == URL(string: "https://github.com/iillyyaa1997/udeck-plugins/pull/3"))
     }
 
@@ -498,19 +498,27 @@ struct InstallFromLinkTests {
     }
 
     @Test("where a copy came from, as its row says it, and the page it links to", arguments: [
-        (PluginRef(name: "main"), Phrase.pluginFrom(source: "github.com/iillyyaa1997/udeck-plugins", commit: "a1b2c3d"), nil),
-        (PluginRef.pullRequest(3), Phrase.pluginFromPullRequest(number: 3, commit: "a1b2c3d"),
+        (PluginRef(name: "main"), nil, Phrase.pluginFrom(source: "github.com/iillyyaa1997/udeck-plugins", commit: "a1b2c3d"), nil),
+        (PluginRef.pullRequest(3), nil, Phrase.pluginFromPullRequest(number: 3, commit: "a1b2c3d"),
          "https://github.com/iillyyaa1997/udeck-plugins/pull/3"),
-        (PluginRef.branch("fix/uptime"), Phrase.pluginFromBranch(name: "fix/uptime", commit: "a1b2c3d"),
+        (PluginRef.branch("fix/uptime"), nil, Phrase.pluginFromBranch(name: "fix/uptime", commit: "a1b2c3d"),
          "https://github.com/iillyyaa1997/udeck-plugins/tree/fix/uptime"),
-        (PluginRef.branch("a b#c"), Phrase.pluginFromBranch(name: "a b#c", commit: "a1b2c3d"),
+        (PluginRef.branch("a b#c"), nil, Phrase.pluginFromBranch(name: "a b#c", commit: "a1b2c3d"),
          "https://github.com/iillyyaa1997/udeck-plugins/tree/a%20b%23c"),
-        (PluginRef(kind: "commit", name: "x"), Phrase.pluginFrom(source: "github.com/iillyyaa1997/udeck-plugins", commit: "a1b2c3d"),
-         nil),
-    ] as [(PluginRef, Phrase, String?)])
-    func fromLines(ref: PluginRef, phrase: Phrase, page: String?) {
-        let installed = record(ref)
-        #expect(installed.fromPhrase == phrase)
+        (PluginRef(kind: "commit", name: "x"), nil,
+         Phrase.pluginFrom(source: "github.com/iillyyaa1997/udeck-plugins", commit: "a1b2c3d"), nil),
+        // A fork's branch: named with its fork, and its page the fork's.
+        (PluginRef.branch("x"), "someone/udeck-plugins",
+         Phrase.pluginFromBranch(name: "x", commit: "a1b2c3d", fork: "someone/udeck-plugins"),
+         "https://github.com/someone/udeck-plugins/tree/x"),
+        // The official repository spelt in another case is no fork.
+        (PluginRef.branch("x"), "IILLYYAA1997/Udeck-Plugins", Phrase.pluginFromBranch(name: "x", commit: "a1b2c3d"),
+         "https://github.com/IILLYYAA1997/Udeck-Plugins/tree/x"),
+    ] as [(PluginRef, String?, Phrase, String?)])
+    func fromLines(ref: PluginRef, repository: String?, phrase: Phrase, page: String?) {
+        var installed = record(ref)
+        if let repository { installed.repository = RepositoryAddress(path: repository) }
+        #expect(installed.fromPhrase(official: .official) == phrase)
         #expect(installed.refPage?.absoluteString == page)
     }
 
@@ -569,8 +577,11 @@ struct InstallFromLinkTests {
         (RepositoryLink.Refusal.notGitHub(host: "gitlab.com"), .linkRefused(.notGitHub(host: "gitlab.com"), official: repository)),
         (RefResolver.Refusal.notFound(.pullRequest(9)), .linkNotFound(.pullRequest(9), official: repository)),
         (RefResolver.Refusal.notFound(.branch("gone", plugin: nil)), .linkNotFound(.branch("gone", plugin: nil), official: repository)),
-        (RefResolver.Refusal.forkNotYet(RepositoryAddress(path: "someone/udeck-plugins")),
-         .linkOtherRepository(repository: "github.com/someone/udeck-plugins", official: repository)),
+        (RefResolver.Refusal.notAFork(RepositoryAddress(path: "someone/elsewhere")),
+         .linkNotAFork(repository: "github.com/someone/elsewhere", official: repository)),
+        (RefResolver.Refusal.notFound(.forkBranch(RepositoryAddress(path: "someone/udeck-plugins"), branch: "x", plugin: nil)),
+         .linkNotFound(.forkBranch(RepositoryAddress(path: "someone/udeck-plugins"), branch: "x", plugin: nil),
+                       official: repository)),
         (ProviderError.rateLimited(until: Date(timeIntervalSince1970: 1_790_003_600)), nil),
         (ProviderError.unreachable("offline"), nil),
         (CatalogueError.notFound, nil),
@@ -592,8 +603,8 @@ struct InstallFromLinkTests {
             #expect(strings(.linkRefused(.empty, official: Self.repository)).contains(Self.repository))
             #expect(strings(.linkNotFound(.pullRequest(9), official: Self.repository)).contains("#9"))
             #expect(strings(.linkNotFound(.branch("gone", plugin: nil), official: Self.repository)).contains("gone"))
-            let fork = strings(.linkOtherRepository(repository: "github.com/someone/udeck-plugins", official: Self.repository))
-            #expect(fork.contains("github.com/someone/udeck-plugins") && fork.contains(Self.repository))
+            let notAFork = strings(.linkNotAFork(repository: "github.com/someone/elsewhere", official: Self.repository))
+            #expect(notAFork.contains("github.com/someone/elsewhere") && notAFork.contains(Self.repository))
             #expect(strings(.linkIsTheCatalogue(official: Self.repository, plugin: "uptime")).contains("uptime"))
             #expect(strings(.linkHead(ref: .pullRequest(3), commit: "a1b2c3d")).contains("#3")
                     && strings(.linkHead(ref: .pullRequest(3), commit: "a1b2c3d")).contains("a1b2c3d"))

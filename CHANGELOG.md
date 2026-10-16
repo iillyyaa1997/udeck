@@ -10,6 +10,35 @@ for what that promises.
 
 ## [Unreleased]
 
+- **Branches of forks.** **Install from a link…** takes a branch of a fork of
+  the official repository, `github.com/someone/udeck-plugins/tree/x`, a folder
+  under it, or a fork's own page for its default branch. uDeck first asks
+  GitHub whether that repository is a fork of the official one — one request,
+  `GET /repos/{owner}/{repo}` — and refuses any other repository there, with
+  what it is and nothing more asked of it; a fork's branch is then read from
+  the fork itself, its files fetched from the fork's raw host, by a client for
+  the fork that counts against the same hourly limit as the official
+  repository's. The copy is recorded with the fork as its repository,
+  **Unverified**, named with its fork wherever its line is named — *Unverified ·
+  branch x of someone/udeck-plugins at a1b2c3d*, in English and Russian — its
+  branch followed in the fork, compared there, offered there, and put back from
+  there by **Back to**. A copy installed from a link is now followed from what
+  **Look up** heard only over what a read heard before it: a read after it,
+  with the sheet left open — the branch deleted or moved on, a pull request
+  closed — stands.
+- **Fixed:** `udeck-plugin` and uDeck made their temporary folders — the
+  folder `udeck-plugin run` hands a plugin, the index `check` reads a commit's
+  attributes through, the file `pin` downloads to — in the account's folder
+  under `/var/folders`, whatever `TMPDIR` said, and uDeck handed a plugin no
+  `TMPDIR` when it had none. They use `TMPDIR` when it names a folder, and the
+  system's temporary folder otherwise, which a plugin is now always handed.
+  The lock file's reader in the specification, and its CI example, make their
+  file from a template in `TMPDIR`, which puts it there whichever `mktemp`
+  runs them. And `examples/hello-card` and `examples/broken-card` print their
+  card with `printf` or `echo`, `Scripts/make-app.sh` prints its ad-hoc warning
+  with `printf`, and `Scripts/make-cli.sh` asks what it asks of bash itself: a Mac's `/bin/sh` and `/bin/bash` are bash 3.2, which writes
+  every here-document and here-string to a file in `/var/tmp`, whatever
+  `TMPDIR` says — hello-card did so once a poll.
 - **Following the branch or the pull request a plugin came from.** After each
   read of the catalogue uDeck asks GitHub, one request each, where the head of
   the branch or the pull request every **Unverified** plugin came from is now —
@@ -57,8 +86,9 @@ for what that promises.
   changed — each marked **Unverified**. **Install** takes one exactly as a
   catalogue row does, at the commit the link was read at, through the official
   repository: a pull request opened from a fork is read by commit there, never
-  from the fork. A link to one commit, another host or another repository is
-  refused with what it is, before anything is asked. Over the verified copy,
+  from the fork. A link to one commit or another host is refused with what it
+  is, before anything is asked — and another repository that is no fork of the
+  official one once GitHub has said so. Over the verified copy,
   **Install** first says what goes and what comes — *uptime is the verified
   1.0.0 from github.com/…; installing 1.0.1 from pull request #3 at a1b2c3d
   replaces it*, and that the code that comes asks before it runs — and

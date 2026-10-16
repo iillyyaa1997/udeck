@@ -52,6 +52,7 @@ def checkout(tmp_path):
 
 
 def make_app(checkout, *args):
+    assert "<<" not in (checkout / "Scripts" / "make-app.sh").read_text(), "make-app.sh writes a here-document"
     return subprocess.run(
         [str(checkout / "Scripts" / "make-app.sh"), *args],
         capture_output=True,

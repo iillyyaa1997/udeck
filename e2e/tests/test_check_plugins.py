@@ -417,8 +417,9 @@ def test_the_words_the_link_checks_wait_for_are_uDecks_own():
     assert f'case .pluginMarkUnverified: "{checks.UNVERIFIED}"' in english
     assert 'case .pluginFromPullRequest(let number, let commit): "' + checks.FROM_THE_PULL_REQUEST.format(
         number="\\(number)", commit="\\(commit)") + '"' in english
-    assert 'case .pluginFromBranch(let name, let commit): "' + checks.FROM_THE_BRANCH.format(
-        name="\\(name)", commit="\\(commit)") + '"' in english
+    assert 'case .pluginFromBranch(let name, let commit, let fork): "' + checks.FROM_THE_BRANCH.format(
+        name="\\(name)\\(Self.of(fork))", commit="\\(commit)") + '"' in english
+    assert 'fork.map { " of \\($0)" } ?? ""' in english, "nothing after the official repository's own branch"
     assert '"' + checks.ASKS_NOTHING_UNVERIFIED.format(name="\\(name)") + '"' in english
     assert '"Nobody verified this code: it comes from \\(Self.line(ref)) of \\(repository)"' in english
     assert 'said = "pull request #\\(number)"' in english
@@ -433,7 +434,7 @@ def test_the_words_the_link_checks_wait_for_are_uDecks_own():
     flat = re.sub(r'"\s*\+\s*"', "", swift)
     assert from_verified in flat and to_verified in flat
     # The catalogue row of a copy whose folder has gone, and the link sheet with the catalogue off.
-    assert '"' + checks.INSTALLED_HERE_UNVERIFIED.format(line="\\(Self.line(ref))") + '"' in english
+    assert '"' + checks.INSTALLED_HERE_UNVERIFIED.format(line="\\(Self.line(ref, fork: fork))") + '"' in english
     assert 'case .catalogueMissing(let id, let path): "\\(id) is not in \\(path)"' in english
     assert checks.NOT_IN_THE_PLUGINS_FOLDER == "{id} is not in " + checks.UDECK_HOME + "/plugins"
     gone = checks.INSTALLED_HERE_UNVERIFIED.format(line="pull request #3") + " — " + checks.NOT_IN_THE_PLUGINS_FOLDER.format(id="uptime")
@@ -476,6 +477,20 @@ def test_only_the_requests_named_pass_and_every_file_once_when_asked():
                             raw={"plugins/uptime/uptime.sh", "plugins/uptime/hold.sh"}, what="x", every=True)
 
 
+def test_only_the_named_requests_of_the_fork_pass_when_a_check_names_the_fork():
+    commit = "e" * 40
+    fork_raw = f"/raw/{checks.FORK}/{commit}"
+    fork_api = f"/api/repos/{checks.FORK}"
+    heard = [_request(fork_api, host="api"), _request(f"{fork_raw}/plugins/uptime/uptime.sh")]
+    checks._expect_only(heard, commit, api={fork_api}, raw={"plugins/uptime/uptime.sh"}, what="x", every=True,
+                        repository=checks.FORK)
+    for stray in (_request(f"/raw/{config.PLUGINS_REPOSITORY}/{commit}/plugins/uptime/uptime.sh"),
+                  _request(f"/api/repos/{config.PLUGINS_REPOSITORY}/commits/refs/heads/x", host="api")):
+        with pytest.raises(CheckFailed):
+            checks._expect_only(heard + [stray], commit, api={fork_api}, raw={"plugins/uptime/uptime.sh"}, what="x",
+                                repository=checks.FORK)
+
+
 def test_an_unverified_record_is_the_official_sources_at_its_ref_and_nobodys_guarantee():
     record = _record(ref={"kind": "pr", "name": "3"}, version="1.0.1",
                      verification={"status": "unverified", "by": None, "checkedAgainst": "a" * 40, "checkedAt": "x"})
@@ -487,6 +502,13 @@ def test_an_unverified_record_is_the_official_sources_at_its_ref_and_nobodys_gua
         with pytest.raises(CheckFailed):
             checks._expect_an_unverified_record({**record, **change}, ref={"kind": "pr", "name": "3"}, commit="a" * 40,
                                                 version="1.0.1")
+    # A fork's branch: the official source's, at the fork.
+    forked = {**record, "ref": {"kind": "branch", "name": "x"},
+              "repository": {"provider": "github", "host": "github.com", "path": checks.FORK}}  # fmt: skip
+    checks._expect_an_unverified_record(forked, ref={"kind": "branch", "name": "x"}, commit="a" * 40, version="1.0.1",
+                                        repository=checks.FORK)
+    with pytest.raises(CheckFailed):
+        checks._expect_an_unverified_record(forked, ref={"kind": "branch", "name": "x"}, commit="a" * 40, version="1.0.1")
 
 
 class _Shell:
@@ -612,7 +634,8 @@ def test_the_words_the_merge_and_close_checks_wait_for_are_uDecks_own():
     assert f'case .catalogueMergedDiffers: "{checks.CATALOGUE_MERGED_DIFFERS}"' in english
     assert f'case .catalogueClosedUnmerged: "{checks.CATALOGUE_CLOSED}"' in english
     assert 'case .windowReinstallBrings(let copy): "Reinstall puts back \\(Self.copy(copy)): code nobody verified."' in english
-    assert 'case .branch(let branch, let commit, let version): "\\(version) from branch \\(branch) at \\(commit)"' in english
+    # The official repository's own branch: nothing after its name (`of`).
+    assert 'case .branch(let branch, let commit, let version, let fork): "\\(version) from branch \\(branch)\\(of(fork)) at \\(commit)"' in english
     assert checks.REINSTALL_BRINGS == "Reinstall puts back {version} from branch {name} at {commit}: code nobody verified."
     assert 'case .catalogueAvailable(let version): "' + checks.AVAILABLE.format(version="\\(version)") + '"' in english
     assert 'count == 1 ? "1 update is waiting"' in english
@@ -714,11 +737,11 @@ def test_leaving_the_reserve_spends_what_the_read_at_launch_would_need_beyond_th
 
 def test_the_words_the_follow_checks_wait_for_are_uDecks_own():
     english = _source("Sources", "UDeckCore", "Localization", "English.swift")
-    line = "\\(Self.line(ref))"
+    line = "\\(Self.line(ref, fork: fork))"
     assert '"' + checks.CHANGED_STILL.format(line=line, version="\\(version)") + '"' in english
     assert '"' + checks.REWRITTEN.format(line=line) + '"' in english
-    assert '"' + checks.BRANCH_GONE.format(name="\\(name)") + '"' in english
-    assert '"' + checks.NOT_CHECKED_SINCE.format(line="\\(Self.line(ref, capitalised: true))") + '\\(at)"' in english
+    assert '"' + checks.BRANCH_GONE.format(name="\\(name)\\(Self.of(fork))") + '"' in english
+    assert '"' + checks.NOT_CHECKED_SINCE.format(line="\\(Self.line(ref, capitalised: true, fork: fork))") + '\\(at)"' in english
     assert 'count == 1 ? "' + checks.ONE_UPDATE_WAITING + '"' in english
     assert f'case .catalogueUpdate: "{checks.UPDATE}"' in english
     model = _source("Sources", "UDeckKit", "Plugins", "DeckModel+Repository.swift")
@@ -784,3 +807,39 @@ def test_the_card_is_clicked_where_it_came_to_rest_not_where_it_was_passing(monk
         checks._once_it_stands_still(machine, readings.pop(0), [], "consent.asks-nothing.allow", 1.0)
     assert not isinstance(raised.value, CheckFailed), "a card the lab cannot aim at is not uDeck's failure"
     assert "545" in raised.value.reason
+
+
+def test_the_fork_and_the_repository_of_its_own_the_fork_check_pastes_are_the_fixtures():
+    """x of the fork is pr3 — what the official repository has no branch of — and the control a repository of its own."""
+    assert checks.FORKS[checks.FORK]["branches"] == {checks.FORK_BRANCH: "pr3"} and checks.FORKS[checks.FORK].get("fork", True)
+    assert checks.FORKS[checks.NOT_A_FORK]["fork"] is False and checks.FORKS[checks.NOT_A_FORK]["branches"] == {checks.FORK_BRANCH: "pr3"}
+    assert checks.FORK_BRANCH not in checks.BRANCHES, "the official repository has no branch x: nothing of x could come from it"
+    assert len({checks.FORK, checks.NOT_A_FORK, config.PLUGINS_REPOSITORY}) == 3
+    assert checks.FORK_LINK == f"https://github.com/{checks.FORK}/tree/{checks.FORK_BRANCH}/plugins/{checks.UPTIME}"
+    assert checks.NOT_A_FORK_LINK.endswith(f"/{checks.NOT_A_FORK}/tree/{checks.FORK_BRANCH}/plugins/{checks.UPTIME}")
+    assert FACTS["parents"]["p2"] == "pr3", "the fork's branch moves on to a commit that continues pr3"
+
+
+def test_the_words_the_fork_check_waits_for_are_uDecks_own():
+    english = _source("Sources", "UDeckCore", "Localization", "English.swift")
+    assert 'said = "branch \\(ref.name ?? "")" + of(fork)' in english
+    assert 'case .linkHead(let ref, let commit, let fork): "\\(Self.line(ref, capitalised: true, fork: fork)) at \\(commit)"' in english
+    # The phrase is handed `github.com/owner/repo` for both; the check reads it as the screen says it.
+    sentence = checks.NOT_A_FORK_SAYS.format(repository="\\(repository)", official="\\(official)").replace("github.com/", "")
+    assert f'"{sentence}"' in english, sentence
+    # Swift's own tests hold the same sentences, word for word.
+    swift = re.sub(r'"\s*\+\s*"', "", _source("Tests", "UDeckCoreTests", "ForkTests.swift"))
+    fork = checks.FORK
+    for said in (checks.FROM_THE_FORK.format(name="x", fork=fork, commit="a1b2c3d"),
+                 checks.FORK_HEAD.format(name="x", fork=fork, commit="a1b2c3d"),
+                 checks.CHANGED_STILL.format(line=checks.OF_THE_FORK.format(name="x", fork=fork), version="1.0.1"),
+                 checks.NOT_A_FORK_SAYS.format(repository="someone/elsewhere", official=config.PLUGINS_REPOSITORY)):
+        assert f'"{said}"' in swift, said
+
+
+def test_the_fake_serves_the_forks_the_fork_check_names():
+    """Every key of FORKS is a repository the fake answers for, and the official one is none of them."""
+    fake = _fake()
+    state = fake.read_state(str(plugin_repository.FIXTURES), "c1")
+    assert state["forks"] == {}, "no fork unless the check names one"
+    assert config.PLUGINS_REPOSITORY not in checks.FORKS

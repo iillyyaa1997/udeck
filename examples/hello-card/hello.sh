@@ -59,22 +59,29 @@ if [ "$show_table" = "true" ]; then
                  "rows": [ ["'$table_declared'", "8"], ["'$table_drawn'", "7"] ] } }'
 fi
 
-cat <<JSON
-{
+# printf, and not a here-document: a Mac's /bin/sh is bash 3.2, which writes
+# every here-document to a file in /var/tmp — once a poll. Each %s is the
+# argument in its place below; %% is a percent sign.
+printf '{
   "state": "ok",
   "chip": "example",
   "rows": [
-    { "text": "$greeting $from" },
-    { "kv": ["$appearance_label", "${UDECK_APPEARANCE:-unknown}"] },
-    { "kv": ["$reason_label", "${UDECK_REFRESH_REASON:-unknown}", "ok"] },
-    { "meter": { "value": 0.42, "label": "$meter_label", "caption": "42%" } },
+    { "text": "%s %s" },
+    { "kv": ["%s", "%s"] },
+    { "kv": ["%s", "%s", "ok"] },
+    { "meter": { "value": 0.42, "label": "%s", "caption": "42%%" } },
     { "list": [
-        { "text": "$list_first", "note": "$list_first_note", "icon": "ok" },
-        { "text": "$list_second", "note": "$list_second_note", "icon": "warn", "state": "warn" }
+        { "text": "%s", "note": "%s", "icon": "ok" },
+        { "text": "%s", "note": "%s", "icon": "warn", "state": "warn" }
       ] },
     { "spark": [3, 7, 4, 9, 6, 11, 8] },
-    { "log": ["$log_new", "$log_old"] }$table_row
+    { "log": ["%s", "%s"] }%s
   ],
   "ttl": 30
 }
-JSON
+' "$greeting" "$from" \
+  "$appearance_label" "${UDECK_APPEARANCE:-unknown}" \
+  "$reason_label" "${UDECK_REFRESH_REASON:-unknown}" \
+  "$meter_label" \
+  "$list_first" "$list_first_note" "$list_second" "$list_second_note" \
+  "$log_new" "$log_old" "$table_row"

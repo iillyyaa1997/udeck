@@ -87,6 +87,12 @@ public struct FollowedPull: Codable, Equatable, Sendable {
 public struct FollowedBranch: Codable, Equatable, Sendable {
     /// The branch's name, as the record has it.
     public var name: String
+    /// The repository it is in, as the record has it: the official one's, or
+    /// a fork's — a fork's branch called `fix` is another branch than the
+    /// official repository's `fix`. Absent from what was heard before
+    /// branches of forks were followed, when every branch was the official
+    /// repository's.
+    public var repository: RepositoryAddress?
     /// The commit its head was at — nil: GitHub said the branch is not there,
     /// deleted after its merge or by hand. The copy keeps running, and its row
     /// says so.
@@ -96,8 +102,10 @@ public struct FollowedBranch: Codable, Equatable, Sendable {
     public var history: HeadHistory?
     public var checkedAt: Date
 
-    public init(name: String, head: String?, history: HeadHistory? = nil, checkedAt: Date) {
+    public init(name: String, repository: RepositoryAddress? = nil, head: String?, history: HeadHistory? = nil,
+                checkedAt: Date) {
         self.name = name
+        self.repository = repository
         self.head = head
         self.history = history
         self.checkedAt = InstalledPlugins.wholeSeconds(checkedAt)
@@ -152,10 +160,12 @@ public struct FollowedRefs: Codable, Equatable, Sendable {
     }
 
     /// What is known of the branch `record`'s copy of `id` came from — nil for
-    /// a copy of anything else, and for what was heard of another branch.
+    /// a copy of anything else, and for what was heard of another branch: one
+    /// of another name, or of the same name in another repository.
     public func branch(of id: String, record: InstalledRecord?) -> FollowedBranch? {
         guard let record, !record.isOfficialDefault, record.ref.kind == PluginRef.branchKind,
-              let followed = branches[id], ShownPlace.same(followed.name, record.ref.name ?? "") else { return nil }
+              let followed = branches[id], ShownPlace.same(followed.name, record.ref.name ?? ""),
+              followed.repository.map({ $0 == record.repository }) ?? true else { return nil }
         return followed
     }
 
@@ -202,33 +212,41 @@ public struct FollowedRefs: Codable, Equatable, Sendable {
     /// cached listing of that commit, says it; when it does not, what was
     /// known stays, and the next read of the catalogue asks. Of a branch,
     /// **Look up** heard its head — `branchHead`, the commit just installed;
-    /// nil when it was not looked up — and that is what is known of it now,
-    /// whatever an earlier read heard: an older head, or no branch at all.
-    /// Put back or updated along it, what was heard of the branch stands.
-    /// What was heard of a pull request goes once the copy is anything else's:
-    /// the default branch's, a branch's — and what was heard of a branch, once
-    /// it is not a branch's. A copy just put in place was just read: *not
-    /// checked since* goes with it.
-    public mutating func keep(_ pull: PullRequest?, branchHead: String?, heardAtInstall record: InstalledRecord,
-                              of id: String, defaultBranch: String?, mergeListing: CommitListing?, now: Date) {
+    /// nil when it was not looked up. Either is kept as heard when **Look up**
+    /// heard it, `heardAt` — `now` when it does not say — and is what is
+    /// known of that line from then on unless a read of the catalogue heard
+    /// of the same line after it: the sheet can stay open across a read, and
+    /// what that read heard — another head, the branch deleted, the pull
+    /// request closed — is newer than the head installed from, and stands.
+    /// What a read heard before **Look up** — an older head, no branch at
+    /// all — goes. Put back or updated along it, what was heard of the line
+    /// stands. What was heard of a pull request goes once the copy is anything
+    /// else's: the default branch's, a branch's — and what was heard of a
+    /// branch, once it is not a branch's. A copy just put in place was just
+    /// read: *not checked since* goes with it.
+    public mutating func keep(_ pull: PullRequest?, branchHead: String?, heardAt: Date? = nil,
+                              heardAtInstall record: InstalledRecord, of id: String, defaultBranch: String?,
+                              mergeListing: CommitListing?, now: Date) {
         guard !record.isOfficialDefault else {
             forget(id)
             return
         }
         notCheckedSince[id] = nil
+        let heard = InstalledPlugins.wholeSeconds(heardAt ?? now)
         if record.ref.kind != PluginRef.branchKind {
             branches[id] = nil
-        } else if let branchHead, let name = record.ref.name {
-            branches[id] = FollowedBranch(name: name, head: branchHead, checkedAt: now)
+        } else if let branchHead, let name = record.ref.name,
+                  !(branch(of: id, record: record).map { $0.checkedAt > heard } ?? false) {
+            branches[id] = FollowedBranch(name: name, repository: record.repository, head: branchHead, checkedAt: heard)
         }
         guard let number = record.ref.pullRequestNumber else {
             pulls[id] = nil
             return
         }
-        guard let pull, pull.number == number,
-              let heard = FollowedPull.of(pull, id: id, defaultBranch: defaultBranch, mergeListing: mergeListing,
-                                          knownBefore: pulls[id], now: now) else { return }
-        pulls[id] = heard
+        guard let pull, pull.number == number, !(self.pull(of: id, record: record).map { $0.checkedAt > heard } ?? false),
+              let lookedUp = FollowedPull.of(pull, id: id, defaultBranch: defaultBranch, mergeListing: mergeListing,
+                                             knownBefore: pulls[id], now: heard) else { return }
+        pulls[id] = lookedUp
     }
 }
 
@@ -294,9 +312,14 @@ public enum PullRequestLifecycle: Equatable, Sendable {
 }
 
 /// Asks after the branch or the pull request every copy installed from one of
-/// the official repository's came from, at the catalogue's own moments — in the
-/// read of the catalogue, after the catalogue itself — and keeps what it heard
-/// (`FollowedRefs`).
+/// the official repository's — or from a branch of one of its forks — came
+/// from, at the catalogue's own moments — in the read of the catalogue, after
+/// the catalogue itself — and keeps what it heard (`FollowedRefs`). A pull
+/// request is asked of the official repository, whoever opened it; a branch
+/// of the repository it is in: the official one, or the fork, through the same
+/// host's client for it, counted against the same limit
+/// (`RepositoryProvider.provider(for:)`) — its head, its listing and the
+/// comparison all asked of the fork.
 ///
 /// What it costs, in requests to the API, for each such copy whose tree the
 /// catalogue's head does not already have (a copy whose tree is at the head
@@ -308,7 +331,8 @@ public enum PullRequestLifecycle: Equatable, Sendable {
 ///   default branch, the listing of the commit it was merged as — once per
 ///   commit. A merge into any other branch verifies nothing, and its commit is
 ///   not listed;
-/// * a branch: its head, `GET /repos/{o}/{r}/commits/refs/heads/{b}`, asked
+/// * a branch: its head, `GET /repos/{o}/{r}/commits/refs/heads/{b}` — of the
+///   fork, for a fork's branch, and so its listing and its comparison — asked
 ///   with `If-None-Match` and the commit installed — GitHub's `ETag` for a
 ///   head is its commit — so a branch that did not move answers `304`, which
 ///   still costs one; a branch that is not there answers `422` and is said;
@@ -330,8 +354,9 @@ public enum PullRequestLifecycle: Equatable, Sendable {
 /// or failed — asks nothing at all, and leaves every copy the same way
 /// (`follow(_:headTrees:unrequested:asking:)`).
 public struct RefFollower: Sendable {
-    /// The official repository, through which every branch and pull request
-    /// is read.
+    /// The official repository, through which every pull request and every
+    /// branch of its own is read — and the same host's client for each fork
+    /// (`RepositoryProvider.provider(for:)`).
     public let provider: any RepositoryProvider
     public let store: CatalogueStore
     public let limits: RateLimitRecorder
@@ -393,9 +418,10 @@ public struct RefFollower: Sendable {
     }
 
     /// Asks after the branch or the pull request of every copy in `installed`
-    /// that came from one of the official repository's, `headTrees` being the
-    /// trees the catalogue's head has by plugin id, and `unrequested` whether
-    /// nobody asked for this read. `asking` false is a read of the catalogue
+    /// that came from one of the official repository's or a fork's branch,
+    /// `headTrees` being the trees the catalogue's head has by plugin id, and
+    /// `unrequested` whether nobody asked for this read. `asking` false is a
+    /// read of the catalogue
     /// that did not get as far as this — left for later, or failed: nothing
     /// is asked, and every such copy is left as it was, saying since when it
     /// was not checked. What is kept of any other id is dropped.
@@ -411,7 +437,7 @@ public struct RefFollower: Sendable {
         var stopped = !asking
         for id in installed.plugins.keys.sorted() {
             guard let record = installed.plugins[id], !record.isOfficialDefault,
-                  record.source == InstalledPlugins.officialSource, record.repository == provider.address else { continue }
+                  record.source == InstalledPlugins.officialSource, let line = line(of: record) else { continue }
             let number = record.ref.pullRequestNumber
             let branch = record.ref.kind == PluginRef.branchKind ? record.ref.name.flatMap { $0.isEmpty ? nil : $0 } : nil
             guard number != nil || branch != nil else { continue }
@@ -436,8 +462,8 @@ public struct RefFollower: Sendable {
                         kept.pulls[id] = oldPull
                     }
                 } else if let branch {
-                    kept.branches[id] = try await askAbout(branch: branch, of: id, record: record, before: oldBranch,
-                                                           unrequested: unrequested)
+                    kept.branches[id] = try await askAbout(branch: branch, in: line, of: id, record: record,
+                                                           before: oldBranch, unrequested: unrequested)
                 }
                 asked.append(id)
             } catch {
@@ -455,6 +481,17 @@ public struct RefFollower: Sendable {
     /// A read nobody asked for, come to the reserve halfway through a copy:
     /// that copy is left as it was, what it heard on the way not kept.
     private struct LeftForTheReserve: Error {}
+
+    /// Where `record`'s line is asked: a pull request, and a branch of the
+    /// official repository, of the official repository; a fork's branch, of
+    /// the fork, through the same host's client for it — nil for a pull
+    /// request recorded as another repository's, which none is, and for a
+    /// repository on another host.
+    private func line(of record: InstalledRecord) -> (any RepositoryProvider)? {
+        if record.repository == provider.address { return provider }
+        guard record.ref.kind == PluginRef.branchKind else { return nil }
+        return provider.provider(for: record.repository)
+    }
 
     /// Whether the next request may go: never, in a read nobody asked for,
     /// while the reserve for the operator is all that is left.
@@ -496,31 +533,32 @@ public struct RefFollower: Sendable {
         // Merged into the default branch, it offers what was merged, not its
         // head (`PullRequestLifecycle`).
         if !heard.mergedInto(defaultBranch) {
-            heard.history = try await history(of: id, record: record, head: heard.head, known: old?.history,
-                                              unrequested: unrequested)
+            heard.history = try await history(of: id, in: provider, record: record, head: heard.head,
+                                              known: old?.history, unrequested: unrequested)
         }
         return heard
     }
 
-    /// What GitHub says of branch `name`, which `record`'s copy of `id` came
-    /// from: its head, asked with the commit installed — `304` when it is
-    /// still there — or that it is not there any more.
-    private func askAbout(branch name: String, of id: String, record: InstalledRecord,
+    /// What GitHub says of branch `name` of `line` — the official repository,
+    /// or the fork it is in — which `record`'s copy of `id` came from: its
+    /// head, asked with the commit installed — `304` when it is still there —
+    /// or that it is not there any more.
+    private func askAbout(branch name: String, in line: any RepositoryProvider, of id: String, record: InstalledRecord,
                           before old: FollowedBranch?, unrequested: Bool) async throws -> FollowedBranch {
         let answer: HeadAnswer
         do {
-            answer = try await provider.head(of: "refs/heads/\(name)", ifNoneMatch: "\"\(record.commit)\"")
+            answer = try await line.head(of: "refs/heads/\(name)", ifNoneMatch: "\"\(record.commit)\"")
         } catch ProviderError.notFound {
-            return FollowedBranch(name: name, head: nil, checkedAt: now())
+            return FollowedBranch(name: name, repository: record.repository, head: nil, checkedAt: now())
         }
         let head: String
         switch answer {
         case .unchanged: head = record.commit
         case .commit(let commit, _): head = commit
         }
-        return FollowedBranch(name: name, head: head,
-                              history: try await history(of: id, record: record, head: head, known: old?.history,
-                                                         unrequested: unrequested),
+        return FollowedBranch(name: name, repository: record.repository, head: head,
+                              history: try await history(of: id, in: line, record: record, head: head,
+                                                         known: old?.history, unrequested: unrequested),
                               checkedAt: now())
     }
 
@@ -532,22 +570,24 @@ public struct RefFollower: Sendable {
     /// listing, and the copy's manifest there, are read on the way, for what
     /// the row offers (`RefHead`). In a read nobody asked for, neither the
     /// listing nor the comparison is asked once the reserve is all that is
-    /// left (`mayAsk`).
-    private func history(of id: String, record: InstalledRecord, head: String,
+    /// left (`mayAsk`). All of it is asked of `line`, the repository the line
+    /// is in.
+    private func history(of id: String, in line: any RepositoryProvider, record: InstalledRecord, head: String,
                          known: HeadHistory?, unrequested: Bool) async throws -> HeadHistory? {
         guard head != record.commit else { return nil }
+        let lister = refresher(asking: line)
         if store.listing(head) == nil { try mayAsk(unrequested: unrequested) }
-        let listing = try await refresher.listing(head)
+        let listing = try await lister.listing(head)
         let folder = listing.plugins[id]
         if folder != nil {
-            try await refresher.fetchManifests(of: listing, folders: [id], language: language)
+            try await lister.fetchManifests(of: listing, folders: [id], language: language)
         }
         guard folder?.tree != record.tree else { return nil }
         if let known, known.holds(installed: record.commit, head: head) { return known }
         try mayAsk(unrequested: unrequested)
         let answer: Result<Comparison, ProviderError>
         do {
-            answer = .success(try await provider.compare(record.commit, head))
+            answer = .success(try await line.compare(record.commit, head))
         } catch let error as ProviderError {
             answer = .failure(error)
         }
@@ -560,8 +600,11 @@ public struct RefFollower: Sendable {
         return HeadHistory(from: record.commit, to: head, rewritten: rewritten, checkedAt: now())
     }
 
-    private var refresher: CatalogueRefresher {
-        CatalogueRefresher(provider: provider, store: store, limits: limits, now: now)
+    private var refresher: CatalogueRefresher { refresher(asking: provider) }
+
+    /// What lists a commit and fetches its manifests, asking `line`.
+    private func refresher(asking line: any RepositoryProvider) -> CatalogueRefresher {
+        CatalogueRefresher(provider: line, store: store, limits: limits, now: now)
     }
 }
 

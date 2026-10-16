@@ -328,14 +328,14 @@ codesign "${SIGN_FLAGS[@]}" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 if [ "$IDENTITY" = "-" ]; then
-    cat <<'WARNING'
-
-    This build is ad-hoc signed. On any machine other than this one, macOS will
-    refuse to open it on the first attempt; right-click the app and choose Open
-    to get the dialog that lets you through. For a build you can hand out
-    without that step, sign with a Developer ID and notarise it.
-
-WARNING
+    # printf, not a here-document: bash 3.2 writes those to /var/tmp whatever
+    # TMPDIR says, and the lab's tests run this script on the Mac they run on.
+    printf '%s\n' '' \
+        '    This build is ad-hoc signed. On any machine other than this one, macOS will' \
+        '    refuse to open it on the first attempt; right-click the app and choose Open' \
+        '    to get the dialog that lets you through. For a build you can hand out' \
+        '    without that step, sign with a Developer ID and notarise it.' \
+        ''
 fi
 
 # An application outside one of the Applications folders does not get its icon

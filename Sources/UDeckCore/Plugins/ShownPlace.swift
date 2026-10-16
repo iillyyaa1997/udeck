@@ -161,7 +161,7 @@ public enum ShownPlace {
         /// — the verified copy by a pull request's, a branch's by the verified
         /// one: both, as the warning names them. Nil when what comes follows
         /// the line the copy there came from, or nothing uDeck installed is
-        /// there.
+        /// there. A fork's branch is named with its fork.
         public var switching: Switch?
 
         public init(fate: Fate, arriving: String?, copy: String? = nil, switching: Switch? = nil) {
@@ -181,11 +181,13 @@ public enum ShownPlace {
         /// the button would put there, `from` where it comes. The one way a
         /// button asks: what it puts there says the version and the copy
         /// together — and, when it comes from another line of history than
-        /// the copy there, both of them (`Switch`).
+        /// the copy there, both of them (`Switch`), `official` being the
+        /// official repository, by which a fork's branch is told from its own.
         public static func now(_ id: String, in paths: UDeckPaths, record: InstalledRecord?,
-                               bringing arrival: Arrival, from origin: PluginOrigin? = nil) -> Place {
+                               bringing arrival: Arrival, from origin: PluginOrigin? = nil,
+                               official: RepositoryAddress? = nil) -> Place {
             var place = now(id, in: paths, record: record, arriving: arrival.version, copy: arrival.copy)
-            place.switching = Switch.of(record: record, fate: place.fate, arrival: arrival, from: origin)
+            place.switching = Switch.of(record: record, fate: place.fate, arrival: arrival, from: origin, official: official)
             return place
         }
 
@@ -231,8 +233,11 @@ public enum ShownPlace {
         /// `record`'s copy, whose place's fate is `fate` — nil when nothing
         /// comes, when no copy uDeck installed is there (nothing at all, a
         /// link, a folder of the operator's own), and when what comes follows
-        /// the same line of history (`PluginOrigin.followsTheSameLine`).
-        static func of(record: InstalledRecord?, fate: Place.Fate, arrival: Arrival, from origin: PluginOrigin?) -> Switch? {
+        /// the same line of history (`PluginOrigin.followsTheSameLine`). A
+        /// fork's branch, on either side, is named with its fork, `official`
+        /// being the official repository.
+        static func of(record: InstalledRecord?, fate: Place.Fate, arrival: Arrival, from origin: PluginOrigin?,
+                       official: RepositoryAddress? = nil) -> Switch? {
             guard let record, let origin, let version = arrival.version,
                   fate == .deleted || fate == .toTrash,
                   !record.origin.followsTheSameLine(as: origin) else { return nil }
@@ -241,8 +246,8 @@ public enum ShownPlace {
             case .atCommit(_, let at): commit = at
             case .atHead, .nothing: commit = ""
             }
-            return Switch(from: CopyName.of(record.origin, commit: record.commit, version: record.version),
-                          to: CopyName.of(origin, commit: commit, version: version))
+            return Switch(from: CopyName.of(record.origin, commit: record.commit, version: record.version, official: official),
+                          to: CopyName.of(origin, commit: commit, version: version, official: official))
         }
     }
 
@@ -350,7 +355,8 @@ public enum ShownPlace {
         guard let catalogue, let entry = catalogue.entry(id) else { return .nothing }
         let version = entry.manifest?.version ?? ""
         let now = Place.now(id, in: paths, record: installed.plugins[id],
-                            bringing: .atHead(version: version, tree: entry.listing.tree), from: origin(of: catalogue))
+                            bringing: .atHead(version: version, tree: entry.listing.tree), from: origin(of: catalogue),
+                            official: catalogue.address)
         if case .ask(let place) = press(.install, shown: shown, now: now) { return .ask(place) }
         let operation: InstallRequest.Operation = installed.plugins[id] != nil
             ? .update : (PluginInstaller.folderIsTaken(id, in: paths) ? .replace : .install)
@@ -366,7 +372,8 @@ public enum ShownPlace {
         guard let catalogue, let entry = catalogue.entry(id) else { return .nothing }
         let version = entry.manifest?.version ?? ""
         let now = Place.now(id, in: paths, record: installed.plugins[id],
-                            bringing: .atHead(version: version, tree: entry.listing.tree), from: origin(of: catalogue))
+                            bringing: .atHead(version: version, tree: entry.listing.tree), from: origin(of: catalogue),
+                            official: catalogue.address)
         if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
         return .install(.update, commit: catalogue.commit, folder: entry.listing, version: version,
                         from: origin(of: catalogue))
@@ -378,11 +385,14 @@ public enum ShownPlace {
     /// branch's, and so stays unverified — unless its folder is what `head`,
     /// the catalogue's head, has for the id: the installer records that as
     /// the default branch's (`Adoption`), and the warning names it so.
+    /// `source` is the source's own repository, by which a fork's branch is
+    /// told from its own in that warning.
     public static func reinstall(_ id: String, in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?,
-                                 head: Adoption.DefaultBranch? = nil) -> Step {
+                                 head: Adoption.DefaultBranch? = nil, source: RepositoryAddress? = nil) -> Step {
         guard let record = installed.plugins[id] else { return .nothing }
         return atCommit(.reinstall, id: id, commit: record.commit, version: record.version, from: record.origin,
-                        in: paths, installed: installed, shown: shown, tree: record.tree, head: head)
+                        in: paths, installed: installed, shown: shown, tree: record.tree, head: head,
+                        official: source ?? head?.repository)
     }
 
     /// **Back to** the copy this one replaced, from where it came — `source`
@@ -395,7 +405,7 @@ public enum ShownPlace {
         guard let previous = installed.plugins[id]?.previous else { return .nothing }
         return atCommit(.earlier, id: id, commit: previous.commit, version: previous.version,
                         from: previous.origin(source: source), in: paths, installed: installed, shown: shown,
-                        tree: previous.tree, head: head)
+                        tree: previous.tree, head: head, official: source)
     }
 
     /// **Update** along the line a copy of code nobody verified came from: the
@@ -435,18 +445,19 @@ public enum ShownPlace {
                                in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?) -> Step {
         atCommit(.earlier, id: id, commit: line.commit, version: line.version,
                  from: PluginOrigin(repository: source, ref: .defaultBranch(branch)),
-                 in: paths, installed: installed, shown: shown)
+                 in: paths, installed: installed, shown: shown, official: source)
     }
 
     /// A copy replaced by `version` at `commit`: the commit its warning names
     /// is the one the files come from — and the copy, by what it is recorded
     /// as once it is there (`recordedAs`), the folder at that commit being
-    /// `tree`.
+    /// `tree`; `official` the official repository.
     static func atCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
                          from origin: PluginOrigin, in paths: UDeckPaths, installed: InstalledPlugins,
-                         shown: Place?, tree: String? = nil, head: Adoption.DefaultBranch? = nil) -> Step {
+                         shown: Place?, tree: String? = nil, head: Adoption.DefaultBranch? = nil,
+                         official: RepositoryAddress? = nil) -> Step {
         let now = Place.now(id, in: paths, record: installed.plugins[id], bringing: .atCommit(version: version, commit: commit),
-                            from: recordedAs(origin, tree: tree, id: id, head: head))
+                            from: recordedAs(origin, tree: tree, id: id, head: head), official: official)
         if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
         return .atCommit(operation, commit: commit, version: version, from: origin)
     }
@@ -458,13 +469,16 @@ public enum ShownPlace {
     /// **Back to** puts it back; a replace of a folder of the operator's own;
     /// an install onto nothing. Over a copy from another line of history —
     /// the verified copy, most often — the warning that names both comes
-    /// first (`Switch`).
+    /// first (`Switch`), `source` being the source's own repository, by which
+    /// a fork's branch is told from its own.
     public static func installFromLink(_ id: String, resolution: RefResolver.Resolution, in paths: UDeckPaths,
-                                       installed: InstalledPlugins, shown: Place?) -> Step {
+                                       installed: InstalledPlugins, shown: Place?,
+                                       source: RepositoryAddress? = nil) -> Step {
         guard let entry = resolution.entries.first(where: { same($0.id, id) }) else { return .nothing }
         let version = entry.manifest?.version ?? ""
         let now = Place.now(id, in: paths, record: installed.plugins[id],
-                            bringing: .atCommit(version: version, commit: resolution.commit), from: resolution.origin)
+                            bringing: .atCommit(version: version, commit: resolution.commit), from: resolution.origin,
+                            official: source)
         if case .ask(let place) = press(.install, shown: shown, now: now) { return .ask(place) }
         let operation: InstallRequest.Operation = installed.plugins[id] != nil
             ? .update : (PluginInstaller.folderIsTaken(id, in: paths) ? .replace : .install)

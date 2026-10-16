@@ -16,7 +16,9 @@ struct Said {
 /// folder of the test's own — and so is the account's home folder, which is
 /// where `link` looks for uDeck's (`homes`, `home` unless the test names
 /// others) — so neither `new` nor `link` can reach the operator's git
-/// settings or uDeck folder, whatever a test gets wrong.
+/// settings or uDeck folder, whatever a test gets wrong. `TMPDIR` is the
+/// tests' own, as a shell would have it: what `run` hands a plugin, which
+/// would otherwise be the system's temporary folder.
 func udeckPlugin(_ arguments: [String], in here: URL, home: URL, gitConfig: String = "/dev/null",
                  extra: [String: String] = [:], homes: UserHomes? = nil) async -> Said {
     var output: [String] = []
@@ -24,6 +26,7 @@ func udeckPlugin(_ arguments: [String], in here: URL, home: URL, gitConfig: Stri
     let environment = [
         "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin",
         "HOME": home.path,
+        "TMPDIR": TemporaryFolder.path,
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_CONFIG_GLOBAL": gitConfig,
     ].merging(extra) { _, new in new }
@@ -929,6 +932,8 @@ struct RunPluginTests {
         for (environment, homes, expected) in cases {
             let report = try await PluginTrial.run(folder, options: PluginTrial.Options(environment: environment, homes: homes))
             #expect(report.environment["HOME"] == expected, "\(environment)")
+            #expect(report.environment["TMPDIR"] == TemporaryFolder.system,
+                    "no TMPDIR given: the system's temporary folder, as uDeck hands one without its own")
             guard case .card(let card) = report.execution else { Issue.record("\(report.execution)"); continue }
             #expect(card.rows == [.text(expected)], "\(environment)")
         }
@@ -994,6 +999,26 @@ struct RunPluginTests {
         guard case .card = report.execution else { Issue.record("\(report.execution)"); return }
     }
 
+    /// Its folder is made in the temporary folder the command was given — the
+    /// account's `/var/folders` was used whatever `TMPDIR` said, which put a
+    /// test run's, or a CI job's, files where nobody had asked for them.
+    @Test("without --home, the run's folder is in the temporary folder the command was given, and its home line says so")
+    func homeLine() async throws {
+        let temp = TemporaryDirectory()
+        defer { withExtendedLifetime(temp) {} }
+        Self.plugin(temp, "here", script: #"printf '{"rows": [{"text": "%s"}]}' "$TMPDIR""#)
+        let said = await udeckPlugin(["run", "plugins/here"], in: temp.url, home: temp.url)
+        #expect(said.status == 0, "\(said.output)")
+        #expect(said.output.contains { $0.contains("\"text\" : \"\(TemporaryFolder.path)\"") },
+                "the plugin is handed the TMPDIR the command was started with: \(said.output)")
+        let home = try #require(said.output.first { $0.hasPrefix("home: ") }, "\(said.output)")
+        #expect(home.hasPrefix("home: \(TemporaryFolder.url.path)/udeck-plugin-\(getuid())/\(ScratchFolder.runPrefix)"), "\(home)")
+        #expect(home.hasSuffix(" (made for this run, and taken away after it)"), "\(home)")
+        if let given = ProcessInfo.processInfo.environment["TMPDIR"], given.hasPrefix("/") {
+            #expect(home.hasPrefix("home: \(URL(fileURLWithPath: given, isDirectory: true).path)/"), "TMPDIR is \(given)")
+        }
+    }
+
     @Test("run says what uDeck forgives: an ignored key, a row it does not draw, a cut, a write into the plugin's own folder")
     func forgiven() async throws {
         let temp = TemporaryDirectory()
@@ -1019,18 +1044,10 @@ struct RunPluginTests {
         #expect(said.output.contains("uDeck draws the card:"))
     }
 
-    @Test("a card printed before the timeout is a card uDeck draws and a failure it counts")
-    func lateCard() async throws {
-        let temp = TemporaryDirectory()
-        defer { withExtendedLifetime(temp) {} }
-        Self.plugin(temp, "late", timeout: "0.5", script: #"printf '{"rows": [{"text": "early"}]}'; sleep 30"#)
-        let said = await udeckPlugin(["run", "plugins/late"], in: temp.url, home: temp.url)
-        #expect(said.status == 1)
-        #expect(said.output.contains("ended: stopped by uDeck after 0.5 s, its timeout"))
-        #expect(said.output.contains("uDeck draws the card, and counts a failure: the producer did not answer within 0.5s and was stopped"))
-        #expect(said.output.contains { $0.hasPrefix("warning: the producer printed its card and then ran on past its timeout") })
-        #expect(said.output.last == "ran plugins/late: a failure, 1 warning")
-    }
+    // A card printed before the timeout is drawn and counted a failure:
+    // UDeckPluginFormatTimingTests (`LateCardTests`), which runs by itself —
+    // whether the card is printed before the timeout depends on how busy the
+    // machine is, and beside every other test it once was not.
 
     @Test("a failure is said in uDeck's words, with every line of stderr")
     func failure() async throws {

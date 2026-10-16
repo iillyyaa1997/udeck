@@ -69,6 +69,9 @@ def checkout(tmp_path):
 
 
 def make_cli(checkout, *args, **env):
+    # Never run with a here-document or a here-string in it: see
+    # test_what_the_tests_run_here_writes_no_here_document.
+    assert "<<" not in (checkout / "Scripts" / "make-cli.sh").read_text(), "make-cli.sh writes a here-document"
     return subprocess.run(
         [str(checkout / "Scripts" / "make-cli.sh"), *args],
         capture_output=True,
@@ -628,7 +631,7 @@ pin)
     lock="$repo/.github/udeck-plugin.lock"
     [ -n "$version" ] || version="$(sed -n 's/^version=//p' "$lock")"
     release="${UDECK_PLUGIN_DOWNLOAD_BASE#file://}/v$version"
-    expected="$(mktemp)"
+    expected="$(mktemp "${TMPDIR:-/tmp}/udeck-lock.XXXXXX")"
     {
         echo "version=$version"
         for platform in macos-universal linux-x86_64 linux-aarch64; do
@@ -1150,6 +1153,7 @@ def alpine_packages_script(tmp_path, installed):
               .replace("mkdir -p /usr/share/licenses/udeck-plugin\n", "")
               .replace("/lib/apk/db/installed", str(tmp_path / "installed"))
               .replace("/usr/share/licenses/udeck-plugin/ALPINE-PACKAGES", str(tmp_path / "ALPINE-PACKAGES")))
+    assert "<<" not in script, "the RUN writes a here-document"
     subprocess.run(["sh", "-c", script], check=True, env={**os.environ, "VERSION": VERSION})
     return (tmp_path / "ALPINE-PACKAGES").read_text()
 
@@ -1421,6 +1425,10 @@ def test_the_ci_example_in_the_docs_reads_the_lock_file_of_the_base_not_the_pull
     example = after.split("```sh\n", 1)[1].split("```\n", 1)[0]
     reading = example.split('read_udeck_plugin_lock "$lock" || exit 1\n', 1)
     assert len(reading) == 2, "the example reads the lock file it took from the base"
+    # Its files and the reader's are made from a template in TMPDIR, which puts
+    # them there whichever mktemp makes them: the folder the runs below are given.
+    for text in (example, docs.split("\n<!-- lock-reader -->\n", 1)[1].split("\n<!-- /lock-reader -->\n", 1)[0]):
+        assert text.count("mktemp") == text.count('mktemp "${TMPDIR:-/tmp}/') > 0, "every mktemp is given a template in TMPDIR"
     assert "read_udeck_plugin_lock .github" not in example, "never the checkout's"
     reader = subprocess.run(["awk", re.findall(r"^LOCK_READER='(.*)'$", (REPO / "Scripts" / "make-cli.sh").read_text(), re.M)[0]],
                             input=docs, capture_output=True, text=True, check=True).stdout
@@ -1537,10 +1545,31 @@ def test_no_pipeline_ends_in_a_grep_that_leaves_early():
     before the writer is done: the writer dies of SIGPIPE and the pipeline
     reports it. MIT, in the middle of ALPINE_LICENSES, failed CI that way
     (run 37716911865), and `if readelf -l … | grep -q INTERP` would read the
-    same failure as "no INTERP". What is looked for is read with a
-    here-string instead."""
+    same failure as "no INTERP". What is looked for is asked of bash itself
+    instead: has_line, is_version, [[ … ]]."""
     for name in ("make-cli.sh", "make-app.sh"):
         script = (REPO / "Scripts" / name).read_text()
         code = [line for line in script.splitlines() if not line.lstrip().startswith("#")]
         found = [line for line in code if re.search(r"\|\s*grep\s+(-\w*q|--quiet)", line)]
         assert found == [], (name, found)
+
+
+def test_what_the_tests_run_here_writes_no_here_document():
+    """A Mac's /bin/bash and /bin/sh are bash 3.2, which writes every
+    here-document and here-string to a file in /var/tmp, whatever TMPDIR says
+    (a here-string of /bin/bash on macOS 27, with TMPDIR elsewhere, was
+    /private/var/tmp/sh-thd-…). So the shell scripts the
+    tests run on the machine they run on have none: make-cli.sh, run here by
+    make_cli; make-app.sh, run here by make_app; e2e/run.sh, asked for its --list; the Dockerfile's RUN that
+    writes ALPINE-PACKAGES; and the examples' producers, which uDeck's own
+    tests run."""
+    dockerfile = (REPO / "Scripts" / "udeck-plugin.Dockerfile").read_text()
+    scripts = {
+        "Scripts/make-cli.sh": (REPO / "Scripts" / "make-cli.sh").read_text(),
+        "Scripts/make-app.sh": (REPO / "Scripts" / "make-app.sh").read_text(),
+        "e2e/run.sh": (REPO / "e2e" / "run.sh").read_text(),
+        "the Dockerfile's RUN": re.search(r"^RUN <<'SH'\n(.*?)\nSH$", dockerfile, re.M | re.S).group(1),
+    }
+    scripts.update({str(path.relative_to(REPO)): path.read_text() for path in sorted(REPO.glob("examples/*/*.sh"))})
+    assert {"examples/hello-card/hello.sh", "examples/broken-card/broken.sh", "examples/slow-plugin/hang.sh"} <= set(scripts)
+    assert [name for name, text in scripts.items() if "<<" in text] == []

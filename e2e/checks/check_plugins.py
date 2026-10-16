@@ -1,6 +1,6 @@
 """Plugins from a repository: the catalogue, installing, updating, removing — and saying no.
 
-Thirty-six checks, one per row of the table in docs/plugin-repository.md ("The
+Thirty-seven checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"), and all of them against the same two things: a release build of
 this checkout, and a fake GitHub served inside the guest
 (`plugin_repository.FakeGitHub`, `e2e/guest/fake-github.py`) whose content is
@@ -324,6 +324,21 @@ LEFT_FOR_LATER = "the official catalogue: leftForLater"
 # answered (`_leave_the_reserve`).
 HOURLY = 60
 RESERVE = 10
+# A branch of a fork (stage 3, R7). The fork someone/udeck-plugins — the one pull request #3 comes from — has a branch
+# of its own, x, at pr3, which the official repository has none of; the link goes into plugins/uptime on it. A
+# repository of its own on the same host, with a branch x at the same commit, is the control: no fork of the official
+# repository, so refused once GitHub has said so. Each a key of the fake's `forks` (fake-github.py).
+FORK_BRANCH = "x"
+NOT_A_FORK = "someone/elsewhere"
+FORKS = {FORK: {"branches": {FORK_BRANCH: "pr3"}}, NOT_A_FORK: {"fork": False, "branches": {FORK_BRANCH: "pr3"}}}
+FORK_LINK = f"https://github.com/{FORK}/tree/{FORK_BRANCH}/plugins/{UPTIME}"
+NOT_A_FORK_LINK = f"github.com/{NOT_A_FORK}/tree/{FORK_BRANCH}/plugins/{UPTIME}"
+# What uDeck says of them (English.swift: line and of with a fork, pluginFromBranch, linkHead, linkNotAFork).
+OF_THE_FORK = "branch {name} of {fork}"
+FROM_THE_FORK = "branch {name} of {fork} at {commit}"
+FORK_HEAD = "Branch {name} of {fork} at {commit}"
+NOT_A_FORK_SAYS = ("github.com/{repository} is not a fork of github.com/{official}. Plugins come from github.com/{official} "
+                   "and its forks for now; other repositories come later, as sources of their own.")
 
 
 # --- The checks -------------------------------------------------------------------------
@@ -1278,6 +1293,105 @@ def check_install_from_a_branch(machine, check_dir, lab):
                and ((verified.get("previous") or {}).get("ref") or {}).get("kind") == "branch",
                f"Switch to verified, the branch's copy gone, left {_read_json(machine, INSTALLED)!r}: no verified copy "
                f"over the branch's record, or no warning-free install where nothing was")  # fmt: skip
+    finally:
+        scene.close()
+
+
+def check_install_from_a_fork_branch(machine, check_dir, lab):
+    """A branch of a fork of the official repository: asked of the fork — whether it is one, its head, its listing, its files — recorded as the fork's, named with it, and followed in it; a repository that is no fork is refused after one question.
+
+    The control first: a link into `plugins/uptime` on `x` of `someone/elsewhere`,
+    a repository of its own, is refused with what it is — *… is not a fork of
+    …* — and the log holds that repository's description and nothing else: no
+    head, no listing, no file. Then the link into `plugins/uptime` on `x` of
+    `someone/udeck-plugins`, a fork: from **Look up** to the end of the
+    install the log holds the fork's description, the head of its `x` by
+    `refs/heads/`, its listing, and files of `plugins/uptime/` at that commit
+    from the fork's raw host — nothing of the official repository at all,
+    which has no branch `x`. The sheet says *Branch x of someone/udeck-plugins
+    at …*; the record says `repository` the fork, `ref {branch, "x"}`,
+    `unverified`, by `null`; the row **Unverified** · *branch x of
+    someone/udeck-plugins at …*. The fork moves `x` on to `p2`: **Check now**
+    asks the fork for `x` with the commit installed, lists `p2` there and
+    compares there once, and the row says *Changed in branch x of
+    someone/udeck-plugins, still 1.0.1*, with **Update** and *What changed*;
+    **Update** takes every file of the folder at `p2`, once, from the fork.
+
+    **Red for**: a fork's branch asked of the official repository, a
+    repository that is no fork read past its description, a fork's copy
+    recorded as the official repository's, a row that does not name the fork,
+    and a fork's branch never followed or updated from anywhere else.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", forks=FORKS)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        pr3, p2 = scene.github.commit("pr3"), scene.github.commit("p2")
+        fork_api = f"/api/repos/{FORK}"
+
+        heard, dump = _look_up(scene, NOT_A_FORK_LINK, "a repository that is no fork", came_to="link.refused")
+        said = ui.says(ui.element(dump, "link.refused"))
+        refused = NOT_A_FORK_SAYS.format(repository=NOT_A_FORK, official=config.PLUGINS_REPOSITORY)
+        expect(said == refused, f"{NOT_A_FORK_LINK} is refused with {said!r}, not {refused!r}")
+        expect([r.path for r in heard] == [f"/api/repos/{NOT_A_FORK}"],
+               f"{NOT_A_FORK} is no fork, and uDeck asked {described(heard)}: its description, and nothing after it")
+        _close_the_link_sheet(scene, "after the refusal")
+
+        looked, dump = _look_up(scene, FORK_LINK, "the fork's branch")
+        said = ui.says(ui.element(dump, "link.head"))
+        head = FORK_HEAD.format(name=FORK_BRANCH, fork=FORK, commit=pr3[:7])
+        expect(said == head, f"the link sheet says {said!r} of {FORK_LINK}, not {head!r}")
+        listed = sorted(row.identifier.split(".")[1] for row in ui.controls(dump) if row.identifier.endswith(".install")
+                        and row.identifier.startswith("link."))  # fmt: skip
+        expect(listed == [UPTIME], f"a link into plugins/{UPTIME} on {FORK_BRANCH} of {FORK} lists {listed}, not {UPTIME} alone")
+        record, asked = _install_from_the_link(scene, UPTIME, "the fork's branch")
+        files = scene.github.files("pr3", f"plugins/{UPTIME}")
+        _expect_only(looked + asked, pr3,
+                     api={fork_api, f"{fork_api}/commits/refs/heads/{FORK_BRANCH}", f"{fork_api}/git/trees/{pr3}"},
+                     raw=set(files), what="looking up the fork's branch and installing from it", repository=FORK)
+        _expect_only(asked, pr3, api=set(), raw=set(files), what=f"installing {UPTIME} from the fork's branch", every=True,
+                     repository=FORK)
+        tree = scene.github.tree_in_guest(f"{UDECK_HOME}/plugins/{UPTIME}", "hashing the installed folder")
+        expect(tree == scene.github.tree("pr3", f"plugins/{UPTIME}"),
+               f"the folder uDeck installed hashes to {tree}, not pr3's plugins/{UPTIME}")
+        _expect_an_unverified_record(record, ref={"kind": "branch", "name": FORK_BRANCH}, commit=pr3, version="1.0.1",
+                                     repository=FORK)
+        _close_the_link_sheet(scene, "after installing")
+        _expect_the_row_says(scene, UPTIME, FROM_THE_FORK.format(name=FORK_BRANCH, fork=FORK, commit=pr3[:7]), "the row")
+
+        scene.github.tell("moving the fork's branch on to p2", forks={**FORKS, FORK: {"branches": {FORK_BRANCH: "p2"}}})
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now after the fork's branch moved on")
+        changed = CHANGED_STILL.format(line=OF_THE_FORK.format(name=FORK_BRANCH, fork=FORK), version="1.0.1")
+        offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == changed, CATALOGUE_SECONDS)
+        heard = _since(scene, before)
+        dump = _keep_the_pane(machine, check_dir, lab, "offered-along-the-fork.txt")
+        expect(offer == changed, f"the fork's branch moved on to p2, and uptime's row says {offer!r}, not {changed!r}; "
+                                 f"uDeck asked {described(heard)}")
+        asked = [r for r in heard if r.is_api and r.path.startswith(fork_api + "/")]
+        expect([r.path for r in asked] == [f"{fork_api}/commits/refs/heads/{FORK_BRANCH}", f"{fork_api}/git/trees/{p2}",
+                                          f"{fork_api}/compare/{pr3}...{p2}"]
+               and asked[0].status == 200 and asked[0].if_none_match == f'"{pr3}"',
+               f"the fork's branch moved on, and uDeck asked the fork {described(asked)}: not its head with the commit "
+               f"installed, p2's listing and one comparison")  # fmt: skip
+        official = f"/api/repos/{config.PLUGINS_REPOSITORY}/"
+        astray = [r for r in heard if r.is_api and r.path.startswith(official)
+                  and (f"refs/heads/{FORK_BRANCH}" in r.path or "/compare/" in r.path or p2 in r.path)]  # fmt: skip
+        expect(not astray, f"the fork's branch was asked of the official repository: {described(astray)}")
+        expect(ui.element(dump, f"plugin.{UPTIME}.update") is not None and ui.element(dump, f"plugin.{UPTIME}.whatChanged") is not None,
+               "the row offers the fork's head without Update and What changed")
+
+        before = _count(scene)
+        updated = _operate(scene, f"plugin.{UPTIME}.update", "Update along the fork's branch",
+                           lambda r: r is not None and r.get("commit") == p2)
+        asked = _since(scene, before)
+        expect(updated is not None, f"Update along the fork's branch left {_read_json(machine, INSTALLED)!r}; uDeck asked "
+                                    f"{described(asked)}")  # fmt: skip
+        _expect_an_unverified_record(updated, ref={"kind": "branch", "name": FORK_BRANCH}, commit=p2, version="1.0.1",
+                                     repository=FORK)
+        _expect_only(asked, p2, api=set(), raw=set(scene.github.files("p2", f"plugins/{UPTIME}")),
+                     what="updating along the fork's branch", every=True, repository=FORK)
+        _expect_the_row_says(scene, UPTIME, FROM_THE_FORK.format(name=FORK_BRANCH, fork=FORK, commit=p2[:7]), "updated")
     finally:
         scene.close()
 
@@ -3319,8 +3433,8 @@ def _status(machine, plugin):
     return (record.get("verification") or {}).get("status")
 
 
-def _look_up(scene, link, label):
-    """`link` typed into **Install from a link…** and looked up: uDeck's requests from the press on, and the walk once it says what it came to."""
+def _look_up(scene, link, label, came_to="link.head"):
+    """`link` typed into **Install from a link…** and looked up: uDeck's requests from the press on, and the walk once it says what it came to — `came_to`, the sheet's head, or whatever else a check expects it to come to."""
     machine = scene.machine
     dump = _read_the_screen(machine, f"looking for the link sheet: {label}")
     if ui.element(dump, "link.field") is None:
@@ -3344,8 +3458,9 @@ def _look_up(scene, link, label):
             break
         machine.sleep(1)
     _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-link-sheet-{label.replace(' ', '-')}.txt")
-    if "link.head" not in found:
-        said = ui.says(ui.element(dump, "link.refused")) or ui.says(ui.element(dump, "link.catalogue"))
+    if came_to not in found:
+        said = (ui.says(ui.element(dump, "link.refused")) or ui.says(ui.element(dump, "link.catalogue"))
+                or ui.says(ui.element(dump, "link.head")))
         raise CheckFailed(f"{link} came to {said or 'nothing'} within {OPERATION_SECONDS}s; uDeck asked "
                           f"{described(_since(scene, before))}")
     return _since(scene, before), dump
@@ -3370,20 +3485,20 @@ def _close_the_link_sheet(scene, label):
     scene.machine.sleep(config.SETTLE_SECONDS)
 
 
-def _expect_only(heard, commit, api, raw, what, every=False):
-    """uDeck's requests `heard` are the API paths `api` and the raw files `raw` of the official repository at `commit` — nothing else, from no other repository; `every` raw file once, when asked."""
+def _expect_only(heard, commit, api, raw, what, every=False, repository=config.PLUGINS_REPOSITORY):
+    """uDeck's requests `heard` are the API paths `api` and the raw files `raw` of `repository` — the official one, or a fork — at `commit`: nothing else, from no other repository; `every` raw file once, when asked."""
     stray = []
     files = []
     for request in heard:
         if request.is_api and request.path in api:
             continue
-        found = request.raw_file()
+        found = request.raw_file(repository)
         if found is not None and found[0] == commit and found[1] in raw:
             files.append(found[1])
             continue
         stray.append(request)
     expect(not stray, f"{what}, uDeck also asked {described(stray)}; it asks for {sorted(api)} and the files "
-                      f"{sorted(raw)} at {commit[:7]}, through {config.PLUGINS_REPOSITORY}, and nothing else")
+                      f"{sorted(raw)} at {commit[:7]}, through {repository}, and nothing else")
     if every:
         missing = sorted(set(raw) - set(files))
         twice = sorted({path for path in files if files.count(path) > 1})
@@ -3391,10 +3506,10 @@ def _expect_only(heard, commit, api, raw, what, every=False):
                f"{what}, uDeck never fetched {missing} and fetched {twice} more than once")  # fmt: skip
 
 
-def _expect_an_unverified_record(record, ref, commit, version, plugin=UPTIME):
-    """A record of the official source's copy from a branch or a pull request: where it came from, and nobody's guarantee."""
+def _expect_an_unverified_record(record, ref, commit, version, plugin=UPTIME, repository=config.PLUGINS_REPOSITORY):
+    """A record of the official source's copy from a branch or a pull request — of `repository`, the official one or a fork: where it came from, and nobody's guarantee."""
     wanted = {"source": "official", "ref": ref, "commit": commit, "version": version,
-              "repository": {"provider": "github", "host": "github.com", "path": config.PLUGINS_REPOSITORY}}  # fmt: skip
+              "repository": {"provider": "github", "host": "github.com", "path": repository}}  # fmt: skip
     wrong = {key: record.get(key, "(missing)") for key, value in wanted.items() if record.get(key, "(missing)") != value}
     expect(not wrong, f"installed.json says {wrong} of {plugin}, where the install from the link has to have written "
                       f"{({k: wanted[k] for k in wrong})}")

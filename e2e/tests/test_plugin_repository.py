@@ -643,6 +643,78 @@ def test_requests_spent_elsewhere_leave_less_and_run_out_sooner(tmp_path):
         served.close()
 
 
+FORK = "someone/udeck-plugins"
+FORK_API = f"/api/repos/{FORK}"
+
+
+def test_a_fork_is_described_as_one_and_a_repository_of_its_own_as_none(served):
+    """`GET /repos/{fork}`: `fork`, `parent` and `source` as GitHub says them (the official repository unless the lab says
+    otherwise); a repository of its own, `fork` false and neither; one the lab does not name, 404."""
+    served.state(main="c1", forks={FORK: {"branches": {"x": "pr3"}}, "someone/elsewhere": {"fork": False},
+                                   "someone/other": {"source": "somebody/else", "parent": "somebody/else", "default_branch": "trunk"}})
+    status, _, body = served.json(FORK_API)
+    assert status == 200 and body == {"full_name": FORK, "default_branch": "main", "private": False, "fork": True,
+                                      "parent": {"full_name": REPOSITORY}, "source": {"full_name": REPOSITORY}}
+    _, _, own = served.json("/api/repos/someone/elsewhere")
+    assert own["fork"] is False and "source" not in own and "parent" not in own
+    _, _, other = served.json("/api/repos/someone/other")
+    assert other["source"]["full_name"] == "somebody/else" and other["default_branch"] == "trunk"
+    assert served.get("/api/repos/someone/unknown")[0] == 404
+    assert served.get(f"/api/repos/{REPOSITORY}-x")[0] == 404, "no repository by a prefix of the official one's name"
+    assert served.json(API)[2]["fork"] is False, "the official repository is no fork"
+
+
+def test_a_forks_branch_is_its_own_and_its_listing_files_and_comparisons_are_the_networks(served):
+    """A fork's `x` is the fork's, not the official repository's `x`; by `refs/heads/`, with its ETag and 304, and 422 once
+    deleted; any commit of the network is listed, served raw and compared through it; its pull requests are not modelled."""
+    facts = served.fake.repository.facts()["commits"]
+    c1, pr3, p2 = facts["c1"]["sha"], facts["pr3"]["sha"], facts["p2"]["sha"]
+    served.state(main="c1", branches={"x": "c1"}, forks={FORK: {"branches": {"x": "pr3"}}})
+    status, headers, body = served.get(f"{FORK_API}/commits/refs%2Fheads%2Fx", SHA_ONLY)
+    assert (status, body.decode(), headers["ETag"]) == (200, pr3, f'"{pr3}"')
+    assert served.get(f"{FORK_API}/commits/refs%2Fheads%2Fx", {**SHA_ONLY, "If-None-Match": f'"{pr3}"'})[0] == 304
+    assert served.get(f"{API}/commits/refs%2Fheads%2Fx", SHA_ONLY)[2].decode() == c1, "the official repository's x is another"
+    assert served.get(f"{FORK_API}/commits/refs%2Fheads%2Fgone", SHA_ONLY)[0] == 422
+    assert served.get(f"{FORK_API}/commits/refs%2Fheads%2Fmain", SHA_ONLY)[0] == 422, "the fork's main only when the lab names it"
+    assert served.get(f"{FORK_API}/commits/refs%2Fpull%2F3%2Fhead", SHA_ONLY)[0] == 422
+    assert served.get(f"{FORK_API}/commits/{c1}", SHA_ONLY)[2].decode() == c1, "any commit of the network by its id"
+    status, _, listing = served.json(f"{FORK_API}/git/trees/{pr3}?recursive=1")
+    assert status == 200 and {"plugins/asks-nothing/manifest.json", "plugins/uptime/uptime.sh"} <= {e["path"] for e in listing["tree"]}
+    status, _, data = served.get(f"/raw/{FORK}/{pr3}/plugins/asks-nothing/manifest.json")
+    assert status == 200 and fake_github.blob_id(data) == facts["pr3"]["paths"]["plugins/asks-nothing/manifest.json"]["sha"]
+    assert served.get(f"/raw/someone/unknown/{pr3}/udeck-plugins.json")[0] == 404
+    served.state(main="c1", forks={FORK: {"branches": {"x": "p2"}}})
+    _, _, compared = served.json(f"{FORK_API}/compare/{pr3}...{p2}?per_page=1")
+    assert (compared["status"], compared["ahead_by"], compared["behind_by"]) == ("ahead", 1, 0)
+    assert served.json(f"{FORK_API}/compare/{pr3}...x")[2]["status"] == "ahead", "the fork's own ref"
+    assert served.get(f"{FORK_API}/compare/{pr3}...fix%2Fuptime")[0] == 404, "the official repository's branches are not the fork's"
+    assert served.get(f"{FORK_API}/pulls/3")[0] == 404
+    assert served.get(f"{FORK_API}/commits?path=plugins/uptime")[0] == 404
+    served.state(main="c1", forks={FORK: {"branches": {}}})
+    assert served.get(f"{FORK_API}/commits/refs%2Fheads%2Fx", SHA_ONLY)[0] == 422, "deleted"
+    assert [r.path for r in served.requests()][:2] == [f"{FORK_API}/commits/refs/heads/x"] * 2
+
+
+def test_a_forks_requests_spend_the_same_hour(tmp_path):
+    """GitHub counts what an address asks whichever repository it asks about: the fork's answers spend the official
+    repository's hour, a 404 included; raw files spend none."""
+    now = [1_800_000_000.0]
+    served = Served(tmp_path, clock=lambda: now[0])
+    try:
+        served.state(forks={FORK: {"branches": {"x": "pr3"}}})
+        assert served.get(API)[1]["x-ratelimit-remaining"] == "59"
+        assert served.get(FORK_API)[1]["x-ratelimit-remaining"] == "58"
+        assert served.get(f"{FORK_API}/commits/x", SHA_ONLY)[1]["x-ratelimit-remaining"] == "57"
+        assert served.get("/api/repos/someone/unknown")[1]["x-ratelimit-remaining"] == "56"
+        pr3 = served.fake.repository.facts()["commits"]["pr3"]["sha"]
+        assert "x-ratelimit-remaining" not in served.get(f"/raw/{FORK}/{pr3}/udeck-plugins.json")[1]
+        assert served.get(API)[1]["x-ratelimit-remaining"] == "55"
+        served.state(forks={FORK: {"branches": {"x": "pr3"}}}, limit_until=int(now[0]) + 600)
+        assert served.get(FORK_API)[0] == 403, "the limit used up is the fork's too"
+    finally:
+        served.close()
+
+
 @needs_git
 def test_every_two_fixture_commits_compare_as_git_compares_them(tmp_path):
     """The fake's compare, held against `git rev-list --left-right --count` on the same commits, every pair."""
@@ -694,6 +766,9 @@ def test_a_raw_request_says_which_commit_and_path_it_was_for():
     request = Request(0, "GET", "raw", f"/raw/{REPOSITORY}/{'a' * 40}/plugins/uptime/uptime.sh", "", 200, False)
     assert request.raw_file() == ("a" * 40, "plugins/uptime/uptime.sh")
     assert Request(0, "GET", "api", f"/api/repos/{REPOSITORY}", "", 200, False).raw_file() is None
+    # A fork's raw file is the fork's, asked by name: never taken for the official repository's.
+    fork = Request(0, "GET", "raw", f"/raw/{FORK}/{'a' * 40}/plugins/uptime/uptime.sh", "", 200, False)
+    assert fork.raw_file() is None and fork.raw_file(FORK) == ("a" * 40, "plugins/uptime/uptime.sh")
 
 
 def test_the_fixtures_travel_as_one_archive_with_their_link_and_modes(tmp_path):

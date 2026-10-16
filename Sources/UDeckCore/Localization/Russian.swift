@@ -172,7 +172,7 @@ struct Russian: Vocabulary {
         // Плагины из репозитория
         case .pluginsOfficialCatalogue: "Официальный каталог"
         case .pluginsOfficialCatalogueHelp(let source):
-            "uDeck читает список плагинов в \(source) через несколько секунд после запуска, раз в день, при открытии этой панели, если списку больше часа, и по кнопке «Проверить» — список и манифест каждого плагина, а для плагина, установленного из ветки или запроса на слияние, ещё и где сейчас эта ветка или запрос и, если они сдвинулись, их список файлов, манифест этого плагина там и одно сравнение с установленным. Файлы плагина скачиваются, когда вы нажимаете «Установить» и когда проверенный плагин обновляется сам. Если выключить, uDeck не делает никаких запросов о плагинах; установленные продолжают работать."
+            "uDeck читает список плагинов в \(source) через несколько секунд после запуска, раз в день, при открытии этой панели, если списку больше часа, и по кнопке «Проверить» — список и манифест каждого плагина, а для плагина, установленного из ветки или запроса на слияние, ещё и где сейчас эта ветка или запрос — ветку форка спрашивают у самого форка — и, если они сдвинулись, их список файлов, манифест этого плагина там и одно сравнение с установленным. Файлы плагина скачиваются, когда вы нажимаете «Установить» и когда проверенный плагин обновляется сам. Если выключить, uDeck не делает никаких запросов о плагинах; установленные продолжают работать."
         case .catalogueCheckNow: "Проверить"
         case .catalogueChecked(let source, let time): "\(source) · проверено в \(time)"
         case .catalogueNeverRead(let source): "\(source) · ещё не прочитан"
@@ -246,7 +246,7 @@ struct Russian: Vocabulary {
                 ? "Сейчас \(id) — \(Self.copy(from)), и в ней есть ваши изменения. Ваши изменения в \(id) будут перемещены в Корзину, а на её место встанет \(Self.copy(to)). "
                 : "Сейчас \(id) — \(Self.copy(from)). На её место встанет \(Self.copy(to)). ") + Self.staysAfterSwitching(to: to)
         case .catalogueLinkedHere(let id): "\(id) подключён здесь ссылкой на вашу папку"
-        case .catalogueInstalledUnverified(let ref): "Здесь установлен из \(Self.lineFrom(ref)): не проверен"
+        case .catalogueInstalledUnverified(let ref, let fork): "Здесь установлен из \(Self.lineFrom(ref, fork: fork)): не проверен"
         case .catalogueSwitchToVerified(let version): "Перейти на проверенную \(version)"
         case .catalogueMergedDiffers: "влит, и проверенная версия отличается"
         case .catalogueClosedUnmerged: "закрыт без слияния"
@@ -266,22 +266,24 @@ struct Russian: Vocabulary {
         case .pluginMarkMissing: "Папки нет"
         case .pluginFrom(let source, let commit): "Из \(source), коммит \(commit)"
         case .pluginFromPullRequest(let number, let commit): "запрос на слияние #\(number), коммит \(commit)"
-        case .pluginFromBranch(let name, let commit): "ветка \(name), коммит \(commit)"
+        case .pluginFromBranch(let name, let commit, let fork): "ветка \(name)\(Self.of(fork)), коммит \(commit)"
         case .pluginPullRequestMergedDiffers(let number):
             "Запрос на слияние #\(number) влит, и проверенная версия отличается — обновить"
         case .pluginPullRequestMergedNothingOffered(let number):
             "Запрос на слияние #\(number) влит; проверенной версии здесь не предлагается, плагин продолжает работать"
         case .pluginPullRequestClosed(let number):
             "Запрос на слияние #\(number) закрыт без слияния; плагин продолжает работать"
-        case .pluginRefAvailable(let ref, let version): "В \(Self.lineIn(ref)) доступна \(version)"
-        case .pluginRefChangedStill(let ref, let version): "Изменён в \(Self.lineIn(ref)), всё ещё \(version)"
-        case .pluginRefNowHas(let ref, let version): "В \(Self.lineIn(ref)) теперь \(version)"
-        case .pluginRefGone(let ref, let id): "\(id) больше нет в \(Self.lineIn(ref)); плагин продолжает работать"
-        case .pluginRefRewritten(let ref):
-            "История \(Self.lineFrom(ref)) переписана: новый последний коммит не продолжает установленный"
-        case .pluginBranchGone(let name): "Ветки \(name) больше нет; плагин продолжает работать"
-        case .pluginRefNotCheckedSince(let ref, let at):
-            "\(Self.line(ref, capitalised: true)) не \(ref.kind == PluginRef.branchKind ? "проверялась" : "проверялся") с \(at)"
+        case .pluginRefAvailable(let ref, let version, let fork): "В \(Self.lineIn(ref, fork: fork)) доступна \(version)"
+        case .pluginRefChangedStill(let ref, let version, let fork):
+            "Изменён в \(Self.lineIn(ref, fork: fork)), всё ещё \(version)"
+        case .pluginRefNowHas(let ref, let version, let fork): "В \(Self.lineIn(ref, fork: fork)) теперь \(version)"
+        case .pluginRefGone(let ref, let id, let fork):
+            "\(id) больше нет в \(Self.lineIn(ref, fork: fork)); плагин продолжает работать"
+        case .pluginRefRewritten(let ref, let fork):
+            "История \(Self.lineFrom(ref, fork: fork)) переписана: новый последний коммит не продолжает установленный"
+        case .pluginBranchGone(let name, let fork): "Ветки \(name)\(Self.of(fork)) больше нет; плагин продолжает работать"
+        case .pluginRefNotCheckedSince(let ref, let at, let fork):
+            "\(Self.line(ref, capitalised: true, fork: fork)) не \(ref.kind == PluginRef.branchKind ? "проверялась" : "проверялся") с \(at)"
         case .pluginPinned: "Оставлен на этой версии — о новых всё равно сообщается"
         case .pluginUpdatedByItself(let date): "Обновился сам \(date)"
         case .pluginUpdateByItselfFailed(let version):
@@ -308,7 +310,7 @@ struct Russian: Vocabulary {
         case .linkFolderRefused(let refusal): Self.linkRefusal(refusal)
         case .linkInstall: "Установить по ссылке…"
         case .linkHelp(let official):
-            "Вставьте ссылку на запрос на слияние или на ветку \(official). uDeck спросит о ней GitHub и покажет плагины, которые там не такие, как в каталоге, — новые или изменённые. Их никто не проверял."
+            "Вставьте ссылку на запрос на слияние или на ветку \(official) либо на ветку его форка. uDeck спросит о ней GitHub и покажет плагины, которые там не такие, как в каталоге, — новые или изменённые. Их никто не проверял."
         case .linkField: "github.com/…/pull/3 или …/tree/ветка"
         case .linkLookUp: "Найти"
         case .linkReading: "Спрашиваю GitHub…"
@@ -320,14 +322,16 @@ struct Russian: Vocabulary {
             switch link {
             case .pullRequest(let number): "В \(official) нет запроса на слияние #\(number)."
             case .branch(let name, _): "В \(official) нет ветки \(name) — возможно, её удалили."
+            case .forkBranch(let repository, let name, _): "В \(repository) нет ветки \(name) — возможно, её удалили."
+            case .forkRepository(let repository): "Репозиторий \(repository) не найден — или он закрытый."
             default: "В \(official) по этой ссылке ничего нет."
             }
-        case .linkOtherRepository(let repository, let official):
-            "\(repository) — не \(official). Устанавливать из другого репозитория, в том числе из форка, пока нельзя."
+        case .linkNotAFork(let repository, let official):
+            "\(repository) — не форк \(official). Плагины пока приходят из \(official) и его форков; другие репозитории появятся позже, как отдельные источники."
         case .linkIsTheCatalogue(let official, let plugin):
             plugin.map { "Это \($0) в основной ветке \(official): он есть в каталоге ниже, проверенный." }
                 ?? "Это основная ветка \(official): её плагины — каталог ниже, проверенные."
-        case .linkHead(let ref, let commit): "\(Self.line(ref, capitalised: true)), коммит \(commit)"
+        case .linkHead(let ref, let commit, let fork): "\(Self.line(ref, capitalised: true, fork: fork)), коммит \(commit)"
         case .linkPullRequestMerged:
             "Этот запрос на слияние влит. Ниже — его последний коммит в том виде, в каком его предлагали; то, что репозиторий влил, есть в каталоге."
         case .catalogueCommitGone(let commit):
@@ -335,11 +339,11 @@ struct Russian: Vocabulary {
         case .linkPullRequestMergedElsewhere(let base):
             "Этот запрос на слияние влит в \(base), а не в основную ветку: ниже — его последний коммит, и ничего из него не проверено."
         case .linkPullRequestClosed: "Этот запрос на слияние закрыт без слияния."
-        case .linkNothingDiffers(let ref, let plugin):
-            plugin.map { "\($0) из \(Self.lineFrom(ref)) такой же, как в каталоге: устанавливать отсюда нечего." }
-                ?? "Все плагины из \(Self.lineFrom(ref)) такие же, как в каталоге: устанавливать отсюда нечего."
-        case .linkPluginNotThere(let ref, let plugin):
-            "В файлах \(Self.lineFrom(ref)) нет plugins/\(plugin): устанавливать отсюда нечего."
+        case .linkNothingDiffers(let ref, let plugin, let fork):
+            plugin.map { "\($0) из \(Self.lineFrom(ref, fork: fork)) такой же, как в каталоге: устанавливать отсюда нечего." }
+                ?? "Все плагины из \(Self.lineFrom(ref, fork: fork)) такие же, как в каталоге: устанавливать отсюда нечего."
+        case .linkPluginNotThere(let ref, let plugin, let fork):
+            "В файлах \(Self.lineFrom(ref, fork: fork)) нет plugins/\(plugin): устанавливать отсюда нечего."
         case .linkUnverifiedNote:
             "То, что здесь перечислено, никто не проверял: это не то, что репозиторий влил. Плагин, установленный отсюда, спросит перед запуском — даже если ничего не просит — и снова, как только его код изменится."
         case .runLogSwitch: "Вести лог запусков связанных папок"
@@ -533,12 +537,12 @@ struct Russian: Vocabulary {
 extension Russian {
     /// Ветка или запрос на слияние, как их называет предложение: *запрос на
     /// слияние #3*, *ветка fix/uptime*.
-    static func line(_ ref: PluginRef, capitalised: Bool = false) -> String {
+    static func line(_ ref: PluginRef, capitalised: Bool = false, fork: String? = nil) -> String {
         let said: String
         if let number = ref.pullRequestNumber {
             said = "запрос на слияние #\(number)"
         } else if ref.kind == PluginRef.branchKind {
-            said = "ветка \(ref.name ?? "")"
+            said = "ветка \(ref.name ?? "")" + of(fork)
         } else if ref.isDefault {
             said = "основная ветка"
         } else {
@@ -549,17 +553,17 @@ extension Russian {
     }
 
     /// То же после «в»: *в запросе на слияние #3*, *в ветке fix/uptime*.
-    static func lineIn(_ ref: PluginRef) -> String {
+    static func lineIn(_ ref: PluginRef, fork: String? = nil) -> String {
         if let number = ref.pullRequestNumber { return "запросе на слияние #\(number)" }
-        if ref.kind == PluginRef.branchKind { return "ветке \(ref.name ?? "")" }
+        if ref.kind == PluginRef.branchKind { return "ветке \(ref.name ?? "")" + of(fork) }
         if ref.isDefault { return "основной ветке" }
         return [ref.kind, ref.name].compactMap { $0 }.joined(separator: " ")
     }
 
     /// То же после «из»: *из запроса на слияние #3*, *из ветки fix/uptime*.
-    static func lineFrom(_ ref: PluginRef) -> String {
+    static func lineFrom(_ ref: PluginRef, fork: String? = nil) -> String {
         if let number = ref.pullRequestNumber { return "запроса на слияние #\(number)" }
-        if ref.kind == PluginRef.branchKind { return "ветки \(ref.name ?? "")" }
+        if ref.kind == PluginRef.branchKind { return "ветки \(ref.name ?? "")" + of(fork) }
         if ref.isDefault { return "основной ветки" }
         return [ref.kind, ref.name].compactMap { $0 }.joined(separator: " ")
     }
@@ -574,13 +578,21 @@ extension Russian {
         return "Окна плагина и его настройки останутся. Код, который встанет, никто не проверял: плагин спросит разрешения перед запуском, если только вы уже не разрешали именно этот код."
     }
 
+    /// Что идёт после имени ветки форка: *репозитория someone/udeck-plugins*
+    /// — родительный падеж, в любом падеже самой ветки; у веток официального
+    /// репозитория ничего.
+    static func of(_ fork: String?) -> String {
+        fork.map { " репозитория \($0)" } ?? ""
+    }
+
     /// Копия, как её называет предупреждение (`CopyName`): версия и откуда она.
     static func copy(_ name: CopyName) -> String {
         switch name {
         case .verified(let version, let repository): "проверенная версия \(version) из \(repository)"
         case .pullRequest(let number, let commit, let version):
             "версия \(version) из запроса на слияние #\(number), коммит \(commit)"
-        case .branch(let branch, let commit, let version): "версия \(version) из ветки \(branch), коммит \(commit)"
+        case .branch(let branch, let commit, let version, let fork):
+            "версия \(version) из ветки \(branch)\(of(fork)), коммит \(commit)"
         case .other(let commit, let version): "версия \(version), коммит \(commit)"
         }
     }
@@ -588,16 +600,16 @@ extension Russian {
     /// Почему вставленная ссылка не прочитана (`RepositoryLink.Refusal`).
     static func linkRefusal(_ refusal: RepositoryLink.Refusal, official: String) -> String {
         switch refusal {
-        case .empty: "Вставьте ссылку на запрос на слияние или на ветку \(official)."
+        case .empty: "Вставьте ссылку на запрос на слияние или на ветку \(official) либо на ветку его форка."
         case .notALink:
             "Это не ссылка на github.com. Вставьте ссылку на запрос на слияние или на ветку \(official) — такую, как её показывает браузер."
         case .notGitHub(let host):
-            "\(host) — не GitHub. Плагины пока приходят из \(official); другие сайты появятся позже, как отдельные источники."
+            "\(host) — не GitHub. Плагины пока приходят из \(official) и его форков; другие сайты появятся позже, как отдельные источники."
         case .commit(let sha):
             "Это ссылка на один коммит" + (sha.isEmpty ? "" : ", \(sha.prefix(7))")
                 + ". Установить отдельный коммит пока нельзя: вставьте ссылку на его запрос на слияние или ветку."
         case .otherRepositoryPullRequest(let repository, let number):
-            "Запрос на слияние #\(number) в \(repository) — не из \(official). Устанавливать из другого репозитория пока нельзя."
+            "Запрос на слияние #\(number) в \(repository) — не из \(official). Вставьте вместо него ссылку на его ветку: из ветки форка \(official) установить можно."
         case .notABranch(let name): "\(name) — не то имя, которое git разрешает для ветки."
         case .unsupported:
             "Эта страница не называет ни запроса на слияние, ни ветки. Вставьте ссылку на запрос на слияние (…/pull/3) или на ветку (…/tree/имя)."

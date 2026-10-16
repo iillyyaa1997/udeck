@@ -100,19 +100,15 @@ extension DeckModel {
     }
 
     /// The client a copy from `origin` is taken through: the official
-    /// source's, or one for another repository on the same host, asking the
-    /// same API and raw host and counted against the same limit — nil for a
-    /// repository elsewhere, and for another repository's default branch,
-    /// which would be recorded as the official one's (`PluginOrigin.mayBeTaken`).
+    /// source's, or one for another repository on the same host — a fork's —
+    /// asking the same API and raw host and counted against the same limit
+    /// (`GitHubClient.client(for:)`); nil for a repository elsewhere, and for
+    /// another repository's default branch, which would be recorded as the
+    /// official one's (`PluginOrigin.mayBeTaken`).
     func provider(for origin: PluginOrigin) -> GitHubClient? {
         let official = provider
         guard origin.mayBeTaken(forSourceAt: official.address) else { return nil }
-        if origin.repository == official.address { return official }
-        return GitHubClient(
-            endpoints: GitHubEndpoints(apiBase: endpoints.apiBase, rawBase: endpoints.rawBase,
-                                       repository: origin.repository.path),
-            udeckVersion: udeckVersion, limits: limits
-        )
+        return official.client(for: origin.repository)
     }
 
     var catalogueStore: CatalogueStore { CatalogueStore(paths: paths) }
@@ -120,13 +116,14 @@ extension DeckModel {
     /// Where the catalogue comes from, as the operator reads it.
     public var catalogueAddress: RepositoryAddress { provider.address }
 
-    private var installer: PluginInstaller { installer(fetchingFrom: provider) }
-
-    /// The installer, fetching files from `provider`'s repository.
-    private func installer(fetchingFrom provider: GitHubClient) -> PluginInstaller {
-        PluginInstaller(
+    /// The installer, fetching each copy's files from the repository its
+    /// request names — the official one's, or a fork's — on the official
+    /// source's host (`RepositoryProvider.file(of:at:commit:)`).
+    private var installer: PluginInstaller {
+        let official = provider
+        return PluginInstaller(
             paths: paths, discovery: discovery, trash: trash,
-            fetch: { path, commit in try await provider.file(at: path, commit: commit) }
+            fetch: { repository, path, commit in try await official.file(of: repository, at: path, commit: commit) }
         )
     }
 
@@ -235,11 +232,12 @@ extension DeckModel {
     }
 
     /// What became of the branch or the pull request each copy installed from
-    /// one came from — its head, merged, closed, gone — asked through the
-    /// official repository, one request each, after a read of the catalogue
-    /// that succeeded (`RefFollower`), with the listing of a head that moved
-    /// and one comparison when the copy changed there: never for a copy whose
-    /// tree the new head has, which is what was merged (`Adoption`), and, in
+    /// one came from — its head, merged, closed, gone — asked of the official
+    /// repository, or of the fork a fork's branch is in, one request each,
+    /// after a read of the catalogue that succeeded (`RefFollower`), with the
+    /// listing of a head that moved and one comparison when the copy changed
+    /// there: never for a copy whose tree the new head has, which is what was
+    /// merged (`Adoption`), and, in
     /// a read nobody asked for, not while the reserve for the operator is all
     /// that is left — those say since when they were not checked. `asking`
     /// false: the read of the catalogue was left for later or failed, nothing
@@ -354,7 +352,8 @@ extension DeckModel {
     /// What a window of `id` says beside **Reinstall** of what it puts back,
     /// when that is code nobody verified (`InstalledRecord.reinstallSays`).
     public func reinstallSays(_ id: PluginIdentifier) -> Phrase? {
-        installed.plugins[id.rawValue]?.reinstallSays(headTree: catalogue?.entry(id.rawValue)?.listing.tree)
+        installed.plugins[id.rawValue]?.reinstallSays(headTree: catalogue?.entry(id.rawValue)?.listing.tree,
+                                                      official: catalogueAddress)
     }
 
     /// Whether the version the catalogue's head has for `id` asks for other
@@ -653,7 +652,8 @@ extension DeckModel {
     @discardableResult
     public func reinstall(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
         guard settings.readsOfficialCatalogue else { return .goAhead }
-        return act(ShownPlace.reinstall(id, in: paths, installed: installed, shown: shown, head: defaultHead), id: id)
+        return act(ShownPlace.reinstall(id, in: paths, installed: installed, shown: shown, head: defaultHead,
+                                        source: catalogueAddress), id: id)
     }
 
     /// **Back to** the copy this one replaced, from where it came — named as
@@ -707,10 +707,12 @@ extension DeckModel {
 
     /// **Look up** on a link pasted into **Install from a link…**: read for
     /// what it names (`RepositoryLink`) — a refusal is said at once, without a
-    /// request — and then asked of GitHub through the official repository
-    /// (`RefResolver`): one request for a pull request or a branch's head,
-    /// one for its listing unless the cache has it, and the manifests of the
-    /// plugins there that differ from the catalogue's head. Off, **Official
+    /// request — and then asked of GitHub (`RefResolver`): through the
+    /// official repository, one request for a pull request or a branch's head;
+    /// of a fork, one for whether it is a fork of the official repository and
+    /// one for its branch's head; then one for the listing unless the cache
+    /// has it, and the manifests of the plugins there that differ from the
+    /// catalogue's head. Off, **Official
     /// catalogue** governs this too: uDeck makes no request about plugins,
     /// and says why nothing is looked up.
     public func lookUpLink(_ text: String) {
@@ -777,8 +779,8 @@ extension DeckModel {
     @discardableResult
     public func installFromLink(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
         guard settings.readsOfficialCatalogue, case .resolved(let resolution)? = linkLookup else { return .goAhead }
-        return act(ShownPlace.installFromLink(id, resolution: resolution, in: paths, installed: installed, shown: shown),
-                   id: id)
+        return act(ShownPlace.installFromLink(id, resolution: resolution, in: paths, installed: installed, shown: shown,
+                                              source: catalogueAddress), id: id)
     }
 
     /// Reads a plugin's earlier versions from its folder's history.
@@ -864,7 +866,10 @@ extension DeckModel {
             operationProblems[id] = .recordsBroken(installedProblem ?? "")
             return
         }
-        guard let provider = provider(for: origin) else {
+        // Taken from where it came, and only from a repository a copy of its
+        // line may be taken from: the installer refuses the rest too, before
+        // a file is asked for (`PluginInstaller.stage`).
+        guard provider(for: origin) != nil else {
             operationProblems[id] = .catalogue(.notFound)
             return
         }
@@ -878,16 +883,19 @@ extension DeckModel {
             defaultBranch: catalogue?.branch ?? catalogueState.defaultBranch, automatic: automatic
         )
         // What **Look up** heard of the pull request or the branch this copy
-        // comes from, if that is where it comes from: kept with what is heard
-        // of it later, so that its row says at once whether it was merged or
-        // closed — and nothing an earlier read heard of the branch.
+        // comes from, if that is where it comes from, and when: kept with what
+        // is heard of it later, so that its row says at once whether it was
+        // merged or closed — and nothing a read heard of the branch before
+        // Look up, while what a read heard after it stands.
         var heard: PullRequest?
         var branchHead: String?
+        var heardAt: Date?
         if case .resolved(let resolution)? = linkLookup, resolution.origin == origin, resolution.commit == commit {
             heard = resolution.pullRequest
             branchHead = resolution.branchHead
+            heardAt = resolution.heardAt
         }
-        let installer = installer(fetchingFrom: provider)
+        let installer = self.installer
         let store = catalogueStore
         // The copy the permission decision was made for, read before the swap.
         let before = copyForTheDecision(id)
@@ -910,7 +918,7 @@ extension DeckModel {
                 DeckLog.plugins.info("\(id, privacy: .public) \(record.version, privacy: .public) is in place")
                 // Before the plugin runs again: it is quiet until `resume`.
                 carryTheDecision(of: identifier, from: before, to: record, asking: staged.plugin.manifest)
-                await keepWhatWasHeard(heard, branchHead: branchHead, of: id, for: record)
+                await keepWhatWasHeard(heard, branchHead: branchHead, heardAt: heardAt, of: id, for: record)
                 reloadInstalled()
                 discoverPlugins()
             } catch {
@@ -930,15 +938,15 @@ extension DeckModel {
     }
 
     /// What **Look up** heard of the pull request or the branch a copy was
-    /// just installed from — `pull`, or the branch's head `branchHead`; nil
-    /// when it was not looked up — kept as what is known of it
-    /// (`FollowedRefs.keep`), with the cached listing of the commit it was
-    /// merged as, if there is one.
-    private func keepWhatWasHeard(_ pull: PullRequest?, branchHead: String?, of id: String,
+    /// just installed from — `pull`, or the branch's head `branchHead`, heard
+    /// at `heardAt`; nil when it was not looked up — kept as what is known of
+    /// it unless a read heard of it since (`FollowedRefs.keep`), with the
+    /// cached listing of the commit it was merged as, if there is one.
+    private func keepWhatWasHeard(_ pull: PullRequest?, branchHead: String?, heardAt: Date?, of id: String,
                                   for record: InstalledRecord) async {
         let mergeListing = await Self.listing(pull?.merged == true ? pull?.mergeCommit : nil, in: catalogueStore)
         var kept = followed
-        kept.keep(pull, branchHead: branchHead, heardAtInstall: record, of: id,
+        kept.keep(pull, branchHead: branchHead, heardAt: heardAt, heardAtInstall: record, of: id,
                   defaultBranch: catalogue?.branch ?? catalogueState.defaultBranch, mergeListing: mergeListing, now: Date())
         guard kept != followed else { return }
         followed = kept

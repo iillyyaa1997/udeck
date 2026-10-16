@@ -287,7 +287,8 @@ struct RefFollowerTests {
         let still = Provider(commits: [moved], branches: ["fix/uptime": Self.installedCommit])
         let unchanged = await follower(still).follow(Self.installed(ref), headTrees: Self.headTrees, unrequested: false)
         #expect(still.asked == [asked], "GitHub's 304: the branch is where it was, and nothing more is asked")
-        #expect(unchanged.followed.branches["uptime"] == FollowedBranch(name: "fix/uptime", head: Self.installedCommit,
+        #expect(unchanged.followed.branches["uptime"] == FollowedBranch(name: "fix/uptime", repository: .official,
+                                                                         head: Self.installedCommit,
                                                                          checkedAt: Self.at))
         #expect(unchanged.followed.pulls.isEmpty && unchanged.asked == ["uptime"])
 
@@ -301,7 +302,8 @@ struct RefFollowerTests {
         let gone = await follower(deleted, now: Self.later).follow(Self.installed(ref), headTrees: Self.headTrees,
                                                                    unrequested: false)
         #expect(deleted.asked == [asked])
-        #expect(gone.followed.branches["uptime"] == FollowedBranch(name: "fix/uptime", head: nil, checkedAt: Self.later))
+        #expect(gone.followed.branches["uptime"] == FollowedBranch(name: "fix/uptime", repository: .official, head: nil,
+                                                                    checkedAt: Self.later))
         #expect(gone.asked == ["uptime"] && gone.leftAsTheyWere.isEmpty, "asked, and answered: it is not there")
     }
 
@@ -419,8 +421,8 @@ struct RefFollowerTests {
 
     @Test("what a read asks of a line, said beside Official catalogue, in both languages")
     func catalogueHelp() {
-        #expect(Strings(.english)(.pluginsOfficialCatalogueHelp(source: "github.com/o/r")) == "uDeck reads the list of plugins in github.com/o/r a few seconds after it starts, once a day, when you open this pane and the list is more than an hour old, and when you press Check now — the list and each plugin's manifest; for a plugin installed from a branch or a pull request, also where that branch or pull request is now and, once it has moved, its list of files, that plugin's manifest there and one comparison with what is installed. A plugin's files are fetched when you press Install, and when a verified plugin updates itself. Off, uDeck makes no request about plugins at all; what is installed keeps running.")
-        #expect(Strings(.russian)(.pluginsOfficialCatalogueHelp(source: "github.com/o/r")) == "uDeck читает список плагинов в github.com/o/r через несколько секунд после запуска, раз в день, при открытии этой панели, если списку больше часа, и по кнопке «Проверить» — список и манифест каждого плагина, а для плагина, установленного из ветки или запроса на слияние, ещё и где сейчас эта ветка или запрос и, если они сдвинулись, их список файлов, манифест этого плагина там и одно сравнение с установленным. Файлы плагина скачиваются, когда вы нажимаете «Установить» и когда проверенный плагин обновляется сам. Если выключить, uDeck не делает никаких запросов о плагинах; установленные продолжают работать.")
+        #expect(Strings(.english)(.pluginsOfficialCatalogueHelp(source: "github.com/o/r")) == "uDeck reads the list of plugins in github.com/o/r a few seconds after it starts, once a day, when you open this pane and the list is more than an hour old, and when you press Check now — the list and each plugin's manifest; for a plugin installed from a branch or a pull request, also where that branch or pull request is now — a fork's branch asked of the fork — and, once it has moved, its list of files, that plugin's manifest there and one comparison with what is installed. A plugin's files are fetched when you press Install, and when a verified plugin updates itself. Off, uDeck makes no request about plugins at all; what is installed keeps running.")
+        #expect(Strings(.russian)(.pluginsOfficialCatalogueHelp(source: "github.com/o/r")) == "uDeck читает список плагинов в github.com/o/r через несколько секунд после запуска, раз в день, при открытии этой панели, если списку больше часа, и по кнопке «Проверить» — список и манифест каждого плагина, а для плагина, установленного из ветки или запроса на слияние, ещё и где сейчас эта ветка или запрос — ветку форка спрашивают у самого форка — и, если они сдвинулись, их список файлов, манифест этого плагина там и одно сравнение с установленным. Файлы плагина скачиваются, когда вы нажимаете «Установить» и когда проверенный плагин обновляется сам. Если выключить, uDeck не делает никаких запросов о плагинах; установленные продолжают работать.")
     }
 
     @Test("what an asking heard of a branch joins what is known now; a copy installed meanwhile keeps its own")
@@ -510,7 +512,8 @@ struct RefFollowerTests {
         refs = before
         refs.keep(nil, branchHead: Self.installedCommit, heardAtInstall: fromTheBranch, of: "uptime", defaultBranch: "main",
                   mergeListing: nil, now: Self.later)
-        #expect(refs.branches["uptime"] == FollowedBranch(name: "fix/uptime", head: Self.installedCommit, checkedAt: Self.later))
+        #expect(refs.branches["uptime"] == FollowedBranch(name: "fix/uptime", repository: .official, head: Self.installedCommit,
+                                                           checkedAt: Self.later))
         #expect(refs.pulls["uptime"] == nil && refs.notCheckedSince["uptime"] == nil && refs.branches["cpu"] == branch)
         let gone = UnverifiedRow.of("uptime", record: fromTheBranch, followed: refs, head: nil, defaultBranch: "main",
                                     readsCatalogue: true, verified: nil)
@@ -522,6 +525,56 @@ struct RefFollowerTests {
         let stale = UnverifiedRow.of("uptime", record: fromTheBranch, followed: refs, head: Self.head(Self.movedOn),
                                      defaultBranch: "main", readsCatalogue: true, verified: nil)
         #expect(stale?.lineOffer == nil && stale?.waiting == false)
+        // The sheet left open across a read: what that read heard after Look
+        // up — the branch deleted, or at another head — is newer than the head
+        // installed from, and stands; Look up's head is kept only over what
+        // was heard before it, and as heard when Look up heard it.
+        for (after, said) in [(FollowedBranch(name: "fix/uptime", repository: .official, head: nil, checkedAt: Self.later),
+                               "deleted after Look up"),
+                              (FollowedBranch(name: "fix/uptime", head: Self.movedOn.commit, checkedAt: Self.later),
+                               "moved on after Look up")] {
+            refs = FollowedRefs(branches: ["uptime": after])
+            refs.keep(nil, branchHead: Self.installedCommit, heardAt: Self.at, heardAtInstall: fromTheBranch, of: "uptime",
+                      defaultBranch: "main", mergeListing: nil, now: Self.later.addingTimeInterval(60))
+            #expect(refs.branches["uptime"] == after, "\(said): what the read heard stands")
+        }
+        refs = FollowedRefs(branches: ["uptime": FollowedBranch(name: "fix/uptime", head: Self.movedOn.commit, checkedAt: Self.later)])
+        refs.keep(nil, branchHead: Self.installedCommit, heardAt: Self.at, heardAtInstall: fromTheBranch, of: "uptime",
+                  defaultBranch: "main", mergeListing: nil, now: Self.later.addingTimeInterval(60))
+        let newer = UnverifiedRow.of("uptime", record: fromTheBranch, followed: refs, head: Self.head(Self.movedOn),
+                                     defaultBranch: "main", readsCatalogue: true, verified: nil)
+        #expect(newer?.lineOffer?.head == Self.movedOn.commit && newer?.waiting == true,
+                "the head a read heard after Look up is offered over the one installed from")
+        refs = FollowedRefs(branches: ["uptime": FollowedBranch(name: "fix/uptime", repository: .official, head: nil, checkedAt: Self.later)])
+        refs.keep(nil, branchHead: Self.installedCommit, heardAt: Self.at, heardAtInstall: fromTheBranch, of: "uptime",
+                  defaultBranch: "main", mergeListing: nil, now: Self.later.addingTimeInterval(60))
+        #expect(UnverifiedRow.of("uptime", record: fromTheBranch, followed: refs, head: nil, defaultBranch: "main",
+                                 readsCatalogue: true, verified: nil)?.branchGone == true, "deleted after Look up: still said")
+        refs = FollowedRefs(branches: ["uptime": FollowedBranch(name: "fix/uptime", head: nil, checkedAt: Self.at)])
+        refs.keep(nil, branchHead: Self.installedCommit, heardAt: Self.later, heardAtInstall: fromTheBranch, of: "uptime",
+                  defaultBranch: "main", mergeListing: nil, now: Self.later.addingTimeInterval(60))
+        #expect(refs.branches["uptime"] == FollowedBranch(name: "fix/uptime", repository: .official, head: Self.installedCommit,
+                                                           checkedAt: Self.later),
+                "heard before Look up: Look up's head, as heard when Look up heard it, not when the install ended")
+        refs = FollowedRefs(branches: ["uptime": FollowedBranch(name: "fix/uptime", head: nil, checkedAt: Self.at)])
+        refs.keep(nil, branchHead: Self.installedCommit, heardAt: Self.at, heardAtInstall: fromTheBranch, of: "uptime",
+                  defaultBranch: "main", mergeListing: nil, now: Self.later)
+        #expect(refs.branches["uptime"]?.head == Self.installedCommit, "heard in the same second: Look up's, which was installed from")
+        // A pull request the same way: closed by a read after Look up, it stays closed.
+        let closed = AdoptionTests.pull(state: .closed, merged: false, mergeCommit: nil, mergeTree: nil)
+        var laterRead = closed
+        laterRead.checkedAt = Self.later
+        let lookedUp = PullRequest(number: 3, state: .open, merged: false, mergeCommit: nil, head: AdoptionTests.pullHead,
+                                   headRef: "fix", headRepository: nil, title: "", base: "main")
+        refs = FollowedRefs(pulls: ["uptime": laterRead])
+        refs.keep(lookedUp, branchHead: nil, heardAt: Self.at, heardAtInstall: Self.record(), of: "uptime", defaultBranch: "main",
+                  mergeListing: nil, now: Self.later.addingTimeInterval(60))
+        #expect(refs.pulls["uptime"] == laterRead, "closed after Look up: still said")
+        refs = FollowedRefs(pulls: ["uptime": closed])
+        refs.keep(lookedUp, branchHead: nil, heardAt: Self.later, heardAtInstall: Self.record(), of: "uptime", defaultBranch: "main",
+                  mergeListing: nil, now: Self.later.addingTimeInterval(60))
+        #expect(refs.pulls["uptime"]?.state == .open && refs.pulls["uptime"]?.checkedAt == Self.later,
+                "closed before Look up, open when Look up asked: open, as heard then")
         refs = before
         refs.keep(nil, branchHead: nil, heardAtInstall: Self.record(), of: "uptime", defaultBranch: "main", mergeListing: nil,
                   now: Self.later)
@@ -534,11 +587,22 @@ struct RefFollowerTests {
         #expect(refs == FollowedRefs())
     }
 
-    @Test("what Look up heard of a branch: its head, the commit it read; of a pull request nothing — its answer says it")
-    func branchHeadHeard() {
+    @Test("what Look up heard of a branch: its head, the commit it read; of a pull request nothing — its answer says it; and when it heard it")
+    func branchHeadHeard() async throws {
         let branch = PluginOrigin(repository: .official, ref: .branch("fix/uptime"))
         #expect(InstallFromLinkTests.resolution(Self.movedOn, origin: branch).branchHead == Self.movedOn.commit)
         #expect(InstallFromLinkTests.resolution(Self.movedOn).branchHead == nil)
+        // When: the moment the head was answered, as the resolver's clock says it.
+        let provider = Provider(commits: [Self.movedOn], branches: ["fix/uptime": Self.movedOn.commit],
+                                pulls: [3: Self.pull(head: Self.movedOn.commit)])
+        let resolver = RefResolver(provider: provider, store: store, limits: RateLimitRecorder(), now: { Self.later })
+        for link in [RepositoryLink.branch("fix/uptime", plugin: nil), .pullRequest(3)] {
+            guard case .resolved(let found) = try await resolver.resolve(link, defaultBranch: "main", head: nil, udeck: nil,
+                                                                         language: "en") else {
+                Issue.record("\(link) resolves"); continue
+            }
+            #expect(found.heardAt == Self.later, "\(link)")
+        }
     }
 
     @Test("a moved head as the cache holds it: the copy's folder there as a catalogue row reads it")

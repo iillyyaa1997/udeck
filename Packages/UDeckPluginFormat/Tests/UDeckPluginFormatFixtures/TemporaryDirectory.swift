@@ -1,6 +1,9 @@
 import Foundation
+import UDeckPluginFormat
 
-/// A real directory on disk, removed when the test is done.
+/// A real directory on disk, removed when the test is done — in the temporary
+/// folder the test run was given (`TemporaryFolder`): `TMPDIR`, or the
+/// system's without one.
 ///
 /// Tests here use the actual filesystem rather than a fake one: everything
 /// interesting about plugin discovery — the executable bit, a relative path
@@ -10,9 +13,14 @@ public final class TemporaryDirectory {
     public let url: URL
 
     public init() {
-        url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("udeck-tests-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let made = TemporaryFolder.url.appendingPathComponent("udeck-tests-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: made, withIntermediateDirectories: true)
+        // As Foundation standardizes a path that is there — `/private/tmp/…`
+        // as `/tmp/…` — which is the shape the system's `/var/folders/…` always
+        // had, a link on the way: the tests compare paths `udeck-plugin` writes
+        // through that standardizing, and a `TMPDIR` under `/private` spelt
+        // the other way round is otherwise the same folder said two ways.
+        url = made.standardizedFileURL
     }
 
     deinit { try? FileManager.default.removeItem(at: url) }

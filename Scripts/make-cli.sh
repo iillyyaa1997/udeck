@@ -160,11 +160,13 @@ Apache-2.0 WITH Swift-exception
 Apache-2.0 WITH LLVM-exception
 MIT
 BSD-3-Clause"
-# Membership in a list like this one is asked with a here-string, never as
-# `printf … | grep -q`: under pipefail, grep -q leaves as soon as it has its
+# Membership in a list like this one is asked of bash itself (has_line), never
+# as `printf … | grep -q`: under pipefail, grep -q leaves as soon as it has its
 # answer, the writer before it can die of SIGPIPE, and the pipeline fails —
-# MIT, in the middle of this list, failed CI that way (run 37716911865). A
-# harness test holds the script to it.
+# MIT, in the middle of this list, failed CI that way (run 37716911865). Nor
+# with a here-string or a here-document: bash 3.2, a Mac's /bin/bash, writes
+# each to a file in /var/tmp, whatever TMPDIR says. Harness tests hold the
+# script to both.
 ALPINE_LICENSES="Apache-2.0
 BSD-3-Clause
 BSD-3-Clause OR GPL-2.0-or-later
@@ -186,6 +188,21 @@ fail() {
     exit 1
 }
 
+# Whether $1 is X.Y.Z and nothing else: one line, no more.
+is_version() {
+    local x_y_z='^[0-9]+\.[0-9]+\.[0-9]+$'
+    [[ $1 =~ $x_y_z ]]
+}
+
+# Whether one of the lines of $2 is $1, exactly.
+has_line() {
+    local nl=$'\n'
+    case "$nl$2$nl" in
+        *"$nl$1$nl"*) return 0 ;;
+    esac
+    return 1
+}
+
 # The version a tag of this commit has to name: CFBundleShortVersionString in
 # the app's Info.plist, which release.yml holds the tag to — read with sed, so
 # that a Linux job, which has no PlistBuddy, can ask it too.
@@ -195,7 +212,7 @@ release_version() {
     keys="$(grep -c '<key>CFBundleShortVersionString</key>' "$plist" || true)"
     [ "$keys" = 1 ] || fail "$plist names CFBundleShortVersionString $keys times, not once"
     said="$(sed -n '/^[[:space:]]*<key>CFBundleShortVersionString<\/key>[[:space:]]*$/{n;s/^[[:space:]]*<string>\([^<]*\)<\/string>[[:space:]]*$/\1/p;}' "$plist")"
-    grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+' <<< "$said" && [ "$(wc -l <<< "$said" | tr -d ' ')" = 1 ] \
+    is_version "$said" \
         || fail "$plist says CFBundleShortVersionString is \"$said\", not X.Y.Z on the line after its key"
     printf '%s\n' "$said"
 }
@@ -246,7 +263,7 @@ if [ "$VERSION_GIVEN" = 1 ] && [ -z "$VERSION" ]; then
     echo "make-cli: --version is empty; it takes X.Y.Z (the tag without its v)" >&2
     exit 2
 fi
-if [ -n "$VERSION" ] && ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<< "$VERSION"; then
+if [ -n "$VERSION" ] && ! is_version "$VERSION"; then
     echo "make-cli: --version $VERSION is not X.Y.Z (the tag without its v)" >&2
     exit 2
 fi
@@ -277,7 +294,7 @@ version_of() {
         *) fail "$binary --version said \"$said\", not \"udeck-plugin X.Y.Z\"" ;;
     esac
     said="${said#udeck-plugin }"
-    grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<< "$said" || fail "$binary says its version is \"$said\""
+    is_version "$said" || fail "$binary says its version is \"$said\""
     if [ -n "$VERSION" ] && [ "$said" != "$VERSION" ]; then
         fail "$binary says it is udeck-plugin $said; this release is $VERSION — the command, the archive and the tag must say one number"
     fi
@@ -295,7 +312,7 @@ size_of() {
 # describe and shows neither them nor the extended attributes a pax header
 # holds, which another machine's tar unpacks as files of their own.
 records_of() {
-    python3 - "$1" <<'PY'
+    python3 -c '
 import sys, tarfile
 with tarfile.open(sys.argv[1]) as tar:
     lines = []
@@ -306,7 +323,7 @@ with tarfile.open(sys.argv[1]) as tar:
         lines.append(f"{kind} {mode} {m.uid} {m.gid} {m.name} {pax}")
 for line in sorted(lines, key=lambda l: l.split(" ")[4]):
     print(line)
-PY
+' "$1"
 }
 
 # What every archive holds, record for record, as records_of prints it.
@@ -343,8 +360,9 @@ archive() {
     cp LICENSE NOTICE "$folder/"
     cp "$NOTICES" "$folder/THIRD_PARTY_NOTICES"
     chmod 644 "$folder/LICENSE" "$folder/NOTICE" "$folder/THIRD_PARTY_NOTICES"
-    local options gnu=0
-    if grep -q 'GNU tar' <<< "$(tar --version 2>/dev/null || true)"; then
+    local options gnu=0 tar_says
+    tar_says="$(tar --version 2>/dev/null || true)"
+    if [[ $tar_says == *"GNU tar"* ]]; then
         # GNU tar stores no extended attribute unless asked (--xattrs).
         gnu=1
         options=(--owner=0 --group=0 --numeric-owner)
@@ -468,17 +486,18 @@ build_linux() {
     # Each read whole before it is looked at: `readelf | grep -q` under
     # pipefail fails when grep has seen enough and readelf is cut off, and
     # an `if` reads that as "not there" (see the note at ALPINE_LICENSES).
-    local header program dynamic
+    local header program dynamic said_machine
     header="$(readelf -h "$binary")" || fail "readelf cannot read udeck-plugin's header"
     program="$(readelf -l "$binary")" || fail "readelf cannot read udeck-plugin's program headers"
     dynamic="$(readelf -d "$binary")" || fail "readelf cannot read udeck-plugin's dynamic section"
-    grep -q "$machine" <<< "$(grep 'Machine:' <<< "$header")" \
-        || fail "udeck-plugin is not built for $ARCH: $(grep 'Machine:' <<< "$header")"
-    if grep -q 'INTERP' <<< "$program"; then
+    said_machine="$(printf '%s\n' "$header" | sed -n '/Machine:/p')"
+    [[ $said_machine == *"$machine"* ]] \
+        || fail "udeck-plugin is not built for $ARCH: $said_machine"
+    if [[ $program == *INTERP* ]]; then
         fail "udeck-plugin asks for a dynamic loader; it is not a static binary"
     fi
-    if grep -q 'NEEDED' <<< "$dynamic"; then
-        fail "udeck-plugin needs shared libraries; it is not a static binary: $(grep 'NEEDED' <<< "$dynamic" | tr '\n' ' ')"
+    if [[ $dynamic == *NEEDED* ]]; then
+        fail "udeck-plugin needs shared libraries; it is not a static binary: $(printf '%s\n' "$dynamic" | sed -n '/NEEDED/p' | tr '\n' ' ')"
     fi
 
     local version
@@ -634,21 +653,20 @@ image_context() {
 # joined into one SPDX expression — a licence that is itself an AND or an OR
 # in brackets.
 licenses_label() {
-    local label="" seen="" licence
-    while IFS= read -r licence; do
-        [ -n "$licence" ] || continue
-        if grep -Fxq -- "$licence" <<< "$seen"; then continue; fi
-        seen="$seen
+    printf '%s\n' "$COMMAND_LICENSES" "$ALPINE_LICENSES" | {
+        local label="" seen="" licence
+        while IFS= read -r licence; do
+            [ -n "$licence" ] || continue
+            if has_line "$licence" "$seen"; then continue; fi
+            seen="$seen
 $licence"
-        case "$licence" in
-            *" AND "* | *" OR "*) licence="($licence)" ;;
-        esac
-        label="${label:+$label AND }$licence"
-    done <<EOF
-$COMMAND_LICENSES
-$ALPINE_LICENSES
-EOF
-    printf '%s\n' "$label"
+            case "$licence" in
+                *" AND "* | *" OR "*) licence="($licence)" ;;
+            esac
+            label="${label:+$label AND }$licence"
+        done
+        printf '%s\n' "$label"
+    }
 }
 
 # The index at repository@digest, read from its registry: an OCI index with an
@@ -697,7 +715,7 @@ check_image() {
     [ -s "$SCRATCH/licenses.txt" ] || fail "the image ($platform) has no package records"
     local licence
     while IFS= read -r licence; do
-        grep -Fxq -- "$licence" <<< "$ALPINE_LICENSES" \
+        has_line "$licence" "$ALPINE_LICENSES" \
             || fail "a package in the image ($platform) is under \"$licence\", which its licenses label does not name: add it to ALPINE_LICENSES"
     done < "$SCRATCH/licenses.txt"
 
@@ -1021,6 +1039,7 @@ build_sources() {
     [ -s "$copyleft" ] || fail "no package in udeck-plugin-staged-packages.txt is under the GPL or the LGPL, and BusyBox is: the list is not the image's"
 
     local commit origin folder sum file count=0
+    local a_sha512='^[0-9a-f]{128}$' a_name='^[A-Za-z0-9_][A-Za-z0-9._+~-]*$'
     while IFS="$tab" read -r commit origin; do
         folder="$tree/aports/$commit/main/$origin"
         echo "==> aports $commit main/$origin"
@@ -1028,7 +1047,7 @@ build_sources() {
         apkbuild_sums "$folder/APKBUILD" > "$SCRATCH/sums.txt"
         [ -s "$SCRATCH/sums.txt" ] || fail "aports $commit main/$origin: its APKBUILD names no sha512sums"
         while read -r sum file; do
-            if ! grep -Eqx '[0-9a-f]{128}' <<< "$sum" || ! grep -Eqx '[A-Za-z0-9_][A-Za-z0-9._+~-]*' <<< "$file"; then
+            if ! [[ $sum =~ $a_sha512 ]] || ! [[ $file =~ $a_name ]]; then
                 fail "aports $commit main/$origin: its APKBUILD's sha512sums has a line that is not <sha512>  <file>: $sum $file"
             fi
             if [ -f "$folder/$file" ]; then
@@ -1069,8 +1088,7 @@ sources_readme() {
     tab="$(printf '\t')"
     title="The sources of the GPL and LGPL software in the udeck-plugin image of uDeck $version"
     printf '%s\n%s\n' "$title" "$(printf '%s\n' "$title" | sed 's/./=/g')"
-    cat <<EOF
-
+    printf '%s\n' "
 The image ghcr.io/iillyyaa1997/udeck-plugin:v$version — by the digest its
 release names in udeck-plugin-image.txt — is Alpine Linux with git and curl,
 and udeck-plugin. Every Alpine package in it is listed, with its version, its
@@ -1096,8 +1114,7 @@ folder, with SRCDEST pointing at distfiles/, run abuild.
 
 The packages — name and version, licence, the platforms whose image holds it,
 and its folder here:
-
-EOF
+"
     awk -F "$tab" '
         {
             key = "  " $2 " " $3 " | " $4 " | "
@@ -1113,7 +1130,7 @@ EOF
 # The archive, written the same way wherever it is made: sorted, owned by 0:0
 # with no names, every time 0, no extended attribute and no pax record.
 pack_sources() {
-    python3 - "$1" "$2" "$3" <<'PY'
+    python3 -c '
 import os, sys, tarfile
 root, name, out = sys.argv[1:4]
 def add(tar, path, arcname):
@@ -1139,7 +1156,7 @@ def add(tar, path, arcname):
         sys.exit(f"{arcname} is neither a file nor a folder")
 with tarfile.open(out, "w", format=tarfile.GNU_FORMAT) as tar:
     add(tar, os.path.join(root, name), name)
-PY
+' "$1" "$2" "$3"
 }
 
 # Refuses a sources archive that is not one folder, udeck-plugin-image-sources-
@@ -1147,7 +1164,7 @@ PY
 # owned by 0:0 with no pax record — with a README, an APKBUILD, and a
 # SHA512SUMS that names every other file in it with the sha512 it has.
 check_sources() {
-    python3 - "$1" "udeck-plugin-image-sources-$2" <<'PY' || fail "$(basename "$1") is not the sources archive sources writes"
+    python3 -c '
 import hashlib, sys, tarfile
 archive, name = sys.argv[1:3]
 problems = []
@@ -1187,7 +1204,7 @@ if not any(path.startswith("aports/") and path.endswith("/APKBUILD") for path in
 for problem in problems[:10]:
     print(problem, file=sys.stderr)
 sys.exit(1 if problems else 0)
-PY
+' "$1" "udeck-plugin-image-sources-$2" || fail "$(basename "$1") is not the sources archive sources writes"
 }
 
 # The digest BuildKit reports for what it pushed, from its metadata file —

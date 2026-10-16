@@ -18,9 +18,16 @@ struct PollExecutionTests {
         discovery.load(RepositoryExamples.plugin(name))
     }
 
-    func poll(_ name: String, temp: TemporaryDirectory, settings: PluginSettings = PluginSettings()) async -> PollExecution {
-        await executor.poll(
-            plugin: example(name),
+    /// Held before anything runs: a Mac's /bin/sh is bash 3.2, which writes
+    /// every here-document and here-string to a file in /var/tmp, whatever
+    /// TMPDIR says, and an example that used one would leave the system's
+    /// temporary folder a file each time these tests run it.
+    func poll(_ name: String, temp: TemporaryDirectory, settings: PluginSettings = PluginSettings()) async throws -> PollExecution {
+        let plugin = example(name)
+        let program = try String(contentsOf: try #require(plugin.executable), encoding: .utf8)
+        try #require(!program.contains("<<"), "\(name) writes a here-document or a here-string")
+        return await executor.poll(
+            plugin: plugin,
             grant: nil,
             enabled: true,
             settings: settings,
@@ -33,9 +40,9 @@ struct PollExecutionTests {
     }
 
     @Test("a working plugin produces a card")
-    func helloCardProducesACard() async {
+    func helloCardProducesACard() async throws {
         let temp = TemporaryDirectory()
-        guard case .card(let card) = await poll("hello-card", temp: temp) else {
+        guard case .card(let card) = try await poll("hello-card", temp: temp) else {
             Issue.record("expected a card"); return
         }
         #expect(card.state == .ok)
@@ -45,13 +52,13 @@ struct PollExecutionTests {
     }
 
     @Test("settings and host context reach the producer as environment variables")
-    func environmentReachesTheProducer() async {
+    func environmentReachesTheProducer() async throws {
         let temp = TemporaryDirectory()
         var settings = PluginSettings()
         settings.set(.string("Privet"), for: "greeting", plugin: PluginIdentifier(rawValue: "hello-card")!)
         settings.set(.bool(false), for: "show_table", plugin: PluginIdentifier(rawValue: "hello-card")!)
 
-        guard case .card(let card) = await poll("hello-card", temp: temp, settings: settings) else {
+        guard case .card(let card) = try await poll("hello-card", temp: temp, settings: settings) else {
             Issue.record("expected a card"); return
         }
         guard case .text(let first) = card.rows.first else { Issue.record("expected a text row"); return }
@@ -66,10 +73,10 @@ struct PollExecutionTests {
     /// stock macOS, so the host has to enforce the deadline. The fixture also
     /// ignores SIGTERM, so this proves the escalation to SIGKILL as well.
     @Test("a producer that hangs is killed by the host and reported as timed out")
-    func hangingProducerIsKilled() async {
+    func hangingProducerIsKilled() async throws {
         let temp = TemporaryDirectory()
         let started = Date()
-        guard case .failure(let failure) = await poll("slow-plugin", temp: temp) else {
+        guard case .failure(let failure) = try await poll("slow-plugin", temp: temp) else {
             Issue.record("expected a failure"); return
         }
         let elapsed = Date().timeIntervalSince(started)
@@ -162,9 +169,9 @@ struct PollExecutionTests {
     }
 
     @Test("a producer printing something that is not a card is named as the culprit")
-    func garbageIsReported() async {
+    func garbageIsReported() async throws {
         let temp = TemporaryDirectory()
-        guard case .failure(let failure) = await poll("broken-card", temp: temp) else {
+        guard case .failure(let failure) = try await poll("broken-card", temp: temp) else {
             Issue.record("expected a failure"); return
         }
         guard case .unparsableOutput(let detail) = failure.reason else {
@@ -491,7 +498,7 @@ struct PollExecutionTests {
     /// Spawning by hand means owning the descriptors by hand, and a leak there
     /// is invisible until the host runs out of them a few thousand polls later.
     @Test("running a plugin many times leaks no descriptors")
-    func descriptorsAreNotLeaked() async {
+    func descriptorsAreNotLeaked() async throws {
         let temp = TemporaryDirectory()
         let plugin = example("hello-card")
 
@@ -501,10 +508,10 @@ struct PollExecutionTests {
 
         // Warm up first: the first run of anything allocates things that are
         // not a leak, and counting from zero would call them one.
-        for _ in 0 ..< 3 { _ = await poll(plugin.directory.lastPathComponent, temp: temp) }
+        for _ in 0 ..< 3 { _ = try await poll(plugin.directory.lastPathComponent, temp: temp) }
         let before = openDescriptors()
 
-        for _ in 0 ..< 20 { _ = await poll(plugin.directory.lastPathComponent, temp: temp) }
+        for _ in 0 ..< 20 { _ = try await poll(plugin.directory.lastPathComponent, temp: temp) }
         let after = openDescriptors()
 
         #expect(after <= before + 2, "descriptors went from \(before) to \(after) over twenty runs")

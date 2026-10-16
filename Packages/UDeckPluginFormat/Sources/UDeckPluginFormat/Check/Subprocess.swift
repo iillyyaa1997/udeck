@@ -31,9 +31,10 @@ enum Subprocess {
     }
 
     /// Runs `arguments[0]`, found on the `PATH` of `environment`, with its
-    /// files made in `folder`.
+    /// files made in `folder` — the temporary folder this process was given,
+    /// unless a caller names another (`TemporaryFolder`).
     static func run(_ arguments: [String], environment: [String: String], input: [UInt8] = [],
-                    in folder: String = FileManager.default.temporaryDirectory.path) throws -> Result {
+                    in folder: String = TemporaryFolder.path) throws -> Result {
         var files: [Int32] = []
         defer { for file in files { close(file) } }
         // Standard input, output and error, in that order: each one made takes
