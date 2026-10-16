@@ -262,6 +262,67 @@ struct InstallFromLinkTests {
                                                to: .pullRequest(number: 3, commit: "a1b2c3d", version: "1.0.1")))
     }
 
+    /// R4+R6's review, low #8: before **Back to** or **Reinstall** of a pull
+    /// request's copy whose folder is what the default branch's head has, the
+    /// warning said *Nobody verified the code that comes* while the installer
+    /// records that copy **Verified** (`Adoption`). The warning names the copy
+    /// as it is recorded: the verified one.
+    @Test("Back to and Reinstall of a pull request's copy the head has: named as the verified copy the installer records it as")
+    func putBackAsWhatWasMerged() async throws {
+        let installer = installer([Self.head, Self.pullRequestHead], trash: TestTrash(in: udeck.url))
+        let pullTree = Self.pullRequestHead.plugin("uptime").tree
+        _ = try await perform(ShownPlace.installFromLink("uptime", resolution: Self.resolution(Self.pullRequestHead), in: paths,
+                                                         installed: InstalledPlugins(), shown: nil), "uptime", with: installer)
+        let catalogue = Self.catalogue(Self.head)
+        guard case .ask(let toVerified) = ShownPlace.update("uptime", catalogue: catalogue, in: paths,
+                                                           installed: try installer.loadRecords(), shown: nil) else {
+            Issue.record("the switch to verified warns first"); return
+        }
+        _ = try await perform(ShownPlace.update("uptime", catalogue: catalogue, in: paths, installed: try installer.loadRecords(),
+                                                shown: toVerified), "uptime", with: installer)
+        let back = try installer.loadRecords()
+        // Not merged: the pull request's copy, named as code nobody verified.
+        guard case .ask(let notMerged) = ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: back,
+                                                                   shown: nil, head: Adoption.DefaultBranch(catalogue)) else {
+            Issue.record("Back to across two lines of history warns first"); return
+        }
+        #expect(notMerged.switching?.to == .pullRequest(number: 3, commit: "a1b2c3d", version: "1.0.1"))
+        // Merged as exactly that copy: the head has its tree, and it comes back as the verified copy it is recorded as —
+        // the verified copy for the verified copy, the same line: nothing to warn of.
+        let merged = Adoption.DefaultBranch(repository: .official, name: "main", head: Self.laterCommit, trees: ["uptime": pullTree])
+        let step = ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: back, shown: nil, head: merged)
+        #expect(step == .atCommit(.earlier, commit: Self.pullCommit, version: "1.0.1", from: Self.pullRequest),
+                "no warning, and the files from where they came")
+        let request = InstallRequest(operation: .earlier, id: PluginIdentifier(rawValue: "uptime")!, sourceRepository: .official,
+                                     repository: .official, ref: .pullRequest(3), commit: Self.pullCommit,
+                                     folder: Self.pullRequestHead.plugin("uptime"), version: "1.0.1", headCommit: Self.laterCommit,
+                                     headTree: pullTree, defaultBranch: "main")
+        let record = try installer.commit(try await installer.stage(request))
+        #expect(record.isOfficialDefault && record.verification.status == .verified && record.commit == Self.laterCommit,
+                "what the warning did not warn of is what the installer did: the verified copy")
+
+        // Reinstall of a pull request's copy changed on disk, its tree the head's: the Trash, and the verified copy named.
+        // The folder is the pull request's copy, as Back to left it; its record, the pull request's.
+        var changed = try installer.loadRecords()
+        changed.plugins["uptime"]?.ref = .pullRequest(3)
+        changed.plugins["uptime"]?.commit = Self.pullCommit
+        #expect(changed.plugins["uptime"]?.tree == pullTree)
+        try Data("echo changed\n".utf8).write(to: live("uptime").appendingPathComponent("uptime.sh"))
+        guard case .ask(let reinstall) = ShownPlace.reinstall("uptime", in: paths, installed: changed, shown: nil, head: merged),
+              case .ask(let plain) = ShownPlace.reinstall("uptime", in: paths, installed: changed, shown: nil,
+                                                          head: Adoption.DefaultBranch(catalogue)) else {
+            Issue.record("Reinstall over the operator's changes warns first"); return
+        }
+        #expect(reinstall.fate == .toTrash && reinstall.switching == .init(
+            from: .pullRequest(number: 3, commit: "a1b2c3d", version: "1.0.1"),
+            to: .verified(version: "1.0.1", repository: Self.repository)))
+        let said = Strings(.english)(PlaceWarning.of(reinstall, button: .replaceCopy, id: "uptime", path: "~", link: nil))
+        #expect(said.contains("the verified 1.0.1 from github.com/iillyyaa1997/udeck-plugins") && !said.contains("Nobody verified"),
+                "\(said)")
+        #expect(plain.fate == .toTrash && plain.switching == nil, "not merged: the same copy put back, as before")
+        #expect(!ShownPlace.holds(plain, now: reinstall), "a warning of one is not a warning of the other")
+    }
+
     @Test("The same line of history is no switch: Reinstall, the pull request again at a later head; an earlier version of a pull request's copy is one")
     func theSameLine() async throws {
         let installer = installer([Self.head, Self.pullRequestHead], trash: TestTrash(in: udeck.url))
@@ -556,6 +617,24 @@ struct InstallFromLinkTests {
         #expect(LinkRefusal.head(of: resolution) == [.linkHead(ref: .pullRequest(3), commit: "a1b2c3d"), .linkPullRequestClosed])
         resolution.pullRequest?.merged = true
         #expect(LinkRefusal.head(of: resolution).last == .linkPullRequestMerged)
+        // Merged into another branch than the default one (R4+R6's review,
+        // low #3): what it merged is not in the catalogue, and nothing of it
+        // is verified. Into main, or while either branch is not known, it is
+        // said as a merge.
+        resolution.defaultBranch = "main"
+        resolution.pullRequest?.base = "main"
+        #expect(LinkRefusal.head(of: resolution).last == .linkPullRequestMerged)
+        resolution.pullRequest?.base = "next"
+        #expect(LinkRefusal.head(of: resolution) == [.linkHead(ref: .pullRequest(3), commit: "a1b2c3d"),
+                                                     .linkPullRequestMergedElsewhere(base: "next")])
+        resolution.defaultBranch = nil
+        #expect(LinkRefusal.head(of: resolution).last == .linkPullRequestMerged)
+        resolution.defaultBranch = "main"
+        resolution.pullRequest?.base = nil
+        #expect(LinkRefusal.head(of: resolution).last == .linkPullRequestMerged)
+        resolution.pullRequest?.merged = false
+        resolution.pullRequest?.base = "next"
+        #expect(LinkRefusal.head(of: resolution).last == .linkPullRequestClosed, "closed, unmerged, whatever its base")
         resolution.pullRequest?.state = .open
         resolution.pullRequest?.merged = false
         resolution.entries = []
@@ -567,6 +646,22 @@ struct InstallFromLinkTests {
         #expect(LinkRefusal.head(of: resolution).last == .linkNothingDiffers(ref: .pullRequest(3), plugin: "uptime"))
         resolution.plugin = "gone"
         #expect(LinkRefusal.head(of: resolution).last == .linkPluginNotThere(ref: .pullRequest(3), plugin: "gone"))
+    }
+
+    @Test("a commit GitHub no longer has, installed at — Back to, Reinstall, an earlier version: said, in both languages")
+    func commitGoneWords() {
+        #expect(Strings(.english)(.catalogueCommitGone(commit: "a1b2c3d"))
+                == "a1b2c3d is no longer on GitHub — the history it was on may have been rewritten — so nothing can be installed from it; nothing was changed.")
+        #expect(Strings(.russian)(.catalogueCommitGone(commit: "a1b2c3d"))
+                == "Коммита a1b2c3d больше нет на GitHub — возможно, историю, где он был, переписали, — поэтому из него ничего не установить; ничего не изменено.")
+    }
+
+    @Test("a pull request merged into another branch, as the sheet says it, in both languages")
+    func mergedElsewhereWords() {
+        #expect(Strings(.english)(.linkPullRequestMergedElsewhere(base: "next"))
+                == "This pull request was merged into next, not the default branch: what is listed is its head, and nothing of it is verified.")
+        #expect(Strings(.russian)(.linkPullRequestMergedElsewhere(base: "next"))
+                == "Этот запрос на слияние влит в next, а не в основную ветку: ниже — его последний коммит, и ничего из него не проверено.")
     }
 
     @Test("what an empty list says, in both languages: every plugin, the one named, or the one that is not there")

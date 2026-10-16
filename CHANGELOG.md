@@ -10,6 +10,26 @@ for what that promises.
 
 ## [Unreleased]
 
+- **Following the branch or the pull request a plugin came from.** After each
+  read of the catalogue uDeck asks GitHub, one request each, where the head of
+  the branch or the pull request every **Unverified** plugin came from is now —
+  a branch with the commit installed, so that one that did not move answers
+  `304` — and, when it moved, offers it on the plugin's row: *Changed in pull
+  request #3, still 1.0.1*, with **Update** and *What changed*, counted among
+  the updates waiting, never installed by itself, and asked about on the card
+  once it is. A head that does not continue what is installed — pushed again
+  over it, or gone back — is said, *The history of pull request #3 was
+  rewritten…*, from one comparison of the two commits, never with `main`. A
+  deleted branch is said, and the plugin keeps running. A read nobody asked for
+  asks none of it while the hour's last ten requests are all that is left, and
+  the row says since when it was not checked — as it does when the read of the
+  catalogue itself was left for later or failed; **Official catalogue** says
+  what a read asks of them. After a pull request merged with
+  changes, the catalogue row's button says **Update**, as the plugin's own
+  does; **Back to** and **Reinstall** of a pull request's copy that `main` has
+  name it as the verified copy it becomes; the link sheet says that a pull
+  request merged into another branch than `main` verified nothing; and **Back
+  to** a commit GitHub no longer has says so.
 - **A merged pull request becomes Verified.** A plugin installed from a pull
   request — or a branch — of the official repository whose folder is exactly
   what `main` now has, by its git tree, is recorded as `main`'s and marked

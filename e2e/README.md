@@ -19,7 +19,7 @@ the last section.
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, the accessibility helper that reads uDeck's windows, a
 > self-check, the builds a check needs, a fake GitHub for the plugin catalogue,
-> the same lab on a GitHub runner, and sixty-three checks of uDeck itself in five groups
+> the same lab on a GitHub runner, and sixty-six checks of uDeck itself in five groups
 > (`e2e/run.sh --list`). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
 > itself as it ships, and by itself again once an operator who switched that off
@@ -32,12 +32,14 @@ the last section.
 > it was opened — with its wrong-chord control and a check that the combination
 > dies with uDeck. `login`: "Open at Login", through a restart and an update, and
 > switched off. `settings`: two changes made in uDeck's own window, and whether
-> they hold across a restart. `plugins`: the thirty-three checks of
+> they hold across a restart. `plugins`: the thirty-six checks of
 > docs/plugin-repository.md — the catalogue, installing, updating, a verified
 > plugin updating itself and an update asking for other permissions only
 > offered, earlier versions, removing, each refusal, installing from a pull
 > request and a branch, that pull request merged — as exactly the copy, with
-> changes, after `main` moved on — or closed, a linked folder, and what Settings offers
+> changes, after `main` moved on — or closed, the pull request and the branch
+> followed — a new head offered, a history rewritten said, a branch deleted
+> said — a linked folder, and what Settings offers
 > somebody writing a plugin: Link a folder…, the run log's switch, a failed run
 > on a fresh card, Install command, Where to look for commands, and all of it
 > in Russian — against a fake GitHub in the guest.
@@ -1810,15 +1812,17 @@ problem.
 
 ### Plugins from a repository
 
-Thirty-three checks, one per row of the table in docs/plugin-repository.md ("The
+Thirty-six checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"). None of them talks to github.com — in the lab only the update
 checks given a published release do, `updates.a-published-release` by default.
 A fake GitHub runs inside the guest (`e2e/guest/fake-github.py`, the guest's
 own Python and the standard library only, on `127.0.0.1:8766`), answering the
 part of the API uDeck uses — the default branch, the head of a branch or of a
 pull request (`refs/heads/{b}`, `refs/pull/{n}/head`) with its `ETag` and
-`304`, a pull request (`/pulls/{n}`), a tree with and without `recursive=1`, a
-folder's history — and a raw file host beside it. Its content
+`304`, a pull request (`/pulls/{n}`), two commits compared through their
+parents (`/compare/{a}...{b}`: ahead, behind, identical or diverged), a tree
+with and without `recursive=1`, a folder's history — and a raw file host
+beside it. Its content
 is the fixture commits in `e2e/fixtures/plugin-repository/`. On the main line,
 in the order `history` gives: `c1` holds
 `uptime` 1.0.0 and the three plugins uDeck must refuse (`future-api` with
@@ -1830,19 +1834,25 @@ head — `uptime` 1.0.1, asking for what 1.0.0 asks, and `asks-nothing`, a new
 plugin asking for no permission at all; `s1`, that pull request squash-merged
 onto `c1` as exactly its head — `pr3`'s content, which a third name on its line
 gives it, so it has no folder of its own; `s2`, the same merge with a
-maintainer's change, `uptime` 1.0.2; and `m1`, `s2`'s content made on `s1`,
-`main` moved on past the merge. The fake hashes them into real git
+maintainer's change, `uptime` 1.0.2; `m1`, `s2`'s content made on `s1`,
+`main` moved on past the merge; `p2`, the pull request's next commit, made on
+`pr3` — `uptime`'s script with one paragraph more, the same version and the
+same manifest; and `p2x`, `p2`'s content made on `c1`, the pull request pushed
+again with its history rewritten. The fake hashes them into real git
 blob, tree and commit ids itself — there is no git in the guest — and the lab's
 own tests hold its hashing against `git hash-object`, `git write-tree` and `git
-commit-tree`, parents included. uDeck's Swift then has to agree with it, file by file and folder
+commit-tree`, parents included, and its comparison of every two commits against
+`git rev-list --left-right --count`. uDeck's Swift then has to agree with it, file by file and folder
 by folder, or nothing installs.
 
 **The lab drives the fake by rewriting a small state file over SSH**: which
 commit `main` is at, which commit each other branch is at (a branch left out
 is deleted), each pull request's head, state and merge commit and the
 repository it came from, "the limit is used up until T" (`403` with
-`x-ratelimit-remaining: 0`), "answer this file with different bytes", "say the
-listing is truncated". Moving a head, force-pushing, merging and closing are
+`x-ratelimit-remaining: 0`), "this many of the hour's requests were spent
+elsewhere" (`spent`, so that a read at launch finds the reserve all that is
+left), "answer this file with different bytes", "say the listing is
+truncated". Moving a head, force-pushing, merging and closing are
 each one such rewrite. Each change is read back through the fake before a check
 relies on it.
 

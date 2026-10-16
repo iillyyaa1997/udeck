@@ -20,3 +20,12 @@ s2 c1
 # m1: the default branch moved on past s1 — uptime changed again, to s2's 1.0.2
 # (plugins.merged-then-moved-on-becomes-verified).
 m1 s1 s2
+# p2: pull request #3's next commit, made on its head pr3 — uptime's script with
+# one paragraph more, the same version and the same manifest, so that nothing a
+# read of it fetches is new (plugins.unverified-only-offers,
+# plugins.a-branch-is-followed).
+p2 pr3
+# p2x: pull request #3's head pushed again with its history rewritten — p2's
+# content made on c1, not on pr3, so that it does not continue what was
+# installed from pr3 (plugins.force-push-is-said).
+p2x c1 p2

@@ -114,8 +114,9 @@ def test_pull_request_3_merged_squashed_as_its_head_with_a_change_and_main_movin
     """s1: pr3's content on c1. s2: pr3 with uptime 1.0.2, asking for what 1.0.1 asks. m1: s2's content on s1."""
     root = plugin_repository.FIXTURES
     repository = fake_github.Repository(str(root))
-    assert repository.parents == {"pr3": "c1", "s1": "c1", "s2": "c1", "m1": "s1"}
-    assert repository.contents == {"s1": "pr3", "m1": "s2"}, "s1 and m1 have no folder of their own"
+    assert {name: repository.parents[name] for name in ("pr3", "s1", "s2", "m1")} == {"pr3": "c1", "s1": "c1", "s2": "c1", "m1": "s1"}
+    assert {name: repository.contents[name] for name in ("s1", "m1")} == {"s1": "pr3", "m1": "s2"}, \
+        "s1 and m1 have no folder of their own"
     assert not (root / "s1").exists() and not (root / "m1").exists()
     commits = repository.commits
     # Squashed as exactly its head: another commit, on another parent, with the same tree.
@@ -130,6 +131,25 @@ def test_pull_request_3_merged_squashed_as_its_head_with_a_change_and_main_movin
     assert uptime["version"] == "1.0.2" and uptime["permissions"] == {"exec": ["sysctl", "./hold.sh"]}
     assert "version=1.0.2\n" in (root / "s2" / "plugins" / "uptime" / "uptime.sh").read_text()
     assert commits["m1"].snapshot.root == s2.root
+
+
+def test_pull_request_3_moves_on_as_p2_and_is_pushed_again_as_p2x_with_its_history_rewritten():
+    """p2: made on pr3, uptime's script alone changed — the same version, the same manifest. p2x: p2's content on c1."""
+    root = plugin_repository.FIXTURES
+    repository = fake_github.Repository(str(root))
+    assert repository.parents["p2"] == "pr3" and repository.parents["p2x"] == "c1"
+    assert repository.contents["p2x"] == "p2" and "p2" not in repository.contents and not (root / "p2x").exists()
+    commits = repository.commits
+    pr3, p2, p2x = commits["pr3"].snapshot, commits["p2"].snapshot, commits["p2x"].snapshot
+    differ = {path for path in set(pr3.paths) | set(p2.paths) if pr3.at(path) != p2.at(path)}
+    assert differ == {"plugins", "plugins/uptime", "plugins/uptime/uptime.sh"}, "the script alone, and the folders it is in"
+    # Nothing a read of p2 fetches is new: its manifests are pr3's, byte for byte.
+    for path in ("plugins/uptime/manifest.json", "plugins/uptime/manifest.ru.json", "plugins/asks-nothing/manifest.json"):
+        assert pr3.at(path) == p2.at(path), path
+    assert "version=1.0.1\n" in (root / "p2" / "plugins" / "uptime" / "uptime.sh").read_text()
+    # Pushed again: another commit, on c1 rather than on pr3, with p2's tree.
+    assert p2x.root == p2.root and commits["p2x"].sha != commits["p2"].sha
+    assert commits["p2"].parent is commits["pr3"] and commits["p2x"].parent is commits["c1"]
 
 
 def test_a_parents_file_that_names_what_is_not_there_is_refused(tmp_path):
@@ -448,8 +468,9 @@ def test_the_lab_can_ask_the_fake_what_it_holds_and_what_it_was_told(served):
     assert state["main"] == "c2" and state["alter"] == ["x"] and state["limit_until"] is None
     _, _, facts = served.json("/lab/facts")
     assert facts["history"] == ["c1", "c2", "c3"] and len(facts["commits"]["c2"]["sha"]) == 40
-    assert facts["parents"] == {"pr3": "c1", "s1": "c1", "s2": "c1", "m1": "s1"} and len(facts["commits"]["pr3"]["sha"]) == 40
-    assert facts["contents"] == {"s1": "pr3", "m1": "s2"}
+    assert facts["parents"] == {"pr3": "c1", "s1": "c1", "s2": "c1", "m1": "s1", "p2": "pr3", "p2x": "c1"}
+    assert len(facts["commits"]["pr3"]["sha"]) == 40
+    assert facts["contents"] == {"s1": "pr3", "m1": "s2", "p2x": "p2"}
     assert state["branches"] == {} and state["pulls"] == {}
 
 
@@ -574,6 +595,81 @@ def test_a_pull_request_merged_and_main_moved_past_it(served):
     assert served.json(f"{API}/pulls/3")[2]["state"] == "closed"
     served.state(main="c1", pulls={"3": {"head": "pr3", "state": "open", "merged": False}})
     assert served.json(f"{API}/pulls/3")[2]["state"] == "open"
+
+
+def test_two_commits_are_compared_through_their_parents(served):
+    """Ahead when the head continues the base, behind when the base continues it, identical, diverged — and 404."""
+    facts = served.fake.repository.facts()["commits"]
+    sha = {name: facts[name]["sha"] for name in ("c1", "pr3", "p2", "p2x", "s1", "m1")}
+    served.state(main="c1", branches={"fix/uptime": "p2"})
+    for base, head, wanted in (
+        ("pr3", "p2", ("ahead", 1, 0)),  # the pull request moved on
+        ("pr3", "p2x", ("diverged", 1, 1)),  # pushed again, its history rewritten
+        ("p2", "pr3", ("behind", 0, 1)),  # gone back
+        ("pr3", "pr3", ("identical", 0, 0)),
+        ("c1", "m1", ("ahead", 2, 0)),
+        ("pr3", "s1", ("diverged", 1, 1)),  # a squash merge against the head it was made from
+    ):
+        status, headers, body = served.json(f"{API}/compare/{sha[base]}...{sha[head]}?per_page=1")
+        assert status == 200 and (body["status"], body["ahead_by"], body["behind_by"]) == wanted, (base, head)
+        assert body["files"] == [] and len(body["commits"]) == wanted[1]
+        assert body["merge_base_commit"]["sha"] == (sha["c1"] if wanted[0] == "diverged" and head != "m1" else
+                                                    sha[base] if wanted[0] in ("ahead", "identical") else sha[head])
+    # Refs as GitHub takes them; a commit that is not there is 404.
+    _, _, body = served.json(f"{API}/compare/main...fix/uptime")
+    assert (body["status"], body["ahead_by"]) == ("ahead", 2)
+    assert served.get(f"{API}/compare/{'0' * 40}...{sha['p2']}")[0] == 404
+    assert served.get(f"{API}/compare/{sha['pr3']}")[0] == 404, "no three dots: nothing compared"
+    assert served.requests()[-1].path == f"{API}/compare/{sha['pr3']}" and served.requests()[-1].is_api
+
+
+def test_requests_spent_elsewhere_leave_less_and_run_out_sooner(tmp_path):
+    """`spent`: what something else on the connection took of the hour — said in what is left, and refused at none."""
+    now = [1_800_000_000.0]
+    served = Served(tmp_path, clock=lambda: now[0])
+    try:
+        assert served.get(API)[1]["x-ratelimit-remaining"] == "59"
+        served.state(spent=50)
+        assert served.get(API)[1]["x-ratelimit-remaining"] == "8", "58 left, 50 of them spent elsewhere"
+        for _ in range(8):
+            assert served.get(API)[0] == 200
+        status, headers, _ = served.get(API)
+        assert status == 403 and headers["x-ratelimit-remaining"] == "0"
+        served.state()
+        assert served.get(API)[1]["x-ratelimit-remaining"] == "49", "nothing spent elsewhere: the fake's own count"
+        served.state(spent="many")
+        assert served.get(API)[0] == 200, "a spent the lab did not write as a number is none"
+    finally:
+        served.close()
+
+
+@needs_git
+def test_every_two_fixture_commits_compare_as_git_compares_them(tmp_path):
+    """The fake's compare, held against `git rev-list --left-right --count` on the same commits, every pair."""
+    repository = fake_github.Repository(str(plugin_repository.FIXTURES))
+    work = tmp_path / "work"
+    work.mkdir()
+    git("init", "-q", cwd=work)
+    # The graph alone is compared: every commit one empty tree, its own message, its own parent — made by the lab,
+    # as the fixtures are, never by whoever git would guess runs the test.
+    empty = git("mktree", cwd=work, data=b"").decode().strip()
+    env = {
+        "GIT_AUTHOR_NAME": "uDeck lab", "GIT_AUTHOR_EMAIL": "lab@udeck.invalid",
+        "GIT_COMMITTER_NAME": "uDeck lab", "GIT_COMMITTER_EMAIL": "lab@udeck.invalid",
+    }  # fmt: skip
+    made = {}
+    ordered = list(repository.names) + list(repository.parents)
+    for name in ordered:
+        commit = repository.commits[name]
+        parents = ["-p", made[commit.parent.name]] if commit.parent else []
+        made[name] = git("commit-tree", empty, "-m", name, *parents, cwd=work, env=env)
+    for base in ordered:
+        for head in ordered:
+            behind, ahead = (int(n) for n in git("rev-list", "--left-right", "--count", f"{made[base]}...{made[head]}",
+                                                cwd=work).split())  # fmt: skip
+            status = "identical" if ahead == behind == 0 else "ahead" if behind == 0 else "behind" if ahead == 0 else "diverged"
+            said = repository.compare(repository.commits[base], repository.commits[head])
+            assert said[:3] == (status, ahead, behind), (base, head)
 
 
 # --- Reading the log -----------------------------------------------------------------------

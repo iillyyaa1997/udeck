@@ -43,10 +43,14 @@ public final class DeckModel {
     public internal(set) var treesOnDisk = HashedTrees()
     /// The official catalogue as the cache holds it, shown at once.
     public internal(set) var catalogue: Catalogue?
-    /// What was last heard of the pull request each copy installed from one
-    /// came from — merged, closed, open — asked at the catalogue's moments
-    /// (`PullRequestFollower`) and kept in `catalogue/official/followed.json`.
+    /// What was last heard of the branch or the pull request each copy
+    /// installed from one came from — its head, merged, closed, gone — asked
+    /// at the catalogue's moments (`RefFollower`) and kept in
+    /// `catalogue/official/followed.json`.
     public internal(set) var followed: FollowedRefs
+    /// The heads those lines moved to, as the cache holds them: what each
+    /// such copy's row offers (`RefOffer`), read with the catalogue.
+    public internal(set) var refHeads: [String: RefHead] = [:]
     public internal(set) var catalogueState: CatalogueState
     public internal(set) var catalogueRefreshing = false
     /// The one install, update or removal running, if any. They run one after

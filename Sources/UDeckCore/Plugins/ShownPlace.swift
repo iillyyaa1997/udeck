@@ -375,21 +375,57 @@ public enum ShownPlace {
     /// **Reinstall**: what the record says was installed, put back — the
     /// record's commit is the copy, from where the record says it came: a
     /// copy from a pull request is put back as one, never as the default
-    /// branch's, and so stays unverified.
-    public static func reinstall(_ id: String, in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?) -> Step {
+    /// branch's, and so stays unverified — unless its folder is what `head`,
+    /// the catalogue's head, has for the id: the installer records that as
+    /// the default branch's (`Adoption`), and the warning names it so.
+    public static func reinstall(_ id: String, in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?,
+                                 head: Adoption.DefaultBranch? = nil) -> Step {
         guard let record = installed.plugins[id] else { return .nothing }
         return atCommit(.reinstall, id: id, commit: record.commit, version: record.version, from: record.origin,
-                        in: paths, installed: installed, shown: shown)
+                        in: paths, installed: installed, shown: shown, tree: record.tree, head: head)
     }
 
     /// **Back to** the copy this one replaced, from where it came — `source`
     /// being the source's own repository, where a copy recorded without one
-    /// came from.
+    /// came from; named, as **Reinstall** names its copy, by what the
+    /// installer records it as (`head`).
     public static func backToPrevious(_ id: String, source: RepositoryAddress, in paths: UDeckPaths,
-                                      installed: InstalledPlugins, shown: Place?) -> Step {
+                                      installed: InstalledPlugins, shown: Place?,
+                                      head: Adoption.DefaultBranch? = nil) -> Step {
         guard let previous = installed.plugins[id]?.previous else { return .nothing }
         return atCommit(.earlier, id: id, commit: previous.commit, version: previous.version,
-                        from: previous.origin(source: source), in: paths, installed: installed, shown: shown)
+                        from: previous.origin(source: source), in: paths, installed: installed, shown: shown,
+                        tree: previous.tree, head: head)
+    }
+
+    /// **Update** along the line a copy of code nobody verified came from: the
+    /// folder at the head its branch or pull request moved to (`RefHead`), from
+    /// that line, the head's commit the copy its warning names — offered,
+    /// never made by itself (`RefOffer`). Nothing for the default branch's
+    /// copy, a folder not at the head, or a version that cannot run here. The
+    /// same line, so no switch is warned of; the operator's work and a link
+    /// are, as for any update.
+    public static func alongTheLine(_ id: String, head: RefHead?, in paths: UDeckPaths, installed: InstalledPlugins,
+                                    shown: Place?) -> Step {
+        guard let record = installed.plugins[id], !record.isOfficialDefault, let head, head.commit != record.commit,
+              let entry = head.entry, entry.verdict.refusals.isEmpty, let manifest = entry.manifest else { return .nothing }
+        let now = Place.now(id, in: paths, record: record,
+                            bringing: .atCommit(version: manifest.version, commit: head.commit), from: record.origin)
+        if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
+        return .install(.update, commit: head.commit, folder: entry.listing, version: manifest.version,
+                        from: record.origin)
+    }
+
+    /// Where a copy that comes is recorded, as its warning names it: a
+    /// branch's or a pull request's copy whose folder, `tree`, is exactly what
+    /// `head` has for `id` is what was merged, and the installer records it as
+    /// the default branch's, **Verified** (`Adoption`) — so it comes as the
+    /// verified copy, not as code nobody verified. Any other copy comes from
+    /// where it came.
+    static func recordedAs(_ origin: PluginOrigin, tree: String?, id: String,
+                           head: Adoption.DefaultBranch?) -> PluginOrigin {
+        guard !origin.ref.isDefault, let tree, let head, head.trees[id] == tree else { return origin }
+        return PluginOrigin(repository: head.repository, ref: .defaultBranch(head.name))
     }
 
     /// An earlier version, chosen from the folder's history — which is the
@@ -403,12 +439,14 @@ public enum ShownPlace {
     }
 
     /// A copy replaced by `version` at `commit`: the commit its warning names
-    /// is the one the files come from.
+    /// is the one the files come from — and the copy, by what it is recorded
+    /// as once it is there (`recordedAs`), the folder at that commit being
+    /// `tree`.
     static func atCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
                          from origin: PluginOrigin, in paths: UDeckPaths, installed: InstalledPlugins,
-                         shown: Place?) -> Step {
+                         shown: Place?, tree: String? = nil, head: Adoption.DefaultBranch? = nil) -> Step {
         let now = Place.now(id, in: paths, record: installed.plugins[id], bringing: .atCommit(version: version, commit: commit),
-                            from: origin)
+                            from: recordedAs(origin, tree: tree, id: id, head: head))
         if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
         return .atCommit(operation, commit: commit, version: version, from: origin)
     }

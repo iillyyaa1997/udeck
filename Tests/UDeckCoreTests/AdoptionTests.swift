@@ -7,7 +7,7 @@ import UDeckPluginFormatFixtures
 /// (stage 3): when a copy of a branch or a pull request is what was merged and
 /// its record alone is rewritten (`Adoption`), what became of its pull request
 /// (`PullRequestLifecycle`), and what uDeck asks GitHub about it
-/// (`PullRequestFollower`). UDeckKit has no tests, so every decision its rows
+/// (`RefFollower`). UDeckKit has no tests, so every decision its rows
 /// show is held here.
 @Suite("A merged pull request becomes Verified")
 struct AdoptionTests {
@@ -391,7 +391,8 @@ struct AdoptionTests {
         func kept(_ pull: PullRequest?, record: InstalledRecord = copy, before: FollowedRefs = FollowedRefs(),
                   listing merge: CommitListing? = nil) -> FollowedRefs {
             var refs = before
-            refs.keep(pull, heardAtInstall: record, of: "uptime", defaultBranch: "main", mergeListing: merge, now: Self.at)
+            refs.keep(pull, branchHead: nil, heardAtInstall: record, of: "uptime", defaultBranch: "main", mergeListing: merge,
+                      now: Self.at)
             return refs
         }
         func said(_ refs: FollowedRefs) -> PullRequestLifecycle? {
@@ -423,12 +424,12 @@ struct AdoptionTests {
 
     /// The asking runs away from the main thread; an install, an adoption or
     /// a removal can happen while it waits, and says its own word of that
-    /// copy (`PullRequestFollower.Outcome.merged`).
+    /// copy (`RefFollower.Outcome.merged`).
     @Test("what an asking heard joins what is known now; a copy installed, adopted or removed meanwhile keeps its own")
     func joined() {
         let asked = InstalledPlugins(plugins: ["uptime": Self.record(), "removed": Self.record(), "adopted": Self.record(),
                                                "moved": Self.record(), "rechecked": Self.record(ref: .pullRequest(5))])
-        let heard = PullRequestFollower.Outcome(
+        let heard = RefFollower.Outcome(
             followed: FollowedRefs(pulls: ["uptime": Self.pull(state: .closed, merged: false), "removed": Self.pull(),
                                            "adopted": Self.pull(), "moved": Self.pull(mergeTree: Self.other),
                                            "rechecked": Self.pull(number: 5)]),
@@ -483,7 +484,8 @@ struct AdoptionTests {
 
 /// What uDeck asks GitHub about the pull requests copies came from, and when
 /// it asks nothing — against a provider of the test's own that counts its
-/// requests (`Provider`, beside the link tests).
+/// requests (`Provider`, beside the link tests). A branch's copy is asked
+/// about too (stage 3, R5: `RefFollowerTests`); here its branch is not there.
 @Suite("Asking after pull requests")
 struct PullRequestFollowerTests {
     let temp = TemporaryDirectory()
@@ -524,19 +526,21 @@ struct PullRequestFollowerTests {
 
     /// The follower, after a read of the catalogue that found `defaultBranch`.
     func follower(_ provider: Provider, limits: RateLimitRecorder = RateLimitRecorder(),
-                  defaultBranch: String? = "main") -> PullRequestFollower {
+                  defaultBranch: String? = "main") -> RefFollower {
         try? store.save(CatalogueState(defaultBranch: defaultBranch))
-        return PullRequestFollower(provider: provider, store: store, limits: limits, now: { AdoptionTests.at })
+        return RefFollower(provider: provider, store: store, limits: limits, now: { AdoptionTests.at })
     }
 
     @Test("one question for each pull request's copy not at the head; the commit a merge was made as listed once")
     func asks() async {
         let provider = Self.provider()
         let outcome = await follower(provider).follow(Self.installed, headTrees: Self.headTrees, unrequested: true)
-        #expect(provider.asked == ["pull 5", "tree \(Self.mergeCommit) recursive", "pull 3"],
-                "not the copy at the head, the branch's or the default branch's")
-        #expect(outcome.asked == ["merged", "uptime"] && outcome.leftAsTheyWere.isEmpty)
+        #expect(provider.asked == [Self.branchAsked, "pull 5", "tree \(Self.mergeCommit) recursive", "pull 3"],
+                "not the copy at the head or the default branch's")
+        #expect(outcome.asked == ["branch", "merged", "uptime"] && outcome.leftAsTheyWere.isEmpty)
         #expect(outcome.followed.pulls.keys.sorted() == ["merged", "uptime"])
+        #expect(outcome.followed.branches["branch"] == FollowedBranch(name: "fix/uptime", head: nil, checkedAt: AdoptionTests.at),
+                "a branch that is not there: said")
         #expect(outcome.followed.pulls["uptime"]?.state == .closed && outcome.followed.pulls["uptime"]?.merged == false)
         #expect(outcome.followed.pulls["merged"]?.mergeTree == Self.merge.plugin("merged").tree)
         #expect(store.followed() == outcome.followed, "kept")
@@ -546,13 +550,16 @@ struct PullRequestFollowerTests {
         store.prune(head: nil, installedCommits: [])
         #expect(store.listing(Self.mergeCommit) == nil, "the premise: the listing is gone from the cache")
         _ = await follower(provider).follow(Self.installed, headTrees: Self.headTrees, unrequested: false)
-        #expect(Array(provider.asked.suffix(2)) == ["pull 5", "pull 3"])
+        #expect(Array(provider.asked.suffix(3)) == [Self.branchAsked, "pull 5", "pull 3"])
         // A copy gone from the records is forgotten.
         var fewer = Self.installed
         fewer.plugins["merged"] = nil
         let after = await follower(provider).follow(fewer, headTrees: Self.headTrees, unrequested: false)
         #expect(after.followed.pulls.keys.sorted() == ["uptime"] && store.followed() == after.followed)
     }
+
+    /// The branch's copy's question: its head, with the commit installed.
+    static let branchAsked = "head refs/heads/fix/uptime if-none-match \"\(AdoptionTests.pullHead)\""
 
     @Test("a merge into another branch is asked about and kept, and the commit it was merged as is never listed")
     func mergedElsewhere() async {
@@ -583,9 +590,13 @@ struct PullRequestFollowerTests {
                                                    reset: AdoptionTests.at.addingTimeInterval(3600)))
         let left = await follower(provider, limits: low).follow(Self.installed, headTrees: Self.headTrees, unrequested: true)
         #expect(provider.asked.isEmpty)
-        #expect(left.followed == heard && left.leftAsTheyWere == ["merged", "uptime"], "what was heard stands")
+        #expect(left.followed.pulls == heard.pulls && left.leftAsTheyWere == ["branch", "merged", "uptime"],
+                "what was heard stands")
+        #expect(left.followed.notCheckedSince == ["branch": AdoptionTests.at, "merged": AdoptionTests.at, "uptime": AdoptionTests.at],
+                "said since when: when each was last asked about, or installed")
         let asked = await follower(provider, limits: low).follow(Self.installed, headTrees: Self.headTrees, unrequested: false)
-        #expect(provider.asked.first == "pull 5" && asked.asked == ["merged", "uptime"])
+        #expect(provider.asked.first == Self.branchAsked && asked.asked == ["branch", "merged", "uptime"])
+        #expect(asked.followed.notCheckedSince.isEmpty, "asked again: not said any more")
     }
 
     @Test("a limit reached stops the asking there, and what was heard stands")
@@ -596,7 +607,9 @@ struct PullRequestFollowerTests {
         try? store.save(followed: heard)
         provider.limited = true
         let outcome = await follower(provider).follow(Self.installed, headTrees: Self.headTrees, unrequested: false)
-        #expect(provider.asked == ["pull 5"], "one refusal, and nothing more asked")
-        #expect(outcome.followed == heard && outcome.leftAsTheyWere == ["merged", "uptime"] && outcome.asked.isEmpty)
+        #expect(provider.asked == [Self.branchAsked], "one refusal, and nothing more asked")
+        #expect(outcome.followed.pulls == heard.pulls && outcome.followed.branches.isEmpty
+                && outcome.leftAsTheyWere == ["branch", "merged", "uptime"] && outcome.asked.isEmpty)
+        #expect(Set(outcome.followed.notCheckedSince.keys) == ["branch", "merged", "uptime"])
     }
 }

@@ -177,3 +177,187 @@ public enum ConsentSource {
                                             changedHere: changedHere)
     }
 }
+
+/// What the branch or the pull request a copy of code nobody verified came
+/// from has for it now, against the copy installed: an update along that line
+/// — *Changed in pull request #3, still 1.0.1*, **Update** and *What changed* —
+/// and whether the head that brings it continues what is installed or its
+/// history was rewritten (`HistoryRewrite`). Offered, never made by itself:
+/// **Update** installs that head's folder, and the card asks about it, as about
+/// any new content of code nobody verified (`ConsentBasis`).
+public struct RefOffer: Equatable, Sendable {
+    /// The commit the line's head is at.
+    public var head: String
+    /// The copy's folder there against the one installed (`UpdateOffer.of`):
+    /// never `.current`, which offers nothing.
+    public var offer: UpdateOffer
+    /// The head does not continue the commit installed.
+    public var rewritten: Bool
+
+    public init(head: String, offer: UpdateOffer, rewritten: Bool) {
+        self.head = head
+        self.offer = offer
+        self.rewritten = rewritten
+    }
+
+    /// What `record`'s line offers: `heard` being the head it was last heard
+    /// at with what was found of it (`FollowedRefs.head`), and `head` that
+    /// head as the cache holds it (`RefHead`) — nil while the head is the
+    /// commit installed, before the head's listing is read, and when the
+    /// copy's folder there is the copy's.
+    public static func of(_ record: InstalledRecord, heard: (commit: String, history: HeadHistory?)?,
+                          head: RefHead?) -> RefOffer? {
+        guard !record.isOfficialDefault, let heard, heard.commit != record.commit,
+              let head, head.commit == heard.commit else { return nil }
+        let offer = UpdateOffer.of(record, head: head.entry)
+        guard offer != .current else { return nil }
+        let rewritten = heard.history.map { $0.holds(installed: record.commit, head: heard.commit) && $0.rewritten } ?? false
+        return RefOffer(head: heard.commit, offer: offer, rewritten: rewritten)
+    }
+
+    /// What the row says of it, `ref` being the line and `id` the plugin's:
+    /// *1.0.2 available in pull request #3*, *Changed in branch fix/uptime,
+    /// still 1.0.1*, *Pull request #3 now has 1.0.0*, *uptime is no longer in
+    /// pull request #3; the plugin keeps running*, or why the version there
+    /// cannot run here — one line, its parts joined.
+    public func said(ref: PluginRef, id: String) -> [Phrase] {
+        switch offer {
+        case .current: []
+        case .newer(let version): [.pluginRefAvailable(ref: ref, version: version)]
+        case .changedStill(let version): [.pluginRefChangedStill(ref: ref, version: version)]
+        case .older(let version): [.pluginRefNowHas(ref: ref, version: version)]
+        case .goneFromRepository: [.pluginRefGone(ref: ref, id: id)]
+        case .cannotRun(let version, let reason):
+            switch reason {
+            case .apiNotSpoken(_, _, let api): [.catalogueUpdateNeedsAPI(version: version, api: api)]
+            case .needsNewerUDeck(_, _, let required, _): [.catalogueUpdateNeedsUDeck(version: version, required: required)]
+            default: [.catalogueUpdateCannotInstall(version: version), .catalogueRefusal(reason)]
+            }
+        }
+    }
+
+    /// The button that goes with it: **Update** for a newer version or other
+    /// files, **Switch to** an older one; none for a folder that is not there
+    /// or a version that cannot run here.
+    public var button: Phrase? {
+        switch offer {
+        case .newer, .changedStill: .catalogueUpdate
+        case .older(let version): .catalogueSwitchTo(version: version)
+        case .current, .goneFromRepository, .cannotRun: nil
+        }
+    }
+}
+
+/// What the rows of a copy of code nobody verified — installed from a branch or
+/// a pull request — say and offer beyond its mark: what became of its pull
+/// request, what its line has for it now, its branch gone, a line not checked
+/// in the last read, and the verified copy that can take its place. Decided
+/// here, whole, where it is tested; UDeckKit has no tests, and its views only
+/// show this.
+public struct UnverifiedRow: Equatable, Sendable {
+    /// What became of its pull request (`PullRequestLifecycle`); nil for a
+    /// branch's copy, and before anything was heard.
+    public var lifecycle: PullRequestLifecycle?
+    /// The version of the catalogue's verified copy, which can be put in its
+    /// place here — nil when the catalogue does not have the plugin, cannot
+    /// install it here, or is switched off.
+    public var verifiedVersion: String?
+    /// What its branch or pull request has for it now (`RefOffer`) — never
+    /// while the catalogue is off, for a branch that is not there, or once its
+    /// pull request was merged into the default branch: what was merged is
+    /// what it is offered then.
+    public var lineOffer: RefOffer?
+    /// Its branch is not there any more: said, and the plugin keeps running.
+    public var branchGone: Bool
+    /// The last read did not ask about its line — the reserve, a limit, a
+    /// request that failed, a read of the catalogue left for later or failed
+    /// before it got there: when it was last asked about. Nil while the
+    /// catalogue is off: then nothing is asked at all, as Settings says.
+    public var notCheckedSince: Date?
+
+    public init(lifecycle: PullRequestLifecycle?, verifiedVersion: String?, lineOffer: RefOffer?, branchGone: Bool,
+                notCheckedSince: Date?) {
+        self.lifecycle = lifecycle
+        self.verifiedVersion = verifiedVersion
+        self.lineOffer = lineOffer
+        self.branchGone = branchGone
+        self.notCheckedSince = notCheckedSince
+    }
+
+    /// The row of `id`, whose record is `record` — nil for the default
+    /// branch's copy, and where uDeck installed nothing — `followed` being
+    /// what was heard of its line, `head` its moved head as the cache holds it,
+    /// `defaultBranch` the official source's, `readsCatalogue` whether
+    /// **Official catalogue** is on, and `verified` the catalogue's row of the
+    /// same id.
+    public static func of(_ id: String, record: InstalledRecord?, followed: FollowedRefs, head: RefHead?,
+                          defaultBranch: String?, readsCatalogue: Bool, verified entry: CatalogueEntry?) -> UnverifiedRow? {
+        guard let record, !record.isOfficialDefault else { return nil }
+        var verifiedVersion: String?
+        // Its folder there or gone, the same verified copy is offered.
+        if readsCatalogue, let entry,
+           case .unverified(let version, nil, _) = CatalogueRowState.of(entry, record: record, folderExists: true) {
+            verifiedVersion = version
+        }
+        let branch = followed.branch(of: id, record: record)
+        return UnverifiedRow(
+            lifecycle: PullRequestLifecycle.of(record, followed: followed.pull(of: id, record: record),
+                                               defaultBranch: defaultBranch, verifiedOffered: verifiedVersion != nil),
+            verifiedVersion: verifiedVersion,
+            lineOffer: readsCatalogue
+                ? RefOffer.of(record, heard: followed.head(of: id, record: record, defaultBranch: defaultBranch), head: head)
+                : nil,
+            branchGone: branch != nil && branch?.head == nil,
+            notCheckedSince: readsCatalogue ? followed.notCheckedSince[id] : nil
+        )
+    }
+
+    /// Whether the verified copy is offered as the update it is — its pull
+    /// request merged as something else: *the verified version differs —
+    /// update* — rather than as a switch.
+    public var verifiedIsAnUpdate: Bool { lifecycle == .mergedDiffers && verifiedVersion != nil }
+
+    /// What the button that puts the verified copy in its place says — one
+    /// name for one press, on the plugin's row and on the catalogue row alike:
+    /// **Update** once its pull request was merged as something else, which
+    /// its row says to do, and **Switch to verified 1.0.0** otherwise. Nil
+    /// when there is no verified copy to put there.
+    public var verifiedButton: Phrase? {
+        guard let verifiedVersion else { return nil }
+        return verifiedIsAnUpdate ? .catalogueUpdate : .catalogueSwitchToVerified(version: verifiedVersion)
+    }
+
+    /// Whether it counts among the updates Settings says are waiting: the
+    /// verified version offered as an update, or a newer version or other
+    /// files along its own line.
+    public var waiting: Bool { verifiedIsAnUpdate || lineOffer?.offer.isWaiting == true }
+
+    /// One line the row says under its mark, and the end of its identifier
+    /// (`plugin.<id>.<suffix>`).
+    public struct Said: Equatable, Sendable {
+        public var suffix: String
+        public var phrase: [Phrase]
+    }
+
+    /// What the plugin's row says under its mark, in order, `ref` being where
+    /// the copy came from and `time` how a moment is written: what became of
+    /// its pull request; its branch gone; its line's history rewritten; what
+    /// its line offers; and since when that line was not checked.
+    public func said(ref: PluginRef, id: String, time: (Date) -> String) -> [Said] {
+        var said: [Said] = []
+        if let number = ref.pullRequestNumber, let phrase = lifecycle?.rowPhrase(number: number) {
+            said.append(Said(suffix: "pullRequest", phrase: [phrase]))
+        }
+        if branchGone, ref.kind == PluginRef.branchKind, let name = ref.name {
+            said.append(Said(suffix: "branchGone", phrase: [.pluginBranchGone(name: name)]))
+        }
+        if let lineOffer {
+            if lineOffer.rewritten { said.append(Said(suffix: "rewritten", phrase: [.pluginRefRewritten(ref: ref)])) }
+            said.append(Said(suffix: "offer", phrase: lineOffer.said(ref: ref, id: id)))
+        }
+        if let notCheckedSince {
+            said.append(Said(suffix: "notChecked", phrase: [.pluginRefNotCheckedSince(ref: ref, at: time(notCheckedSince))]))
+        }
+        return said
+    }
+}

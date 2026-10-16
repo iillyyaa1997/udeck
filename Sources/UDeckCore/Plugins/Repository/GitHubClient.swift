@@ -108,6 +108,49 @@ public struct PullRequest: Equatable, Sendable {
     }
 }
 
+/// Two commits compared, as `GET /repos/{o}/{r}/compare/{base}...{head}`
+/// says it: whether `head` continues `base` — is ahead of it — or `base`
+/// continues `head`, is the same commit, or neither does: the two have gone
+/// different ways from a commit both have. All uDeck reads of the answer;
+/// the commits and files GitHub lists with it are left unread.
+public struct Comparison: Equatable, Sendable {
+    public enum Status: String, Sendable {
+        /// `head` continues `base`: `base` is in its history.
+        case ahead
+        /// `base` continues `head`: `head` is in its history, and behind it.
+        case behind
+        /// The same commit.
+        case identical
+        /// Neither is in the other's history.
+        case diverged
+    }
+
+    public var status: Status
+    /// Commits `head` has that `base` does not.
+    public var aheadBy: Int
+    /// Commits `base` has that `head` does not.
+    public var behindBy: Int
+
+    public init(status: Status, aheadBy: Int, behindBy: Int) {
+        self.status = status
+        self.aheadBy = aheadBy
+        self.behindBy = behindBy
+    }
+
+    /// GitHub's answer, or nil when it is not one: a status it does not
+    /// have, a count that is not a number.
+    static func read(_ data: Data) -> Comparison? {
+        struct Answer: Decodable {
+            var status: String
+            var ahead_by: Int
+            var behind_by: Int
+        }
+        guard let answer = try? JSONDecoder().decode(Answer.self, from: data),
+              let status = Status(rawValue: answer.status), answer.ahead_by >= 0, answer.behind_by >= 0 else { return nil }
+        return Comparison(status: status, aheadBy: answer.ahead_by, behindBy: answer.behind_by)
+    }
+}
+
 /// What uDeck asks of a repository host. GitHub implements it now; GitLab's
 /// client implements the same questions in stage 4, through its own API.
 public protocol RepositoryProvider: Sendable {
@@ -126,6 +169,10 @@ public protocol RepositoryProvider: Sendable {
     func commits(touching path: String, on branch: String) async throws -> [CommitSummary]
     /// Pull request `number`: its head, and whether it was merged or closed.
     func pull(_ number: Int) async throws -> PullRequest
+    /// Whether `head` continues `base` (`Comparison`) — `notFound` when
+    /// either commit is not there, as after a push that rewrote history and
+    /// a clean-up that took the old commits away.
+    func compare(_ base: String, _ head: String) async throws -> Comparison
 
     /// Where a person reads a folder at a commit, in the browser.
     func folderPage(_ path: String, commit: String) -> URL?
@@ -332,6 +379,24 @@ public struct GitHubClient: RepositoryProvider {
             throw ProviderError.badAnswer("pull request #\(number) could not be read")
         }
         return pull
+    }
+
+    /// `GET /repos/{o}/{r}/compare/{base}...{head}?per_page=1` — one request.
+    /// GitHub lists the files that differ with every answer, however many
+    /// commits are asked for (161 053 bytes for one squash merge of the
+    /// official repository, measured when stage 3 was designed); one commit
+    /// asked for keeps the rest of it short. A commit that is not there is
+    /// `notFound`.
+    public func compare(_ base: String, _ head: String) async throws -> Comparison {
+        guard GitHash.isObjectID(base), GitHash.isObjectID(head) else {
+            throw ProviderError.badAnswer("only two commits are compared, not \(base.prefix(40)) and \(head.prefix(40))")
+        }
+        let (data, _) = try await api("\(repositoryPath)/compare/\(base)...\(head)",
+                                      query: [URLQueryItem(name: "per_page", value: "1")])
+        guard let comparison = Comparison.read(data) else {
+            throw ProviderError.badAnswer("the comparison of \(base.prefix(7)) with \(head.prefix(7)) could not be read")
+        }
+        return comparison
     }
 
     public func folderPage(_ path: String, commit: String) -> URL? {

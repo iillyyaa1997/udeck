@@ -114,6 +114,10 @@ struct LocalizationTests {
         .pluginFromPullRequest(number: 3, commit: "a1b2c3d"), .pluginFromBranch(name: "fix/uptime", commit: "a1b2c3d"),
         .catalogueMergedDiffers, .catalogueClosedUnmerged, .pluginPullRequestMergedDiffers(number: 3),
         .pluginPullRequestClosed(number: 3), .pluginPullRequestMergedNothingOffered(number: 3),
+        .pluginRefAvailable(ref: .pullRequest(3), version: "1.1.0"), .pluginRefChangedStill(ref: .branch("fix/uptime"), version: "1.0.1"),
+        .pluginRefNowHas(ref: .pullRequest(3), version: "1.0.0"), .pluginRefGone(ref: .branch("fix/uptime"), id: "uptime"),
+        .pluginRefRewritten(ref: .pullRequest(3)), .pluginBranchGone(name: "fix/uptime"),
+        .pluginRefNotCheckedSince(ref: .branch("fix/uptime"), at: "14:02"),
         .windowReinstallBrings(.pullRequest(number: 3, commit: "a1b2c3d", version: "1.0.1")),
         .linkInstall, .linkHelp(official: "github.com/o/r"), .linkField, .linkLookUp, .linkReading, .linkClose, .linkOff,
         .linkRefused(.empty, official: "github.com/o/r"), .linkRefused(.notALink, official: "github.com/o/r"),
@@ -127,7 +131,9 @@ struct LocalizationTests {
         .linkOtherRepository(repository: "github.com/someone/r", official: "github.com/o/r"),
         .linkIsTheCatalogue(official: "github.com/o/r", plugin: nil), .linkIsTheCatalogue(official: "github.com/o/r", plugin: "uptime"),
         .linkHead(ref: .pullRequest(3), commit: "a1b2c3d"), .linkHead(ref: .branch("fix/uptime"), commit: "a1b2c3d"),
-        .linkPullRequestMerged, .linkPullRequestClosed, .linkNothingDiffers(ref: .pullRequest(3)), .linkUnverifiedNote,
+        .linkPullRequestMerged, .linkPullRequestMergedElsewhere(base: "next"), .linkPullRequestClosed,
+        .catalogueCommitGone(commit: "a1b2c3d"),
+        .linkNothingDiffers(ref: .pullRequest(3)), .linkUnverifiedNote,
         .linkNothingDiffers(ref: .branch("fix/uptime"), plugin: "uptime"), .linkPluginNotThere(ref: .branch("fix/uptime"), plugin: "gone"),
 
         .pluginLastRun(at: "21:04:05", reason: .interval, duration: 0.21, result: .card),
@@ -212,7 +218,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 364,
+        #expect(Self.all.count == 373,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

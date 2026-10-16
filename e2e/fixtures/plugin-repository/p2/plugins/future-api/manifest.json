@@ -1,0 +1,12 @@
+{
+  "id": "future-api",
+  "name": "Future contract",
+  "version": "2.0.0",
+  "api": 2,
+  "kind": "poll",
+  "description": "Written for a plugin contract this uDeck does not speak.",
+  "author": "uDeck lab",
+  "run": ["./run.sh"],
+  "interval": 60,
+  "timeout": 2
+}

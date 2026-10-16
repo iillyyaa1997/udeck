@@ -166,7 +166,7 @@ struct English: Vocabulary {
         // Plugins from a repository
         case .pluginsOfficialCatalogue: "Official catalogue"
         case .pluginsOfficialCatalogueHelp(let source):
-            "uDeck reads the list of plugins in \(source) a few seconds after it starts and once a day, and when you press Check now — the list and each plugin's manifest, nothing else. A plugin's files are fetched when you press Install, and when a verified plugin updates itself. Off, uDeck makes no request about plugins at all; what is installed keeps running."
+            "uDeck reads the list of plugins in \(source) a few seconds after it starts, once a day, when you open this pane and the list is more than an hour old, and when you press Check now — the list and each plugin's manifest; for a plugin installed from a branch or a pull request, also where that branch or pull request is now and, once it has moved, its list of files, that plugin's manifest there and one comparison with what is installed. A plugin's files are fetched when you press Install, and when a verified plugin updates itself. Off, uDeck makes no request about plugins at all; what is installed keeps running."
         case .catalogueCheckNow: "Check now"
         case .catalogueChecked(let source, let time): "\(source) · checked \(time)"
         case .catalogueNeverRead(let source): "\(source) · not read yet"
@@ -268,6 +268,14 @@ struct English: Vocabulary {
             "Pull request #\(number) was merged; no verified version is offered here, and the plugin keeps running"
         case .pluginPullRequestClosed(let number):
             "Pull request #\(number) was closed without being merged; the plugin keeps running"
+        case .pluginRefAvailable(let ref, let version): "\(version) available in \(Self.line(ref))"
+        case .pluginRefChangedStill(let ref, let version): "Changed in \(Self.line(ref)), still \(version)"
+        case .pluginRefNowHas(let ref, let version): "\(Self.line(ref, capitalised: true)) now has \(version)"
+        case .pluginRefGone(let ref, let id): "\(id) is no longer in \(Self.line(ref)); the plugin keeps running"
+        case .pluginRefRewritten(let ref):
+            "The history of \(Self.line(ref)) was rewritten: its new head does not continue what is installed"
+        case .pluginBranchGone(let name): "Branch \(name) no longer exists; the plugin keeps running"
+        case .pluginRefNotCheckedSince(let ref, let at): "\(Self.line(ref, capitalised: true)) not checked since \(at)"
         case .pluginPinned: "Kept at this version — newer ones are still shown"
         case .pluginUpdatedByItself(let date): "Updated by itself on \(date)"
         case .pluginUpdateByItselfFailed(let version):
@@ -316,6 +324,10 @@ struct English: Vocabulary {
         case .linkHead(let ref, let commit): "\(Self.line(ref, capitalised: true)) at \(commit)"
         case .linkPullRequestMerged:
             "This pull request was merged. What is listed is its head as it was proposed; what the repository merged is in the catalogue."
+        case .catalogueCommitGone(let commit):
+            "\(commit) is no longer on GitHub — the history it was on may have been rewritten — so nothing can be installed from it; nothing was changed."
+        case .linkPullRequestMergedElsewhere(let base):
+            "This pull request was merged into \(base), not the default branch: what is listed is its head, and nothing of it is verified."
         case .linkPullRequestClosed: "This pull request was closed without being merged."
         case .linkNothingDiffers(let ref, let plugin):
             plugin.map { "\($0) in \(Self.line(ref)) is what the catalogue already has: there is nothing to install from it." }

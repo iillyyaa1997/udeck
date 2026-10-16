@@ -24,15 +24,20 @@ public enum LinkRefusal {
     }
 
     /// What a resolved link says above its list: the line of history and the
-    /// commit it was read at (`linkHead`), whether a pull request was merged
-    /// or closed, and — when nothing there differs from the catalogue's head —
-    /// that there is nothing to install from it: of every plugin there, or of
-    /// the one plugin a link into its folder named, which may not be there
-    /// at all.
+    /// commit it was read at (`linkHead`), whether a pull request was merged —
+    /// into the default branch, whose merge is what the catalogue has, or into
+    /// another, where nothing of it is verified — or closed, and — when nothing
+    /// there differs from the catalogue's head — that there is nothing to
+    /// install from it: of every plugin there, or of the one plugin a link
+    /// into its folder named, which may not be there at all. A merge into a
+    /// branch GitHub did not name, or while the default branch is not known,
+    /// is said as a merge.
     public static func head(of resolution: RefResolver.Resolution) -> [Phrase] {
         var said: [Phrase] = [.linkHead(ref: resolution.origin.ref, commit: String(resolution.commit.prefix(7)))]
         if let pull = resolution.pullRequest {
-            if pull.merged {
+            if pull.merged, let base = pull.base, let defaultBranch = resolution.defaultBranch, base != defaultBranch {
+                said.append(.linkPullRequestMergedElsewhere(base: base))
+            } else if pull.merged {
                 said.append(.linkPullRequestMerged)
             } else if pull.state == .closed {
                 said.append(.linkPullRequestClosed)

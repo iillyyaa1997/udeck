@@ -237,10 +237,15 @@ struct CatalogueRowView: View {
                     .accessibilityIdentifier("catalogue.\(id).reinstall")
             case .unverified(let version, nil, _):
                 // Code nobody verified is in this id's place: the row's copy
-                // is the verified one, offered as the switch it is — always
-                // after the warning that names both (`ShownPlace.Switch`);
-                // its folder gone, nothing is replaced and nothing warns.
-                Button(strings(.catalogueSwitchToVerified(version: version))) { press(.update) }
+                // is the verified one, offered as the switch it is — or as the
+                // update it is, once its pull request was merged as something
+                // else, by the name the plugin's own row gives the same press
+                // (`UnverifiedRow.verifiedButton`) — always after the warning
+                // that names both (`ShownPlace.Switch`); its folder gone,
+                // nothing is replaced and nothing warns.
+                Button(strings(model.unverifiedRow(of: id)?.verifiedButton ?? .catalogueSwitchToVerified(version: version))) {
+                    press(.update)
+                }
                     .disabled(model.busyPlugin != nil)
                     .accessibilityIdentifier("catalogue.\(id).switchToVerified")
             case .unverified:
@@ -303,7 +308,7 @@ struct CatalogueRowView: View {
         case .unverified:
             (state.unverifiedLine(ref: model.installed.plugins[id]?.ref ?? PluginRef(kind: "", name: nil), id: id,
                                   path: model.pluginsDirectoryDisplayPath,
-                                  lifecycle: model.pullRequestLifecycle(of: id)) ?? []).map { strings($0) }.joined(separator: " — ")
+                                  lifecycle: model.unverifiedRow(of: id)?.lifecycle) ?? []).map { strings($0) }.joined(separator: " — ")
         }
     }
 
@@ -321,7 +326,11 @@ struct CatalogueRowView: View {
         case .install:
             button = strings(.catalogueReplace)
         case .update:
-            button = shown.switching != nil ? strings(.catalogueSwitchToVerified(version: version)) : strings(.catalogueUpdate)
+            // Across two lines of history, the verified copy's button, by the
+            // name the row gave it (`UnverifiedRow.verifiedButton`).
+            button = shown.switching != nil
+                ? strings(model.unverifiedRow(of: id)?.verifiedButton ?? .catalogueSwitchToVerified(version: version))
+                : strings(.catalogueUpdate)
         case .reinstall:
             button = strings(.catalogueReinstall(version: version))
         }
@@ -366,14 +375,17 @@ struct InstalledRepositoryControls: View {
     /// **Remove**, or a button that replaces the folder — pressed over a copy
     /// holding something of the operator's, or over a copy from another line
     /// of history: **Switch to verified** over a branch's or a pull request's
-    /// copy always names both.
-    enum Action: Equatable { case remove, update, reinstall, backTo, switchToVerified }
+    /// copy always names both. `alongTheLine` is **Update** of such a copy to
+    /// the head its own branch or pull request moved to (`RefOffer`).
+    enum Action: Equatable { case remove, update, reinstall, backTo, switchToVerified, alongTheLine }
 
     private var record: InstalledRecord? { model.installed.plugins[id] }
     private var standing: PluginStanding { model.standing(of: id) }
     private var offer: UpdateOffer? {
         model.settings.readsOfficialCatalogue ? model.updateOffer(for: id) : nil
     }
+    /// What a copy of code nobody verified says and offers (`UnverifiedRow`).
+    private var unverified: UnverifiedRow? { model.unverifiedRow(of: id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -412,22 +424,30 @@ struct InstalledRepositoryControls: View {
                     if offer.isWaiting, let page = model.whatChanged(id) {
                         Button(strings(.catalogueWhatChanged)) { openURL(page) }
                             .buttonStyle(.link).font(.caption)
+                            .accessibilityIdentifier("plugin.\(id).whatChanged")
                     }
                 }
             }
-            // What became of the pull request the copy came from: merged as
-            // something else — the verified version offered — or closed
-            // without being merged, the plugin running on.
-            if let record, let number = record.ref.pullRequestNumber, let lifecycle = model.pullRequestLifecycle(of: id),
-               let phrase = lifecycle.rowPhrase(number: number) {
-                HStack(spacing: 8) {
-                    Text(strings(phrase)).font(.caption).bold()
-                        .foregroundStyle(lifecycle == .closed ? AnyShapeStyle(.orange) : AnyShapeStyle(.primary))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("plugin.\(id).pullRequest")
-                    if lifecycle == .mergedDiffers, let page = model.whatChanged(id) {
-                        Button(strings(.catalogueWhatChanged)) { openURL(page) }
-                            .buttonStyle(.link).font(.caption)
+            // Of code nobody verified: what became of its pull request —
+            // merged as something else, the verified version offered, or
+            // closed without being merged, the plugin running on — its branch
+            // gone, what its branch or pull request has for it now and whether
+            // that head rewrote its history, and since when its line was not
+            // checked (`UnverifiedRow.said`).
+            if let record, let unverified {
+                ForEach(unverified.said(ref: record.ref, id: id, time: { Clock.text($0, strings) }), id: \.suffix) { said in
+                    HStack(spacing: 8) {
+                        Text(said.phrase.map { strings($0) }.joined(separator: " — ")).font(.caption)
+                            .bold(said.suffix != "notChecked")
+                            .foregroundStyle(Self.isWarning(said.suffix, unverified) ? AnyShapeStyle(.orange)
+                                                                                   : AnyShapeStyle(.primary))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("plugin.\(id).\(said.suffix)")
+                        if let page = whatChanged(said.suffix, unverified) {
+                            Button(strings(.catalogueWhatChanged)) { openURL(page) }
+                                .buttonStyle(.link).font(.caption)
+                                .accessibilityIdentifier("plugin.\(id).whatChanged")
+                        }
                     }
                 }
             }
@@ -505,10 +525,17 @@ struct InstalledRepositoryControls: View {
                 }
                 .disabled(busy)
                 .accessibilityIdentifier("plugin.\(id).update")
-            } else if model.verifiedVersionOffered(id) != nil {
+            } else if let unverified, unverified.verifiedIsAnUpdate, let label = unverified.verifiedButton {
                 // *The verified version differs — update*: the catalogue's
-                // copy, after the warning that names both.
-                Button(strings(.catalogueUpdate)) { press(.update) }
+                // copy, after the warning that names both, by the name the
+                // catalogue row gives the same press.
+                Button(strings(label)) { press(.update) }
+                    .disabled(busy)
+                    .accessibilityIdentifier("plugin.\(id).update")
+            } else if let label = unverified?.lineOffer?.button {
+                // What its own branch or pull request has now: the head's
+                // folder, pressed and never by itself; the card asks.
+                Button(strings(label)) { press(.alongTheLine) }
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).update")
             }
@@ -517,8 +544,8 @@ struct InstalledRepositoryControls: View {
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).reinstall")
             }
-            if let verified = switchToVerified {
-                Button(strings(.catalogueSwitchToVerified(version: verified))) { press(.switchToVerified) }
+            if let unverified, !unverified.verifiedIsAnUpdate, let label = unverified.verifiedButton {
+                Button(strings(label)) { press(.switchToVerified) }
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).switchToVerified")
             }
@@ -556,6 +583,7 @@ struct InstalledRepositoryControls: View {
         case .reinstall: came = model.reinstall(id, shown: shown)
         case .backTo: came = model.backToPrevious(id, shown: shown)
         case .switchToVerified: came = model.update(id, shown: shown)
+        case .alongTheLine: came = model.updateAlongItsLine(id, shown: shown)
         }
         if case .ask(let now) = came {
             confirming = Confirmation(shown: now, then: action)
@@ -564,14 +592,26 @@ struct InstalledRepositoryControls: View {
         }
     }
 
-    /// The verified version **Switch to verified** puts in the place of a
-    /// branch's or a pull request's copy: the catalogue's, when it has the
-    /// plugin and it can be installed here (`CatalogueRowState.unverified`) —
-    /// offered as **Update** instead once its pull request was merged as
-    /// something else (`verifiedVersionOffered`).
-    private var switchToVerified: String? {
-        guard model.verifiedVersionOffered(id) == nil else { return nil }
-        return model.verifiedVersion(for: id)
+    /// Whether a line the row says of code nobody verified is a warning: a
+    /// pull request closed unmerged, a branch gone, history rewritten, a
+    /// line not checked.
+    private static func isWarning(_ suffix: String, _ row: UnverifiedRow) -> Bool {
+        switch suffix {
+        case "pullRequest": row.lifecycle == .closed
+        case "branchGone", "rewritten", "notChecked": true
+        default: false
+        }
+    }
+
+    /// *What changed* beside a line of code nobody verified: against the
+    /// verified version once its pull request was merged as something else,
+    /// and along its own line beside what that line offers.
+    private func whatChanged(_ suffix: String, _ row: UnverifiedRow) -> URL? {
+        switch suffix {
+        case "pullRequest": row.verifiedIsAnUpdate ? model.whatChanged(id) : nil
+        case "offer": row.lineOffer?.offer.isWaiting == true ? model.whatChangedAlongItsLine(id) : nil
+        default: nil
+        }
     }
 
     private func isOlder(_ offer: UpdateOffer) -> Bool {
@@ -598,6 +638,7 @@ struct InstalledRepositoryControls: View {
         case .reinstall: button = strings(.catalogueReinstall(version: version))
         case .backTo: button = strings(.catalogueBackTo(version: version))
         case .switchToVerified: button = strings(.catalogueSwitchToVerified(version: version))
+        case .alongTheLine: button = strings(unverified?.lineOffer?.button ?? .catalogueUpdate)
         }
         return VStack(alignment: .leading, spacing: 5) {
             Text(text).font(.caption).fixedSize(horizontal: false, vertical: true)
@@ -1031,6 +1072,7 @@ struct ProblemText: View {
         case .tookTooLong: [strings(.catalogueTookTooLong)]
         case .cannotWrite(let reason): [strings(.catalogueCannotWrite(reason: reason))]
         case .stillRunning(let id): [strings(.catalogueStillRunning(id: id))]
+        case .commitGone(let commit): [strings(.catalogueCommitGone(commit: commit))]
         case .catalogue(let error):
             switch error {
             case .unreachable(let reason): [strings(.catalogueUnreachable(reason: reason, readAt: nil))]

@@ -64,7 +64,8 @@ In scope, and treated as vulnerabilities:
   what was merged, a pull request's copy included;
 - a plugin updating itself when it should only have been offered: a new version
   asking for different permissions than the installed one, a copy that was not
-  **Verified**, one you kept at an earlier version, one holding a file of yours,
+  **Verified** — a new head of the branch or the pull request it came from
+  included — one you kept at an earlier version, one holding a file of yours,
   or with **Update verified plugins by themselves** switched off — or an update
   carrying your permission decision to a version that asks for more;
 - a plugin escaping its folder: `run` resolving outside it, a manifest reading
@@ -97,9 +98,11 @@ launch and both with a switch to turn them off:
   plugin's files when you press Install, Update, Reinstall or pick an earlier
   version, the pull request or the branch a link names when you press Look up
   in Install from a link… — its head, its listing and the manifests there that
-  are not the catalogue's — in each read, the pull request a plugin installed
-  from one came from, unless `main` has it as it is, and once it is merged into
-  `main` the listing of the commit it was merged as — and, after a read, the files of a **Verified** plugin whose new
+  are not the catalogue's — in each read, the pull request or the branch a
+  plugin installed from one came from, unless `main` has it as it is — and, once
+  its head moved, that head's listing and the plugin's manifest there, and one
+  comparison with what is installed when the plugin changed there — and once
+  it is merged into `main` the listing of the commit it was merged as — and, after a read, the files of a **Verified** plugin whose new
   version asks for exactly the permissions it asks for now: such a plugin
   updates itself, keeping your permission decision. Anything else is only
   offered. Off with Settings → Plugins → *Update verified plugins by

@@ -58,15 +58,28 @@ public struct RefResolver: Sendable {
         /// The plugin whose folder the link went into, if it went into one:
         /// what an empty list is said of (`LinkRefusal.head`).
         public var plugin: String?
+        /// The official repository's default branch, as it was known when the
+        /// link was read — nil when it was not: whether a pull request merged
+        /// was merged into it, where what it merged is in the catalogue, or
+        /// into another branch, where nothing is verified (`LinkRefusal.head`).
+        public var defaultBranch: String?
 
         public init(origin: PluginOrigin, commit: String, listing: CommitListing, entries: [CatalogueEntry],
-                    pullRequest: PullRequest?, plugin: String? = nil) {
+                    pullRequest: PullRequest?, plugin: String? = nil, defaultBranch: String? = nil) {
             self.origin = origin
             self.commit = commit
             self.listing = listing
             self.entries = entries
             self.pullRequest = pullRequest
             self.plugin = plugin
+            self.defaultBranch = defaultBranch
+        }
+
+        /// Where a branch's head was heard to be — the commit a copy installed
+        /// from it is at, and what is known of that branch from then on
+        /// (`FollowedRefs.keep`); nil for a pull request, whose answer says it.
+        public var branchHead: String? {
+            origin.ref.kind == PluginRef.branchKind ? commit : nil
         }
     }
 
@@ -91,6 +104,7 @@ public struct RefResolver: Sendable {
         let commit: String
         var pullRequest: PullRequest?
         var plugin: String?
+        var known = defaultBranch
         switch link {
         case .officialRepository:
             return .catalogue(plugin: nil)
@@ -105,8 +119,7 @@ public struct RefResolver: Sendable {
             origin = PluginOrigin(repository: provider.address, ref: .pullRequest(number))
             commit = pullRequest?.head ?? ""
         case .branch(let name, let named):
-            let known: String?
-            if let defaultBranch { known = defaultBranch } else { known = try await provider.defaultBranch() }
+            if known == nil { known = try await provider.defaultBranch() }
             // The catalogue's: named only when the catalogue's head has it,
             // so that nothing says a plugin is in the catalogue below when it
             // is not.
@@ -133,7 +146,7 @@ public struct RefResolver: Sendable {
             listing.plugins[id].map { Catalogue.entry(id, $0, store: store, udeck: udeck, language: language) }
         }
         return .resolved(Resolution(origin: origin, commit: commit, listing: listing, entries: entries,
-                                    pullRequest: pullRequest, plugin: plugin))
+                                    pullRequest: pullRequest, plugin: plugin, defaultBranch: known))
     }
 
     /// The plugin folders of `listing` whose tree is not the one `head` has

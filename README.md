@@ -251,10 +251,12 @@ uDeck reads it from `api.github.com` and `raw.githubusercontent.com`, anonymousl
   or the branch of that repository the link names — its head, its listing and
   the manifests of the plugins there that are not the catalogue's — and, when
   you press **Install** there, that plugin's files;
-* and, in each read, for a plugin installed from a pull request that the
-  catalogue does not have as it is, that pull request — whether it was merged
-  or closed — and, once merged into `main`, the listing of the commit it was
-  merged as.
+* and, in each read, for a plugin installed from a pull request or a branch
+  that the catalogue does not have as it is, that pull request — where its head
+  is, whether it was merged or closed — or that branch's head; once the head
+  moved, its listing and the plugin's manifest there, and, when the plugin
+  changed there, one comparison with what is installed; and, once merged into
+  `main`, the listing of the commit it was merged as.
 
 A read is usually one or two requests, each carrying `User-Agent:
 uDeck/<version>` and the network address any request carries. **Verified
@@ -268,7 +270,9 @@ one you kept at an earlier version are only offered, for you to press
 installed from a pull request or a branch is **Unverified** — on its row in
 Settings, in the list it came from and on its card — asks before it runs, even
 when it asks for nothing, and again whenever its code changes, and is never
-updated by itself. Once exactly that folder is merged into the repository, it
+updated by itself: its row offers what its pull request or branch has now,
+with *What changed*, and says when a push rewrote that history or the branch
+is gone. Once exactly that folder is merged into the repository, it
 is **Verified** — nothing downloaded, nothing asked again — and updates as a
 verified plugin does; merged with changes, its row offers the verified version,
 and closed without being merged, its row says so and it keeps running. **Settings →

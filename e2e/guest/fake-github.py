@@ -36,6 +36,9 @@ passes; the lab's own tests hold this one against git itself.
     GET /api/repos/{o}/{r}/git/trees/{sha}[?recursive=1] a listing, of any commit, on the main line or off it
     GET /api/repos/{o}/{r}/pulls/{n}                     a pull request: its head, state, merge, the
                                                          repository it came from; an ETag and 304
+    GET /api/repos/{o}/{r}/compare/{base}...{head}       two commits compared through their parents:
+                                                         ahead, behind, identical or diverged, and by how
+                                                         many; a commit that is not there is 404
     GET /raw/{o}/{r}/{commit}/{path}                     one file, standing in for raw.githubusercontent.com
 
 API answers carry `x-ratelimit-remaining` and `x-ratelimit-reset`, and the
@@ -56,12 +59,16 @@ afresh on every request:
                                                     when merged; refs/pull/{n}/head follows head
     {"limit_until": 1790000000}                     the hourly limit is used up until then:
                                                     403 with remaining 0 and that reset
+    {"spent": 50}                                   that many of the hour's requests already spent by
+                                                    something else on the connection: what is left
+                                                    says so, and runs out that much sooner
     {"alter": ["plugins/uptime/uptime.sh"]}         answer these files with different bytes
     {"truncated": true}                             say the whole-repository listing is truncated
 
 Moving a branch's head, force-pushing it, merging or closing a pull request is
-one rewrite of the file: a head at another fixture commit, `state` and
-`merged` changed, a branch left out.
+one rewrite of the file: a head at another fixture commit — one that does not
+descend from the one before, for a force push — `state` and `merged` changed, a
+branch left out.
 
 **It keeps an access log**, one JSON object per line and per request — method,
 host, path, query, status, and the headers that decide an answer — which is the
@@ -301,6 +308,29 @@ class Repository:
             return self.commits.get(str(branches[name]))
         return None if name != ref else self.by_sha.get(ref)
 
+    def compare(self, base: Commit, head: Commit) -> tuple[str, int, int, Commit | None]:
+        """(status, ahead_by, behind_by, merge base) as GitHub's compare says them, through the parents: `ahead` when
+        `head` continues `base`, `behind` when `base` continues `head`, `identical`, or `diverged` from the newest
+        commit both have — none, when they have none."""
+        base_line = self.line(base)
+        head_line = self.line(head)
+        on_head = {commit.sha: index for index, commit in enumerate(head_line)}
+        for behind, commit in enumerate(base_line):
+            if commit.sha in on_head:
+                ahead = on_head[commit.sha]
+                status = "identical" if ahead == behind == 0 else "ahead" if behind == 0 else "behind" if ahead == 0 else "diverged"
+                return status, ahead, behind, commit
+        return "diverged", len(head_line), len(base_line), None
+
+    @staticmethod
+    def line(commit: Commit) -> list[Commit]:
+        """A commit and every commit before it, newest first: one parent each."""
+        found = []
+        while commit is not None:
+            found.append(commit)
+            commit = commit.parent
+        return found
+
     def tree_owner(self, sha: str) -> Snapshot | None:
         """The snapshot that holds this tree, or whose commit this is."""
         if sha in self.by_sha:
@@ -337,7 +367,7 @@ def read_state(root: str, default_main: str) -> dict:
     Broken is not guessed at: the lab writes the file whole and renames it into
     place, and reads it back through `/lab/state` before it relies on it.
     """
-    state = {"main": default_main, "branches": {}, "pulls": {}, "limit_until": None, "alter": [], "truncated": False}
+    state = {"main": default_main, "branches": {}, "pulls": {}, "limit_until": None, "spent": 0, "alter": [], "truncated": False}
     try:
         with open(os.path.join(root, "state.json")) as file:
             given = json.load(file)
@@ -356,18 +386,19 @@ class Limit:
         self.remaining = LIMIT
         self.reset = int(now) + WINDOW_SECONDS
 
-    def spend(self, now: float, used_up_until: int | None) -> tuple[bool, int, int]:
-        """(allowed, remaining, reset) for one API request."""
+    def spend(self, now: float, used_up_until: int | None, spent: int = 0) -> tuple[bool, int, int]:
+        """(allowed, remaining, reset) for one API request, `spent` of the hour's requests having gone to something
+        else on the same connection."""
         with self.lock:
             if used_up_until is not None and now < used_up_until:
                 return False, 0, int(used_up_until)
             if now >= self.reset:
                 self.remaining = LIMIT
                 self.reset = int(now) + WINDOW_SECONDS
-            if self.remaining <= 0:
+            if self.remaining - spent <= 0:
                 return False, 0, self.reset
             self.remaining -= 1
-            return True, self.remaining, self.reset
+            return True, self.remaining - spent, self.reset
 
 
 # --- The server ---------------------------------------------------------------------
@@ -420,7 +451,11 @@ class Fake:
 
     def api(self, path: str, query: dict, headers: dict) -> tuple[int, dict, bytes]:
         state = self.state()
-        allowed, remaining, reset = self.limit.spend(self.clock(), state.get("limit_until"))
+        try:
+            spent = max(0, int(state.get("spent") or 0))
+        except (TypeError, ValueError):
+            spent = 0
+        allowed, remaining, reset = self.limit.spend(self.clock(), state.get("limit_until"), spent)
         limits = {
             "x-ratelimit-limit": str(LIMIT),
             "x-ratelimit-remaining": str(remaining),
@@ -459,6 +494,8 @@ class Fake:
             return self.tree(rest[len("/git/trees/") :], recursive, bool(state.get("truncated")))
         if rest.startswith("/pulls/"):
             return self.pull(rest[len("/pulls/") :], headers, state)
+        if rest.startswith("/compare/"):
+            return self.compare(rest[len("/compare/") :], state)
         return self.json(404, {"message": "Not Found"})
 
     def commit(self, ref: str, headers: dict, state: dict) -> tuple[int, dict, bytes]:
@@ -524,6 +561,30 @@ class Fake:
         if headers.get("if-none-match", "") == etag:
             return 304, {"ETag": etag}, b""
         return status, {**extra, "ETag": etag}, data
+
+    def compare(self, spec: str, state: dict) -> tuple[int, dict, bytes]:
+        """`GET /compare/{base}...{head}` as GitHub answers it: the status, how many commits each side has that the
+        other does not, the newest commit both have, the commits `head` has — and no files, which uDeck does not read.
+        Either side a commit id or a ref; one that is not there is 404, as GitHub's."""
+        base_ref, dots, head_ref = spec.partition("...")
+        base = self.repository.resolve(base_ref, state) if dots else None
+        head = self.repository.resolve(head_ref, state) if dots else None
+        if base is None or head is None:
+            return self.json(404, {"message": "Not Found"})
+        status, ahead, behind, merge_base = self.repository.compare(base, head)
+        return self.json(
+            200,
+            {
+                "status": status,
+                "ahead_by": ahead,
+                "behind_by": behind,
+                "total_commits": ahead,
+                "base_commit": self.describe(base),
+                "merge_base_commit": self.describe(merge_base) if merge_base else None,
+                "commits": [self.describe(commit) for commit in reversed(self.repository.line(head)[:ahead])],
+                "files": [],
+            },
+        )
 
     def history(self, query: dict, state: dict) -> tuple[int, dict, bytes]:
         start = self.repository.resolve(query.get("sha", [DEFAULT_BRANCH])[0], state)

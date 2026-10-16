@@ -313,6 +313,21 @@ public enum Phrase: Sendable, Equatable {
     case pluginPullRequestMergedDiffers(number: Int)
     case pluginPullRequestMergedNothingOffered(number: Int)
     case pluginPullRequestClosed(number: Int)
+    /// What the branch or the pull request a copy came from has for it now
+    /// (`RefOffer`), under its mark: a newer version, other files under the
+    /// same one, an older one, its folder no longer there — and that the head
+    /// which brings it does not continue what is installed (`HistoryRewrite`).
+    case pluginRefAvailable(ref: PluginRef, version: String)
+    case pluginRefChangedStill(ref: PluginRef, version: String)
+    case pluginRefNowHas(ref: PluginRef, version: String)
+    case pluginRefGone(ref: PluginRef, id: String)
+    case pluginRefRewritten(ref: PluginRef)
+    /// The branch a copy came from is not there any more; the plugin keeps
+    /// running.
+    case pluginBranchGone(name: String)
+    /// The last read did not ask about the branch or the pull request a copy
+    /// came from — the reserve, a limit, a request that failed — since `at`.
+    case pluginRefNotCheckedSince(ref: PluginRef, at: String)
     case pluginPinned
     /// A copy a verified plugin put in place by itself (`AutoUpdate`), and
     /// one it could not: tried again at the next read of the catalogue.
@@ -355,6 +370,12 @@ public enum Phrase: Sendable, Equatable {
     case linkIsTheCatalogue(official: String, plugin: String?)
     case linkHead(ref: PluginRef, commit: String)
     case linkPullRequestMerged
+    /// Merged into `base`, another branch than the default one: nothing of it
+    /// is verified, and the catalogue does not have it.
+    case linkPullRequestMergedElsewhere(base: String)
+    /// **Back to** or **Reinstall** of a commit GitHub no longer has: a
+    /// history rewritten, and cleaned up since.
+    case catalogueCommitGone(commit: String)
     case linkPullRequestClosed
     /// Nothing there differs from the catalogue's head: every plugin, or —
     /// for a link into one plugin's folder — that plugin.

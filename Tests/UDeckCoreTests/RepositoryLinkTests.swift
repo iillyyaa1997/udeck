@@ -184,6 +184,7 @@ struct RefResolverTests {
         #expect(found.entries.first { $0.id == "uptime" }?.manifest?.version == "1.0.1")
         #expect(found.entries.first { $0.id == "asks-nothing" }?.manifest?.permissions.capabilities == [])
         #expect(found.pullRequest?.headRepository == "someone/udeck-plugins")
+        #expect(found.defaultBranch == "main", "the default branch as it was known: what a merge is said against")
         #expect(provider.asked == ["pull 3", "tree \(Self.pullRequestHead.commit) recursive"],
                 "one request for the pull request, one for its listing")
         #expect(Set(provider.files) == ["plugins/asks-nothing/manifest.json", "plugins/uptime/manifest.json"],
@@ -202,6 +203,7 @@ struct RefResolverTests {
         }
         #expect(found.origin == PluginOrigin(repository: provider.address, ref: .branch("feature/x")))
         #expect(found.entries.map(\.id) == ["asks-nothing", "uptime"] && found.pullRequest == nil)
+        #expect(found.defaultBranch == "main")
         #expect(provider.asked == ["head refs/heads/feature/x", "tree \(Self.pullRequestHead.commit) recursive"])
 
         guard case .resolved(let one) = try await resolve(.branch("feature/x", plugin: "uptime"), with: provider) else {
@@ -284,28 +286,50 @@ struct RefResolverTests {
 }
 
 /// A provider of the test's own: repositories in memory, by commit, and what
-/// it was asked, in order.
+/// it was asked, in order. A head asked with `If-None-Match` answers
+/// unchanged when it is that commit, as GitHub's `304`; two commits are
+/// compared by what the test says of them (`comparisons`), and a commit the
+/// test does not name in one is not there.
 final class Provider: RepositoryProvider, @unchecked Sendable {
     let address = RepositoryAddress(path: "iillyyaa1997/udeck-plugins")
     private let lock = NSLock()
     private var log: [String] = []
     private var fetched: [String] = []
     private var isLimited = false
+    private var failing: Set<String> = []
+    private var hook: (@Sendable (String) -> Void)?
     let commits: [String: FakeRepository]
     let branches: [String: String]
     let pulls: [Int: PullRequest]
+    /// `"<base>...<head>"` → how they compare.
+    let comparisons: [String: Comparison]
     static let until = Date(timeIntervalSince1970: 1_790_003_600)
 
-    init(commits: [FakeRepository], branches: [String: String] = [:], pulls: [Int: PullRequest] = [:]) {
+    init(commits: [FakeRepository], branches: [String: String] = [:], pulls: [Int: PullRequest] = [:],
+         comparisons: [String: Comparison] = [:]) {
         self.commits = Dictionary(uniqueKeysWithValues: commits.map { ($0.commit, $0) })
         self.branches = branches
         self.pulls = pulls
+        self.comparisons = comparisons
+    }
+
+    /// Requests beginning with one of these get no answer at all.
+    var unreachable: Set<String> {
+        get { lock.withLock { failing } }
+        set { lock.withLock { failing = newValue } }
     }
 
     static func pull(_ number: Int, head: String, from repository: String?, state: PullRequest.State = .open,
                      merged: Bool = false) -> PullRequest {
         PullRequest(number: number, state: state, merged: merged, mergeCommit: nil, head: head, headRef: "fix",
                     headRepository: repository, title: "A fix")
+    }
+
+    /// Called with each request once it is answered — what a test changes
+    /// between one request and the next: what the limit says is left.
+    var afterAsking: (@Sendable (String) -> Void)? {
+        get { lock.withLock { hook } }
+        set { lock.withLock { hook = newValue } }
     }
 
     var asked: [String] { lock.withLock { log } }
@@ -316,11 +340,13 @@ final class Provider: RepositoryProvider, @unchecked Sendable {
     }
 
     private func ask(_ what: String) throws {
-        let blocked = lock.withLock { () -> Bool in
+        let (blocked, fails, after) = lock.withLock { () -> (Bool, Bool, (@Sendable (String) -> Void)?) in
             log.append(what)
-            return isLimited
+            return (isLimited, failing.contains { what.hasPrefix($0) }, hook)
         }
+        after?(what)
         if blocked { throw ProviderError.rateLimited(until: Self.until) }
+        if fails { throw ProviderError.unreachable("no answer") }
     }
 
     func defaultBranch() async throws -> String {
@@ -329,9 +355,10 @@ final class Provider: RepositoryProvider, @unchecked Sendable {
     }
 
     func head(of branch: String, ifNoneMatch etag: String?) async throws -> HeadAnswer {
-        try ask("head \(branch)")
+        try ask("head \(branch)" + (etag.map { " if-none-match \($0)" } ?? ""))
         let name = branch.hasPrefix("refs/heads/") ? String(branch.dropFirst("refs/heads/".count)) : branch
         guard let commit = branches[name] else { throw ProviderError.notFound }
+        if etag == "\"\(commit)\"" { return .unchanged }
         return .commit(commit, etag: "\"\(commit)\"")
     }
 
@@ -356,6 +383,12 @@ final class Provider: RepositoryProvider, @unchecked Sendable {
         try ask("pull \(number)")
         guard let pull = pulls[number] else { throw ProviderError.notFound }
         return pull
+    }
+
+    func compare(_ base: String, _ head: String) async throws -> Comparison {
+        try ask("compare \(base)...\(head)")
+        guard let comparison = comparisons["\(base)...\(head)"] else { throw ProviderError.notFound }
+        return comparison
     }
 
     func folderPage(_ path: String, commit: String) -> URL? { nil }

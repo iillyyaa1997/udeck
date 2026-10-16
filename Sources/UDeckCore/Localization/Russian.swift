@@ -172,7 +172,7 @@ struct Russian: Vocabulary {
         // Плагины из репозитория
         case .pluginsOfficialCatalogue: "Официальный каталог"
         case .pluginsOfficialCatalogueHelp(let source):
-            "uDeck читает список плагинов в \(source) через несколько секунд после запуска, раз в день и по кнопке «Проверить» — только список и манифест каждого плагина. Файлы плагина скачиваются, когда вы нажимаете «Установить» и когда проверенный плагин обновляется сам. Если выключить, uDeck не делает никаких запросов о плагинах; установленные продолжают работать."
+            "uDeck читает список плагинов в \(source) через несколько секунд после запуска, раз в день, при открытии этой панели, если списку больше часа, и по кнопке «Проверить» — список и манифест каждого плагина, а для плагина, установленного из ветки или запроса на слияние, ещё и где сейчас эта ветка или запрос и, если они сдвинулись, их список файлов, манифест этого плагина там и одно сравнение с установленным. Файлы плагина скачиваются, когда вы нажимаете «Установить» и когда проверенный плагин обновляется сам. Если выключить, uDeck не делает никаких запросов о плагинах; установленные продолжают работать."
         case .catalogueCheckNow: "Проверить"
         case .catalogueChecked(let source, let time): "\(source) · проверено в \(time)"
         case .catalogueNeverRead(let source): "\(source) · ещё не прочитан"
@@ -273,6 +273,15 @@ struct Russian: Vocabulary {
             "Запрос на слияние #\(number) влит; проверенной версии здесь не предлагается, плагин продолжает работать"
         case .pluginPullRequestClosed(let number):
             "Запрос на слияние #\(number) закрыт без слияния; плагин продолжает работать"
+        case .pluginRefAvailable(let ref, let version): "В \(Self.lineIn(ref)) доступна \(version)"
+        case .pluginRefChangedStill(let ref, let version): "Изменён в \(Self.lineIn(ref)), всё ещё \(version)"
+        case .pluginRefNowHas(let ref, let version): "В \(Self.lineIn(ref)) теперь \(version)"
+        case .pluginRefGone(let ref, let id): "\(id) больше нет в \(Self.lineIn(ref)); плагин продолжает работать"
+        case .pluginRefRewritten(let ref):
+            "История \(Self.lineFrom(ref)) переписана: новый последний коммит не продолжает установленный"
+        case .pluginBranchGone(let name): "Ветки \(name) больше нет; плагин продолжает работать"
+        case .pluginRefNotCheckedSince(let ref, let at):
+            "\(Self.line(ref, capitalised: true)) не \(ref.kind == PluginRef.branchKind ? "проверялась" : "проверялся") с \(at)"
         case .pluginPinned: "Оставлен на этой версии — о новых всё равно сообщается"
         case .pluginUpdatedByItself(let date): "Обновился сам \(date)"
         case .pluginUpdateByItselfFailed(let version):
@@ -321,6 +330,10 @@ struct Russian: Vocabulary {
         case .linkHead(let ref, let commit): "\(Self.line(ref, capitalised: true)), коммит \(commit)"
         case .linkPullRequestMerged:
             "Этот запрос на слияние влит. Ниже — его последний коммит в том виде, в каком его предлагали; то, что репозиторий влил, есть в каталоге."
+        case .catalogueCommitGone(let commit):
+            "Коммита \(commit) больше нет на GitHub — возможно, историю, где он был, переписали, — поэтому из него ничего не установить; ничего не изменено."
+        case .linkPullRequestMergedElsewhere(let base):
+            "Этот запрос на слияние влит в \(base), а не в основную ветку: ниже — его последний коммит, и ничего из него не проверено."
         case .linkPullRequestClosed: "Этот запрос на слияние закрыт без слияния."
         case .linkNothingDiffers(let ref, let plugin):
             plugin.map { "\($0) из \(Self.lineFrom(ref)) такой же, как в каталоге: устанавливать отсюда нечего." }
@@ -533,6 +546,14 @@ extension Russian {
         }
         guard capitalised, let first = said.first else { return said }
         return first.uppercased() + said.dropFirst()
+    }
+
+    /// То же после «в»: *в запросе на слияние #3*, *в ветке fix/uptime*.
+    static func lineIn(_ ref: PluginRef) -> String {
+        if let number = ref.pullRequestNumber { return "запросе на слияние #\(number)" }
+        if ref.kind == PluginRef.branchKind { return "ветке \(ref.name ?? "")" }
+        if ref.isDefault { return "основной ветке" }
+        return [ref.kind, ref.name].compactMap { $0 }.joined(separator: " ")
     }
 
     /// То же после «из»: *из запроса на слияние #3*, *из ветки fix/uptime*.

@@ -1,6 +1,6 @@
 """Plugins from a repository: the catalogue, installing, updating, removing — and saying no.
 
-Thirty-two checks, one per row of the table in docs/plugin-repository.md ("The
+Thirty-six checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks"), and all of them against the same two things: a release build of
 this checkout, and a fake GitHub served inside the guest
 (`plugin_repository.FakeGitHub`, `e2e/guest/fake-github.py`) whose content is
@@ -294,6 +294,30 @@ CATALOGUE_MERGED_DIFFERS = "merged, and the verified version differs"
 CATALOGUE_CLOSED = "closed without being merged"
 REINSTALL_BRINGS = "Reinstall puts back {version} from branch {name} at {commit}: code nobody verified."
 AVAILABLE = "{version} available"
+# Following the branch or the pull request a copy came from (stage 3, R5). Pull request #3,
+# or the branch fix/uptime, moves on from pr3 to p2 — uptime's script with one paragraph
+# more, the same version and the same manifest — or is pushed again as p2x: p2's content
+# made on c1, so that it does not continue pr3 (e2e/fixtures/plugin-repository/parents).
+# What uDeck says of it (English.swift: pluginRefChangedStill, pluginRefRewritten,
+# pluginBranchGone, pluginRefNotCheckedSince, catalogueUpdatesWaiting, catalogueUpdate).
+CHANGED_STILL = "Changed in {line}, still {version}"
+REWRITTEN = "The history of {line} was rewritten: its new head does not continue what is installed"
+BRANCH_GONE = "Branch {name} no longer exists; the plugin keeps running"
+NOT_CHECKED_SINCE = "{line} not checked since "
+ONE_UPDATE_WAITING = "1 update is waiting"
+UPDATE = "Update"
+# Two buttons with the same word in the same window are as wide as each other, to the pixel or two.
+SAME_WORD_PX = 2
+# What the follower writes in uDeck's log of the copies it did not ask about (DeckModel+Repository.swift).
+LEFT_AS_THEY_WERE = "left as they were: {ids}"
+# uDeck's log of a read of the catalogue that asked nothing: fewer than the reserve left before it began.
+LEFT_FOR_LATER = "the official catalogue: leftForLater"
+# How many API requests an hour GitHub allows an address without a token, and how many uDeck
+# keeps for what the operator presses (RateLimit.swift: reserveForTheOperator) — so that a
+# read nobody asked for is left with one fewer than that once the catalogue's own question is
+# answered (`_leave_the_reserve`).
+HOURLY = 60
+RESERVE = 10
 
 
 # --- The checks -------------------------------------------------------------------------
@@ -1521,8 +1545,9 @@ def check_merged_with_changes_offers_the_verified(machine, check_dir, lab):
     pull request's copy as `previous`.
 
     **Red for**: a merge with changes made by itself — what comes is not what
-    was allowed — or adopted as if it were the copy, and an offer nobody can
-    see.
+    was allowed — or adopted as if it were the copy, an offer nobody can see,
+    and one press called two names — the catalogue row's button says
+    **Update**, as the plugin's row does.
     """
     scene = _prepare(machine, check_dir, lab, main="c1", pulls=PULLS)
     try:
@@ -1553,6 +1578,18 @@ def check_merged_with_changes_offers_the_verified(machine, check_dir, lab):
         waiting = ui.says(ui.element(dump, "catalogue.updatesWaiting"))
         expect(waiting == "1 update is waiting", f"Settings says {waiting!r} of the updates waiting, not that one is")
         expect(ui.element(dump, f"plugin.{UPTIME}.update") is not None, "the row says to update, and offers no Update")
+        # One press, one name: the catalogue row's button for the verified copy says what the plugin's row's says,
+        # **Update**. The walk reads no button's words — a SwiftUI button lists neither AXTitle nor AXDescription,
+        # and the helper reads what System Events reads (e2e/guest/ax.swift) — so the word is told by the button's
+        # width, which is the plugin row's Update's: *Switch to verified 1.0.2* is more than twice as wide (69
+        # against 159 to 161 px, run 38318972153). A screenshot of the row is kept for a person to read.
+        button = ui.element(dump, f"catalogue.{UPTIME}.switchToVerified")
+        update = ui.element(dump, f"plugin.{UPTIME}.update")
+        expect(button is not None and update is not None and abs(button.width - update.width) <= SAME_WORD_PX,
+               f"the plugin's row says to update, and the catalogue row's button for the same press is "
+               f"{button.width if button else 'not there'} px wide against the {update.width if update else '?'} px of "
+               f"{UPDATE}: not the same word")  # fmt: skip
+        _show_the_catalogue_row(scene, f"catalogue.{UPTIME}.switchToVerified", "the catalogue row merged with changes")
 
         _expect_a_warning_that_changes_nothing(
             scene, f"plugin.{UPTIME}", "Update to the verified version",
@@ -1784,6 +1821,402 @@ def check_a_closed_pull_request_keeps_running(machine, check_dir, lab):
         expect(mark == UNVERIFIED and said is None,
                f"pull request #3 was opened again, and uptime's row says {mark!r} · {ui.says(said) if said else None!r}, "
                f"not {UNVERIFIED!r} and nothing of the pull request")  # fmt: skip
+    finally:
+        scene.close()
+
+
+def check_unverified_only_offers(machine, check_dir, lab):
+    """Pull request #3 moves on: its copy is offered **Update** and *What changed*, by **Check now** and by a read at launch — never installed by itself.
+
+    uptime 1.0.1 installed from pull request #3, placed and allowed. The fake
+    moves the pull request's head from pr3 to p2 — the same version, the same
+    manifest, one paragraph more in its script. After **Check now** the log
+    holds the question about the pull request, the listing of p2 and one
+    comparison of pr3 with p2, and not one request to the raw host — nothing
+    of p2 is new to uDeck but its listing; the record and the folder are as
+    they were; the row says *Changed in pull request #3, still 1.0.1* with
+    **Update** and *What changed*, and nothing of a rewritten history, and
+    Settings counts one update waiting. Then uDeck is ended and started again
+    with the catalogue two days old and all but nine of the hour's requests
+    spent elsewhere on the connection (the fake's `spent`): the read at launch
+    reads the catalogue and does not ask about the pull request — the reserve
+    is the operator's — and its row says *Pull request #3 not checked since …*
+    and still offers **Update**; **Check now**, a read asked for, asks again,
+    the comparison not repeated, and that line goes. Ended and started again
+    with the catalogue two days old once more, nothing spent elsewhere, the read
+    at launch asks about the pull request by itself, and the row offers
+    **Update** and *What changed*. **Update**, pressed: the record is the pull
+    request's at p2, unverified, with pr3's copy as `previous`, and the card
+    asks before it runs. Last, a read left for later whole: **Check now** with
+    all but nine of the hour's requests spent elsewhere leaves fewer than the
+    reserve, uDeck is ended and started again with the catalogue two days old,
+    and the read at launch asks nothing at all — not even the catalogue's head
+    — uDeck's log says the catalogue was left for later and the pull request
+    left as it was, and `followed.json` says since when; Settings → Plugins
+    opened with the hour's requests all spent, its own read refused by the
+    limit, the row says *Pull request #3 not checked since …*.
+
+    **Red for**: an unverified copy updated without a press, an offer only
+    **Check now** finds, an offer said against the catalogue's head instead of
+    its own line's, a read that spends the reserve on what nobody asked for and
+    one that does not say so — whether it stopped at the pull request or before
+    the catalogue — and an update that runs new code on the old decision.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", pulls=PULLS)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        pr3, p2 = scene.github.commit("pr3"), scene.github.commit("p2")
+        _look_up(scene, PULL_LINK, "the pull request")
+        installed, _ = _install_from_the_link(scene, UPTIME, "the pull request")
+        _close_the_link_sheet(scene, "after installing")
+        _place(scene, UPTIME)
+        _the_card_says_unverified(scene, UPTIME, "the pull request's copy")
+        folder = _identity(machine, UPTIME, "before the pull request moved on")
+
+        _move_the_pull_request(scene, "p2", "moving pull request #3 on to p2")
+        ui.plugins_pane(machine, "opening Settings → Plugins after the pull request moved on")
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now after the pull request moved on")
+        changed = CHANGED_STILL.format(line=f"pull request #{PULL}", version="1.0.1")
+        offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == changed, CATALOGUE_SECONDS)
+        heard = _since(scene, before)
+        dump = _keep_the_pane(machine, check_dir, lab, "offered-along-the-pull-request.txt")
+        expect(offer == changed, f"pull request #3 moved on to p2, and after Check now uptime's row says {offer!r}, "
+                                 f"not {changed!r}; uDeck asked {described(heard)}")
+        api = f"/api/repos/{config.PLUGINS_REPOSITORY}"
+        compared = [r for r in heard if r.is_api and r.path == f"{api}/compare/{pr3}...{p2}"]
+        expect(any(r.is_api and r.path == f"{api}/pulls/{PULL}" for r in heard)
+               and any(r.is_api and r.path == f"{api}/git/trees/{p2}" for r in heard) and len(compared) == 1,
+               f"after Check now uDeck did not ask about pull request #3, list p2 and compare pr3 with p2 once: "
+               f"{described(heard)}")  # fmt: skip
+        raw = [r for r in heard if r.is_raw]
+        expect(not raw, f"nothing of p2 is new to uDeck but its listing, and it fetched {described(raw)}")
+        expect(ui.element(dump, f"plugin.{UPTIME}.update") is not None and ui.element(dump, f"plugin.{UPTIME}.whatChanged") is not None,
+               f"the row offers {changed!r} without Update and What changed: "
+               f"{[c.identifier for c in ui.controls(dump) if UPTIME in c.identifier]}")  # fmt: skip
+        expect(ui.element(dump, f"plugin.{UPTIME}.rewritten") is None,
+               f"p2 continues pr3, and the row says {ui.says(ui.element(dump, f'plugin.{UPTIME}.rewritten'))!r}")
+        waiting = ui.says(ui.element(dump, "catalogue.updatesWaiting"))
+        expect(waiting == ONE_UPDATE_WAITING, f"Settings says {waiting!r} of the updates waiting, not {ONE_UPDATE_WAITING!r}")
+        _expect_the_copy_as_it_was(scene, installed, folder, "after the pull request moved on")
+        followed = _followed(machine, UPTIME) or {}
+        expect(followed.get("head") == p2 and (followed.get("history") or {}).get("rewritten") is False
+               and (followed.get("history") or {}).get("from") == pr3,
+               f"{FOLLOWED} keeps {followed!r} of pull request #3: not its head at p2, continuing pr3")  # fmt: skip
+
+        # The reserve: a read nobody asked for leaves the pull request unasked, and says so.
+        app.quit_app(machine, "ending uDeck before the reserve is all that is left")
+        _age_the_catalogue(machine, AGED_DAYS)
+        before = _count(scene)
+        _leave_the_reserve(scene, "all but nine of the hour's requests spent elsewhere")
+        mark = scene.log.mark("marking the launch with the reserve all that is left")
+        app.launch(machine)
+        heard = _the_launch_read(scene, before)
+        asked = [r for r in heard if r.is_api and r.path == f"{api}/pulls/{PULL}"]
+        expect(not asked, f"the read at launch, nobody asking, with the reserve all that was left, asked {described(asked)}")
+        _expect_uDeck_said(scene, mark, LEFT_AS_THEY_WERE.format(ids=UPTIME), "after the read at launch within the reserve")
+        expect(UPTIME in ((_read_json(machine, FOLLOWED) or {}).get("notCheckedSince") or {}),
+               f"{FOLLOWED} does not say uptime's pull request was not checked: {_read_json(machine, FOLLOWED)!r}")
+        ui.plugins_pane(machine, "opening Settings → Plugins after the read within the reserve")
+        unchecked = NOT_CHECKED_SINCE.format(line=f"Pull request #{PULL}")
+        said = _wait_until(machine, f"plugin.{UPTIME}.notChecked", lambda said: (said or "").startswith(unchecked),
+                           NOTICED_SECONDS)  # fmt: skip
+        dump = _keep_the_pane(machine, check_dir, lab, "not-checked-since.txt")
+        expect((said or "").startswith(unchecked), f"the read at launch did not ask about pull request #3, and its row says "
+                                                    f"{said!r}, not {unchecked!r}…")
+        expect(ui.says(ui.element(dump, f"plugin.{UPTIME}.offer")) == changed and ui.element(dump, f"plugin.{UPTIME}.update"),
+               "not checked, the row no longer offers what was heard before")
+
+        # Asked for, a read asks within the reserve; what was found of p2 is not asked again.
+        scene.github.tell("nothing spent elsewhere any more", spent=0)
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now within the reserve")
+        gone = _wait_until(machine, f"plugin.{UPTIME}.notChecked", lambda said: said is None, CATALOGUE_SECONDS)
+        heard = _since(scene, before)
+        expect(gone is None and any(r.is_api and r.path == f"{api}/pulls/{PULL}" for r in heard),
+               f"Check now, a read asked for, did not ask about pull request #3, or its row still says {gone!r}: "
+               f"{described(heard)}")  # fmt: skip
+        again = [r for r in heard if r.is_api and ("/compare/" in r.path or r.path == f"{api}/git/trees/{p2}")]
+        expect(not again, f"p2 was compared with pr3 and listed before, and uDeck asked {described(again)} again")
+
+        # By itself: the read at launch asks about the pull request, and the row offers it.
+        app.quit_app(machine, "ending uDeck before a read at launch")
+        _age_the_catalogue(machine, AGED_DAYS)
+        before = _count(scene)
+        app.launch(machine)
+        heard = _the_launch_read(scene, before)
+        expect(any(r.is_api and r.path == f"{api}/pulls/{PULL}" for r in heard) and not [r for r in heard if r.is_raw],
+               f"the read at launch, nobody asking, did not ask about pull request #3, or fetched files: {described(heard)}")
+        ui.plugins_pane(machine, "opening Settings → Plugins after the read at launch")
+        offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == changed, NOTICED_SECONDS)
+        dump = _keep_the_pane(machine, check_dir, lab, "offered-after-a-read-at-launch.txt")
+        expect(offer == changed and ui.element(dump, f"plugin.{UPTIME}.update") is not None
+               and ui.element(dump, f"plugin.{UPTIME}.whatChanged") is not None,
+               f"after the read at launch uptime's row says {offer!r}, with "
+               f"{[c.identifier for c in ui.controls(dump) if UPTIME in c.identifier]}")  # fmt: skip
+        _expect_the_copy_as_it_was(scene, installed, folder, "after the read at launch")
+
+        before = _count(scene)
+        record = _operate(scene, f"plugin.{UPTIME}.update", "pressing Update along the pull request",
+                          lambda r: r is not None and r.get("commit") == p2)
+        heard = _since(scene, before)
+        expect(record is not None, f"Update was pressed, and installed.json says {_read_json(machine, INSTALLED)!r}")
+        _expect_an_unverified_record(record, ref={"kind": "pr", "name": PULL}, commit=p2, version="1.0.1")
+        previous = record.get("previous") or {}
+        expect((previous.get("ref") or {}) == {"kind": "pr", "name": PULL} and previous.get("commit") == pr3,
+               f"after the update, previous is {previous!r}, not pull request #3's copy at pr3")
+        _expect_only(heard, p2, api=set(), raw=set(scene.github.files("p2", f"plugins/{UPTIME}")),
+                     what="updating uptime along the pull request", every=True)
+        tree = scene.github.tree_in_guest(f"{UDECK_HOME}/plugins/{UPTIME}", "hashing the folder after the update")
+        expect(tree == scene.github.tree("p2", f"plugins/{UPTIME}"), f"after the update the folder hashes to {tree}, not p2's")
+        _the_card_asks(scene, UPTIME, "after the update along the pull request")
+        _put_the_panel_away(machine, "after the card asked")
+
+        # Left for later whole: fewer than the reserve left before the read at launch begins — it asks nothing at all.
+        ui.plugins_pane(machine, "opening Settings → Plugins before the reserve is all that is left")
+        _leave_the_reserve(scene, "all but nine of the hour's requests spent elsewhere once more")
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now, which leaves less than the reserve")
+        asked = _wait_for_disk(machine, lambda: any(r.is_api and r.path == f"{api}/pulls/{PULL}" for r in _since(scene, before)),
+                               CATALOGUE_SECONDS)  # fmt: skip
+        expect(asked, f"Check now did not ask about pull request #3: {described(_since(scene, before))}")
+        _left_alone(scene, before)
+        app.quit_app(machine, "ending uDeck with less than the reserve left")
+        _age_the_catalogue(machine, AGED_DAYS)
+        before = _count(scene)
+        mark = scene.log.mark("marking the launch with less than the reserve left before it")
+        app.launch(machine)
+        unchecked_kept = _wait_for_disk(
+            machine, lambda: UPTIME in ((_read_json(machine, FOLLOWED) or {}).get("notCheckedSince") or {}), CATALOGUE_SECONDS
+        )
+        heard = [r for r in _left_alone(scene, before) if r.is_api]
+        expect(not heard, f"the read at launch, less than the reserve left before it began, asked {described(heard)}")
+        _expect_uDeck_said(scene, mark, LEFT_FOR_LATER, "after the read at launch was left for later")
+        _expect_uDeck_said(scene, mark, LEFT_AS_THEY_WERE.format(ids=UPTIME), "after the read at launch was left for later")
+        expect(unchecked_kept, f"the read at launch was left for later, and {FOLLOWED} does not say uptime's pull request "
+                               f"was not checked: {_read_json(machine, FOLLOWED)!r}")  # fmt: skip
+        scene.github.tell("the hour's requests all spent elsewhere", spent=HOURLY)
+        before = _count(scene)
+        ui.plugins_pane(machine, "opening Settings → Plugins with the hour's requests all spent")
+        refused = _wait_for_disk(machine, lambda: any(r.is_api and r.status == 403 for r in _since(scene, before)),
+                                 NOTICED_SECONDS)  # fmt: skip
+        if not refused:
+            # The minute's clock was reading as Settings opened, and Settings' own read did not start: Check now.
+            _press(machine, "catalogue.checkNow", "pressing Check now with the hour's requests all spent")
+            refused = _wait_for_disk(machine, lambda: any(r.is_api and r.status == 403 for r in _since(scene, before)),
+                                     CATALOGUE_SECONDS)  # fmt: skip
+        said = _wait_until(machine, f"plugin.{UPTIME}.notChecked", lambda said: (said or "").startswith(unchecked),
+                           NOTICED_SECONDS)  # fmt: skip
+        _keep_the_pane(machine, check_dir, lab, "not-checked-since-a-read-left-for-later.txt")
+        expect(refused, f"Settings → Plugins opened with the hour's requests all spent, and no read was refused: "
+                        f"{described(_since(scene, before))}")  # fmt: skip
+        expect((said or "").startswith(unchecked), f"the read at launch was left for later and the next one refused, and "
+                                                    f"uptime's row says {said!r}, not {unchecked!r}…")
+    finally:
+        scene.close()
+
+
+def check_force_push_is_said(machine, check_dir, lab):
+    """Pull request #3 pushed again with its history rewritten: the row says so, with **Update** offered and nothing installed.
+
+    uptime 1.0.1 installed from pull request #3, placed and allowed. First the
+    control: `main` moves on alone, to c2 — **Check now** asks about the pull
+    request, whose head is still the commit installed, and compares nothing.
+    Then the fake moves the pull request's head to p2x, which was made on c1
+    and does not continue pr3. After **Check now** the log holds one comparison
+    of pr3 with p2x, and no file of uptime; the record and the folder are as
+    they were; the row says *The history of pull request #3 was rewritten: its
+    new head does not continue what is installed* and *Changed in pull request
+    #3, still 1.0.1*, with **Update**. **Update**, pressed: the record is the
+    pull request's at p2x, unverified, and the card asks before it runs.
+
+    **Red for**: a rewritten history said of nothing, or not said; a head that
+    does not continue the copy installed by itself; a comparison with the
+    default branch, against which every squash merge goes another way too.
+    """
+    # main moves on in the control: nothing of this copy updates itself, and every check that moves main starts so.
+    scene = _prepare(machine, check_dir, lab, main="c1", updates_itself=False, pulls=PULLS)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        pr3, p2x = scene.github.commit("pr3"), scene.github.commit("p2x")
+        _look_up(scene, PULL_LINK, "the pull request")
+        installed, _ = _install_from_the_link(scene, UPTIME, "the pull request")
+        _close_the_link_sheet(scene, "after installing")
+        _place(scene, UPTIME)
+        _the_card_says_unverified(scene, UPTIME, "the pull request's copy")
+        folder = _identity(machine, UPTIME, "before the push")
+        api = f"/api/repos/{config.PLUGINS_REPOSITORY}"
+
+        # The control: main moves on alone; the pull request's head is the commit installed.
+        scene.github.tell("moving main on to c2 alone", main="c2")
+        ui.plugins_pane(machine, "opening Settings → Plugins after main moved on")
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now after main moved on alone")
+        asked = _wait_for_disk(machine, lambda: any(r.is_api and r.path == f"{api}/pulls/{PULL}" for r in _since(scene, before)),
+                               NOTICED_SECONDS)  # fmt: skip
+        heard = _left_alone(scene, before)
+        compared = [r for r in heard if r.is_api and "/compare/" in r.path]
+        expect(asked and not compared, f"main moved on alone, and after Check now uDeck asked {described(heard)}: "
+                                       f"the pull request's head did not move, and nothing is compared")
+        dump = _keep_the_pane(machine, check_dir, lab, "main-moved-on-alone.txt")
+        expect(ui.element(dump, f"plugin.{UPTIME}.rewritten") is None and ui.element(dump, f"plugin.{UPTIME}.offer") is None,
+               f"main moved on alone, and uptime's row says "
+               f"{[ui.says(c) for c in ui.controls(dump) if c.identifier in (f'plugin.{UPTIME}.rewritten', f'plugin.{UPTIME}.offer')]}")
+
+        _move_the_pull_request(scene, "p2x", "pushing pull request #3 again as p2x, made on c1")
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now after the push")
+        rewritten = REWRITTEN.format(line=f"pull request #{PULL}")
+        said = _wait_until(machine, f"plugin.{UPTIME}.rewritten", lambda said: said == rewritten, CATALOGUE_SECONDS)
+        heard = _since(scene, before)
+        dump = _keep_the_pane(machine, check_dir, lab, "history-rewritten.txt")
+        expect(said == rewritten, f"pull request #3 was pushed again as p2x, which does not continue pr3, and uptime's row "
+                                  f"says {said!r}; uDeck asked {described(heard)}")
+        compared = [r for r in heard if r.is_api and "/compare/" in r.path]
+        expect([r.path for r in compared] == [f"{api}/compare/{pr3}...{p2x}"],
+               f"uDeck compared {described(compared)}, not pr3 with p2x once")
+        expect(not _files_fetched(heard, UPTIME), f"the push fetched {described(_files_fetched(heard, UPTIME))} by itself")
+        changed = CHANGED_STILL.format(line=f"pull request #{PULL}", version="1.0.1")
+        offer = ui.says(ui.element(dump, f"plugin.{UPTIME}.offer"))
+        expect(offer == changed and ui.element(dump, f"plugin.{UPTIME}.update") is not None,
+               f"the row says {offer!r} beside the rewritten history, not {changed!r} with Update")
+        _expect_the_copy_as_it_was(scene, installed, folder, "after the push")
+        followed = _followed(machine, UPTIME) or {}
+        expect((followed.get("history") or {}).get("rewritten") is True and followed.get("head") == p2x,
+               f"{FOLLOWED} keeps {followed!r}: not that p2x rewrote the history of what is installed")
+
+        record = _operate(scene, f"plugin.{UPTIME}.update", "pressing Update after the push",
+                          lambda r: r is not None and r.get("commit") == p2x)
+        expect(record is not None, f"Update was pressed, and installed.json says {_read_json(machine, INSTALLED)!r}")
+        _expect_an_unverified_record(record, ref={"kind": "pr", "name": PULL}, commit=p2x, version="1.0.1")
+        _the_card_asks(scene, UPTIME, "after the update to the pushed head")
+        _put_the_panel_away(machine, "after the card asked")
+    finally:
+        scene.close()
+
+
+def check_a_branch_is_followed(machine, check_dir, lab):
+    """The branch a copy came from: asked with the commit installed, a `304` while it stays; moved on, offered; deleted, said; made again and installed from, not said.
+
+    uptime 1.0.1 installed from the branch fix/uptime, at pr3, placed and
+    allowed. **Check now**: the log holds the branch's head by `refs/heads/`,
+    asked with `If-None-Match` and pr3, answered `304`, and nothing more about
+    it. The fake moves the branch on to p2: after **Check now** the head is
+    answered p2, p2 is listed and compared with pr3 once, and the row says
+    *Changed in branch fix/uptime, still 1.0.1* with **Update** and *What
+    changed*. The fake deletes the branch: after **Check now** the head is
+    answered `422`, the row says *Branch fix/uptime no longer exists; the plugin
+    keeps running*, offers **Switch to verified** and **Remove** and no
+    **Update**, the record and the folder are as they were, and the card runs
+    again, its count of runs going up. The fake makes the branch again, at p2,
+    and uptime is installed from it through **Look up**: the record is the
+    branch's at p2, `followed.json` keeps the head **Look up** heard, and — no
+    read having asked about the branch since — the row says nothing of a branch
+    gone and offers nothing.
+
+    **Red for**: a branch never asked about, asked about by name in a way
+    GitHub cannot answer with `304`, a moved head offered against the catalogue
+    instead of the branch, a deleted branch that removes, stops or says
+    nothing, and a branch installed from again that its row still says is gone.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", branches=BRANCHES)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        pr3, p2 = scene.github.commit("pr3"), scene.github.commit("p2")
+        _look_up(scene, BRANCH_LINK, "the branch")
+        installed, _ = _install_from_the_link(scene, UPTIME, "the branch")
+        _close_the_link_sheet(scene, "after installing")
+        _place(scene, UPTIME)
+        found, _ = _the_card_asks(scene, UPTIME, "the branch's copy")
+        machine.click(*found[f"consent.{UPTIME}.allow"].middle, "allowing uptime: the branch's copy")
+        card = _read_the_card(scene, UPTIME, "the branch's copy", lambda card: RUNS in card and card[RUNS] not in ("", "unknown"))
+        _put_the_panel_away(machine, "the branch's copy")
+        ui.plugins_pane(machine, "opening Settings → Plugins after the card ran")
+        folder = _identity(machine, UPTIME, "before the branch moved")
+        api = f"/api/repos/{config.PLUGINS_REPOSITORY}"
+        head = f"{api}/commits/refs/heads/{BRANCH}"
+
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now with the branch where it was")
+        _wait_for_disk(machine, lambda: any(r.is_api and r.path == head for r in _since(scene, before)), CATALOGUE_SECONDS)
+        heard = _left_alone(scene, before)
+        asked = [r for r in heard if r.is_api and r.path == head]
+        expect(len(asked) == 1 and asked[0].status == 304 and asked[0].if_none_match == f'"{pr3}"',
+               f"Check now asked about the branch {described(asked)}: not once, with the commit installed, answered 304")
+        more = [r for r in heard if r.is_api and (f"/git/trees/{pr3}" in r.path or "/compare/" in r.path)]
+        expect(not more, f"the branch did not move, and uDeck asked {described(more)}")
+
+        scene.github.tell("moving the branch on to p2", branches={BRANCH: "p2"})
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now after the branch moved on")
+        changed = CHANGED_STILL.format(line=f"branch {BRANCH}", version="1.0.1")
+        offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == changed, CATALOGUE_SECONDS)
+        heard = _since(scene, before)
+        dump = _keep_the_pane(machine, check_dir, lab, "offered-along-the-branch.txt")
+        expect(offer == changed, f"the branch moved on to p2, and uptime's row says {offer!r}, not {changed!r}; "
+                                 f"uDeck asked {described(heard)}")
+        asked = [r for r in heard if r.is_api and r.path == head]
+        expect(len(asked) == 1 and asked[0].status == 200
+               and any(r.is_api and r.path == f"{api}/git/trees/{p2}" for r in heard)
+               and [r.path for r in heard if r.is_api and "/compare/" in r.path] == [f"{api}/compare/{pr3}...{p2}"],
+               f"the branch moved on, and uDeck asked {described(heard)}: not its head, p2's listing and one comparison")  # fmt: skip
+        expect(ui.element(dump, f"plugin.{UPTIME}.update") is not None and ui.element(dump, f"plugin.{UPTIME}.whatChanged") is not None,
+               "the row offers the branch's head without Update and What changed")
+        expect(ui.says(ui.element(dump, "catalogue.updatesWaiting")) == ONE_UPDATE_WAITING,
+               f"Settings says {ui.says(ui.element(dump, 'catalogue.updatesWaiting'))!r} of the updates waiting")
+        _expect_the_copy_as_it_was(scene, installed, folder, "after the branch moved on")
+
+        scene.github.tell("deleting the branch", branches={})
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now after the branch was deleted")
+        gone = BRANCH_GONE.format(name=BRANCH)
+        said = _wait_until(machine, f"plugin.{UPTIME}.branchGone", lambda said: said == gone, CATALOGUE_SECONDS)
+        heard = _since(scene, before)
+        dump = _keep_the_pane(machine, check_dir, lab, "branch-deleted.txt")
+        expect(said == gone, f"the branch was deleted, and uptime's row says {said!r}; uDeck asked {described(heard)}")
+        asked = [r for r in heard if r.is_api and r.path == head]
+        expect(len(asked) == 1 and asked[0].status == 422, f"the branch was deleted, and uDeck asked {described(asked)}")
+        offered = {c.identifier for c in ui.controls(dump) if UPTIME in c.identifier}
+        expect({f"plugin.{UPTIME}.switchToVerified", f"plugin.{UPTIME}.remove"} <= offered
+               and f"plugin.{UPTIME}.update" not in offered and f"plugin.{UPTIME}.offer" not in offered,
+               f"the branch's copy, its branch gone, is offered {sorted(offered)}: Switch to verified and Remove, "
+               f"and no Update")  # fmt: skip
+        _expect_the_copy_as_it_was(scene, installed, folder, "after the branch was deleted")
+        runs = int(card[RUNS])
+        _open_the_panel(machine, "opening the panel after the branch was deleted")
+        later = _read_the_card(scene, UPTIME, "after the branch was deleted",
+                               lambda card: card.get(RUNS, "").isdigit() and int(card[RUNS]) > runs,
+                               f"it had run more than {runs} times")  # fmt: skip
+        _put_the_panel_away(machine, "after the branch was deleted")
+        expect(int(later[RUNS]) > runs, f"the deleted branch's copy stopped: its card says {later!r}")
+
+        # Made again at p2, and installed from: what Look up heard stands, and nothing of a branch gone is said.
+        scene.github.tell("making the branch again, at p2", branches={BRANCH: "p2"})
+        ui.plugins_pane(machine, "opening Settings → Plugins after the branch was made again")
+        _look_up(scene, BRANCH_LINK, "the branch made again")
+        before = _count(scene)
+        record = _operate(scene, f"link.{UPTIME}.install", "installing uptime from the branch made again",
+                          lambda r: r is not None and r.get("commit") == p2)
+        expect(record is not None, f"Install was pressed on the branch made again, and installed.json says "
+                                   f"{_read_json(machine, INSTALLED)!r}")
+        _expect_an_unverified_record(record, ref={"kind": "branch", "name": BRANCH}, commit=p2, version="1.0.1")
+        _close_the_link_sheet(scene, "after installing from the branch made again")
+        kept = _wait_for_disk(machine, lambda: (((_read_json(machine, FOLLOWED) or {}).get("branches") or {}).get(UPTIME)
+                                                or {}).get("head") == p2, NOTICED_SECONDS)  # fmt: skip
+        expect(kept, f"uptime was installed from the branch made again at p2, and {FOLLOWED} keeps "
+                     f"{((_read_json(machine, FOLLOWED) or {}).get('branches') or {}).get(UPTIME)!r} of it")
+        said = _wait_until(machine, f"plugin.{UPTIME}.branchGone", lambda said: said is None, NOTICED_SECONDS)
+        dump = _keep_the_pane(machine, check_dir, lab, "installed-from-the-branch-made-again.txt")
+        heard = _since(scene, before)
+        asked = [r for r in heard if r.is_api and r.path == head]
+        expect(not asked, f"a read asked about the branch after the install, so the row says what it heard: {described(asked)}")
+        offered = {c.identifier for c in ui.controls(dump) if UPTIME in c.identifier}
+        expect(said is None and f"plugin.{UPTIME}.offer" not in offered and f"plugin.{UPTIME}.update" not in offered,
+               f"uptime was installed from the branch made again, and its row says {said!r} and offers "
+               f"{sorted(offered)}: nothing of a branch gone, nothing along it")  # fmt: skip
     finally:
         scene.close()
 
@@ -3054,6 +3487,50 @@ def _merge(scene, commit, step, main=None, into=None):
         if main is None:
             raise ValueError("a merge into another branch says where main is")
         scene.github.tell(step, main=main, branches={into: commit}, pulls={PULL: {**merged, "base": into}})
+
+
+def _show_the_catalogue_row(scene, identifier, label):
+    """The catalogue row holding `identifier`, scrolled into view where the screen is too short for the pane (a
+    runner's), and a screenshot of it kept for a person to read what the walk cannot."""
+    machine = scene.machine
+    if getattr(machine, "scroll", None) is not None:
+        ui.in_view(machine, identifier, f"bringing {identifier} into view")
+    machine.screenshot(scene.check_dir, label)
+
+
+def _move_the_pull_request(scene, head, step):
+    """Pull request #3's head at the fixture commit `head` — a push to its branch; open, as it was."""
+    scene.github.tell(step, pulls={PULL: {**PULLS[PULL], "head": head}})
+
+
+def _leave_the_reserve(scene, step):
+    """The fake told that all but `RESERVE - 1` of the hour's requests will be spent once uDeck asks one more: what
+    the read at launch is left with once the catalogue's own question is answered, so that it asks nothing more."""
+    used = sum(1 for request in scene.github.read_log(step) if request.is_api and request.status != 403)
+    scene.github.tell(step, spent=max(0, HOURLY - used - 1 - (RESERVE - 1)))
+
+
+def _the_launch_read(scene, before):
+    """uDeck's requests from `before` on, once the read at launch has asked for the default branch's head and what
+    follows it has had `LEFT_ALONE_SECONDS` — a failure when it never asks."""
+    machine = scene.machine
+    main = f"/api/repos/{config.PLUGINS_REPOSITORY}/commits/main"
+    read = _wait_for_disk(machine, lambda: any(r.is_api and r.path == main for r in _since(scene, before)),
+                          CATALOGUE_SECONDS)  # fmt: skip
+    if not read:
+        panel.expect_it_was_still_there(machine, "waiting for the read at launch", "uDeck was gone before it read the catalogue")
+        raise CheckFailed(f"{CATALOGUE_SECONDS}s after a launch with the catalogue {AGED_DAYS} days old, uDeck had not "
+                          f"read it: {described(_since(scene, before))}")
+    return _left_alone(scene, before)
+
+
+def _expect_the_copy_as_it_was(scene, installed, folder, label):
+    """`uptime`'s record the copy `installed` was, unverified, and its folder the very one `folder` read."""
+    machine = scene.machine
+    record = _record(machine, UPTIME)
+    expect(_the_copy(record) == _the_copy(installed) and _status(machine, UPTIME) == "unverified",
+           f"{label}, installed.json says {record!r}: the copy was changed without a press")
+    expect(_identity(machine, UPTIME, label) == folder, f"{label}, uptime's folder or a file in it was replaced")
 
 
 def _record(machine, plugin):

@@ -1,0 +1,12 @@
+{
+  "id": "asks-nothing",
+  "name": "Asks nothing",
+  "version": "1.0.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "Asks for no permission at all; a pull request's new plugin in uDeck's lab.",
+  "author": "uDeck lab",
+  "run": ["./run.sh"],
+  "interval": 60,
+  "timeout": 2
+}

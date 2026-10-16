@@ -624,9 +624,13 @@ def test_the_words_the_merge_and_close_checks_wait_for_are_uDecks_own():
 
 def test_the_controls_the_merge_and_close_checks_press_and_read_are_the_views_own():
     views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift")
-    for identifier in ('"plugin.\\(id).pullRequest"', '"plugin.\\(id).update"', '"catalogue.updatesWaiting"',
+    for identifier in ('"plugin.\\(id).update"', '"catalogue.updatesWaiting"',
                        '"plugin.\\(id).mark"', '"plugin.\\(id).offer"', '"plugin.\\(id).remove"', '"catalogue.checkNow"'):
         assert identifier in views, identifier
+    # What became of the pull request is one of the lines the row says of code nobody verified, each identified by
+    # the end UDeckCore gives it (`UnverifiedRow.said`).
+    assert '"plugin.\\(id).\\(said.suffix)"' in views
+    assert 'Said(suffix: "pullRequest"' in _source("Sources", "UDeckCore", "Plugins", "Repository", "UnverifiedCopies.swift")
     settings = _source("Sources", "UDeckKit", "Views", "SettingsView.swift")
     for identifier in ('"plugins.nothingInstalled"', '"plugin.\\(plugin.folderName).enabled"', '"plugin.\\(plugin.folderName).more"',
                        '"plugin.\\(manifest.id).allow"', '"plugin.\\(manifest.id).decline"', '"plugin.\\(manifest.id).asksNothing"'):
@@ -664,3 +668,89 @@ def test_the_copy_a_record_says_is_all_of_it_but_what_was_last_found():
     assert checks._the_copy(record) == checks._the_copy(moved), "the head moved: the same copy"
     assert checks._the_copy({**record, "commit": "d"}) != checks._the_copy(record)
     assert checks._the_copy(None) == {}
+
+
+# --- Following a branch or a pull request (stage 3, R5) --------------------------------------
+
+
+def test_the_heads_the_follow_checks_move_to_are_the_fixtures():
+    """p2 continues pr3 with uptime changed and its manifest not; p2x is p2's content made on c1, which does not."""
+    commits = FACTS["commits"]
+    assert FACTS["parents"]["p2"] == "pr3" and FACTS["parents"]["p2x"] == "c1" and FACTS["contents"]["p2x"] == "p2"
+    for path in ("plugins/uptime/manifest.json", "plugins/uptime/manifest.ru.json"):
+        assert commits["p2"]["paths"][path] == commits["pr3"]["paths"][path], "nothing a read of p2 fetches is new"
+    assert commits["p2"]["paths"]["plugins/uptime"] != commits["pr3"]["paths"]["plugins/uptime"], "uptime is another tree"
+    assert commits["p2x"]["paths"]["plugins/uptime"] == commits["p2"]["paths"]["plugins/uptime"]
+    assert checks.BRANCHES == {checks.BRANCH: "pr3"} and checks.PULLS[checks.PULL]["head"] == "pr3", "both start at pr3"
+
+
+def test_moving_the_pull_request_keeps_the_rest_of_it():
+    scene = type("Scene", (), {"github": _Telling()})()
+    checks._move_the_pull_request(scene, "p2x", "pushing again")
+    pull = scene.github.told[-1]["pulls"][checks.PULL]
+    assert pull == {**checks.PULLS[checks.PULL], "head": "p2x"} and pull["state"] == "open" and pull["merged"] is False
+
+
+def test_leaving_the_reserve_spends_what_the_read_at_launch_would_need_beyond_the_catalogue():
+    """After the requests the log holds, one more — the catalogue's own question — leaves one fewer than the reserve."""
+    log = [plugin_repository.Request(1.0, "GET", host, f"/{host}/x", "", status, False)
+           for host, status in (("api", 200), ("api", 304), ("raw", 200), ("lab", 200), ("api", 403), ("api", 200))]  # fmt: skip
+
+    class GitHub(_Telling):
+        def read_log(self, step):
+            return log
+
+    scene = type("Scene", (), {"github": GitHub()})()
+    checks._leave_the_reserve(scene, "leaving the reserve")
+    spent = scene.github.told[-1]["spent"]
+    used = 3  # three API answers spent the hour's requests; a refusal and the raw and lab hosts did not
+    assert spent == checks.HOURLY - used - 1 - (checks.RESERVE - 1)
+    assert checks.HOURLY - used - 1 - spent == checks.RESERVE - 1, "what the next answer says is left: one below the reserve"
+    fake = _fake()
+    assert checks.HOURLY == fake.LIMIT
+    swift = _source("Sources", "UDeckCore", "Plugins", "Repository", "RateLimit.swift")
+    assert f"public static let reserveForTheOperator = {checks.RESERVE}\n" in swift
+
+
+def test_the_words_the_follow_checks_wait_for_are_uDecks_own():
+    english = _source("Sources", "UDeckCore", "Localization", "English.swift")
+    line = "\\(Self.line(ref))"
+    assert '"' + checks.CHANGED_STILL.format(line=line, version="\\(version)") + '"' in english
+    assert '"' + checks.REWRITTEN.format(line=line) + '"' in english
+    assert '"' + checks.BRANCH_GONE.format(name="\\(name)") + '"' in english
+    assert '"' + checks.NOT_CHECKED_SINCE.format(line="\\(Self.line(ref, capitalised: true))") + '\\(at)"' in english
+    assert 'count == 1 ? "' + checks.ONE_UPDATE_WAITING + '"' in english
+    assert f'case .catalogueUpdate: "{checks.UPDATE}"' in english
+    model = _source("Sources", "UDeckKit", "Plugins", "DeckModel+Repository.swift")
+    assert "left as they were: \\(outcome.leftAsTheyWere.joined(separator: \", \")" in model
+    assert checks.LEFT_AS_THEY_WERE.format(ids="uptime") == "left as they were: uptime"
+    # A read of the catalogue left for later is logged as its outcome, by the case's own name.
+    assert 'info("the official catalogue: \\(String(describing: outcome), privacy: .public)")' in model
+    refresher = _source("Sources", "UDeckCore", "Plugins", "Repository", "CatalogueRefresher.swift")
+    assert "        case leftForLater\n" in refresher
+    assert checks.LEFT_FOR_LATER == "the official catalogue: " + "leftForLater"
+    # Swift's own tests hold the same sentences, word for word.
+    swift = _source("Tests", "UDeckCoreTests", "RefFollowerTests.swift")
+    for sentence in (checks.CHANGED_STILL.format(line="pull request #3", version="1.0.1"),
+                     checks.CHANGED_STILL.format(line="branch fix/uptime", version="1.0.1"),
+                     checks.REWRITTEN.format(line="pull request #3"), checks.BRANCH_GONE.format(name="fix/uptime"),
+                     checks.NOT_CHECKED_SINCE.format(line="Pull request #3") + "14:02"):  # fmt: skip
+        assert f'"{sentence}"' in swift, sentence
+
+
+def test_the_controls_the_follow_checks_press_and_read_are_the_views_own():
+    views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift")
+    for identifier in ('"plugin.\\(id).\\(said.suffix)"', '"plugin.\\(id).whatChanged"', '"plugin.\\(id).update"',
+                       '"plugin.\\(id).switchToVerified"', '"catalogue.\\(id).switchToVerified"'):
+        assert identifier in views, identifier
+    core = _source("Sources", "UDeckCore", "Plugins", "Repository", "UnverifiedCopies.swift")
+    for suffix in ("pullRequest", "branchGone", "rewritten", "offer", "notChecked"):
+        assert f'Said(suffix: "{suffix}"' in core, suffix
+    # One press, one name: both rows take the verified copy's button from UDeckCore (`UnverifiedRow.verifiedButton`).
+    assert views.count("model.unverifiedRow(of: id)?.verifiedButton ?? .catalogueSwitchToVerified(version: version)") == 2
+    assert "unverified.verifiedIsAnUpdate, let label = unverified.verifiedButton" in views
+    assert "!unverified.verifiedIsAnUpdate, let label = unverified.verifiedButton" in views
+    assert checks.SAME_WORD_PX < (159 - 69) // 2, "the widths measured of Update and Switch to verified 1.0.x are far apart"
+    store = _source("Sources", "UDeckCore", "Plugins", "Repository", "FollowedRefs.swift")
+    for key in ("branches", "notCheckedSince", "history"):
+        assert f"public var {key}:" in store, key
