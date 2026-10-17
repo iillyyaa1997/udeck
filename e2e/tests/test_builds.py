@@ -205,6 +205,43 @@ def test_a_build_that_would_read_github_is_refused(tmp_path):
     assert "UDeckPluginsRawBase is 'https://raw.githubusercontent.com'" in raised.value.reason
 
 
+def _shipped(tmp_path, api="https://api.github.com"):
+    """The checkout's Info.plist, as Sources/uDeck/Support/Info.plist ships the catalogue's addresses."""
+    plist = tmp_path / "repo" / "Sources" / "uDeck" / "Support" / "Info.plist"
+    plist.parent.mkdir(parents=True, exist_ok=True)
+    plist.write_bytes(plistlib.dumps({"UDeckPluginsAPIBase": api, "UDeckPluginsRawBase": "https://raw.githubusercontent.com"}))
+
+
+def test_the_smokes_build_keeps_githubs_addresses_and_is_held_to_them(tmp_path):
+    """smoke.real-pull-request's build: no --test-plugins, and the addresses the checkout ships."""
+    _shipped(tmp_path)
+    script = Script()
+    the_builder = builder(script, tmp_path)
+    the_builder.plugins_url = None
+    the_builder.build("0.4.1", "6")
+    assert "--test-plugins" not in script.calls[0][0]
+    # A make-app.sh that pointed it at the fake all the same is refused.
+    script = Script()
+    the_builder = builder(script, tmp_path)
+    the_builder.plugins_url = None
+    script_calls = script.__call__
+
+    def at_the_fake(args, **kwargs):
+        return script_calls([*args, "--test-plugins", "http://127.0.0.1:1"], **kwargs)
+
+    the_builder._popen = at_the_fake
+    with pytest.raises(LabError, match="UDeckPluginsAPIBase is 'http://127.0.0.1:1/api', not 'https://api.github.com'"):
+        the_builder.build("0.4.1", "6")
+
+
+def test_a_checkout_that_does_not_ship_githubs_addresses_gives_the_smoke_no_build(tmp_path):
+    _shipped(tmp_path, api="http://127.0.0.1:8766/api")
+    the_builder = builder(Script(), tmp_path)
+    the_builder.plugins_url = None
+    with pytest.raises(LabError, match="does not ship GitHub's own addresses"):
+        the_builder.build("0.4.1", "6")
+
+
 def test_a_build_that_cannot_speak_plain_http_to_the_fake_is_refused(tmp_path):
     """Without local networking every request to the fake fails inside uDeck, and reads as silence."""
     with pytest.raises(LabError, match="without NSAllowsLocalNetworking"):

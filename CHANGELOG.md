@@ -10,6 +10,65 @@ for what that promises.
 
 ## [Unreleased]
 
+Plugins come from pull requests and branches now, and the verified ones keep
+themselves up to date — stage 3 of
+[docs/plugin-repository.md](docs/plugin-repository.md#stages). **Install from a
+link…** takes a pull request or a branch of the official plugin repository, or
+a branch of a fork of it, and installs a plugin from there as **Unverified**:
+said wherever the plugin is, asked about before it runs whenever its code
+changes, followed along its own line and offered what that line has, never
+updated by itself. Once exactly that folder is merged it is **Verified**, with
+nothing downloaded. A verified plugin updates itself after a read of the
+catalogue when its new version asks for exactly what the old one asked. Every
+screen of it is in English and Russian.
+
+- **Verified plugins update themselves.** After a read of the official
+  catalogue that finds a new version of a **Verified** plugin asking for
+  exactly the permissions the installed one asks for, uDeck puts it in place
+  with nothing pressed — the update **Update** makes, one plugin at a time,
+  its window kept and `previous` written — and its row says *Updated by itself
+  on October 10, 2026*, with **Back to** as after any update. A new version that
+  asks for different permissions is only offered, and its row says *1.3.0
+  available, asks for different permissions*; a plugin changed on disk, one
+  holding a file of yours such as a `.env`, a linked folder and one kept at an
+  earlier version are only offered too — asked again at the moment of the swap,
+  so that a file of yours put there while it downloads leaves it as it was. An
+  update by itself never ends a card action: it waits, and is asked about again
+  every minute. A failed one is said on the row and tried again after the next
+  read. **Settings → Plugins →
+  Update verified plugins by themselves** turns it off (`autoUpdateVerified` in
+  `settings.json`); it is on as uDeck ships, and does nothing while **Official
+  catalogue** is off. README, SECURITY.md and docs/plugin-repository.md no
+  longer say that no plugin is installed by itself.
+- **A new version asking for what the old one asked does not ask again.** When
+  one **Verified** copy replaces another — **Update**, **Switch to**, **Back
+  to**, an earlier version, or an update by itself — and the new manifest asks
+  for exactly the same permissions, byte for byte, your permission decision is
+  carried to the new version, a refusal included, and the card goes on running.
+  Anything else asks on the card, as before. `installed.json` gains an
+  `automatic: true` on a copy uDeck put in place by itself; a uDeck from before
+  reads it and skips the key.
+- **Install from a link…** Settings → Plugins takes a link to a pull request or
+  a branch of the official repository, pasted as the browser shows it, and
+  lists the plugins there that are not what the catalogue has — new, or
+  changed — each marked **Unverified**. **Install** takes one exactly as a
+  catalogue row does, at the commit the link was read at, through the official
+  repository: a pull request opened from a fork is read by commit there, never
+  from the fork. A link to one commit or another host is refused with what it
+  is, before anything is asked — and another repository that is no fork of the
+  official one once GitHub has said so. Over the verified copy,
+  **Install** first says what goes and what comes — *uptime is the verified
+  1.0.0 from github.com/…; installing 1.0.1 from pull request #3 at a1b2c3d
+  replaces it*, and that the code that comes asks before it runs — and
+  **Switch to verified 1.0.0**, on the catalogue row and on the plugin's own,
+  goes back the same way, its folder there or gone; the copy replaced is kept
+  as **Back to**. **Unverified** is said on the plugin's row, with the pull
+  request or the branch and a link to its page, on the header of each of its
+  windows, and on its card's question, which says where the code comes from;
+  a plugin that asks for nothing can be allowed or declined in Settings too.
+  Such a copy is never offered an update against the catalogue, and never
+  updates by itself. Off with **Official catalogue**, as every request about
+  plugins.
 - **Branches of forks.** **Install from a link…** takes a branch of a fork of
   the official repository, `github.com/someone/udeck-plugins/tree/x`, a folder
   under it, or a fork's own page for its default branch. uDeck first asks
@@ -26,19 +85,20 @@ for what that promises.
   **Look up** heard only over what a read heard before it: a read after it,
   with the sheet left open — the branch deleted or moved on, a pull request
   closed — stands.
-- **Fixed:** `udeck-plugin` and uDeck made their temporary folders — the
-  folder `udeck-plugin run` hands a plugin, the index `check` reads a commit's
-  attributes through, the file `pin` downloads to — in the account's folder
-  under `/var/folders`, whatever `TMPDIR` said, and uDeck handed a plugin no
-  `TMPDIR` when it had none. They use `TMPDIR` when it names a folder, and the
-  system's temporary folder otherwise, which a plugin is now always handed.
-  The lock file's reader in the specification, and its CI example, make their
-  file from a template in `TMPDIR`, which puts it there whichever `mktemp`
-  runs them. And `examples/hello-card` and `examples/broken-card` print their
-  card with `printf` or `echo`, `Scripts/make-app.sh` prints its ad-hoc warning
-  with `printf`, and `Scripts/make-cli.sh` asks what it asks of bash itself: a Mac's `/bin/sh` and `/bin/bash` are bash 3.2, which writes
-  every here-document and here-string to a file in `/var/tmp`, whatever
-  `TMPDIR` says — hello-card did so once a poll.
+- **Code nobody verified asks before every new content.** What installing
+  from a branch or a pull request stands on. `installed.json` keeps a branch's or a pull request's
+  ref (`branch`, `pr`) and the status `unverified`, and every button that puts a
+  copy back — **Reinstall**, **Back to** — keeps the ref the copy came from, so
+  that a pull request's copy is never recorded as the default branch's, and so
+  **Verified**; `previous` says the repository its copy came from. A status a
+  later uDeck writes is read as `modified` rather than making the file
+  unreadable. For such a copy the permission decision is held to the folder's
+  content (`decidedForTree` in `grants.json`, beside the version): every new
+  content asks again, a plugin that asks for nothing included — *"… asks for
+  nothing, but its code is unverified"* — and it waits until its folder is
+  hashed. Verified plugins, folders of your own and linked folders are decided
+  per version, as before — and every folder but a link is held to its content
+  while `installed.json` cannot be read. Going back to 0.6 after such a copy is installed is below.
 - **Following the branch or the pull request a plugin came from.** After each
   read of the catalogue uDeck asks GitHub, one request each, where the head of
   the branch or the pull request every **Unverified** plugin came from is now —
@@ -50,7 +110,7 @@ for what that promises.
   over it, or gone back — is said, *The history of pull request #3 was
   rewritten…*, from one comparison of the two commits, never with `main`. A
   deleted branch is said, and the plugin keeps running. A read nobody asked for
-  asks none of it while the hour's last ten requests are all that is left, and
+  asks none of it while fewer than ten of the hour's requests are left, and
   the row says since when it was not checked — as it does when the read of the
   catalogue itself was left for later or failed; **Official catalogue** says
   what a read asks of them. After a pull request merged with
@@ -80,70 +140,22 @@ for what that promises.
   back **Verified**. A window of a pull request's or a branch's copy whose folder
   has gone says what **Reinstall** puts back, and Settings no longer says
   *Nothing installed yet* above a **Missing** row.
-- **Install from a link…** Settings → Plugins takes a link to a pull request or
-  a branch of the official repository, pasted as the browser shows it, and
-  lists the plugins there that are not what the catalogue has — new, or
-  changed — each marked **Unverified**. **Install** takes one exactly as a
-  catalogue row does, at the commit the link was read at, through the official
-  repository: a pull request opened from a fork is read by commit there, never
-  from the fork. A link to one commit or another host is refused with what it
-  is, before anything is asked — and another repository that is no fork of the
-  official one once GitHub has said so. Over the verified copy,
-  **Install** first says what goes and what comes — *uptime is the verified
-  1.0.0 from github.com/…; installing 1.0.1 from pull request #3 at a1b2c3d
-  replaces it*, and that the code that comes asks before it runs — and
-  **Switch to verified 1.0.0**, on the catalogue row and on the plugin's own,
-  goes back the same way, its folder there or gone; the copy replaced is kept
-  as **Back to**. **Unverified** is said on the plugin's row, with the pull
-  request or the branch and a link to its page, on the header of each of its
-  windows, and on its card's question, which says where the code comes from;
-  a plugin that asks for nothing can be allowed or declined in Settings too.
-  Such a copy is never offered an update against the catalogue, and never
-  updates by itself. Off with **Official catalogue**, as every request about
-  plugins.
-- **Verified plugins update themselves.** After a read of the official
-  catalogue that finds a new version of a **Verified** plugin asking for
-  exactly the permissions the installed one asks for, uDeck puts it in place
-  with nothing pressed — the update **Update** makes, one plugin at a time,
-  its window kept and `previous` written — and its row says *Updated by itself
-  on October 10, 2026*, with **Back to** as after any update. A new version that
-  asks for different permissions is only offered, and its row says *1.3.0
-  available, asks for different permissions*; a plugin changed on disk, one
-  holding a file of yours such as a `.env`, a linked folder and one kept at an
-  earlier version are only offered too — asked again at the moment of the swap,
-  so that a file of yours put there while it downloads leaves it as it was. An
-  update by itself never ends a card action: it waits, and is asked about again
-  every minute. A failed one is said on the row and tried again after the next
-  read. **Settings → Plugins →
-  Update verified plugins by themselves** turns it off (`autoUpdateVerified` in
-  `settings.json`); it is on as uDeck ships, and does nothing while **Official
-  catalogue** is off. README, SECURITY.md and docs/plugin-repository.md no
-  longer say that no plugin is installed by itself.
-- **A new version asking for what the old one asked does not ask again.** When
-  one **Verified** copy replaces another — **Update**, **Switch to**, **Back
-  to**, an earlier version, or an update by itself — and the new manifest asks
-  for exactly the same permissions, byte for byte, your permission decision is
-  carried to the new version, a refusal included, and the card goes on running.
-  Anything else asks on the card, as before. `installed.json` gains an
-  `automatic: true` on a copy uDeck put in place by itself; a uDeck from before
-  reads it and skips the key.
-- **Code nobody verified asks before every new content.** What installing
-  from a branch or a pull request stands on. `installed.json` keeps a branch's or a pull request's
-  ref (`branch`, `pr`) and the status `unverified`, and every button that puts a
-  copy back — **Reinstall**, **Back to** — keeps the ref the copy came from, so
-  that a pull request's copy is never recorded as the default branch's, and so
-  **Verified**; `previous` says the repository its copy came from. A status a
-  later uDeck writes is read as `modified` rather than making the file
-  unreadable. For such a copy the permission decision is held to the folder's
-  content (`decidedForTree` in `grants.json`, beside the version): every new
-  content asks again, a plugin that asks for nothing included — *"… asks for
-  nothing, but its code is unverified"* — and it waits until its folder is
-  hashed. Verified plugins, folders of your own and linked folders are decided
-  per version, as before — and every folder but a link is held to its content
-  while `installed.json` cannot be read. A 0.6 uDeck cannot read the status
-  `unverified`: going back to 0.6 after such a copy is installed makes it read
-  the whole of `installed.json` as broken, and install, update and remove
-  nothing until the copy is removed with a 0.7 uDeck.
+- **A click past a held panel leaves you where you clicked.** When uDeck heard
+  the click before macOS said which application it had brought forward, the
+  panel went away and the application that was in front before it came back
+  over the window you had just clicked — on a GitHub-hosted Mac 12 clicks of
+  12. uDeck now gives such a click two seconds to answer. An application it
+  brings forward stays in front. A menu it opens without bringing one forward —
+  the one the Dock shows for an icon — stays open, and the earlier application
+  comes back once the menu has closed. A click that does neither, on the Dock's
+  separator for one, brings the earlier application back after the two seconds,
+  as Escape, ⌘W and the shortcut bring it back at once at a panel you were
+  working in, so the next key still has somewhere to go. The panel opened again
+  while a click waits, by the shortcut or the gesture, takes the keyboard as it
+  always does, and gives it back to that earlier application. A Dock stack is the
+  exception: the Dock draws it inside its own window, and nothing uDeck reads
+  without a permission has been found to tell it from a click on nothing, so the earlier application comes back after the two seconds with the stack
+  open, and that usually closes it.
 - **About says how to open a downloaded copy on macOS 15 and later.** It said
   right-click → Open, which macOS 15 no longer lets past Gatekeeper for an app
   that is not notarised; the way through there is System Settings → Privacy &
@@ -159,22 +171,60 @@ for what that promises.
   check since udeck-plugins#2; and, in the CI example, which commit is the
   base: the first parent of GitHub's merge of the pull request, and the target
   branch's tip on GitLab.
-- **A click past a held panel leaves you where you clicked.** When uDeck heard
-  the click before macOS said which application it had brought forward, the
-  panel went away and the application that was in front before it came back
-  over the window you had just clicked — on a GitHub-hosted Mac 12 clicks of
-  12. uDeck now gives such a click two seconds to answer. An application it
-  brings forward stays in front. A menu it opens without bringing one forward —
-  the one the Dock shows for an icon — stays open, and the earlier application
-  comes back once the menu has closed. A click that does neither, on the Dock's
-  separator for one, brings the earlier application back after the two seconds,
-  as Escape, ⌘W and the shortcut bring it back at once at a panel you were
-  working in, so the next key still has somewhere to go. The panel opened again
-  while a click waits, by the shortcut (measured; the gesture takes the same
-  path in the code), takes the keyboard as it always does, and gives it back to that earlier application. A Dock stack is the
-  exception: the Dock draws it inside its own window, and nothing uDeck reads
-  without a permission has been found to tell it from a click on nothing, so the earlier application comes back after the two seconds with the stack
-  open, and that usually closes it.
+- **Fixed:** `udeck-plugin` and uDeck made their temporary folders — the
+  folder `udeck-plugin run` hands a plugin, the index `check` reads a commit's
+  attributes through, the file `pin` downloads to — in the account's folder
+  under `/var/folders`, whatever `TMPDIR` said, and uDeck handed a plugin no
+  `TMPDIR` when it had none. They use `TMPDIR` when it names a folder, and the
+  system's temporary folder otherwise, which a plugin is now always handed.
+  The lock file's reader in the specification, and its CI example, make their
+  file from a template in `TMPDIR`, which puts it there whichever `mktemp`
+  runs them. And `examples/hello-card` and `examples/broken-card` print their
+  card with `printf` or `echo`, `Scripts/make-app.sh` prints its ad-hoc warning
+  with `printf`, and `Scripts/make-cli.sh` asks what it asks of bash itself: a Mac's `/bin/sh` and `/bin/bash` are bash 3.2, which writes
+  every here-document and here-string to a file in `/var/tmp`, whatever
+  `TMPDIR` says — hello-card did so once a poll.
+- **The lab.** `plugins.screens-in-russian` reads the screens of stage 3 a
+  person meets along the way with uDeck in Russian — the link sheet, the
+  warnings of the switch between copies, the **Не проверен** row and card,
+  history rewritten, not checked since, closed, merged with changes and with
+  nothing offered, *Обновился сам* — each sentence held to Russian.swift by the
+  lab's tests, and a screenshot of each kept; the rest of stage 3's sentences,
+  a deleted branch and the link sheet's other answers among them, are not read
+  in Russian yet. What only throwaway probes had held is three checks:
+  `panel.the-key-after-a-click-on-the-dock`, and the panel opened again while
+  that click waits, then Escape, by the shortcut
+  (`panel.the-hotkey-while-a-click-waits`) and by the gesture
+  (`panel.the-gesture-while-a-click-waits`), the gesture's way in run for the
+  first time — green in a Tart guest and on a runner. And
+  `smoke.real-pull-request` — run only when it is named, with `--pull-request
+  <link>`, and only on a GitHub runner — installs a plugin from a real pull
+  request of the official repository with a build that reads github.com itself,
+  waits for somebody to close it unmerged, and reads its row saying so.
+- **Going back to 0.6.1 after installing from a link.** 0.6 does not know the
+  status `unverified` that a plugin installed from a pull request or a branch
+  is recorded with, and reads the whole of `~/.udeck/installed.json` as broken.
+  Its plugins keep running — a plugin is a folder, and 0.6 reads folders — but
+  Settings → Plugins shows every one of them as a folder of your own, and a
+  press that would install, update or remove one says *~/.udeck/installed.json
+  cannot be read, so uDeck installs, updates and removes nothing until it can*.
+  0.6 writes nothing into the file meanwhile, so 0.7 reads it again as it was.
+  And 0.6 holds a permission decision to a plugin's version alone: a copy from
+  a link that asks for nothing runs without asking, and one decided for its
+  version runs whatever its code has become since. Before going back, press
+  **Remove** on every plugin you have installed from a link, whether it is
+  marked **Unverified** now or was put back to a verified copy since, and
+  install the verified one again from the catalogue if you want it.
+  **Switch to verified** alone is not enough: the copy it replaces stays in
+  `installed.json` as `previous`, and 0.6's **Back to** puts that code back
+  recorded as the default branch's, **Verified**. Already back, install 0.7
+  again and do it there — or, with uDeck not running, delete from
+  `installed.json` every plugin whose own `ref` or whose `previous`'s `ref` is
+  of any kind but `default`, or whose `verification` says `"status":
+  "unverified"`, and its folder in `~/.udeck/plugins`. A copy from a link whose
+  folder has changed since is recorded `"modified"` — and stays so if the
+  folder then goes — which 0.6 reads, and 0.6's **Reinstall** on it puts that code back recorded as the default
+  branch's, **Verified**, too.
 
 ## [0.6.1] — 2026-10-08
 

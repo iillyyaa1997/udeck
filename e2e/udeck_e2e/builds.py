@@ -22,7 +22,10 @@ was decided rather than assumed:
   serve on the guest's loopback (`--test-plugins`, `plugin_repository`). A check
   that does not serve the fake leaves nothing listening there, and uDeck reads
   nothing; a build that shipped the real addresses would reach out to GitHub from
-  every guest with a network, so `_verify` refuses it.
+  every guest with a network, so `_verify` refuses it. One check alone keeps
+  them — `smoke.real-pull-request`, which runs only when it is named, only on a
+  GitHub runner, and is about the real GitHub (`smoke`) — and `_verify` holds
+  its build to them exactly as `Sources/uDeck/Support/Info.plist` ships them.
 
 **The compiling can be done once, elsewhere** (`--prebuilt DIR`). Every lab
 build of one checkout is the same binary with a different Info.plist, a
@@ -75,6 +78,9 @@ MAKE_APP = Path("Scripts") / "make-app.sh"
 
 # Where the bundle's plist sits inside the zip the script makes.
 INFO_PLIST = "uDeck.app/Contents/Info.plist"
+# The plist the script starts from, which carries the addresses a release ships with — and GitHub's raw host.
+SHIPPED_PLIST = Path("Sources") / "uDeck" / "Support" / "Info.plist"
+GITHUB_RAW = "https://raw.githubusercontent.com"
 
 # What a directory of binaries compiled elsewhere has to hold (`--prebuilt`):
 # the two products `make-app.sh` puts in the bundle, and the commit they were
@@ -205,7 +211,7 @@ class Builder:
         feed_url: str,
         key: SigningKey | PublicKey,
         note: Note,
-        plugins_url: str = plugin_repository.base_url(),
+        plugins_url: str | None = plugin_repository.base_url(),
         prebuilt: Path | None = None,
         popen: Callable[..., subprocess.Popen[str]] = subprocess.Popen,
         seconds: float = config.BUILD_SECONDS,
@@ -253,7 +259,7 @@ class Builder:
                     "--zip",
                     "--test-feed", self.feed_url,
                     "--test-key", self.key.public_key,
-                    "--test-plugins", self.plugins_url,
+                    *(["--test-plugins", self.plugins_url] if self.plugins_url is not None else []),
                     *(["--prebuilt", str(self.prebuilt)] if self.prebuilt is not None else []),
                 ],
                 step,
@@ -296,7 +302,6 @@ class Builder:
                 plist = plistlib.loads(archive.read(INFO_PLIST))
         except (OSError, KeyError, ValueError, zipfile.BadZipFile) as error:
             raise LabError(step, f"could not read {INFO_PLIST} from the build: {error}") from None
-        base = self.plugins_url.rstrip("/")
         wanted = {
             "CFBundleShortVersionString": version,
             # The one Sparkle compares.
@@ -305,9 +310,12 @@ class Builder:
             "SUPublicEDKey": self.key.public_key,
             # The plugin catalogue, at the fake in the guest and never at GitHub:
             # a build that kept the shipped addresses reads github.com a few
-            # seconds after every launch in every check.
-            "UDeckPluginsAPIBase": f"{base}/api",
-            "UDeckPluginsRawBase": f"{base}/raw",
+            # seconds after every launch in every check. Only the smoke's build
+            # (`plugins_url` None) keeps them, and is held to them as shipped.
+            **(self._shipped_plugin_addresses(step) if self.plugins_url is None else {
+                "UDeckPluginsAPIBase": f"{self.plugins_url.rstrip('/')}/api",
+                "UDeckPluginsRawBase": f"{self.plugins_url.rstrip('/')}/raw",
+            }),
             # The repository stays the official one's name, which is what the
             # fake answers for.
             "UDeckPluginsRepository": config.PLUGINS_REPOSITORY,
@@ -329,6 +337,17 @@ class Builder:
             wrong.append(f"CFBundleIdentifier is {identifier!r}, which is the debug application")
         if wrong:
             raise LabError(step, "the build is not the one that was asked for: " + "; ".join(wrong))
+
+    def _shipped_plugin_addresses(self, step: str) -> dict[str, str]:
+        """The plugin catalogue's addresses as this checkout ships them (`SHIPPED_PLIST`): GitHub's own."""
+        try:
+            shipped = plistlib.loads((self.repo_root / SHIPPED_PLIST).read_bytes())
+        except (OSError, ValueError) as error:
+            raise LabError(step, f"could not read {SHIPPED_PLIST}: {error}") from None
+        addresses = {key: shipped.get(key) for key in ("UDeckPluginsAPIBase", "UDeckPluginsRawBase")}
+        if addresses != {"UDeckPluginsAPIBase": config.GITHUB_API, "UDeckPluginsRawBase": GITHUB_RAW}:
+            raise LabError(step, f"{SHIPPED_PLIST} does not ship GitHub's own addresses: {addresses}")
+        return addresses
 
     def shown(self, path: Path) -> str:
         try:

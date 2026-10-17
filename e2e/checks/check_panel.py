@@ -1,10 +1,10 @@
 """Does the panel open when it should, and close when it should?
 
-Nineteen checks in three parts. The first six are about the panel appearing
-and by which path; the next eight are about it going away again, and they are
+Twenty-two checks in three parts. The first six are about the panel appearing
+and by which path; the next ten are about it going away again, and they are
 where the promise the panel is built on lives — **once the panel is held, the
 cursor leaving never closes it**, and everything that does close it is the
-operator saying so. The last five are the other way in, which needs no pointer
+operator saying so. The last six are the other way in, which needs no pointer
 at all: the keyboard shortcut, which opens the panel and puts it away again.
 
 Both halves read the same oracle, uDeck's own log, and both ask the same kind
@@ -62,7 +62,7 @@ inside the guest. It has to be: the dwell is a fraction of a second, so a
 pointer put at the edge from this Mac would have fired the dwell long before an
 SSH command could push it, and the check would pass by the path it is not about.
 
-**Closing.** The next eight take a panel that is up and put it away. Seven ask
+**Closing.** The next ten take a panel that is up and put it away. Seven ask
 which event uDeck says did it: `peek -> collapsed on pointerLeft`,
 `open -> collapsed on closeRequested` — by either of the two messengers a click
 past the panel has — `open -> collapsed on otherAppActivated`, and
@@ -81,7 +81,15 @@ can still be holding it, and the next thing the operator does after putting the
 panel away is type. So `panel.the-key-after-escape` types, into a document, and
 reads the document back.
 
-**The shortcut.** The last five are ⌃⌥U, and what makes them a part of their
+The ninth and the tenth ask it where no news comes at all: a click past a panel
+being worked in onto the Dock's separator, which brings no application forward
+and opens nothing — uDeck lets go and gives the click two seconds to answer
+before it brings the application from before back
+(`panel.the-key-after-a-click-on-the-dock`) — and the gesture opening the panel
+again inside those two seconds, then Escape (`panel.the-gesture-while-a-click-waits`).
+The shortcut's way into the same wait is the last of the shortcut's six.
+
+**The shortcut.** The last six are ⌃⌥U, and what makes them a part of their
 own rather than a fourth opening path is that the panel it leaves is a
 different panel: the gesture gives a peek, the shortcut gives one already
 promoted to be typed into, because the hand that pressed it is on the keys
@@ -104,23 +112,28 @@ key must not reach the document, and after it, where it must — because uDeck
 names its first responder once per process and a document can be read as often
 as one likes.
 
-The other two are controls, and both are about the combination rather than
+Two are controls, and both are about the combination rather than
 about the panel. `panel.a-chord-that-is-not-the-hotkey` presses one uDeck never
 registered; `panel.the-hotkey-dies-with-udeck` presses the real one at a machine
 uDeck has left, because a global combination that outlived the application would
 take that key away from every other application on the Mac and nothing else here
 would notice.
 
+And `panel.the-hotkey-while-a-click-waits` presses it straight after a click on
+the Dock past a panel being worked in, while that click waits for its answer:
+the panel it opens has to take the keyboard from the application waiting to
+come back, and Escape has to reach it.
+
 What none of them can take for granted is that uDeck was listening at all.
 `RegisterEventHotKey` can be refused, and then a uDeck that is running, healthy
 and watching the pointer hears no chord whatever. Two answers, and the checks
-use both: uDeck says which shortcut it holds at launch, which is why three of
-the five start uDeck inside the window on its log and read that line before
+use both: uDeck says which shortcut it holds at launch, which is why four of
+the six start uDeck inside the window on its log and read that line before
 they press anything; and the control for the wrong chord presses the real one
 straight after its silence, on the same machine, so that "nothing happened" is a
 sentence about the combination rather than about a deaf uDeck.
 
-**The pointer is parked before uDeck starts, in all five**, and that is an
+**The pointer is parked before uDeck starts, in all six**, and that is an
 ordering and not a detail. A pointer left in the strip by whatever ran before
 opens the panel by the gesture, and on a machine shared between checks
 (`--vm per-group`, `per-run`) it would fire in the moment between the launch and
@@ -148,7 +161,7 @@ process's hot keys when the process exits, so `panel.the-hotkey-dies-with-udeck`
 is green over a build that never unregisters anything. That is written down
 where it was measured, in that check.
 
-Those thirteen go through more steps than the six opening checks, so they read
+Those sixteen go through more steps than the six opening checks, so they read
 the log in steps too (`panel.Story`): one window opened at the start, sliced by what
 each action added to it, and the whole of it kept beside the report as
 `story.log`. A check that read only the end could not tell "nothing happened
@@ -162,6 +175,7 @@ on the log holding nothing uDeck said, or a guest clock gone back behind the
 start of it, is the lab's, and those are "could not check".
 """
 
+import re
 import shlex
 import uuid
 
@@ -1138,6 +1152,129 @@ def check_the_key_after_escape(machine, check_dir, lab):
         story.keep()
 
 
+# --- A click on the Dock past a panel being worked in ----------------------------------
+
+
+def check_the_key_after_a_click_on_the_dock(machine, check_dir, lab):
+    """A click past a held panel onto the Dock's separator: the next key reaches the application from before.
+
+    The click every other closing check cannot make. A click on the desktop
+    brings the Finder forward, and the workspace says so; a click on the Dock's
+    separator brings nothing forward and opens nothing, so nothing tells uDeck
+    where the operator now is. uDeck lets go of the keyboard at the click and
+    gives the click two seconds to answer (`KeyboardHandback.answerSeconds`):
+    an application coming forward stays in front, a window the click opened —
+    the Dock's menu — holds the application from before back until it has
+    gone, and a click that does neither, this one, brings that application back
+    once the two seconds are up. Before that rule the next key reached no
+    document at all after a click on the Dock, 4 clicks of 4 in a Tart guest
+    (20261016-055254Z), and that is what this check is red for.
+
+    The scene is `panel.the-key-after-escape`'s: TextEdit in front on a document
+    holding the key typed before the panel (`_a_document_in_front`), then a peek
+    held open by a click on it, then the click on the separator — the first
+    `AXSeparatorDockItem` in the Dock's row, where System Events says it is.
+    The verdict is the document, as there: one key after the panel closed and
+    uDeck brought TextEdit back, and the document holds both keys. uDeck's own
+    account of the wait is read for the order of things — the panel closed by
+    the click (`open -> collapsed on closeRequested`) and TextEdit brought back
+    after no application came forward — and the key is pressed only after it,
+    because a key pressed inside the two seconds goes where the keyboard is
+    then, which is nowhere yet, by design.
+
+    Measured before it was a check, by scratch probes on the build that brought
+    the rule in: TextEdit back 2.04 to 2.06 s after the click and the next key
+    in its document, 12 of 12 on a runner (run 38918223759) and 1 of 1 in a Tart
+    guest (20261016-144410Z).
+    """
+    log = _prepare(machine, check_dir, lab)
+    story = panel.Story(machine, log, check_dir, lab.note)
+    try:
+        application = _a_document_in_front(machine, lab)
+        separator = _the_docks_separator(machine, check_dir)
+        panel.reveal_a_peek(machine, story, "the reveal")
+        panel.hold_it_open(machine, story, check_dir)
+        machine.click(*separator, f"past the panel onto the Dock's separator, at {separator}")
+        said = panel.wait_for_it_to_close(machine, story, "the click on the Dock's separator")
+        machine.screenshot(check_dir, "after the click on the Dock's separator")
+        panel.expect_it_closed(said, "open", "closeRequested", "the click on the Dock's separator")
+
+        if not brought_back_after_the_click(said):
+            said += "\n" + panel.answer(machine, story, "the click's wait for its answer",
+                                        lambda lines: brought_back_after_the_click(lines) != [])
+        machine.screenshot(check_dir, "after the click's wait")
+        back = brought_back_after_the_click(said)
+        expect(
+            back == [application],
+            f"after the click on the Dock's separator, which brought nothing forward and opened nothing, uDeck "
+            f"brought back {back or 'nothing'}, not {application} — the application the operator was in before "
+            f"the panel: {panel.short(said)}",
+        )
+
+        machine.sleep(config.SETTLE_SECONDS)
+        machine.key(config.AFTER_IT_CLOSED_KEY, "after uDeck brought the application from before back")
+        machine.sleep(config.SETTLE_SECONDS)
+        story.take("the key pressed after the click's wait")
+        _expect_the_key_reached(machine, lab, check_dir, application, "a click on the Dock's separator", said)
+    finally:
+        story.keep()
+
+
+def check_the_gesture_while_a_click_waits(machine, check_dir, lab):
+    """The gesture opens the panel again while a click on the Dock waits for its answer: Escape puts it away, and the next key reaches the application from before.
+
+    The two seconds uDeck gives a click past the panel to answer
+    (`panel.the-key-after-a-click-on-the-dock`) are two seconds in which the
+    operator can open the panel again — and in them the workspace goes on
+    naming uDeck in front, because uDeck let go and nothing else came forward.
+    A panel that read that as already having the keyboard took it from nobody:
+    by the shortcut, on the build before `KeyboardHandback.takesTheKeyboard`,
+    the panel shown again said `key=false`, Escape did not reach it and the key
+    after it reached no document, 2 probes of 2 in a Tart guest
+    (20261016-163356Z). So a panel shown while a click waits takes the keyboard
+    from the application waiting to come back, ordered out before it is made
+    key, and gives it back to that application when it goes.
+
+    This is the gesture's way in, which the probes of that fix never ran: the
+    pointer goes from the Dock into the strip straight after the click, and the
+    dwell opens a peek well inside the two seconds. uDeck has to say that the
+    panel showed while the click waited — a peek that came after the wait had
+    ended is another check's question, so the lab could not check this one —
+    and that it took the keyboard as a key window. Then Escape, with the
+    pointer still in the strip: `peek -> collapsed on escape`, and the next key
+    in TextEdit's document. Red for a peek that Escape does not reach, and for a
+    key that reaches nobody after it.
+    """
+    log = _prepare(machine, check_dir, lab)
+    story = panel.Story(machine, log, check_dir, lab.note)
+    try:
+        application = _a_document_in_front(machine, lab)
+        separator = _the_docks_separator(machine, check_dir)
+        panel.reveal_a_peek(machine, story, "the reveal")
+        panel.hold_it_open(machine, story, check_dir)
+        machine.click(*separator, f"past the panel onto the Dock's separator, at {separator}")
+        # Straight into the strip: the move from the Dock is the whole gesture, and the dwell is 0.06 s.
+        machine.move_pointer(*panel.top_of_the_strip(), "from the Dock into the strip, while the click waits")
+        reopened = panel.answer(machine, story, "the gesture while the click waits",
+                                lambda lines: panel.revealed(after_the_click_closed(lines)) != [])
+        machine.screenshot(check_dir, "the peek the gesture opened while the click waited")
+        _expect_shown_in_the_wait(reopened, ["peek"], "the gesture", application)
+
+        machine.key("esc", "at the peek the gesture opened while the click waited")
+        said = panel.wait_for_it_to_close(machine, story, "Escape")
+        machine.screenshot(check_dir, "after Escape")
+        panel.expect_it_closed(said, "peek", "escape", "Escape at the peek the gesture opened while the click waited")
+
+        machine.sleep(config.SETTLE_SECONDS)
+        machine.key(config.AFTER_IT_CLOSED_KEY, "after Escape closed the peek")
+        machine.sleep(config.SETTLE_SECONDS)
+        story.take("the key pressed after Escape")
+        _expect_the_key_reached(machine, lab, check_dir, application, "Escape at the peek opened while a click waited",
+                                reopened + "\n" + said)
+    finally:
+        story.keep()
+
+
 # --- The keyboard shortcut ------------------------------------------------------------
 
 
@@ -1354,6 +1491,66 @@ def check_the_hotkey_closes_what_the_gesture_opened(machine, check_dir, lab):
         story.keep()
 
 
+def check_the_hotkey_while_a_click_waits(machine, check_dir, lab):
+    """The shortcut opens the panel again while a click on the Dock waits for its answer: Escape puts it away, and the next key reaches the application from before.
+
+    `panel.the-gesture-while-a-click-waits` by the other way in, and the one the
+    fix was measured by. uDeck lets go of the keyboard at the click on the
+    Dock's separator and gives it two seconds to answer; the shortcut, pressed
+    straight after, opens the panel ready to be typed into while the workspace
+    still names uDeck in front. On the build before
+    `KeyboardHandback.takesTheKeyboard` that panel took the keyboard from nobody
+    — `key=false`, Escape not reaching it, the next key in no document, 2
+    probes of 2 in a Tart guest (20261016-163356Z) — and taking it from the
+    waiting application alone was not enough: the panel was still not key, and
+    Escape never reached it, 12 probes of 12 on a runner (run 38933545091),
+    until it was ordered out before being made key: 12 of 12 there (run
+    38938650252) and 2 of 2 in a Tart guest (20261016-171102Z, -171905Z).
+    Those were scratch probes; this is them kept.
+
+    uDeck has to say the panel showed while the click waited — the shortcut
+    reaching it after the wait had ended asks nothing of the rule, so the lab
+    could not check — then Escape: `open -> collapsed on escape`, and the next
+    key in TextEdit's document. Red for a panel Escape does not reach, and for
+    a key that reaches nobody after it.
+    """
+    log = _prepare(machine, check_dir, lab, launch=False)
+    panel.park_in_the_middle(machine)
+    story = panel.Story(machine, log, check_dir, lab.note)
+    try:
+        _a_uDeck_holding_the_hotkey(machine, story, check_dir)
+        application = _a_document_in_front(machine, lab)
+        separator = _the_docks_separator(machine, check_dir)
+        panel.reveal_a_peek(machine, story, "the reveal")
+        panel.hold_it_open(machine, story, check_dir)
+        machine.click(*separator, f"past the panel onto the Dock's separator, at {separator}")
+        what = f"{config.THE_HOTKEY} while the click waits"
+        panel.press_the_chord(machine, config.HOTKEY_KEY_CODE, what)
+        reopened = panel.answer(machine, story, what,
+                                lambda lines: panel.phases(after_the_click_closed(lines))[-2:] == panel.OPENED_READY_TO_TYPE)
+        machine.screenshot(check_dir, "the panel the shortcut opened while the click waited")
+        _expect_shown_in_the_wait(reopened, ["peek"], config.THE_HOTKEY, application)
+        expect(
+            panel.phases(after_the_click_closed(reopened)) == panel.OPENED_READY_TO_TYPE,
+            f"{what} moved the panel {panel.phases(after_the_click_closed(reopened))} after the click closed it, not "
+            f"{panel.OPENED_READY_TO_TYPE}: {panel.short(reopened)}",
+        )
+
+        machine.key("esc", "at the panel the shortcut opened while the click waited")
+        said = panel.wait_for_it_to_close(machine, story, "Escape")
+        machine.screenshot(check_dir, "after Escape")
+        panel.expect_it_closed(said, "open", "escape", f"Escape at the panel {config.THE_HOTKEY} opened while the click waited")
+
+        machine.sleep(config.SETTLE_SECONDS)
+        machine.key(config.AFTER_IT_CLOSED_KEY, "after Escape closed the panel")
+        machine.sleep(config.SETTLE_SECONDS)
+        story.take("the key pressed after Escape")
+        _expect_the_key_reached(machine, lab, check_dir, application,
+                                f"Escape at the panel {config.THE_HOTKEY} opened while a click waited", reopened + "\n" + said)
+    finally:
+        story.keep()
+
+
 def check_a_chord_that_is_not_the_hotkey(machine, check_dir, lab):
     """⌃⌥J does nothing — to a uDeck that answers ⌃⌥U a moment later.
 
@@ -1560,7 +1757,7 @@ def check_the_hotkey_dies_with_udeck(machine, check_dir, lab):
         story.keep()
 
 
-# --- What all seventeen do ----------------------------------------------------------
+# --- What all twenty-two do ---------------------------------------------------------
 
 
 def _where_uDeck_hears_each_report(lab):
@@ -1814,3 +2011,83 @@ def _a_document_in_front(machine, lab):
             "the lab cannot tell where the keyboard went afterwards either",
         )
     return application
+
+
+# What uDeck says when a click past the panel that brought nothing forward has had its time to answer and
+# it brings the application from before back (`PanelController.handBackAfterTheClick`), and when a panel
+# shown again meanwhile takes the keyboard from the application waiting to come back (`takeKeyboard`).
+_BROUGHT_BACK_AFTER_THE_CLICK = re.compile(
+    r"no application came forward in \d+ ms after the click past the panel, .*, so bringing back (.+?)\s*$", re.MULTILINE
+)
+SHOWN_WHILE_A_CLICK_WAITED = "the panel showed while a click past it waited for its answer"
+
+
+def brought_back_after_the_click(lines):
+    """The applications uDeck says it brought back once a click past the panel had answered nothing, in order."""
+    return [match.group(1) for match in _BROUGHT_BACK_AFTER_THE_CLICK.finditer(lines)]
+
+
+def after_the_click_closed(lines):
+    """What uDeck said after the click past the panel closed it: the first closing in `lines`, and on."""
+    return panel.after_it_closed(lines)
+
+
+def _the_docks_separator(machine, check_dir):
+    """Where the Dock's first separator is, its items kept beside the report — the scene, so a Dock without one is the lab's."""
+    step = "finding the Dock's separator"
+    items = probes.dock_items(machine, step)
+    try:
+        (check_dir / "dock-items.txt").write_text("".join("\t".join(str(part) for part in item) + "\n" for item in items))
+    except OSError:
+        pass
+    separator = probes.the_docks_separator(items)
+    if separator is None:
+        raise LabError(step, f"System Events lists no separator in the Dock, so there is nothing to click that opens nothing: {items}")
+    return separator
+
+
+def _expect_shown_in_the_wait(said, shown, by, application):
+    """The click closed the held panel, and `by` showed it again as `shown` while the click waited for its answer.
+
+    The click closing it is uDeck's to do, and so is the panel showing; that it
+    showed *inside* the wait is the scene. A panel shown after uDeck had brought
+    `application` back is the ordinary case, which other checks hold, and
+    this check could not ask its question of it.
+    """
+    closings = [phase for phase in panel.phases(said) if phase[1] == panel.SHUT]
+    expect(
+        closings[:1] == [("open", panel.SHUT, "closeRequested")],
+        f"the click on the Dock's separator closed the held panel as {closings[:1]}, not as ('open', '{panel.SHUT}', "
+        f"'closeRequested'): {panel.short(said)}",
+    )
+    after = after_the_click_closed(said)
+    expect(
+        panel.revealed(after) == shown,
+        f"{by} while the click waited showed the panel as {panel.revealed(after)}, not as {shown}: {panel.short(said)}",
+    )
+    back = brought_back_after_the_click(said)
+    if SHOWN_WHILE_A_CLICK_WAITED not in after:
+        raise LabError(
+            f"showing the panel again by {by} while the click waits",
+            f"uDeck does not say the panel showed while the click waited"
+            + (f" — it had brought {back[0]} back first" if back else "")
+            + f", so the panel came after the wait and this is not the case the check asks about: {panel.short(said)}",
+        )
+    expect(
+        back == [],
+        f"uDeck brought {back} back while the panel {by} showed again was on screen: {panel.short(said)}",
+    )
+
+
+def _expect_the_key_reached(machine, lab, check_dir, application, after, said):
+    """The key pressed after `after` is in `application`'s document, after the key typed before the panel."""
+    holds = probes.typed_into(machine, application, f"reading what {application} holds after {after}")
+    lab.note(f"   {application} holds after {after}: {holds!r}")
+    machine.screenshot(check_dir, "after the key")
+    wanted = config.BEFORE_THE_PANEL_KEY + config.AFTER_IT_CLOSED_KEY
+    # Without regard to case: TextEdit capitalises the first letter of a document (panel.the-hotkey-again).
+    expect(
+        holds.lower() == wanted.lower(),
+        f"{application} holds {holds!r} and not {wanted!r} after a key pressed once {after} had put the panel away: "
+        f"the key the operator typed next did not reach the application he was in; what uDeck said: {panel.short(said)}",
+    )

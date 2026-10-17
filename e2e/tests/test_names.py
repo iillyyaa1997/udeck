@@ -31,6 +31,17 @@ def test_nothing_asked_for_means_everything_in_definition_order():
     assert select(AVAILABLE, []) == AVAILABLE
 
 
+def test_a_check_run_only_when_named_is_chosen_by_its_own_name_alone():
+    """The smoke against the real GitHub: never in a run without names, nor in its group's."""
+    available = ["panel.dwell", "smoke.real-pull-request", "plugins.install", "plugins.real"]
+    named_only = {"smoke.real-pull-request", "plugins.real"}
+    assert select(available, [], named_only) == ["panel.dwell", "plugins.install"]
+    assert select(available, ["plugins"], named_only) == ["plugins.install"]
+    assert select(available, ["smoke.real-pull-request", "panel"], named_only) == ["panel.dwell", "smoke.real-pull-request"]
+    with pytest.raises(CheckNameError, match="run only when each is named: smoke.real-pull-request"):
+        select(available, ["smoke"], named_only)
+
+
 def test_a_group_picks_its_checks():
     assert select(AVAILABLE, ["panel"]) == ["panel.dwell", "panel.push"]
 

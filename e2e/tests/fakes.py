@@ -300,13 +300,19 @@ class Lab:
         self.repo_root = tmp_path / "repo"
         self.signing_key = SigningKey(tmp_path / "sparkle-key", "public-key")
         self.builders = []
+        # The checks a build keeping the catalogue's shipped addresses was made for (`plugin.Lab.builder`).
+        self.real_plugin_builds = []
+        # `--pull-request`, which only the smoke takes.
+        self.pull_request = None
         self._tmp = tmp_path
 
     def note(self, text):
         self.notes.append(text)
 
-    def builder(self, feed_url, for_check, release_key=None):
+    def builder(self, feed_url, for_check, release_key=None, real_plugins=False):
         self.builders.append((feed_url, for_check) if release_key is None else (feed_url, for_check, release_key))
+        if real_plugins:
+            self.real_plugin_builds.append(for_check)
         directory = self._tmp / "builds" / for_check
         directory.mkdir(parents=True, exist_ok=True)
         return Builder(directory)

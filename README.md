@@ -244,8 +244,9 @@ uDeck reads it from `api.github.com` and `raw.githubusercontent.com`, anonymousl
 * once every 24 hours while uDeck runs, and an hour after a read that failed;
 * when Settings → Plugins is opened and the list is more than an hour old, and
   whenever **Check now** is pressed there;
-* and when you press **Install**, **Update**, **Reinstall**, **Back to** or
-  **Earlier versions**, the files that needs — so GitHub learns which plugin;
+* and when you press **Install**, **Update**, **Reinstall**, **Back to**,
+  **Switch to verified** or **Earlier versions**, the files that needs — a
+  fork's copy from the fork — so GitHub learns which plugin;
 * and, after a read, the files of a **Verified** plugin that updates itself;
 * and when you press **Look up** in **Install from a link…**, the pull request
   or the branch of that repository the link names, or the branch of a fork of
@@ -258,10 +259,15 @@ uDeck reads it from `api.github.com` and `raw.githubusercontent.com`, anonymousl
   of the fork; once the head
   moved, its listing and the plugin's manifest there, and, when the plugin
   changed there, one comparison with what is installed; and, once merged into
-  `main`, the listing of the commit it was merged as.
+  `main`, the listing of the commit it was merged as. A read nobody asked for —
+  at launch, the daily one, or the one an hour after a read that failed — asks
+  none of these once fewer than ten of the hour's requests are left, and the
+  plugin's row says since when it was not checked; **Check now** asks them.
 
-A read is usually one or two requests, each carrying `User-Agent:
-uDeck/<version>` and the network address any request carries. **Verified
+*What changed* and *Open on GitHub* open GitHub's pages in your browser; uDeck
+itself asks nothing for them. A read is usually one or two requests, and one
+more for each plugin installed from a pull request or a branch, each carrying
+`User-Agent: uDeck/<version>` and the network address any request carries. **Verified
 plugins update themselves**: after a read that finds a new version of one —
 asking for exactly the permissions the installed one asks for — uDeck downloads
 that plugin's files and puts it in place, its window and your permission

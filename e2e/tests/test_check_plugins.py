@@ -248,6 +248,96 @@ def test_the_russian_words_are_uDecks_own():
     assert f'"{ui.RUSSIAN.settings_item}"' in russian and f'"{ui.RUSSIAN.settings_window}"' in russian
 
 
+def test_the_russian_words_of_stage_3_are_uDecks_own():
+    """plugins.screens-in-russian's second half reads Russian.swift's sentences — held to its templates, and to the
+    Russian the Swift tests hold them to word for word wherever those say a whole sentence."""
+    russian = _source("Sources", "UDeckCore", "Localization", "Russian.swift")
+    tests = "\n".join(_source("Tests", "UDeckCoreTests", name) for name in
+                      ("RefFollowerTests.swift", "ForkTests.swift", "InstallFromLinkTests.swift", "AdoptionTests.swift"))
+    flat = re.sub(r'"\s*\+\s*"', "", tests)
+    official = checks.config.PLUGINS_REPOSITORY
+
+    def said_by_swift(text):
+        return f'"{text}"' in flat
+
+    assert f'case .pluginMarkUnverified: "{checks.RU_UNVERIFIED}"' in russian
+    assert said_by_swift(checks.RU_FROM_THE_PULL_REQUEST.format(number=3, commit="a1b2c3d"))
+    # The sheet's head: line(_, capitalised: true) and the commit — a pull request, a branch, a fork's branch.
+    assert '"\\(Self.line(ref, capitalised: true, fork: fork)), коммит \\(commit)"' in russian
+    assert 'said = "запрос на слияние #\\(number)"' in russian and 'said = "ветка \\(ref.name ?? "")" + of(fork)' in russian
+    assert 'fork.map { " репозитория \\($0)" } ?? ""' in russian
+    assert checks.RU_PULL_REQUEST_HEAD.format(number=3, commit="c") == "Запрос на слияние #3, коммит c"
+    assert checks.RU_BRANCH_HEAD.format(name="fix/uptime", commit="c") == "Ветка fix/uptime, коммит c"
+    assert said_by_swift(checks.RU_FORK_HEAD.format(name="x", fork="someone/udeck-plugins", commit="a1b2c3d"))
+    template = checks.RU_NOT_A_FORK.replace("github.com/{repository}", "\\(repository)").replace("github.com/{official}", "\\(official)")
+    assert f'"{template}"' in russian
+    assert f'"{checks.RU_NOBODY_VERIFIED_LISTED}"' in russian
+    # The switch, both ways: catalogueSwitchConfirm with copy(_) and staysAfterSwitching(to:).
+    assert '"Сейчас \\(id) — \\(Self.copy(from)). На её место встанет \\(Self.copy(to)). "' in russian
+    verified = "проверенная версия {v} из {r}"
+    pull = "версия {v} из запроса на слияние #{n}, коммит {c}"
+    assert '"проверенная версия \\(version) из \\(repository)"' in russian
+    assert '"версия \\(version) из запроса на слияние #\\(number), коммит \\(commit)"' in russian
+    stays_verified = "Окна плагина, его настройки и ваше решение о разрешениях останутся."
+    stays_unverified = ("Окна плагина и его настройки останутся. Код, который встанет, никто не проверял: плагин спросит "
+                        "разрешения перед запуском, если только вы уже не разрешали именно этот код.")
+    assert f'"{stays_verified}"' in russian and f'"{stays_unverified}"' in russian
+    assert checks.RU_SWITCH_FROM_VERIFIED.format(id="uptime", old="1.1.0", repository=official, new="1.0.1", number=3,
+                                                 commit="a1b2c3d") == (
+        f"Сейчас uptime — {verified.format(v='1.1.0', r='github.com/' + official)}. На её место встанет "
+        f"{pull.format(v='1.0.1', n=3, c='a1b2c3d')}. {stays_unverified}")
+    assert checks.RU_SWITCH_TO_VERIFIED.format(id="uptime", old="1.0.1", number=3, commit="a1b2c3d", new="1.1.0",
+                                               repository=official) == (
+        f"Сейчас uptime — {pull.format(v='1.0.1', n=3, c='a1b2c3d')}. На её место встанет "
+        f"{verified.format(v='1.1.0', r='github.com/' + official)}. {stays_verified}")
+    # The catalogue row, and what became of the pull request.
+    assert said_by_swift(f"{checks.RU_INSTALLED_HERE_UNVERIFIED.format(number=3)} — {checks.RU_CATALOGUE_MERGED_DIFFERS} — uptime нет в ~/.udeck/plugins")
+    assert f'case .catalogueClosedUnmerged: "{checks.RU_CATALOGUE_CLOSED}"' in russian
+    assert f'case .catalogueMergedDiffers: "{checks.RU_CATALOGUE_MERGED_DIFFERS}"' in russian
+    for sentence in (checks.RU_MERGED_DIFFERS, checks.RU_MERGED_NOTHING_OFFERED, checks.RU_CLOSED_UNMERGED, checks.RU_REWRITTEN):
+        assert said_by_swift(sentence.format(number=3)), sentence
+    assert said_by_swift(checks.RU_CHANGED_STILL.format(number=3, version="1.0.1"))
+    assert said_by_swift(checks.RU_NOT_CHECKED_SINCE.format(number=3) + "14:02")
+    # The card: where the code comes from, and a plugin that asks for nothing.
+    assert '"Этот код никто не проверял: он из \\(Self.lineFrom(ref)) репозитория \\(repository)"' in russian
+    assert '", а не из того, что репозиторий влил. uDeck спросит снова, как только он изменится."' in russian
+    assert checks.RU_NOBODY_VERIFIED.format(number=3, repository=official) == (
+        f"Этот код никто не проверял: он из запроса на слияние #3 репозитория github.com/{official}, а не из того, что "
+        "репозиторий влил. uDeck спросит снова, как только он изменится.")
+    assert 'return "запроса на слияние #\\(number)"' in russian
+    asks_nothing = checks.RU_ASKS_NOTHING_UNVERIFIED.format(name="\\(name)")
+    assert f'"{asks_nothing}"' in russian
+
+
+def _the_cards_in_russian(leave_out=(), english_header=None):
+    """The two copies' cards as a walk of the panel hands them over: one card each, as run 38966347071 kept them."""
+    source = checks.RU_NOBODY_VERIFIED.format(number=checks.PULL, repository=checks.config.PLUGINS_REPOSITORY)
+    lines = []
+    for x, plugin in ((854, checks.UPTIME), (1385, checks.ASKS_NOTHING)):
+        header = "Unverified" if plugin == english_header else checks.RU_UNVERIFIED
+        lines += [f"3|AXStaticText||card.{plugin}.unverified||{header}||{x};85;|88;13;",
+                  f"4|AXStaticText||consent.{plugin}.source||{source}||{x};120;|300;40;",
+                  f"4|AXButton||consent.{plugin}.allow||||{x};232;|152;23;"]  # fmt: skip
+    return "\n".join(line for line in lines if not any(f"|{gone}|" in line for gone in leave_out))
+
+
+def test_each_card_of_the_pull_requests_copies_asks_in_russian():
+    """The second half's cards are read card by card: one card asking, or one header said in English, is red — it
+    used to take either card's words for both."""
+    asks = [checks.RU_ASKS_NOTHING_UNVERIFIED.format(name=checks.ASKS_NOTHING_NAME)]
+    official = checks.config.PLUGINS_REPOSITORY
+    checks._the_cards_ask_in_russian(_the_cards_in_russian(), asks, official)
+    for gone in (f"consent.{checks.UPTIME}.allow", f"consent.{checks.ASKS_NOTHING}.allow",
+                 f"card.{checks.UPTIME}.unverified", f"consent.{checks.ASKS_NOTHING}.source"):  # fmt: skip
+        with pytest.raises(CheckFailed):
+            checks._the_cards_ask_in_russian(_the_cards_in_russian(leave_out=(gone,)), asks, official)
+    for plugin in (checks.UPTIME, checks.ASKS_NOTHING):
+        with pytest.raises(CheckFailed, match=f"{plugin}'s card says 'Unverified'"):
+            checks._the_cards_ask_in_russian(_the_cards_in_russian(english_header=plugin), asks, official)
+    with pytest.raises(CheckFailed, match="does not say"):
+        checks._the_cards_ask_in_russian(_the_cards_in_russian(), ["Asks nothing asks for nothing"], official)
+
+
 def test_the_panel_buttons_the_check_expects_are_the_panels_own():
     """plugins.failed-run-on-a-fresh-card reads the panel's buttons by the identifiers WorkspaceView gives them."""
     workspace = _source("Sources", "UDeckKit", "Views", "WorkspaceView.swift")

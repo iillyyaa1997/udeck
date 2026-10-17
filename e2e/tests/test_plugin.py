@@ -1030,6 +1030,44 @@ def test_the_list_says_each_update_checks_default_pair_and_asks_github_nothing(l
     assert nowhere.asked == []
 
 
+SMOKE = """
+from udeck_e2e import smoke
+
+@smoke.only_when_named(smoke.PULL_REQUEST_OPTION)
+def check_real_pull_request(machine, check_dir, lab):
+    pass
+"""
+PULL_LINK = "github.com/iillyyaa1997/udeck-plugins/pull/5"
+
+
+def write_the_smoke(lab):
+    lab.write("check_smoke.py", SMOKE)
+    lab.write("check_panel.py", "def check_dwell(machine): pass\n")
+
+
+def test_the_smoke_is_listed_with_what_it_takes_and_left_out_of_a_run_without_names(lab):
+    write_the_smoke(lab)
+    code, out = lab.run(listing=True)
+    assert code == 0
+    assert out.splitlines() == ["panel.dwell", "smoke.real-pull-request  only when named, with --pull-request <link>"]
+    code, out = lab.run()
+    assert code == 0 and "✅ panel.dwell" in out and "1 passed in" in out
+    assert "smoke.real-pull-request" not in out
+
+
+def test_the_smoke_without_a_pull_request_and_a_pull_request_without_the_smoke_are_refused(lab):
+    write_the_smoke(lab)
+    code, out = lab.run("smoke.real-pull-request")
+    assert code == 2 and "smoke.real-pull-request takes --pull-request <link>" in out
+    code, out = lab.run("panel.dwell", pull_request=PULL_LINK)
+    assert code == 2 and "--pull-request does nothing without smoke.real-pull-request" in out
+    code, out = lab.run("smoke.real-pull-request", pull_request="github.com/someone/else/pull/5")
+    assert code == 2 and "is not a link to a pull request of github.com/iillyyaa1997/udeck-plugins" in out
+    code, out = lab.run("smoke", pull_request=PULL_LINK)
+    assert code == 2 and "run only when each is named" in out
+    assert lab.preflights == 0 and lab.run_dirs() == []
+
+
 def test_a_pair_given_to_a_check_that_takes_none_is_refused_before_anything_starts(lab, monkeypatch):
     write_paired(lab, monkeypatch)
     code, out = lab.run("panel.dwell", "updates.sparkle", from_side="checkout", to_side="latest")

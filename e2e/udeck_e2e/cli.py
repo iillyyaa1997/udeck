@@ -112,6 +112,14 @@ def parser() -> argparse.ArgumentParser:
         help="assemble the builds from binaries 'swift build -c release' already made in DIR, compiled from this "
              "checkout's commit (DIR/commit says which) with its sources unchanged since, instead of compiling",
     )
+    p.add_argument(
+        "--pull-request",
+        dest="pull_request",
+        metavar="LINK",
+        default=None,
+        help="the pull request of the official plugin repository smoke.real-pull-request installs from and waits to see "
+             "closed — only with that check, which runs only when it is named, and only on a GitHub runner",
+    )
     p.add_argument("--golden", action="store_true", help="with cleanup: remove golden images too")
     # For the lab's own tests: run checks from somewhere else.
     p.add_argument("--checks-dir", type=Path, default=E2E_DIR / "checks", help=argparse.SUPPRESS)
@@ -144,7 +152,7 @@ def pytest_args(target_dir: Path, listing: bool) -> list[str]:
 
 
 # The flags whose names are not their destination's.
-FLAGS = {"from_side": "--from", "to_side": "--to"}
+FLAGS = {"from_side": "--from", "to_side": "--to", "pull_request": "--pull-request"}
 
 # What `--target here` refuses beside it, because there each would do nothing:
 # there is one machine, the runner, and no guest to choose, keep or start ahead.
@@ -153,7 +161,8 @@ NOT_WITH_HERE = ("guest", "vm", "jobs", "keep_on_failure")
 # Which options each command takes. An option a command would ignore is refused:
 # `cleanup --list` once deleted the kept clones it was asked to list.
 ALLOWED = {
-    "checks": {"list", "guest", "vm", "keep_on_failure", "jobs", "from_side", "to_side", "target", "shard", "prebuilt"},
+    "checks": {"list", "guest", "vm", "keep_on_failure", "jobs", "from_side", "to_side", "target", "shard", "prebuilt",
+               "pull_request"},
     "selfcheck": {"list", "guest", "vm", "keep_on_failure", "jobs", "target", "prebuilt"},
     "bake": {"list", "guest"},
     "cleanup": {"list", "guest", "golden"},
@@ -174,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
             ("keep_on_failure", args.keep_on_failure), ("golden", args.golden),
             ("jobs", args.jobs), ("from_side", args.from_side), ("to_side", args.to_side),
             ("target", args.target), ("shard", args.shard), ("prebuilt", args.prebuilt),
+            ("pull_request", args.pull_request),
         )
         if value not in (None, False)
     }  # fmt: skip
@@ -242,6 +252,7 @@ def main(argv: list[str] | None = None) -> int:
         target=target,
         shard=shard,
         prebuilt=args.prebuilt.resolve() if args.prebuilt is not None else None,
+        pull_request=args.pull_request,
     )
     return run_pytest(plugin, pytest_args(checks_dir, args.list))
 

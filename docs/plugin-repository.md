@@ -19,11 +19,13 @@ where each one came from.
 
 uDeck gets this in five stages, each of which ships something that works on its
 own (see [Stages](#stages)). **Everything in this document without a mark is
-built** — stage 1, and what later stages have built since, which
-[Stages](#stages) lists. Anything that belongs to a later stage and is not
-built yet is marked where it appears:
+built** — stages 1, 2 and 3, which [Stages](#stages) lists, all but one step of
+stage 2 marked in [The official repository](#the-official-repository): its
+script deleted once `udeck-plugin check-repo` has agreed with it long enough.
+Anything that belongs to a later stage and is not built yet is marked where it
+appears:
 
-> **Later — stage 3.** Text like this describes something that is not built
+> **Later — stage 4.** Text like this describes something that is not built
 > yet.
 
 Later stages are written down so that stage 1 does not close a door they need —
@@ -2192,8 +2194,10 @@ repository. What that means, exactly:
 * **While it runs**, once every 24 hours.
 * **When Settings → Plugins is opened**, if the catalogue is more than an hour
   old; and whenever **Check now** is pressed.
-* **When the operator presses Install, Update or Earlier versions**, the files
-  that needs.
+* **When the operator presses Install, Update, Reinstall, Back to, Switch to
+  verified or Earlier versions**, the files that needs — from the repository the
+  copy comes from, a fork's from the fork — and, for **Earlier versions**, the
+  default branch's history of that plugin's folder.
 * **When the operator presses Look up in Install from a link…**, the pull
   request or the branch the link names, its listing unless it is cached, and
   the manifests of the plugins there that are not the catalogue's — through
@@ -2402,7 +2406,8 @@ guest's `~/.udeck` over SSH.
 | `plugins.failed-run-on-a-fresh-card` | A linked plugin whose card lasts 300 s fails (exit 3, a line on stderr) while a file is in its folder: with the panel open, the fresh card keeps its values and gets the amber dot by its name and the lines *Last run failed at …: the producer exited with status 3* and *showing values from …*; Settings → Plugins, under **More**, says *Last run … a failure: …* and the end of its stderr; the file taken away and the panel opened again, the dot and the line are gone. The panel's own buttons are refresh, Settings, send away and fill the screen — no density button. |
 | `plugins.install-command` | The bundle carries `Contents/Helpers/udeck-plugin` and `codesign --verify --deep --strict` holds in the guest; the row says it is not installed; **Install command** makes `~/.local/bin/udeck-plugin` a link to it, and `--help` and `--version` run through the link; the row says it is installed and what the guest's zsh makes of `~/.local/bin` (the line to add, when it does not look there); **Remove command** takes the link and leaves the command in the bundle; a file of somebody else's at that place is said, left as it is, and not offered **Install command**. |
 | `plugins.search-path-field` | A linked plugin running the bare `lab-greet`, on no folder of the default list: its window says it was not found. **＋ Add a folder…** (the folder chosen in the panel) puts a folder of the lab's at the top of **Where to look for commands** and in `settings.json`, and the card, allowed, says that folder's word; a second folder added says its word; **↓** on it, the first folder's word again — each from the next run, without a restart; **Restore the defaults** puts the default list back in `settings.json`. |
-| `plugins.screens-in-russian` | With uDeck in Russian (`language` in `settings.json`), a failed run on a fresh card, the **Linked** row and its Remove warning, **Link a folder…** over the installed `uptime` and its warning, the last run under **More**, the run log switch, **Where to look for commands** and **Install command** are each there and say uDeck's Russian words — why the run failed too, *программа плагина завершилась с кодом 3*, with the last run's seconds written with a comma; **Link a folder…** over a link writes both folders from `~`; **Update** over a link put where the installed `uptime` was says first *uptime здесь — ссылка на ~/…* and leaves the link until that is confirmed; a screenshot of each is kept for a person to read. |
+| `plugins.screens-in-russian` | With uDeck in Russian (`language` in `settings.json`), a failed run on a fresh card, the **Linked** row and its Remove warning, **Link a folder…** over the installed `uptime` and its warning, the last run under **More**, the run log switch, **Where to look for commands** and **Install command** are each there and say uDeck's Russian words — why the run failed too, *программа плагина завершилась с кодом 3*, with the last run's seconds written with a comma; **Link a folder…** over a link writes both folders from `~`; **Update** over a link put where the installed `uptime` was says first *uptime здесь — ссылка на ~/…* and leaves the link until that is confirmed. Then, in a uDeck started afresh in Russian with updates by themselves on, the screens of stage 3 a person meets along the way say Russian.swift's words: *Обновился сам …* after `main` moved to `c2`; the link sheet — the refusal of `someone/elsewhere`, and the head, **Не проверен** and note of the fork's branch, of `fix/uptime` and of pull request #3; the warnings of **Install** over the verified copy, **Switch to verified** and **Back to** the pull request's copy, each naming both; the **Не проверен** row, *запрос на слияние #3, коммит …*, and the catalogue row; the cards of `uptime` and `asks-nothing` asking — the header, where the code comes from, *… ничего не просит, но его код не проверен*; history rewritten; *Запрос на слияние #3 не проверялся с …*; closed without being merged; merged with changes; merged with nothing offered. A screenshot of each is kept for a person to read. Not read in Russian yet, among others: a new version along the copy's line, a deleted branch or plugin, an update that asks for different permissions or failed, the link sheet's other answers — merged, merged elsewhere, closed, nothing differs, not there, not found, a commit gone — **Switch to verified**'s own label, a window's **Reinstall** warning and a fork's branch on its row. |
+| `smoke.real-pull-request` | Runs only when named, with `--pull-request <link>`, and only on a GitHub runner, against the real GitHub: a lab build that keeps the shipped addresses reads the official catalogue from github.com; the link of an open pull request of the official repository that changes one plugin, typed into **Install from a link…**, says *Pull request #N at …*; **Install** records `ref {pr, "N"}` at its head, `unverified`, by `null`, and the row says **Unverified** · *pull request #N at …*; once somebody has closed the pull request unmerged and deleted its branch, **Check now**, and the row says *Pull request #N was closed without being merged; the plugin keeps running*, the catalogue row *… unverified — closed without being merged*, the record as it was. Fewer than fifteen of the hour's sixty left to the runner's address, a pull request merged or closed before the install: it could not check. Screenshots of each. |
 
 ### Unit tests
 
@@ -2626,7 +2631,7 @@ places:
 
 ## Stages
 
-### Stage 1 — the shortest path (now)
+### Stage 1 — the shortest path (built)
 
 **The official repository** gets its passport, README, CONTRIBUTING with the
 DCO, CODEOWNERS, the CI with its temporary check script, and `uptime`. Its
@@ -2653,48 +2658,57 @@ owner sets the branch protection.
   so;
 * the fake repository in the guest and the lab checks above.
 
+### Stage 2 — one validator and a template (built but for one step)
+
+The rules move into a Swift library, `UDeckPluginFormat`, that builds on macOS
+and Linux; the `udeck-plugin` command (`check`, `check-repo`, `new`, `run`)
+is shipped as release assets and a container image ([Where the command comes
+from](#where-the-command-comes-from)), and a repository pins one release in a
+lock file `udeck-plugin pin` writes ([The lock file](#the-lock-file)); uDeck
+links the same library; CI templates for GitHub Actions and GitLab CI, with a
+variable for a mirror of the image (in the template repository below); the
+version-bump and `minUDeck` checks; a template repository anyone can start from
+([`udeck-plugins-template`](https://github.com/iillyyaa1997/udeck-plugins-template),
+with the check for GitHub Actions and GitLab CI); a plugin folder that is a link
+to a working copy, for development; a run log and the standard error of
+successful runs for authors. The bash check in uDeck's CI goes; the official
+repository's Python script runs beside `udeck-plugin check-repo` until the two
+have agreed long enough ([The official repository](#the-official-repository)).
+
+### Stage 3 — branches, pull requests, verified (built)
+
+* **Install from a link…**: a pull request or a branch of the official
+  repository, or a branch of a fork of it, read through `RepositoryLink` and
+  `RefResolver`, its plugins that are not the catalogue's listed and installed,
+  recorded with their ref, and every button that puts a copy back keeping it
+  ([Installing from a branch or a pull request](#installing-from-a-branch-or-a-pull-request),
+  [`installed.json`](#installedjson)); a repository that is no fork of the
+  official one refused once GitHub has said so; **Switch to verified**, and
+  every switch between copies of two lines of history naming both.
+* **Unverified**, on the plugin's row, in the list it came from, on the
+  catalogue row of the same id and on the card's header and question
+  ([Where Unverified is said](#verified-trusted-unverified)).
+* Consent for every new content of code nobody verified, a plugin that asks for
+  nothing included ([Consent for unverified code](#consent-for-unverified-code)).
+* **Verified** computed from content: a copy whose folder is what was merged
+  becomes the default branch's with nothing downloaded; a pull request merged
+  with changes offered the verified version, one closed unmerged said ([When the
+  pull request is merged or closed](#when-the-pull-request-is-merged-or-closed)).
+* Verified plugins updating themselves after a read of the catalogue, with the
+  permission decision carried across a swap of one verified copy for another
+  ([Automatic updates](#automatic-updates), [Updating](#updating)).
+* The branch or the pull request a copy came from followed at the catalogue's
+  moments — its new head offered with *What changed*, history rewritten on it
+  said, a deleted branch said, and since when it was not checked — and a fork's
+  branch read, installed, followed and named from the fork itself ([Following
+  the branch or the pull request a copy came
+  from](#following-the-branch-or-the-pull-request-a-copy-came-from)).
+* Every screen of it in English and Russian, and the lab's checks of them,
+  `smoke.real-pull-request` against the real GitHub among them ([The lab's
+  checks](#the-labs-checks)).
+
 ### Later stages
 
-* **Stage 2 — one validator and a template.** The rules move into a Swift
-  library, `UDeckPluginFormat`, that builds on macOS and Linux; the
-  `udeck-plugin` command (`check`, `check-repo`, `new`, `run`) is shipped as
-  release assets and a container image (built: [Where the command comes
-  from](#where-the-command-comes-from)), and a repository pins one release
-  in a lock file `udeck-plugin pin` writes (built: [The lock
-  file](#the-lock-file)); uDeck links the same library; CI
-  templates for GitHub Actions and GitLab CI, with a variable for a mirror of
-  the image (built: in the template repository below); the version-bump and `minUDeck` checks; a template repository
-  anyone can start from (built:
-  [`udeck-plugins-template`](https://github.com/iillyyaa1997/udeck-plugins-template),
-  with the check for GitHub Actions and GitLab CI); a plugin folder that is a
-  link to a working copy, for development; a run log and the standard error of
-  successful runs for authors. The bash check in uDeck's CI and the official
-  repository's Python script go.
-* **Stage 3 — branches, pull requests, verified.** Installing from a branch or a
-  pull request, forks included (built underneath: `installed.json` keeps a
-  branch's and a pull request's ref, and every button that puts a copy back
-  keeps it, [`installed.json`](#installedjson); a github.com link read and
-  resolved, `RepositoryLink` and `RefResolver`; and on top of them **Install
-  from a link…**, [Installing from a branch or a pull
-  request](#installing-from-a-branch-or-a-pull-request), with **Switch to
-  verified**); **Unverified**, on the card too (built: [Where Unverified is
-  said](#verified-trusted-unverified)); consent for
-  every new content (built: [Consent for unverified code](#consent-for-unverified-code));
-  **Verified** computed from content, with the switch to
-  the merged version when a pull request lands (built: [When the pull request
-  is merged or closed](#when-the-pull-request-is-merged-or-closed), with a pull
-  request merged as something else offered the verified version, and one
-  closed unmerged said); automatic daily updates for
-  verified plugins (built: [Automatic updates](#automatic-updates), with the
-  permission decision carried across a swap of one verified copy for another,
-  [Updating](#updating)); the branch or the pull request a copy came from
-  followed, its new head offered with *What changed*, and history rewritten on
-  it detected and said (built: [Following the branch or the pull request a copy
-  came from](#following-the-branch-or-the-pull-request-a-copy-came-from)); a
-  branch of a fork of the official repository, read, installed, followed and
-  named from the fork itself, and any other repository refused once GitHub has
-  said it is no fork of it (built: [Installing from a branch or a pull
-  request](#installing-from-a-branch-or-a-pull-request)).
 * **Stage 4 — own and private sources.** `~/.udeck/sources.json`; GitLab,
   gitlab.com and self-hosted; tokens pasted from a pre-filled creation page, or
   **Sign in** — GitHub and gitlab.com by device flow, a self-hosted GitLab with

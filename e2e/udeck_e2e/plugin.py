@@ -22,7 +22,7 @@ from typing import IO, Any
 
 import pytest
 
-from udeck_e2e import ax, builds, config, golden, here, names, pairs, preflight, releases, targets
+from udeck_e2e import ax, builds, config, golden, here, names, pairs, preflight, releases, smoke, targets
 from udeck_e2e.config import Guest
 from udeck_e2e.errors import CheckFailed, FailedBeforeTheMachine, LabError, NotOnThisTarget
 from udeck_e2e.guest import SSH, make_key
@@ -137,6 +137,7 @@ class LabPlugin:
         target: str = targets.TART,
         shard: tuple[int, int] | None = None,
         prebuilt: Path | None = None,
+        pull_request: str | None = None,
         build_helper: Callable[[Path, Note], Path] = ax.build,
         run_here_preflight: Callable[..., tuple[preflight.Assessment, dict[str, Any]]] | None = None,
     ) -> None:
@@ -147,6 +148,8 @@ class LabPlugin:
         self.target = target
         self.shard = shard
         self.prebuilt = prebuilt
+        # The pull request a check run only when named installs from (`smoke`, `--pull-request`).
+        self.pull_request = pull_request
         self.build_helper = build_helper
         self.run_here_preflight = run_here_preflight or here_preflight
         # The accessibility helper (`ax`), built once the pre-flight has passed.
@@ -392,7 +395,8 @@ class LabPlugin:
 
     # --- Builds ------------------------------------------------------------
 
-    def builder(self, feed_url: str, for_check: str, release_key: str | None = None) -> builds.Builder:
+    def builder(self, feed_url: str, for_check: str, release_key: str | None = None,
+                real_plugins: bool = False) -> builds.Builder:
         """Lab builds for this run, pointed at `feed_url` and carrying its own key — or a release's.
 
         A directory per check, because two checks build the same versions: the
@@ -402,6 +406,10 @@ class LabPlugin:
         `release_key` is a published release's public key, for a build of this
         checkout that the release is offered to (`pairs`). Whatever the key, the
         build is held to every rule a lab build is (`Builder._verify`).
+
+        `real_plugins` keeps the plugin catalogue's shipped addresses — github.com
+        itself — for the one check that asks the real GitHub (`smoke`), and the
+        build is held to having them.
         """
         if self.run_dir is None:
             raise LabError("preparing a build", "there is no run in progress")
@@ -414,6 +422,7 @@ class LabPlugin:
             key=builds.PublicKey(release_key) if release_key is not None else self.signing_key,
             note=self.note,
             prebuilt=self.prebuilt,
+            **({"plugins_url": None} if real_plugins else {}),
         )
 
     def failed_in(self, scope: str, request: pytest.FixtureRequest) -> bool:
@@ -479,11 +488,14 @@ class LabPlugin:
                 continue
             by_name[name] = item
 
+        # Checks that run only when named (`smoke`) are listed, and run only by their own name.
+        named_only = {name for name, item in by_name.items() if smoke.what_it_takes(getattr(item, "obj", None))}
         try:
-            chosen = names.select(by_name, self.wanted)
+            chosen = names.select(by_name, self.wanted, () if self.listing else named_only)
         except names.CheckNameError as error:
             self.collection_errors.append(str(error))
             chosen = []
+        self._ask_for_the_pull_request(chosen, named_only)
         if self.shard is not None:
             chosen = names.shard(chosen, *self.shard)
         for name in chosen:
@@ -500,6 +512,34 @@ class LabPlugin:
         self.names = {by_name[name].nodeid: name for name in chosen}
         self.chosen_items = keep
         self._plan_the_warming(keep)
+
+    def _ask_for_the_pull_request(self, chosen: list[str], named_only: set[str]) -> None:
+        """`--pull-request` given to the check that takes it and to nothing else, and naming the official repository's.
+
+        Refused before anything starts, as a pair is: a run that took the option and
+        did nothing with it, or ran the smoke without a pull request to ask about,
+        would be a run of something nobody asked for.
+        """
+        if self.listing:
+            return
+        takers = [name for name in chosen if name in named_only]
+        if self.pull_request is None:
+            if takers:
+                self.collection_errors.append(
+                    f"{', '.join(takers)} takes {smoke.PULL_REQUEST_OPTION} <link>: the pull request of "
+                    f"github.com/{config.PLUGINS_REPOSITORY} it installs from and waits to see closed"
+                )
+            return
+        if not takers:
+            self.collection_errors.append(
+                f"{smoke.PULL_REQUEST_OPTION} does nothing without {smoke.REAL_PULL_REQUEST}, the only check that takes it"
+            )
+            return
+        if smoke.pull_request(self.pull_request, config.PLUGINS_REPOSITORY) is None:
+            self.collection_errors.append(
+                f"{smoke.PULL_REQUEST_OPTION} {self.pull_request!r} is not a link to a pull request of "
+                f"github.com/{config.PLUGINS_REPOSITORY}"
+            )
 
     def _ask_for_pairs(self, chosen: list[str], by_name: dict[str, pytest.Item]) -> None:
         """Which pair each chosen update check runs with — and every pair that cannot be run, refused now.
@@ -656,9 +696,16 @@ class LabPlugin:
             return
 
         if self.listing:
-            for name in self.names.values():
+            items = {item.nodeid: item for item in self.chosen_items}
+            for nodeid, name in self.names.items():
                 rule = self.rules.get(name)
-                self.say(f"{name}  {rule.default}" if rule is not None else name)
+                takes = smoke.what_it_takes(getattr(items.get(nodeid), "obj", None))
+                if rule is not None:
+                    self.say(f"{name}  {rule.default}")
+                elif takes is not None:
+                    self.say(f"{name}  only when named, with {takes} <link>")
+                else:
+                    self.say(name)
             if not self.names:
                 self.say("There are no checks yet.")
             self.stop(EXIT_PASSED)

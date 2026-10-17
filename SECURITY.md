@@ -95,27 +95,28 @@ launch and both with a switch to turn them off:
   is downloaded only when you press Install. Off with Settings → About → *Check
   for updates automatically*.
 - **the official plugin catalogue** — `api.github.com` and
-  `raw.githubusercontent.com`, anonymously, for
-  `iillyyaa1997/udeck-plugins`: a few seconds after launch unless it was read in
-  the last 24 hours, once a day while uDeck runs, when Settings → Plugins is
-  opened on a list more than an hour old, when you press Check now, and the
-  plugin's files when you press Install, Update, Reinstall or pick an earlier
-  version, the pull request or the branch a link names when you press Look up
-  in Install from a link… — for a branch of another repository on github.com,
-  first whether it is a fork of `iillyyaa1997/udeck-plugins`, and then, only if
-  it is, everything after this of the fork itself — its head, its listing and
-  the manifests there that are not the catalogue's — in each read, the pull
-  request or the branch a plugin installed from one came from, a fork's of the
-  fork, unless `main` has it as it is — and, once
-  its head moved, that head's listing and the plugin's manifest there, and one
-  comparison with what is installed when the plugin changed there — and once
-  it is merged into `main` the listing of the commit it was merged as — and, after a read, the files of a **Verified** plugin whose new
-  version asks for exactly the permissions it asks for now: such a plugin
-  updates itself, keeping your permission decision. Anything else is only
-  offered. Off with Settings → Plugins → *Update verified plugins by
-  themselves*, after which every update waits for a press; all of it off with
-  Settings → Plugins → *Official catalogue*, after which uDeck makes no request
-  about plugins at all.
+  `raw.githubusercontent.com`, anonymously, for `iillyyaa1997/udeck-plugins`: a
+  few seconds after launch unless it was read in the last 24 hours, once a day
+  while uDeck runs, when Settings → Plugins is opened on a list more than an
+  hour old, when you press Check now, and the plugin's files when you press
+  Install, Update, Reinstall, Back to or Switch to verified or pick an earlier
+  version, the pull request or the branch a link names when you press Look up in
+  Install from a link… — for a branch of another repository on github.com, first
+  whether it is a fork of `iillyyaa1997/udeck-plugins`, and then, only if it is,
+  everything after this of the fork itself — its head, its listing and the
+  manifests there that are not the catalogue's — in each read, the pull request
+  or the branch a plugin installed from one came from, a fork's of the fork,
+  unless `main` has it as it is — and, once its head moved, that head's listing
+  and the plugin's manifest there, and one comparison with what is installed
+  when the plugin changed there — and once it is merged into `main` the listing
+  of the commit it was merged as, none of it in a read nobody asked for once
+  fewer than ten of the hour's requests are left — and, after a read, the files
+  of a **Verified** plugin whose new version asks for exactly the permissions it
+  asks for now: such a plugin updates itself, keeping your permission decision.
+  Anything else is only offered. Off with Settings → Plugins → *Update verified
+  plugins by themselves*, after which every update waits for a press; all of it
+  off with Settings → Plugins → *Official catalogue*, after which uDeck makes no
+  request about plugins at all.
 
 Neither carries an account, an identifier, a cookie or the list of what you
 have installed. The details are in [README.md](README.md#what-udeck-connects-to-and-when)

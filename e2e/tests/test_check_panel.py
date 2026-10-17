@@ -29,7 +29,7 @@ from pathlib import Path
 import pytest
 from fakes import Dropped, Failed, Lab, Machine, ax_answer, ax_texts, throw_output, wobble_output
 
-from udeck_e2e import app, config, panel
+from udeck_e2e import app, config, panel, probes
 from udeck_e2e.errors import CheckFailed, LabError
 
 
@@ -1484,6 +1484,148 @@ def test_a_panel_that_comes_back_as_a_peek_after_a_margin_click_and_a_switch_fai
         checks.check_a_switch_after_a_click_in_the_margin(machine, check_dir, lab)
 
 
+# --- A click on the Dock past a panel being worked in -------------------------------------
+
+
+# The Dock as System Events lists it in a Tart guest (probe.dock-gap, 20261016-144410Z): two separators, and
+# the first of them is the one clicked.
+DOCK = (
+    "Finder\tAXApplicationDockItem\t467\t1351\t68\t84\n"
+    "System Settings\tAXApplicationDockItem\t1691\t1351\t68\t84\n"
+    "missing value\tAXSeparatorDockItem\t1759\t1351\t30\t84\n"
+    "TextEdit\tAXApplicationDockItem\t1858\t1351\t68\t84\n"
+    "missing value\tAXSeparatorDockItem\t1926\t1351\t30\t84\n"
+    "Downloads\tAXFolderDockItem\t1956\t1351\t68\t84\n"
+)
+SEPARATOR = (1759 + 15, 1351 + 42)
+# What uDeck says of a click past the panel that brought nothing forward, once it has had its two seconds
+# (PanelController.handBackAfterTheClick), and of a panel shown again meanwhile (takeKeyboard).
+BROUGHT_BACK = (
+    "2026-09-18 18:20:14.341 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] no application came forward in 2041 ms "
+    "after the click past the panel, and the click opened nothing that is on screen, with uDeck in front, so bringing "
+    "back TextEdit\n"
+)
+SHOWN_IN_THE_WAIT = (
+    "2026-09-18 18:20:12.800 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] the panel showed while a click past it "
+    "waited for its answer, so uDeck takes the keyboard from TextEdit, which comes back when the panel goes (TextEdit "
+    "was waiting)\n"
+    "2026-09-18 18:20:12.801 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] took the keyboard: key=true active=true "
+    "activated=true\n"
+)
+OPEN_ESCAPED = ESCAPED.replace("peek -> collapsed", "open -> collapsed")
+AFTER_THE_DOCK = (REVEAL, PROMOTED, DISMISSED, BROUGHT_BACK, NOTHING)
+GESTURE_IN_THE_WAIT = (REVEAL, PROMOTED, DISMISSED + REVEAL + SHOWN_IN_THE_WAIT, ESCAPED + GATED, NOTHING)
+
+
+def at_the_dock(machine, dock=DOCK):
+    """The guest's Dock, as System Events lists it."""
+    machine.ssh.answers['tell process "Dock"'] = dock
+    return machine
+
+
+def test_the_dock_is_read_as_system_events_lists_it():
+    items = [("missing value", "AXSeparatorDockItem", 1759.0, 1351.0, 30.0, 84.0)]
+    assert probes.the_docks_separator(items) == SEPARATOR
+    assert probes.the_docks_separator([("Finder", "AXApplicationDockItem", 467.0, 1351.0, 68.0, 84.0)]) is None
+    assert "UI elements of list 1" in probes.DOCK_ITEMS_SCRIPT and "System Events" in probes.DOCK_ITEMS_SCRIPT
+
+
+def test_the_key_after_a_click_on_the_dock_reaches_the_application_from_before(monkeypatch, lab, check_dir):
+    machine = at_the_dock(prepared(monkeypatch, growing(*AFTER_THE_DOCK)))
+    order = []
+    sleeping = machine.sleep
+    machine.sleep = lambda seconds: order.append(("sleep", seconds)) or sleeping(seconds)
+    pressing = machine.key
+    machine.key = lambda name, step: order.append(("key", name)) or pressing(name, step)
+
+    checks.check_the_key_after_a_click_on_the_dock(machine, check_dir, lab)
+
+    # The peek held by a click on it, then the click on the first separator, at its middle.
+    assert [(x, y) for x, y, _ in machine.clicks] == [panel.inside_the_peek(), SEPARATOR]
+    assert [name for name, _ in machine.keys] == [config.BEFORE_THE_PANEL_KEY, config.AFTER_IT_CLOSED_KEY]
+    # The key only once uDeck has said it brought TextEdit back, and the system has had its moment.
+    pressed = order.index(("key", config.AFTER_IT_CLOSED_KEY))
+    assert ("sleep", config.SETTLE_SECONDS) in order[order.index(("key", config.BEFORE_THE_PANEL_KEY)) + 1 : pressed]
+    assert (check_dir / "dock-items.txt").read_text().count("AXSeparatorDockItem") == 2
+
+
+def test_a_key_after_a_click_on_the_dock_that_reached_nobody_fails(monkeypatch, lab, check_dir):
+    """What the rule is for: before it, the next key after a click on the Dock reached no document, 4 of 4."""
+    machine = at_the_dock(prepared(monkeypatch, growing(*AFTER_THE_DOCK), holds=[BEFORE_THE_PANEL, BEFORE_THE_PANEL]))
+    with pytest.raises(CheckFailed, match="did not reach the application he was in"):
+        checks.check_the_key_after_a_click_on_the_dock(machine, check_dir, lab)
+
+
+def test_a_click_on_the_dock_after_which_uDeck_brought_nothing_back_fails(monkeypatch, lab, check_dir):
+    machine = at_the_dock(prepared(monkeypatch, growing(REVEAL, PROMOTED, DISMISSED, NOTHING, NOTHING)))
+    with pytest.raises(CheckFailed, match="brought back nothing"):
+        checks.check_the_key_after_a_click_on_the_dock(machine, check_dir, lab)
+    assert machine.now >= config.GESTURE_ANSWER_SECONDS, "the wait is given its time before that is said"
+    assert [name for name, _ in machine.keys] == [config.BEFORE_THE_PANEL_KEY], "and no key is pressed into nowhere"
+
+
+def test_a_click_on_the_dock_that_did_not_close_the_held_panel_fails(monkeypatch, lab, check_dir):
+    machine = at_the_dock(prepared(monkeypatch, growing(REVEAL, PROMOTED, NOTHING, NOTHING)))
+    with pytest.raises(CheckFailed, match="did not close the panel"):
+        checks.check_the_key_after_a_click_on_the_dock(machine, check_dir, lab)
+
+
+def test_a_dock_without_a_separator_is_the_scene_failing(monkeypatch, lab, check_dir):
+    machine = at_the_dock(prepared(monkeypatch, growing(*AFTER_THE_DOCK)), dock=DOCK.splitlines()[0] + "\n")
+    with pytest.raises(LabError, match="no separator in the Dock") as raised:
+        checks.check_the_key_after_a_click_on_the_dock(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+    assert machine.clicks == [], "nothing is clicked, not even the peek"
+
+
+def test_the_gesture_while_a_click_waits_opens_a_peek_that_escape_puts_away(monkeypatch, lab, check_dir):
+    machine = at_the_dock(prepared(monkeypatch, growing(*GESTURE_IN_THE_WAIT)))
+    checks.check_the_gesture_while_a_click_waits(machine, check_dir, lab)
+    assert [(x, y) for x, y, _ in machine.clicks] == [panel.inside_the_peek(), SEPARATOR]
+    # Straight from the Dock into the strip: the last move is the gesture made while the click waits.
+    assert (machine.pointer[-1][0], machine.pointer[-1][1]) == panel.top_of_the_strip()
+    assert "while the click waits" in machine.pointer[-1][2]
+    assert [name for name, _ in machine.keys] == [config.BEFORE_THE_PANEL_KEY, "esc", config.AFTER_IT_CLOSED_KEY]
+
+
+def test_a_peek_opened_after_the_click_had_its_answer_is_not_this_check(monkeypatch, lab, check_dir):
+    """uDeck brought TextEdit back before the peek came: the ordinary case, which other checks hold."""
+    late = (REVEAL, PROMOTED, DISMISSED + BROUGHT_BACK + REVEAL, ESCAPED + GATED, NOTHING)
+    machine = at_the_dock(prepared(monkeypatch, growing(*late)))
+    with pytest.raises(LabError, match="brought TextEdit back first") as raised:
+        checks.check_the_gesture_while_a_click_waits(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+    assert "esc" not in [name for name, _ in machine.keys]
+
+
+def test_a_peek_shown_in_the_wait_that_escape_does_not_reach_fails(monkeypatch, lab, check_dir):
+    """The failure the fix was for: `key=false`, and Escape reaching nothing."""
+    machine = at_the_dock(prepared(monkeypatch, growing(REVEAL, PROMOTED, DISMISSED + REVEAL + SHOWN_IN_THE_WAIT, NOTHING, NOTHING)))
+    with pytest.raises(CheckFailed, match="did not close the panel"):
+        checks.check_the_gesture_while_a_click_waits(machine, check_dir, lab)
+
+
+def test_a_click_on_the_dock_read_as_an_interruption_fails_before_the_gesture_is_asked_about(monkeypatch, lab, check_dir):
+    """The click past a held panel is the operator putting it away: `closeRequested`, or uDeck read it wrong."""
+    machine = at_the_dock(prepared(monkeypatch, growing(REVEAL, PROMOTED, INTERRUPTED + REVEAL + SHOWN_IN_THE_WAIT, ESCAPED, NOTHING)))
+    with pytest.raises(CheckFailed, match="closed the held panel as"):
+        checks.check_the_gesture_while_a_click_waits(machine, check_dir, lab)
+    assert "esc" not in [name for name, _ in machine.keys]
+
+
+def test_the_gesture_in_the_wait_whose_next_key_reached_nobody_fails(monkeypatch, lab, check_dir):
+    machine = at_the_dock(prepared(monkeypatch, growing(*GESTURE_IN_THE_WAIT), holds=[BEFORE_THE_PANEL, BEFORE_THE_PANEL]))
+    with pytest.raises(CheckFailed, match="did not reach the application he was in"):
+        checks.check_the_gesture_while_a_click_waits(machine, check_dir, lab)
+
+
+def test_a_click_that_left_the_panel_shut_in_the_wait_fails(monkeypatch, lab, check_dir):
+    """The gesture made, and the panel never shown again: uDeck's."""
+    machine = at_the_dock(prepared(monkeypatch, growing(REVEAL, PROMOTED, DISMISSED, BROUGHT_BACK, NOTHING)))
+    with pytest.raises(CheckFailed, match=r"showed the panel as \[\]"):
+        checks.check_the_gesture_while_a_click_waits(machine, check_dir, lab)
+
+
 # --- The keyboard shortcut ---------------------------------------------------------------
 
 
@@ -1905,6 +2047,63 @@ def test_the_hotkey_at_a_gesture_panel_parks_the_pointer_before_uDeck_starts(mon
 
     assert machine.prepared_with_launch is False
     assert order[:3] == ["park", "mark", "launch"], order
+
+
+# --- The shortcut while a click on the Dock waits ------------------------------------------
+
+
+HOTKEY_IN_THE_WAIT = (
+    REGISTERED, REVEAL, PROMOTED, DISMISSED + REVEAL + SHOWN_IN_THE_WAIT + PROMOTED, OPEN_ESCAPED + GATED, NOTHING,
+)
+
+
+def test_the_hotkey_while_a_click_waits_opens_a_panel_that_escape_puts_away(monkeypatch, lab, check_dir):
+    machine = at_the_dock(prepared(monkeypatch, growing(*HOTKEY_IN_THE_WAIT)))
+    order = []
+    clicking = machine.click
+    machine.click = lambda x, y, step: order.append(("click", (x, y))) or clicking(x, y, step)
+    running = machine.ssh.run
+    machine.ssh.run = lambda command, step, **kw: (order.append(("chord", command)) if "key code" in command else None) or running(command, step, **kw)
+
+    checks.check_the_hotkey_while_a_click_waits(machine, check_dir, lab)
+
+    assert machine.prepared_with_launch is False, "uDeck starts inside the window, to say which shortcut it holds"
+    # The chord straight after the click on the separator, nothing read in between.
+    assert [kind for kind, _ in order] == ["click", "click", "chord"] and order[1][1] == SEPARATOR
+    assert chords(machine) == [config.HOTKEY_KEY_CODE]
+    assert [name for name, _ in machine.keys] == [config.BEFORE_THE_PANEL_KEY, "esc", config.AFTER_IT_CLOSED_KEY]
+
+
+def test_a_panel_the_hotkey_showed_in_the_wait_that_escape_does_not_reach_fails(monkeypatch, lab, check_dir):
+    """Run 38933545091: the panel shown again said `key=false`, and Escape never reached it, 12 of 12."""
+    steps = list(HOTKEY_IN_THE_WAIT)
+    steps[4] = NOTHING
+    machine = at_the_dock(prepared(monkeypatch, growing(*steps)))
+    with pytest.raises(CheckFailed, match="did not close the panel"):
+        checks.check_the_hotkey_while_a_click_waits(machine, check_dir, lab)
+
+
+def test_the_hotkey_in_the_wait_whose_next_key_reached_nobody_fails(monkeypatch, lab, check_dir):
+    machine = at_the_dock(prepared(monkeypatch, growing(*HOTKEY_IN_THE_WAIT), holds=[BEFORE_THE_PANEL, BEFORE_THE_PANEL]))
+    with pytest.raises(CheckFailed, match="did not reach the application he was in"):
+        checks.check_the_hotkey_while_a_click_waits(machine, check_dir, lab)
+
+
+def test_a_hotkey_that_reached_uDeck_after_the_wait_is_not_this_check(monkeypatch, lab, check_dir):
+    steps = list(HOTKEY_IN_THE_WAIT)
+    steps[3] = DISMISSED + BROUGHT_BACK + OPENED_BY_THE_HOTKEY
+    machine = at_the_dock(prepared(monkeypatch, growing(*steps)))
+    with pytest.raises(LabError, match="came after the wait") as raised:
+        checks.check_the_hotkey_while_a_click_waits(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_hotkey_in_the_wait_that_left_a_peek_fails(monkeypatch, lab, check_dir):
+    steps = list(HOTKEY_IN_THE_WAIT)
+    steps[3] = DISMISSED + REVEAL + SHOWN_IN_THE_WAIT
+    machine = at_the_dock(prepared(monkeypatch, growing(*steps)))
+    with pytest.raises(CheckFailed):
+        checks.check_the_hotkey_while_a_click_waits(machine, check_dir, lab)
 
 
 # --- A chord that is not the shortcut ------------------------------------------------------

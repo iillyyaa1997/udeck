@@ -152,6 +152,56 @@ def typed_into(machine: Machine, process: str, step: str) -> str:
     return answer["text"].strip()
 
 
+DOCK_ITEMS_SCRIPT = (
+    f"with timeout of {config.SYSTEM_EVENTS_SECONDS} seconds\n"
+    'tell application "System Events" to tell process "Dock"\n'
+    'set out to ""\n'
+    "repeat with e in (UI elements of list 1)\n"
+    "try\n"
+    "set p to position of e\n"
+    "set s to size of e\n"
+    "set out to out & (name of e as text) & tab & (subrole of e as text) & tab & (item 1 of p) & tab & "
+    "(item 2 of p) & tab & (item 1 of s) & tab & (item 2 of s) & linefeed\n"
+    "end try\n"
+    "end repeat\n"
+    "return out\n"
+    "end tell\n"
+    "end timeout"
+)
+
+
+def dock_items(machine: Machine, step: str) -> list[tuple[str, str, float, float, float, float]]:
+    """The Dock's items as System Events lists them: name, subrole, and the frame in screen points.
+
+    The Dock's own row — `list 1` of its process — in its own order. An item
+    whose position or size cannot be read is left out, as one that is not on
+    the screen. Asked the way the scratch probes of 2026-10-16 asked it, which
+    found the separators — `AXSeparatorDockItem`, one after the applications
+    kept in the Dock and one before the Downloads stack — on a runner and in a
+    Tart guest every time (`probe.dock-gap`, run 38918223759, 20261016-144410Z).
+    """
+    # `run`, which raises on any exit but 0: a refusal is the lab failing to ask.
+    said = machine.ssh.run(f"osascript -e {shlex.quote(DOCK_ITEMS_SCRIPT)}", step).stdout
+    items = []
+    for line in said.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 6:
+            continue
+        try:
+            items.append((parts[0], parts[1], *(float(number) for number in parts[2:])))
+        except ValueError:
+            continue
+    return items
+
+
+def the_docks_separator(items: list[tuple[str, str, float, float, float, float]]) -> tuple[int, int] | None:
+    """The middle of the Dock's separator — a place a click opens nothing and brings nothing forward — or None."""
+    for _, subrole, x, y, width, height in items:
+        if subrole == "AXSeparatorDockItem":
+            return round(x + width / 2), round(y + height / 2)
+    return None
+
+
 def press_chord(machine: Machine, key_code: int, modifiers: tuple[str, ...], step: str) -> None:
     """Hold `modifiers` and press the key with `key_code`, from inside the guest.
 

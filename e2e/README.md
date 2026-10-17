@@ -19,8 +19,9 @@ the last section.
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, the accessibility helper that reads uDeck's windows, a
 > self-check, the builds a check needs, a fake GitHub for the plugin catalogue,
-> the same lab on a GitHub runner, and sixty-six checks of uDeck itself in five groups
-> (`e2e/run.sh --list`). `updates`: the
+> the same lab on a GitHub runner, and seventy checks of uDeck itself in five groups
+> (`e2e/run.sh --list`) — and one more, `smoke.real-pull-request`, against the
+> real GitHub, which runs only when it is named ("Not in the full run"). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
 > itself as it ships, and by itself again once an operator who switched that off
 > switches it back on; and a published release updating itself from GitHub, as
@@ -30,7 +31,9 @@ the last section.
 > control and the line between its two paths, the ways of putting it away again,
 > and the keyboard shortcut that opens the panel and puts it away — whichever way
 > it was opened — with its wrong-chord control and a check that the combination
-> dies with uDeck. `login`: "Open at Login", through a restart and an update, and
+> dies with uDeck; and the keyboard after a click on the Dock past a panel being
+> worked in, and after the panel is opened again — by the gesture or the
+> shortcut — while that click waits for its answer. `login`: "Open at Login", through a restart and an update, and
 > switched off. `settings`: two changes made in uDeck's own window, and whether
 > they hold across a restart. `plugins`: the thirty-seven checks of
 > docs/plugin-repository.md — the catalogue, installing, updating, a verified
@@ -42,7 +45,8 @@ the last section.
 > said — a linked folder, and what Settings offers
 > somebody writing a plugin: Link a folder…, the run log's switch, a failed run
 > on a fresh card, Install command, Where to look for commands, and all of it
-> in Russian — against a fake GitHub in the guest.
+> in Russian, the screens of stage 3 a person meets along the way included —
+> against a fake GitHub in the guest.
 
 ## Running it
 
@@ -61,6 +65,7 @@ e2e/run.sh --keep-on-failure   # keep a failed check's machine to look at
 e2e/run.sh --jobs 2            # boot the next check's machine while this one runs
 e2e/run.sh plugins --shard 2/3 # the second of three parts of the plugins group
 e2e/run.sh --prebuilt DIR      # assemble the builds from binaries compiled in DIR
+e2e/run.sh smoke.real-pull-request --pull-request LINK   # the real GitHub; a runner only, and only when named
 e2e/run.sh cleanup --list      # what cleanup would remove, removing nothing
 e2e/run.sh cleanup             # remove kept or left-behind clones
 e2e/run.sh cleanup --golden --guest 26   # …and macOS 26's golden image
@@ -906,6 +911,45 @@ release — nothing re-checks by itself that the new "from" refuses an offer
 signed with another key; that is the command above with the new version.
 Whether the full run should hold it too is not settled.
 
+**The smoke against the real GitHub**, `smoke.real-pull-request`, is never in a
+run that did not name it — not in a run without names, not in its group's
+(`names.select`, `smoke.only_when_named`) — and it takes the pull request it is
+about, a link to one of the official plugin repository's:
+
+```
+e2e/run.sh smoke.real-pull-request --pull-request https://github.com/iillyyaa1997/udeck-plugins/pull/3
+```
+
+It runs only on a GitHub runner (`--target here`; from a Tart guest it says it
+could not check, before asking anything), where it is dispatched with the link in
+`run`: `gh workflow run lab.yml --ref <branch> -f run='smoke.real-pull-request
+--pull-request <link>'`. Its lab build is the only one that keeps the catalogue's
+shipped addresses, `api.github.com` and `raw.githubusercontent.com`, and
+`Builder._verify` holds it to them as `Sources/uDeck/Support/Info.plist` ships
+them; so it reads the official catalogue from GitHub, anonymously, from the
+runner's address. The lab first asks GitHub — with the job's token — what the
+pull request is: open, its head, and the one plugin folder it changes; and,
+without the token, how many of the hour's sixty the address has left
+(`/rate_limit`, which costs none): fewer than fifteen, and it could not check. Then
+the link typed into **Install from a link…**: the sheet says *Pull request #N at
+<head>*, **Install** on the plugin records `ref {pr, "N"}` at the head,
+`unverified`, by nobody, and the row says **Unverified** · *pull request #N at
+<head>*. Then it waits, up to thirty minutes, asking GitHub every fifteen seconds,
+for somebody to close the pull request without merging it and delete its branch;
+**Check now**; and the row says *Pull request #N was closed without being merged;
+the plugin keeps running*, the catalogue row *… unverified — closed without being
+merged*, and the record is as it was. A pull request merged, or closed before the
+install, is not its question: it could not check.
+
+Measured on 2026-10-16 (run 38967398779, 300 s): a draft pull request on
+`iillyyaa1997/udeck-plugins` — `uptime` 1.0.1, one README line, `validate`
+green — was installed from its link at e1f5c5c, said **Unverified** on its row,
+was closed unmerged with its branch deleted four and a half minutes later, and
+after **Check now** its row said it was closed without being merged; the
+runner's address had 43 of its sixty left before and 30 after. Screenshots of
+the catalogue read from GitHub, the sheet, the row and both closed rows are in the
+run's report.
+
 ### Looking for an update by itself
 
 uDeck ships with automatic checks **on** — `SUEnableAutomaticChecks` is true
@@ -1362,9 +1406,11 @@ are kept in `.build/e2e/kept/`.
 
 ### The panel closing
 
-Eight more. Seven of them read the same log from the other end; the eighth asks
+Ten more. Seven of them read the same log from the other end; the other three ask
 the question that follows all of them and that the log cannot answer, which is
-where the keyboard went. The line the seven take as the verdict is the phase and the
+where the keyboard went — after Escape at a peek, after a click on the Dock past
+a panel being worked in, and after the gesture opened the panel again while that
+click waited (below). The line the seven take as the verdict is the phase and the
 event together — `peek -> collapsed on pointerLeft`, `open -> collapsed on
 closeRequested`, `open -> collapsed on otherAppActivated`, `peek -> collapsed on
 escape` — and both halves of it are the check. The event, because the panel has
@@ -1478,8 +1524,8 @@ it landed" and "the click has an answer: a window it opened holds the
 application from before until it goes" hold the rule; nine mutants of it fail
 them.
 
-**A panel shown again while the click waits** — by the shortcut, measured;
-the gesture takes the same path in the code and was not run — takes the keyboard from the application waiting to come back, and gives it
+**A panel shown again while the click waits** — by the shortcut or by the
+gesture — takes the keyboard from the application waiting to come back, and gives it
 back to that application when it goes (`KeyboardHandback.takesTheKeyboard`).
 The workspace goes on naming uDeck in front while the click waits, and a uDeck
 that read that as already having the keyboard took it from nobody: on the build
@@ -1496,12 +1542,25 @@ on a runner, but Escape never reached it, 12 of 12 (run 38933545091), and 2 of
 key, the panel shown again is key: Escape closed it and TextEdit had the next
 key, 12 of 12 on a runner (run 38938650252) and 2 of 2 in a Tart guest
 (20261016-171102Z, -171905Z), and so did the shortcut pressed again, 12 of 12
-and 1 of 1 (-171905Z). These are probes
-(`probe.reopen-escape`, `probe.reopen-hotkey`, on throwaway branches), not
-checks. The Swift test "a panel shown while a click waits for its answer takes
-the keyboard from the application waiting to come back" holds which application
-that is; three mutants of it fail it. Nothing but those probes holds the
-ordering out.
+and 1 of 1 (-171905Z). Those were probes on throwaway branches
+(`probe.reopen-escape`, `probe.reopen-hotkey`); the ordering out is held by
+two checks now, which the gesture's way in was first run by.
+`panel.the-hotkey-while-a-click-waits` clicks past a held panel onto the Dock's
+separator, presses the shortcut at once, then Escape and one key;
+`panel.the-gesture-while-a-click-waits` does the same with the pointer taken
+from the Dock straight into the strip, where the dwell opens a peek. Each has to
+read uDeck saying the panel showed while the click waited — a panel that came
+after the wait is the ordinary case, and the check could not check — then the
+panel closing on `escape` and the key in TextEdit's document. In a Tart guest
+(20261016-203714Z) and on a runner (run 38963232997), 1 of 1 each: the gesture's
+peek came 1.33 s and 0.27 s after the click closed the panel — the VNC moves of
+a Tart guest are slower than the helper's on a runner, and the two seconds left
+room both times — and took the keyboard as a key window
+(`took the keyboard: key=true`); the shortcut's panel came 0.37 s after it on
+both; Escape closed each, and TextEdit held "ax" or "Ax". The Swift test "a
+panel shown while a click waits for its answer takes the keyboard from the
+application waiting to come back" holds which application that is; three
+mutants of it fail it.
 
 What the probes found the window server shows, in a Tart guest and on a runner
 (scratch probes, not checks): the Dock's own window covers the whole screen at
@@ -1545,7 +1604,14 @@ against 0.6 to 1.2 for a closed one, and a few of each were looked at):
   7.1 s after it (run 38918223759).
 - **A click on the separator** brings TextEdit back 2.04 to 2.06 s after the
   click, and the next key reaches its document: 1 of 1 in a Tart guest, 12 of 12
-  on a runner.
+  on a runner. That is a check now, `panel.the-key-after-a-click-on-the-dock`:
+  the click on the Dock's first separator (`AXSeparatorDockItem`, where System
+  Events lists it, `probes.dock_items`) closes the held panel on
+  `closeRequested`, uDeck brings TextEdit back once no application came forward
+  and the click opened nothing — 2026 ms after it in a Tart guest
+  (20261016-203714Z), 2.05 s on a runner (run 38963232997) — and only then is a
+  key pressed, which reaches the document. A Dock without a separator is the
+  scene failing, not uDeck.
 - **A stack does not stay open.** TextEdit comes back 2.04 to 2.09 s after the
   click, and the stack was still on screen in the 5 s screenshot in 1 of the 2
   Tart readings with this rule and 5 of the 24 runner readings (the empty
@@ -1736,7 +1802,7 @@ since outside it.
 
 ### The panel's keyboard shortcut
 
-Five more, and they are about the other way in: ⌃⌥U, which works with the
+Six more, and they are about the other way in: ⌃⌥U, which works with the
 cursor nowhere near the top of the screen. It is not a third opening path,
 because the panel it leaves is a different panel. The gesture gives a peek — the
 glance the cursor being right there has earned — and the shortcut gives one
@@ -1790,7 +1856,10 @@ pointer left in the strip by whatever ran before opens the panel by the gesture
 in a fraction of a second, and on a machine shared between checks (`--vm
 per-group`, `per-run`) that reveal lands between the launch and the mark, where
 no read here would ever see it — leaving a shortcut check pressing a chord at a
-panel that was already up. Park, mark, a second's wait, launch, in all five.
+panel that was already up. Park, mark, a second's wait, launch, in all six.
+The sixth, `panel.the-hotkey-while-a-click-waits`, is the shortcut pressed while a
+click on the Dock waits for its answer, and it is told with the panel closing
+above, beside the gesture's way in to the same wait.
 
 What `panel.the-hotkey` does **not** ask is where the keyboard went: it presses
 the chord and reads two phases, types nothing and reads no document, so a uDeck
@@ -2176,7 +2245,7 @@ problem.
 ### Plugins from a repository
 
 Thirty-seven checks, one per row of the table in docs/plugin-repository.md ("The
-lab's checks"). None of them talks to github.com — in the lab only the update
+lab's checks") but its last, `smoke.real-pull-request` ("Not in the full run"). None of them talks to github.com — in the lab only the update
 checks given a published release do, `updates.a-published-release` by default.
 A fake GitHub runs inside the guest (`e2e/guest/fake-github.py`, the guest's
 own Python and the standard library only, on `127.0.0.1:8766`), answering the
@@ -2356,7 +2425,27 @@ row of the same table:
   and window title (`ui.RUSSIAN`), and keeps a screenshot of every part the
   others check, in Russian, for a person to read — and of two warnings over a
   link: **Link a folder…** over the linked `flaky`, and **Update** over a link
-  put by hand where the installed `uptime` was.
+  put by hand where the installed `uptime` was. Then it ends uDeck, takes
+  `~/.udeck` away and starts it again in Russian with **Update verified plugins
+  by themselves** on, as it ships, for the screens of stage 3 a person meets
+  along the way: *Обновился сам*
+  after `main` moved to `c2`; the link sheet refusing `someone/elsewhere` and
+  reading the fork's branch, `fix/uptime` and pull request #3; the warnings of
+  the switch between copies both ways — **Install** over the verified copy,
+  **Switch to verified**, **Back to** the pull request's copy; the **Не
+  проверен** row and its catalogue row; the two copies' cards asking, `uptime`'s
+  header and where its code comes from, and `asks-nothing`'s *… ничего не
+  просит, но его код не проверен*; history rewritten; *не проверялся с …* after a
+  read at launch within the reserve; closed; merged with changes; and merged with
+  nothing offered, **Official catalogue** off. Twenty-nine screenshots in all,
+  every sentence held to Russian.swift by the lab's tests
+  (`test_the_russian_words_of_stage_3_are_uDecks_own`). Not read in Russian
+  yet, among others: a new version along the copy's line, a deleted branch or
+  plugin, an update that asks for different permissions or failed, the link
+  sheet's other answers — merged, merged elsewhere, closed, nothing differs, not
+  there, not found, a commit gone — **Switch to verified**'s own label, a
+  window's **Reinstall** warning and a fork's branch on its row. Measured: 7 min 15 s in a
+  Tart guest (20261016-205217Z), 3 min 8 s on a runner (run 38966347071).
 
 ## Reading the result
 
@@ -2432,6 +2521,11 @@ called `<group>.<name>` on the command line — `check_wrong_key` in
 * Check files live directly in `checks/`, and a file must not skip itself — a
   skipped file would silently drop its whole group. An exception in a thread the
   check started makes the check "could not check".
+* A check that needs a virtual machine says so with `@targets.needs_a_vm(...)`;
+  one that must never run unless it is named — it asks the real GitHub, or
+  waits for a person — with `@smoke.only_when_named(option)`: a run without
+  names and a run of its group leave it out, `--list` says what it takes, and
+  the option is refused for any other check.
 
 ## The lab's own tests
 

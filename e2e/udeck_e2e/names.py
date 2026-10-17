@@ -52,16 +52,19 @@ def group_of(name: str) -> str:
     return name.split(".", 1)[0]
 
 
-def select(available: Iterable[str], wanted: Iterable[str]) -> list[str]:
+def select(available: Iterable[str], wanted: Iterable[str], only_when_named: Iterable[str] = ()) -> list[str]:
     """The checks `wanted` names, in the order they are defined.
 
-    Nothing wanted means everything. Raises CheckNameError for any wanted name that
-    matches no check, naming what does exist.
+    Nothing wanted means everything — but for the checks in `only_when_named`,
+    which neither nothing nor their group chooses, only their own dotted name
+    (`smoke`). Raises CheckNameError for any wanted name that matches no check,
+    naming what does exist.
     """
     available = list(available)
     wanted = list(wanted)
+    named_only = set(only_when_named)
     if not wanted:
-        return available
+        return [name for name in available if name not in named_only]
 
     chosen: set[str] = set()
     unknown: list[str] = []
@@ -73,7 +76,10 @@ def select(available: Iterable[str], wanted: Iterable[str]) -> list[str]:
             else:
                 unknown.append(item)
         elif item in groups:
-            chosen.update(name for name in available if group_of(name) == item)
+            members = [name for name in available if group_of(name) == item]
+            if all(name in named_only for name in members):
+                raise CheckNameError(f"the checks of {item!r} run only when each is named: {', '.join(members)}")
+            chosen.update(name for name in members if name not in named_only)
         else:
             unknown.append(item)
 

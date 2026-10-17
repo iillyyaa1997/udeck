@@ -1,7 +1,8 @@
 """Plugins from a repository: the catalogue, installing, updating, removing — and saying no.
 
 Thirty-seven checks, one per row of the table in docs/plugin-repository.md ("The
-lab's checks"), and all of them against the same two things: a release build of
+lab's checks") but its last — `smoke.real-pull-request`, against the real GitHub,
+is in check_smoke.py — and all of them against the same two things: a release build of
 this checkout, and a fake GitHub served inside the guest
 (`plugin_repository.FakeGitHub`, `e2e/guest/fake-github.py`) whose content is
 the fixture commits in `e2e/fixtures/plugin-repository/` — `c1` with `uptime`
@@ -225,6 +226,42 @@ RU_REPLACING_A_LINK = "{id} здесь — ссылка на ~/"
 RU_UPDATED_BY_ITSELF = "Обновился сам "
 RU_UPDATES_BY_THEMSELVES_HELP = "После каждого чтения каталога проверенный плагин"
 RU_AVAILABLE_1_1_0 = "Доступна 1.1.0"
+# What stage 3 added, in uDeck's Russian (Russian.swift: pluginMarkUnverified, pluginFromPullRequest, linkHead with
+# line(_, capitalised:) and of(_), linkNotAFork, linkUnverifiedNote, catalogueSwitchConfirm with copy(_) and
+# staysAfterSwitching(to:), catalogueInstalledUnverified with lineFrom(_), permissionsUnverifiedSource,
+# permissionsAsksNothingUnverified, pluginRefRewritten, pluginRefChangedStill with lineIn(_), pluginRefNotCheckedSince,
+# pluginPullRequestClosed, catalogueClosedUnmerged, pluginPullRequestMergedDiffers, catalogueMergedDiffers,
+# pluginPullRequestMergedNothingOffered), for the second half of plugins.screens-in-russian.
+RU_UNVERIFIED = "Не проверен"
+RU_FROM_THE_PULL_REQUEST = "запрос на слияние #{number}, коммит {commit}"
+RU_PULL_REQUEST_HEAD = "Запрос на слияние #{number}, коммит {commit}"
+RU_BRANCH_HEAD = "Ветка {name}, коммит {commit}"
+RU_FORK_HEAD = "Ветка {name} репозитория {fork}, коммит {commit}"
+RU_NOT_A_FORK = ("github.com/{repository} — не форк github.com/{official}. Плагины пока приходят из github.com/{official} "
+                 "и его форков; другие репозитории появятся позже, как отдельные источники.")
+RU_NOBODY_VERIFIED_LISTED = ("То, что здесь перечислено, никто не проверял: это не то, что репозиторий влил. Плагин, "
+                             "установленный отсюда, спросит перед запуском — даже если ничего не просит — и снова, как "
+                             "только его код изменится.")
+RU_SWITCH_FROM_VERIFIED = ("Сейчас {id} — проверенная версия {old} из github.com/{repository}. На её место встанет версия "
+                           "{new} из запроса на слияние #{number}, коммит {commit}. Окна плагина и его настройки останутся. "
+                           "Код, который встанет, никто не проверял: плагин спросит разрешения перед запуском, если только "
+                           "вы уже не разрешали именно этот код.")
+RU_SWITCH_TO_VERIFIED = ("Сейчас {id} — версия {old} из запроса на слияние #{number}, коммит {commit}. На её место встанет "
+                         "проверенная версия {new} из github.com/{repository}. Окна плагина, его настройки и ваше решение о "
+                         "разрешениях останутся.")
+RU_INSTALLED_HERE_UNVERIFIED = "Здесь установлен из запроса на слияние #{number}: не проверен"
+RU_NOBODY_VERIFIED = ("Этот код никто не проверял: он из запроса на слияние #{number} репозитория github.com/{repository}, а "
+                      "не из того, что репозиторий влил. uDeck спросит снова, как только он изменится.")
+RU_ASKS_NOTHING_UNVERIFIED = "{name} ничего не просит, но его код не проверен"
+RU_REWRITTEN = "История запроса на слияние #{number} переписана: новый последний коммит не продолжает установленный"
+RU_CHANGED_STILL = "Изменён в запросе на слияние #{number}, всё ещё {version}"
+RU_NOT_CHECKED_SINCE = "Запрос на слияние #{number} не проверялся с "
+RU_CLOSED_UNMERGED = "Запрос на слияние #{number} закрыт без слияния; плагин продолжает работать"
+RU_CATALOGUE_CLOSED = "закрыт без слияния"
+RU_MERGED_DIFFERS = "Запрос на слияние #{number} влит, и проверенная версия отличается — обновить"
+RU_CATALOGUE_MERGED_DIFFERS = "влит, и проверенная версия отличается"
+RU_MERGED_NOTHING_OFFERED = ("Запрос на слияние #{number} влит; проверенной версии здесь не предлагается, плагин продолжает "
+                             "работать")
 
 # How long the catalogue is made to look old while uDeck is not running, so that
 # the launch reads it again (CatalogueSchedule.refreshesAtLaunch: over a day).
@@ -3110,12 +3147,236 @@ def check_screens_in_russian(machine, check_dir, lab):
             expect(warning is not None and warning.startswith(replacing) and "/Users/" not in warning,
                    f"Update over a link in Russian says {warning!r} first; it has to say {replacing!r}…")
             expect(_link_leads(machine, UPTIME) is not None, "Update over a link took the link away before its warning was confirmed")
+
+        _the_screens_of_stage_3_in_russian(scene, window)
     finally:
         try:
             machine.ssh.ask("rm -f ~/.local/bin/udeck-plugin", "taking the command away")
         except LabError:
             pass
         scene.close()
+
+
+def _the_screens_of_stage_3_in_russian(scene, window):
+    """plugins.screens-in-russian's second half: stage 3's screens met along the way, in Russian, a screenshot of each.
+
+    A uDeck of its own for it: ended, `~/.udeck` and the working copies of the
+    first half taken away, the language Russian and **Update verified plugins
+    by themselves** on, as uDeck ships, and the fake at `c1` with pull request
+    #3, the branch `fix/uptime` and the forks — the scenes of the English
+    checks, said in Russian, one after another:
+
+    * **Обновился сам** — the verified `uptime` installed, `main` moved to
+      `c2`, **Check now**, and its row says so of the 1.1.0 it put in place;
+    * the link sheet — refused for `someone/elsewhere`, no fork, and its
+      head, its **Не проверен** and its note for the fork's branch `x`, the
+      branch `fix/uptime` and pull request #3;
+    * the switch between copies — **Install** on the pull request's `uptime`
+      over the verified 1.1.0 names both, **Switch to verified** names both the
+      other way round, and **Back to** the pull request's copy names both again;
+      `asks-nothing` installed beside it;
+    * the **Не проверен** row — its mark and *запрос на слияние #3, коммит …* —
+      and the catalogue row's *Здесь установлен из запроса на слияние #3: не
+      проверен*;
+    * the cards: both copies placed on one tab, each asks, `uptime`'s header
+      **Не проверен** and its question saying where the code comes from, and
+      `asks-nothing` *… ничего не просит, но его код не проверен*;
+    * history rewritten — the pull request pushed again as `p2x`;
+    * *не проверялся с …* — a read at launch with the reserve all that is left;
+    * closed without being merged, and its catalogue row;
+    * merged with changes, as `s2`, and its catalogue row;
+    * merged with nothing offered — the same, **Official catalogue** switched off.
+
+    Every sentence is read by the identifier the English checks read it by,
+    and held to Russian.swift word for word (`test_check_plugins`). **Red
+    for** a screen that is not there, or says it in English. Not every sentence
+    stage 3 added is read here: a deleted branch, the link sheet's other
+    answers and an update asking for different permissions, among others, are
+    not (docs/plugin-repository.md, the row of this check).
+    """
+    machine, check_dir, lab = scene.machine, scene.check_dir, scene.lab
+    official = config.PLUGINS_REPOSITORY
+    pr3 = scene.github.commit("pr3")
+    short = pr3[:7]
+    ru = ui.RUSSIAN
+
+    app.quit_app(machine, "ending uDeck before the screens of stage 3")
+    machine.ssh.run(f"rm -rf {UDECK_HOME} {WORK} && mkdir -p {UDECK_HOME}", "taking away what the first half left")
+    _write(machine, SETTINGS, {"language": ru.code}, "setting uDeck's language to Russian, updates by themselves on")
+    scene.github.tell("the catalogue at c1, with pull request #3, the branch fix/uptime and the forks", main="c1",
+                      pulls=PULLS, branches=BRANCHES, forks=FORKS, spent=0)  # fmt: skip
+    before = _count(scene)
+    app.launch(machine)
+    _the_catalogue_read(scene, since=before, commit="c1")
+
+    # Обновился сам.
+    ui.plugins_pane(machine, "opening Settings → Plugins for the screens of stage 3", language=ru)
+    _install(scene, UPTIME, pane_open=True, window=window)
+    scene.github.tell("moving main to c2", main="c2")
+    _press(machine, "catalogue.checkNow", "pressing Check now with main at c2, in Russian", window)
+    said = _wait_until(machine, f"plugin.{UPTIME}.updatedByItself", lambda said: (said or "").startswith(RU_UPDATED_BY_ITSELF),
+                       OPERATION_SECONDS, window)  # fmt: skip
+    _keep_the_pane(machine, check_dir, lab, "ru-updated-by-itself.txt", window)
+    expect((said or "").startswith(RU_UPDATED_BY_ITSELF),
+           f"with main moved to c2, uptime's row in Russian says {said!r} of updating by itself, not {RU_UPDATED_BY_ITSELF!r}…")
+
+    # The link sheet: a refusal, a fork's branch, a branch, a pull request.
+    _, dump = _look_up(scene, NOT_A_FORK_LINK, "no fork in Russian", came_to="link.refused", window=window)
+    refused = ui.says(ui.element(dump, "link.refused"))
+    wanted = RU_NOT_A_FORK.format(repository=NOT_A_FORK, official=official)
+    expect(refused == wanted, f"{NOT_A_FORK_LINK} is refused in Russian with {refused!r}, not {wanted!r}")
+    _close_the_link_sheet(scene, "after the refusal in Russian", window)
+    for link, label, head in (
+        (FORK_LINK, "the fork's branch in Russian", RU_FORK_HEAD.format(name=FORK_BRANCH, fork=FORK, commit=short)),
+        (BRANCH_LINK, "the branch in Russian", RU_BRANCH_HEAD.format(name=BRANCH, commit=short)),
+    ):
+        _, dump = _look_up(scene, link, label, window=window)
+        _expect_the_sheet_in_russian(dump, head, link)
+        _close_the_link_sheet(scene, f"after {label}", window)
+    _, dump = _look_up(scene, PULL_LINK, "the pull request in Russian", window=window)
+    _expect_the_sheet_in_russian(dump, RU_PULL_REQUEST_HEAD.format(number=PULL, commit=short), PULL_LINK)
+
+    # The switch between copies, both ways.
+    from_verified = RU_SWITCH_FROM_VERIFIED.format(id=UPTIME, old="1.1.0", repository=official, new="1.0.1", number=PULL,
+                                                   commit=short)  # fmt: skip
+    to_verified = RU_SWITCH_TO_VERIFIED.format(id=UPTIME, old="1.0.1", number=PULL, commit=short, new="1.1.0",
+                                               repository=official)  # fmt: skip
+    _a_warning_in_russian(scene, f"link.{UPTIME}", f"link.{UPTIME}.install", from_verified, "install-from-the-pull-request", window)
+    record = _operate(scene, f"link.{UPTIME}.confirm", "confirming the switch to the pull request, in Russian",
+                      lambda r: r is not None and (r.get("ref") or {}).get("kind") == "pr", window=window)  # fmt: skip
+    expect(record is not None, f"the switch to the pull request was confirmed and installed.json says {_read_json(machine, INSTALLED)!r}")
+    record = _operate(scene, f"link.{ASKS_NOTHING}.install", "installing asks-nothing from the pull request, in Russian",
+                      lambda r: r is not None and (r.get("ref") or {}).get("kind") == "pr", ASKS_NOTHING, window)  # fmt: skip
+    expect(record is not None, f"Install on asks-nothing put no record of it in installed.json: {_read_json(machine, INSTALLED)!r}")
+    _close_the_link_sheet(scene, "after installing in Russian", window)
+    _a_warning_in_russian(scene, f"plugin.{UPTIME}", f"plugin.{UPTIME}.switchToVerified", to_verified, "switch-to-verified", window)
+    record = _operate(scene, f"plugin.{UPTIME}.confirm", "confirming Switch to verified, in Russian",
+                      lambda r: r is not None and (r.get("ref") or {}).get("kind") == "default", window=window)  # fmt: skip
+    expect(record is not None, f"Switch to verified was confirmed and installed.json says {_read_json(machine, INSTALLED)!r}")
+    _a_warning_in_russian(scene, f"plugin.{UPTIME}", f"plugin.{UPTIME}.backTo", from_verified, "back-to-the-pull-request", window)
+    record = _operate(scene, f"plugin.{UPTIME}.confirm", "confirming Back to the pull request's copy, in Russian",
+                      lambda r: r is not None and (r.get("ref") or {}).get("kind") == "pr" and r.get("commit") == pr3,
+                      window=window)  # fmt: skip
+    expect(record is not None, f"Back to the pull request's copy was confirmed and installed.json says {_read_json(machine, INSTALLED)!r}")
+
+    # The Не проверен row, and the catalogue row of the same id.
+    mark = _wait_until(machine, f"plugin.{UPTIME}.mark", lambda said: said == RU_UNVERIFIED, NOTICED_SECONDS, window)
+    dump = _keep_the_pane(machine, check_dir, lab, "ru-the-unverified-row.txt", window)
+    source = ui.says(ui.element(dump, f"plugin.{UPTIME}.from"))
+    wanted = RU_FROM_THE_PULL_REQUEST.format(number=PULL, commit=short)
+    expect(mark == RU_UNVERIFIED and source == wanted,
+           f"the pull request's uptime's row in Russian says {mark!r} · {source!r}, not {RU_UNVERIFIED!r} · {wanted!r}")
+    state = ui.says(ui.element(dump, f"catalogue.{UPTIME}.state"))
+    wanted = RU_INSTALLED_HERE_UNVERIFIED.format(number=PULL)
+    expect(state == wanted, f"uptime's catalogue row in Russian says {state!r}, not {wanted!r}")
+    _show_the_catalogue_row(scene, f"catalogue.{UPTIME}.state", "ru — the catalogue row of the pull request's copy", window)
+
+    # The cards: Не проверен in the header, where the code comes from, and asks-nothing's question.
+    _place_side_by_side(scene, (UPTIME, ASKS_NOTHING))
+    _open_the_panel(machine, "opening the panel on the two copies of the pull request, in Russian")
+    asks = RU_ASKS_NOTHING_UNVERIFIED.format(name=ASKS_NOTHING_NAME)
+    asking = {f"consent.{plugin}.allow" for plugin in (UPTIME, ASKS_NOTHING)}
+    dump, texts = _wait_for_the_card(machine, lambda found, texts: asking <= set(found) and any(asks in t for t in texts),
+                                     CARD_SECONDS + NOTICED_SECONDS)  # fmt: skip
+    machine.screenshot(check_dir, "ru — the cards of code nobody verified ask")
+    _keep(check_dir, "ru-the-cards-ask.txt", "\n".join(texts) + "\n\n" + dump)
+    _put_the_panel_away(machine, "after the cards in Russian")
+    _the_cards_ask_in_russian(dump, texts, official)
+
+    # History rewritten: pull request #3 pushed again as p2x, made on c1.
+    ui.plugins_pane(machine, "opening Settings → Plugins after the cards, in Russian", language=ru)
+    _move_the_pull_request(scene, "p2x", "pushing pull request #3 again as p2x, made on c1")
+    _press(machine, "catalogue.checkNow", "pressing Check now after the push, in Russian", window)
+    rewritten = RU_REWRITTEN.format(number=PULL)
+    said = _wait_until(machine, f"plugin.{UPTIME}.rewritten", lambda said: said == rewritten, CATALOGUE_SECONDS, window)
+    dump = _keep_the_pane(machine, check_dir, lab, "ru-history-rewritten.txt", window)
+    expect(said == rewritten, f"pull request #3 was pushed again over what is installed, and its row in Russian says {said!r}")
+    offer = ui.says(ui.element(dump, f"plugin.{UPTIME}.offer"))
+    wanted = RU_CHANGED_STILL.format(number=PULL, version="1.0.1")
+    expect(offer == wanted, f"beside the rewritten history the row in Russian offers {offer!r}, not {wanted!r}")
+
+    # Не проверялся с …: a read at launch with the reserve all that is left asks nothing about the pull request.
+    app.quit_app(machine, "ending uDeck before the reserve is all that is left")
+    _age_the_catalogue(machine, AGED_DAYS)
+    before = _count(scene)
+    _leave_the_reserve(scene, "all but nine of the hour's requests spent elsewhere")
+    app.launch(machine)
+    heard = _the_launch_read(scene, before)
+    asked = [r for r in heard if r.is_api and r.path == f"/api/repos/{official}/pulls/{PULL}"]
+    expect(not asked, f"the read at launch, nobody asking, with the reserve all that was left, asked {described(asked)}")
+    ui.plugins_pane(machine, "opening Settings → Plugins after the read within the reserve, in Russian", language=ru)
+    unchecked = RU_NOT_CHECKED_SINCE.format(number=PULL)
+    said = _wait_until(machine, f"plugin.{UPTIME}.notChecked", lambda said: (said or "").startswith(unchecked),
+                       NOTICED_SECONDS, window)  # fmt: skip
+    _keep_the_pane(machine, check_dir, lab, "ru-not-checked-since.txt", window)
+    expect((said or "").startswith(unchecked), f"the read at launch left pull request #3 unasked, and its row in Russian says "
+                                               f"{said!r}, not {unchecked!r}…")
+    scene.github.tell("nothing spent elsewhere any more", spent=0)
+
+    # Closed without being merged.
+    scene.github.tell("closing pull request #3 without merging it", pulls={PULL: {**PULLS[PULL], "head": "p2x", "state": "closed"}})
+    _press(machine, "catalogue.checkNow", "pressing Check now after the pull request was closed, in Russian", window)
+    closed = RU_CLOSED_UNMERGED.format(number=PULL)
+    said = _wait_until(machine, f"plugin.{UPTIME}.pullRequest", lambda said: said == closed, CATALOGUE_SECONDS, window)
+    dump = _keep_the_pane(machine, check_dir, lab, "ru-closed.txt", window)
+    expect(said == closed, f"pull request #3 was closed, and its row in Russian says {said!r}, not {closed!r}")
+    state = ui.says(ui.element(dump, f"catalogue.{UPTIME}.state"))
+    wanted = f"{RU_INSTALLED_HERE_UNVERIFIED.format(number=PULL)} — {RU_CATALOGUE_CLOSED}"
+    expect(state == wanted, f"uptime's catalogue row in Russian says {state!r}, not {wanted!r}")
+    _show_the_catalogue_row(scene, f"catalogue.{UPTIME}.state", "ru — the catalogue row of a closed pull request", window)
+
+    # Merged with changes, as s2.
+    _merge(scene, "s2", "squash-merging pull request #3 with uptime made 1.0.2")
+    _press(machine, "catalogue.checkNow", "pressing Check now after the merge, in Russian", window)
+    merged = RU_MERGED_DIFFERS.format(number=PULL)
+    said = _wait_until(machine, f"plugin.{UPTIME}.pullRequest", lambda said: said == merged, CATALOGUE_SECONDS, window)
+    dump = _keep_the_pane(machine, check_dir, lab, "ru-merged-with-changes.txt", window)
+    expect(said == merged, f"pull request #3 was merged as something else, and its row in Russian says {said!r}, not {merged!r}")
+    state = ui.says(ui.element(dump, f"catalogue.{UPTIME}.state"))
+    wanted = f"{RU_INSTALLED_HERE_UNVERIFIED.format(number=PULL)} — {RU_CATALOGUE_MERGED_DIFFERS}"
+    expect(state == wanted, f"uptime's catalogue row in Russian says {state!r}, not {wanted!r}")
+    _show_the_catalogue_row(scene, f"catalogue.{UPTIME}.state", "ru — the catalogue row of a pull request merged with changes", window)
+
+    # Merged, and nothing offered: the same with Official catalogue switched off.
+    _switch(machine, "catalogue.enabled", False, "switching Official catalogue off, in Russian", window)
+    nothing = RU_MERGED_NOTHING_OFFERED.format(number=PULL)
+    said = _wait_until(machine, f"plugin.{UPTIME}.pullRequest", lambda said: said == nothing, NOTICED_SECONDS, window)
+    dump = _keep_the_pane(machine, check_dir, lab, "ru-merged-nothing-offered.txt", window)
+    expect(said == nothing, f"pull request #3 was merged with no verified version to offer, and its row in Russian says "
+                            f"{said!r}, not {nothing!r}")
+    expect(ui.element(dump, f"plugin.{UPTIME}.update") is None,
+           "with nothing offered, the row of the merged pull request's copy still offers Update")
+
+
+def _expect_the_sheet_in_russian(dump, head, link):
+    """The link sheet in Russian: its head, its **Не проверен** and its note that nobody verified what it lists."""
+    said = ui.says(ui.element(dump, "link.head"))
+    expect(said == head, f"the link sheet in Russian says {said!r} of {link}, not {head!r}")
+    mark = ui.says(ui.element(dump, "link.mark"))
+    expect(mark == RU_UNVERIFIED, f"the link sheet of {link} is marked {mark!r} in Russian, not {RU_UNVERIFIED!r}")
+    note = ui.says(ui.element(dump, "link.note"))
+    expect(note == RU_NOBODY_VERIFIED_LISTED, f"the link sheet of {link} says {note!r} in Russian of what it lists")
+
+
+def _a_warning_in_russian(scene, row, button, words, name, window):
+    """`button` pressed: its warning on `row` says `words` in Russian, kept beside the report, and nothing is confirmed."""
+    machine = scene.machine
+    _press(machine, button, f"pressing {button}, in Russian", window)
+    warning = _wait_until(machine, f"{row}.confirmText", lambda said: bool(said) and words in said, NOTICED_SECONDS, window)
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"ru-the-warning-before-{name}.txt", window)
+    expect(warning is not None and words in warning, f"{button} in Russian warns {warning!r}; it has to say {words!r}")
+
+
+def _place_side_by_side(scene, plugins):
+    """`plugins` side by side on a tab of their own, written into `layout.json` while uDeck is not running, and uDeck started again."""
+    machine = scene.machine
+    app.quit_app(machine, "ending uDeck before placing the plugins")
+    tab = str(uuid.uuid4()).upper()
+    windows = [{"id": str(uuid.uuid4()).upper(), "pluginID": plugin, "column": 6 * index, "row": 0, "width": 6, "height": 6}
+               for index, plugin in enumerate(plugins)]  # fmt: skip
+    layout = {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Lab", "windows": windows}]}
+    _write(machine, LAYOUT, layout, f"placing {', '.join(plugins)} on an empty tab")
+    app.launch(machine)
 
 
 # --- What the checks share ------------------------------------------------------------------
@@ -3433,31 +3694,31 @@ def _status(machine, plugin):
     return (record.get("verification") or {}).get("status")
 
 
-def _look_up(scene, link, label, came_to="link.head"):
+def _look_up(scene, link, label, came_to="link.head", window=ui.SETTINGS_WINDOW):
     """`link` typed into **Install from a link…** and looked up: uDeck's requests from the press on, and the walk once it says what it came to — `came_to`, the sheet's head, or whatever else a check expects it to come to."""
     machine = scene.machine
-    dump = _read_the_screen(machine, f"looking for the link sheet: {label}")
+    dump = _read_the_screen(machine, f"looking for the link sheet: {label}", window)
     if ui.element(dump, "link.field") is None:
-        _press(machine, "plugins.installFromLink", f"pressing Install from a link…: {label}")
+        _press(machine, "plugins.installFromLink", f"pressing Install from a link…: {label}", window)
     try:
-        field = ui.wait_for(machine, "link.field", f"waiting for the link field: {label}")
+        field = ui.wait_for(machine, "link.field", f"waiting for the link field: {label}", window)
     except NotThere as error:
         raise CheckFailed(f"Install from a link… offers no field to paste a link into: {error.reason}") from None
     machine.click(*field.middle, f"putting the cursor in the link field: {label}")
     ui.type_text(machine, link, f"typing {link}: {label}")
-    typed = _wait_until(machine, "link.field", lambda said: said == link, config.UI_CHANGE_SECONDS)
+    typed = _wait_until(machine, "link.field", lambda said: said == link, config.UI_CHANGE_SECONDS, window)
     if typed != link:
         raise LabError(f"typing the link: {label}", f"the field reads {typed!r} after {link!r} was typed into it")
     before = _count(scene)
-    _press(machine, "link.lookUp", f"pressing Look up: {label}")
+    _press(machine, "link.lookUp", f"pressing Look up: {label}", window)
     deadline = machine.clock() + OPERATION_SECONDS
     while True:
-        dump = _read_the_screen(machine, f"reading what the link came to: {label}")
+        dump = _read_the_screen(machine, f"reading what the link came to: {label}", window)
         found = {row.identifier for row in ui.controls(dump)}
         if found & {"link.head", "link.refused", "link.catalogue"} or machine.clock() >= deadline:
             break
         machine.sleep(1)
-    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-link-sheet-{label.replace(' ', '-')}.txt")
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-link-sheet-{label.replace(' ', '-')}.txt", window)
     if came_to not in found:
         said = (ui.says(ui.element(dump, "link.refused")) or ui.says(ui.element(dump, "link.catalogue"))
                 or ui.says(ui.element(dump, "link.head")))
@@ -3479,9 +3740,9 @@ def _install_from_the_link(scene, plugin, label):
     return record, asked
 
 
-def _close_the_link_sheet(scene, label):
+def _close_the_link_sheet(scene, label, window=ui.SETTINGS_WINDOW):
     """The link sheet closed, so that the rows below it are read alone (`_row_of`)."""
-    _press(scene.machine, "link.close", f"closing the link sheet: {label}")
+    _press(scene.machine, "link.close", f"closing the link sheet: {label}", window)
     scene.machine.sleep(config.SETTLE_SECONDS)
 
 
@@ -3627,12 +3888,12 @@ def _merge(scene, commit, step, main=None, into=None):
         scene.github.tell(step, main=main, branches={into: commit}, pulls={PULL: {**merged, "base": into}})
 
 
-def _show_the_catalogue_row(scene, identifier, label):
+def _show_the_catalogue_row(scene, identifier, label, window=ui.SETTINGS_WINDOW):
     """The catalogue row holding `identifier`, scrolled into view where the screen is too short for the pane (a
     runner's), and a screenshot of it kept for a person to read what the walk cannot."""
     machine = scene.machine
     if getattr(machine, "scroll", None) is not None:
-        ui.in_view(machine, identifier, f"bringing {identifier} into view")
+        ui.in_view(machine, identifier, f"bringing {identifier} into view", window)
     machine.screenshot(scene.check_dir, label)
 
 
@@ -4121,6 +4382,22 @@ def _installed_tree(machine):
     if machine.ssh.ask(f"test -d {folder} && ! test -L {folder}", "looking at the installed uptime").returncode != 0:
         return None
     return _fingerprint(machine, "reading the installed uptime", folder=folder)
+
+
+def _the_cards_ask_in_russian(dump, texts, official):
+    """Each of the two copies' cards asks, in Russian: **Не проверен** in its header, where its code comes from, and
+    asks-nothing's question — read card by card, as the walks of every run so far hand them over (Tart
+    20261016-205217Z, runs 38966347071 and 38970717376), so that one card asking does not stand for both."""
+    found = {row.identifier: row for row in ui.controls(dump) if row.identifier}
+    wanted = RU_NOBODY_VERIFIED.format(number=PULL, repository=official)
+    for plugin in (UPTIME, ASKS_NOTHING):
+        expect(f"consent.{plugin}.allow" in found, f"{plugin}'s card in Russian does not ask: it shows {sorted(found)}")
+        header = ui.says(found.get(f"card.{plugin}.unverified"))
+        expect(header == RU_UNVERIFIED, f"{plugin}'s card says {header!r} in its header in Russian, not {RU_UNVERIFIED!r}")
+        source = ui.says(found.get(f"consent.{plugin}.source"))
+        expect(wanted in source, f"{plugin}'s card says {source!r} in Russian of where its code comes from, not {wanted!r}")
+    asks = RU_ASKS_NOTHING_UNVERIFIED.format(name=ASKS_NOTHING_NAME)
+    expect(any(asks in t for t in texts), f"asks-nothing's card in Russian does not say {asks!r}: {texts}")
 
 
 def _wait_for_the_card(machine, ready, seconds, expect_it=True):

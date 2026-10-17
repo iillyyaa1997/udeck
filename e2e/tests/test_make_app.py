@@ -266,8 +266,11 @@ def test_the_options_that_would_leave_a_lab_build_lying_about_are_refused(checko
 # read uDeck's own gesture defaults, so the lab's push can be checked against
 # the numbers it has to clear (test_panel.py), and read the settings view, so the
 # identifier the update checks click is the one uDeck gives the switch
-# (test_check_updates.py). Reading a source file cannot build anything.
-MAY_READ_THE_CHECKOUT = {"test_panel.py", "test_check_updates.py", "test_check_plugins.py"}
+# (test_check_updates.py), and read the sentences the plugin checks and the smoke
+# wait for, in the localisations, the Swift tests and the specification
+# (test_check_plugins.py, test_check_smoke.py). Reading a source file cannot build
+# anything.
+MAY_READ_THE_CHECKOUT = {"test_panel.py", "test_check_updates.py", "test_check_plugins.py", "test_check_smoke.py"}
 
 
 # The files that run a script of the repository's, each only against a toy
