@@ -904,7 +904,7 @@ new optional fields are exactly what the `api: 1` promise allows.
 ```
 
 Optional, the same `MAJOR.MINOR.PATCH` grammar, compared with the running
-uDeck's own version (`CFBundleShortVersionString`, `0.6.1` at the time of
+uDeck's own version (`CFBundleShortVersionString`, `0.7.0` at the time of
 writing). Absent means "any uDeck that speaks my `api`".
 
 `api` and `minUDeck` answer different questions. `api` says which *contract*;

@@ -8,7 +8,7 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.7.0] — 2026-10-17
 
 Plugins come from pull requests and branches now, and the verified ones keep
 themselves up to date — stage 3 of
