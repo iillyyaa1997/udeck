@@ -167,13 +167,20 @@ public struct RepositoryDescription: Equatable, Sendable {
     public var source: String?
     /// The repository it was forked from.
     public var parent: String?
+    /// The number the host knows the repository by, which neither a rename
+    /// nor a transfer changes — `1393324153` for the official repository
+    /// (**measured**, 2026-10-18); nil when the answer did not say one, or
+    /// said one that is not a whole number above 0.
+    public var id: Int?
 
-    public init(fullName: String?, defaultBranch: String, fork: Bool, source: String? = nil, parent: String? = nil) {
+    public init(fullName: String?, defaultBranch: String, fork: Bool, source: String? = nil, parent: String? = nil,
+                id: Int? = nil) {
         self.fullName = fullName
         self.defaultBranch = defaultBranch
         self.fork = fork
         self.source = source
         self.parent = parent
+        self.id = id
     }
 
     /// Whether this is a fork of `official` — directly, or a fork of a fork:
@@ -196,12 +203,15 @@ public struct RepositoryDescription: Equatable, Sendable {
             var source: Named?
             var parent: Named?
         }
+        // Apart, so that an id that is not a number costs the id, not the answer.
+        struct Numbered: Decodable { var id: Int? }
         guard let answer = try? JSONDecoder().decode(Answer.self, from: data), !answer.default_branch.isEmpty else {
             return nil
         }
+        let id = (try? JSONDecoder().decode(Numbered.self, from: data))?.id.flatMap { $0 > 0 ? $0 : nil }
         return RepositoryDescription(fullName: answer.full_name, defaultBranch: answer.default_branch,
                                      fork: answer.fork ?? false, source: answer.source?.full_name,
-                                     parent: answer.parent?.full_name)
+                                     parent: answer.parent?.full_name, id: id)
     }
 }
 
@@ -339,6 +349,8 @@ public struct GitHubEndpoints: Equatable, Sendable {
 public struct GitHubClient: RepositoryProvider {
     public private(set) var endpoints: GitHubEndpoints
     public private(set) var address: RepositoryAddress
+    /// How the API's requests name the repository (`Addressing`).
+    public private(set) var addressing: Addressing
     private let session: URLSession
     private let userAgent: String
     private let limits: RateLimitRecorder
@@ -346,15 +358,29 @@ public struct GitHubClient: RepositoryProvider {
 
     public static let requestTimeout: TimeInterval = 30
 
+    /// How the API's requests name the repository: by its path,
+    /// `/repos/{owner}/{repo}/…` — the official repository, as in stage 3,
+    /// and its forks — or by the number GitHub knows it by,
+    /// `/repositories/{id}/…`: a source of one's own after it was looked up
+    /// (stage 4), which a repository made later at its old name can never
+    /// answer for. Raw files come by its path at a commit either way, and
+    /// each is hashed against a listing asked by the same addressing.
+    public enum Addressing: Equatable, Sendable {
+        case path
+        case id(Int)
+    }
+
     public init(
         endpoints: GitHubEndpoints,
         udeckVersion: String,
         limits: RateLimitRecorder,
         session: URLSession = GitHubClient.makeSession(),
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        addressing: Addressing = .path
     ) {
         self.endpoints = endpoints
         self.address = RepositoryAddress(provider: "github", host: "github.com", path: endpoints.repository)
+        self.addressing = addressing
         self.session = session
         self.userAgent = "uDeck/\(udeckVersion)"
         self.limits = limits
@@ -376,7 +402,12 @@ public struct GitHubClient: RepositoryProvider {
         return URLSession(configuration: configuration)
     }
 
-    private var repositoryPath: String { "repos/\(endpoints.repository)" }
+    private var repositoryPath: String {
+        switch addressing {
+        case .path: "repos/\(endpoints.repository)"
+        case .id(let id): "repositories/\(id)"
+        }
+    }
 
     // MARK: - The questions
 
@@ -500,11 +531,17 @@ public struct GitHubClient: RepositoryProvider {
     /// and a limit either learns of stops both. Nil for another host or
     /// provider, and for a path that is not GitHub's `owner/repo`
     /// (`RepositoryLink.isOwner`, `isRepository`): nothing else goes into a
-    /// request's path.
+    /// request's path. A client addressed by id is itself for its own
+    /// repository, whatever the case of its name, and nil for any other path —
+    /// an earlier spelling of its own name among them: what a path names now
+    /// may be another repository, and a source's requests never go by a name
+    /// (`Addressing`). A copy of a source is read through that source's
+    /// client, found by the record's `source`, not by its `repository`.
     public func client(for repository: RepositoryAddress) -> GitHubClient? {
         guard repository.provider == address.provider, repository.host == address.host else { return nil }
         let parts = repository.path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
         guard parts.count == 2, RepositoryLink.isOwner(parts[0]), RepositoryLink.isRepository(parts[1]) else { return nil }
+        if case .id = addressing { return repository.path.lowercased() == address.path.lowercased() ? self : nil }
         var client = self
         client.endpoints.repository = repository.path
         client.address = RepositoryAddress(provider: address.provider, host: address.host, path: repository.path)

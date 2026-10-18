@@ -81,12 +81,29 @@ public struct Reverification: Equatable, Sendable {
     }
 
     /// What `plugins`, as the plugins folder was read, and the `trees` of the
-    /// folders `folders(of:installed:)` named come to.
+    /// folders `folders(of:installed:)` named come to, against the official
+    /// catalogue's `head` alone: a copy of a source of one's own is not
+    /// checked against it, and its record is not written.
     public static func of(
         _ plugins: [DiscoveredPlugin],
         installed: InstalledPlugins,
         trees: [String: String?],
         head: Head,
+        now: Date
+    ) -> Reverification {
+        of(plugins, installed: installed, trees: trees, heads: [InstalledPlugins.officialSource: head], now: now)
+    }
+
+    /// The same, each copy checked against the head of its own source —
+    /// `heads`, by source id; a source missing from it is not read yet — and
+    /// `trusted` the sources the operator trusted, by id. Until there is a
+    /// trusted mark (stage 4, R4) that set is empty and changes nothing.
+    public static func of(
+        _ plugins: [DiscoveredPlugin],
+        installed: InstalledPlugins,
+        trees: [String: String?],
+        heads: [String: Head],
+        trusted: Set<String> = [],
         now: Date
     ) -> Reverification {
         var standings: [String: PluginStanding] = [:]
@@ -100,7 +117,7 @@ public struct Reverification: Equatable, Sendable {
             }
             let tree = trees[id] ?? nil
             standings[id] = PluginStanding.of(record: record, folderExists: true, treeOnDisk: tree)
-            guard case .read(let headCommit) = head else { continue }
+            guard case .read(let headCommit) = heads[record.source] ?? .notReadYet else { continue }
             let found = record.verification(treeOnDisk: tree, headCommit: headCommit, now: now)
             if !found.saysTheSame(as: record.verification) {
                 records.plugins[id]?.verification = found

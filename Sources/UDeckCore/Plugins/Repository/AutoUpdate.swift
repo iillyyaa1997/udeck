@@ -236,6 +236,71 @@ public struct AutoUpdateSchedule: Equatable, Sendable {
     }
 }
 
+/// One `AutoUpdateSchedule` per source, by its id — the official source's and
+/// each source of one's own's (stage 4): a read of one source makes only that
+/// source's plugins due, and forgets only the failures of its own plugins, so
+/// that one source's read never wipes another source's failure rows. The pass
+/// asks each source's in turn (`asking(in:)`).
+public struct AutoUpdateSchedules: Equatable, Sendable {
+    public private(set) var schedules: [String: AutoUpdateSchedule] = [:]
+
+    public init() {}
+
+    /// The schedule of `source` — a fresh one for a source not read yet.
+    public subscript(source: String) -> AutoUpdateSchedule {
+        schedules[source] ?? AutoUpdateSchedule()
+    }
+
+    /// A read of `source` ended, `succeeded` or not, the hashing of the
+    /// folders started after it being `hashing`.
+    public mutating func read(_ source: String, succeeded: Bool, hashing: Int) {
+        schedules[source, default: AutoUpdateSchedule()].read(succeeded: succeeded, hashing: hashing)
+    }
+
+    /// The hashing numbered `hashing` was applied: one hashing covers every
+    /// source's folders.
+    public mutating func hashed(_ hashing: Int) {
+        for source in schedules.keys { schedules[source]?.hashed(hashing) }
+    }
+
+    /// The sources whose plugins are asked now, in `order` — the official
+    /// source first, then the sources of one's own as `sources.json` lists
+    /// them.
+    public func asking(in order: [String]) -> [String] {
+        order.filter { schedules[$0]?.asks == true }
+    }
+
+    /// `source`'s plugins were asked (`AutoUpdateSchedule.asked`).
+    public mutating func asked(_ source: String, started: Bool, waits: Bool) {
+        schedules[source]?.asked(started: started, waits: waits)
+    }
+
+    /// An install, update or removal of `id` began: what its row said of an
+    /// update by itself that failed goes, whichever source's it was — one
+    /// copy per id, and the copy may come from another source now.
+    public mutating func began(_ id: String) {
+        for source in schedules.keys { schedules[source]?.began(id) }
+    }
+
+    /// An update by itself of `id`, of `source`, to `version`, threw `error`
+    /// (`AutoUpdateSchedule.ended`).
+    @discardableResult
+    public mutating func ended(_ source: String, id: String, version: String, throwing error: any Error) -> AutoUpdateSchedule.Ending {
+        schedules[source, default: AutoUpdateSchedule()].ended(id, version: version, throwing: error)
+    }
+
+    /// Every plugin whose update by itself failed since its source was last
+    /// read, and the version it was to: said on their rows.
+    public var failures: [String: String] {
+        schedules.values.reduce(into: [:]) { all, schedule in all.merge(schedule.failures) { first, _ in first } }
+    }
+
+    /// A source that was removed: nothing of it is asked or said any more.
+    public mutating func forget(_ source: String) {
+        schedules[source] = nil
+    }
+}
+
 extension UpdateOffer {
     /// The version an update would bring, for the two offers that wait.
     public var waitingVersion: String? {

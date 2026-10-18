@@ -74,6 +74,8 @@ public struct InstallRequest: Codable, Equatable, Sendable {
 
     public var operation: Operation
     public var id: PluginIdentifier
+    /// The source the copy is a copy of — `official`, or a source of one's
+    /// own by its id — what the record says (`InstalledRecord.source`).
     public var source: String
     /// The source's own repository, where its default branch is: a copy of
     /// the default branch is taken from there and nowhere else
@@ -122,8 +124,20 @@ public struct InstallRequest: Codable, Equatable, Sendable {
         self.automatic = automatic
     }
 
-    /// Where the copy comes from.
-    public var origin: PluginOrigin { PluginOrigin(repository: repository, ref: ref) }
+    /// A request for the copy a button brings `from` its origin — the
+    /// repository, the line of history and the source together, as the
+    /// button's step names them (`ShownPlace.Step`): the source is always
+    /// the origin's, never assumed.
+    public init(operation: Operation, id: PluginIdentifier, from origin: PluginOrigin, sourceRepository: RepositoryAddress,
+                commit: String, folder: PluginListing, version: String, headCommit: String?, headTree: String? = nil,
+                defaultBranch: String? = nil, automatic: Bool = false) {
+        self.init(operation: operation, id: id, source: origin.source, sourceRepository: sourceRepository,
+                  repository: origin.repository, ref: origin.ref, commit: commit, folder: folder, version: version,
+                  headCommit: headCommit, headTree: headTree, defaultBranch: defaultBranch, automatic: automatic)
+    }
+
+    /// Where the copy comes from, and the source it is a copy of.
+    public var origin: PluginOrigin { PluginOrigin(repository: repository, ref: ref, source: source) }
 }
 
 /// `intent.json`: a journal of one operation, in its staging folder, so that a
@@ -244,8 +258,10 @@ public struct PluginInstaller: Sendable {
     public let discovery: PluginDiscovery
     public let trash: any PluginTrash
     public let renames: FolderRenames
-    /// One file: from `repository`'s raw host, at `path` and `commit`.
-    private let fetch: @Sendable (_ repository: RepositoryAddress, _ path: String, _ commit: String) async throws -> Data
+    /// One file of a copy of `source`: from `repository`, at `path` and
+    /// `commit` — through that source's own provider.
+    private let fetch: @Sendable (_ source: String, _ repository: RepositoryAddress, _ path: String,
+                                  _ commit: String) async throws -> Data
     private let now: @Sendable () -> Date
 
     /// Four files at a time, each retried twice, the whole install at most five
@@ -254,12 +270,16 @@ public struct PluginInstaller: Sendable {
     public static let attempts = 3
     public var deadline: TimeInterval = 300
 
+    /// An installer whose files come through `fetch`, told the source of the
+    /// copy as well as its repository (`InstallRequest.source`), so that a
+    /// copy of a source of one's own is fetched through that source's
+    /// provider.
     public init(
         paths: UDeckPaths,
         discovery: PluginDiscovery,
         trash: any PluginTrash = SystemTrash(),
         renames: FolderRenames = .system,
-        fetch: @escaping @Sendable (RepositoryAddress, String, String) async throws -> Data,
+        fetchOfSource fetch: @escaping @Sendable (String, RepositoryAddress, String, String) async throws -> Data,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.paths = paths
@@ -268,6 +288,20 @@ public struct PluginInstaller: Sendable {
         self.renames = renames
         self.fetch = fetch
         self.now = now
+    }
+
+    /// An installer whose files come through `fetch` by repository alone:
+    /// the official source's, and its forks'.
+    public init(
+        paths: UDeckPaths,
+        discovery: PluginDiscovery,
+        trash: any PluginTrash = SystemTrash(),
+        renames: FolderRenames = .system,
+        fetch: @escaping @Sendable (RepositoryAddress, String, String) async throws -> Data,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.init(paths: paths, discovery: discovery, trash: trash, renames: renames,
+                  fetchOfSource: { _, repository, path, commit in try await fetch(repository, path, commit) }, now: now)
     }
 
     private var fileManager: FileManager { .default }
@@ -353,7 +387,7 @@ public struct PluginInstaller: Sendable {
                 next += 1
                 group.addTask {
                     let data = try await fetchWithRetries("\(base)/\(entry.path)", commit: request.commit,
-                                                          from: request.repository)
+                                                          from: request.repository, of: request.source)
                     try place(data, as: entry, in: folder, base: base)
                 }
             }
@@ -364,12 +398,13 @@ public struct PluginInstaller: Sendable {
         }
     }
 
-    private func fetchWithRetries(_ path: String, commit: String, from repository: RepositoryAddress) async throws -> Data {
+    private func fetchWithRetries(_ path: String, commit: String, from repository: RepositoryAddress,
+                                  of source: String) async throws -> Data {
         var last = ""
         for attempt in 1...Self.attempts {
             try Task.checkCancellation()
             do {
-                return try await fetch(repository, path, commit)
+                return try await fetch(source, repository, path, commit)
             } catch ProviderError.rawRateLimited(let until) {
                 throw InstallError.rawRateLimited(until: until)
             } catch is CancellationError {

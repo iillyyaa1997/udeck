@@ -248,7 +248,9 @@ struct CatalogueRowView: View {
                 }
                     .disabled(model.busyPlugin != nil)
                     .accessibilityIdentifier("catalogue.\(id).switchToVerified")
-            case .unverified:
+            case .unverified, .fromElsewhere:
+                // The official catalogue never comes to `.fromElsewhere`: that
+                // is a row of a source of one's own's.
                 EmptyView()
             case .cannotInstall:
                 Button(strings(.catalogueDetails)) { details.toggle() }
@@ -310,6 +312,7 @@ struct CatalogueRowView: View {
                                   fork: model.installed.plugins[id]?.origin.fork(official: model.catalogueAddress), id: id,
                                   path: model.pluginsDirectoryDisplayPath,
                                   lifecycle: model.unverifiedRow(of: id)?.lifecycle) ?? []).map { strings($0) }.joined(separator: " — ")
+        case .fromElsewhere(let copy, _, _, _): strings(.catalogueInstalledFromElsewhere(copy))
         }
     }
 

@@ -14,8 +14,13 @@ import Foundation
 /// (`ShownPlace.Switch`): both sources and the ref, before anything is
 /// replaced.
 public enum CopyName: Equatable, Sendable {
-    /// From the source's default branch, whose copies are verified.
+    /// From the official source's default branch, whose copies are verified.
     case verified(version: String, repository: String)
+    /// From the default branch of a source of one's own, at `address`
+    /// (`host/path`): *1.1.0 from gitlab.example/tools/udeck-plugins:
+    /// unverified* — or, once it is trusted, *…: trusted source* `trustedName`
+    /// (`SourceName.shown`). Never verified, trusted or not.
+    case sourceDefault(version: String, address: String, trustedName: String? = nil)
     /// From pull request `number`, at `commit` — its first seven characters.
     case pullRequest(number: Int, commit: String, version: String)
     /// From branch `name`, at `commit` — of `fork`, `owner/repo`, when it is a
@@ -25,11 +30,20 @@ public enum CopyName: Equatable, Sendable {
     case other(commit: String, version: String)
 
     /// `version` at `commit`, from `origin`, `official` being the official
-    /// repository: a branch of another repository is named with its fork.
+    /// repository: a branch of another repository is named with its fork, and
+    /// a default branch is the verified copy only when it is the official
+    /// source's — another source's is named with its address, and with its
+    /// name from `trustedNames`, by source id, when it is trusted.
     public static func of(_ origin: PluginOrigin, commit: String, version: String,
-                          official: RepositoryAddress? = nil) -> CopyName {
+                          official: RepositoryAddress? = nil, trustedNames: [String: String] = [:]) -> CopyName {
         let short = String(commit.prefix(7))
-        if origin.ref.isDefault { return .verified(version: version, repository: origin.repository.description) }
+        if origin.ref.isDefault {
+            guard origin.source == InstalledPlugins.officialSource else {
+                return .sourceDefault(version: version, address: origin.repository.description,
+                                      trustedName: trustedNames[origin.source])
+            }
+            return .verified(version: version, repository: origin.repository.description)
+        }
         if let number = origin.ref.pullRequestNumber { return .pullRequest(number: number, commit: short, version: version) }
         if origin.ref.kind == PluginRef.branchKind, let name = origin.ref.name {
             return .branch(name: name, commit: short, version: version, fork: origin.fork(official: official))
@@ -42,6 +56,8 @@ public enum CopyName: Equatable, Sendable {
         switch (one, other) {
         case (.verified(let v1, let r1), .verified(let v2, let r2)):
             ShownPlace.same(v1, v2) && ShownPlace.same(r1, r2)
+        case (.sourceDefault(let v1, let a1, let n1), .sourceDefault(let v2, let a2, let n2)):
+            ShownPlace.same(v1, v2) && ShownPlace.same(a1, a2) && ShownPlace.same(n1, n2)
         case (.pullRequest(let n1, let c1, let v1), .pullRequest(let n2, let c2, let v2)):
             n1 == n2 && ShownPlace.same(c1, c2) && ShownPlace.same(v1, v2)
         case (.branch(let b1, let c1, let v1, let f1), .branch(let b2, let c2, let v2, let f2)):
@@ -69,12 +85,14 @@ extension PluginOrigin {
     }
 
     /// Whether a copy from `other` follows the same line of history as a copy
-    /// from here: the source's default branch — whatever its repository is
-    /// called now, a rename is no other source — or the same branch, or the
-    /// same pull request, of the same repository, its name byte for byte.
-    /// A copy from another line taking a copy's place is a switch of source,
-    /// and its warning names both (`ShownPlace.Switch`).
+    /// from here: the default branch of the same source — whatever its
+    /// repository is called now, a rename is no other source; the default
+    /// branches of two sources are two lines — or the same branch, or the
+    /// same pull request, of the same repository and the same source, its
+    /// name byte for byte. A copy from another line taking a copy's place is a
+    /// switch of source, and its warning names both (`ShownPlace.Switch`).
     public func followsTheSameLine(as other: PluginOrigin) -> Bool {
+        guard source == other.source else { return false }
         if ref.isDefault || other.ref.isDefault { return ref.isDefault && other.ref.isDefault }
         return repository == other.repository && ref.kind == other.ref.kind
             && ShownPlace.same(ref.name, other.ref.name)
@@ -100,14 +118,19 @@ extension InstalledRecord {
     /// *pull request #3 at a1b2c3d*, *branch fix/uptime at a1b2c3d* or —
     /// a fork's branch — *branch fix of someone/udeck-plugins at a1b2c3d* for
     /// code nobody verified, after **Unverified**; `official` being the
-    /// official repository.
-    public func fromPhrase(official: RepositoryAddress?) -> Phrase {
+    /// official repository. A copy of a source of one's own that is no
+    /// longer among `sources`, the sources added — when they are known — says
+    /// so: *From gitlab.example/tools/udeck-plugins — a source no longer added*.
+    public func fromPhrase(official: RepositoryAddress?, sources: [OwnSource]? = nil) -> Phrase {
         let commit = String(self.commit.prefix(7))
         if let number = ref.pullRequestNumber {
             return .pluginFromPullRequest(number: number, commit: commit)
         }
         if ref.kind == PluginRef.branchKind, let name = ref.name {
             return .pluginFromBranch(name: name, commit: commit, fork: origin.fork(official: official))
+        }
+        if source != InstalledPlugins.officialSource, let sources, !sources.contains(where: { $0.id == source }) {
+            return .sourceNoLongerAdded(address: repository.description)
         }
         return .pluginFrom(source: repository.description, commit: commit)
     }
@@ -124,9 +147,12 @@ extension InstalledRecord {
     /// for a copy whose tree is the one the catalogue's head has
     /// (`headTree`): that is what was merged, and it comes back **Verified**
     /// (`Adoption`). A fork's branch is named with its fork, `official` being
-    /// the official repository.
+    /// the official repository. Only the official source's copies are
+    /// adopted: a copy of a source of one's own comes back as that source's
+    /// whatever the official catalogue's head has, and is said.
     public func reinstallSays(headTree: String?, official: RepositoryAddress? = nil) -> Phrase? {
-        guard !isOfficialDefault, tree != headTree else { return nil }
+        guard !isOfficialDefault else { return nil }
+        guard source != InstalledPlugins.officialSource || tree != headTree else { return nil }
         return .windowReinstallBrings(CopyName.of(origin, commit: commit, version: version, official: official))
     }
 }
@@ -138,8 +164,13 @@ extension UpdateOffer {
     /// is not an older or a changed version of the catalogue's: the verified
     /// copy is offered as the switch it is (`CatalogueRowState.unverified`),
     /// never as an update, so nothing waits, and nothing updates by itself.
-    public static func offered(_ record: InstalledRecord, head entry: CatalogueEntry?) -> UpdateOffer? {
-        guard record.isOfficialDefault else { return nil }
+    /// `source` is the source whose catalogue's head `entry` is: a copy of
+    /// another source's default branch is offered nothing from it — a copy of
+    /// a source of one's own is offered updates from that source's head
+    /// alone.
+    public static func offered(_ record: InstalledRecord, head entry: CatalogueEntry?,
+                               source: String = InstalledPlugins.officialSource) -> UpdateOffer? {
+        guard record.source == source, record.ref.isDefault else { return nil }
         return of(record, head: entry)
     }
 }
@@ -152,11 +183,16 @@ extension CatalogueRowState {
     /// closed (`lifecycle`); that its folder is not in `path`, when it is
     /// gone; and why the verified copy cannot be installed here, when it
     /// cannot. Nil for every other state. `fork` is the fork the branch is
-    /// in, when it is one's (`PluginOrigin.fork`).
+    /// in, when it is one's (`PluginOrigin.fork`); `source`, the address of
+    /// the source of one's own the copy came from, when it did — its default
+    /// branch named by it: *Installed here from gitlab.example/tools/x:
+    /// unverified*.
     public func unverifiedLine(ref: PluginRef, fork: String? = nil, id: String, path: String,
-                               lifecycle: PullRequestLifecycle? = nil) -> [Phrase]? {
+                               lifecycle: PullRequestLifecycle? = nil, source: String? = nil) -> [Phrase]? {
         guard case .unverified(_, let refusal, let folderGone) = self else { return nil }
-        return [.catalogueInstalledUnverified(ref: ref, fork: fork)]
+        let installed: Phrase = source.flatMap { ref.isDefault ? .catalogueInstalledFromSource(address: $0) : nil }
+            ?? .catalogueInstalledUnverified(ref: ref, fork: fork)
+        return [installed]
             + (lifecycle?.cataloguePhrase.map { [$0] } ?? [])
             + (folderGone ? [.catalogueMissing(id: id, path: path)] : [])
             + (refusal.map { [.catalogueRefusal($0)] } ?? [])
@@ -182,7 +218,10 @@ extension PluginStanding {
 /// What the consent card says of where the code it asks about comes from —
 /// for a decision held to its tree (`ConsentBasis`), which is code nobody
 /// verified: *Nobody verified this code: it comes from pull request #3 of
-/// github.com/…, not from what the repository merged.* Nothing for a decision
+/// github.com/…, not from what the repository merged.* — or, for the default
+/// branch of a source of one's own, which merged it but nobody vouches for:
+/// *Nobody verified this code: it comes from the default branch of
+/// gitlab.example/…, a source you have not trusted.* Nothing for a decision
 /// held to the version: a verified copy, a folder of the operator's own, a
 /// link.
 public enum ConsentSource {
@@ -194,6 +233,9 @@ public enum ConsentSource {
         guard basis == .tree else { return nil }
         guard recordsReadable else { return .permissionsSourceUnknown }
         guard let record, !record.isOfficialDefault else { return nil }
+        if record.ref.isDefault {
+            return .permissionsUntrustedSource(address: record.repository.description, changedHere: changedHere)
+        }
         return .permissionsUnverifiedSource(ref: record.ref, repository: record.repository.description,
                                             changedHere: changedHere)
     }

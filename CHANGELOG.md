@@ -8,6 +8,43 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [Unreleased]
+
+- **Sources of one's own, underneath.** The ground for stage 4 of
+  [docs/plugin-repository.md](docs/plugin-repository.md#stages), which nothing
+  in uDeck reads or offers yet: Settings is as it was, and no request is new.
+  `~/.udeck/sources.json` — a GitHub repository or a GitLab project per entry,
+  known by the number its host gives it (`remoteID`), never with a secret in
+  it — is read and written: a key uDeck does not know is ignored and written
+  back as it was, an entry it cannot use is left out with its reason and
+  written back as it was, and the whole file is broken, and never written
+  over, when an entry's id is not the one derived from its provider, host and
+  number, when two entries share an id or a repository — entries left out
+  counted, so Add refuses one beside them — or when it does not parse. A
+  source's id is the host, the repository's last name and 8 hexadecimal digits
+  of SHA-256 over provider, host and number, so a renamed repository keeps it
+  and a new one at the old name gets another. An address pasted as a browser
+  shows it is read as the repository or the project it names — github.com's,
+  gitlab.com's or a GitLab of one's own, with a port, nested groups and `/-/`
+  pages — and refused before any request when it is `http://`, git's SSH
+  address, holds a login, is a github.com page that is no repository, or is
+  the official repository. A source's name on screen is its passport's with
+  controls, format characters and line and paragraph separators taken out,
+  inside a bidirectional isolate — or its address, when there is no name,
+  nothing is left of it, or it is the official passport's or *uDeck plugins*.
+  Underneath the catalogue, a copy now says which source it is a copy of: its
+  row in another source's catalogue, the update offered only from its own
+  source's head, a switch between two sources' default branches warned of and
+  named, **Back to** of a copy whose source is gone not offered, its check
+  against its own source's head, and one schedule of updates by themselves per
+  source; and the GitHub client can name a repository by its number,
+  `/repositories/{id}/…`, and so named asks of no other repository, nor of its
+  own by a name it had before. The official catalogue says and does what it
+  did. `installed.json`, `grants.json`, `followed.json` and `settings.json`
+  keep their shape: the files 0.7.0 wrote read as they did, and are written
+  back byte for byte — `settings.json` but for the order of the shortcut's
+  modifiers, which 0.7.0 does not keep from one run to the next either.
+
 ## [0.7.0] — 2026-10-17
 
 Plugins come from pull requests and branches now, and the verified ones keep

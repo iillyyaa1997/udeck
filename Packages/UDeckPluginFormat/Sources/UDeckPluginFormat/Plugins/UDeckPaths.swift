@@ -62,6 +62,12 @@ public struct UDeckPaths: Sendable, Equatable {
     /// what it was when it was put there. See docs/plugin-repository.md.
     public var installedFile: URL { root.appendingPathComponent("installed.json") }
 
+    /// The sources the operator added beside the built-in official one — a
+    /// GitHub repository or a GitLab project each, by its numeric id — in the
+    /// order Settings shows them. Never a secret: what a source's token is
+    /// lives in the Keychain. See docs/plugin-repository.md.
+    public var sourcesFile: URL { root.appendingPathComponent("sources.json") }
+
     /// What uDeck knows about each plugin repository: listings by commit,
     /// manifests by hash, the limit. Not under `cache/`, where every folder
     /// belongs to a plugin of the same name and `catalogue` is a legal id.

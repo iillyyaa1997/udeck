@@ -163,6 +163,10 @@ struct Russian: Vocabulary {
             "Этот код никто не проверял: он из \(Self.lineFrom(ref)) репозитория \(repository)"
                 + (changedHere ? " и после установки изменён на этом Mac" : "")
                 + ", а не из того, что репозиторий влил. uDeck спросит снова, как только он изменится."
+        case .permissionsUntrustedSource(let address, let changedHere):
+            "Этот код никто не проверял: он из основной ветки \(address) — источника, которому вы не доверяли"
+                + (changedHere ? ", и после установки изменён на этом Mac" : "")
+                + ". uDeck спросит снова, когда он изменится."
         case .permissionsSourceUnknown:
             "uDeck не может прочитать ~/.udeck/installed.json, поэтому неизвестно, откуда этот код: о нём спрашивают по тому, что он есть, и снова — как только он изменится."
         case .permissionsUnsandboxed:
@@ -190,8 +194,8 @@ struct Russian: Vocabulary {
                 + "uDeck посмотрит снова после \(until)."
         case .catalogueRawLimited(let until):
             "Файловый сервер GitHub попросил подождать; до \(until) файлы с него не скачиваются."
-        case .catalogueUnreachable(let reason, let readAt):
-            "Не удалось связаться с GitHub: \(reason)." + (readAt.map { " Список ниже — на \($0)." } ?? "")
+        case .catalogueUnreachable(let reason, let readAt, let host):
+            "Не удалось связаться с \(host): \(reason)." + (readAt.map { " Список ниже — на \($0)." } ?? "")
         case .catalogueNotFound(let source): "\(source) не найден или закрыт."
         case .catalogueNotARepository(let source, let branch):
             "\(source) — не репозиторий плагинов uDeck: в корне \(branch) нет udeck-plugins.json."
@@ -199,8 +203,8 @@ struct Russian: Vocabulary {
             "Этот репозиторий в формате \(declared); этот uDeck читает формат \(RepositoryPassport.supportedFormat). Обновите uDeck."
         case .catalogueInvalidPassport(let source, let reason):
             "udeck-plugins.json в \(source) uDeck прочитать не может: \(reason)."
-        case .catalogueRefused(let status): "GitHub отказал в запросе (HTTP \(status))."
-        case .catalogueBadAnswer(let reason): "GitHub ответил так, что uDeck не понял ответа: \(reason)."
+        case .catalogueRefused(let status, let host): "\(host) отказал в запросе (HTTP \(status))."
+        case .catalogueBadAnswer(let reason, let host): "\(host) ответил так, что uDeck не понял ответа: \(reason)."
         case .catalogueArrivedDifferent(let path, let expected, let got):
             "\(path) пришёл не таким, как его перечисляет репозиторий (ожидался \(expected), пришёл \(got))."
         case .catalogueVerified: "Проверен"
@@ -247,6 +251,9 @@ struct Russian: Vocabulary {
                 : "Сейчас \(id) — \(Self.copy(from)). На её место встанет \(Self.copy(to)). ") + Self.staysAfterSwitching(to: to)
         case .catalogueLinkedHere(let id): "\(id) подключён здесь ссылкой на вашу папку"
         case .catalogueInstalledUnverified(let ref, let fork): "Здесь установлен из \(Self.lineFrom(ref, fork: fork)): не проверен"
+        case .catalogueInstalledFromSource(let address): "Здесь установлен из \(address): не проверен"
+        case .catalogueInstalledFromElsewhere(let copy): "Здесь установлена \(Self.copy(copy))"
+        case .catalogueInstallFromHere: "Установить отсюда…"
         case .catalogueSwitchToVerified(let version): "Перейти на проверенную \(version)"
         case .catalogueMergedDiffers: "влит, и проверенная версия отличается"
         case .catalogueClosedUnmerged: "закрыт без слияния"
@@ -346,6 +353,24 @@ struct Russian: Vocabulary {
             "В файлах \(Self.lineFrom(ref, fork: fork)) нет plugins/\(plugin): устанавливать отсюда нечего."
         case .linkUnverifiedNote:
             "То, что здесь перечислено, никто не проверял: это не то, что репозиторий влил. Плагин, установленный отсюда, спросит перед запуском — даже если ничего не просит — и снова, как только его код изменится."
+
+        // Свои источники
+        case .linkNotAForkAddAsASource(let repository, let official):
+            "\(repository) — не форк \(official). Чтобы ставить из него, добавьте его как отдельный источник."
+        case .linkAddAsASource: "Добавить как источник…"
+        case .sourceLinkRefused(let refusal, let official): Self.sourceLinkRefusal(refusal, official: official)
+        case .sourcesBroken(let broken): Self.sourcesBroken(broken)
+        case .sourceSkipped(let skipped): Self.sourceSkipped(skipped)
+        case .sourceIDTaken(let name):
+            "uDeck не может добавить этот источник: его идентификатор совпал бы с идентификатором \(name)."
+        case .sourceNotFound(let address):
+            "\(address) не найден или закрыт. Если он закрытый, uDeck нужен токен для него: «Токен…»."
+        case .sourceNoLongerAdded(let address): "Из \(address) — источник больше не добавлен"
+        case .sourceRemoveConfirm(let name, let address):
+            "Удалить \(name) (\(address))? uDeck перестанет его читать и забудет его токен. Установленное из него останется и продолжит работать; если вы ему доверяли, эти плагины станут непроверенными и спросят снова перед следующим запуском, а обновить или переустановить их нельзя, пока источник не добавлен снова."
+        case .catalogueNotASourceAnyMore(let address): "\(address) больше не источник"
+        case .catalogueOfficialRepositoryChanged:
+            "Адрес официального каталога теперь принадлежит другому репозиторию. uDeck перестал его читать, и ничего не обновляется само; установленные плагины продолжают работать."
         case .runLogSwitch: "Вести лог запусков связанных папок"
         case .runLogHelp(let path):
             "Каждый запуск связанного плагина — когда, почему, чем кончился, сколько шёл, конец его stderr — пишется в \(path)/<id>.log, не больше 2 МБ на плагин. Остальные плагины помнят только последний запуск, и только в памяти."
@@ -409,6 +434,9 @@ struct Russian: Vocabulary {
         case .windowNotInPluginsFolder(let id, let path): "\(id) нет в \(path)"
         case .windowWillNotRun(let id): "\(id) не запустится:"
         case .windowReinstall: "Переустановить"
+        // Копия своего источника не говорит своей отметки перед той, что говорит фраза.
+        case .windowReinstallBrings(.sourceDefault(let version, let address, _)):
+            "«Переустановить» вернёт: версия \(version) из \(address). Этот код никто не проверял."
         case .windowReinstallBrings(let copy): "«Переустановить» вернёт: \(Self.copy(copy)). Этот код никто не проверял."
 
         // Что плагин может попросить
@@ -585,10 +613,13 @@ extension Russian {
         fork.map { " репозитория \($0)" } ?? ""
     }
 
-    /// Копия, как её называет предупреждение (`CopyName`): версия и откуда она.
+    /// Копия, как её называет предупреждение (`CopyName`): версия и откуда она
+    /// — а копия своего источника ещё и чьё за неё поручительство.
     static func copy(_ name: CopyName) -> String {
         switch name {
         case .verified(let version, let repository): "проверенная версия \(version) из \(repository)"
+        case .sourceDefault(let version, let address, let trustedName):
+            "версия \(version) из \(address)" + (trustedName.map { ": доверенный источник \($0)" } ?? ": не проверена")
         case .pullRequest(let number, let commit, let version):
             "версия \(version) из запроса на слияние #\(number), коммит \(commit)"
         case .branch(let branch, let commit, let version, let fork):
@@ -614,6 +645,53 @@ extension Russian {
         case .unsupported:
             "Эта страница не называет ни запроса на слияние, ни ветки. Вставьте ссылку на запрос на слияние (…/pull/3) или на ветку (…/tree/имя)."
         }
+    }
+
+    /// Почему адрес, вставленный в «Добавить источник…», не прочитан (`SourceLink.Refusal`).
+    static func sourceLinkRefusal(_ refusal: SourceLink.Refusal, official: String) -> String {
+        switch refusal {
+        case .empty:
+            "Вставьте адрес репозитория GitHub или проекта GitLab — такой, как его показывает браузер: github.com/владелец/репозиторий или gitlab.com/группа/проект."
+        case .notALink:
+            "Это не адрес репозитория или проекта. Вставьте его таким, как его показывает браузер: github.com/владелец/репозиторий или gitlab.com/группа/проект."
+        case .notHTTPS: "Источники читаются только по HTTPS: вставьте адрес, который начинается с https://."
+        case .ssh: "Это адрес git по SSH. Вставьте вместо него страницу репозитория или проекта — такую, как её показывает браузер."
+        case .login: "В адресе есть имя или пароль. Вставьте его без них — таким, как его показывает браузер."
+        case .notARepository(let page):
+            "\(page.contains(".") ? page : "github.com/\(page)") — не страница репозитория: вставьте страницу самого репозитория, github.com/владелец/репозиторий."
+        case .officialCatalogue: "Это \(official), официальный каталог: его плагины уже перечислены выше, проверенные."
+        case .notAProject:
+            "Это не адрес проекта: вставьте страницу проекта, как gitlab.com/группа/проект, или со своим сервером и его группами."
+        case .readsAsAnother(let other): "Этот адрес читается как \(other)."
+        }
+    }
+
+    /// Почему ~/.udeck/sources.json нельзя использовать (`SourceList.Broken`).
+    static func sourcesBroken(_ broken: SourceList.Broken) -> String {
+        let until = "поэтому uDeck не читает, не добавляет и не удаляет ваши источники, пока файл не исправлен."
+        return switch broken {
+        case .unreadable(let detail):
+            "~/.udeck/sources.json не читается, поэтому uDeck не читает, не добавляет и не удаляет ваши источники, пока это не исправлено: \(detail)"
+        case .idNotDerived(let id, let named):
+            "В ~/.udeck/sources.json у \(named) идентификатор \(id ?? "null"), а uDeck даёт этому репозиторию другой, \(until)"
+        case .sameID(let id): "В ~/.udeck/sources.json у двух источников один идентификатор \(id), \(until)"
+        case .sameRepository(let one, let other):
+            "В ~/.udeck/sources.json один репозиторий указан дважды — как \(one) и как \(other), \(until)"
+        }
+    }
+
+    /// Почему запись ~/.udeck/sources.json пропущена (`SourceList.Skipped`).
+    static func sourceSkipped(_ skipped: SourceList.Skipped) -> String {
+        let name = skipped.named ?? "запись \(skipped.position)"
+        let why = switch skipped.reason {
+        case .notAnEntry: "это не источник"
+        case .unknownProvider(let provider):
+            provider.map { "его провайдер, \($0), этот uDeck не читает" } ?? "в нём не указан провайдер"
+        case .noRemoteID: "в нём нет remoteID — номера, под которым его знает сервер"
+        case .address(.readsAsAnother(let other)): "он читается как \(other), а не так, как записан"
+        case .address: "по такому адресу uDeck источник не читает"
+        }
+        return "uDeck пропускает \(name) в ~/.udeck/sources.json: \(why)."
     }
 
     /// Секунды с `places` знаками после запятой — как их пишут по-русски.

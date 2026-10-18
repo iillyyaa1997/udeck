@@ -572,3 +572,126 @@ struct ForkTests {
                 == .windowReinstallBrings(.branch(name: "x", commit: "a1b2c3d", version: "1.0.1", fork: "someone/udeck-plugins")))
     }
 }
+
+// MARK: - A repository addressed by its number (stage 4, R1a)
+
+/// GitHub's numeric id, read from its description, and a client that names
+/// the repository by it — `/repositories/{id}/…` — for every API request,
+/// raw files still by its path at a commit. Nothing uDeck builds uses it yet;
+/// what it asks is held here, against answers of the test's own.
+extension ForkTests {
+    static let ids: [(String, Int?, String)] = [
+        (#"{"id": 1393324153, "full_name": "iillyyaa1997/udeck-plugins", "default_branch": "main"}"#, 1_393_324_153,
+         "the official repository's, as GitHub answered it"),
+        (#"{"full_name": "o/r", "default_branch": "main"}"#, nil, "no id"),
+        (#"{"id": "1393324153", "full_name": "o/r", "default_branch": "main"}"#, nil, "an id that is not a number"),
+        (#"{"id": 0, "full_name": "o/r", "default_branch": "main"}"#, nil, "an id that is no repository's"),
+        (#"{"id": -4, "full_name": "o/r", "default_branch": "main"}"#, nil, "a negative id"),
+        (#"{"id": 1.5, "full_name": "o/r", "default_branch": "main"}"#, nil, "a fraction"),
+    ]
+
+    @Test("a description says the repository's id; an id that is not one costs the id, not the answer", arguments: 0..<ids.count)
+    func descriptionID(row: Int) throws {
+        let (text, id, why) = Self.ids[row]
+        let read = try #require(RepositoryDescription.read(Data(text.utf8)), "\(why)")
+        #expect(read.id == id, "\(why)")
+        #expect(read.defaultBranch == "main" && read.fullName != nil)
+    }
+
+    /// Every question a source asks, by id: describe, the head, the listing,
+    /// a folder's history, a pull request, a comparison — and raw files by
+    /// the repository's path at a commit, which each is hashed against.
+    @Test("addressed by id, every API request goes to /repositories/{id}/…, and raw files by the path at a commit")
+    func addressedByID() async throws {
+        let host = "byid-\(UUID().uuidString.lowercased()).invalid"
+        let commit = String(repeating: "a", count: 40), other = String(repeating: "b", count: 40)
+        let client = GitHubClient(
+            endpoints: GitHubEndpoints(apiBase: URL(string: "https://\(host)/api")!, rawBase: URL(string: "https://\(host)/raw")!,
+                                       repository: "someone/team-plugins"),
+            udeckVersion: "0.8.0", limits: RateLimitRecorder(), session: GitHubClient.makeSession(protocolClasses: [StubAnswers.self]),
+            now: { Self.at }, addressing: .id(123_456_789)
+        )
+        #expect(client.addressing == .id(123_456_789) && client.address == RepositoryAddress(path: "someone/team-plugins"))
+        StubAnswers.answer(host) { request in
+            switch request.url?.path {
+            case "/api/repositories/123456789":
+                (200, Data(#"{"id": 123456789, "full_name": "someone/renamed", "default_branch": "main", "fork": false}"#.utf8))
+            case "/api/repositories/123456789/commits/main": (200, Data(commit.utf8))
+            case "/api/repositories/123456789/git/trees/\(commit)": (200, Data(#"{"sha": "\#(commit)", "tree": []}"#.utf8))
+            case "/api/repositories/123456789/commits":
+                (200, Data(#"[{"sha": "\#(commit)", "commit": {"committer": {"date": "2026-10-18T10:00:00Z"}}}]"#.utf8))
+            case "/api/repositories/123456789/pulls/3":
+                (200, Data(#"{"number": 3, "state": "open", "head": {"sha": "\#(commit)", "ref": "x"}}"#.utf8))
+            case "/api/repositories/123456789/compare/\(commit)...\(other)":
+                (200, Data(#"{"status": "ahead", "ahead_by": 1, "behind_by": 0}"#.utf8))
+            case "/raw/someone/team-plugins/\(commit)/udeck-plugins.json": (200, Data("{}".utf8))
+            default: (404, Data(#"{"message": "Not Found"}"#.utf8))
+            }
+        }
+        defer { StubAnswers.forget(host) }
+
+        let described = try await client.describe()
+        #expect(described.id == 123_456_789 && described.fullName == "someone/renamed", "the spelling it has now, said by id")
+        #expect(try await client.head(of: "main", ifNoneMatch: nil) == .commit(commit, etag: nil))
+        #expect(try await client.tree(commit, recursive: true) == GitTree(sha: commit, tree: []))
+        #expect(try await client.commits(touching: "plugins/uptime", on: "main").map(\.sha) == [commit])
+        #expect(try await client.pull(3).head == commit)
+        #expect(try await client.compare(commit, other) == Comparison(status: .ahead, aheadBy: 1, behindBy: 0))
+        #expect(try await client.file(at: "udeck-plugins.json", commit: commit) == Data("{}".utf8))
+        let asked = StubAnswers.asked(host)
+        #expect(asked.map { $0.url?.path ?? "" } == [
+            "/api/repositories/123456789",
+            "/api/repositories/123456789/commits/main",
+            "/api/repositories/123456789/git/trees/\(commit)",
+            "/api/repositories/123456789/commits",
+            "/api/repositories/123456789/pulls/3",
+            "/api/repositories/123456789/compare/\(commit)...\(other)",
+            "/raw/someone/team-plugins/\(commit)/udeck-plugins.json",
+        ])
+        #expect(asked[1].value(forHTTPHeaderField: "Accept") == "application/vnd.github.sha")
+        #expect(asked[2].url?.query == "recursive=1" && asked[3].url?.query?.contains("sha=main") == true)
+        #expect(!asked.contains { $0.url?.path.contains("/repos/") == true }, "nothing addressed by the name")
+        #expect(asked.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == nil })
+        #expect(client.folderPage("plugins/uptime", commit: commit)?.absoluteString
+                == "https://github.com/someone/team-plugins/tree/\(commit)/plugins/uptime", "pages a person reads by the name")
+    }
+
+    /// The id names one repository: a client for the same one, whatever the
+    /// case of its name, is the client itself; for any other path — the
+    /// source's earlier name among them, which another repository may have
+    /// now — there is none, so no request of a source's ever goes by a name;
+    /// and a path addressed client is exactly what it was, a fork's by path.
+    @Test("addressed by id, a client for its own repository is itself, and for any other path there is none")
+    func addressingAcrossClients() throws {
+        let byID = GitHubClient(
+            endpoints: GitHubEndpoints(apiBase: URL(string: "https://unused.invalid/api")!,
+                                       rawBase: URL(string: "https://unused.invalid/raw")!, repository: "someone/renamed"),
+            udeckVersion: "0.8.0", limits: RateLimitRecorder(), addressing: .id(123_456_789))
+        let own = try #require(byID.client(for: RepositoryAddress(path: "Someone/Renamed")))
+        #expect(own.addressing == .id(123_456_789) && own.address == RepositoryAddress(path: "someone/renamed"))
+        #expect(byID.client(for: RepositoryAddress(path: "someone/team-plugins")) == nil,
+                "its name before the rename: a squatter's now, perhaps")
+        #expect(byID.client(for: Self.fork) == nil && byID.provider(for: Self.fork) == nil, "another repository")
+        #expect(byID.client(for: RepositoryAddress(provider: "gitlab", host: "gitlab.com", path: "someone/renamed")) == nil)
+        let official = Self.clients("unused.invalid")
+        #expect(official.addressing == .path, "the official client is addressed by path, as in stage 3")
+        let fork = try #require(official.client(for: Self.fork))
+        #expect(fork.addressing == .path && fork.address == Self.fork, "a fork of the official one: by its own path")
+    }
+
+    /// The path addressed client asks exactly what it asked: the official
+    /// repository's questions are stage 3's.
+    @Test("addressed by path, the questions are stage 3's own")
+    func addressedByPath() async throws {
+        let host = "bypath-\(UUID().uuidString.lowercased()).invalid"
+        let client = Self.clients(host)
+        StubAnswers.answer(host) { request in
+            request.url?.path == "/api/repos/iillyyaa1997/udeck-plugins"
+                ? (200, Data(#"{"id": 1393324153, "full_name": "iillyyaa1997/udeck-plugins", "default_branch": "main"}"#.utf8))
+                : (404, Data())
+        }
+        defer { StubAnswers.forget(host) }
+        #expect(try await client.describe().id == 1_393_324_153)
+        #expect(StubAnswers.asked(host).map { $0.url?.path ?? "" } == ["/api/repos/iillyyaa1997/udeck-plugins"])
+    }
+}

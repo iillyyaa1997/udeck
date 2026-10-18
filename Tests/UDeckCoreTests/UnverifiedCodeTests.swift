@@ -300,3 +300,173 @@ struct UnverifiedCodeTests {
         }
     }
 }
+
+// MARK: - Copies of sources of one's own (stage 4, R1a)
+
+/// A copy of a source of one's own in the records: which source a previous
+/// copy is of, what it is checked against, what its card and its window say,
+/// and its row once the source is no longer added.
+extension UnverifiedCodeTests {
+    static let team = RepositoryAddress(provider: "gitlab", host: "gitlab.example", path: "tools/team-plugins")
+    static let teamSource = OwnSource(id: SourceID.derive(SourceIdentity(provider: "gitlab", host: "gitlab.example",
+                                                                         remoteID: 48), path: "tools/team-plugins"),
+                                      provider: "gitlab", host: "gitlab.example", path: "tools/team-plugins", remoteID: 48,
+                                      addedAt: nil)
+    static let fork = RepositoryAddress(path: "someone/udeck-plugins")
+
+    static func teamRecord(ref: PluginRef = .defaultBranch("main"), tree: String = tree) -> InstalledRecord {
+        var record = record(source: teamSource.id, ref: ref, tree: tree)
+        record.repository = team
+        record.verification = PluginVerification(status: .unverified, by: nil, checkedAgainst: nil, checkedAt: at)
+        return record
+    }
+
+    enum Holder: Sendable { case official, team }
+
+    /// The record holding the copy, the copy's ref and repository — and the
+    /// source it is of, or none: S4-11's five rules, in order.
+    static let previous: [(holder: Holder, ref: PluginRef, repository: RepositoryAddress?, listed: Bool, source: String?, why: String)] = [
+        (.official, .defaultBranch("main"), nil, true, "official", "1: no repository, the record's source"),
+        (.team, .defaultBranch("main"), nil, true, teamSource.id, "1: no repository, the record's source — a source's"),
+        (.team, .defaultBranch("main"), team, false, teamSource.id, "1: the record's repository, though no longer listed"),
+        (.official, .branch("x"), fork, true, "official", "2: a fork's branch is the official source's"),
+        (.team, .pullRequest(3), .official, true, "official", "2: a pull request is the official source's"),
+        (.team, .defaultBranch("main"), .official, true, "official", "3: the official repository"),
+        (.team, .defaultBranch("main"), RepositoryAddress(path: "IILLYYAA1997/udeck-plugins"), true, "official",
+         "3: the official repository, whatever its case"),
+        (.official, .defaultBranch("main"), team, true, teamSource.id, "4: a source's address as it is now"),
+        (.official, .defaultBranch("main"), RepositoryAddress(provider: "gitlab", host: "GITLAB.example", path: "tools/team-plugins"),
+         true, teamSource.id, "4: the host whatever its case"),
+        (.official, .defaultBranch("main"), RepositoryAddress(provider: "gitlab", host: "gitlab.example", path: "tools/Team-Plugins"),
+         true, nil, "5: a GitLab path in another case is another path"),
+        (.official, .defaultBranch("main"), team, false, nil, "5: a source no longer added"),
+        (.official, .defaultBranch("main"), RepositoryAddress(provider: "github", host: "gitlab.example", path: "tools/team-plugins"),
+         true, nil, "5: the same host and path on another provider"),
+        (.official, .defaultBranch("main"), fork, true, nil, "5: a fork's default branch is no source's"),
+    ]
+
+    @Test("which source a previous copy is of, by the five rules", arguments: 0..<previous.count)
+    func previousCopysSource(row: Int) {
+        let (holder, ref, repository, listed, source, why) = Self.previous[row]
+        let record = holder == .official ? Self.record(ref: .defaultBranch("main")) : Self.teamRecord()
+        let copy = PreviousCopy(ref: ref, commit: Self.commit, tree: Self.tree, version: "0.9.0", repository: repository)
+        let found = copy.source(record: record, official: .official, sources: listed ? [Self.teamSource] : [])
+        let from = repository ?? (holder == .official ? .official : Self.team)
+        if let source {
+            #expect(found == .source(PluginOrigin(repository: from, ref: ref, source: source)), "\(why)")
+        } else {
+            #expect(found == .notASource(from), "\(why)")
+        }
+    }
+
+    @Test("a previous copy without a repository of a source no longer added comes from the record's own repository")
+    func previousOfARemovedSource() {
+        let copy = PreviousCopy(ref: .defaultBranch("main"), commit: Self.commit, tree: Self.tree, version: "0.9.0")
+        var record = Self.teamRecord()
+        record.repository = RepositoryAddress(provider: "gitlab", host: "gitlab.example", path: "tools/old-name")
+        #expect(copy.source(record: record, official: .official, sources: [])
+                == .source(PluginOrigin(repository: record.repository, ref: .defaultBranch("main"), source: Self.teamSource.id)))
+        #expect(copy.source(record: record, official: .official, sources: [Self.teamSource])
+                == .source(PluginOrigin(repository: Self.team, ref: .defaultBranch("main"), source: Self.teamSource.id)),
+                "while it is added, its address as it is now")
+        let english = Strings(.english), russian = Strings(.russian)
+        #expect(english(.catalogueNotASourceAnyMore(address: "gitlab.example/tools/x")) == "gitlab.example/tools/x is not a source any more")
+        #expect(russian(.catalogueNotASourceAnyMore(address: "gitlab.example/tools/x")) == "gitlab.example/tools/x больше не источник")
+    }
+
+    /// Each copy is checked against the head of its own source — never the
+    /// official head for a source's copy — and a source not read yet writes
+    /// nothing. The official copies' findings are what they were.
+    @Test("checked against the head of each copy's own source")
+    func headPerSource() {
+        let plugins = ["uptime", "cpu"].map {
+            DiscoveredPlugin(directory: URL(fileURLWithPath: "/u/plugins/\($0)"), folderName: $0, manifest: nil, executable: nil,
+                             problems: [])
+        }
+        var official = Self.record(ref: .defaultBranch("main"))
+        official.verification = PluginVerification(status: .verified, by: "official", checkedAgainst: "old", checkedAt: Self.at)
+        var team = Self.teamRecord()
+        team.verification = PluginVerification(status: .verified, by: "official", checkedAgainst: "old", checkedAt: Self.at)
+        let installed = InstalledPlugins(plugins: ["uptime": official, "cpu": team])
+        let trees: [String: String?] = ["uptime": Self.tree, "cpu": Self.tree]
+        let both = Reverification.of(plugins, installed: installed, trees: trees,
+                                     heads: ["official": .read("officialHead"), Self.teamSource.id: .read("teamHead")],
+                                     now: Self.at)
+        #expect(both.records?.plugins["uptime"]?.verification.checkedAgainst == "officialHead")
+        #expect(both.records?.plugins["cpu"]?.verification
+                == PluginVerification(status: .unverified, by: nil, checkedAgainst: "teamHead", checkedAt: Self.at),
+                "a source's copy, checked against its own source's head, and never verified")
+        #expect(both.standings == ["uptime": .verified, "cpu": .unverified])
+        let officialOnly = Reverification.of(plugins, installed: installed, trees: trees, heads: ["official": .read("officialHead")],
+                                             now: Self.at)
+        #expect(officialOnly.records?.plugins["cpu"]?.verification == team.verification,
+                "a source not read yet: nothing written for its copy")
+        #expect(officialOnly.records?.plugins["uptime"]?.verification.checkedAgainst == "officialHead")
+        #expect(Reverification.of(plugins, installed: installed, trees: trees, head: .read("officialHead"), now: Self.at)
+                == officialOnly, "one head is the official one's alone")
+        #expect(Reverification.of(plugins, installed: installed, trees: trees, heads: ["official": .read("officialHead")],
+                                  trusted: [Self.teamSource.id], now: Self.at) == officialOnly,
+                "the trusted set changes nothing until there is a trusted mark")
+        let sourceOnly = Reverification.of(plugins, installed: installed, trees: trees, heads: [Self.teamSource.id: .read(nil)],
+                                           now: Self.at)
+        #expect(sourceOnly.records?.plugins["uptime"]?.verification == official.verification, "nor for the official one's")
+        #expect(sourceOnly.records?.plugins["cpu"]?.verification.checkedAgainst == Self.commit, "no head: its own commit")
+    }
+
+    /// What the card says of a source's code: its default branch, of a
+    /// source nobody vouches for — never that it is not what was merged.
+    @Test("the card names a source's default branch, a source nobody trusted")
+    func consentForASource() {
+        let record = Self.teamRecord()
+        #expect(ConsentBasis.of(record, linked: false, recordsReadable: true) == .tree, "held to its tree")
+        #expect(ConsentSource.of(record, basis: .tree, recordsReadable: true, changedHere: false)
+                == .permissionsUntrustedSource(address: "gitlab.example/tools/team-plugins", changedHere: false))
+        #expect(ConsentSource.of(Self.teamRecord(ref: .branch("x")), basis: .tree, recordsReadable: true, changedHere: true)
+                == .permissionsUnverifiedSource(ref: .branch("x"), repository: "gitlab.example/tools/team-plugins", changedHere: true))
+        #expect(ConsentSource.of(Self.record(ref: .defaultBranch("main")), basis: .version, recordsReadable: true,
+                                 changedHere: false) == nil)
+        let english = Strings(.english), russian = Strings(.russian)
+        #expect(english(.permissionsUntrustedSource(address: "gitlab.example/tools/x", changedHere: false))
+                == "Nobody verified this code: it comes from the default branch of gitlab.example/tools/x, a source you have not trusted. uDeck asks again whenever it changes.")
+        #expect(russian(.permissionsUntrustedSource(address: "gitlab.example/tools/x", changedHere: false))
+                == "Этот код никто не проверял: он из основной ветки gitlab.example/tools/x — источника, которому вы не доверяли. uDeck спросит снова, когда он изменится.")
+        for language in Language.allCases {
+            let strings = Strings(language)
+            let changed = strings(.permissionsUntrustedSource(address: "gitlab.example/tools/x", changedHere: true))
+            #expect(changed.contains("gitlab.example/tools/x") && changed.contains("Mac"))
+            #expect(!changed.contains(language == .english ? "merged" : "влил"), "a source's default branch is what it merged")
+        }
+    }
+
+    /// The window of a source's copy whose folder has gone says what
+    /// Reinstall puts back — whatever the official head has for the id: only
+    /// the official source's copies are adopted.
+    @Test("Reinstall of a source's copy is said even where the official head has its folder")
+    func reinstallOfASource() {
+        let record = Self.teamRecord()
+        #expect(record.reinstallSays(headTree: Self.tree)
+                == .windowReinstallBrings(.sourceDefault(version: "1.0.0", address: "gitlab.example/tools/team-plugins")))
+        #expect(record.reinstallSays(headTree: nil) == record.reinstallSays(headTree: Self.tree))
+        #expect(Self.record(ref: .pullRequest(3)).reinstallSays(headTree: Self.tree) == nil, "the official one's is adopted")
+        #expect(Self.record(ref: .defaultBranch("main")).reinstallSays(headTree: nil) == nil)
+        #expect(PluginStanding.of(record: record, folderExists: true, treeOnDisk: Self.tree) == .unverified)
+        #expect(PluginStanding.cardSaysUnverified(.unverified, record: record, linked: false))
+    }
+
+    @Test("a source's copy says where it came from — and, once the source is removed, that it is no longer added")
+    func fromPhraseOfASource() {
+        let record = Self.teamRecord()
+        let from = Phrase.pluginFrom(source: "gitlab.example/tools/team-plugins", commit: String(Self.commit.prefix(7)))
+        #expect(record.fromPhrase(official: .official) == from, "sources not known: as it was")
+        #expect(record.fromPhrase(official: .official, sources: [Self.teamSource]) == from)
+        #expect(record.fromPhrase(official: .official, sources: [])
+                == .sourceNoLongerAdded(address: "gitlab.example/tools/team-plugins"))
+        #expect(Self.record(ref: .defaultBranch("main")).fromPhrase(official: .official, sources: [])
+                == .pluginFrom(source: "github.com/iillyyaa1997/udeck-plugins", commit: String(Self.commit.prefix(7))),
+                "the official source is never no longer added")
+        #expect(Strings(.english)(.sourceNoLongerAdded(address: "gitlab.example/tools/x"))
+                == "From gitlab.example/tools/x — a source no longer added")
+        #expect(Strings(.russian)(.sourceNoLongerAdded(address: "gitlab.example/tools/x"))
+                == "Из gitlab.example/tools/x — источник больше не добавлен")
+    }
+}

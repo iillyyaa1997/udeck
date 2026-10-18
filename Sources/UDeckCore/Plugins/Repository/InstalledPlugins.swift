@@ -145,19 +145,70 @@ public struct PreviousCopy: Codable, Equatable, Sendable {
     public func origin(source: RepositoryAddress) -> PluginOrigin {
         PluginOrigin(repository: repository ?? source, ref: ref)
     }
+
+    /// Which source this copy is the copy of — `previous` keeps no source of
+    /// its own, so that a uDeck from before sources reads and writes it as it
+    /// always did — worked out from what it does keep, in this order, `record`
+    /// being the record it is the previous copy of, `official` the official
+    /// repository and `sources` the sources added:
+    ///
+    /// 1. no repository, or `record`'s: `record`'s source;
+    /// 2. a ref that is not the default branch: the official source — a
+    ///    branch, a pull request and a fork's branch are its, and a source of
+    ///    one's own has no other refs;
+    /// 3. the official repository: the official source;
+    /// 4. a source's address as it is now (`OwnSource.isAt`): that source;
+    /// 5. anything else is no source any more, and **Back to** is not offered.
+    public func source(record: InstalledRecord, official: RepositoryAddress, sources: [OwnSource]) -> PreviousSource {
+        let from = repository ?? (record.source == InstalledPlugins.officialSource
+            ? official : sources.first { $0.id == record.source }?.address ?? record.repository)
+        if repository == nil || repository == record.repository {
+            return .source(PluginOrigin(repository: from, ref: ref, source: record.source))
+        }
+        if !ref.isDefault || from.isTheOfficialRepository(official) {
+            return .source(PluginOrigin(repository: from, ref: ref, source: InstalledPlugins.officialSource))
+        }
+        if let source = sources.first(where: { $0.isAt(from) }) {
+            return .source(PluginOrigin(repository: from, ref: ref, source: source.id))
+        }
+        return .notASource(from)
+    }
+}
+
+/// Which source a previous copy is of (`PreviousCopy.source`).
+public enum PreviousSource: Equatable, Sendable {
+    /// Where **Back to** takes it from: its repository and ref, and the source.
+    case source(PluginOrigin)
+    /// A repository that is no source any more: *"github.com/… is not a
+    /// source any more"*, and no **Back to**.
+    case notASource(RepositoryAddress)
+}
+
+extension RepositoryAddress {
+    /// Whether this is `official`, the official repository: its provider and
+    /// host, and its path whatever its case, as GitHub reads names.
+    public func isTheOfficialRepository(_ official: RepositoryAddress) -> Bool {
+        provider == official.provider && host.lowercased() == official.host.lowercased()
+            && path.lowercased() == official.path.lowercased()
+    }
 }
 
 /// Where a copy comes from: a repository, and the line of its history — what
 /// an install records, and what **Reinstall** and **Back to** take it from
 /// again, so that a copy from a pull request is put back as one, never as
-/// the default branch's.
+/// the default branch's — and the source it is a copy of: `official`, or the
+/// id of a source of one's own (`SourceID`). Not kept anywhere but in the
+/// record's `source`: what a button brings carries it (`ShownPlace.Step`), and
+/// the install records it (`InstallRequest.source`).
 public struct PluginOrigin: Equatable, Sendable {
     public var repository: RepositoryAddress
     public var ref: PluginRef
+    public var source: String
 
-    public init(repository: RepositoryAddress, ref: PluginRef) {
+    public init(repository: RepositoryAddress, ref: PluginRef, source: String = InstalledPlugins.officialSource) {
         self.repository = repository
         self.ref = ref
+        self.source = source
     }
 
     /// Whether a copy is taken from here for the source whose own repository
@@ -252,8 +303,9 @@ public struct InstalledRecord: Codable, Equatable, Sendable {
         PreviousCopy(ref: ref, commit: commit, tree: tree, version: version, repository: repository)
     }
 
-    /// Where this copy came from: what **Reinstall** puts back.
-    public var origin: PluginOrigin { PluginOrigin(repository: repository, ref: ref) }
+    /// Where this copy came from, and the source it is a copy of: what
+    /// **Reinstall** puts back.
+    public var origin: PluginOrigin { PluginOrigin(repository: repository, ref: ref, source: source) }
 
     /// Whether this copy came from the default branch of the official
     /// source: every commit uDeck installs from there comes from that branch

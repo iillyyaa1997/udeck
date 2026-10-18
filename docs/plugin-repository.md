@@ -2589,6 +2589,29 @@ never the network. What they cover:
   while one waits, a failure said until the next read and a folder left as it
   was no failure; and, at the swap, an update by itself refusing a place that
   holds the operator's work by then (`PluginInstaller`);
+* sources of one's own, underneath (stage 4 — nothing in Settings reads or
+  offers them yet): `~/.udeck/sources.json` read and written (`SourcesTests`)
+  — keys it does not know ignored and written back as they were, each entry
+  uDeck cannot use left out with its reason and written back as it was, and
+  the whole file broken by an id that is not the one derived from the entry's
+  provider, host and `remoteID`, by two entries of one id or of one repository
+  — entries left out counted, and Add refused beside one — or by a file that
+  does not parse, and then never written over; a source's id — a rename keeps
+  it, a new repository at the old name gets another, and the pattern holds
+  whatever the host and the path; an address as a browser shows it
+  (`SourceLinkTests`), every GitHub and GitLab form and every refusal; what a
+  source is called, its passport's name cleaned and isolated or its address; a
+  row of one source's catalogue of a copy from another
+  (`CatalogueRowState.fromElsewhere`), an update offered only from a copy's
+  own source's head, and two default branches one line only within one source
+  (`CatalogueRowTests`, `ShownPlaceTests`); which source a previous copy is of
+  (`PreviousCopy.source`), a check against each copy's own source's head, and
+  what the card, the window and the row say of a source's copy
+  (`UnverifiedCodeTests`); one schedule of updates by themselves per source
+  (`AutoUpdateTests`); the GitHub client asking `/repositories/{id}/…`, and,
+  so addressed, nothing of any other repository (`ForkTests`); and the files
+  0.7.0 wrote read and written back byte for byte, `settings.json` but for the
+  order of a set (`FilesFrom070Tests`);
 * what `Scripts/make-cli.sh` makes and refuses, and what `release.yml` may do
   and in which order, in the lab's own tests (`e2e/tests/test_make_cli.py`):
   the archives and their names, the signature of the Mac's, a static and

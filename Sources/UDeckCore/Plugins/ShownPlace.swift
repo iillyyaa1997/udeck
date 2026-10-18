@@ -343,20 +343,23 @@ public enum ShownPlace {
     /// Where the catalogue's copies come from: its repository, at its default
     /// branch.
     static func origin(of catalogue: Catalogue) -> PluginOrigin {
-        PluginOrigin(repository: catalogue.address, ref: .defaultBranch(catalogue.branch))
+        PluginOrigin(repository: catalogue.address, ref: .defaultBranch(catalogue.branch), source: catalogue.source)
     }
 
     /// **Install** — or **Replace…** over a folder of the operator's own or a
     /// link — at the commit the catalogue was built from: the folder's tree
     /// there is the copy its warning names. An update when uDeck installed it
     /// before, a replace when something of the operator's is in its place.
+    /// `official` is the official repository, by which a fork's branch is
+    /// named in a warning — the catalogue's own address unless given: a source
+    /// of one's own's catalogue gives it.
     public static func install(_ id: String, catalogue: Catalogue?, in paths: UDeckPaths, installed: InstalledPlugins,
-                               shown: Place?) -> Step {
+                               shown: Place?, official: RepositoryAddress? = nil) -> Step {
         guard let catalogue, let entry = catalogue.entry(id) else { return .nothing }
         let version = entry.manifest?.version ?? ""
         let now = Place.now(id, in: paths, record: installed.plugins[id],
                             bringing: .atHead(version: version, tree: entry.listing.tree), from: origin(of: catalogue),
-                            official: catalogue.address)
+                            official: official ?? catalogue.address)
         if case .ask(let place) = press(.install, shown: shown, now: now) { return .ask(place) }
         let operation: InstallRequest.Operation = installed.plugins[id] != nil
             ? .update : (PluginInstaller.folderIsTaken(id, in: paths) ? .replace : .install)
@@ -368,12 +371,12 @@ public enum ShownPlace {
     /// the plugin at the catalogue's head — the folder's tree there, which a
     /// republish of the same version changes, is the copy its warning names.
     public static func update(_ id: String, catalogue: Catalogue?, in paths: UDeckPaths, installed: InstalledPlugins,
-                              shown: Place?) -> Step {
+                              shown: Place?, official: RepositoryAddress? = nil) -> Step {
         guard let catalogue, let entry = catalogue.entry(id) else { return .nothing }
         let version = entry.manifest?.version ?? ""
         let now = Place.now(id, in: paths, record: installed.plugins[id],
                             bringing: .atHead(version: version, tree: entry.listing.tree), from: origin(of: catalogue),
-                            official: catalogue.address)
+                            official: official ?? catalogue.address)
         if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
         return .install(.update, commit: catalogue.commit, folder: entry.listing, version: version,
                         from: origin(of: catalogue))
@@ -396,15 +399,23 @@ public enum ShownPlace {
     }
 
     /// **Back to** the copy this one replaced, from where it came — `source`
-    /// being the source's own repository, where a copy recorded without one
-    /// came from; named, as **Reinstall** names its copy, by what the
-    /// installer records it as (`head`).
+    /// being the official repository, where a copy of the official source
+    /// recorded without one came from; named, as **Reinstall** names its copy,
+    /// by what the installer records it as (`head`). The source it is a copy
+    /// of is worked out from what `previous` keeps, `sources` being the
+    /// sources added (`PreviousCopy.source`): nothing for a copy from what is
+    /// no source any more — nor for one of a source no longer added: Back to
+    /// gives nothing for it until the source is added again.
     public static func backToPrevious(_ id: String, source: RepositoryAddress, in paths: UDeckPaths,
                                       installed: InstalledPlugins, shown: Place?,
-                                      head: Adoption.DefaultBranch? = nil) -> Step {
-        guard let previous = installed.plugins[id]?.previous else { return .nothing }
+                                      head: Adoption.DefaultBranch? = nil, sources: [OwnSource] = []) -> Step {
+        guard let record = installed.plugins[id], let previous = record.previous,
+              case .source(let origin) = previous.source(record: record, official: source, sources: sources),
+              origin.source == InstalledPlugins.officialSource || sources.contains(where: { $0.id == origin.source }) else {
+            return .nothing
+        }
         return atCommit(.earlier, id: id, commit: previous.commit, version: previous.version,
-                        from: previous.origin(source: source), in: paths, installed: installed, shown: shown,
+                        from: origin, in: paths, installed: installed, shown: shown,
                         tree: previous.tree, head: head, official: source)
     }
 
@@ -434,17 +445,24 @@ public enum ShownPlace {
     /// where it came.
     static func recordedAs(_ origin: PluginOrigin, tree: String?, id: String,
                            head: Adoption.DefaultBranch?) -> PluginOrigin {
-        guard !origin.ref.isDefault, let tree, let head, head.trees[id] == tree else { return origin }
+        // Only the official source's copies are adopted (`Adoption`): a copy
+        // of a source of one's own stays that source's, whatever the official
+        // head has.
+        guard origin.source == InstalledPlugins.officialSource, !origin.ref.isDefault, let tree, let head,
+              head.trees[id] == tree else { return origin }
         return PluginOrigin(repository: head.repository, ref: .defaultBranch(head.name))
     }
 
     /// An earlier version, chosen from the folder's history — which is the
     /// history of `source`'s default branch, `branch`, whatever the copy on
-    /// disk came from: a version is something that branch had.
+    /// disk came from: a version is something that branch had. `sourceID` is
+    /// the source `source` is the repository of: the official one, or a
+    /// source of one's own.
     public static func earlier(_ id: String, line: PluginHistory.Line, source: RepositoryAddress, branch: String?,
-                               in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?) -> Step {
+                               in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?,
+                               sourceID: String = InstalledPlugins.officialSource) -> Step {
         atCommit(.earlier, id: id, commit: line.commit, version: line.version,
-                 from: PluginOrigin(repository: source, ref: .defaultBranch(branch)),
+                 from: PluginOrigin(repository: source, ref: .defaultBranch(branch), source: sourceID),
                  in: paths, installed: installed, shown: shown, official: source)
     }
 

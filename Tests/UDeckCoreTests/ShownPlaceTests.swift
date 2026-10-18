@@ -593,3 +593,225 @@ struct ShownPlaceTests {
         #expect(decide(false, nothing, shown: [], shownTree: nil, required: PermissionGate.treeNotHashedYet) == .nothing)
     }
 }
+
+// MARK: - Sources of one's own (stage 4, R1a)
+
+/// What a button brings carries the source it is a copy of, all the way to the
+/// record; two default branches are one line only within one source; and a
+/// switch between the official copy and a source's names both.
+extension ShownPlaceTests {
+    static let team = RepositoryAddress(provider: "gitlab", host: "gitlab.example", path: "tools/team-plugins")
+    static let teamID = SourceID.derive(SourceIdentity(provider: "gitlab", host: "gitlab.example", remoteID: 48),
+                                        path: "tools/team-plugins")
+    static let teamOrigin = PluginOrigin(repository: team, ref: .defaultBranch("main"), source: teamID)
+
+    /// `repository` as the catalogue of the team source.
+    func teamCatalogue(_ repository: FakeRepository) -> Catalogue {
+        var catalogue = catalogue(repository)
+        catalogue.address = Self.team
+        catalogue.source = Self.teamID
+        return catalogue
+    }
+
+    /// An installer that says which source each file was asked for.
+    func sourceInstaller(_ repository: FakeRepository, sources: SourceLog) -> PluginInstaller {
+        let log = FetchLog(repository)
+        return PluginInstaller(paths: paths, discovery: PluginDiscovery(searchPath: ["/bin", "/usr/bin"], udeck: SemanticVersion("0.5.0")),
+                               trash: TestTrash(in: udeck.url),
+                               fetchOfSource: { source, repository, path, commit in
+                                   sources.add(source)
+                                   return try await log.fetch(repository, path, commit)
+                               },
+                               now: { Date(timeIntervalSince1970: 1_790_000_000) })
+    }
+
+    static let lines: [(PluginOrigin, PluginOrigin, Bool, String)] = [
+        (official, official, true, "the official default branch"),
+        (official, PluginOrigin(repository: RepositoryAddress(path: "iillyyaa1997/renamed"), ref: .defaultBranch("main")), true,
+         "the official one renamed"),
+        (official, teamOrigin, false, "the official default branch and a source's"),
+        (teamOrigin, official, false, "a source's and the official one"),
+        (teamOrigin, PluginOrigin(repository: RepositoryAddress(provider: "gitlab", host: "gitlab.example", path: "tools/renamed"),
+                                  ref: .defaultBranch("trunk"), source: teamID), true, "a source renamed is the same source"),
+        (teamOrigin, PluginOrigin(repository: team, ref: .defaultBranch("main"), source: "github.com-other-00000000"), false,
+         "two sources at one address are two lines"),
+        (PluginOrigin(repository: .official, ref: .pullRequest(3)), PluginOrigin(repository: .official, ref: .pullRequest(3)),
+         true, "one pull request"),
+        (PluginOrigin(repository: .official, ref: .pullRequest(3)),
+         PluginOrigin(repository: .official, ref: .pullRequest(3), source: teamID), false, "one pull request, said of two sources"),
+        (PluginOrigin(repository: .official, ref: .branch("x")), teamOrigin, false, "a branch and a source's default"),
+    ]
+
+    @Test("two default branches are one line only when they share a source", arguments: 0..<lines.count)
+    func sameLineBySource(row: Int) {
+        let (one, other, same, why) = Self.lines[row]
+        #expect(one.followsTheSameLine(as: other) == same, "\(why)")
+        #expect(other.followsTheSameLine(as: one) == same, "\(why), the other way round")
+    }
+
+    @Test("a copy's name: verified only for the official default branch; a source's names its address and, trusted, its name")
+    func copyNames() {
+        #expect(CopyName.of(Self.official, commit: "a1b2c3d4", version: "1.0.0")
+                == .verified(version: "1.0.0", repository: "github.com/iillyyaa1997/udeck-plugins"))
+        #expect(CopyName.of(Self.teamOrigin, commit: "a1b2c3d4", version: "1.1.0")
+                == .sourceDefault(version: "1.1.0", address: "gitlab.example/tools/team-plugins"))
+        #expect(CopyName.of(Self.teamOrigin, commit: "a1b2c3d4", version: "1.1.0", trustedNames: [Self.teamID: "Team"])
+                == .sourceDefault(version: "1.1.0", address: "gitlab.example/tools/team-plugins", trustedName: "Team"))
+        #expect(CopyName.of(Self.official, commit: "a1b2c3d4", version: "1.0.0", trustedNames: ["official": "x"])
+                == .verified(version: "1.0.0", repository: "github.com/iillyyaa1997/udeck-plugins"), "the official one is never trusted")
+        let english = Strings(.english), russian = Strings(.russian)
+        let untrusted = CopyName.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x")
+        let trusted = CopyName.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x", trustedName: "Team")
+        #expect(English.copy(untrusted) == "1.1.0 from gitlab.example/tools/x: unverified")
+        #expect(English.copy(trusted) == "1.1.0 from gitlab.example/tools/x: trusted source Team")
+        #expect(Russian.copy(untrusted) == "версия 1.1.0 из gitlab.example/tools/x: не проверена")
+        #expect(Russian.copy(trusted) == "версия 1.1.0 из gitlab.example/tools/x: доверенный источник Team")
+        #expect(english(.windowReinstallBrings(untrusted))
+                == "Reinstall puts back 1.1.0 from gitlab.example/tools/x: code nobody verified.")
+        #expect(russian(.windowReinstallBrings(untrusted))
+                == "«Переустановить» вернёт: версия 1.1.0 из gitlab.example/tools/x. Этот код никто не проверял.")
+        #expect(CopyName.same(untrusted, untrusted) && !CopyName.same(untrusted, trusted))
+        #expect(!CopyName.same(untrusted, .sourceDefault(version: "1.1.0", address: "gitlab.example/tools/X")), "by bytes")
+        #expect(!CopyName.same(untrusted, .verified(version: "1.1.0", repository: "gitlab.example/tools/x")))
+    }
+
+    /// Install from a source's catalogue over the verified copy is a switch of
+    /// source: it warns first, naming both; pressed on the warning, its step
+    /// carries the source, and the installer records it — fetching every file
+    /// for that source, and adopting nothing although the official head has
+    /// the same folder.
+    @Test("a source's copy over the verified one warns, naming both; its step carries the source, and the record says it")
+    func switchToASource() async throws {
+        let repository = FakeRepository.withUptime()
+        let base = installer(repository, trash: TestTrash(in: udeck.url))
+        try await install("uptime", from: repository, with: base)
+        let records = try base.loadRecords()
+        var newer = repository
+        newer.addPlugin("uptime", version: "1.1.0")
+        let catalogue = teamCatalogue(newer)
+        let entry = try #require(catalogue.entry("uptime"))
+        let first = ShownPlace.install("uptime", catalogue: catalogue, in: paths, installed: records, shown: nil)
+        let switching = ShownPlace.Switch(from: .verified(version: "1.0.0", repository: "github.com/iillyyaa1997/udeck-plugins"),
+                                          to: .sourceDefault(version: "1.1.0", address: "gitlab.example/tools/team-plugins"))
+        let shown = ShownPlace.Place(fate: .deleted, arriving: "1.1.0", copy: entry.listing.tree, switching: switching)
+        #expect(first == .ask(shown), "uDeck's own copy, exactly as installed, still warns: another source comes")
+        #expect(ShownPlace.update("uptime", catalogue: catalogue, in: paths, installed: records, shown: nil) == .ask(shown))
+        guard case .install(let operation, let commit, let folder, let version, let origin)
+                = ShownPlace.install("uptime", catalogue: catalogue, in: paths, installed: records, shown: shown) else {
+            Issue.record("the press on the warning goes ahead"); return
+        }
+        #expect(operation == .update && origin == Self.teamOrigin, "the step carries the source")
+        #expect(English.copy(switching.to) == "1.1.0 from gitlab.example/tools/team-plugins: unverified")
+        #expect(Strings(.english)(.catalogueSwitchConfirm(id: "uptime", from: switching.from, to: switching.to, toTrash: false))
+            .hasSuffix("Nobody verified the code that comes: it asks before it runs, unless you allowed exactly that code before."))
+
+        let sources = SourceLog()
+        let request = InstallRequest(operation: operation, id: PluginIdentifier(rawValue: "uptime")!, from: origin,
+                                     sourceRepository: Self.team, commit: commit, folder: folder, version: version,
+                                     headCommit: commit, headTree: folder.tree, defaultBranch: "main")
+        #expect(request.source == Self.teamID && request.origin == origin)
+        let installer = sourceInstaller(newer, sources: sources)
+        let recorded = try installer.commit(try await installer.stage(request))
+        #expect(recorded.source == Self.teamID && recorded.repository == Self.team && recorded.ref == .defaultBranch("main"))
+        #expect(recorded.verification.status == .unverified && recorded.verification.by == nil,
+                "a source's copy is never verified, whatever any head has")
+        #expect(!sources.all.isEmpty && sources.all.allSatisfy { $0 == Self.teamID }, "every file asked for the source's")
+        #expect(recorded.previous?.repository == .official, "the verified copy is kept for Back to")
+
+        // Back to it: the official copy, from the official source.
+        let after = try installer.loadRecords()
+        guard case .ask(let back) = ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: after,
+                                                             shown: nil) else {
+            Issue.record("Back to from another source warns first"); return
+        }
+        #expect(back.switching == ShownPlace.Switch(from: switching.to, to: .verified(version: "1.0.0",
+                                                                                      repository: "github.com/iillyyaa1997/udeck-plugins")))
+        guard case .atCommit(.earlier, _, "1.0.0", let backFrom)
+                = ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: after, shown: back) else {
+            Issue.record("Back to on its warning goes ahead"); return
+        }
+        #expect(backFrom == Self.official)
+        // Reinstall of the source's copy: from the source.
+        guard case .atCommit(.reinstall, _, _, let again) = ShownPlace.reinstall("uptime", in: paths, installed: after, shown: nil)
+        else { Issue.record("Reinstall over uDeck's own copy goes ahead"); return }
+        #expect(again == Self.teamOrigin)
+        // An earlier version of the source's: from the source.
+        let line = PluginHistory.Line(version: "0.9.0", commit: String(repeating: "8", count: 40), date: nil, manifest: nil)
+        let earlier = ShownPlace.earlier("uptime", line: line, source: Self.team, branch: "main", in: paths, installed: after,
+                                         shown: nil, sourceID: Self.teamID)
+        #expect(earlier == .atCommit(.earlier, commit: line.commit, version: "0.9.0", from: Self.teamOrigin),
+                "the same source's line: no switch to warn of")
+    }
+
+    /// A source's copy is never adopted as the official one's — Adoption is
+    /// the official source's — so what Reinstall and Back to name it as is
+    /// what it is.
+    @Test("a source's copy is named as itself however the official head has its folder")
+    func recordedAsOnlyOfficial() {
+        let tree = String(repeating: "a", count: 40)
+        let head = Adoption.DefaultBranch(repository: .official, name: "main", head: String(repeating: "c", count: 40),
+                                          trees: ["uptime": tree])
+        let teamBranch = PluginOrigin(repository: Self.team, ref: .branch("x"), source: Self.teamID)
+        #expect(ShownPlace.recordedAs(teamBranch, tree: tree, id: "uptime", head: head) == teamBranch)
+        let officialBranch = PluginOrigin(repository: .official, ref: .branch("x"))
+        #expect(ShownPlace.recordedAs(officialBranch, tree: tree, id: "uptime", head: head)
+                == PluginOrigin(repository: .official, ref: .defaultBranch("main")), "the official branch's, as before")
+    }
+
+    /// Back to of a copy from what is no source any more is not offered.
+    @Test("Back to: nothing for a copy from a source that is no longer added; from the source while it is")
+    func backToANoLongerAddedSource() async throws {
+        let repository = FakeRepository.withUptime()
+        let base = installer(repository, trash: TestTrash(in: udeck.url))
+        try await install("uptime", from: repository, with: base)
+        var records = try base.loadRecords()
+        let previousCommit = String(repeating: "9", count: 40)
+        records.plugins["uptime"]?.previous = PreviousCopy(ref: .defaultBranch("main"), commit: previousCommit,
+                                                           tree: String(repeating: "7", count: 40), version: "0.9.0",
+                                                           repository: Self.team)
+        #expect(ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: nil) == .nothing)
+        let added = OwnSource(id: Self.teamID, provider: "gitlab", host: "gitlab.example", path: "tools/team-plugins",
+                              remoteID: 48, addedAt: nil)
+        guard case .ask(let back) = ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records,
+                                                             shown: nil, sources: [added]) else {
+            Issue.record("Back to a source's copy over the verified one warns"); return
+        }
+        #expect(ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: back,
+                                          sources: [added])
+                == .atCommit(.earlier, commit: previousCommit, version: "0.9.0",
+                             from: PluginOrigin(repository: Self.team, ref: .defaultBranch("main"), source: Self.teamID)))
+
+        // A copy of the source whose previous copy is the same source's (rule 1
+        // of `PreviousCopy.source`): while the source is added, Back to takes it
+        // from there; once it is removed, nothing — not from the removed source.
+        records.plugins["uptime"]?.source = Self.teamID
+        records.plugins["uptime"]?.repository = Self.team
+        for repository in [nil, Self.team] {
+            records.plugins["uptime"]?.previous?.repository = repository
+            #expect(ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: nil) == .nothing,
+                    "a source no longer added, its previous copy recorded \(repository.map { "at \($0)" } ?? "without a repository")")
+            #expect(ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: nil,
+                                              sources: [OwnSource(id: "github.com-other-00000000", provider: "github",
+                                                                  host: "github.com", path: "o/other", remoteID: 3,
+                                                                  addedAt: nil)]) == .nothing,
+                    "another source added is not this one")
+            func backTo(_ shown: ShownPlace.Place?) -> ShownPlace.Step {
+                ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: shown,
+                                          sources: [added])
+            }
+            var step = backTo(nil)
+            if case .ask(let place) = step { step = backTo(place) }
+            #expect(step == .atCommit(.earlier, commit: previousCommit, version: "0.9.0", from: Self.teamOrigin),
+                    "while it is added, from the source")
+        }
+    }
+}
+
+/// The sources a fetch was asked for.
+final class SourceLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sources: [String] = []
+
+    func add(_ source: String) { lock.withLock { sources.append(source) } }
+    var all: [String] { lock.withLock { sources } }
+}

@@ -47,14 +47,19 @@ public struct Catalogue: Equatable, Sendable {
     public var passport: RepositoryPassport
     /// Sorted by name, as the operator reads it.
     public var entries: [CatalogueEntry]
+    /// The source it is the catalogue of: `official`, or a source of one's
+    /// own by its id (`SourceID`) — what its copies are recorded as.
+    public var source: String
 
     public init(address: RepositoryAddress, commit: String, branch: String?,
-                passport: RepositoryPassport, entries: [CatalogueEntry]) {
+                passport: RepositoryPassport, entries: [CatalogueEntry],
+                source: String = InstalledPlugins.officialSource) {
         self.address = address
         self.commit = commit
         self.branch = branch
         self.passport = passport
         self.entries = entries
+        self.source = source
     }
 
     public func entry(_ id: String) -> CatalogueEntry? { entries.first { $0.id == id } }
@@ -72,19 +77,22 @@ public struct Catalogue: Equatable, Sendable {
         from store: CatalogueStore,
         address: RepositoryAddress,
         udeck: SemanticVersion?,
-        language: String
+        language: String,
+        source: String = InstalledPlugins.officialSource
     ) async -> Catalogue? {
-        load(from: store, address: address, udeck: udeck, language: language)
+        load(from: store, address: address, udeck: udeck, language: language, source: source)
     }
 
     /// The catalogue as the cache holds it, or nil when there is nothing to
     /// show yet. This is what makes it appear at once when Settings opens,
-    /// before any request answers.
+    /// before any request answers. `source` is the source it is the
+    /// catalogue of.
     public static func load(
         from store: CatalogueStore,
         address: RepositoryAddress,
         udeck: SemanticVersion?,
-        language: String
+        language: String,
+        source: String = InstalledPlugins.officialSource
     ) -> Catalogue? {
         let state = store.state()
         guard let head = state.head, let listing = store.listing(head) else { return nil }
@@ -99,7 +107,8 @@ public struct Catalogue: Equatable, Sendable {
             address: address, commit: head, branch: state.defaultBranch, passport: passport,
             entries: entries.sorted {
                 $0.name(in: language).localizedStandardCompare($1.name(in: language)) == .orderedAscending
-            }
+            },
+            source: source
         )
     }
 
@@ -196,21 +205,46 @@ public enum CatalogueRowState: Equatable, Sendable {
     /// pull request's back, saying where it comes from. Never **Reinstall**
     /// here: a catalogue row's button brings the catalogue's copy.
     case unverified(version: String, refusal: RepositoryRefusal?, folderGone: Bool = false)
+    /// In the catalogue of a source of one's own: the id is installed from
+    /// somewhere else — the official source, or another source — as `copy`
+    /// names it, in the place of the copy this row offers, `version`:
+    /// **Install from here…**, a replace that names both first
+    /// (`ShownPlace.Switch`), never one made unsaid. When this row's copy
+    /// cannot be installed here, `refusal` says why and nothing is offered;
+    /// `folderGone`: the copy's folder is gone too.
+    case fromElsewhere(CopyName, version: String, refusal: RepositoryRefusal?, folderGone: Bool = false)
 
+    /// The state of `entry`'s row in the catalogue of `source` — the
+    /// official one, or a source of one's own by its id — `record` being the
+    /// record of the same id. A copy of this source's default branch is
+    /// measured against this source's head. In the official catalogue
+    /// anything else is the copy of code nobody verified it always was
+    /// (`unverified`) — a source of one's own's included, whose
+    /// `unverifiedLine` names it — with **Switch to verified**; in a source of
+    /// one's own's, anything else is from elsewhere (`fromElsewhere`), `official`
+    /// naming a fork's branch there.
     public static func of(
         _ entry: CatalogueEntry,
         record: InstalledRecord?,
-        folderExists: Bool
+        folderExists: Bool,
+        source: String = InstalledPlugins.officialSource,
+        official: RepositoryAddress? = nil
     ) -> CatalogueRowState {
         if let record {
-            // Code nobody verified is said first, its folder there or not: a
-            // row that said only "missing" offered **Reinstall**, which put the
-            // pull request's copy back under the row's **Verified** (R3's
-            // review).
-            guard record.isOfficialDefault else {
-                let refusal = entry.verdict.refusals.first
-                    ?? (entry.manifest == nil ? .noManifest(path: "plugins/\(entry.id)/manifest.json") : nil)
-                return .unverified(version: entry.manifest?.version ?? "?", refusal: refusal, folderGone: !folderExists)
+            let refusal = entry.verdict.refusals.first
+                ?? (entry.manifest == nil ? .noManifest(path: "plugins/\(entry.id)/manifest.json") : nil)
+            let version = entry.manifest?.version ?? "?"
+            guard record.source == source, record.ref.isDefault else {
+                // Code nobody verified is said first, its folder there or
+                // not: a row that said only "missing" offered **Reinstall**,
+                // which put the pull request's copy back under the row's
+                // **Verified** (R3's review).
+                guard source == InstalledPlugins.officialSource else {
+                    return .fromElsewhere(CopyName.of(record.origin, commit: record.commit, version: record.version,
+                                                      official: official),
+                                          version: version, refusal: refusal, folderGone: !folderExists)
+                }
+                return .unverified(version: version, refusal: refusal, folderGone: !folderExists)
             }
             guard folderExists else { return .missing }
             return .installed(UpdateOffer.of(record, head: entry))

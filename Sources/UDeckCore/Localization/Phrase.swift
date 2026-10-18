@@ -195,6 +195,9 @@ public enum Phrase: Sendable, Equatable {
     /// The same while `installed.json` cannot be read: nothing says where any
     /// copy came from, so every one is asked about by its content.
     case permissionsSourceUnknown
+    /// Where the code of a source of one's own that nobody vouches for comes
+    /// from (`ConsentSource`): its default branch, at `address`.
+    case permissionsUntrustedSource(address: String, changedHere: Bool)
     case permissionsUnsandboxed
     case permissionsAllowAndRun
 
@@ -221,13 +224,15 @@ public enum Phrase: Sendable, Equatable {
     /// already formatted, or nil when there is no list.
     case catalogueLimited(readAt: String?, until: String)
     case catalogueRawLimited(until: String)
-    case catalogueUnreachable(reason: String, readAt: String?)
+    /// `host` is the host the request was for: `GitHub` for the official
+    /// catalogue, as it always said; a source's host for a source of one's own.
+    case catalogueUnreachable(reason: String, readAt: String?, host: String = "GitHub")
     case catalogueNotFound(source: String)
     case catalogueNotARepository(source: String, branch: String)
     case catalogueFutureFormat(declared: Int)
     case catalogueInvalidPassport(source: String, reason: String)
-    case catalogueRefused(status: Int)
-    case catalogueBadAnswer(reason: String)
+    case catalogueRefused(status: Int, host: String = "GitHub")
+    case catalogueBadAnswer(reason: String, host: String = "GitHub")
     case catalogueArrivedDifferent(path: String, expected: String, got: String)
 
     /// A catalogue row.
@@ -280,6 +285,13 @@ public enum Phrase: Sendable, Equatable {
     /// is in, `owner/repo`, when it is a fork's (`PluginOrigin.fork`) — the
     /// same in every phrase below that names a line of history.
     case catalogueInstalledUnverified(ref: PluginRef, fork: String? = nil)
+    /// The same, of a copy of the default branch of a source of one's own,
+    /// at `address`, in the official catalogue (`CatalogueRowState.unverifiedLine`).
+    case catalogueInstalledFromSource(address: String)
+    /// A row of a source of one's own whose id is installed from elsewhere
+    /// (`CatalogueRowState.fromElsewhere`), and its button.
+    case catalogueInstalledFromElsewhere(CopyName)
+    case catalogueInstallFromHere
     case catalogueSwitchToVerified(version: String)
     /// After *Installed here from pull request #3: unverified*, what became
     /// of the pull request (`PullRequestLifecycle.cataloguePhrase`).
@@ -390,6 +402,32 @@ public enum Phrase: Sendable, Equatable {
     /// does not have.
     case linkPluginNotThere(ref: PluginRef, plugin: String, fork: String? = nil)
     case linkUnverifiedNote
+
+    // MARK: - Sources of one's own (stage 4)
+
+    /// A repository that is no fork of the official one, once a source of
+    /// one's own can be added: what to do with it, and the button that does it.
+    case linkNotAForkAddAsASource(repository: String, official: String)
+    case linkAddAsASource
+    /// Why an address pasted into **Add a source…** is not read (`SourceLink`).
+    case sourceLinkRefused(SourceLink.Refusal, official: String)
+    /// `~/.udeck/sources.json` cannot be used (`SourceList.Broken`), and an
+    /// entry of it that is left out (`SourceList.Skipped`).
+    case sourcesBroken(SourceList.Broken)
+    case sourceSkipped(SourceList.Skipped)
+    /// **Add** of a source whose id another source has (`SourceList.AddRefusal.idTaken`).
+    case sourceIDTaken(name: String)
+    /// A source's `404`, asked without a token.
+    case sourceNotFound(address: String)
+    /// A copy of a source that is no longer added: its row, after its mark.
+    case sourceNoLongerAdded(address: String)
+    /// **Remove…** of a source: what it does.
+    case sourceRemoveConfirm(name: String, address: String)
+    /// **Back to** a copy from a repository that is no source any more
+    /// (`PreviousCopy.source`).
+    case catalogueNotASourceAnyMore(address: String)
+    /// The official repository's number is not the one this uDeck knows it by.
+    case catalogueOfficialRepositoryChanged
 
     /// The run log of linked folders (Q127): its switch, what it does, and
     /// the button that shows the logs.

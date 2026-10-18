@@ -157,6 +157,10 @@ struct English: Vocabulary {
             "Nobody verified this code: it comes from \(Self.line(ref)) of \(repository)"
                 + (changedHere ? ", changed on this Mac since" : "")
                 + ", not from what the repository merged. uDeck asks again whenever it changes."
+        case .permissionsUntrustedSource(let address, let changedHere):
+            "Nobody verified this code: it comes from the default branch of \(address), a source you have not trusted"
+                + (changedHere ? ", and it was changed on this Mac since" : "")
+                + ". uDeck asks again whenever it changes."
         case .permissionsSourceUnknown:
             "uDeck cannot read ~/.udeck/installed.json, so nothing says where this code came from: it is asked about by what it is, and again whenever it changes."
         case .permissionsUnsandboxed:
@@ -185,8 +189,8 @@ struct English: Vocabulary {
                 + "uDeck will look again after \(until)."
         case .catalogueRawLimited(let until):
             "GitHub's file host asked uDeck to wait; no file is fetched from it before \(until)."
-        case .catalogueUnreachable(let reason, let readAt):
-            "Could not reach GitHub: \(reason)." + (readAt.map { " The list below is from \($0)." } ?? "")
+        case .catalogueUnreachable(let reason, let readAt, let host):
+            "Could not reach \(host): \(reason)." + (readAt.map { " The list below is from \($0)." } ?? "")
         case .catalogueNotFound(let source): "\(source) could not be found, or it is private."
         case .catalogueNotARepository(let source, let branch):
             "\(source) is not a uDeck plugin repository: there is no udeck-plugins.json at the top of \(branch)."
@@ -194,8 +198,8 @@ struct English: Vocabulary {
             "This repository is in format \(declared); this uDeck reads format \(RepositoryPassport.supportedFormat). Update uDeck."
         case .catalogueInvalidPassport(let source, let reason):
             "\(source) has a udeck-plugins.json that uDeck cannot read: \(reason)."
-        case .catalogueRefused(let status): "GitHub refused the request (HTTP \(status))."
-        case .catalogueBadAnswer(let reason): "GitHub answered with something uDeck could not read: \(reason)."
+        case .catalogueRefused(let status, let host): "\(host) refused the request (HTTP \(status))."
+        case .catalogueBadAnswer(let reason, let host): "\(host) answered with something uDeck could not read: \(reason)."
         case .catalogueArrivedDifferent(let path, let expected, let got):
             "\(path) arrived different from what the repository lists (expected \(expected), got \(got))."
         case .catalogueVerified: "Verified"
@@ -242,6 +246,9 @@ struct English: Vocabulary {
                 : "\(id) is \(Self.copy(from)); installing \(Self.copy(to)) replaces it. ") + Self.staysAfterSwitching(to: to)
         case .catalogueLinkedHere(let id): "\(id) is linked here, to a folder of your own"
         case .catalogueInstalledUnverified(let ref, let fork): "Installed here from \(Self.line(ref, fork: fork)): unverified"
+        case .catalogueInstalledFromSource(let address): "Installed here from \(address): unverified"
+        case .catalogueInstalledFromElsewhere(let copy): "Installed here: \(Self.copy(copy))"
+        case .catalogueInstallFromHere: "Install from here…"
         case .catalogueSwitchToVerified(let version): "Switch to verified \(version)"
         case .catalogueMergedDiffers: "merged, and the verified version differs"
         case .catalogueClosedUnmerged: "closed without being merged"
@@ -340,6 +347,23 @@ struct English: Vocabulary {
             "\(Self.line(ref, capitalised: true, fork: fork)) has no plugins/\(plugin): there is nothing to install from it."
         case .linkUnverifiedNote:
             "Nobody verified what is listed here: it is not what the repository merged. A plugin installed from here asks before it runs — even one that asks for nothing — and again whenever its code changes."
+
+        // Sources of one's own
+        case .linkNotAForkAddAsASource(let repository, let official):
+            "\(repository) is not a fork of \(official). To install from it, add it as a source of its own."
+        case .linkAddAsASource: "Add as a source…"
+        case .sourceLinkRefused(let refusal, let official): Self.sourceLinkRefusal(refusal, official: official)
+        case .sourcesBroken(let broken): Self.sourcesBroken(broken)
+        case .sourceSkipped(let skipped): Self.sourceSkipped(skipped)
+        case .sourceIDTaken(let name): "uDeck cannot add this source: its id would be the same as \(name)'s."
+        case .sourceNotFound(let address):
+            "\(address) could not be found, or it is private. If it is private, uDeck needs a token for it: Token…"
+        case .sourceNoLongerAdded(let address): "From \(address) — a source no longer added"
+        case .sourceRemoveConfirm(let name, let address):
+            "Remove \(name) (\(address))? uDeck stops reading it and forgets its token. What was installed from it stays and keeps running; if you trusted it, those plugins become Unverified and ask again before they next run, and nothing updates or reinstalls them until you add it again."
+        case .catalogueNotASourceAnyMore(let address): "\(address) is not a source any more"
+        case .catalogueOfficialRepositoryChanged:
+            "The address of the official catalogue now belongs to a different repository. uDeck stopped reading it, and nothing updates by itself; installed plugins keep running."
         case .runLogSwitch: "Keep a run log for linked folders"
         case .runLogHelp(let path):
             "Every run of a linked plugin — when, why, how it ended, how long it took, the end of its standard error — goes into \(path)/<id>.log, at most 2 MB a plugin. Other plugins keep only their last run, in memory."
@@ -403,6 +427,9 @@ struct English: Vocabulary {
         case .windowNotInPluginsFolder(let id, let path): "\(id) is not in \(path)"
         case .windowWillNotRun(let id): "\(id) will not run:"
         case .windowReinstall: "Reinstall"
+        // A source's copy says no mark of its own before the sentence's own.
+        case .windowReinstallBrings(.sourceDefault(let version, let address, _)):
+            "Reinstall puts back \(version) from \(address): code nobody verified."
         case .windowReinstallBrings(let copy): "Reinstall puts back \(Self.copy(copy)): code nobody verified."
 
         // What a plugin may ask for
@@ -560,10 +587,13 @@ struct English: Vocabulary {
         fork.map { " of \($0)" } ?? ""
     }
 
-    /// A copy as a warning names it (`CopyName`).
+    /// A copy as a warning names it (`CopyName`) — a copy of a source of
+    /// one's own with whose guarantee it is.
     static func copy(_ name: CopyName) -> String {
         switch name {
         case .verified(let version, let repository): "the verified \(version) from \(repository)"
+        case .sourceDefault(let version, let address, let trustedName):
+            "\(version) from \(address)" + (trustedName.map { ": trusted source \($0)" } ?? ": unverified")
         case .pullRequest(let number, let commit, let version): "\(version) from pull request #\(number) at \(commit)"
         case .branch(let branch, let commit, let version, let fork): "\(version) from branch \(branch)\(of(fork)) at \(commit)"
         case .other(let commit, let version): "\(version) at \(commit)"
@@ -587,6 +617,52 @@ struct English: Vocabulary {
         case .unsupported:
             "That page names no pull request and no branch. Paste the link of a pull request (…/pull/3) or a branch (…/tree/name)."
         }
+    }
+
+    /// Why an address pasted into **Add a source…** is not read (`SourceLink.Refusal`).
+    static func sourceLinkRefusal(_ refusal: SourceLink.Refusal, official: String) -> String {
+        switch refusal {
+        case .empty:
+            "Paste the address of a GitHub repository or a GitLab project, as the browser shows it: github.com/owner/repo or gitlab.com/group/project."
+        case .notALink:
+            "That is not the address of a repository or a project. Paste it as the browser shows it: github.com/owner/repo or gitlab.com/group/project."
+        case .notHTTPS: "Sources are read over HTTPS only: paste the address that starts with https://."
+        case .ssh: "That is git's address over SSH. Paste the page of the repository or the project instead, as the browser shows it."
+        case .login: "That address has a name or a password in it. Paste it without one, as the browser shows it."
+        case .notARepository(let page):
+            "\(page.contains(".") ? page : "github.com/\(page)") is not a repository's page: paste the repository's own, github.com/owner/repo."
+        case .officialCatalogue: "That is \(official), the official catalogue: its plugins are listed above, verified."
+        case .notAProject:
+            "That is not a project's address: paste the project's page, as gitlab.com/group/project, or with your own host and its groups."
+        case .readsAsAnother(let other): "That address reads as \(other)."
+        }
+    }
+
+    /// Why `~/.udeck/sources.json` cannot be used (`SourceList.Broken`).
+    static func sourcesBroken(_ broken: SourceList.Broken) -> String {
+        let until = "so uDeck reads, adds and removes none of your sources until the file is put right."
+        return switch broken {
+        case .unreadable(let detail):
+            "~/.udeck/sources.json cannot be read, so uDeck reads, adds and removes none of your sources until it can: \(detail)"
+        case .idNotDerived(let id, let named):
+            "~/.udeck/sources.json gives \(named) the id \(id ?? "null"), which is not the id uDeck gives that repository, \(until)"
+        case .sameID(let id): "~/.udeck/sources.json gives two sources the id \(id), \(until)"
+        case .sameRepository(let one, let other):
+            "~/.udeck/sources.json lists one repository twice, as \(one) and as \(other), \(until)"
+        }
+    }
+
+    /// Why an entry of `~/.udeck/sources.json` is left out (`SourceList.Skipped`).
+    static func sourceSkipped(_ skipped: SourceList.Skipped) -> String {
+        let name = skipped.named ?? "entry \(skipped.position)"
+        let why = switch skipped.reason {
+        case .notAnEntry: "it is not a source"
+        case .unknownProvider(let provider): provider.map { "its provider, \($0), is not one this uDeck reads" } ?? "it names no provider"
+        case .noRemoteID: "it has no remoteID, the number its host knows it by"
+        case .address(.readsAsAnother(let other)): "it reads as \(other), not as written"
+        case .address: "it is not an address uDeck reads a source at"
+        }
+        return "uDeck leaves out \(name) in ~/.udeck/sources.json: \(why)."
     }
 
     /// Why **Link a folder…** linked nothing.

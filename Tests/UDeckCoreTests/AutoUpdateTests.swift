@@ -267,3 +267,70 @@ struct AutoUpdateTests {
         #expect(schedule.failures.isEmpty, "each failed update is tried again once per read")
     }
 }
+
+// MARK: - One schedule per source (stage 4, R1a)
+
+/// A read of one source makes only its own plugins due and forgets only its
+/// own failures: one source's read never wipes another's failure rows.
+extension AutoUpdateTests {
+    static let team = "gitlab.example-team-plugins-0a0b0c0d"
+    static let other = "github.com-other-0e0f0a0b"
+
+    @Test("one source's read clears only its own failures and makes only its own plugins due")
+    func schedulePerSource() {
+        var schedules = AutoUpdateSchedules()
+        #expect(schedules.asking(in: ["official", Self.team]).isEmpty && schedules.failures.isEmpty)
+        schedules.read("official", succeeded: true, hashing: 1)
+        schedules.read(Self.team, succeeded: true, hashing: 1)
+        schedules.hashed(1)
+        #expect(schedules.asking(in: ["official", Self.team, Self.other]) == ["official", Self.team])
+        #expect(schedules.asking(in: [Self.team, "official"]) == [Self.team, "official"], "in the order given")
+        #expect(schedules.ended("official", id: "uptime", version: "1.1.0", throwing: InstallError.tookTooLong) == .failed)
+        #expect(schedules.ended(Self.team, id: "cpu", version: "2.0.0", throwing: InstallError.tookTooLong) == .failed)
+        #expect(schedules.ended(Self.team, id: "disk", version: "0.2.0", throwing: InstallError.stillRunning(id: "disk"))
+                == .leftAsItWas)
+        #expect(schedules.failures == ["uptime": "1.1.0", "cpu": "2.0.0"])
+
+        schedules.read(Self.team, succeeded: true, hashing: 2)
+        #expect(schedules.failures == ["uptime": "1.1.0"], "the team source's read forgets the team source's failure only")
+        #expect(schedules[Self.team].failures.isEmpty && schedules["official"].failures == ["uptime": "1.1.0"])
+        schedules.asked("official", started: false, waits: false)
+        #expect(schedules.asking(in: ["official", Self.team]).isEmpty, "the team source waits for its hashing")
+        schedules.hashed(2)
+        #expect(schedules.asking(in: ["official", Self.team]) == [Self.team], "the official source is not due again")
+        schedules.read(Self.other, succeeded: false, hashing: 3)
+        schedules.hashed(3)
+        #expect(schedules.asking(in: ["official", Self.team, Self.other]) == [Self.team], "a read that failed makes nothing due")
+
+        schedules.read("official", succeeded: true, hashing: 4)
+        #expect(schedules.failures.isEmpty)
+        #expect(schedules.ended("official", id: "uptime", version: "1.2.0", throwing: InstallError.tookTooLong) == .failed)
+        schedules.began("uptime")
+        #expect(schedules.failures.isEmpty, "an operation on a plugin forgets its failure, whichever source's it was")
+        #expect(schedules.ended(Self.team, id: "cpu", version: "2.1.0", throwing: InstallError.tookTooLong) == .failed)
+        schedules.began("cpu")
+        #expect(schedules.failures.isEmpty, "a source of one's own's failure goes the same way")
+        #expect(schedules.ended(Self.team, id: "cpu", version: "2.1.0", throwing: InstallError.tookTooLong) == .failed)
+        schedules.forget(Self.team)
+        #expect(schedules.failures.isEmpty && schedules[Self.team] == AutoUpdateSchedule(), "a source removed is forgotten")
+        #expect(schedules.asking(in: [Self.team]).isEmpty)
+    }
+
+    /// One source's schedule is the single schedule it always was.
+    @Test("a source's schedule asks as the one schedule did")
+    func aSourcesScheduleIsTheSchedule() {
+        var schedules = AutoUpdateSchedules()
+        var single = AutoUpdateSchedule()
+        for (succeeded, hashing) in [(false, 1), (true, 4), (true, 6)] {
+            schedules.read("official", succeeded: succeeded, hashing: hashing)
+            single.read(succeeded: succeeded, hashing: hashing)
+            #expect(schedules["official"] == single)
+            schedules.hashed(hashing)
+            single.hashed(hashing)
+            #expect(schedules["official"] == single && schedules["official"].asks == single.asks)
+        }
+        schedules.asked("official", started: true, waits: false)
+        single.asked(started: true, waits: false)
+        #expect(schedules["official"] == single)
+    }
+}

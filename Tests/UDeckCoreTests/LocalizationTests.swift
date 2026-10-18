@@ -154,6 +154,43 @@ struct LocalizationTests {
         .linkNotFound(.forkBranch(RepositoryAddress(path: "someone/r"), branch: "x", plugin: nil), official: "github.com/o/r"),
         .linkNotFound(.forkRepository(RepositoryAddress(path: "someone/r")), official: "github.com/o/r"),
 
+        // Sources of one's own (stage 4, R1a): the sentences that name a host, the
+        // catalogue rows of two sources, the sources file, and what Add and Remove say.
+        .catalogueUnreachable(reason: "offline", readAt: "14:02", host: "gitlab.example"),
+        .catalogueRefused(status: 401, host: "gitlab.example"), .catalogueBadAnswer(reason: "garbled", host: "gitlab.example"),
+        .permissionsUntrustedSource(address: "gitlab.example/tools/x", changedHere: false),
+        .permissionsUntrustedSource(address: "gitlab.example/tools/x", changedHere: true),
+        .catalogueInstalledFromSource(address: "gitlab.example/tools/x"),
+        .catalogueInstalledFromElsewhere(.verified(version: "1.0.0", repository: "github.com/o/r")),
+        .catalogueInstalledFromElsewhere(.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x")),
+        .catalogueInstallFromHere,
+        .linkNotAForkAddAsASource(repository: "github.com/someone/r", official: "github.com/o/r"), .linkAddAsASource,
+        .sourceLinkRefused(.empty, official: "github.com/o/r"), .sourceLinkRefused(.notALink, official: "github.com/o/r"),
+        .sourceLinkRefused(.notHTTPS, official: "github.com/o/r"), .sourceLinkRefused(.ssh, official: "github.com/o/r"),
+        .sourceLinkRefused(.login, official: "github.com/o/r"),
+        .sourceLinkRefused(.notARepository(page: "settings"), official: "github.com/o/r"),
+        .sourceLinkRefused(.notARepository(page: "gist.github.com"), official: "github.com/o/r"),
+        .sourceLinkRefused(.officialCatalogue, official: "github.com/o/r"), .sourceLinkRefused(.notAProject, official: "github.com/o/r"),
+        .sourceLinkRefused(.readsAsAnother("gitlab.com/g/p"), official: "github.com/o/r"),
+        .sourcesBroken(.unreadable("not JSON")), .sourcesBroken(.idNotDerived(id: "x-00000000", named: "github.com/o/r")),
+        .sourcesBroken(.idNotDerived(id: nil, named: "github.com/o/r")), .sourcesBroken(.sameID("x-00000000")),
+        .sourcesBroken(.sameRepository("github.com/o/r", "github.com/o/renamed")),
+        .sourceSkipped(.init(position: 2, named: nil, reason: .notAnEntry, json: .null)),
+        .sourceSkipped(.init(position: 1, named: "gitea.example/o/p", reason: .unknownProvider("gitea"), json: .null)),
+        .sourceSkipped(.init(position: 1, named: "gitea.example/o/p", reason: .unknownProvider(nil), json: .null)),
+        .sourceSkipped(.init(position: 1, named: "github.com/o/r", reason: .noRemoteID, json: .null)),
+        .sourceSkipped(.init(position: 1, named: "github.com/settings/x", reason: .address(.notARepository(page: "settings")),
+                             json: .null)),
+        .sourceSkipped(.init(position: 1, named: "github.com/g/p", reason: .address(.readsAsAnother("gitlab.com/g/p")),
+                             json: .null)),
+        .sourceIDTaken(name: "\u{2068}Team\u{2069}"), .sourceNotFound(address: "github.com/o/r"),
+        .sourceNoLongerAdded(address: "gitlab.example/tools/x"),
+        .sourceRemoveConfirm(name: "\u{2068}Team\u{2069}", address: "gitlab.example/tools/x"),
+        .catalogueNotASourceAnyMore(address: "gitlab.example/tools/x"), .catalogueOfficialRepositoryChanged,
+        .catalogueSwitchConfirm(id: "uptime", from: .verified(version: "1.0.0", repository: "github.com/o/r"),
+                                to: .sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x"), toTrash: false),
+        .windowReinstallBrings(.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x")),
+
         .pluginLastRun(at: "21:04:05", reason: .interval, duration: 0.21, result: .card),
         .pluginLastRun(at: "21:04:05", reason: .launch, duration: 0.21, result: .failure(.exited(code: 3))),
         .pluginLastRun(at: "21:04:05", reason: .manual, duration: 2, result: .lateCard(.timedOut(after: 2))),
@@ -236,7 +273,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 389,
+        #expect(Self.all.count == 429,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
@@ -498,6 +535,81 @@ struct LocalizationTests {
                 == "Your changes to uptime will be moved to the Trash and replaced with 1.3.0.")
         #expect(english(.windowNotInPluginsFolder(id: "uptime", path: "~/.udeck/plugins"))
                 == "uptime is not in ~/.udeck/plugins")
+    }
+
+    /// Where the design gives the words of stage 4's sentences, uDeck says
+    /// exactly them, in both languages; and the official catalogue's say
+    /// GitHub, as they did.
+    @Test("stage 4's sentences, word for word in both languages; the official catalogue's as they were")
+    func stageFourSentences() {
+        let english = Strings(.english), russian = Strings(.russian)
+        let address = "gitlab.unicorns.place/tools/udeck-plugins"
+        #expect(english(.sourceNotFound(address: address))
+                == "\(address) could not be found, or it is private. If it is private, uDeck needs a token for it: Token…")
+        #expect(russian(.sourceNotFound(address: address))
+                == "\(address) не найден или закрыт. Если он закрытый, uDeck нужен токен для него: «Токен…».")
+        #expect(english(.catalogueUnreachable(reason: "offline", readAt: nil, host: "gitlab.unicorns.place"))
+                == "Could not reach gitlab.unicorns.place: offline.")
+        #expect(russian(.catalogueUnreachable(reason: "offline", readAt: nil, host: "gitlab.unicorns.place"))
+                == "Не удалось связаться с gitlab.unicorns.place: offline.")
+        #expect(english(.catalogueRefused(status: 500, host: "gitlab.unicorns.place"))
+                == "gitlab.unicorns.place refused the request (HTTP 500).")
+        #expect(russian(.catalogueRefused(status: 500, host: "gitlab.unicorns.place"))
+                == "gitlab.unicorns.place отказал в запросе (HTTP 500).")
+        #expect(english(.catalogueBadAnswer(reason: "not JSON", host: "gitlab.unicorns.place"))
+                == "gitlab.unicorns.place answered with something uDeck could not read: not JSON.")
+        #expect(russian(.catalogueBadAnswer(reason: "not JSON", host: "gitlab.unicorns.place"))
+                == "gitlab.unicorns.place ответил так, что uDeck не понял ответа: not JSON.")
+        #expect(english(.catalogueRefused(status: 451)) == "GitHub refused the request (HTTP 451).", "the official catalogue's")
+        #expect(russian(.catalogueRefused(status: 451)) == "GitHub отказал в запросе (HTTP 451).")
+        #expect(english(.catalogueBadAnswer(reason: "garbled")) == "GitHub answered with something uDeck could not read: garbled.")
+        #expect(russian(.catalogueUnreachable(reason: "offline", readAt: "14:02"))
+                == "Не удалось связаться с GitHub: offline. Список ниже — на 14:02.")
+        #expect(english(.catalogueEmpty) == "The repository offers no plugins yet."
+                && russian(.catalogueEmpty) == "В репозитории пока нет плагинов.", "item 15, as it was")
+        #expect(english(.linkNotAForkAddAsASource(repository: "github.com/someone/r", official: "github.com/o/r"))
+                == "github.com/someone/r is not a fork of github.com/o/r. To install from it, add it as a source of its own.")
+        #expect(russian(.linkNotAForkAddAsASource(repository: "github.com/someone/r", official: "github.com/o/r"))
+                == "github.com/someone/r — не форк github.com/o/r. Чтобы ставить из него, добавьте его как отдельный источник.")
+        #expect(english(.linkAddAsASource) == "Add as a source…" && russian(.linkAddAsASource) == "Добавить как источник…")
+        #expect(english(.sourceNoLongerAdded(address: address)) == "From \(address) — a source no longer added")
+        #expect(russian(.sourceNoLongerAdded(address: address)) == "Из \(address) — источник больше не добавлен")
+        #expect(english(.sourceRemoveConfirm(name: "Team", address: address))
+                == "Remove Team (\(address))? uDeck stops reading it and forgets its token. What was installed from it stays and keeps running; if you trusted it, those plugins become Unverified and ask again before they next run, and nothing updates or reinstalls them until you add it again.")
+        #expect(russian(.sourceRemoveConfirm(name: "Team", address: address))
+                == "Удалить Team (\(address))? uDeck перестанет его читать и забудет его токен. Установленное из него останется и продолжит работать; если вы ему доверяли, эти плагины станут непроверенными и спросят снова перед следующим запуском, а обновить или переустановить их нельзя, пока источник не добавлен снова.")
+        #expect(english(.catalogueOfficialRepositoryChanged)
+                == "The address of the official catalogue now belongs to a different repository. uDeck stopped reading it, and nothing updates by itself; installed plugins keep running.")
+        #expect(russian(.catalogueOfficialRepositoryChanged)
+                == "Адрес официального каталога теперь принадлежит другому репозиторию. uDeck перестал его читать, и ничего не обновляется само; установленные плагины продолжают работать.")
+        #expect(english(.sourceIDTaken(name: "Team")) == "uDeck cannot add this source: its id would be the same as Team's.")
+        #expect(russian(.sourceIDTaken(name: "Team"))
+                == "uDeck не может добавить этот источник: его идентификатор совпал бы с идентификатором Team.")
+        // The not-a-fork sentence the link sheet says today is stage 3's, until Add as a source… is there.
+        #expect(english(.linkNotAFork(repository: "github.com/someone/r", official: "github.com/o/r")).contains("come later"))
+    }
+
+    /// What the sources file and its entries say carries what is wrong and where.
+    @Test("sources.json's problems say what and where, in both languages", arguments: Language.allCases)
+    func sourcesFileSentences(language: Language) {
+        let strings = Strings(language)
+        #expect(strings(.sourcesBroken(.unreadable("it ends early"))).contains("~/.udeck/sources.json")
+                && strings(.sourcesBroken(.unreadable("it ends early"))).contains("it ends early"))
+        let notDerived = strings(.sourcesBroken(.idNotDerived(id: "x-00000000", named: "github.com/o/r")))
+        #expect(notDerived.contains("x-00000000") && notDerived.contains("github.com/o/r"))
+        #expect(strings(.sourcesBroken(.idNotDerived(id: nil, named: "github.com/o/r"))).contains("null"))
+        #expect(strings(.sourcesBroken(.sameID("x-00000000"))).contains("x-00000000"))
+        let twice = strings(.sourcesBroken(.sameRepository("github.com/o/r", "github.com/o/renamed")))
+        #expect(twice.contains("github.com/o/r ") && twice.contains("github.com/o/renamed"))
+        let skipped = strings(.sourceSkipped(.init(position: 1, named: "gitea.example/o/p", reason: .unknownProvider("gitea"),
+                                                   json: .null)))
+        #expect(skipped.contains("gitea.example/o/p") && skipped.contains("gitea") && skipped.contains("~/.udeck/sources.json"))
+        #expect(strings(.sourceSkipped(.init(position: 3, named: nil, reason: .notAnEntry, json: .null))).contains("3"))
+        #expect(strings(.sourceSkipped(.init(position: 1, named: "github.com/g/p",
+                                             reason: .address(.readsAsAnother("gitlab.com/g/p")), json: .null)))
+            .contains("gitlab.com/g/p"))
+        #expect(strings(.sourceSkipped(.init(position: 1, named: "github.com/o/r", reason: .noRemoteID, json: .null)))
+            .contains("remoteID"))
     }
 
     /// Every refusal has something to say in every language, and says the path.
