@@ -61,16 +61,59 @@ public final class DeckModel {
     public internal(set) var operationProblems: [String: OperationProblem] = [:]
     /// Earlier versions, as they were read.
     public internal(set) var histories: [String: HistoryLoad] = [:]
+    /// The source each plugin's earlier versions were read from: they stand
+    /// for its copy only while the copy is of that source (`EarlierVersions`).
+    @ObservationIgnored var historySources: [String: String] = [:]
     /// What **Install from a link…** came to, while its sheet is open: the
     /// link being asked about, why it names nothing to install, the
     /// catalogue, or the plugins at a branch or a pull request
     /// (`lookUpLink`).
     public internal(set) var linkLookup: LinkLookup?
     /// When the installed plugins are asked whether they update themselves,
-    /// and which of them failed to since the catalogue was last read — said on
-    /// their rows, and not tried again before the next read
-    /// (`AutoUpdateSchedule`, `updateVerifiedPlugins`).
-    public internal(set) var autoUpdates = AutoUpdateSchedule()
+    /// and which of them failed to since their source was last read — said on
+    /// their rows, and not tried again before the next read — one schedule per
+    /// source (`AutoUpdateSchedules`, `updateVerifiedPlugins`).
+    public internal(set) var autoUpdates = AutoUpdateSchedules()
+
+    // MARK: - Sources of one's own (DeckModel+Sources.swift)
+
+    /// `~/.udeck/sources.json` as it was last read: the sources the operator
+    /// added, and the entries left out (`SourceList`).
+    public internal(set) var sourceList = SourceList()
+    /// Why `sources.json` cannot be used, while it cannot: no source of one's
+    /// own is read, added or removed meanwhile, and the file is not written.
+    public internal(set) var sourcesProblem: SourceList.Broken?
+    /// Each source's catalogue as its cache holds it, by the source's id.
+    public internal(set) var sourceCatalogues: [String: Catalogue] = [:]
+    /// What each source's catalogue remembers between reads, by its id.
+    public internal(set) var sourceStates: [String: CatalogueState] = [:]
+    /// The sources being read now, or waiting their turn.
+    public internal(set) var sourcesRefreshing: Set<String> = []
+    /// **Add a source…**: whether its sheet is open, what its field holds —
+    /// **Add as a source…** fills it — and what **Look up** came to.
+    public var sourceSheetOpen = false
+    public var sourceField = ""
+    public internal(set) var sourceAdding: SourceAdding?
+    /// What the last **Add** or **Remove…** of a source could not do, by the
+    /// source's id — `""` for an **Add** — said where it was pressed.
+    public internal(set) var sourceOperationProblems: [String: String] = [:]
+    /// The lines a test build carries under **Your sources** (`TestBuild`).
+    public let testBuild: [Phrase]
+    /// Which **Look up** of a source is the latest: an answer to an earlier
+    /// one, or to a sheet closed since, is not shown over it.
+    @ObservationIgnored var sourceLookups = 0
+    /// Which read of each source's catalogue cache is the latest asked for.
+    @ObservationIgnored var sourceCatalogueReads: [String: Int] = [:]
+    /// The sources whose cache has been read since launch — nil or not:
+    /// until it has, no copy of the source has its verification written.
+    @ObservationIgnored var sourceCataloguesRead: Set<String> = []
+    /// The last read of any source asked for: every read waits for the one
+    /// before it — one at a time, the official source first (`inTurn`).
+    @ObservationIgnored var readTail: Task<Void, Never>?
+    /// The launch reads of the sources of one's own, apart from the official
+    /// one's (`launchRefresh`): switching **Official catalogue** off cancels
+    /// that one alone.
+    var sourceLaunch: Task<Void, Never>?
 
     /// The running uDeck's own version, as `CFBundleShortVersionString` says it.
     public let udeckVersion: String
@@ -199,7 +242,8 @@ public final class DeckModel {
         executor: PollExecutor = PollExecutor(),
         udeckVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0",
         endpoints: GitHubEndpoints = .from(infoDictionary: Bundle.main.infoDictionary),
-        trash: any PluginTrash = SystemTrash()
+        trash: any PluginTrash = SystemTrash(),
+        testBuild: [Phrase] = TestBuild.notices(infoDictionary: Bundle.main.infoDictionary)
     ) {
         self.paths = paths
         self.executor = executor
@@ -207,6 +251,7 @@ public final class DeckModel {
         self.udeck = SemanticVersion(udeckVersion)
         self.endpoints = endpoints
         self.trash = trash
+        self.testBuild = testBuild
 
         // Before the plugins folder is first read: an install, update or
         // removal a crash interrupted is finished or undone, so nothing below
@@ -248,6 +293,9 @@ public final class DeckModel {
         followed = store.followed()
         limits = RateLimitRecorder(catalogueState.rateLimit)
         self.problems = problems
+        // The sources of one's own, before the plugins folder is first read:
+        // which source each copy is of decides how it is held.
+        loadSources()
 
         if udeck == nil {
             DeckLog.plugins.error(
@@ -276,6 +324,7 @@ public final class DeckModel {
         // plugins folder at launch, before it, writes no verification.
         Task { [weak self] in
             await self?.reloadCatalogue()
+            await self?.reloadSourceCatalogues()
             self?.reverify()
         }
     }

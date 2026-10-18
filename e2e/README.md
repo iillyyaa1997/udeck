@@ -19,7 +19,7 @@ the last section.
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, the accessibility helper that reads uDeck's windows, a
 > self-check, the builds a check needs, a fake GitHub for the plugin catalogue,
-> the same lab on a GitHub runner, and seventy checks of uDeck itself in five groups
+> the same lab on a GitHub runner, and eighty-two checks of uDeck itself in five groups
 > (`e2e/run.sh --list`) — and one more, `smoke.real-pull-request`, against the
 > real GitHub, which runs only when it is named ("Not in the full run"). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
@@ -35,14 +35,16 @@ the last section.
 > worked in, and after the panel is opened again — by the gesture or the
 > shortcut — while that click waits for its answer. `login`: "Open at Login", through a restart and an update, and
 > switched off. `settings`: two changes made in uDeck's own window, and whether
-> they hold across a restart. `plugins`: the thirty-seven checks of
+> they hold across a restart. `plugins`: the forty-nine checks of
 > docs/plugin-repository.md — the catalogue, installing, updating, a verified
 > plugin updating itself and an update asking for other permissions only
 > offered, earlier versions, removing, each refusal, installing from a pull
 > request, a branch and a branch of a fork, that pull request merged — as exactly the copy, with
 > changes, after `main` moved on — or closed, the pull request and the branch
 > followed — a new head offered, a history rewritten said, a branch deleted
-> said — a linked folder, and what Settings offers
+> said — a public GitHub repository added as a source of its own and its copies,
+> the official repository's number held at its describe, a linked folder, and
+> what Settings offers
 > somebody writing a plugin: Link a folder…, the run log's switch, a failed run
 > on a fresh card, Install command, Where to look for commands, and all of it
 > in Russian, the screens of stage 3 a person meets along the way included —
@@ -2244,9 +2246,12 @@ problem.
 
 ### Plugins from a repository
 
-Thirty-seven checks, one per row of the table in docs/plugin-repository.md ("The
-lab's checks") but its last, `smoke.real-pull-request` ("Not in the full run"). None of them talks to github.com — in the lab only the update
-checks given a published release do, `updates.a-published-release` by default.
+Forty-nine checks, one per row of the table in docs/plugin-repository.md ("The
+lab's checks") but its last, `smoke.real-pull-request` ("Not in the full run"). None of them talks to github.com from the guest — in the lab only the update
+checks given a published release do, `updates.a-published-release` by default,
+and `plugins.source-downgrade-to-0-7-0`, which fetches the released 0.7.0 the
+way they fetch a release, from the Mac the lab runs on, and runs it with the
+official catalogue off.
 A fake GitHub runs inside the guest (`e2e/guest/fake-github.py`, the guest's
 own Python and the standard library only, on `127.0.0.1:8766`), answering the
 part of the API uDeck uses — the default branch, the head of a branch or of a
@@ -2280,6 +2285,25 @@ own tests hold its hashing against `git hash-object`, `git write-tree` and `git
 commit-tree`, parents included, and its comparison of every two commits against
 `git rev-list --left-right --count`. uDeck's Swift then has to agree with it, file by file and folder
 by folder, or nothing installs.
+
+**Repositories of their own** (stage 4) are fixture folders too, under
+`e2e/fixtures/plugin-repository/sources/github/<owner>/<repo>/`, each with its own
+`history` and an `id` file, the number GitHub gives it: `someone/team-plugins`
+(`t1`: `team-clock` 1.0.0 asking for nothing, `team-ping` 1.0.0 asking for one
+command, and an `uptime` 1.0.0 of its own under the official one's id; `t2`:
+both at 1.1.0; `t3`: `team-clock` 1.2.0 asking for one command more),
+`someone/not-plugins` without a passport, and `someone/squatter`, the other
+repository the lab makes at team-plugins' old name. The fake serves each by its
+name and by its number (`/repositories/{id}/…`), each one's `main` where the
+lab says (`sources`), under the names the lab says (`served`); the official
+repository's description says its number, the fixture's own `id` (900000001,
+which every lab build carries as `UDeckPluginsRepositoryID`) unless the lab
+names another (`official_id`). Every line of its log says the port the request
+came in on and whether it carried a credential — `none`, or `rejected`, answered
+`401` — never its value; each source check ends by finding none. A source's
+block lies far down Settings → Plugins, under **Your sources**: its controls are
+scrolled to as any other's, and a check that comes back to the official switch
+chooses the pane afresh, so that the switch is not under the window's title bar.
 
 **The lab drives the fake by rewriting a small state file over SSH**: which
 commit `main` is at, which commit each other branch is at (a branch left out

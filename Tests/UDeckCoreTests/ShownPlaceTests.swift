@@ -731,8 +731,11 @@ extension ShownPlaceTests {
             Issue.record("Back to on its warning goes ahead"); return
         }
         #expect(backFrom == Self.official)
-        // Reinstall of the source's copy: from the source.
-        guard case .atCommit(.reinstall, _, _, let again) = ShownPlace.reinstall("uptime", in: paths, installed: after, shown: nil)
+        // Reinstall of the source's copy: from the source, while it is added.
+        let added = OwnSource(id: Self.teamID, provider: "gitlab", host: "gitlab.example", path: "tools/team-plugins",
+                              remoteID: 48, addedAt: nil)
+        guard case .atCommit(.reinstall, _, _, let again) = ShownPlace.reinstall("uptime", in: paths, installed: after,
+                                                                                shown: nil, sources: [added])
         else { Issue.record("Reinstall over uDeck's own copy goes ahead"); return }
         #expect(again == Self.teamOrigin)
         // An earlier version of the source's: from the source.
@@ -804,6 +807,39 @@ extension ShownPlaceTests {
             #expect(step == .atCommit(.earlier, commit: previousCommit, version: "0.9.0", from: Self.teamOrigin),
                     "while it is added, from the source")
         }
+    }
+
+    /// Reinstall of a copy of a source of one's own puts it back from that
+    /// source only while the source is added (S4-20, item 17): nothing for one
+    /// no longer added — nor for one whose only listing is another source —
+    /// and the official copy's Reinstall needs no source at all.
+    @Test("Reinstall: nothing for a copy of a source that is no longer added; from the source while it is")
+    func reinstallANoLongerAddedSource() async throws {
+        let repository = FakeRepository.withUptime()
+        let base = installer(repository, trash: TestTrash(in: udeck.url))
+        try await install("uptime", from: repository, with: base)
+        var records = try base.loadRecords()
+        let official = ShownPlace.reinstall("uptime", in: paths, installed: records, shown: nil)
+        guard case .atCommit(.reinstall, _, _, let officialFrom) = official else {
+            Issue.record("the official copy reinstalls without any source added: \(official)"); return
+        }
+        #expect(officialFrom.source == InstalledPlugins.officialSource)
+
+        records.plugins["uptime"]?.source = Self.teamID
+        records.plugins["uptime"]?.repository = Self.team
+        let added = OwnSource(id: Self.teamID, provider: "gitlab", host: "gitlab.example", path: "tools/team-plugins",
+                              remoteID: 48, addedAt: nil)
+        let other = OwnSource(id: "github.com-other-00000000", provider: "github", host: "github.com", path: "o/other",
+                              remoteID: 3, addedAt: nil)
+        #expect(ShownPlace.reinstall("uptime", in: paths, installed: records, shown: nil) == .nothing,
+                "no source added: nothing reinstalls the copy")
+        #expect(ShownPlace.reinstall("uptime", in: paths, installed: records, shown: nil, sources: [other]) == .nothing,
+                "another source added is not this one")
+        guard case .atCommit(.reinstall, let commit, _, let from)
+                = ShownPlace.reinstall("uptime", in: paths, installed: records, shown: nil, sources: [other, added]) else {
+            Issue.record("while it is added, Reinstall goes ahead over uDeck's own copy"); return
+        }
+        #expect(commit == records.plugins["uptime"]?.commit && from == Self.teamOrigin, "from the source, as recorded")
     }
 }
 

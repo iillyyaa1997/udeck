@@ -23,6 +23,12 @@ public enum CatalogueError: Codable, Equatable, Sendable {
     case badAnswer(String)
     /// A file fetched for the catalogue did not hash to what the listing named.
     case arrivedDifferent(path: String, expected: String, got: String)
+    /// The official repository's describe answered another number than the
+    /// one this uDeck knows it by (`OfficialRepositoryCheck`): its address now
+    /// belongs to a different repository, and it is not read — nor anything
+    /// updated by itself — until it answers its own number again. An older
+    /// uDeck, which does not know this case, reads the state without it.
+    case officialRepositoryChanged
 }
 
 /// What one source's catalogue remembers between refreshes and launches.

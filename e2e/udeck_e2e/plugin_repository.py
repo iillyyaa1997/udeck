@@ -82,6 +82,10 @@ class Request:
     user_agent: str = ""
     accept: str = ""
     if_none_match: str = ""
+    # The port it came in on, and whether it carried a credential — `none`, `accepted`, `rejected` — never its
+    # value (stage 4). A line of a fake from before either is the fake's own port and no credential.
+    port: int = 0
+    credential: str = "none"
 
     @property
     def is_api(self) -> bool:
@@ -133,6 +137,8 @@ def parse_log(text: str) -> list[Request]:
                     user_agent=str(entry.get("user_agent", "")),
                     accept=str(entry.get("accept", "")),
                     if_none_match=str(entry.get("if_none_match", "")),
+                    port=int(entry.get("port", 0)),
+                    credential=str(entry.get("credential", "none")),
                 )
             )
         except (ValueError, KeyError, TypeError) as error:
@@ -342,6 +348,29 @@ class FakeGitHub:
     def files(self, name: str, folder: str) -> dict[str, str]:
         """Every file under `folder` in fixture commit `name`, path → mode."""
         paths = self.facts()["commits"][name]["paths"]
+        return {path: entry["mode"] for path, entry in paths.items() if path.startswith(folder + "/") and entry["mode"] != "40000"}
+
+    # A repository of its own (stage 4), by its fixture folder's `owner/repo`.
+
+    def official_id(self) -> int | None:
+        """The number the fake gives the official repository."""
+        return self.facts().get("id")
+
+    def source_id(self, source: str) -> int:
+        """The number the fake gives a repository of its own."""
+        return self.facts()["sources"][source]["id"]
+
+    def source_commit(self, source: str, name: str) -> str:
+        """The id the fake gave commit `name` of a repository of its own."""
+        return self.facts()["sources"][source]["commits"][name]["sha"]
+
+    def source_tree(self, source: str, name: str, path: str) -> str:
+        """The id of the folder at `path` in commit `name` of a repository of its own."""
+        return self.facts()["sources"][source]["commits"][name]["paths"][path]["sha"]
+
+    def source_files(self, source: str, name: str, folder: str) -> dict[str, str]:
+        """Every file under `folder` in commit `name` of a repository of its own, path → mode."""
+        paths = self.facts()["sources"][source]["commits"][name]["paths"]
         return {path: entry["mode"] for path, entry in paths.items() if path.startswith(folder + "/") and entry["mode"] != "40000"}
 
     def tree_in_guest(self, folder: str, step: str) -> str:

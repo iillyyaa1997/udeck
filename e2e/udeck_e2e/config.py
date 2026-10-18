@@ -648,6 +648,13 @@ PLUGINS_PORT = 8766
 # a lab build carries in `UDeckPluginsRepository` as it ships.
 PLUGINS_REPOSITORY = "iillyyaa1997/udeck-plugins"
 
+# The number the fake gives the official repository (e2e/fixtures/plugin-repository/id), which every lab build carries as
+# `UDeckPluginsRepositoryID` (`Scripts/make-app.sh --test-plugins`) — not GitHub's own, 1393324153, which the build
+# as shipped and the smoke's build carry (`SHIPPED_REPOSITORY_ID`): a lab build that kept it would stop its catalogue
+# at the first describe, as the official address taken by another repository does (stage 4, S4-13).
+PLUGINS_REPOSITORY_ID = 900000001
+SHIPPED_REPOSITORY_ID = 1393324153
+
 # Until the fake GitHub answers on the guest's loopback after it is started.
 PLUGINS_UP_SECONDS = 30
 

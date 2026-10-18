@@ -1189,6 +1189,10 @@ private struct PluginSettingsSection: View {
         CommandSection(model: model)
 
         CatalogueSection(model: model)
+
+        // The sources the operator added, after the official catalogue: each
+        // a catalogue of its own, read whatever the official switch says.
+        SourcesSection(model: model)
     }
 
     private var missingIDs: [String] {

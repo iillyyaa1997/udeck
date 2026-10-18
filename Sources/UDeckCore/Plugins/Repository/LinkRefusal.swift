@@ -17,7 +17,7 @@ public enum LinkRefusal {
         case RefResolver.Refusal.notFound(let link):
             .linkNotFound(link, official: official.description)
         case RefResolver.Refusal.notAFork(let address):
-            .linkNotAFork(repository: address.description, official: official.description)
+            .linkNotAForkAddAsASource(repository: address.description, official: official.description)
         default:
             nil
         }

@@ -99,6 +99,13 @@ extension DeckModel {
         GitHubClient(endpoints: endpoints, udeckVersion: udeckVersion, limits: limits)
     }
 
+    /// The official source as its catalogue and **Install from a link…**
+    /// read it: every describe held to the number this build knows the
+    /// official repository by (`OfficialRepositoryCheck`).
+    var officialReader: OfficialRepositoryCheck {
+        OfficialRepositoryCheck(provider, expected: endpoints.repositoryID)
+    }
+
     /// The client a copy from `origin` is taken through: the official
     /// source's, or one for another repository on the same host — a fork's —
     /// asking the same API and raw host and counted against the same limit
@@ -111,19 +118,59 @@ extension DeckModel {
         return official.client(for: origin.repository)
     }
 
+    /// The provider a copy from `origin` is taken through, whichever source it
+    /// is of: the official source's (`provider(for:)`), or a source of one's
+    /// own's — its default branch only, by its number, found by the copy's
+    /// source and never by its repository's name (`SourceProvider`); nil for
+    /// a source that is not added.
+    func client(for origin: PluginOrigin) -> (any RepositoryProvider)? {
+        guard origin.source != InstalledPlugins.officialSource else { return provider(for: origin) }
+        guard origin.ref.isDefault else { return nil }
+        return sourceProvider(origin.source)
+    }
+
+    /// `origin` as a copy of it is taken now: a source of one's own's at the
+    /// address the source has now — the repository as the record keeps it is
+    /// where it was when it was installed, and a source renamed since is read
+    /// by its number all the same — the official source's as it is.
+    func takenNow(_ origin: PluginOrigin) -> PluginOrigin {
+        guard origin.source != InstalledPlugins.officialSource, let source = source(origin.source) else { return origin }
+        return PluginOrigin(repository: source.address, ref: origin.ref, source: origin.source)
+    }
+
+    /// The repository a source's default branch is taken from: the official
+    /// one, or a source of one's own's own (`PluginOrigin.mayBeTaken`).
+    func sourceRepository(of source: String) -> RepositoryAddress {
+        self.source(source)?.address ?? catalogueAddress
+    }
+
     var catalogueStore: CatalogueStore { CatalogueStore(paths: paths) }
 
     /// Where the catalogue comes from, as the operator reads it.
     public var catalogueAddress: RepositoryAddress { provider.address }
 
-    /// The installer, fetching each copy's files from the repository its
-    /// request names — the official one's, or a fork's — on the official
-    /// source's host (`RepositoryProvider.file(of:at:commit:)`).
+    /// The installer, fetching each copy's files from the source it is a copy
+    /// of: the official source's from the repository its request names — the
+    /// official one's, or a fork's — on the official source's host
+    /// (`RepositoryProvider.file(of:at:commit:)`); a source of one's own's
+    /// through that source's own provider, by its number, whatever its
+    /// repository was called when the copy was installed — and nothing of a
+    /// source that is not added.
     private var installer: PluginInstaller {
         let official = provider
+        var own: [String: SourceProvider] = [:]
+        for source in sources {
+            if let provider = sourceClients.of(source) { own[source.id] = provider }
+        }
         return PluginInstaller(
             paths: paths, discovery: discovery, trash: trash,
-            fetch: { repository, path, commit in try await official.file(of: repository, at: path, commit: commit) }
+            fetchOfSource: { [own] source, repository, path, commit in
+                guard source != InstalledPlugins.officialSource else {
+                    return try await official.file(of: repository, at: path, commit: commit)
+                }
+                guard let provider = own[source] else { throw ProviderError.notFound }
+                return try await provider.file(at: path, commit: commit)
+            }
         )
     }
 
@@ -139,41 +186,38 @@ extension DeckModel {
     /// after a read, the files of a verified plugin that updates itself
     /// (`updateVerifiedPlugins`). Each read asks after the branches and pull
     /// requests copies came from too (`followLines`).
+    ///
+    /// The sources the operator added are read on the same schedule, each by
+    /// its own state, for as long as `sources.json` lists them — whatever
+    /// **Official catalogue** says, which governs the official repository
+    /// alone — after the official source's launch read, one at a time
+    /// (`SourceSchedule`, `inTurn`). The minute's clock runs while any source
+    /// can be read (`updateClock`).
     public func startCatalogueSchedule() {
         launchRefresh?.cancel()
+        launchRefresh = nil
         catalogueTimer?.invalidate()
-        guard settings.readsOfficialCatalogue else { return }
-        if CatalogueSchedule.refreshesAtLaunch(catalogueState, now: Date()) {
+        catalogueTimer = nil
+        if settings.readsOfficialCatalogue, CatalogueSchedule.refreshesAtLaunch(catalogueState, now: Date()) {
             launchRefresh = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: Seconds.nanoseconds(CatalogueSchedule.launchDelay))
                 guard !Task.isCancelled else { return }
                 await self?.refreshCatalogue(unrequested: true, why: "at launch")
             }
         }
+        startSourceLaunchReads(after: launchRefresh)
         // A minute's tick asks whether the next refresh is due; the answer is
         // `CatalogueSchedule.nextDue`, which is where the rule is tested.
-        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                // An update by itself that waited — on a card action, on
-                // another operation — is asked about again.
-                self?.updateVerifiedPlugins()
-                guard let self, self.settings.readsOfficialCatalogue, !self.catalogueRefreshing,
-                      CatalogueSchedule.nextDue(self.catalogueState, now: Date()) <= Date(),
-                      self.catalogueState.lastAttempt.map({ Date().timeIntervalSince($0) > 60 }) ?? true
-                else { return }
-                Task { await self.refreshCatalogue(unrequested: true, why: "on schedule") }
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        catalogueTimer = timer
+        updateClock()
     }
 
     /// Settings → Plugins was opened: the catalogue is read if it is more than
-    /// an hour old.
+    /// an hour old, and so is each source of one's own whatever the switch.
     public func pluginsPaneOpened() {
-        guard settings.readsOfficialCatalogue,
-              CatalogueSchedule.refreshesWhenSettingsOpen(catalogueState, now: Date()) else { return }
-        Task { await refreshCatalogue(unrequested: false, why: "Settings → Plugins opened") }
+        if settings.readsOfficialCatalogue, CatalogueSchedule.refreshesWhenSettingsOpen(catalogueState, now: Date()) {
+            Task { await refreshCatalogue(unrequested: false, why: "Settings → Plugins opened") }
+        }
+        sourcesPaneOpened()
     }
 
     /// **Check now**.
@@ -182,34 +226,52 @@ extension DeckModel {
         Task { await refreshCatalogue(unrequested: false, why: "Check now") }
     }
 
-    /// **Official catalogue**, on or off. Off, uDeck makes no request about
-    /// plugins at all; installed plugins keep running.
+    /// **Official catalogue**, on or off. Off, uDeck makes no request to the
+    /// official repository — its catalogue, **Install from a link…**, its
+    /// forks, the lines its copies came from; the sources the operator added
+    /// are read until they are removed, and installed plugins keep running.
+    /// The minute's clock stops only when no source is left to read.
     public func setOfficialCatalogue(_ on: Bool) {
         var changed = settings
         changed.officialCatalogue = on
         update(settings: changed)
         if on {
-            startCatalogueSchedule()
+            updateClock()
             Task { await refreshCatalogue(unrequested: false, why: "the official catalogue was switched on") }
         } else {
             launchRefresh?.cancel()
-            catalogueTimer?.invalidate()
-            catalogueTimer = nil
+            launchRefresh = nil
+            updateClock()
         }
     }
 
     func refreshCatalogue(unrequested: Bool, why: String) async {
         guard settings.readsOfficialCatalogue, !catalogueRefreshing else { return }
         catalogueRefreshing = true
-        defer { catalogueRefreshing = false }
+        await inTurn { [self] in
+            defer { catalogueRefreshing = false }
+            guard settings.readsOfficialCatalogue else { return }
+            await readOfficialCatalogue(unrequested: unrequested, why: why)
+        }
+    }
+
+    /// One read of the official catalogue, in its turn (`inTurn`).
+    private func readOfficialCatalogue(unrequested: Bool, why: String) async {
         DeckLog.plugins.info("reading the official catalogue: \(why, privacy: .public)")
-        let refresher = CatalogueRefresher(provider: provider, store: catalogueStore, limits: limits)
+        let refresher = CatalogueRefresher(provider: officialReader, store: catalogueStore, limits: limits)
         // The heads the branches and pull requests copies came from were
         // last heard at are kept with the installed commits: what they offer
         // is read again from the cache.
         let outcome = await refresher.refresh(unrequested: unrequested, language: strings.language.rawValue,
                                               installedCommits: installed.commits.union(followed.heads))
         DeckLog.plugins.info("the official catalogue: \(String(describing: outcome), privacy: .public)")
+        if case .failed(.officialRepositoryChanged) = outcome {
+            // The official address is another repository's now — or was, and
+            // no describe has answered since: the next read asks its number
+            // again before anything else (`CatalogueRefresher`), and nothing
+            // else is asked of it meanwhile (`readsOfficialRepository`).
+            DeckLog.plugins.error("the official repository answered another number than \(String(describing: self.endpoints.repositoryID), privacy: .public): not read, and nothing updates by itself")
+        }
         catalogueState = catalogueStore.state()
         // In the same read, after the catalogue: what became of the branch
         // or the pull request each copy installed from one came from — or,
@@ -228,7 +290,7 @@ extension DeckModel {
         // is applied, and not on a standing from before the read.
         var succeeded = false
         if case .refreshed = outcome { succeeded = true }
-        autoUpdates.read(succeeded: succeeded, hashing: reverifications)
+        autoUpdates.read(InstalledPlugins.officialSource, succeeded: succeeded, hashing: reverifications)
     }
 
     /// What became of the branch or the pull request each copy installed from
@@ -305,21 +367,25 @@ extension DeckModel {
         standings[id] ?? .folderOfYourOwn
     }
 
-    /// Whether a window's plugin is here to run.
+    /// Whether a window's plugin is here to run — **Reinstall** offered while
+    /// its copy's source can be read (`canRead`).
     public func presence(of id: PluginIdentifier) -> PluginPresence {
-        PluginPresence.of(id, plugins: plugins, installed: installed, readsCatalogue: settings.readsOfficialCatalogue)
+        PluginPresence.of(id, plugins: plugins, installed: installed,
+                          readsCatalogue: installed[id].map { canRead($0.source) } ?? false)
     }
 
-    /// What the repository has for an installed plugin, or nil when uDeck did
-    /// not install it or there is no catalogue to compare with.
+    /// What the repository has for an installed plugin — its own source's
+    /// head, never another source's — or nil when uDeck did not install it or
+    /// there is no catalogue to compare with.
     public func updateOffer(for id: String) -> UpdateOffer? {
-        guard let record = installed.plugins[id], let catalogue else { return nil }
-        return UpdateOffer.offered(record, head: catalogue.entry(id))
+        guard let record = installed.plugins[id], let catalogue = catalogue(of: record.source) else { return nil }
+        return UpdateOffer.offered(record, head: catalogue.entry(id), source: record.source)
     }
 
-    /// A catalogue row's state.
-    public func rowState(for entry: CatalogueEntry) -> CatalogueRowState {
-        CatalogueRowState.of(entry, record: installed.plugins[entry.id], folderExists: folderExists(entry.id))
+    /// A catalogue row's state, in the catalogue of `source`.
+    public func rowState(for entry: CatalogueEntry, in source: String = InstalledPlugins.officialSource) -> CatalogueRowState {
+        CatalogueRowState.of(entry, record: installed.plugins[entry.id], folderExists: folderExists(entry.id),
+                             source: source, official: catalogueAddress)
     }
 
     /// How many updates are waiting: the verified copies' — and those of
@@ -327,8 +393,11 @@ extension DeckModel {
     /// version offered once a pull request was merged as something else, and
     /// a newer version or other files along a branch or a pull request.
     public var updatesWaiting: Int {
-        installed.plugins.keys.filter { id in
-            folderExists(id) && (updateOffer(for: id)?.isWaiting == true || unverifiedRow(of: id)?.waiting == true)
+        // Only what the rows offer: a copy whose source cannot be read now is
+        // offered nothing (`canRead`).
+        installed.plugins.filter { id, record in
+            canRead(record.source) && folderExists(id)
+                && (updateOffer(for: id)?.isWaiting == true || unverifiedRow(of: id)?.waiting == true)
         }.count
     }
 
@@ -339,7 +408,7 @@ extension DeckModel {
     public func unverifiedRow(of id: String) -> UnverifiedRow? {
         UnverifiedRow.of(id, record: installed.plugins[id], followed: followed, head: refHeads[id],
                          defaultBranch: catalogue?.branch ?? catalogueState.defaultBranch,
-                         readsCatalogue: settings.readsOfficialCatalogue, verified: catalogue?.entry(id))
+                         readsCatalogue: readsOfficialRepository, verified: catalogue?.entry(id))
     }
 
     /// The default branch's head as the catalogue was read at: what a copy
@@ -362,8 +431,13 @@ extension DeckModel {
     /// itself, and its row says why.
     public func updateAsksDifferently(_ id: String) -> Bool {
         guard let now = installedManifest(id)?.permissions.capabilities,
-              let head = catalogue?.entry(id)?.manifest?.permissions.capabilities else { return false }
+              let head = headEntry(id)?.manifest?.permissions.capabilities else { return false }
         return AutoUpdate.asksDifferently(now, head)
+    }
+
+    /// What the head of the source `id`'s copy is of has for it.
+    func headEntry(_ id: String) -> CatalogueEntry? {
+        catalogue(of: installed.plugins[id]?.source ?? InstalledPlugins.officialSource)?.entry(id)
     }
 
     /// The manifest of the copy at `plugins/<id>`, as the folder was last
@@ -404,15 +478,22 @@ extension DeckModel {
                          changedHere: standings[id.rawValue] == .modifiedLocally)
     }
 
-    /// The page where a plugin's folder is read, at a commit.
-    public func folderPage(_ id: String, commit: String) -> URL? {
-        provider.folderPage("\(CommitListing.pluginsFolder)/\(id)", commit: commit)
+    /// The page where a plugin's folder is read, at a commit, in the
+    /// repository of `source`.
+    public func folderPage(_ id: String, commit: String, source: String = InstalledPlugins.officialSource) -> URL? {
+        let path = "\(CommitListing.pluginsFolder)/\(id)"
+        guard source != InstalledPlugins.officialSource else { return provider.folderPage(path, commit: commit) }
+        return sourceProvider(source)?.folderPage(path, commit: commit)
     }
 
-    /// *What changed*: the installed commit against the head.
+    /// *What changed*: the installed commit against the head of its own
+    /// source.
     public func whatChanged(_ id: String) -> URL? {
-        guard let record = installed.plugins[id], let head = catalogue?.commit else { return nil }
-        return provider.comparePage(from: record.commit, to: head)
+        guard let record = installed.plugins[id], let head = catalogue(of: record.source)?.commit else { return nil }
+        guard record.source != InstalledPlugins.officialSource else {
+            return provider.comparePage(from: record.commit, to: head)
+        }
+        return sourceProvider(record.source)?.comparePage(from: record.commit, to: head)
     }
 
     /// *What changed* along the line a copy of code nobody verified came
@@ -457,8 +538,13 @@ extension DeckModel {
                 (records, adopted) = Adoption.apply(installed, trees: trees, branch: Adoption.DefaultBranch(catalogue),
                                                     followed: followed, now: Date())
             }
-            let found = Reverification.of(plugins, installed: records, trees: trees,
-                                          head: catalogueWasRead ? .read(catalogue?.commit) : .notReadYet, now: Date())
+            var heads: [String: Reverification.Head] = [
+                InstalledPlugins.officialSource: catalogueWasRead ? .read(catalogue?.commit) : .notReadYet,
+            ]
+            for source in sources where sourceCataloguesRead.contains(source.id) {
+                heads[source.id] = .read(sourceCatalogues[source.id]?.commit)
+            }
+            let found = Reverification.of(plugins, installed: records, trees: trees, heads: heads, now: Date())
             if found.standings != standings { standings = found.standings }
             // What code held to its tree runs on from now (`requiredTree`):
             // its loop starts or stops only when its tree is another.
@@ -526,22 +612,33 @@ extension DeckModel {
     /// the update is asked about again on the minute's tick. False too when
     /// **Update verified plugins by themselves** or **Official catalogue** was
     /// switched off while it downloaded: then it is not made at all.
-    func quietUnlessActing(_ id: PluginIdentifier) async -> Bool {
-        guard switchedOnStill(id) else { return false }
+    func quietUnlessActing(_ id: PluginIdentifier, source: String) async -> Bool {
+        guard switchedOnStill(id, source: source) else { return false }
         pluginRuns.quiet(id.rawValue)
         guard !actionProcesses.isRunning(id.rawValue) else {
             DeckLog.plugins.info("\(id.rawValue, privacy: .public) has a card action running; it is not ended for an update by itself")
             return false
         }
-        return await quiet(id) && switchedOnStill(id)
+        return await quiet(id) && switchedOnStill(id, source: source)
     }
 
-    private func switchedOnStill(_ id: PluginIdentifier) -> Bool {
-        guard settings.verifiedPluginsUpdateThemselves else {
+    private func switchedOnStill(_ id: PluginIdentifier, source: String) -> Bool {
+        guard updatesByThemselves(source) else {
             DeckLog.plugins.info("\(id.rawValue, privacy: .public) does not update itself: switched off while it downloaded")
             return false
         }
         return true
+    }
+
+    /// Whether copies of `source` update themselves now: **Update verified
+    /// plugins by themselves** on, and the source readable — the official
+    /// one's under **Official catalogue**, and not while its address belongs
+    /// to another repository (`CatalogueError.officialRepositoryChanged`); a
+    /// source of one's own's while it is listed, whatever **Official
+    /// catalogue** says. Which copies do is each copy's own (`AutoUpdate`).
+    func updatesByThemselves(_ source: String) -> Bool {
+        AutoUpdate.switchedOn(source, settings: settings, sources: sources,
+                              officialChanged: catalogueState.lastError == .officialRepositoryChanged)
     }
 
     // MARK: - Updating by themselves
@@ -552,33 +649,42 @@ extension DeckModel {
     /// are hashed after each successful read of the catalogue, after each
     /// install, update or removal ends, and on the minute's tick while one
     /// waits; at any other time it does nothing.
+    ///
+    /// Source by source (`AutoUpdateSchedules`): the official one first, then
+    /// each source of one's own as `sources.json` lists them, each only after a
+    /// read of its own that succeeded, and each copy only among its own
+    /// source's — whatever any switch but its own source's says
+    /// (`updatesByThemselves`).
     func updateVerifiedPlugins() {
-        guard autoUpdates.asks else { return }
-        let switchedOn = settings.verifiedPluginsUpdateThemselves
-        guard switchedOn, installedProblem == nil, catalogue != nil else {
-            autoUpdates.asked(started: false, waits: false)
-            return
-        }
-        var waits = false
-        for id in installed.plugins.keys.sorted() {
-            switch autoUpdateVerdict(for: id, switchedOn: switchedOn) {
-            case .update(let version):
-                DeckLog.plugins.info("\(id, privacy: .public) updates itself to \(version, privacy: .public)")
-                if updateByItself(id) {
-                    autoUpdates.asked(started: true, waits: waits)
-                    return
-                }
-                DeckLog.plugins.info("\(id, privacy: .public) did not update itself: its place is not what was asked about")
-            case .later(let wait):
-                waits = true
-                DeckLog.plugins.info("\(id, privacy: .public) updates itself later: \(String(describing: wait), privacy: .public)")
-            case .not(.nothingWaiting):
-                break
-            case .not(let reason):
-                DeckLog.plugins.info("\(id, privacy: .public) does not update itself: \(String(describing: reason), privacy: .public)")
+        let asking = autoUpdates.asking(in: [InstalledPlugins.officialSource] + sources.map(\.id))
+        guard !asking.isEmpty else { return }
+        for source in asking {
+            let switchedOn = updatesByThemselves(source)
+            guard switchedOn, installedProblem == nil, catalogue(of: source) != nil else {
+                autoUpdates.asked(source, started: false, waits: false)
+                continue
             }
+            var waits = false
+            for id in installed.plugins.keys.sorted() where installed.plugins[id]?.source == source {
+                switch autoUpdateVerdict(for: id, switchedOn: switchedOn) {
+                case .update(let version):
+                    DeckLog.plugins.info("\(id, privacy: .public) updates itself to \(version, privacy: .public)")
+                    if updateByItself(id) {
+                        autoUpdates.asked(source, started: true, waits: waits)
+                        return
+                    }
+                    DeckLog.plugins.info("\(id, privacy: .public) did not update itself: its place is not what was asked about")
+                case .later(let wait):
+                    waits = true
+                    DeckLog.plugins.info("\(id, privacy: .public) updates itself later: \(String(describing: wait), privacy: .public)")
+                case .not(.nothingWaiting):
+                    break
+                case .not(let reason):
+                    DeckLog.plugins.info("\(id, privacy: .public) does not update itself: \(String(describing: reason), privacy: .public)")
+                }
+            }
+            autoUpdates.asked(source, started: false, waits: waits)
         }
-        autoUpdates.asked(started: false, waits: waits)
     }
 
     /// What `AutoUpdate` says of `id` now. Its place is hashed — what
@@ -593,7 +699,7 @@ extension DeckModel {
         let plugin = AutoUpdate.Plugin(
             record: record, offer: offer, standing: standing,
             asksNow: installedManifest(id)?.permissions.capabilities,
-            asksAtHead: catalogue?.entry(id)?.manifest?.permissions.capabilities,
+            asksAtHead: headEntry(id)?.manifest?.permissions.capabilities,
             place: place, actionRunning: actionProcesses.isRunning(id),
             failedSinceTheLastRead: autoUpdates.failures[id] != nil
         )
@@ -604,8 +710,10 @@ extension DeckModel {
     /// nothing shown — and when that step would warn first, nothing here
     /// answers it. Answers whether it started.
     private func updateByItself(_ id: String) -> Bool {
+        let source = installed.plugins[id]?.source ?? InstalledPlugins.officialSource
         guard case .install(let operation, let commit, let folder, let version, let origin)
-                = ShownPlace.update(id, catalogue: catalogue, in: paths, installed: installed, shown: nil) else {
+                = ShownPlace.update(id, catalogue: catalogue(of: source), in: paths, installed: installed, shown: nil,
+                                    official: catalogueAddress) else {
             return false
         }
         run(operation, id: id, commit: commit, folder: folder, version: version, from: origin, automatic: true)
@@ -632,55 +740,92 @@ extension DeckModel {
     /// **Install** — or **Replace…** over a folder of the operator's own or a
     /// link — at the commit the catalogue was built from, whatever the
     /// repository has done since: what the operator saw is what they get.
+    ///
+    /// `source` is the catalogue whose row it is: the official one, or a
+    /// source of one's own's — there, over a copy from elsewhere, **Install
+    /// from here…**, which names both first.
     @discardableResult
-    public func install(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        act(ShownPlace.install(id, catalogue: catalogue, in: paths, installed: installed, shown: shown), id: id)
+    public func install(_ id: String, from source: String = InstalledPlugins.officialSource,
+                        shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
+        act(ShownPlace.install(id, catalogue: catalogue(of: source), in: paths, installed: installed, shown: shown,
+                               official: catalogueAddress), id: id)
     }
 
     /// **Update**, or **Switch to** a version the repository went back to: the
-    /// plugin at the head.
+    /// plugin at the head of `source` — the copy's own source for the update a
+    /// row offers it, the official one for **Switch to verified**.
     @discardableResult
-    public func update(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        act(ShownPlace.update(id, catalogue: catalogue, in: paths, installed: installed, shown: shown), id: id)
+    public func update(_ id: String, from source: String = InstalledPlugins.officialSource,
+                       shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
+        act(ShownPlace.update(id, catalogue: catalogue(of: source), in: paths, installed: installed, shown: shown,
+                              official: catalogueAddress), id: id)
     }
 
     /// **Reinstall**: what the record says was installed, put back — over a
     /// copy changed on disk, which goes to the Trash, or where it has gone.
-    /// A download, so not while **Official catalogue** is off. Its warning
-    /// names the copy as it will be recorded: a pull request's copy the head
-    /// has comes back verified (`ShownPlace.recordedAs`).
+    /// A download, so not while the copy's source cannot be read — the
+    /// official one's with **Official catalogue** off, a source of one's
+    /// own's once it is no longer added. Its warning names the copy as it
+    /// will be recorded: a pull request's copy the head has comes back
+    /// verified (`ShownPlace.recordedAs`).
     @discardableResult
     public func reinstall(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        guard settings.readsOfficialCatalogue else { return .goAhead }
+        guard let record = installed.plugins[id], canRead(record.source) else { return .goAhead }
         return act(ShownPlace.reinstall(id, in: paths, installed: installed, shown: shown, head: defaultHead,
-                                        source: catalogueAddress), id: id)
+                                        source: catalogueAddress, sources: sources), id: id)
     }
 
     /// **Back to** the copy this one replaced, from where it came — named as
-    /// **Reinstall** names its copy.
+    /// **Reinstall** names its copy — and from the source it is a copy of
+    /// (`PreviousCopy.source`): nothing for a source no longer added.
     @discardableResult
     public func backToPrevious(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
         act(ShownPlace.backToPrevious(id, source: catalogueAddress, in: paths, installed: installed, shown: shown,
-                                      head: defaultHead), id: id)
+                                      head: defaultHead, sources: sources), id: id)
+    }
+
+    /// The source **Back to** of `id` takes its copy from, when it offers one
+    /// and that source can be read now — nil otherwise.
+    public func backToSource(_ id: String) -> String? {
+        guard let record = installed.plugins[id], let previous = record.previous,
+              case .source(let origin) = previous.source(record: record, official: catalogueAddress, sources: sources),
+              canRead(origin.source) else { return nil }
+        return origin.source
     }
 
     /// **Update** on a copy of code nobody verified: the folder at the head
     /// its branch or pull request moved to (`RefOffer`), from that line —
     /// pressed, never by itself; the card asks about it before it runs. A
-    /// download, so not while **Official catalogue** is off.
+    /// download, so not while the official repository cannot be read
+    /// (`readsOfficialRepository`).
     @discardableResult
     public func updateAlongItsLine(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        guard settings.readsOfficialCatalogue, unverifiedRow(of: id)?.lineOffer != nil else { return .goAhead }
+        guard readsOfficialRepository, unverifiedRow(of: id)?.lineOffer != nil else { return .goAhead }
         return act(ShownPlace.alongTheLine(id, head: refHeads[id], in: paths, installed: installed, shown: shown), id: id)
     }
 
     /// An earlier version, chosen from the default branch's history: installed
     /// and marked pinned.
+    ///
+    /// From the history of the source the copy is of: the official one's, or
+    /// a source of one's own's — its own default branch, its own copies.
     @discardableResult
     public func installEarlier(_ id: String, line: PluginHistory.Line, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        act(ShownPlace.earlier(id, line: line, source: catalogueAddress,
-                               branch: catalogueState.defaultBranch ?? catalogue?.branch,
-                               in: paths, installed: installed, shown: shown), id: id)
+        let source = installed.plugins[id]?.source ?? InstalledPlugins.officialSource
+        // Only a version the history of the copy's own source lists: a list
+        // read while the copy was of another source installs nothing.
+        guard EarlierVersions.installs(line, from: readHistory(id), readOf: historySources[id], copyOf: source) else {
+            return .goAhead
+        }
+        guard source != InstalledPlugins.officialSource else {
+            return act(ShownPlace.earlier(id, line: line, source: catalogueAddress,
+                                          branch: catalogueState.defaultBranch ?? catalogue?.branch,
+                                          in: paths, installed: installed, shown: shown), id: id)
+        }
+        guard let own = self.source(source) else { return .goAhead }
+        return act(ShownPlace.earlier(id, line: line, source: own.address,
+                                      branch: sourceStates[source]?.defaultBranch ?? sourceCatalogues[source]?.branch,
+                                      in: paths, installed: installed, shown: shown, sourceID: source), id: id)
     }
 
     /// Does what `step` says — every argument it carries is `ShownPlace`'s —
@@ -713,8 +858,10 @@ extension DeckModel {
     /// one for its branch's head; then one for the listing unless the cache
     /// has it, and the manifests of the plugins there that differ from the
     /// catalogue's head. Off, **Official
-    /// catalogue** governs this too: uDeck makes no request about plugins,
-    /// and says why nothing is looked up.
+    /// catalogue** governs this too: uDeck makes no request to the official
+    /// repository or its forks, and says why nothing is looked up — as it
+    /// does while the official address belongs to another repository
+    /// (`readsOfficialRepository`).
     public func lookUpLink(_ text: String) {
         linkLookups += 1
         let asked = linkLookups
@@ -722,7 +869,18 @@ extension DeckModel {
             linkLookup = .refused(.linkOff)
             return
         }
+        guard readsOfficialRepository else {
+            linkLookup = .refused(.catalogueOfficialRepositoryChanged)
+            return
+        }
         let official = catalogueAddress
+        // A branch, the page or a pull request of a source of one's own: its
+        // branches are not installed from yet — only its default branch,
+        // under Your sources — and nothing is asked.
+        if RepositoryLink.namesASource(text, official: official, sources: sources) {
+            linkLookup = .refused(.sourceBranchNotYet)
+            return
+        }
         let link: RepositoryLink
         switch RepositoryLink.read(text, official: official) {
         case .failure(let refusal):
@@ -732,7 +890,7 @@ extension DeckModel {
             link = read
         }
         linkLookup = .reading
-        let resolver = RefResolver(provider: provider, store: catalogueStore, limits: limits)
+        let resolver = RefResolver(provider: officialReader, store: catalogueStore, limits: limits)
         let store = catalogueStore
         let head = catalogue?.commit
         let branch = catalogueState.defaultBranch ?? catalogue?.branch
@@ -778,44 +936,66 @@ extension DeckModel {
     /// (`ShownPlace.installFromLink`).
     @discardableResult
     public func installFromLink(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        guard settings.readsOfficialCatalogue, case .resolved(let resolution)? = linkLookup else { return .goAhead }
+        guard readsOfficialRepository, case .resolved(let resolution)? = linkLookup else { return .goAhead }
         return act(ShownPlace.installFromLink(id, resolution: resolution, in: paths, installed: installed, shown: shown,
                                               source: catalogueAddress), id: id)
     }
 
-    /// Reads a plugin's earlier versions from its folder's history.
+    /// Reads a plugin's earlier versions from its folder's history — the
+    /// history of the default branch of the source its copy is of, through
+    /// that source's own provider.
     public func readEarlierVersions(_ id: String) {
-        guard settings.readsOfficialCatalogue, let head = catalogue?.commit,
-              let branch = catalogueState.defaultBranch ?? catalogue?.branch else { return }
-        if case .read(let history) = histories[id], history.headCommit == head { return }
+        let source = installed.plugins[id]?.source ?? InstalledPlugins.officialSource
+        guard canRead(source), let head = catalogue(of: source)?.commit,
+              let branch = catalogueState(of: source).defaultBranch ?? catalogue(of: source)?.branch else { return }
+        let reader: PluginHistoryReader
+        if source == InstalledPlugins.officialSource {
+            reader = PluginHistoryReader(provider: provider, store: catalogueStore)
+        } else if let own = sourceProvider(source) {
+            reader = PluginHistoryReader(provider: own, store: CatalogueStore(paths: paths, source: source))
+        } else {
+            return
+        }
+        if EarlierVersions.stands(readHistory(id), readOf: historySources[id], copyOf: source, head: head) { return }
         histories[id] = .reading
-        let reader = PluginHistoryReader(provider: provider, store: catalogueStore)
+        historySources[id] = source
         Task {
+            let came: HistoryLoad
             do {
-                let history = try await reader.read(id, branch: branch, head: head)
-                histories[id] = .read(history)
+                came = .read(try await reader.read(id, branch: branch, head: head))
             } catch {
-                histories[id] = .failed(OperationProblem(error))
+                came = .failed(OperationProblem(error))
             }
+            // An answer for a copy that is of another source since is not
+            // shown as its history.
+            if historySources[id] == source { histories[id] = came }
             catalogueState.rateLimit = limits.current
             persistRateLimit()
         }
+    }
+
+    /// The history last read for `id`, when it was read.
+    private func readHistory(_ id: String) -> PluginHistory? {
+        if case .read(let history)? = histories[id] { history } else { nil }
     }
 
     /// An operation at a commit that is not the head: its listing from the
     /// cache, or one request for it — to the repository the copy comes from.
     private func runAtCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
                              from origin: PluginOrigin) {
-        // Off, uDeck makes no request about plugins at all — whichever button
-        // was pressed, and whatever screen it was on.
-        guard settings.readsOfficialCatalogue, busyPlugin == nil else { return }
-        guard let provider = provider(for: origin) else {
+        // Nothing is asked of a source that cannot be read — the official one
+        // with **Official catalogue** off, a source no longer added —
+        // whichever button was pressed, and whatever screen it was on.
+        let origin = takenNow(origin)
+        guard canRead(origin.source), busyPlugin == nil else { return }
+        guard let provider = client(for: origin) else {
             operationProblems[id] = .catalogue(.notFound)
             return
         }
         busyPlugin = id
         operationProblems[id] = nil
-        let refresher = CatalogueRefresher(provider: provider, store: catalogueStore, limits: limits)
+        let refresher = CatalogueRefresher(provider: provider, store: CatalogueStore(paths: paths, source: origin.source),
+                                           limits: limits)
         Task {
             do {
                 let listing = try await refresher.listing(commit)
@@ -860,7 +1040,8 @@ extension DeckModel {
         from origin: PluginOrigin,
         automatic: Bool = false
     ) {
-        guard settings.readsOfficialCatalogue, busyPlugin == nil,
+        let origin = takenNow(origin)
+        guard canRead(origin.source), busyPlugin == nil,
               let identifier = PluginIdentifier(rawValue: id) else { return }
         guard installedProblem == nil else {
             operationProblems[id] = .recordsBroken(installedProblem ?? "")
@@ -869,18 +1050,21 @@ extension DeckModel {
         // Taken from where it came, and only from a repository a copy of its
         // line may be taken from: the installer refuses the rest too, before
         // a file is asked for (`PluginInstaller.stage`).
-        guard provider(for: origin) != nil else {
+        guard client(for: origin) != nil else {
             operationProblems[id] = .catalogue(.notFound)
             return
         }
         busyPlugin = id
         operationProblems[id] = nil
         autoUpdates.began(id)
+        // The copy's own source's head, which it is verified — or recorded —
+        // against, and the source its record names.
+        let head = catalogue(of: origin.source)
         let request = InstallRequest(
-            operation: operation, id: identifier, sourceRepository: catalogueAddress,
-            repository: origin.repository, ref: origin.ref, commit: commit, folder: folder, version: version,
-            headCommit: catalogue?.commit, headTree: catalogue?.entry(id)?.listing.tree,
-            defaultBranch: catalogue?.branch ?? catalogueState.defaultBranch, automatic: automatic
+            operation: operation, id: identifier, from: origin, sourceRepository: sourceRepository(of: origin.source),
+            commit: commit, folder: folder, version: version,
+            headCommit: head?.commit, headTree: head?.entry(id)?.listing.tree,
+            defaultBranch: head?.branch ?? catalogueState(of: origin.source).defaultBranch, automatic: automatic
         )
         // What **Look up** heard of the pull request or the branch this copy
         // comes from, if that is where it comes from, and when: kept with what
@@ -912,8 +1096,9 @@ extension DeckModel {
                 let manifest = await store.manifest(of: folder)
                 let staged = try await installer.stage(request, manifest: manifest)
                 defer { resume(identifier) }
+                let source = origin.source
                 let record = try await installer.commit(staged, once: { @Sendable in
-                    automatic ? await self.quietUnlessActing(identifier) : await self.quiet(identifier)
+                    automatic ? await self.quietUnlessActing(identifier, source: source) : await self.quiet(identifier)
                 })
                 DeckLog.plugins.info("\(id, privacy: .public) \(record.version, privacy: .public) is in place")
                 // Before the plugin runs again: it is quiet until `resume`.
@@ -922,7 +1107,7 @@ extension DeckModel {
                 reloadInstalled()
                 discoverPlugins()
             } catch {
-                if automatic, autoUpdates.ended(id, version: version, throwing: error) == .leftAsItWas {
+                if automatic, autoUpdates.ended(origin.source, id: id, version: version, throwing: error) == .leftAsItWas {
                     // A card action was running, the switch went off, or the
                     // operator's work came to the place: no failure, and the
                     // next asking says what becomes of it.
@@ -1045,6 +1230,7 @@ extension DeckModel {
         }
         snapshots[id.rawValue] = nil
         histories[id.rawValue] = nil
+        historySources[id.rawValue] = nil
         if followed.holds(id.rawValue) {
             followed.forget(id.rawValue)
             saveFollowed()
@@ -1179,7 +1365,7 @@ extension DeckModel {
         if !treesOnDisk.inQuestion { treesOnDisk.mayHaveChanged() }
     }
 
-    private func persistRateLimit() {
+    func persistRateLimit() {
         var state = catalogueStore.state()
         state.rateLimit = limits.current
         try? catalogueStore.save(state)

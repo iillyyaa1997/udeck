@@ -60,7 +60,10 @@ struct CatalogueSection: View {
                         .font(.callout).bold()
                         .accessibilityIdentifier("catalogue.updatesWaiting")
                 }
-                if let catalogue = model.catalogue {
+                // While the official address belongs to another repository,
+                // nothing of the catalogue read before is offered: uDeck asks
+                // it nothing but its number (`readsOfficialRepository`).
+                if let catalogue = model.catalogue, model.readsOfficialRepository {
                     if catalogue.entries.isEmpty {
                         Text(strings(.catalogueEmpty)).foregroundStyle(.secondary)
                     }
@@ -84,37 +87,19 @@ struct CatalogueSection: View {
         return strings(.catalogueChecked(source: source, at: Clock.text(success, strings)))
     }
 
-    /// Why the list is not fresh, when the last refresh did not finish.
+    /// Why the list is not fresh, when the last refresh did not finish — in
+    /// the official catalogue's words, which name GitHub (`CatalogueTrouble`).
     private var trouble: String? {
         guard let error = model.catalogueState.lastError else { return nil }
         let readAt = model.catalogue == nil ? nil : model.catalogueState.lastSuccess.map { Clock.text($0, strings) }
-        let source = model.catalogueAddress.description
-        switch error {
-        case .rateLimited(let until):
-            return strings(.catalogueLimited(readAt: readAt, until: Clock.text(until, strings)))
-        case .rawRateLimited(let until):
-            return strings(.catalogueRawLimited(until: Clock.text(until, strings)))
-        case .unreachable(let reason):
-            return strings(.catalogueUnreachable(reason: reason, readAt: readAt))
-        case .notFound:
-            return strings(.catalogueNotFound(source: source))
-        case .notARepository(let branch):
-            return strings(.catalogueNotARepository(source: source, branch: branch))
-        case .futureFormat(let declared):
-            return strings(.catalogueFutureFormat(declared: declared))
-        case .invalidPassport(let reason):
-            return strings(.catalogueInvalidPassport(source: source, reason: reason))
-        case .refused(let status):
-            return strings(.catalogueRefused(status: status))
-        case .badAnswer(let reason):
-            return strings(.catalogueBadAnswer(reason: reason))
-        case .arrivedDifferent(let path, let expected, let got):
-            return strings(.catalogueArrivedDifferent(path: path, expected: expected, got: got))
-        }
+        return strings(CatalogueTrouble.phrase(error, address: model.catalogueAddress.description, host: nil, readAt: readAt,
+                                               until: { Clock.text($0, strings) }))
     }
 }
 
-/// One plugin the catalogue offers.
+/// One plugin a catalogue offers — the official one's, or a source of one's
+/// own's (`source`, its id), whose rows are `source.<sid>.plugin.<id>.*` and
+/// carry **Unverified**, never **Verified**.
 ///
 /// Everything it shows comes from the listing and the manifest — none of it
 /// cost a download — and it has one button, the one that goes with its state.
@@ -122,6 +107,7 @@ struct CatalogueRowView: View {
     @Bindable var model: DeckModel
     var entry: CatalogueEntry
     var commit: String
+    var source: String = InstalledPlugins.officialSource
     @Environment(\.strings) private var strings
     @Environment(\.openURL) private var openURL
     @State private var details = false
@@ -143,7 +129,11 @@ struct CatalogueRowView: View {
 
     private var id: String { entry.id }
     private var manifest: PluginManifest? { entry.manifest(in: strings.language.rawValue) }
-    private var state: CatalogueRowState { model.rowState(for: entry) }
+    private var state: CatalogueRowState { model.rowState(for: entry, in: source) }
+    private var isOfficial: Bool { source == InstalledPlugins.officialSource }
+    /// What every control of the row is called: `catalogue.<id>` in the
+    /// official catalogue, `source.<sid>.plugin.<id>` in a source's.
+    private var named: String { isOfficial ? "catalogue.\(id)" : "source.\(source).plugin.\(id)" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -153,11 +143,19 @@ struct CatalogueRowView: View {
                     Text(manifest.version).font(.caption).monospacedDigit().foregroundStyle(.secondary)
                     if let author = manifest.author { Text(author).font(.caption).foregroundStyle(.secondary) }
                 }
-                // The official repository's mark: a maintainer read it before
-                // merging. Not "safe" — the strongest thing uDeck can honestly say.
-                Label(strings(.catalogueVerified), systemImage: "checkmark.seal.fill")
-                    .font(.caption).foregroundStyle(.green)
-                    .accessibilityIdentifier("catalogue.\(id).verified")
+                if isOfficial {
+                    // The official repository's mark: a maintainer read it
+                    // before merging. Not "safe" — the strongest thing uDeck
+                    // can honestly say.
+                    Label(strings(.catalogueVerified), systemImage: "checkmark.seal.fill")
+                        .font(.caption).foregroundStyle(.green)
+                        .accessibilityIdentifier("catalogue.\(id).verified")
+                } else {
+                    // A source nobody vouches for: never Verified (S4-07).
+                    Label(strings(.pluginMarkUnverified), systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange)
+                        .accessibilityIdentifier("\(named).mark")
+                }
                 Spacer()
                 action
             }
@@ -173,7 +171,7 @@ struct CatalogueRowView: View {
                                          unit: strings.language == .russian ? "Б" : "B",
                                          separator: strings.language == .russian ? "," : ".")
                 ))).font(.caption).foregroundStyle(.secondary)
-                if let page = model.folderPage(id, commit: commit) {
+                if let page = model.folderPage(id, commit: commit, source: source) {
                     Button(strings(.catalogueOpenOnGitHub)) { openURL(page) }
                         .buttonStyle(.link).font(.caption)
                 }
@@ -183,7 +181,7 @@ struct CatalogueRowView: View {
                 confirmation(confirming)
             }
             if let problem = model.operationProblems[id] {
-                ProblemText(problem: problem).accessibilityIdentifier("catalogue.\(id).problem")
+                ProblemText(problem: problem, source: model.source(source)).accessibilityIdentifier("\(named).problem")
             }
             if details {
                 ForEach(Array(entry.verdict.refusals.enumerated()), id: \.offset) { _, refusal in
@@ -213,28 +211,28 @@ struct CatalogueRowView: View {
                 // since is warned of first, as **Replace…** warns of it.
                 Button(strings(.catalogueInstall)) { press(.install) }
                     .disabled(model.busyPlugin != nil)
-                    .accessibilityIdentifier("catalogue.\(id).install")
+                    .accessibilityIdentifier("\(named).install")
             case .folderOfYourOwn:
                 Button(strings(.catalogueReplace)) { press(.install) }
                     .disabled(model.busyPlugin != nil)
-                    .accessibilityIdentifier("catalogue.\(id).replace")
+                    .accessibilityIdentifier("\(named).replace")
             case .installed(let offer):
                 switch offer {
                 case .newer, .changedStill:
                     Button(strings(.catalogueUpdate)) { press(.update) }
                         .disabled(model.busyPlugin != nil)
-                        .accessibilityIdentifier("catalogue.\(id).update")
+                        .accessibilityIdentifier("\(named).update")
                 case .older(let version):
                     Button(strings(.catalogueSwitchTo(version: version))) { press(.update) }
                         .disabled(model.busyPlugin != nil)
-                        .accessibilityIdentifier("catalogue.\(id).update")
+                        .accessibilityIdentifier("\(named).update")
                 default:
                     EmptyView()
                 }
             case .missing:
                 Button(strings(.windowReinstall)) { press(.reinstall) }
                     .disabled(model.busyPlugin != nil)
-                    .accessibilityIdentifier("catalogue.\(id).reinstall")
+                    .accessibilityIdentifier("\(named).reinstall")
             case .unverified(let version, nil, _):
                 // Code nobody verified is in this id's place: the row's copy
                 // is the verified one, offered as the switch it is — or as the
@@ -248,14 +246,19 @@ struct CatalogueRowView: View {
                 }
                     .disabled(model.busyPlugin != nil)
                     .accessibilityIdentifier("catalogue.\(id).switchToVerified")
+            case .fromElsewhere(_, _, nil, _):
+                // A source's row over a copy from elsewhere — the official
+                // one, another source: this source's copy in its place, after
+                // the warning that names both (`ShownPlace.Switch`).
+                Button(strings(.catalogueInstallFromHere)) { press(.install) }
+                    .disabled(model.busyPlugin != nil)
+                    .accessibilityIdentifier("\(named).installFromHere")
             case .unverified, .fromElsewhere:
-                // The official catalogue never comes to `.fromElsewhere`: that
-                // is a row of a source of one's own's.
                 EmptyView()
             case .cannotInstall:
                 Button(strings(.catalogueDetails)) { details.toggle() }
                     .buttonStyle(.link)
-                    .accessibilityIdentifier("catalogue.\(id).details")
+                    .accessibilityIdentifier("\(named).details")
             }
         }
     }
@@ -269,8 +272,8 @@ struct CatalogueRowView: View {
     private func press(_ action: Action, shown: ShownPlace.Place? = nil) {
         let came: ShownPlace.Press
         switch action {
-        case .install: came = model.install(id, shown: shown)
-        case .update: came = model.update(id, shown: shown)
+        case .install: came = model.install(id, from: source, shown: shown)
+        case .update: came = model.update(id, from: source, shown: shown)
         case .reinstall: came = model.reinstall(id, shown: shown)
         }
         if case .ask(let now) = came {
@@ -288,13 +291,13 @@ struct CatalogueRowView: View {
                 .font(.caption)
                 .foregroundStyle(isTrouble ? .orange : .secondary)
                 .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("catalogue.\(id).state")
+                .accessibilityIdentifier("\(named).state")
         }
     }
 
     private var isTrouble: Bool {
         switch state {
-        case .cannotInstall, .missing, .unverified: true
+        case .cannotInstall, .missing, .unverified, .fromElsewhere: true
         case .installed(.cannotRun): true
         default: false
         }
@@ -311,9 +314,20 @@ struct CatalogueRowView: View {
             (state.unverifiedLine(ref: model.installed.plugins[id]?.ref ?? PluginRef(kind: "", name: nil),
                                   fork: model.installed.plugins[id]?.origin.fork(official: model.catalogueAddress), id: id,
                                   path: model.pluginsDirectoryDisplayPath,
-                                  lifecycle: model.unverifiedRow(of: id)?.lifecycle) ?? []).map { strings($0) }.joined(separator: " — ")
-        case .fromElsewhere(let copy, _, _, _): strings(.catalogueInstalledFromElsewhere(copy))
+                                  lifecycle: model.unverifiedRow(of: id)?.lifecycle,
+                                  source: sourceOfTheCopy) ?? []).map { strings($0) }.joined(separator: " — ")
+        case .fromElsewhere(let copy, _, let refusal, let folderGone):
+            ([.catalogueInstalledFromElsewhere(copy)]
+                + (folderGone ? [.catalogueMissing(id: id, path: model.pluginsDirectoryDisplayPath)] : [])
+                + (refusal.map { [.catalogueRefusal($0)] } ?? [])).map { strings($0) }.joined(separator: " — ")
         }
+    }
+
+    /// The address of the source of one's own the copy at this id is of,
+    /// when it is one's: what the official row says it was installed from.
+    private var sourceOfTheCopy: String? {
+        guard let record = model.installed.plugins[id], record.source != InstalledPlugins.officialSource else { return nil }
+        return record.repository.description
     }
 
     private func confirmation(_ confirmation: Confirmation) -> some View {
@@ -328,7 +342,11 @@ struct CatalogueRowView: View {
                                            link: shown.link.map { model.displayPath($0) }))
         switch confirmation.then {
         case .install:
-            button = strings(.catalogueReplace)
+            if case .fromElsewhere = state {
+                button = strings(.catalogueInstallFromHere)
+            } else {
+                button = strings(.catalogueReplace)
+            }
         case .update:
             // Across two lines of history, the verified copy's button, by the
             // name the row gave it (`UnverifiedRow.verifiedButton`).
@@ -340,10 +358,10 @@ struct CatalogueRowView: View {
         }
         return VStack(alignment: .leading, spacing: 5) {
             Text(text).font(.caption).fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("catalogue.\(id).confirmText")
+                .accessibilityIdentifier("\(named).confirmText")
             HStack {
                 Button(button, role: .destructive) { press(confirmation.then, shown: shown) }
-                    .accessibilityIdentifier("catalogue.\(id).confirm")
+                    .accessibilityIdentifier("\(named).confirm")
                 Button(strings(.actionCancel)) { self.confirming = nil }
             }
         }
@@ -364,7 +382,11 @@ struct InstalledRepositoryControls: View {
     @Environment(\.strings) private var strings
     @Environment(\.openURL) private var openURL
     @State private var confirming: Confirmation?
-    @State private var showingHistory = false
+    /// The source whose history **Earlier versions…** was opened for: the
+    /// list is shown while the copy is of that source still, and goes when
+    /// another source's copy takes its place (`EarlierVersions`).
+    @State private var historyOf: String?
+    private var showingHistory: Bool { historyOf != nil && historyOf == record?.source }
 
     /// The warning up on this row: what it said, and the button it goes
     /// with. Its button is held to it (`ShownPlace`).
@@ -385,8 +407,10 @@ struct InstalledRepositoryControls: View {
 
     private var record: InstalledRecord? { model.installed.plugins[id] }
     private var standing: PluginStanding { model.standing(of: id) }
+    /// What its own source's head has for it — while that source can be read.
     private var offer: UpdateOffer? {
-        model.settings.readsOfficialCatalogue ? model.updateOffer(for: id) : nil
+        guard let record, model.canRead(record.source) else { return nil }
+        return model.updateOffer(for: id)
     }
     /// What a copy of code nobody verified says and offers (`UnverifiedRow`).
     private var unverified: UnverifiedRow? { model.unverifiedRow(of: id) }
@@ -401,7 +425,8 @@ struct InstalledRepositoryControls: View {
                     if !record.isOfficialDefault, model.linkedFolder(id) == nil {
                         Text("·").font(.caption).foregroundStyle(.secondary)
                     }
-                    Text(strings(record.fromPhrase(official: model.catalogueAddress)))
+                    Text(strings(record.fromPhrase(official: model.catalogueAddress,
+                                                   sources: model.sourcesProblem == nil ? model.sources : nil)))
                         .font(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("plugin.\(id).from")
                     if let page = record.refPage {
@@ -467,7 +492,8 @@ struct InstalledRepositoryControls: View {
                     .accessibilityIdentifier("plugin.\(id).updateByItselfFailed")
             }
             if let problem = model.operationProblems[id] {
-                ProblemText(problem: problem).accessibilityIdentifier("plugin.\(id).problem")
+                ProblemText(problem: problem, source: record.flatMap { model.source($0.source) })
+                    .accessibilityIdentifier("plugin.\(id).problem")
             }
             if showingHistory {
                 HistoryList(model: model, id: id, installedCommit: record?.commit)
@@ -544,7 +570,7 @@ struct InstalledRepositoryControls: View {
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).update")
             }
-            if let record, standing.offersReinstall(readsCatalogue: model.settings.readsOfficialCatalogue) {
+            if let record, standing.offersReinstall(readsCatalogue: model.canRead(record.source)) {
                 Button(strings(.catalogueReinstall(version: record.version))) { press(.reinstall) }
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).reinstall")
@@ -554,14 +580,14 @@ struct InstalledRepositoryControls: View {
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).switchToVerified")
             }
-            if let previous = record?.previous, model.settings.readsOfficialCatalogue {
+            if let previous = record?.previous, model.backToSource(id) != nil {
                 Button(strings(.catalogueBackTo(version: previous.version))) { press(.backTo) }
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).backTo")
             }
-            if record != nil, model.settings.readsOfficialCatalogue {
+            if let record, model.canRead(record.source) {
                 Button(strings(.catalogueEarlierVersions)) {
-                    showingHistory.toggle()
+                    historyOf = showingHistory ? nil : record.source
                     if showingHistory { model.readEarlierVersions(id) }
                 }
                 .disabled(busy && !showingHistory)
@@ -584,10 +610,14 @@ struct InstalledRepositoryControls: View {
         let came: ShownPlace.Press
         switch action {
         case .remove: came = model.remove(id, shown: shown)
-        case .update: came = model.update(id, shown: shown)
+        case .update:
+            // What its own source's head has — or, its pull request merged as
+            // something else, the verified copy (`UnverifiedRow.verifiedIsAnUpdate`).
+            came = model.update(id, from: offer != nil ? record?.source ?? InstalledPlugins.officialSource
+                                                       : InstalledPlugins.officialSource, shown: shown)
         case .reinstall: came = model.reinstall(id, shown: shown)
         case .backTo: came = model.backToPrevious(id, shown: shown)
-        case .switchToVerified: came = model.update(id, shown: shown)
+        case .switchToVerified: came = model.update(id, from: InstalledPlugins.officialSource, shown: shown)
         case .alongTheLine: came = model.updateAlongItsLine(id, shown: shown)
         }
         if case .ask(let now) = came {
@@ -781,8 +811,8 @@ struct MissingPluginRow: View {
 
 /// **Install from a link…** (stage 3), on **Link a folder…**'s row: it opens
 /// the link sheet under them, or closes it. Greyed out with **Official
-/// catalogue** off: uDeck makes no request about plugins then, and the sheet
-/// says why (`LinkInstallSheet`).
+/// catalogue** off: uDeck makes no request to the official repository or its
+/// forks then, and the sheet says why (`LinkInstallSheet`).
 struct LinkInstallButton: View {
     @Bindable var model: DeckModel
     @Binding var open: Bool
@@ -871,6 +901,13 @@ struct LinkInstallSheet: View {
                 .font(.caption).foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("link.refused")
+            if case .linkNotAForkAddAsASource(let repository, _) = phrase {
+                // Nothing is added until Add is pressed in its sheet.
+                Button(strings(.linkAddAsASource)) {
+                    model.openAddSource(prefilled: "https://\(repository)")
+                }
+                .accessibilityIdentifier("link.addAsASource")
+            }
         case .failed(let problem)?:
             ProblemText(problem: problem).accessibilityIdentifier("link.refused")
         case .catalogue(let plugin)?:
@@ -1053,9 +1090,11 @@ enum OfferText {
     }
 }
 
-/// An operation's problem, in the operator's words.
+/// An operation's problem, in the operator's words — of a copy of a source of
+/// one's own (`source`), naming that source's host and address.
 struct ProblemText: View {
     var problem: OperationProblem
+    var source: OwnSource? = nil
     @Environment(\.strings) private var strings
 
     var body: some View {
@@ -1078,6 +1117,9 @@ struct ProblemText: View {
         case .cannotWrite(let reason): [strings(.catalogueCannotWrite(reason: reason))]
         case .stillRunning(let id): [strings(.catalogueStillRunning(id: id))]
         case .commitGone(let commit): [strings(.catalogueCommitGone(commit: commit))]
+        case .catalogue(let error) where source != nil:
+            [strings(CatalogueTrouble.phrase(error, address: source?.address.description ?? "", host: source?.host,
+                                             readAt: nil, until: { Clock.text($0, strings) }))]
         case .catalogue(let error):
             switch error {
             case .unreachable(let reason): [strings(.catalogueUnreachable(reason: reason, readAt: nil))]
@@ -1088,6 +1130,7 @@ struct ProblemText: View {
             case .rawRateLimited(let until): [strings(.catalogueRawLimited(until: Clock.text(until, strings)))]
             case .arrivedDifferent(let path, let expected, let got):
                 [strings(.catalogueArrivedDifferent(path: path, expected: expected, got: got))]
+            case .officialRepositoryChanged: [strings(.catalogueOfficialRepositoryChanged)]
             default: ["\(error)"]
             }
         }

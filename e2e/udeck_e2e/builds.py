@@ -317,8 +317,12 @@ class Builder:
                 "UDeckPluginsRawBase": f"{self.plugins_url.rstrip('/')}/raw",
             }),
             # The repository stays the official one's name, which is what the
-            # fake answers for.
+            # fake answers for — and its number is the fake's, which the
+            # catalogue's describe is held to; the shipped build's and the
+            # smoke's are GitHub's own (stage 4, S4-13).
             "UDeckPluginsRepository": config.PLUGINS_REPOSITORY,
+            "UDeckPluginsRepositoryID": (self._shipped_repository_id(step) if self.plugins_url is None
+                                         else config.PLUGINS_REPOSITORY_ID),
         }
         wrong = [f"{key} is {plist.get(key)!r}, not {value!r}" for key, value in wanted.items() if plist.get(key) != value]
         transport = plist.get("NSAppTransportSecurity")
@@ -348,6 +352,18 @@ class Builder:
         if addresses != {"UDeckPluginsAPIBase": config.GITHUB_API, "UDeckPluginsRawBase": GITHUB_RAW}:
             raise LabError(step, f"{SHIPPED_PLIST} does not ship GitHub's own addresses: {addresses}")
         return addresses
+
+    def _shipped_repository_id(self, step: str) -> int:
+        """The official repository's number as this checkout ships it (`SHIPPED_PLIST`): GitHub's own."""
+        try:
+            shipped = plistlib.loads((self.repo_root / SHIPPED_PLIST).read_bytes())
+        except (OSError, ValueError) as error:
+            raise LabError(step, f"could not read {SHIPPED_PLIST}: {error}") from None
+        number = shipped.get("UDeckPluginsRepositoryID")
+        if number != config.SHIPPED_REPOSITORY_ID:
+            raise LabError(step, f"{SHIPPED_PLIST} ships UDeckPluginsRepositoryID {number!r}, not GitHub's own "
+                                 f"{config.SHIPPED_REPOSITORY_ID} for {config.PLUGINS_REPOSITORY}")
+        return number
 
     def shown(self, path: Path) -> str:
         try:

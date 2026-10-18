@@ -71,7 +71,16 @@ public struct CatalogueRefresher: Sendable {
             state.failuresInARow = 0
             outcome = .refreshed(head: head, changed: changed)
         } catch {
-            let reason = Self.reason(error, branch: state.defaultBranch)
+            var reason = Self.reason(error, branch: state.defaultBranch)
+            // The official address answered another repository's number
+            // (`OfficialRepositoryCheck`): the next read asks the number again
+            // before anything else, and a read that fails before a describe
+            // answers says nothing of whose the address is now — what was heard
+            // last stands, until the number is the official repository's own.
+            if state.lastError == .officialRepositoryChanged, state.defaultBranchReadAt == nil {
+                reason = .officialRepositoryChanged
+            }
+            if reason == .officialRepositoryChanged { state.defaultBranchReadAt = nil }
             state.lastError = reason
             state.failuresInARow += 1
             outcome = .failed(reason)

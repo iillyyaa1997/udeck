@@ -287,8 +287,10 @@ verified plugin does; merged with changes, its row offers the verified version,
 and closed without being merged, its row says so and it keeps running. **Settings →
 Plugins → Update verified plugins by themselves** turns that off, and every
 update waits for a press. **Settings → Plugins → Official catalogue** turns all
-of it off: uDeck then makes no request about plugins at all, the plugins you
-have keep running, and uDeck stops knowing about their updates.
+of it off for the official repository: uDeck then makes no request to it, the
+plugins you have from it keep running, and uDeck stops knowing about their
+updates. A repository you added yourself under **Settings → Plugins → Your
+sources** is read the same way, anonymously, until you remove it.
 What exactly is read, cached and counted against GitHub's limits is in
 [docs/plugin-repository.md](docs/plugin-repository.md#what-udeck-fetches-and-when).
 

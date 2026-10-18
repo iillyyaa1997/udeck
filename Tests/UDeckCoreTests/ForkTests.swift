@@ -242,17 +242,17 @@ struct ForkTests {
     func refusalPhrases() {
         let official = "github.com/iillyyaa1997/udeck-plugins"
         #expect(LinkRefusal.phrase(RefResolver.Refusal.notAFork(RepositoryAddress(path: "someone/elsewhere")), official: .official)
-                == .linkNotAFork(repository: "github.com/someone/elsewhere", official: official))
+                == .linkNotAForkAddAsASource(repository: "github.com/someone/elsewhere", official: official))
         #expect(LinkRefusal.phrase(RefResolver.Refusal.notFound(.forkRepository(Self.fork)), official: .official)
                 == .linkNotFound(.forkRepository(Self.fork), official: official))
         let english = Strings(.english)
         let russian = Strings(.russian)
-        #expect(english(.linkNotAFork(repository: "github.com/someone/elsewhere", official: official))
-                == "github.com/someone/elsewhere is not a fork of github.com/iillyyaa1997/udeck-plugins. Plugins come from "
-                + "github.com/iillyyaa1997/udeck-plugins and its forks for now; other repositories come later, as sources of their own.")
-        #expect(russian(.linkNotAFork(repository: "github.com/someone/elsewhere", official: official))
-                == "github.com/someone/elsewhere — не форк github.com/iillyyaa1997/udeck-plugins. Плагины пока приходят из "
-                + "github.com/iillyyaa1997/udeck-plugins и его форков; другие репозитории появятся позже, как отдельные источники.")
+        #expect(english(.linkNotAForkAddAsASource(repository: "github.com/someone/elsewhere", official: official))
+                == "github.com/someone/elsewhere is not a fork of github.com/iillyyaa1997/udeck-plugins. To install from it, "
+                + "add it as a source of its own.")
+        #expect(russian(.linkNotAForkAddAsASource(repository: "github.com/someone/elsewhere", official: official))
+                == "github.com/someone/elsewhere — не форк github.com/iillyyaa1997/udeck-plugins. Чтобы ставить из него, "
+                + "добавьте его как отдельный источник.")
         #expect(english(.linkNotFound(.forkBranch(Self.fork, branch: "x", plugin: nil), official: official))
                 == "github.com/someone/udeck-plugins has no branch x — it may have been deleted.")
         #expect(russian(.linkNotFound(.forkBranch(Self.fork, branch: "x", plugin: nil), official: official))

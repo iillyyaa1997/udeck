@@ -578,7 +578,7 @@ struct InstallFromLinkTests {
         (RefResolver.Refusal.notFound(.pullRequest(9)), .linkNotFound(.pullRequest(9), official: repository)),
         (RefResolver.Refusal.notFound(.branch("gone", plugin: nil)), .linkNotFound(.branch("gone", plugin: nil), official: repository)),
         (RefResolver.Refusal.notAFork(RepositoryAddress(path: "someone/elsewhere")),
-         .linkNotAFork(repository: "github.com/someone/elsewhere", official: repository)),
+         .linkNotAForkAddAsASource(repository: "github.com/someone/elsewhere", official: repository)),
         (RefResolver.Refusal.notFound(.forkBranch(RepositoryAddress(path: "someone/udeck-plugins"), branch: "x", plugin: nil)),
          .linkNotFound(.forkBranch(RepositoryAddress(path: "someone/udeck-plugins"), branch: "x", plugin: nil),
                        official: repository)),
@@ -603,7 +603,7 @@ struct InstallFromLinkTests {
             #expect(strings(.linkRefused(.empty, official: Self.repository)).contains(Self.repository))
             #expect(strings(.linkNotFound(.pullRequest(9), official: Self.repository)).contains("#9"))
             #expect(strings(.linkNotFound(.branch("gone", plugin: nil), official: Self.repository)).contains("gone"))
-            let notAFork = strings(.linkNotAFork(repository: "github.com/someone/elsewhere", official: Self.repository))
+            let notAFork = strings(.linkNotAForkAddAsASource(repository: "github.com/someone/elsewhere", official: Self.repository))
             #expect(notAFork.contains("github.com/someone/elsewhere") && notAFork.contains(Self.repository))
             #expect(strings(.linkIsTheCatalogue(official: Self.repository, plugin: "uptime")).contains("uptime"))
             #expect(strings(.linkHead(ref: .pullRequest(3), commit: "a1b2c3d")).contains("#3")

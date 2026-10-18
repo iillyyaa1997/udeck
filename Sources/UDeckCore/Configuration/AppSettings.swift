@@ -111,8 +111,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// On from the first launch, because it is what makes uDeck convenient to
     /// somebody who has never heard of a plugin repository — and optional so
     /// that the settings file says nothing until the operator switches it off.
-    /// Off, uDeck makes no request about plugins at all; installed plugins keep
-    /// running, and uDeck stops knowing about their updates.
+    /// Off, uDeck makes no request to the official repository or its forks;
+    /// the sources added are read until they are removed (S4-04), installed
+    /// plugins keep running, and uDeck stops knowing about the updates of
+    /// those from the official repository.
     public var officialCatalogue: Bool?
 
     /// The catalogue switch as it stands.
@@ -136,9 +138,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// as well (`verifiedPluginsUpdateThemselves`).
     public var updatesVerifiedByThemselves: Bool { autoUpdateVerified ?? true }
 
-    /// Whether a verified plugin updates itself now: the switch, and
-    /// **Official catalogue** with it — off, uDeck makes no request about
-    /// plugins at all. What `AutoUpdate.verdict` is given as `switchedOn`.
+    /// Whether a verified plugin of the official source updates itself now:
+    /// the switch, and **Official catalogue** with it — off, uDeck makes no
+    /// request to the official repository. A source's own copies decide by
+    /// their source (`AutoUpdate.switchedOn`).
     public var verifiedPluginsUpdateThemselves: Bool { readsOfficialCatalogue && updatesVerifiedByThemselves }
 
     /// Whether every run of a linked folder is written into its run log

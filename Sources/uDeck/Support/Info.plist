@@ -38,6 +38,8 @@
     <string>https://raw.githubusercontent.com</string>
     <key>UDeckPluginsRepository</key>
     <string>iillyyaa1997/udeck-plugins</string>
+    <key>UDeckPluginsRepositoryID</key>
+    <integer>1393324153</integer>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright 2026 Ilya Volkov. Licensed under the Apache License, Version 2.0.</string>
     <key>NSSupportsAutomaticTermination</key>

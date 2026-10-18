@@ -744,6 +744,186 @@ def test_every_two_fixture_commits_compare_as_git_compares_them(tmp_path):
             assert said[:3] == (status, ahead, behind), (base, head)
 
 
+# --- Repositories of their own (stage 4) ------------------------------------------------------
+
+
+TEAM = "someone/team-plugins"
+TEAM_ID = 900000101
+SOURCES = plugin_repository.FIXTURES / "sources" / "github"
+
+
+def test_the_repositories_of_their_own_are_what_the_source_checks_are_written_against():
+    """someone/team-plugins: t1 with team-clock 1.0.0 asking for nothing, team-ping 1.0.0 asking for one command and an
+    uptime 1.0.0 of its own asking for what the official c1's asks; t2 with 1.1.0 of both asking the same; t3 with
+    team-clock 1.2.0 asking for one command more. someone/not-plugins without a passport; someone/squatter another
+    repository, with another number. And the official repository's own number."""
+    team = fake_github.Source(str(SOURCES / TEAM), TEAM)
+    assert team.id == TEAM_ID and team.repository.names == ["t1", "t2", "t3"] and not team.repository.parents
+    for commit, clock, clock_asks, ping in (("t1", "1.0.0", None, "1.0.0"), ("t2", "1.1.0", None, "1.1.0"),
+                                            ("t3", "1.2.0", {"exec": ["sysctl"]}, "1.1.0")):
+        plugins = SOURCES / TEAM / commit / "plugins"
+        assert sorted(p.name for p in plugins.iterdir()) == ["team-clock", "team-ping", "uptime"]
+        manifest = json.loads((plugins / "team-clock" / "manifest.json").read_text())
+        assert manifest["version"] == clock and manifest.get("permissions") == clock_asks, commit
+        manifest = json.loads((plugins / "team-ping" / "manifest.json").read_text())
+        assert manifest["version"] == ping and manifest["permissions"] == {"exec": ["sysctl"]}, commit
+        ours = json.loads((plugins / "uptime" / "manifest.json").read_text())
+        official = json.loads((plugin_repository.FIXTURES / "c1" / "plugins" / "uptime" / "manifest.json").read_text())
+        assert ours["version"] == official["version"] == "1.0.0" and ours["permissions"] == official["permissions"]
+        assert team.repository.commits[commit].snapshot.at("plugins/uptime") != fake_github.Repository(
+            str(plugin_repository.FIXTURES)).commits["c1"].snapshot.at("plugins/uptime"), "a clash of ids, not a copy"
+        for plugin in ("team-clock", "team-ping"):
+            script = plugins / plugin / "run.sh"
+            assert os.access(script, os.X_OK) and "<<" not in script.read_text(), "no here-document"
+        assert json.loads((SOURCES / TEAM / commit / "udeck-plugins.json").read_text())["name"] == "Team plugins"
+    bare = fake_github.Source(str(SOURCES / "someone" / "not-plugins"), "someone/not-plugins")
+    assert bare.repository.commits["n1"].snapshot.at("udeck-plugins.json") is None
+    squatter = fake_github.Source(str(SOURCES / "someone" / "squatter"), "someone/squatter")
+    assert squatter.id != team.id and fake_github.read_number(str(plugin_repository.FIXTURES / "id")) == config.PLUGINS_REPOSITORY_ID
+    found = fake_github.read_sources(str(plugin_repository.FIXTURES))
+    assert sorted(found) == ["someone/not-plugins", "someone/squatter", TEAM]
+
+
+def test_two_repositories_of_their_own_with_one_number_are_refused(tmp_path):
+    root = tmp_path / "repository"
+    shutil.copytree(plugin_repository.FIXTURES, root, symlinks=True)
+    (root / "sources" / "github" / "someone" / "squatter" / "id").write_text(f"{TEAM_ID}\n")
+    with pytest.raises(ValueError, match="share a number"):
+        fake_github.read_sources(str(root))
+    (root / "sources" / "github" / "someone" / "squatter" / "id").write_text(f"{config.PLUGINS_REPOSITORY_ID}\n")
+    with pytest.raises(ValueError, match="official repository's number"):
+        fake_github.Fake(str(root), REPOSITORY, str(tmp_path / "log"))
+
+
+@needs_git
+def test_every_commit_of_a_repository_of_its_own_hashes_as_git_hashes_it(tmp_path):
+    """The hashes the source checks judge uDeck's Swift by: git's own, for every commit of every repository of its own."""
+    for folder in sorted(p for p in SOURCES.glob("*/*") if p.is_dir()):
+        repository = fake_github.Repository(str(folder))
+        work = tmp_path / folder.name
+        work.mkdir()
+        git("init", "-q", cwd=work)
+        git("config", "core.fileMode", "true", cwd=work)
+        parent = None
+        for name in repository.names:
+            commit = repository.commits[name]
+            for child in work.iterdir():
+                if child.name != ".git":
+                    shutil.rmtree(child) if child.is_dir() else child.unlink()
+            shutil.copytree(folder / name, work, symlinks=True, dirs_exist_ok=True)
+            git("add", "-A", cwd=work)
+            tree = git("write-tree", cwd=work)
+            assert commit.snapshot.root == tree, (folder.name, name)
+            stamp = f"{commit.when} +0000"
+            env = {
+                "GIT_AUTHOR_NAME": "uDeck lab", "GIT_AUTHOR_EMAIL": "lab@udeck.invalid", "GIT_AUTHOR_DATE": stamp,
+                "GIT_COMMITTER_NAME": "uDeck lab", "GIT_COMMITTER_EMAIL": "lab@udeck.invalid", "GIT_COMMITTER_DATE": stamp,
+            }  # fmt: skip
+            made = git("commit-tree", tree, "-m", commit.message, *(["-p", parent] if parent else []), cwd=work, env=env)
+            assert commit.sha == made, (folder.name, name)
+            parent = made
+
+
+def test_a_repository_of_its_own_is_served_by_its_name_and_by_its_number(served):
+    """`/repos/{o}/{r}` once, and `/repositories/{id}/…` for everything after, as GitHub serves a repository; its raw
+    files by its name; its main where the lab says; another number is 404."""
+    facts = served.json("/lab/facts")[2]
+    team = facts["sources"][TEAM]
+    t1, t2 = team["commits"]["t1"]["sha"], team["commits"]["t2"]["sha"]
+    assert team["id"] == TEAM_ID and facts["id"] == config.PLUGINS_REPOSITORY_ID
+    served.state(sources={TEAM: {"main": "t1"}})
+    status, _, by_name = served.json(f"/api/repos/{TEAM}")
+    _, _, by_number = served.json(f"/api/repositories/{TEAM_ID}")
+    assert status == 200 and by_name == by_number == {
+        "id": TEAM_ID, "full_name": TEAM, "default_branch": "main", "private": False, "fork": False,
+        "owner": {"login": "someone", "type": "User"}}
+    assert served.json("/api/repos/Someone/Team-Plugins")[2]["full_name"] == TEAM, "GitHub's names whatever their case"
+    status, headers, body = served.get(f"/api/repositories/{TEAM_ID}/commits/main", SHA_ONLY)
+    assert (status, body.decode(), headers["ETag"]) == (200, t1, f'"{t1}"')
+    assert served.get(f"/api/repositories/{TEAM_ID}/commits/main", {**SHA_ONLY, "If-None-Match": f'"{t1}"'})[0] == 304
+    status, _, listing = served.json(f"/api/repositories/{TEAM_ID}/git/trees/{t1}?recursive=1")
+    paths = {entry["path"]: entry for entry in listing["tree"]}
+    assert status == 200 and paths["plugins/team-clock/run.sh"]["mode"] == "100755"
+    status, _, data = served.get(f"/raw/{TEAM}/{t1}/plugins/team-clock/manifest.json")
+    assert status == 200 and fake_github.blob_id(data) == paths["plugins/team-clock/manifest.json"]["sha"]
+    status, _, passport = served.json(f"/raw/{TEAM}/{t1}/udeck-plugins.json")
+    assert status == 200 and passport["name"] == "Team plugins"
+    served.state(sources={TEAM: {"main": "t2"}})
+    assert served.get(f"/api/repositories/{TEAM_ID}/commits/main", SHA_ONLY)[2].decode() == t2
+    _, _, history = served.json(f"/api/repositories/{TEAM_ID}/commits?sha=main&path=plugins/team-clock&per_page=100")
+    assert [entry["sha"] for entry in history] == [t2, t1]
+    assert served.json(f"/api/repositories/{TEAM_ID}/compare/{t1}...{t2}")[2]["status"] == "ahead"
+    assert served.get(f"/api/repositories/{TEAM_ID}/pulls/1")[0] == 404
+    assert served.get("/api/repositories/1")[0] == 404 and served.get("/api/repositories/x")[0] == 404
+    assert served.get(f"/raw/{TEAM}/{t1}/plugins")[0] == 404, "a folder is no file"
+    assert served.get(f"/raw/someone/not-plugins/{t1}/udeck-plugins.json")[0] == 404, "another repository's commit"
+    n1 = facts["sources"]["someone/not-plugins"]["commits"]["n1"]["sha"]
+    assert served.get(f"/raw/someone/not-plugins/{n1}/udeck-plugins.json")[0] == 404, "no passport"
+
+
+def test_a_renamed_repository_keeps_its_number_and_another_takes_its_old_name(served):
+    """The lab renames someone/team-plugins (the same number) and makes someone/squatter at the old name: by its number
+    it says its new name, by the old name it is the other one, and its raw files go by the name it has now."""
+    facts = served.json("/lab/facts")[2]
+    t1 = facts["sources"][TEAM]["commits"]["t1"]["sha"]
+    q1 = facts["sources"]["someone/squatter"]["commits"]["q1"]["sha"]
+    squatter_id = facts["sources"]["someone/squatter"]["id"]
+    served.state(served={"someone/team-plugins-2": TEAM, TEAM: "someone/squatter"})
+    _, _, renamed = served.json(f"/api/repositories/{TEAM_ID}")
+    assert renamed["full_name"] == "someone/team-plugins-2" and renamed["id"] == TEAM_ID
+    _, _, at_the_old_name = served.json(f"/api/repos/{TEAM}")
+    assert at_the_old_name["id"] == squatter_id != TEAM_ID and at_the_old_name["full_name"] == TEAM
+    assert served.get(f"/api/repositories/{TEAM_ID}/commits/main", SHA_ONLY)[2].decode() == t1, "its own head, by number"
+    assert served.get(f"/api/repos/{TEAM}/commits/main", SHA_ONLY)[2].decode() == q1, "the other one's, by the old name"
+    assert served.get(f"/raw/someone/team-plugins-2/{t1}/udeck-plugins.json")[0] == 200
+    assert served.get(f"/raw/{TEAM}/{t1}/udeck-plugins.json")[0] == 404, "the old name serves the other repository"
+    served.state(served={"someone/squatter": "someone/squatter"})
+    assert served.get(f"/api/repositories/{TEAM_ID}")[0] == 404, "served by no name: gone"
+
+
+def test_the_official_description_says_its_number_and_the_lab_can_give_it_another(served):
+    _, _, described = served.json(API)
+    assert described["id"] == config.PLUGINS_REPOSITORY_ID and described["full_name"] == REPOSITORY
+    served.state(official_id=12345)
+    assert served.json(API)[2]["id"] == 12345
+
+
+def test_a_credential_is_refused_and_logged_as_one_never_by_its_value(served):
+    """No token is good for anything yet: one carried, in either provider's header, is 401 — and the log says
+    `rejected`, never what it was; an anonymous request says `none`, and the port it came in on."""
+    assert served.get(API)[0] == 200
+    status, _, body = served.get(API, {"Authorization": "Bearer ghp_the-labs-own-value"})
+    assert status == 401 and json.loads(body) == {"message": "Bad credentials"}
+    assert served.get(f"/raw/{REPOSITORY}/x/y", {"PRIVATE-TOKEN": "glpat-the-labs-own-value"})[0] == 401
+    logged = served.requests()
+    assert [r.credential for r in logged] == ["none", "rejected", "rejected"]
+    assert {r.port for r in logged} == {served.server.server_address[1]}
+    text = served.log.read_text()
+    assert "the-labs-own-value" not in text and "ghp_" not in text and "glpat-" not in text
+
+
+def test_repositories_of_their_own_spend_the_same_hour(tmp_path):
+    """GitHub counts what an address asks whatever the repository: by name or by number, the official hour."""
+    now = [1_800_000_000.0]
+    served = Served(tmp_path, clock=lambda: now[0])
+    try:
+        assert served.get(API)[1]["x-ratelimit-remaining"] == "59"
+        assert served.get(f"/api/repos/{TEAM}")[1]["x-ratelimit-remaining"] == "58"
+        assert served.get(f"/api/repositories/{TEAM_ID}/commits/main", SHA_ONLY)[1]["x-ratelimit-remaining"] == "57"
+        assert served.get("/api/repositories/1")[1]["x-ratelimit-remaining"] == "56"
+        served.state(limit_until=int(now[0]) + 600)
+        assert served.get(f"/api/repositories/{TEAM_ID}")[0] == 403
+    finally:
+        served.close()
+
+
+def test_a_line_of_an_older_fake_reads_as_no_credential_on_no_port():
+    (request,) = parse_log(line() + "\n")
+    assert request.credential == "none" and request.port == 0
+    (request,) = parse_log(line(credential="rejected", port=8766) + "\n")
+    assert request.credential == "rejected" and request.port == 8766
+
+
 # --- Reading the log -----------------------------------------------------------------------
 
 

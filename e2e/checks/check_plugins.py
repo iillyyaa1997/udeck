@@ -1,6 +1,6 @@
 """Plugins from a repository: the catalogue, installing, updating, removing — and saying no.
 
-Thirty-seven checks, one per row of the table in docs/plugin-repository.md ("The
+Forty-nine checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks") but its last — `smoke.real-pull-request`, against the real GitHub,
 is in check_smoke.py — and all of them against the same two things: a release build of
 this checkout, and a fake GitHub served inside the guest
@@ -9,10 +9,14 @@ the fixture commits in `e2e/fixtures/plugin-repository/` — `c1` with `uptime`
 1.0.0 and three plugins uDeck must refuse, `c2` the same with `uptime` 1.1.0,
 asking for what 1.0.0 asks, and `c3` with `uptime` 1.2.0, asking for one
 command more.
-These checks never talk to github.com; every lab build is pointed at the fake,
-and the build step refuses one that is not (`builds.Builder._verify`). (The lab
-as a whole does, for the update checks that take a published release —
-`releases`, `updates.github_answers` — and never for these.)
+These checks never talk to github.com from the guest; every lab build is pointed
+at the fake, and the build step refuses one that is not (`builds.Builder._verify`).
+(The lab as a whole does, from the Mac it runs on, for the update checks that take
+a published release — `releases`, `updates.github_answers` — and for one of these:
+`plugins.source-downgrade-to-0-7-0` fetches the released 0.7.0 that way, and runs
+it with the official catalogue off.) The sources of one's own the stage-4 checks
+add are the fake's too: repositories of their own in
+`e2e/fixtures/plugin-repository/sources/github/`, each with its own number.
 
 **Three oracles, and none of them is what uDeck says about itself.** The fake's
 access log is the traffic: what uDeck asked for, and what it did not — a check
@@ -44,12 +48,13 @@ folder chosen in Settings is chosen in the system's folder panel, by typing its
 path (`ui.choose_folder`).
 """
 
+import hashlib
 import json
 import re
 import shlex
 import uuid
 
-from udeck_e2e import app, config, panel, plugin_repository, ui, updates
+from udeck_e2e import app, config, panel, plugin_repository, releases, ui, updates
 from udeck_e2e.errors import CheckFailed, LabError, NotThere, expect
 from udeck_e2e.plugin_repository import FakeGitHub, described
 
@@ -227,7 +232,7 @@ RU_UPDATED_BY_ITSELF = "Обновился сам "
 RU_UPDATES_BY_THEMSELVES_HELP = "После каждого чтения каталога проверенный плагин"
 RU_AVAILABLE_1_1_0 = "Доступна 1.1.0"
 # What stage 3 added, in uDeck's Russian (Russian.swift: pluginMarkUnverified, pluginFromPullRequest, linkHead with
-# line(_, capitalised:) and of(_), linkNotAFork, linkUnverifiedNote, catalogueSwitchConfirm with copy(_) and
+# line(_, capitalised:) and of(_), linkNotAForkAddAsASource, linkUnverifiedNote, catalogueSwitchConfirm with copy(_) and
 # staysAfterSwitching(to:), catalogueInstalledUnverified with lineFrom(_), permissionsUnverifiedSource,
 # permissionsAsksNothingUnverified, pluginRefRewritten, pluginRefChangedStill with lineIn(_), pluginRefNotCheckedSince,
 # pluginPullRequestClosed, catalogueClosedUnmerged, pluginPullRequestMergedDiffers, catalogueMergedDiffers,
@@ -237,8 +242,8 @@ RU_FROM_THE_PULL_REQUEST = "запрос на слияние #{number}, комм
 RU_PULL_REQUEST_HEAD = "Запрос на слияние #{number}, коммит {commit}"
 RU_BRANCH_HEAD = "Ветка {name}, коммит {commit}"
 RU_FORK_HEAD = "Ветка {name} репозитория {fork}, коммит {commit}"
-RU_NOT_A_FORK = ("github.com/{repository} — не форк github.com/{official}. Плагины пока приходят из github.com/{official} "
-                 "и его форков; другие репозитории появятся позже, как отдельные источники.")
+RU_NOT_A_FORK = ("github.com/{repository} — не форк github.com/{official}. Чтобы ставить из него, добавьте его как "
+                 "отдельный источник.")
 RU_NOBODY_VERIFIED_LISTED = ("То, что здесь перечислено, никто не проверял: это не то, что репозиторий влил. Плагин, "
                              "установленный отсюда, спросит перед запуском — даже если ничего не просит — и снова, как "
                              "только его код изменится.")
@@ -266,6 +271,13 @@ RU_MERGED_NOTHING_OFFERED = ("Запрос на слияние #{number} вли�
 # How long the catalogue is made to look old while uDeck is not running, so that
 # the launch reads it again (CatalogueSchedule.refreshesAtLaunch: over a day).
 AGED_DAYS = 2
+# A minute and a half short of a day: not read at launch (under a day), and due on the
+# minute's clock 90 s after it was made so (`CatalogueSchedule.nextDue`, a day after
+# the last success) — plugins.source-official-off, the clock running with the switch off.
+ALMOST_A_DAY = 1 - 90 / 86400
+# From the launch to the tick that reads it: the 60-second Timer's first tick that
+# finds it due, at most two ticks after a launch within half a minute of the aging.
+CLOCK_SECONDS = 180
 # How long uDeck is listened to after a read that must not install anything: an
 # update by itself starts as soon as the folders are hashed after the read, a
 # second or two, and its download takes a few more on the guest's loopback.
@@ -315,7 +327,12 @@ SWITCH_TO_VERIFIED = ("{id} is {old} from pull request #{number} at {commit}; in
 ASKS_NOTHING_UNVERIFIED = "{name} asks for nothing, but its code is unverified"
 INSTALLED_HERE_UNVERIFIED = "Installed here from {line}: unverified"
 NOT_IN_THE_PLUGINS_FOLDER = "{id} is not in ~/.udeck/plugins"
-LINK_OFF = "The official catalogue is off, so uDeck makes no request about plugins: switch it on to install from a link."
+LINK_OFF = ("The official catalogue is off, so uDeck makes no request to the official repository or its forks: switch it on "
+            "to install from a link.")
+# What Official catalogue says under it, off (English.swift: catalogueOff): the official repository alone stops (S4-04).
+CATALOGUE_OFF = ("The official catalogue is off: uDeck makes no request to the official repository or its forks, and does not "
+                 "look for updates of what was installed from them. Sources you added are still read; installed plugins keep "
+                 "running.")
 NOBODY_VERIFIED = "Nobody verified this code: it comes from pull request #{number} of github.com/{repository}"
 # What asks-nothing's card says (e2e/fixtures/plugin-repository/pr3/plugins/asks-nothing/run.sh),
 # and where it counts its runs.
@@ -370,12 +387,12 @@ NOT_A_FORK = "someone/elsewhere"
 FORKS = {FORK: {"branches": {FORK_BRANCH: "pr3"}}, NOT_A_FORK: {"fork": False, "branches": {FORK_BRANCH: "pr3"}}}
 FORK_LINK = f"https://github.com/{FORK}/tree/{FORK_BRANCH}/plugins/{UPTIME}"
 NOT_A_FORK_LINK = f"github.com/{NOT_A_FORK}/tree/{FORK_BRANCH}/plugins/{UPTIME}"
-# What uDeck says of them (English.swift: line and of with a fork, pluginFromBranch, linkHead, linkNotAFork).
+# What uDeck says of them (English.swift: line and of with a fork, pluginFromBranch, linkHead, linkNotAForkAddAsASource).
 OF_THE_FORK = "branch {name} of {fork}"
 FROM_THE_FORK = "branch {name} of {fork} at {commit}"
 FORK_HEAD = "Branch {name} of {fork} at {commit}"
-NOT_A_FORK_SAYS = ("github.com/{repository} is not a fork of github.com/{official}. Plugins come from github.com/{official} "
-                   "and its forks for now; other repositories come later, as sources of their own.")
+NOT_A_FORK_SAYS = ("github.com/{repository} is not a fork of github.com/{official}. To install from it, add it as a source "
+                   "of its own.")
 
 
 # --- The checks -------------------------------------------------------------------------
@@ -3382,6 +3399,998 @@ def _place_side_by_side(scene, plugins):
 # --- What the checks share ------------------------------------------------------------------
 
 
+# --- Sources of one's own (stage 4, R1b) ------------------------------------------------------
+#
+# A public GitHub repository added as a source of its own: someone/team-plugins, a repository of the fake's own
+# (`e2e/fixtures/plugin-repository/sources/github/someone/team-plugins/`, three commits t1, t2, t3) with a number of
+# its own, which every request after Look up addresses it by (`/repositories/{id}/…`). someone/not-plugins has no
+# passport; someone/squatter is the other repository the lab makes at team-plugins' old name once it is renamed.
+
+TEAM = "someone/team-plugins"
+TEAM_ADDRESS = f"github.com/{TEAM}"
+TEAM_PAGE = f"https://github.com/{TEAM}"
+TEAM_NAME = "Team plugins"
+TEAM_CLOCK = "team-clock"
+TEAM_PING = "team-ping"
+TEAM_RENAMED = "someone/team-plugins-2"
+NOT_PLUGINS = "someone/not-plugins"
+SQUATTER = "someone/squatter"
+MISSING = "someone/missing"
+TEAM_BRANCH_LINK = f"https://github.com/{TEAM}/tree/main/plugins/{TEAM_CLOCK}"
+SOURCES_FILE = f"{UDECK_HOME}/sources.json"
+# The released uDeck a source's copies are taken back to (plugins.source-downgrade-to-0-7-0).
+BEFORE_SOURCES = "0.7.0"
+# What a passport's name is shown inside: an isolate (`SourceName`), which a screen reading compares without.
+ISOLATES = ("⁨", "⁩")
+# What uDeck says of them (English.swift: sourceNotTrusted, permissionsUntrustedSource, catalogueInstalledFromElsewhere
+# with copy(_), catalogueSwitchConfirm, catalogueInstalledFromSource, sourceNoLongerAdded, sourceRemoveConfirm,
+# sourceAlreadyAdded, catalogueNotARepository, sourceNotFound, sourceLinkRefusal, sourceBranchNotYet,
+# catalogueOfficialRepositoryChanged, sourcesTestBuild, pluginFrom).
+NOT_TRUSTED = "Not trusted: nobody vouches for these plugins — each asks again whenever its code changes."
+UNTRUSTED_SOURCE = ("Nobody verified this code: it comes from the default branch of github.com/{repository}, a source you "
+                    "have not trusted. uDeck asks again whenever it changes.")
+FROM_ELSEWHERE = "Installed here: the verified {version} from github.com/{official}"
+SWITCH_TO_THE_SOURCE = ("{id} is the verified {old} from github.com/{official}; installing {new} from github.com/{repository}: "
+                        "unverified replaces it. ")
+SWITCH_FROM_THE_SOURCE = ("{id} is {old} from github.com/{repository}: unverified; installing the verified {new} from "
+                          "github.com/{official} replaces it. ")
+INSTALLED_FROM_THE_SOURCE = "Installed here from github.com/{repository}: unverified"
+FROM_THE_SOURCE = "From github.com/{repository} at {commit}"
+NO_LONGER_ADDED = "From github.com/{repository} — a source no longer added"
+REMOVE_THE_SOURCE = "Remove {name} (github.com/{repository})? uDeck stops reading it and forgets its token."
+ALREADY_ADDED = "{name} (github.com/{repository}) is added already."
+NOT_A_PLUGIN_REPOSITORY = "github.com/{repository} is not a uDeck plugin repository: there is no udeck-plugins.json at the top of main."
+NOT_FOUND_OR_PRIVATE = ("github.com/{repository} could not be found, or it is private. If it is private, uDeck needs a token "
+                        "for it: Token…")
+HTTPS_ONLY = "Sources are read over HTTPS only: paste the address that starts with https://."
+OVER_SSH = "That is git's address over SSH. Paste the page of the repository or the project instead, as the browser shows it."
+THE_OFFICIAL_CATALOGUE = "That is github.com/{official}, the official catalogue: its plugins are listed above, verified."
+BRANCH_NOT_YET = ("Installing from a branch or a merge request of a source is not possible yet; add the project and install "
+                  "from its default branch.")
+OFFICIAL_CHANGED = ("The address of the official catalogue now belongs to a different repository. uDeck stopped reading it, "
+                    "and nothing updates by itself; installed plugins keep running.")
+TEST_BUILD = "Test build: {host} is read from http://127.0.0.1:{port}/{path}."
+# The number the lab gives the official repository's description when it belongs to another repository.
+ANOTHER_REPOSITORY = 12345
+
+
+def check_source_add_github(machine, check_dir, lab):
+    """**Add a source…** of github.com/someone/team-plugins: Look up asks for it by its name once, then by its number; Add names it from its passport, Unverified.
+
+    **Look up** of `github.com/someone/team-plugins`: from the press on, the
+    fake's log holds `GET /repos/someone/team-plugins` once — the one request
+    ever addressed by its name — then `/repositories/<id>/commits/main` and
+    the passport at that commit from the raw host, and nothing else. The sheet
+    shows the passport's name. **Add**: the block is named *Team plugins* from
+    its passport once its catalogue is read, through `/repositories/<id>/…`
+    alone, says *Not trusted…*, and its rows say **Unverified**;
+    `~/.udeck/sources.json` holds the source with the id derived from its
+    number and the number itself, anonymous and nobody's trust. A test build
+    says where it reads github.com from. No request carries a credential.
+
+    **Red for**: a source asked for by its name after Look up, one added
+    without its number, an id that is not the derived one, a source's row
+    marked Verified, and a test build that does not say it is one.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        number = scene.github.source_id(TEAM)
+        t1 = scene.github.source_commit(TEAM, "t1")
+        said, looked, dump = _look_up_a_source(scene, TEAM_ADDRESS, "someone/team-plugins")
+        expect(said == TEAM_NAME, f"Look up of {TEAM_ADDRESS} shows {said!r}, not its passport's name {TEAM_NAME!r}")
+        expect(ui.element(dump, "sources.add.confirm") is not None, "Look up found the repository and offers no Add")
+        wanted = [("api", f"/api/repos/{TEAM}", ""), ("api", f"/api/repositories/{number}/commits/main", "sha"),
+                  ("raw", f"/raw/{TEAM}/{t1}/udeck-plugins.json", "")]
+        heard = [(r.host, r.path, "sha" if r.accept == "application/vnd.github.sha" else "") for r in looked]
+        expect(heard == wanted, f"Look up asked {described(looked)}: the repository by its name once, its head by its "
+                                f"number, the passport at that head, and nothing else")  # fmt: skip
+        notice = ui.says(ui.element(dump, "sources.testBuild"))
+        for host, path in (("api.github.com", "api"), ("raw.githubusercontent.com", "raw")):
+            line = TEST_BUILD.format(host=host, port=config.PLUGINS_PORT, path=path)
+            expect(line in notice, f"a lab build says {notice!r} under Your sources, not {line!r}")
+
+        sid, added = _add_the_team(scene, "adding it", looked_up=True)
+        by_name = [r for r in added if r.is_api and r.path.startswith(f"/api/repos/{TEAM}")]
+        expect(not by_name, f"after Look up, uDeck asked the source by its name: {described(by_name)}")
+        astray = [r for r in added if r.is_api and r.path.startswith("/api/repositories/") and
+                  not r.path.startswith(f"/api/repositories/{number}")]  # fmt: skip
+        expect(not astray, f"Add asked another repository by its number: {described(astray)}")
+        expect(any(r.path == f"/api/repositories/{number}/git/trees/{t1}" for r in added),
+               f"Add read no listing of {TEAM} by its number: {described(added)}")
+        dump = _keep_the_pane(machine, check_dir, lab, "the-source-added.txt")
+        expect(ui.says(ui.element(dump, f"source.{sid}.mark")) == NOT_TRUSTED,
+               f"the source's block says {ui.says(ui.element(dump, f'source.{sid}.mark'))!r}, not {NOT_TRUSTED!r}")
+        # SwiftUI hands the accessibility API one element for texts that read alike (`_row_of`): the three rows'
+        # **Unverified** come back as one, under one row's identifier — so the rows are read as one mark, and no row as
+        # Verified.
+        rows = [row for row in ui.controls(dump) if row.identifier.startswith(f"source.{sid}.plugin.")]
+        marks = {ui.says(row) for row in rows if row.identifier.endswith(".mark")}
+        expect(marks == {UNVERIFIED}, f"the source's rows are marked {marks}, not {UNVERIFIED!r}")
+        expect(not [row for row in rows if row.identifier.endswith(".verified")], "a source's row says Verified")
+        for plugin in (TEAM_CLOCK, TEAM_PING, UPTIME):
+            expect(ui.element(dump, f"source.{sid}.plugin.{plugin}.install") is not None
+                   or ui.element(dump, f"source.{sid}.plugin.{plugin}.installFromHere") is not None,
+                   f"{plugin}'s row in the source's block offers no Install")
+        source = _the_source(machine)
+        expect(source == {"id": sid, "provider": "github", "host": "github.com", "path": TEAM, "remoteID": number,
+                          "access": "none", "trustedAt": None, "addedAt": source.get("addedAt")} and source.get("addedAt"),
+               f"{SOURCES_FILE} says {source!r}: the id derived from the number {number}, the number itself, anonymous")  # fmt: skip
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_install_unverified(machine, check_dir, lab):
+    """**Install** of team-clock from the source: its files by commit from the source's raw host, recorded as the source's, unverified — and its card asks, saying so.
+
+    From the click on, the fake's log holds the files of `plugins/team-clock/`
+    at t1, from `/raw/someone/team-plugins/…`, and nothing else; the folder
+    hashes to the fixture's tree; `installed.json` says `source` the source's
+    id, `repository` someone/team-plugins, `ref` the default branch, and
+    `verification` unverified, by `null`. Placed on a tab, its card asks —
+    though it asks for nothing — with **Unverified** in its header and S4-07's
+    sentence on where its code comes from; **Allow** runs it.
+
+    **Red for**: a copy of a source recorded as the official one's or as
+    verified, files taken from anywhere but the source, and a copy that runs
+    unasked.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        t1 = scene.github.source_commit(TEAM, "t1")
+        record, asked = _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock from the source")
+        files = scene.github.source_files(TEAM, "t1", f"plugins/{TEAM_CLOCK}")
+        _expect_only(asked, t1, api=set(), raw=set(files), what="installing team-clock from the source", every=True,
+                     repository=TEAM)
+        tree = scene.github.tree_in_guest(f"{UDECK_HOME}/plugins/{TEAM_CLOCK}", "hashing the installed folder")
+        expect(tree == scene.github.source_tree(TEAM, "t1", f"plugins/{TEAM_CLOCK}"),
+               f"the folder uDeck installed hashes to {tree}, not t1's plugins/{TEAM_CLOCK}")
+        _expect_a_source_record(record, sid, t1, "1.0.0", TEAM_CLOCK)
+        mark = _wait_until(machine, f"plugin.{TEAM_CLOCK}.mark", lambda said: said == UNVERIFIED, NOTICED_SECONDS)
+        expect(mark == UNVERIFIED, f"team-clock's row says {mark!r}, not {UNVERIFIED!r}")
+
+        _place(scene, TEAM_CLOCK)
+        found, texts = _the_card_asks(scene, TEAM_CLOCK, "a source's copy")
+        source = ui.says(found.get(f"consent.{TEAM_CLOCK}.source"))
+        wanted = UNTRUSTED_SOURCE.format(repository=TEAM)
+        expect(source == wanted, f"team-clock's card says {source!r} of where its code comes from, not {wanted!r}")
+        machine.click(*found[f"consent.{TEAM_CLOCK}.allow"].middle, "allowing team-clock")
+        card = _read_the_card(scene, TEAM_CLOCK, "allowed", lambda card: card.get(RUNS) not in (None, "", "unknown"))
+        _put_the_panel_away(machine, "after allowing team-clock")
+        expect(card.get(VERSION_ROW) == "1.0.0", f"team-clock's card is not 1.0.0's: {card}")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_same_id_switch(machine, check_dir, lab):
+    """One id across two sources: the team's uptime over the official one is **Install from here…**, naming both — and back is **Switch to verified**, naming both.
+
+    The official uptime 1.0.0 is installed, placed and allowed. The source's
+    row of its own uptime 1.0.0 — other files, the same permissions — says
+    *Installed here: the verified 1.0.0 from github.com/…* and offers **Install
+    from here…**, whose warning names both copies. Confirmed, the record is
+    the source's, and the card asks again: a source's copy is held to its
+    tree. The official row then says *Installed here from
+    github.com/someone/team-plugins: unverified* with **Switch to verified
+    1.0.0**, whose warning names both; confirmed, the record is the official
+    one's again.
+
+    **Red for**: a copy from another source replaced unsaid, a warning that
+    names one side, the official decision carried to the source's copy, and
+    an official row that does not say where the copy came from.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        _place(scene, UPTIME)
+        _allow_and_read_the_card(scene, UPTIME, "the official copy")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        t1 = scene.github.source_commit(TEAM, "t1")
+        row = f"source.{sid}.plugin.{UPTIME}"
+        state = _wait_until(machine, f"{row}.state", lambda said: bool(said), NOTICED_SECONDS)
+        elsewhere = FROM_ELSEWHERE.format(version="1.0.0", official=config.PLUGINS_REPOSITORY)
+        expect(state == elsewhere, f"the source's uptime row says {state!r}, not {elsewhere!r}")
+        # The official copy's earlier versions, left open: the official repository's history.
+        before = _count(scene)
+        _press(machine, f"plugin.{UPTIME}.earlier", "pressing Earlier versions… of the official copy")
+        version = f"plugin.{UPTIME}.history.1.0.0"
+        listed = _wait_until(machine, version, lambda said: said is not None, OPERATION_SECONDS, present=True)
+        expect(listed is not None, f"Earlier versions of the official uptime lists no 1.0.0; uDeck asked "
+                                   f"{described(_since(scene, before))}")  # fmt: skip
+        _press(machine, f"{row}.installFromHere", "pressing Install from here…")
+        warning = _wait_until(machine, f"{row}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "install-from-here-warns.txt")
+        both = SWITCH_TO_THE_SOURCE.format(id=UPTIME, old="1.0.0", new="1.0.0", official=config.PLUGINS_REPOSITORY,
+                                           repository=TEAM)
+        expect(warning is not None and warning.startswith(both),
+               f"Install from here… said {warning!r} before replacing the official uptime; it has to say {both!r}…")
+        record = _operate(scene, f"{row}.confirm", "confirming Install from here…",
+                          lambda r: r is not None and r.get("source") == sid)
+        expect(record is not None, f"Install from here… left {_record(machine, UPTIME)!r}")
+        _expect_a_source_record(record, sid, t1, "1.0.0", UPTIME)
+        expect((record.get("previous") or {}).get("repository", {}).get("path") == config.PLUGINS_REPOSITORY,
+               f"the source's copy keeps no official copy to go back to: {record.get('previous')!r}")
+        # The list read of the official repository goes with its copy: none of its versions is offered over the
+        # source's, and Earlier versions… lists the source's own history, asked by its number.
+        gone = _wait_until(machine, version, lambda said: said is None, NOTICED_SECONDS, present=True)
+        dump = _keep_the_pane(machine, check_dir, lab, "earlier-versions-after-the-switch.txt")
+        expect(ui.element(dump, f"plugin.{UPTIME}.remove") is not None, "uptime's row is not on the screen to be read")
+        expect(gone is None and ui.element(dump, f"plugin.{UPTIME}.history") is None and ui.element(dump, version) is None,
+               "with the source's copy in the official copy's place, the official repository's history is still listed "
+               "under it")  # fmt: skip
+        number = scene.github.source_id(TEAM)
+        before = _count(scene)
+        _press(machine, f"plugin.{UPTIME}.earlier", "pressing Earlier versions… of the source's copy")
+        listed = _wait_until(machine, version, lambda said: said is not None, OPERATION_SECONDS, present=True)
+        asked = _since(scene, before)
+        history = [r.path for r in asked if r.is_api]
+        expect(listed is not None and history == [f"/api/repositories/{number}/commits"],
+               f"Earlier versions of the source's uptime asked {described(asked)}: the history of the source's own branch, "
+               "by its number")  # fmt: skip
+        _press(machine, f"plugin.{UPTIME}.earlier", "closing Earlier versions…")
+
+        found, _ = _the_card_asks(scene, UPTIME, "the source's copy in the official copy's place")
+        source = ui.says(found.get(f"consent.{UPTIME}.source"))
+        expect(source == UNTRUSTED_SOURCE.format(repository=TEAM), f"uptime's card says {source!r} of where its code comes from")
+        _put_the_panel_away(machine, "after reading the card")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins again")
+        state = _wait_until(machine, f"catalogue.{UPTIME}.state", lambda said: bool(said), NOTICED_SECONDS)
+        here = INSTALLED_FROM_THE_SOURCE.format(repository=TEAM)
+        expect(state == here, f"the official uptime row says {state!r}, not {here!r}")
+        _press(machine, f"catalogue.{UPTIME}.switchToVerified", "pressing Switch to verified")
+        warning = _wait_until(machine, f"catalogue.{UPTIME}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "switch-to-verified-warns.txt")
+        back = SWITCH_FROM_THE_SOURCE.format(id=UPTIME, old="1.0.0", new="1.0.0", official=config.PLUGINS_REPOSITORY,
+                                             repository=TEAM)
+        expect(warning is not None and warning.startswith(back),
+               f"Switch to verified said {warning!r} before replacing the source's copy; it has to say {back!r}…")
+        record = _operate(scene, f"catalogue.{UPTIME}.confirm", "confirming Switch to verified",
+                          lambda r: r is not None and r.get("source") == "official")
+        expect(record is not None and (record.get("verification") or {}).get("status") == "verified",
+               f"Switch to verified left {_record(machine, UPTIME)!r}")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_update_and_back(machine, check_dir, lab):
+    """The source's main moves to t2: **Check now** on its block offers team-clock 1.1.0 from its own head, **Update** takes it from the source, and **Back to** returns to 1.0.0 from the source.
+
+    **Red for**: an update of a source's copy offered from any head but its
+    own source's, files taken from anywhere but the source, and a **Back to**
+    that does not put the source's copy back as the source's.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        number = scene.github.source_id(TEAM)
+        t1, t2 = scene.github.source_commit(TEAM, "t1"), scene.github.source_commit(TEAM, "t2")
+        _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock 1.0.0")
+
+        scene.github.tell("moving the source's main to t2", sources={TEAM: {"main": "t2"}})
+        before = _count(scene)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now on the source")
+        offer = _wait_until(machine, f"plugin.{TEAM_CLOCK}.offer", lambda said: said == "1.1.0 available", CATALOGUE_SECONDS)
+        heard = _since(scene, before)
+        expect(offer == "1.1.0 available", f"with the source's main at t2, team-clock's row says {offer!r}; uDeck asked "
+                                           f"{described(heard)}")  # fmt: skip
+        # The manifests of the plugins whose folder is new at t2 — team-clock's and team-ping's — and nothing else.
+        _expect_only_the_source(heard, number, "Check now on the source", manifests=True)
+
+        before = _count(scene)
+        updated = _operate(scene, f"plugin.{TEAM_CLOCK}.update", "updating team-clock",
+                           lambda r: r is not None and r.get("commit") == t2, TEAM_CLOCK)
+        asked = _since(scene, before)
+        expect(updated is not None, f"Update of team-clock left {_record(machine, TEAM_CLOCK)!r}; uDeck asked {described(asked)}")
+        _expect_a_source_record(updated, sid, t2, "1.1.0", TEAM_CLOCK)
+        _expect_only(asked, t2, api=set(), raw=set(scene.github.source_files(TEAM, "t2", f"plugins/{TEAM_CLOCK}")),
+                     what="updating team-clock", every=True, repository=TEAM)
+
+        # A button's walk carries no words of its own: that it is there, and what pressing it puts back, are read.
+        back = _wait_until(machine, f"plugin.{TEAM_CLOCK}.backTo", lambda said: said is not None, NOTICED_SECONDS, present=True)
+        expect(back is not None, "after the update, team-clock's row offers no Back to")
+        before = _count(scene)
+        returned = _operate(scene, f"plugin.{TEAM_CLOCK}.backTo", "Back to 1.0.0",
+                            lambda r: r is not None and r.get("commit") == t1, TEAM_CLOCK)
+        asked = _since(scene, before)
+        expect(returned is not None, f"Back to 1.0.0 left {_record(machine, TEAM_CLOCK)!r}; uDeck asked {described(asked)}")
+        _expect_a_source_record(returned, sid, t1, "1.0.0", TEAM_CLOCK)
+        expect(returned.get("pinned") is True, f"Back to left the copy unpinned: {returned!r}")
+        _expect_only_the_source(asked, number, "Back to 1.0.0", raw_commit=t1, plugin=TEAM_CLOCK)
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_reinstall_and_earlier(machine, check_dir, lab):
+    """**Reinstall** of a source's copy changed on disk fetches from the source alone; **Earlier versions** lists its own history, and an earlier one keeps its source.
+
+    The source's main is at t2 and team-clock 1.1.0 is installed from it. A
+    line written into its script makes it **Modified locally**: **Reinstall**,
+    confirmed, puts t2's copy back, every request of it to
+    `/repositories/<id>/…` or the source's raw files. **Earlier versions**
+    lists 1.1.0 and 1.0.0 — the history of the source's own default branch,
+    asked by its number — and **Install this version** of 1.0.0 puts t1's copy
+    in place, recorded as the source's, pinned.
+
+    **Red for**: a source's copy put back from the official repository, a
+    history read from anywhere but the source, and an earlier version
+    recorded as another source's.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", sources={TEAM: {"main": "t2"}})
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source", head="t2")
+        number = scene.github.source_id(TEAM)
+        t1, t2 = scene.github.source_commit(TEAM, "t1"), scene.github.source_commit(TEAM, "t2")
+        installed, _ = _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock 1.1.0")
+        _expect_a_source_record(installed, sid, t2, "1.1.0", TEAM_CLOCK)
+
+        machine.ssh.run(f"printf '# changed here\\n' >> {UDECK_HOME}/plugins/{TEAM_CLOCK}/run.sh", "changing team-clock on disk")
+        mark = _wait_until(machine, f"plugin.{TEAM_CLOCK}.mark", lambda said: said == MODIFIED, NOTICED_SECONDS)
+        expect(mark == MODIFIED, f"with its script changed, team-clock's row says {mark!r}, not {MODIFIED!r}")
+        before = _count(scene)
+        _press(machine, f"plugin.{TEAM_CLOCK}.reinstall", "pressing Reinstall")
+        warning = _wait_until(machine, f"plugin.{TEAM_CLOCK}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        expect(warning is not None and TRASH_WARNING.format(id=TEAM_CLOCK) in warning,
+               f"Reinstall over a changed copy said {warning!r}")
+        machine.screenshot(check_dir, "the warning before Reinstall")
+        reinstalled = _operate(scene, f"plugin.{TEAM_CLOCK}.confirm", "confirming Reinstall",
+                               lambda r: r is not None and r.get("installedAt") != installed.get("installedAt"), TEAM_CLOCK)
+        asked = _since(scene, before)
+        expect(reinstalled is not None, f"Reinstall left {_record(machine, TEAM_CLOCK)!r}; uDeck asked {described(asked)}")
+        _expect_a_source_record(reinstalled, sid, t2, "1.1.0", TEAM_CLOCK)
+        _expect_only_the_source(asked, number, "Reinstall", raw_commit=t2, plugin=TEAM_CLOCK)
+        tree = scene.github.tree_in_guest(f"{UDECK_HOME}/plugins/{TEAM_CLOCK}", "hashing the reinstalled folder")
+        expect(tree == scene.github.source_tree(TEAM, "t2", f"plugins/{TEAM_CLOCK}"), f"the reinstalled folder hashes to {tree}")
+
+        before = _count(scene)
+        _press(machine, f"plugin.{TEAM_CLOCK}.earlier", "pressing Earlier versions…")
+        line = f"plugin.{TEAM_CLOCK}.history.1.0.0.install"
+        listed = _wait_until(machine, line, lambda said: said is not None, OPERATION_SECONDS, present=True)
+        asked = _since(scene, before)
+        _keep_the_pane(machine, check_dir, lab, "earlier-versions.txt")
+        expect(listed is not None, f"Earlier versions of team-clock lists no 1.0.0; uDeck asked {described(asked)}")
+        history = [r for r in asked if r.is_api]
+        expect([r.path for r in history] == [f"/api/repositories/{number}/commits"] and "path=plugins%2Fteam-clock" in
+               history[0].query.replace("/", "%2F"),
+               f"Earlier versions asked {described(asked)}: the history of the source's own branch, by its number")  # fmt: skip
+        _expect_only_the_source(asked, number, "Earlier versions", raw_commit=None, plugin=TEAM_CLOCK)
+        before = _count(scene)
+        earlier = _operate(scene, line, "installing 1.0.0 from the history", lambda r: r is not None and r.get("commit") == t1,
+                           TEAM_CLOCK)
+        asked = _since(scene, before)
+        expect(earlier is not None, f"Install this version 1.0.0 left {_record(machine, TEAM_CLOCK)!r}")
+        _expect_a_source_record(earlier, sid, t1, "1.0.0", TEAM_CLOCK)
+        expect(earlier.get("pinned") is True, f"an earlier version is not pinned: {earlier!r}")
+        _expect_only_the_source(asked, number, "installing an earlier version", raw_commit=t1, plugin=TEAM_CLOCK)
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_official_off(machine, check_dir, lab):
+    """With **Official catalogue** off, the source is still read on its schedule, and its copy's Update, Back to, Earlier versions and Reinstall work — and nothing reaches the official repository.
+
+    The source is added and team-clock 1.0.0 installed from it; then the switch
+    goes off — Settings saying, under it and for **Install from a link…**, that
+    uDeck makes no request to the official repository or its forks, and that
+    the sources added are still read — uDeck is ended, the source's state is
+    made two days old and its main moved to t2, and uDeck started: it reads
+    the source at launch, by its number, and says so in its log. Ended again,
+    the source made a minute and a half short of a day old and uDeck started
+    with Settings left closed: nothing reads it at launch, and the minute's
+    clock does once it is due. From the switch on, the fake's log holds no
+    request of the official repository's — no description, head, listing or
+    file. **Update** takes 1.1.0, **Back to** 1.0.0, **Earlier versions**
+    lists both and installs 1.1.0, and **Reinstall** puts a changed copy back
+    — each from the source.
+
+    **Red for**: a switch called Official catalogue that stops a source the
+    operator added, a source not read at launch or on the minute's clock
+    while it is off, words under the switch that say no source is read, and a
+    request of the official repository's while it is off.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        number = scene.github.source_id(TEAM)
+        t1, t2 = scene.github.source_commit(TEAM, "t1"), scene.github.source_commit(TEAM, "t2")
+        _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock 1.0.0")
+        off = _count(scene)
+        _the_pane_from_its_top(machine, "before switching the official catalogue off")
+        _switch(machine, "catalogue.enabled", False, "switching the official catalogue off")
+        saved = _wait_for_disk(machine, lambda: (_read_json(machine, SETTINGS) or {}).get("officialCatalogue") is False,
+                               config.SETTINGS_SAVE_SECONDS)  # fmt: skip
+        expect(saved, f"the switch was turned off and {SETTINGS} says {_read_json(machine, SETTINGS)!r}")
+        said = _wait_until(machine, "catalogue.status", lambda said: said == CATALOGUE_OFF, config.UI_CHANGE_SECONDS)
+        expect(said == CATALOGUE_OFF, f"with the official catalogue off and a source added, Settings says {said!r} under it")
+        said = _wait_until(machine, "link.off", lambda said: said == LINK_OFF, config.UI_CHANGE_SECONDS)
+        expect(said == LINK_OFF, f"with the official catalogue off, Install from a link… says {said!r} of why it does nothing")
+
+        app.quit_app(machine, "ending uDeck")
+        _age_a_state(machine, f"{UDECK_HOME}/catalogue/{sid}/state.json", AGED_DAYS, "lastSuccess", "lastAttempt")
+        scene.github.tell("moving the source's main to t2", sources={TEAM: {"main": "t2"}})
+        before = _count(scene)
+        mark = scene.log.mark("marking the launch with the source two days old")
+        app.launch(machine)
+        main = f"/api/repositories/{number}/commits/main"
+        read = _wait_for_disk(machine, lambda: any(r.path == main for r in _since(scene, before)), CATALOGUE_SECONDS)
+        expect(read, f"{CATALOGUE_SECONDS}s after a launch with the source {AGED_DAYS} days old and the official catalogue "
+                     f"off, uDeck had not read the source: {described(_since(scene, before))}")  # fmt: skip
+        _expect_uDeck_said(scene, mark, f"({sid}): at launch", "after the launch with the source two days old")
+
+        # The minute's clock with the switch off: no read at launch for a source read under a day ago, and the tick
+        # reads it once it is due — Settings left closed, since opening it reads a list over an hour old.
+        app.quit_app(machine, "ending uDeck for the minute's clock")
+        _age_a_state(machine, f"{UDECK_HOME}/catalogue/{sid}/state.json", ALMOST_A_DAY, "lastSuccess", "lastAttempt")
+        before = _count(scene)
+        mark = scene.log.mark("marking the launch with the source almost a day old")
+        app.launch(machine)
+        ticked = _wait_for_disk(machine, lambda: any(r.path == main for r in _since(scene, before)), CLOCK_SECONDS)
+        expect(ticked, f"{CLOCK_SECONDS}s after a launch with the source due 90 s after it was aged and the official "
+                       f"catalogue off, uDeck had not read the source: {described(_since(scene, before))}")  # fmt: skip
+        _expect_uDeck_said(scene, mark, f"({sid}): on schedule", "after the source's read on the minute's clock")
+        launched = scene.log.read(mark, "reading uDeck's log after the minute's read")
+        expect(f"({sid}): at launch" not in launched, "the source read less than a day ago was read at launch")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        offer = _wait_until(machine, f"plugin.{TEAM_CLOCK}.offer", lambda said: said == "1.1.0 available", CATALOGUE_SECONDS)
+        expect(offer == "1.1.0 available", f"with the official catalogue off, team-clock's row says {offer!r}")
+        updated = _operate(scene, f"plugin.{TEAM_CLOCK}.update", "updating team-clock",
+                           lambda r: r is not None and r.get("commit") == t2, TEAM_CLOCK)
+        expect(updated is not None, f"Update with the official catalogue off left {_record(machine, TEAM_CLOCK)!r}")
+        returned = _operate(scene, f"plugin.{TEAM_CLOCK}.backTo", "Back to 1.0.0",
+                            lambda r: r is not None and r.get("commit") == t1, TEAM_CLOCK)
+        expect(returned is not None, f"Back to with the official catalogue off left {_record(machine, TEAM_CLOCK)!r}")
+        _press(machine, f"plugin.{TEAM_CLOCK}.earlier", "pressing Earlier versions…")
+        line = f"plugin.{TEAM_CLOCK}.history.1.1.0.install"
+        listed = _wait_until(machine, line, lambda said: said is not None, OPERATION_SECONDS, present=True)
+        expect(listed is not None, "with the official catalogue off, Earlier versions of team-clock lists no 1.1.0")
+        earlier = _operate(scene, line, "installing 1.1.0 from the history", lambda r: r is not None and r.get("commit") == t2,
+                           TEAM_CLOCK)
+        expect(earlier is not None, f"Install this version with the official catalogue off left {_record(machine, TEAM_CLOCK)!r}")
+        machine.ssh.run(f"printf '# changed here\\n' >> {UDECK_HOME}/plugins/{TEAM_CLOCK}/run.sh", "changing team-clock on disk")
+        _wait_until(machine, f"plugin.{TEAM_CLOCK}.reinstall", lambda said: said is not None, NOTICED_SECONDS, present=True)
+        _press(machine, f"plugin.{TEAM_CLOCK}.reinstall", "pressing Reinstall")
+        _wait_until(machine, f"plugin.{TEAM_CLOCK}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        reinstalled = _operate(scene, f"plugin.{TEAM_CLOCK}.confirm", "confirming Reinstall",
+                               lambda r: r is not None and r.get("installedAt") != earlier.get("installedAt"), TEAM_CLOCK)
+        expect(reinstalled is not None, f"Reinstall with the official catalogue off left {_record(machine, TEAM_CLOCK)!r}")
+        _expect_a_source_record(reinstalled, sid, t2, "1.1.0", TEAM_CLOCK)
+
+        since_off = _since(scene, off)
+        official = [r for r in since_off if r.path.startswith((f"/api/repos/{config.PLUGINS_REPOSITORY}",
+                                                               f"/raw/{config.PLUGINS_REPOSITORY}/"))]
+        expect(not official, f"with the official catalogue off, uDeck asked the official repository {described(official)}")
+        _expect_only_the_source(since_off, number, "everything with the official catalogue off", raw_commit=None,
+                                plugin=TEAM_CLOCK, manifests=True)
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_renamed(machine, check_dir, lab):
+    """The source renamed, and another repository made at its old name: the daily describe, by its number, writes the new name back, and nothing reaches the repository now at the old name.
+
+    team-plugins is added and team-clock installed from it. The fake renames
+    it someone/team-plugins-2, its number the same, and serves someone/squatter
+    — another repository, another number, a team-clock 9.0.0 — at the old
+    name. With the source's default branch a day old, **Check now** on its
+    block describes it by its number: `sources.json` says the new name under
+    the same id, and the block shows it. From the rename on, the log holds no
+    request of the old name's, through the API or its raw host, and nothing
+    the other repository has is offered.
+
+    **Red for**: a source asked for by its name after it was added, a new name
+    not written back, and a repository squatting the old name read, offered
+    or installed from.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        number = scene.github.source_id(TEAM)
+        t1 = scene.github.source_commit(TEAM, "t1")
+        _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock 1.0.0")
+
+        renamed = _count(scene)
+        scene.github.tell("renaming team-plugins and making another repository at its old name",
+                          served={TEAM_RENAMED: TEAM, TEAM: SQUATTER})
+        _age_a_state(machine, f"{UDECK_HOME}/catalogue/{sid}/state.json", AGED_DAYS, "defaultBranchReadAt")
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now on the source")
+        written = _wait_for_disk(machine, lambda: (_the_source(machine) or {}).get("path") == TEAM_RENAMED, CATALOGUE_SECONDS)
+        heard = _since(scene, renamed)
+        expect(written, f"the source was renamed and {SOURCES_FILE} says {_the_source(machine)!r}; uDeck asked {described(heard)}")
+        expect((_the_source(machine) or {}).get("id") == sid, "the renamed source took another id")
+        expect(any(r.path == f"/api/repositories/{number}" for r in heard), f"no describe by its number: {described(heard)}")
+        old = [r for r in heard if r.path.startswith((f"/api/repos/{TEAM}", f"/raw/{TEAM}/"))]
+        expect(not old, f"after the rename, uDeck asked the old name, where another repository is now: {described(old)}")
+        address = _wait_until(machine, f"source.{sid}.address", lambda said: said == f"github.com/{TEAM_RENAMED}",
+                              NOTICED_SECONDS)
+        expect(address == f"github.com/{TEAM_RENAMED}", f"the source's block names it {address!r}")
+        dump = _keep_the_pane(machine, check_dir, lab, "after-the-rename.txt")
+        expect(ui.element(dump, f"plugin.{TEAM_CLOCK}.offer") is None,
+               f"after the rename team-clock is offered {ui.says(ui.element(dump, f'plugin.{TEAM_CLOCK}.offer'))!r}")
+        head = (_read_json(machine, f"{UDECK_HOME}/catalogue/{sid}/state.json") or {}).get("head")
+        expect(head == t1, f"the source's catalogue is at {head}, not its own t1")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_official_id_mismatch(machine, check_dir, lab):
+    """The official address answers another repository's number at its describe: the catalogue stops with S4-20's item 19, and no verified copy updates itself.
+
+    uptime 1.0.0 is installed, verified. uDeck is ended; the fake's main moves
+    to c2 — an update a verified copy makes by itself — and the official
+    repository's description answers another number; the catalogue's default
+    branch is made two days old. Started again, uDeck describes the official
+    repository, and nothing of it after that: no head, no listing, no file;
+    uptime stays 1.0.0; Settings says the address belongs to a different
+    repository. Nothing of it is offered meanwhile: uptime's row has no
+    **Earlier versions…** — which would list that repository's history and
+    install from it as verified — the catalogue's rows read before are gone,
+    and **Install from a link…** on a branch of it says the same sentence,
+    asking nothing. **Check now** describes it again, and stops again. Given
+    its own number back, **Check now** reads on, and **Earlier versions…** is
+    offered again.
+
+    **Red for**: a catalogue read past a describe that answered another
+    number, a verified copy updating itself from it, and anything of the
+    repository at the official address offered — its history, its rows, its
+    branches — before its number is the official one's again.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        app.quit_app(machine, "ending uDeck")
+        scene.github.tell("moving main to c2 and giving the official address another number", main="c2",
+                          official_id=ANOTHER_REPOSITORY)
+        _age_a_state(machine, CATALOGUE_STATE, AGED_DAYS, "lastSuccess", "lastAttempt", "defaultBranchReadAt")
+        before = _count(scene)
+        app.launch(machine)
+        describe = f"/api/repos/{config.PLUGINS_REPOSITORY}"
+        described_it = _wait_for_disk(machine, lambda: any(r.path == describe for r in _since(scene, before)), CATALOGUE_SECONDS)
+        expect(described_it, f"{CATALOGUE_SECONDS}s after a launch with the catalogue {AGED_DAYS} days old, uDeck had not "
+                             f"described the official repository: {described(_since(scene, before))}")  # fmt: skip
+        heard = _left_alone(scene, before)
+        past = [r for r in heard if r.path.startswith((f"{describe}/", f"/raw/{config.PLUGINS_REPOSITORY}/"))]
+        expect(not past, f"the official address answered another number, and uDeck read on: {described(past)}")
+        expect((_record(machine, UPTIME) or {}).get("version") == "1.0.0",
+               f"uptime updated itself from the repository at the official address: {_record(machine, UPTIME)!r}")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        trouble = _wait_until(machine, "catalogue.trouble", lambda said: said == OFFICIAL_CHANGED, NOTICED_SECONDS)
+        dump = _keep_the_pane(machine, check_dir, lab, "the-official-address-changed.txt")
+        expect(trouble == OFFICIAL_CHANGED, f"Settings says {trouble!r}, not {OFFICIAL_CHANGED!r}")
+        # uptime's row is on the screen — its Remove is — and offers nothing read from the repository at that address.
+        expect(ui.element(dump, f"plugin.{UPTIME}.remove") is not None, "uptime's row is not on the screen to be read")
+        expect(ui.element(dump, f"plugin.{UPTIME}.earlier") is None,
+               "with the official address another repository's, uptime's row offers Earlier versions…, which would list "
+               "that repository's history")  # fmt: skip
+        rows = sorted(row.identifier for row in ui.controls(dump) if row.identifier.startswith(f"catalogue.{UPTIME}."))
+        expect(not rows, f"with the official address another repository's, the catalogue read before is offered: {rows}")
+        heard, dump = _look_up(scene, BRANCH_LINK, "a branch with the official address changed",
+                               came_to="link.refused")
+        said = ui.says(ui.element(dump, "link.refused"))
+        expect(said == OFFICIAL_CHANGED, f"{BRANCH_LINK} is refused with {said!r}, not {OFFICIAL_CHANGED!r}")
+        expect(not heard, f"Install from a link… with the official address another repository's asked {described(heard)}")
+        _close_the_link_sheet(scene, "after the link")
+
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now")
+        again = _wait_for_disk(machine, lambda: any(r.path == describe for r in _since(scene, before)), OPERATION_SECONDS)
+        machine.sleep(config.SETTLE_SECONDS)
+        heard = _since(scene, before)
+        expect(again and not [r for r in heard if r.path.startswith(f"{describe}/")],
+               f"Check now with the official address another repository's asked {described(heard)}: its description again, "
+               "and nothing after it")  # fmt: skip
+
+        scene.github.tell("giving the official repository its own number back", official_id=None)
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now with the number back")
+        main = f"{describe}/commits/main"
+        read = _wait_for_disk(machine, lambda: any(r.path == main for r in _since(scene, before)), OPERATION_SECONDS)
+        expect(read, f"with its own number back, Check now asked {described(_since(scene, before))}, and not its head")
+        earlier = _wait_until(machine, f"plugin.{UPTIME}.earlier", lambda said: said is not None, NOTICED_SECONDS, present=True)
+        expect(earlier is not None, "with its own number back, uptime's row offers no Earlier versions…")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_downgrade_to_0_7_0(machine, check_dir, lab):
+    """A source's copy under the released 0.7.0: Unverified, and its card asks before it runs; the source's files are left byte for byte; back on this build the source reads again and the copy is its own.
+
+    team-clock is installed from the source and placed. uDeck is ended, the
+    official catalogue switched off in `settings.json` — so that 0.7.0 asks
+    nothing of github.com — and 0.7.0, as GitHub publishes it, installed and
+    started (its update feed pointed at one nobody serves). Its Settings say
+    **Unverified** of team-clock, and its card asks before it runs. 0.7.0
+    ended, `sources.json` and every file of `catalogue/<id>/` are as they were,
+    byte for byte, and the record's `source` is still the source's id. This
+    build started again: **Check now** on the source reads it, by its number,
+    and the row says the copy is from it.
+
+    **Red for**: a stage-4 file 0.7.0 cannot live beside, a copy 0.7.0 runs
+    unasked, and a copy that no longer knows its source when this build is
+    back. If GitHub cannot be asked for 0.7.0, the check could not check.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        number = scene.github.source_id(TEAM)
+        t1 = scene.github.source_commit(TEAM, "t1")
+        _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock 1.0.0")
+        _place(scene, TEAM_CLOCK)
+        release = _the_release(lab, BEFORE_SOURCES)
+        app.quit_app(machine, "ending uDeck before 0.7.0")
+        kept = _the_sources_files(machine, sid, "before 0.7.0")
+        settings = _read_json(machine, SETTINGS) or {}
+        _write(machine, SETTINGS, {**settings, "officialCatalogue": False}, "switching the official catalogue off for 0.7.0")
+        app.install(machine, release.zip, lab.note)
+        app.forget_preferences(machine, "forgetting what macOS kept for uDeck")
+        app.point_the_feed_at(machine, updates.Feed(machine, lab.note).url, "pointing 0.7.0 at a feed nobody serves")
+        there = app.installed_version(machine)
+        if there[0] != BEFORE_SOURCES:
+            raise LabError("installing 0.7.0", f"the machine has {there} after the lab installed {release.version}")
+        app.launch(machine, "starting 0.7.0")
+        ui.plugins_pane(machine, "opening 0.7.0's Settings → Plugins")
+        mark = _wait_until(machine, f"plugin.{TEAM_CLOCK}.mark", lambda said: said == UNVERIFIED, NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "under-0.7.0.txt")
+        expect(mark == UNVERIFIED, f"0.7.0 marks the source's team-clock {mark!r}, not {UNVERIFIED!r}")
+        _the_card_asks(scene, TEAM_CLOCK, "under 0.7.0")
+        _put_the_panel_away(machine, "after 0.7.0's card")
+        app.quit_app(machine, "ending 0.7.0")
+        after = _the_sources_files(machine, sid, "after 0.7.0")
+        expect(after == kept, f"0.7.0 changed the source's files: before {kept!r}, after {after!r}")
+        record = _record(machine, TEAM_CLOCK) or {}
+        expect(record.get("source") == sid, f"after 0.7.0 team-clock's record says {record.get('source')!r}, not {sid}")
+
+        app.install(machine, scene.build.zip, lab.note)
+        app.forget_preferences(machine, "forgetting the feed 0.7.0 was pointed at")
+        app.launch(machine, "starting this build again")
+        ui.plugins_pane(machine, "opening Settings → Plugins on this build")
+        before = _count(scene)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now on the source")
+        main = f"/api/repositories/{number}/commits/main"
+        read = _wait_for_disk(machine, lambda: any(r.path == main for r in _since(scene, before)), OPERATION_SECONDS)
+        expect(read, f"back on this build, Check now on the source asked {described(_since(scene, before))}")
+        said = _wait_until(machine, f"plugin.{TEAM_CLOCK}.from",
+                           lambda said: said == FROM_THE_SOURCE.format(repository=TEAM, commit=t1[:7]), NOTICED_SECONDS)
+        expect(said == FROM_THE_SOURCE.format(repository=TEAM, commit=t1[:7]), f"back on this build team-clock's row says {said!r}")
+        expect((_record(machine, TEAM_CLOCK) or {}).get("source") == sid, "back on this build the copy is not the source's")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_remove(machine, check_dir, lab):
+    """**Remove…** of a source: its entry and `catalogue/<id>/` go, its copy stays and says the source is no longer added, and nothing more is asked of it.
+
+    **Red for**: a source still read after it was removed, a removal that
+    takes the copies with it, and a copy offered Reinstall, Back to or Earlier
+    versions from a source that is not there.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        number = scene.github.source_id(TEAM)
+        _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock 1.0.0")
+        _press(machine, f"source.{sid}.remove", "pressing Remove… on the source")
+        warning = _wait_until(machine, f"source.{sid}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "the-warning-before-removing-the-source.txt")
+        words = REMOVE_THE_SOURCE.format(name=TEAM_NAME, repository=TEAM)
+        expect(warning is not None and _strip(warning).startswith(words), f"Remove… said {warning!r}, not {words!r}…")
+        _press(machine, f"source.{sid}.confirm", "confirming Remove")
+        removed = _count(scene)
+        gone = _wait_for_disk(machine, lambda: not ((_read_json(machine, SOURCES_FILE) or {}).get("sources") or []),
+                              NOTICED_SECONDS)  # fmt: skip
+        expect(gone, f"after Remove, {SOURCES_FILE} says {_read_json(machine, SOURCES_FILE)!r}")
+        expect(not _exists(machine, f"{UDECK_HOME}/catalogue/{sid}"), f"after Remove, ~/.udeck/catalogue/{sid} is still there")
+        expect(_exists(machine, f"{UDECK_HOME}/plugins/{TEAM_CLOCK}/manifest.json"), "Remove of the source took team-clock with it")
+        said = _wait_until(machine, f"plugin.{TEAM_CLOCK}.from", lambda said: said == NO_LONGER_ADDED.format(repository=TEAM),
+                           NOTICED_SECONDS)
+        dump = _keep_the_pane(machine, check_dir, lab, "after-removing-the-source.txt")
+        expect(said == NO_LONGER_ADDED.format(repository=TEAM), f"team-clock's row says {said!r} of where it came from")
+        for control in ("earlier", "reinstall", "backTo", "update"):
+            expect(ui.element(dump, f"plugin.{TEAM_CLOCK}.{control}") is None,
+                   f"team-clock offers {control} from a source that is no longer added")
+        expect(ui.element(dump, f"source.{sid}.name") is None, "the removed source's block is still shown")
+        ui.plugins_pane(machine, "opening Settings → Plugins again")
+        heard = _left_alone(scene, removed)
+        asked = [r for r in heard if r.path.startswith((f"/api/repositories/{number}", f"/api/repos/{TEAM}", f"/raw/{TEAM}/"))]
+        expect(not asked, f"after Remove, uDeck asked the source {described(asked)}")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_refusals(machine, check_dir, lab):
+    """What **Look up** refuses, each with its sentence and no **Add**: `http://`, git's SSH address, the official repository — before any request — one added already, one with no passport, and one that is not there.
+
+    **Red for**: an address asked of its host that could have been refused
+    before, a refusal said without what to do instead, and **Add** offered
+    for something that is not a plugin repository.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        official = config.PLUGINS_REPOSITORY
+        for address, words, asks in (
+            (f"http://{TEAM_ADDRESS}", HTTPS_ONLY, []),
+            (f"git@github.com:{TEAM}.git", OVER_SSH, []),
+            (f"github.com/{official}", THE_OFFICIAL_CATALOGUE.format(official=official), []),
+            (f"github.com/{MISSING}", NOT_FOUND_OR_PRIVATE.format(repository=MISSING), [f"/api/repos/{MISSING}"]),
+            (f"github.com/{NOT_PLUGINS}", NOT_A_PLUGIN_REPOSITORY.format(repository=NOT_PLUGINS),
+             [f"/api/repos/{NOT_PLUGINS}", f"/api/repositories/{scene.github.source_id(NOT_PLUGINS)}/commits/main",
+              None]),
+        ):
+            said, heard, dump = _look_up_a_source(scene, address, address)
+            expect(said == words, f"Look up of {address} says {said!r}, not {words!r}")
+            expect(ui.element(dump, "sources.add.confirm") is None, f"Look up of {address} offers Add")
+            paths = [r.path if r.is_api else None for r in heard]
+            expect(paths == asks, f"Look up of {address} asked {described(heard)}")
+            _close_the_source_sheet(scene, address)
+        sid, _ = _add_the_team(scene, "adding the source")
+        said, heard, dump = _look_up_a_source(scene, TEAM_PAGE, "one added already")
+        words = ALREADY_ADDED.format(name=TEAM_NAME, repository=TEAM)
+        expect(said == words, f"Look up of a source added already says {said!r}, not {words!r}")
+        expect(ui.element(dump, "sources.add.confirm") is None, "Look up of a source added already offers Add")
+        expect([r.path for r in heard] == [f"/api/repos/{TEAM}"], f"Look up of a source added already asked {described(heard)}")
+        expect(len(((_read_json(machine, SOURCES_FILE) or {}).get("sources") or [])) == 1, "the source was added twice")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_link_offers_a_source(machine, check_dir, lab):
+    """**Install from a link…** on a branch of someone/team-plugins, which is no fork: the not-a-fork sentence and **Add as a source…**, which opens Add a source… filled in — and once it is added, a link into it is refused with no request.
+
+    **Red for**: a repository of its own refused with nothing to do about it,
+    a button that adds before **Add** is pressed, and a link into a source
+    asked of anybody.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        heard, dump = _look_up(scene, TEAM_BRANCH_LINK, "a branch of a repository of its own", came_to="link.refused")
+        said = ui.says(ui.element(dump, "link.refused"))
+        words = NOT_A_FORK_SAYS.format(repository=TEAM, official=config.PLUGINS_REPOSITORY)
+        expect(said == words, f"{TEAM_BRANCH_LINK} is refused with {said!r}, not {words!r}")
+        expect([r.path for r in heard] == [f"/api/repos/{TEAM}"], f"the link asked {described(heard)}: its description alone")
+        _press(machine, "link.addAsASource", "pressing Add as a source…")
+        filled = _wait_until(machine, "sources.add.field", lambda said: said == TEAM_PAGE, NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "add-as-a-source.txt")
+        expect(filled == TEAM_PAGE, f"Add as a source… opened the sheet with {filled!r}, not {TEAM_PAGE!r}")
+        expect(not _exists(machine, SOURCES_FILE), "Add as a source… added the source before Add was pressed")
+
+        before = _count(scene)
+        _press(machine, "sources.add.lookUp", "pressing Look up on the address filled in")
+        _wait_until(machine, "sources.add.confirm", lambda said: said is not None, OPERATION_SECONDS, present=True)
+        _add_the_team(scene, "adding it from the link", looked_up=True, since=before)
+        _close_the_link_sheet(scene, "before the second link")
+        heard, dump = _look_up(scene, TEAM_BRANCH_LINK, "a branch of a source added", came_to="link.refused")
+        said = ui.says(ui.element(dump, "link.refused"))
+        expect(said == BRANCH_NOT_YET, f"a link into a source added is refused with {said!r}, not {BRANCH_NOT_YET!r}")
+        expect(not heard, f"a link into a source added asked {described(heard)}")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+# --- The sources' helpers ------------------------------------------------------------------
+
+
+def _the_pane_from_its_top(machine, label):
+    """Settings → Plugins chosen afresh, from another section, so that its scroll starts at the top: scrolled down to a
+    source's block, the official catalogue's switch sat under the window's title bar, where a click at it landed on the
+    title (run 39102938550, plugins.source-official-off)."""
+    _press(machine, "section.general", f"choosing General: {label}")
+    ui.plugins_pane(machine, f"choosing Plugins again: {label}")
+
+
+def _strip(text):
+    """`text` without the isolate a passport's name is shown inside (`SourceName`)."""
+    for mark in ISOLATES:
+        text = (text or "").replace(mark, "")
+    return text
+
+
+def _source_id(path, remote_id, host="github.com", provider="github"):
+    """A source's id as uDeck derives it (`SourceID.derive`): the host and the path's last segment, then 8 hexadecimal
+    digits of SHA-256 over provider, host and number."""
+    slug = ""
+    for character in f"{host}-{path.split('/')[-1]}".lower():
+        kept = character if character in "abcdefghijklmnopqrstuvwxyz0123456789.-" else "-"
+        if kept == "-" and slug.endswith("-"):
+            continue
+        slug += kept
+    slug = slug.lstrip("-.")[:40].rstrip("-") or "source"
+    identity = "\n".join((provider, host.lower(), str(remote_id)))
+    return f"{slug}-{hashlib.sha256(identity.encode()).hexdigest()[:8]}"
+
+
+def _the_source(machine):
+    """The one source `sources.json` lists, or None."""
+    listed = (_read_json(machine, SOURCES_FILE) or {}).get("sources") or []
+    return listed[0] if len(listed) == 1 else None
+
+
+def _open_the_source_sheet(scene, label):
+    machine = scene.machine
+    if ui.element(_read_the_screen(machine, f"looking for the source sheet: {label}"), "sources.add.field") is None:
+        _press(machine, "sources.add", f"pressing Add a source…: {label}")
+    try:
+        ui.wait_for(machine, "sources.add.field", f"waiting for the source field: {label}")
+    except NotThere as error:
+        raise CheckFailed(f"Add a source… offers no field to paste an address into: {error.reason}") from None
+
+
+def _close_the_source_sheet(scene, label):
+    _press(scene.machine, "sources.add.close", f"closing the source sheet: {label}")
+    scene.machine.sleep(config.SETTLE_SECONDS)
+
+
+def _look_up_a_source(scene, address, label):
+    """`address` typed into **Add a source…** and looked up: what the sheet says it came to, isolates taken out, uDeck's
+    requests from the press on, and the walk."""
+    machine = scene.machine
+    _open_the_source_sheet(scene, label)
+    ui.click(machine, "sources.add.field", f"putting the cursor in the source field: {label}")
+    ui.type_text(machine, address, f"typing {address}: {label}")
+    typed = _wait_until(machine, "sources.add.field", lambda said: said == address, config.UI_CHANGE_SECONDS)
+    if typed != address:
+        raise LabError(f"typing the address: {label}", f"the field reads {typed!r} after {address!r} was typed into it")
+    before = _count(scene)
+    _press(machine, "sources.add.lookUp", f"pressing Look up: {label}")
+    deadline = machine.clock() + OPERATION_SECONDS
+    while True:
+        dump = _read_the_screen(machine, f"reading what the address came to: {label}")
+        if ui.element(dump, "sources.add.result") is not None or machine.clock() >= deadline:
+            break
+        machine.sleep(1)
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-source-sheet-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt")
+    result = ui.element(dump, "sources.add.result")
+    if result is None:
+        raise CheckFailed(f"{address} came to nothing within {OPERATION_SECONDS}s; uDeck asked {described(_since(scene, before))}")
+    return _strip(ui.says(result)), _since(scene, before), dump
+
+
+def _add_the_team(scene, label, head="t1", looked_up=False, since=None):
+    """someone/team-plugins looked up — unless it was — and added: its id, and uDeck's requests from **Add** on, once its
+    block is named from its passport and its rows are read."""
+    machine = scene.machine
+    if not looked_up:
+        said, _, _ = _look_up_a_source(scene, TEAM_ADDRESS, label)
+        expect(said == TEAM_NAME, f"Look up of {TEAM_ADDRESS} shows {said!r}, not {TEAM_NAME!r}")
+    sid = _source_id(TEAM, scene.github.source_id(TEAM))
+    before = _count(scene)
+    _press(machine, "sources.add.confirm", f"pressing Add: {label}")
+    name = _wait_until(machine, f"source.{sid}.name", lambda said: _strip(said) == TEAM_NAME, CATALOGUE_SECONDS)
+    # The row's button, which is its own: its mark reads alike with every other Unverified and may be handed over as
+    # another's (`_row_of`).
+    row = _wait_until(machine, f"source.{sid}.plugin.{TEAM_CLOCK}.install", lambda said: said is not None,
+                      CATALOGUE_SECONDS, present=True)
+    added = _since(scene, before)
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-source-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt")
+    expect(_strip(name) == TEAM_NAME, f"the source's block is named {name!r}, not {TEAM_NAME!r}; uDeck asked {described(added)}")
+    expect(row is not None, f"the source's block lists no team-clock to install; uDeck asked {described(added)}")
+    head_commit = scene.github.source_commit(TEAM, head)
+    state = _read_json(machine, f"{UDECK_HOME}/catalogue/{sid}/state.json") or {}
+    expect(state.get("head") == head_commit, f"the source's catalogue is at {state.get('head')}, not {head}'s {head_commit}")
+    return sid, added
+
+
+def _install_from_the_source(scene, sid, plugin, label):
+    """**Install** on `plugin`'s row in the source's block: the record it left, and uDeck's requests from the click on."""
+    before = _count(scene)
+    record = _operate(scene, f"source.{sid}.plugin.{plugin}.install", f"installing {plugin}: {label}",
+                      lambda r: r is not None, plugin)
+    asked = _since(scene, before)
+    if record is None:
+        problem = ui.reads(scene.machine, f"source.{sid}.plugin.{plugin}.problem", "reading why it was not installed")
+        raise CheckFailed(f"Install on {plugin} from the source put nothing in installed.json within {OPERATION_SECONDS}s; "
+                          f"the row says {problem!r}; uDeck asked {described(asked)}")
+    return record, asked
+
+
+def _expect_a_source_record(record, sid, commit, version, plugin):
+    """A record of a copy of the source's default branch: its id, someone/team-plugins as it was named, nobody's guarantee."""
+    wanted = {"source": sid, "repository": {"provider": "github", "host": "github.com", "path": TEAM},
+              "ref": {"kind": "default", "name": "main"}, "commit": commit, "version": version}  # fmt: skip
+    wrong = {key: record.get(key, "(missing)") for key, value in wanted.items() if record.get(key, "(missing)") != value}
+    expect(not wrong, f"installed.json says {wrong} of {plugin}, where the source's copy has {({k: wanted[k] for k in wrong})}")
+    verification = record.get("verification") or {}
+    expect(verification.get("status") == "unverified" and "by" in verification and verification.get("by") is None,
+           f"installed.json's verification of {plugin} is {verification!r}: unverified, by nobody")  # fmt: skip
+
+
+def _expect_only_the_source(heard, number, what, raw_commit=None, plugin=TEAM_CLOCK, manifests=False):
+    """uDeck's requests `heard` are the source's alone: the API by its number, and raw files of `plugin` — at
+    `raw_commit`, when given — or, `manifests`, a plugin's manifest or the passport, by its name."""
+    stray = []
+    for request in heard:
+        if request.is_api and request.path.startswith(f"/api/repositories/{number}"):
+            continue
+        found = request.raw_file(TEAM)
+        if found is not None and (raw_commit is None or found[0] == raw_commit) and (
+                found[1].startswith(f"plugins/{plugin}/") or (manifests and (found[1] == "udeck-plugins.json"
+                                                                          or found[1].endswith("/manifest.json")))):
+            continue
+        stray.append(request)
+    expect(not stray, f"{what}, uDeck also asked {described(stray)}: only the source, by its number, and its files")
+
+
+def _expect_no_credential(scene):
+    """No request in the fake's log carried a credential: a source added without a token is read anonymously."""
+    carried = [r for r in scene.github.read_log("reading the fake's log for credentials") if r.credential != "none"]
+    expect(not carried, f"requests carried a credential: {described(carried)}")
+
+
+AGE_A_STATE = """\
+import json, sys, time
+path, days = sys.argv[1], float(sys.argv[2])
+with open(path) as file:
+    state = json.load(file)
+then = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - days * 86400))
+for key in sys.argv[3:]:
+    state[key] = then
+with open(path + ".new", "w") as file:
+    json.dump(state, file, indent=2)
+print(then)
+"""
+
+
+def _age_a_state(machine, path, days, *keys):
+    """A catalogue's `state.json` with `keys` made `days` old — written beside it and moved over it."""
+    step = f"making {', '.join(keys)} of {path} {days} days old"
+    said = machine.ssh.run(f"/usr/bin/python3 -c {shlex.quote(AGE_A_STATE)} {path} {days} {' '.join(keys)} && "
+                           f"mv {path}.new {path}", step)  # fmt: skip
+    if not said.stdout.strip():
+        raise LabError(step, f"{path} was not rewritten: {said.stderr.strip()!r}")
+
+
+def _the_sources_files(machine, sid, label):
+    """`sources.json` and every file of `catalogue/<sid>/`, each with its SHA-256: the same text is the same bytes."""
+    said = machine.ssh.ask(f"cd {UDECK_HOME} && find sources.json catalogue/{sid} -type f | LC_ALL=C sort | "
+                           "while IFS= read -r f; do /usr/bin/shasum -a 256 \"$f\"; done", f"hashing the source's files {label}")
+    if said.returncode != 0 or "sources.json" not in said.stdout:
+        raise LabError(f"hashing the source's files {label}", f"they could not be read: {said.stderr.strip()!r}")
+    return said.stdout
+
+
+def _the_release(lab, version):
+    """The published release `version`, fetched to this Mac and checked against its own appcast — or the lab could not check."""
+    catalogue = releases.Catalogue(releases.GitHub(get=lab.web), lab.repo_root, lab.note, get=lab.web)
+    try:
+        return catalogue.fetch(catalogue.named(version))
+    except releases.ReleaseError as error:
+        raise LabError(f"fetching uDeck {version} from GitHub", error.reason) from None
+
+
 class Scene:
     """One check's machine: uDeck installed and running, the fake serving, uDeck's log kept."""
 
@@ -3443,7 +4452,10 @@ def _prepare(machine, check_dir, lab, main, launch=True, updates_itself=True, **
     if launch:
         app.launch(machine)
         machine.screenshot(check_dir, "uDeck running")
-    return Scene(machine, check_dir, lab, github, log, mark, started_at)
+    scene = Scene(machine, check_dir, lab, github, log, mark, started_at)
+    # The build it installed, for a check that puts it back after another uDeck.
+    scene.build = build
+    return scene
 
 
 def _catalogue_files(scene, commit):

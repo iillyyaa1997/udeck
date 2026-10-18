@@ -10,6 +10,42 @@ for what that promises.
 
 ## [Unreleased]
 
+- **A public GitHub repository as a source of its own.** Settings → Plugins →
+  **Your sources** → **Add a source…** takes a github.com repository's address
+  as the browser shows it; **Look up** asks for it by its name once, then for
+  its head by the number GitHub knows it by, and for its passport, and **Add**
+  writes it into `~/.udeck/sources.json` with the id derived from that number.
+  From then on it is a catalogue of its own, read by its number alone —
+  `/repositories/{id}/…` — on the official catalogue's schedule, with its own
+  **Check now** and **Remove…**: **Install**, **Update**, **Earlier
+  versions…**, **Back to** and **Reinstall** of its copies go through it, never
+  the official repository, and its plugins are **Unverified** and ask before
+  they run, saying *Nobody verified this code: it comes from the default branch
+  of …, a source you have not trusted.* A rename GitHub reports is written back
+  under the same id, and nothing asks the old name, where another repository
+  may be by then. One id is one copy across sources: a source's row over the
+  official copy offers **Install from here…**, the official row over a source's
+  copy **Switch to verified**, and each warning names both. A source removed
+  takes its entry and its cache with it; its copies stay, run, and say the
+  source is no longer added, and nothing reinstalls or puts them back until it
+  is added again. **Official catalogue** now governs the official repository
+  alone: off, the sources added are still read until they are removed. **Install
+  from a link…** of a repository that is no fork offers **Add as a source…**,
+  and a link into a source added is refused before any request. The official
+  repository's daily describe is held to its number, 1393324153
+  (`UDeckPluginsRepositoryID`): another number stops its catalogue, before
+  anything of the other repository is read, until a describe answers the
+  official number again; meanwhile no verified plugin updates itself, the
+  catalogue's rows are taken off the screen, its copies are offered no update,
+  reinstall or earlier version, and no **Back to** a copy of the official
+  repository, and **Install from a link…** says
+  why before any request. **Earlier versions…** lists, and installs from, the
+  history of the source the copy is of now. A test build says where it reads
+  github.com from.
+  `installed.json`, `grants.json`, `followed.json` and `settings.json` keep
+  their shape; the released 0.7.0, run over these files, shows a source's copy
+  as **Unverified**, asks before it runs it, and leaves `sources.json` and
+  `catalogue/<id>/` as they were.
 - **Sources of one's own, underneath.** The ground for stage 4 of
   [docs/plugin-repository.md](docs/plugin-repository.md#stages), which nothing
   in uDeck reads or offers yet: Settings is as it was, and no request is new.

@@ -123,8 +123,8 @@ public enum PluginPresence: Equatable, Sendable {
 
     /// Where `id` stands among the folders found and the records kept.
     ///
-    /// `readsCatalogue` is the **Official catalogue** switch. Off, uDeck makes
-    /// no request about plugins at all, and **Reinstall** is a download, so it
+    /// `readsCatalogue` is whether the copy's source can be read now
+    /// (`SourceAccess.canRead`). **Reinstall** is a download, so otherwise it
     /// is not offered — as **Back to** and **Earlier versions** are not.
     public static func of(
         _ id: PluginIdentifier,

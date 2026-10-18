@@ -115,8 +115,10 @@ launch and both with a switch to turn them off:
   asks for now: such a plugin updates itself, keeping your permission decision.
   Anything else is only offered. Off with Settings → Plugins → *Update verified
   plugins by themselves*, after which every update waits for a press; all of it
-  off with Settings → Plugins → *Official catalogue*, after which uDeck makes no
-  request about plugins at all.
+  off for the official repository with Settings → Plugins → *Official
+  catalogue*, after which uDeck makes no request to it. A repository you added
+  yourself under Settings → Plugins → *Your sources* is read the same way,
+  anonymously, until you remove it.
 
 Neither carries an account, an identifier, a cookie or the list of what you
 have installed. The details are in [README.md](README.md#what-udeck-connects-to-and-when)

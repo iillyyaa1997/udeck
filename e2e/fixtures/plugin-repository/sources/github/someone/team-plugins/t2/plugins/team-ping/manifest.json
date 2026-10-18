@@ -1,0 +1,19 @@
+{
+  "id": "team-ping",
+  "name": "Team ping",
+  "version": "1.1.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "Asks to run one command; says how many times it ran.",
+  "author": "uDeck lab",
+  "run": [
+    "./run.sh"
+  ],
+  "interval": 60,
+  "timeout": 2,
+  "permissions": {
+    "exec": [
+      "sysctl"
+    ]
+  }
+}

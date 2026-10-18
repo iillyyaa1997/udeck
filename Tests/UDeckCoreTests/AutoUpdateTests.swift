@@ -187,6 +187,27 @@ struct AutoUpdateTests {
         #expect(settings.verifiedPluginsUpdateThemselves == wanted, "catalogue \(String(describing: catalogue)), switch \(String(describing: itself))")
     }
 
+    /// Each source's copies by their own source's switch (S4-04): the
+    /// official one's under the switch and **Official catalogue**, and never
+    /// while its address answers another repository's number; a source of
+    /// one's own's under the switch alone, while it is listed.
+    @Test("each source's copies update themselves by their own source's switch")
+    func perSource() {
+        let team = OwnSource(id: "github.com-team-plugins-87a735c2", provider: "github", host: "github.com",
+                             path: "someone/team-plugins", remoteID: 123_456_789, addedAt: nil)
+        for (source, catalogue, itself, listed, changed, wanted) in [
+            ("official", true, true, [team], false, true), ("official", false, true, [team], false, false),
+            ("official", true, false, [team], false, false), ("official", true, true, [team], true, false),
+            (team.id, false, true, [team], false, true), (team.id, true, true, [team], true, true),
+            (team.id, true, false, [team], false, false), (team.id, true, true, [], false, false),
+            ("github.com-other-12345678", true, true, [team], false, false),
+        ] as [(String, Bool, Bool, [OwnSource], Bool, Bool)] {
+            let settings = AppSettings(officialCatalogue: catalogue, autoUpdateVerified: itself)
+            #expect(AutoUpdate.switchedOn(source, settings: settings, sources: listed, officialChanged: changed) == wanted,
+                    "\(source): catalogue \(catalogue), switch \(itself), \(listed.count) listed, changed \(changed)")
+        }
+    }
+
     // MARK: - When the plugins are asked
 
     /// A schedule as it is after a read that succeeded, with the hashing

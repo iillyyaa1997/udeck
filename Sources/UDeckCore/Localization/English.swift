@@ -170,13 +170,13 @@ struct English: Vocabulary {
         // Plugins from a repository
         case .pluginsOfficialCatalogue: "Official catalogue"
         case .pluginsOfficialCatalogueHelp(let source):
-            "uDeck reads the list of plugins in \(source) a few seconds after it starts, once a day, when you open this pane and the list is more than an hour old, and when you press Check now — the list and each plugin's manifest; for a plugin installed from a branch or a pull request, also where that branch or pull request is now — a fork's branch asked of the fork — and, once it has moved, its list of files, that plugin's manifest there and one comparison with what is installed. A plugin's files are fetched when you press Install, and when a verified plugin updates itself. Off, uDeck makes no request about plugins at all; what is installed keeps running."
+            "uDeck reads the list of plugins in \(source) a few seconds after it starts, once a day, when you open this pane and the list is more than an hour old, and when you press Check now — the list and each plugin's manifest; for a plugin installed from a branch or a pull request, also where that branch or pull request is now — a fork's branch asked of the fork — and, once it has moved, its list of files, that plugin's manifest there and one comparison with what is installed. A plugin's files are fetched when you press Install, and when a verified plugin updates itself. Off, uDeck makes no request to the official repository; sources you added are read until you remove them; what is installed keeps running."
         case .catalogueCheckNow: "Check now"
         case .catalogueChecked(let source, let time): "\(source) · checked \(time)"
         case .catalogueNeverRead(let source): "\(source) · not read yet"
         case .catalogueReading: "Reading the catalogue…"
         case .catalogueOff:
-            "The official catalogue is off. Installed plugins keep running; uDeck does not look for their updates."
+            "The official catalogue is off: uDeck makes no request to the official repository or its forks, and does not look for updates of what was installed from them. Sources you added are still read; installed plugins keep running."
         case .catalogueEmpty: "The repository offers no plugins yet."
         case .catalogueUpdatesWaiting(let count):
             count == 1 ? "1 update is waiting" : "\(count) updates are waiting"
@@ -317,7 +317,7 @@ struct English: Vocabulary {
         case .linkReading: "Asking GitHub…"
         case .linkClose: "Close"
         case .linkOff:
-            "The official catalogue is off, so uDeck makes no request about plugins: switch it on to install from a link."
+            "The official catalogue is off, so uDeck makes no request to the official repository or its forks: switch it on to install from a link."
         case .linkRefused(let refusal, let official): Self.linkRefusal(refusal, official: official)
         case .linkNotFound(let link, let official):
             switch link {
@@ -327,8 +327,6 @@ struct English: Vocabulary {
             case .forkRepository(let repository): "\(repository) could not be found — or it is private."
             default: "\(official) has nothing at that link."
             }
-        case .linkNotAFork(let repository, let official):
-            "\(repository) is not a fork of \(official). Plugins come from \(official) and its forks for now; other repositories come later, as sources of their own."
         case .linkIsTheCatalogue(let official, let plugin):
             plugin.map { "That is \($0) on the default branch of \(official): it is in the catalogue below, verified." }
                 ?? "That is the default branch of \(official): its plugins are the catalogue below, verified."
@@ -364,6 +362,20 @@ struct English: Vocabulary {
         case .catalogueNotASourceAnyMore(let address): "\(address) is not a source any more"
         case .catalogueOfficialRepositoryChanged:
             "The address of the official catalogue now belongs to a different repository. uDeck stopped reading it, and nothing updates by itself; installed plugins keep running."
+        case .sourcesTitle: "Your sources"
+        case .sourcesAdd: "Add a source…"
+        case .sourcesAddField: "github.com/owner/repo or gitlab.com/group/project"
+        case .sourcesAddConfirm: "Add"
+        case .sourcesAsking(let host): "Asking \(host)…"
+        case .sourceNotTrusted:
+            "Not trusted: nobody vouches for these plugins — each asks again whenever its code changes."
+        case .sourceRemove: "Remove…"
+        case .sourcesTestBuild(let host, let base): "Test build: \(host) is read from \(base)."
+        case .sourceGitLabNotYet(let host): "\(host): GitLab projects are not read yet"
+        case .sourceAlreadyAdded(let name, let address):
+            name == address ? "\(address) is added already." : "\(name) (\(address)) is added already."
+        case .sourceBranchNotYet:
+            "Installing from a branch or a merge request of a source is not possible yet; add the project and install from its default branch."
         case .runLogSwitch: "Keep a run log for linked folders"
         case .runLogHelp(let path):
             "Every run of a linked plugin — when, why, how it ended, how long it took, the end of its standard error — goes into \(path)/<id>.log, at most 2 MB a plugin. Other plugins keep only their last run, in memory."

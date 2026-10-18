@@ -1,0 +1,8 @@
+# someone/team-plugins, oldest first, each the parent of the next (e2e/guest/fake-github.py).
+# t1: team-clock 1.0.0, asking for nothing; team-ping 1.0.0, asking for one command; uptime 1.0.0, whose
+#     files differ from the official c1's uptime 1.0.0 and which asks for the same.
+# t2: team-clock 1.1.0 and team-ping 1.1.0, asking for what 1.0.0 asks.
+# t3: team-clock 1.2.0, asking for one command more.
+t1
+t2
+t3

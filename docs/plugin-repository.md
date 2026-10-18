@@ -21,7 +21,9 @@ uDeck gets this in five stages, each of which ships something that works on its
 own (see [Stages](#stages)). **Everything in this document without a mark is
 built** — stages 1, 2 and 3, which [Stages](#stages) lists, all but one step of
 stage 2 marked in [The official repository](#the-official-repository): its
-script deleted once `udeck-plugin check-repo` has agreed with it long enough.
+script deleted once `udeck-plugin check-repo` has agreed with it long enough —
+and the first of stage 4: a public GitHub repository added as a source of its
+own ([Sources of one's own](#sources-of-ones-own)).
 Anything that belongs to a later stage and is not built yet is marked where it
 appears:
 
@@ -1180,6 +1182,175 @@ Rows are sorted by name, as the operator reads it.
 
 ---
 
+## Sources of one's own
+
+Beside the official catalogue, the operator can add a repository of their own
+— or a team's — as a **source**: its default branch is a catalogue of its own,
+with **Install**, **Update**, **Earlier versions**, **Back to**, **Reinstall**
+and **Remove** as the official one has them. Nobody vouches for it: its
+plugins are **Unverified**, and ask before they run, whenever their code
+changes ([Consent for unverified code](#consent-for-unverified-code)).
+
+> **Later — stage 4.** GitLab projects (gitlab.com, or one's own) as sources,
+> private sources read with a token kept in the Keychain or by **Sign in**, and
+> **Trust…** with the **Trusted source** mark. Today a source is a public
+> repository on github.com.
+
+### `sources.json`
+
+`~/.udeck/sources.json` lists the sources added, in the order Settings shows
+them. The official source is not in it: it stays built in, from `Info.plist`.
+It is written atomically, like `installed.json`, and it never holds a secret.
+
+```json
+{"version": 1, "sources": [
+  {"id": "github.com-team-plugins-87a735c2", "provider": "github", "host": "github.com",
+   "path": "someone/team-plugins", "remoteID": 123456789, "access": "none",
+   "trustedAt": null, "addedAt": "2026-10-20T11:00:00Z"}]}
+```
+
+| Field | Meaning |
+|---|---|
+| `id` | What every record of a copy of the source says it came from (`installed.json`'s `source`), the name of its cache, `~/.udeck/catalogue/<id>/`, and later the key of its token: `<slug>-<hash8>`. `hash8` is the first 8 hexadecimal digits of SHA-256 over `<provider>\n<lowercased host>\n<remoteID>`, so a renamed repository keeps it and a new repository made at the old name gets another. `slug` — the host, `-` and the path's last segment when it was added, lowercased, every character outside `[a-z0-9.-]` a `-`, at most 40 — is only for a person reading `~/.udeck`. An id always matches `^[a-z0-9][a-z0-9.-]{0,40}-[0-9a-f]{8}$`: never `official`, always a safe folder name. |
+| `provider`, `host` | `github`, and `github.com`. (`gitlab` and a GitLab's host later.) |
+| `path` | `owner/repo` as the host spells it now: for the pages a person opens and for GitHub's raw host. Written back whenever a describe of the repository, by its number, says another. |
+| `remoteID` | The number GitHub knows the repository by, which neither a rename nor a transfer changes. Every request after **Look up** addresses the repository by it. |
+| `access` | What the Keychain is expected to hold for it: `none` today. |
+| `trustedAt` | `null` today; when it was trusted, later. |
+| `addedAt` | When it was added. |
+
+A key uDeck does not know is ignored, and written back as it was. An entry it
+cannot use — a provider it does not know, no `remoteID`, a host or a path it
+would not read as an address — is left out, said on the group's problem line,
+and written back as it was. The whole file is **broken** when an entry's id is
+not the one derived from its provider, host and `remoteID`, when two entries
+share an id or a repository — entries left out counted — or when it does not
+parse: it is said, and never written over, and while it is broken no source is
+read, added or removed, and every copy of one is held to its tree.
+
+`sources.json` is not a boundary against plugins: a plugin runs as the operator
+and can write it, as it can write `grants.json` and the plugin folders.
+
+### Adding a source
+
+Settings → Plugins gets a group after **Official catalogue**, **Your sources**,
+which starts with **Add a source…**. It opens a sheet in the pane, as **Install
+from a link…** does, with one field — *github.com/owner/repo or
+gitlab.com/group/project* — and **Look up**. The address is read as a browser
+shows it, `https://` and `www.` or not, and any page of a repository comes to
+the repository (`SourceLink`). Refused before any request, each saying what to
+paste instead: `http://` (*"Sources are read over HTTPS only…"*), git's SSH
+address, an address with a login in it, a github.com page that is no
+repository, and the official repository itself (*"That is
+github.com/iillyyaa1997/udeck-plugins, the official catalogue…"*). A GitLab
+address is read, and **Look up** says *"<host>: GitLab projects are not read
+yet"*.
+
+**Look up** asks github.com anonymously, three requests (`SourceLookUp`):
+
+1. `GET /repos/{owner}/{repo}` — the one request ever addressed by its name —
+   which says its number (`id`), its name as GitHub spells it and its default
+   branch;
+2. `GET /repositories/{id}/commits/{branch}` with `Accept:
+   application/vnd.github.sha` — its head, by its number;
+3. `udeck-plugins.json` at that commit, from the raw host.
+
+The sheet shows the passport's name — cleaned, inside an isolate, or the
+address instead ([What a source is called](#what-a-source-is-called)) — its
+description and the address, with **Add**. A repository that is added already
+is said so once its number is known (*"Team plugins (github.com/…) is added
+already."*); one with no passport at the top of its default branch is *"… is
+not a uDeck plugin repository: there is no udeck-plugins.json at the top of
+main."*, and one that is not there, or private, *"… could not be found, or it is
+private. If it is private, uDeck needs a token for it: Token…"*; none of them
+offers **Add**. Nothing is added until **Add** is pressed.
+
+**Add** writes the entry with the id derived from its number, keeps the default
+branch and the passport **Look up** heard in `~/.udeck/catalogue/<id>/`, and
+reads its catalogue at once. Its block shows its name and its address, *"Not
+trusted: nobody vouches for these plugins — each asks again whenever its code
+changes."*, when it was read or why it was not — naming its host and its
+address — **Check now**, **Remove…**, and its catalogue's rows, drawn as the
+official ones are, marked **Unverified**, never **Verified**. A build that
+reads github.com, or any host, from somewhere else than the build as shipped —
+the lab's — says so under **Your sources**: *"Test build: api.github.com is
+read from http://127.0.0.1:8766/api."*
+
+**Remove…** says first what it does — *"Remove Team plugins
+(github.com/someone/team-plugins)? uDeck stops reading it and forgets its token.
+What was installed from it stays and keeps running; …"* — and then takes the
+entry and `~/.udeck/catalogue/<id>/` away. Nothing more is asked of it. What
+was installed from it stays and runs, its row saying *"From github.com/… — a
+source no longer added"*, and nothing updates, reinstalls or puts it back until
+the source is added again: added again, it gets the same id, and its copies are
+its own again.
+
+**Install from a link…** of a repository that is no fork of the official one
+says *"github.com/someone/team-plugins is not a fork of
+github.com/iillyyaa1997/udeck-plugins. To install from it, add it as a source of
+its own."*, with **Add as a source…**, which opens **Add a source…** with the
+repository's address filled in. A link into a source added — a branch of it,
+its page, a pull request — is refused before any request: *"Installing from a
+branch or a merge request of a source is not possible yet; add the project and
+install from its default branch."*
+
+### Reading a source
+
+A source is read as the official catalogue is
+([Reading a repository without downloading it](#reading-a-repository-without-downloading-it)),
+with its own cache, `~/.udeck/catalogue/<id>/`, and every API request
+addressed by its number: `/repositories/{id}`, `…/commits/{branch}`,
+`…/git/trees/{commit}`, `…/commits?sha=&path=` — never `/repos/{owner}/{repo}/…`
+(GitHub answered all of them anonymously when stage 4 was designed,
+**measured**). Raw files come from the raw host by the name it has now, at a
+commit, and each is hashed against the listing asked by its number, so a
+repository made later at an old name can serve nothing that passes. When the
+daily describe — `GET /repositories/{id}` — says the repository is called
+something else now, that name is written back to `sources.json` under the same
+id, and from then on its files are asked by it. A source read without a token
+counts against the official source's hourly limit, as GitHub counts what an
+address asks whatever the repository.
+
+A source is read on the official source's schedule
+([What uDeck fetches, and when](#what-udeck-fetches-and-when)), each by its own
+state: a few seconds after launch unless it was read in the last day, then
+once a day, a failure again after an hour, when Settings → Plugins is opened
+and its list is more than an hour old, and when **Check now** on its block is
+pressed. Reads go one at a time, the official source first, then each source
+in `sources.json`'s order. **Official catalogue** governs the official
+repository alone: a source added is read until it is removed, whatever the
+switch says, and a copy of it is updated, reinstalled, put back and given its
+earlier versions from it, through its own client — never the official one's.
+
+**The official repository's number.** The official source stays addressed by
+its path, as in stage 3 — its forks are found by theirs — and its daily
+describe is held to the number the build knows it by (`UDeckPluginsRepositoryID`,
+1393324153 as shipped): one that answers another number, or none, is the
+official address belonging to a different repository now. The read stops there,
+before anything of that repository is read; Settings says *"The address of the
+official catalogue now belongs to a different repository. uDeck stopped reading
+it, and nothing updates by itself; installed plugins keep running."*; every
+later read asks the number again first, and one that fails before a describe
+answers leaves that sentence standing; and until a describe answers the
+official number again, nothing else is asked of the official address: no verified
+copy updates itself, the catalogue's rows read before are taken off the screen,
+its copies are offered no **Update**, **Reinstall** or **Earlier versions…**,
+and no **Back to** a copy of the official repository, and **Install from a link…** says the same sentence before any
+request.
+
+### What a source is called
+
+A source's name is its passport's `name`, somebody else's text: characters of
+the Unicode categories Cc, Cf, Zl and Zp — controls, the zero-width and
+bidirectional ones among them — are taken out, and what is left is shown inside
+an isolate (U+2068 … U+2069), so that it cannot reorder the address beside it.
+The address is shown instead when no passport has been read, when nothing is
+left of the name, and when it is — trimmed, whatever its case — the official
+passport's name or `uDeck plugins`: a passport cannot dress up as the official
+one. Every row and every warning names the address too.
+
+---
+
 ## Installing a plugin
 
 ### What happens when Install is pressed
@@ -1289,9 +1460,8 @@ Whether another repository is a fork of the official one only GitHub can say,
 so that is asked first (below), and a repository that is not — one of its
 own, or a fork of something else — is refused once it has said so:
 *"github.com/someone/elsewhere is not a fork of
-github.com/iillyyaa1997/udeck-plugins. Plugins come from
-github.com/iillyyaa1997/udeck-plugins and its forks for now; other
-repositories come later, as sources of their own."* (stage 4).
+github.com/iillyyaa1997/udeck-plugins. To install from it, add it as a source of
+its own."*, with **Add as a source…** ([Adding a source](#adding-a-source)).
 
 **Look up** then asks GitHub (`RefResolver`) — through the official
 repository, for its pull requests and its branches: for a pull request `GET
@@ -1374,9 +1544,9 @@ request has ([Following the branch or the pull request a copy came
 from](#following-the-branch-or-the-pull-request-a-copy-came-from)) — and, once
 its pull request is merged, what was merged, below.
 
-**Official catalogue** governs this as it governs every request about
-plugins: off, **Install from a link…** is greyed out and says why, and
-plugins installed from a link keep running.
+**Official catalogue** governs this as it governs every request to the
+official repository and its forks: off, **Install from a link…** is greyed out
+and says why, and plugins installed from a link keep running.
 
 **A fork's copy** is named with its fork wherever its line of history is
 named — *Unverified · branch x of someone/udeck-plugins at a1b2c3d* on its row,
@@ -1393,8 +1563,10 @@ folder is exactly what the catalogue's head has is what was merged, and becomes
 the default branch's, **Verified**, like any other (`Adoption`). A fork's
 default branch is never taken as the official one's (`PluginOrigin.mayBeTaken`).
 
-> **Later — stage 4.** Other repositories — one of their own, or a fork of
-> something else — as sources of their own, with **Trust**.
+Other repositories — one of their own, or a fork of something else — are
+sources of their own ([Sources of one's own](#sources-of-ones-own)).
+
+> **Later — stage 4.** **Trust** on a source.
 
 ### When the pull request is merged or closed
 
@@ -1693,8 +1865,8 @@ its hash be compared at all.
 |---|---|---|
 | `version` | integer | The format of this file. Currently `1`. |
 | `plugins` | object | Keyed by plugin id — the same id as the folder. |
-| `source` | string | The source it was installed from. `official` in stage 1. |
-| `repository` | object | Where that source pointed when the plugin was installed: `provider` (`github`; later `gitlab`), `host`, and `path` (`owner/repo`). A copy, so that the record still says where the plugin came from after the source is renamed or removed. For a copy of a branch of a fork, the fork — as GitHub named it when it was looked up — on the source's host; the `source` is still `official`. |
+| `source` | string | The source it was installed from: `official`, or the id of a source of one's own ([`sources.json`](#sourcesjson)). |
+| `repository` | object | Where that source pointed when the plugin was installed: `provider` (`github`; later `gitlab`), `host`, and `path` (`owner/repo`) — for a source of one's own, as it was named then; the copy is read again through the source, by its number, whatever it is called now. A copy, so that the record still says where the plugin came from after the source is renamed or removed. For a copy of a branch of a fork, the fork — as GitHub named it when it was looked up — on the source's host; the `source` is still `official`. |
 | `ref.kind` | string | `default` — the source's default branch; `branch` — another branch; `pr` — a pull request. Reserved for later: `commit`. A kind uDeck does not know is read as it is written, and is unverified. |
 | `ref.name` | string or null | The default branch's name (`main`); the branch's name; the pull request's number, as a string. |
 | `commit` | 40 hex characters | The commit the files were taken from. |
@@ -1724,9 +1896,9 @@ How it is computed:
   by `official`. Every commit uDeck installs from the official source comes
   either from resolving its default branch or from that branch's history, and
   force pushes to it are refused, so the commit is one somebody merged.
-* Otherwise — a branch, a pull request, a kind of ref uDeck does not know —
-  **`unverified`**, by nobody: exactly what was installed, and code nobody
-  verified. Its row says **Unverified**, not *Modified locally*. Unless that
+* Otherwise — a branch, a pull request, a kind of ref uDeck does not know, the
+  default branch of a source of one's own — **`unverified`**, by nobody:
+  exactly what was installed, and code nobody verified. Its row says **Unverified**, not *Modified locally*. Unless that
   is exactly what was merged: then the record itself becomes the default
   branch's ([When the pull request is merged or
   closed](#when-the-pull-request-is-merged-or-closed)).
@@ -1829,7 +2001,21 @@ and the Settings row says where the copy on disk came from: *From
 github.com/iillyyaa1997/udeck-plugins at 5c3e0d2*, or **Unverified** · *pull
 request #3 at a1b2c3d*, with a link to its page.
 
-> **Later — stage 4.** The same of a copy from another source.
+**Across sources**, the same: one copy per id, whichever source it came from.
+In a source's catalogue, the row of an id installed from elsewhere — the
+official source, or another source — says *"Installed here: the verified 1.0.0
+from github.com/iillyyaa1997/udeck-plugins"* and offers **Install from here…**,
+whose warning names both copies first: *"uptime is the verified 1.0.0 from
+github.com/iillyyaa1997/udeck-plugins; installing 1.0.0 from
+github.com/someone/team-plugins: unverified replaces it. Its windows and settings
+stay. Nobody verified the code that comes: it asks before it runs, unless you
+allowed exactly that code before."* In the official catalogue, the row of an id
+installed from a source says *"Installed here from
+github.com/someone/team-plugins: unverified"* with **Switch to verified**, whose
+warning names both the other way round. Two default branches are one line only
+within one source: a copy of one source's default branch never takes another's
+place unsaid, an update is offered from the copy's own source's head alone, and
+**Back to** takes the copy it replaced from the source that copy was of.
 
 ---
 
@@ -2138,7 +2324,7 @@ read it*. That is what these marks answer — and each says whose word it is.
 | **A folder of your own** — `folder` | Put into `~/.udeck/plugins` by anyone but uDeck. uDeck claims nothing about it. | 1 |
 | **Modified locally** — `pencil` | Installed from a repository, but the folder has changed since. Whatever mark it had is gone. | 1 |
 | **Trusted source: \<name\>** — `checkmark.shield` | Installed from the default branch of a repository the operator explicitly trusted (**Trust** on the source, as `brew trust` works for Homebrew). The guarantee is that source's owner's, not uDeck's — a different mark, so nobody mistakes one for the other. | 4 |
-| **Unverified** — `exclamationmark.triangle` | From a branch, a pull request, a fork, a specific commit, or the default branch of a source nobody trusted. Nobody vouches for it. Shown on the card's header as well as in Settings. | 3 (a branch or a pull request of the official repository, a branch of a fork of it); 4 |
+| **Unverified** — `exclamationmark.triangle` | From a branch, a pull request, a fork, a specific commit, or the default branch of a source nobody trusted. Nobody vouches for it. Shown on the card's header as well as in Settings. | 3 (a branch or a pull request of the official repository, a branch of a fork of it); 4 (the default branch of a source nobody trusted — on its rows, its copies' rows and their cards, its block saying *Not trusted…*) |
 
 In the official repository **only what is merged is verified**; its branches and
 pull requests are unverified like anybody else's.
@@ -2226,6 +2412,15 @@ repository. What that means, exactly:
   by themselves** is on. Switched off while one downloads, that download finishes
   and nothing of it is put in place.
 
+* **For each source of one's own**, on the same schedule — at launch unless
+  read in the last day, once a day, when Settings → Plugins is opened and its
+  list is more than an hour old, and when **Check now** on its block is pressed
+  — what the catalogue reads, by the repository's number; when **Look up** is
+  pressed in **Add a source…**, the repository's description by its name, its
+  head by its number and its passport; and, when a button is pressed for a copy
+  of it, the files that needs, from it ([Sources of one's
+  own](#sources-of-ones-own)).
+
 Nothing else. A refresh reads only what [the catalogue](#reading-a-repository-without-downloading-it)
 reads, usually one or two requests, and one more for each copy of a branch or
 a pull request not merged as it is — one or two more, once, when its head
@@ -2241,8 +2436,10 @@ and so, when something is installed, which plugin. No account, no identifier,
 no cookie, no list of what is installed.
 
 **Settings → Plugins → Official catalogue** turns it off. Off, uDeck makes no
-request about plugins at all; installed plugins keep running, and uDeck stops
-knowing about their updates.
+request to the official repository — its catalogue, **Install from a link…**,
+its forks, the lines its copies came from; the sources added are read until
+they are removed, and installed plugins keep running. Without a source added,
+that is no request about plugins at all.
 
 `README.md` promises today that uDeck makes no network connection of any kind
 unless updates are switched on. That stops being true the day stage 1 ships, so
@@ -2331,7 +2528,15 @@ standard library.
   its network's objects — with branches of its own: its description (`fork`,
   `parent`, `source`, or `fork` false for a repository of its own), its
   branches' heads, any listing, comparison and raw file; every request to it
-  spends the same hourly count. A repository the lab names none of is `404`.
+  spends the same hourly count. **Repositories of their own** — stage 4's
+  sources, fixture folders under `sources/github/<owner>/<repo>/`, each with
+  its own history and an `id` file, the number GitHub gives it — answer by
+  their name (`GET /repos/{o}/{r}/…`) and by their number (`GET
+  /repositories/{id}/…`): their description with `id` and `full_name`, their
+  head with its `ETag` and `304`, a folder's history, a listing, a comparison,
+  and raw files by the name they are called now. The official repository's
+  description says its number too, the fixture's own (`id`, 900000001) unless
+  the lab names another. A repository the lab names none of is `404`.
 * **The lab drives it** by rewriting a small state file over SSH: which commit
   `main` is at; which commit each other branch is at, a branch left out being
   deleted; each pull request's head, state, merge commit and the repository it
@@ -2341,12 +2546,16 @@ standard library.
   with `remaining: 0`); "this many of the hour's requests were spent by
   something else on the connection" (`spent`: what is left says so, and runs
   out that much sooner); "answer this file with different bytes"; "say the
-  listing is truncated". Moving a head, force-pushing — a head at a commit that
-  does not continue the one before — merging and closing are each one
-  rewrite.
-* **It keeps an access log** of every request — method, path, query, status —
-  which is the oracle for what uDeck asked for and, just as much, for what it
-  did not.
+  listing is truncated"; which commit each repository of its own's `main` is
+  at; which name serves which of them — a repository renamed, and another made
+  at its old name; "the official repository's description answers this
+  number". Moving a head, force-pushing — a head at a commit that does not
+  continue the one before — merging and closing are each one rewrite.
+* **It keeps an access log** of every request — method, path, query, status,
+  the port it came in on, and whether it carried a credential (`none`,
+  `accepted`, `rejected`, never its value; any credential is answered `401`
+  today) — which is the oracle for what uDeck asked for and, just as much, for
+  what it did not.
 
 **A lab build is pointed at it through `Info.plist`**, the way it is pointed at
 its own update feed, because the lab tests the release build and a relaunch
@@ -2357,10 +2566,13 @@ does not keep environment variables:
 | `UDeckPluginsAPIBase` | `https://api.github.com` | `http://127.0.0.1:<port>/api` |
 | `UDeckPluginsRawBase` | `https://raw.githubusercontent.com` | `http://127.0.0.1:<port>/raw` |
 | `UDeckPluginsRepository` | `iillyyaa1997/udeck-plugins` | the same |
+| `UDeckPluginsRepositoryID` | `1393324153` | `900000001`, the fake's |
 
 `Scripts/make-app.sh` gains `--test-plugins <base URL>`, which sets the first two
-and adds `NSAllowsLocalNetworking`, as `--test-feed` does; the lab's build step
-verifies the keys in the zip as it already verifies `SUFeedURL`.
+and the number, and adds `NSAllowsLocalNetworking`, as `--test-feed` does; the
+lab's build step verifies the keys in the zip as it already verifies
+`SUFeedURL`, and holds the build as shipped and the smoke's to GitHub's own
+number.
 
 ### The lab's checks
 
@@ -2386,7 +2598,7 @@ guest's `~/.udeck` over SSH.
 | `plugins.modified-locally` | A line appended to an installed file over SSH makes `installed.json` say `modified` within seconds — 0.7 to 0.9 s, measured — and then the row **Modified locally**, with **Verified** gone. The disk is read first: one walk of Settings → Plugins takes 40 to 76 s, and a walk that crosses the change returns the row's mark as it was, several times, or not at all — R2's two failures of six — while the walk after it reads the truth (e2e/README.md). |
 | `plugins.install-from-a-pull-request` | Pull request #3, opened from the fork `someone/udeck-plugins`, pasted as `github.com/iillyyaa1997/udeck-plugins/pull/3` into **Install from a link…**: the sheet says *Pull request #3 at …* and lists `asks-nothing` and `uptime` — what differs from the catalogue's head — and the log holds the pull request, its listing and those two manifests at its head, through the official repository; **Install** on `uptime` fetches every file of `plugins/uptime/` once, from the base's raw host at the head's commit, and asks the API nothing; nothing is asked of the fork. The folder hashes to `pr3`'s tree, `installed.json` says `ref {pr, "3"}`, `unverified`, by `null`; the row says **Unverified** · *pull request #3 at …* with a link to its page; placed on a tab, the card's header says **Unverified**, and its question says where the code comes from. Screenshots of the sheet, the row and the card. |
 | `plugins.install-from-a-branch` | The link into `plugins/uptime` on `fix/uptime`, a branch whose name holds a `/`: the sheet lists `uptime` alone, and from **Look up** to the end of the install the log holds the branch's head by `refs/heads/fix/uptime`, its listing and files of `plugins/uptime/` at its commit — nothing else; the record says `ref {branch, "fix/uptime"}`, `unverified`, by `null`, and the row **Unverified** · *branch fix/uptime at …*. Placed on a tab and its folder taken away over SSH, its window says beside **Reinstall** *Reinstall puts back 1.0.1 from branch fix/uptime at …: code nobody verified.*; Settings does not say *Nothing installed yet* above its **Missing** row; the catalogue row says *Installed here from branch fix/uptime: unverified — uptime is not in ~/.udeck/plugins* and offers **Switch to verified** — the plugin's row too — and no **Reinstall**; pressed, the verified copy goes in without a warning, with the branch's as `previous`. |
-| `plugins.install-from-a-fork-branch` | The control first: a link into `plugins/uptime` on `x` of `someone/elsewhere`, a repository of its own, is refused — *"github.com/someone/elsewhere is not a fork of github.com/iillyyaa1997/udeck-plugins. …"* — and the log holds its description, `GET /repos/someone/elsewhere`, and nothing after it: no head, no listing, no file. Then the link into `plugins/uptime` on `x` of the fork `someone/udeck-plugins`, at `pr3` — the official repository has no `x`: from **Look up** to the end of the install the log holds the fork's description, the head of its `x` by `refs/heads/x`, its listing and files of `plugins/uptime/` at that commit from the fork's raw host — every file once on **Install** — and nothing of the official repository; the sheet says *Branch x of someone/udeck-plugins at …*; the folder hashes to `pr3`'s tree; the record says `repository` the fork, `ref {branch, "x"}`, `unverified`, by `null`; the row **Unverified** · *branch x of someone/udeck-plugins at …*. The fork moves `x` on to `p2`: **Check now** asks the fork for `x` with `If-None-Match` and `pr3`, lists `p2` there and compares `pr3...p2` there once, asks the official repository nothing about it, and the row says *Changed in branch x of someone/udeck-plugins, still 1.0.1* with **Update** and *What changed*; **Update** takes every file of `plugins/uptime/` at `p2` once, from the fork, and the row says *… at* `p2`. Screenshots of the refusal, the sheet, the row and the offer. |
+| `plugins.install-from-a-fork-branch` | The control first: a link into `plugins/uptime` on `x` of `someone/elsewhere`, a repository of its own, is refused — *"github.com/someone/elsewhere is not a fork of github.com/iillyyaa1997/udeck-plugins. To install from it, add it as a source of its own."* — and the log holds its description, `GET /repos/someone/elsewhere`, and nothing after it: no head, no listing, no file. Then the link into `plugins/uptime` on `x` of the fork `someone/udeck-plugins`, at `pr3` — the official repository has no `x`: from **Look up** to the end of the install the log holds the fork's description, the head of its `x` by `refs/heads/x`, its listing and files of `plugins/uptime/` at that commit from the fork's raw host — every file once on **Install** — and nothing of the official repository; the sheet says *Branch x of someone/udeck-plugins at …*; the folder hashes to `pr3`'s tree; the record says `repository` the fork, `ref {branch, "x"}`, `unverified`, by `null`; the row **Unverified** · *branch x of someone/udeck-plugins at …*. The fork moves `x` on to `p2`: **Check now** asks the fork for `x` with `If-None-Match` and `pr3`, lists `p2` there and compares `pr3...p2` there once, asks the official repository nothing about it, and the row says *Changed in branch x of someone/udeck-plugins, still 1.0.1* with **Update** and *What changed*; **Update** takes every file of `plugins/uptime/` at `p2` once, from the fork, and the row says *… at* `p2`. Screenshots of the refusal, the sheet, the row and the offer. |
 | `plugins.unverified-asks-even-for-nothing` | `asks-nothing`, installed from the pull request and placed on a tab: its card asks — *Asks nothing asks for nothing, but its code is unverified*, and where the code comes from — and its count of runs is not in its cache: it has not run. **Allow** runs it, and `grants.json` holds the decision for 1.0.0 and for its tree; a line appended to `run.sh` over SSH asks again, and **Decline** on the card switches it off (`plugin-settings.json`), its count of runs what it was before the edit: the changed code never ran. Switched on in Settings, its row asks the same under **More**, and **Decline** there switches it off again, the count unchanged; switched on once more, **Allow** there holds the decision for the edited tree and runs it. |
 | `plugins.a-merged-pull-request-becomes-verified` | `uptime` installed from pull request #3, placed and allowed — `followed.json` holding what **Look up** heard, open at `pr3`, and the log one question about the pull request, **Look up**'s; the fake squash-merges it as `s1` — `main` there, the pull request closed and merged as `s1`, every plugin folder with `pr3`'s tree. After **Check now**: `installed.json` says `main` at `s1`, **Verified** by `official`, the tree and version it had; the row says **Verified**; every file of the folder has the inode and the time it had; the log holds no file of `uptime` and no question about the pull request; `followed.json` no longer holds it; the window and the decision are as they were, and the card runs 1.0.1 without asking, with no **Unverified** in its header. |
 | `plugins.merged-with-changes-offers-the-verified` | `uptime` installed from pull request #3; the fake squash-merges it as `s2`, `uptime` 1.0.2. After **Check now** the log holds one question about the pull request and no file of `uptime`, and the record is as it was; the row says *Pull request #3 was merged, and the verified version differs — update* with **Update**, the catalogue row *… unverified — merged, and the verified version differs* with its button saying **Update** as well — as wide as the plugin row's, since the walk reads no button's words, and kept as a screenshot — and Settings *1 update is waiting*. **Update** first names both copies and changes nothing until it is confirmed; then the record is `main`'s at `s2`, **Verified**, 1.0.2, with the pull request's copy as `previous`. |
@@ -2407,6 +2619,18 @@ guest's `~/.udeck` over SSH.
 | `plugins.install-command` | The bundle carries `Contents/Helpers/udeck-plugin` and `codesign --verify --deep --strict` holds in the guest; the row says it is not installed; **Install command** makes `~/.local/bin/udeck-plugin` a link to it, and `--help` and `--version` run through the link; the row says it is installed and what the guest's zsh makes of `~/.local/bin` (the line to add, when it does not look there); **Remove command** takes the link and leaves the command in the bundle; a file of somebody else's at that place is said, left as it is, and not offered **Install command**. |
 | `plugins.search-path-field` | A linked plugin running the bare `lab-greet`, on no folder of the default list: its window says it was not found. **＋ Add a folder…** (the folder chosen in the panel) puts a folder of the lab's at the top of **Where to look for commands** and in `settings.json`, and the card, allowed, says that folder's word; a second folder added says its word; **↓** on it, the first folder's word again — each from the next run, without a restart; **Restore the defaults** puts the default list back in `settings.json`. |
 | `plugins.screens-in-russian` | With uDeck in Russian (`language` in `settings.json`), a failed run on a fresh card, the **Linked** row and its Remove warning, **Link a folder…** over the installed `uptime` and its warning, the last run under **More**, the run log switch, **Where to look for commands** and **Install command** are each there and say uDeck's Russian words — why the run failed too, *программа плагина завершилась с кодом 3*, with the last run's seconds written with a comma; **Link a folder…** over a link writes both folders from `~`; **Update** over a link put where the installed `uptime` was says first *uptime здесь — ссылка на ~/…* and leaves the link until that is confirmed. Then, in a uDeck started afresh in Russian with updates by themselves on, the screens of stage 3 a person meets along the way say Russian.swift's words: *Обновился сам …* after `main` moved to `c2`; the link sheet — the refusal of `someone/elsewhere`, and the head, **Не проверен** and note of the fork's branch, of `fix/uptime` and of pull request #3; the warnings of **Install** over the verified copy, **Switch to verified** and **Back to** the pull request's copy, each naming both; the **Не проверен** row, *запрос на слияние #3, коммит …*, and the catalogue row; the cards of `uptime` and `asks-nothing` asking — the header, where the code comes from, *… ничего не просит, но его код не проверен*; history rewritten; *Запрос на слияние #3 не проверялся с …*; closed without being merged; merged with changes; merged with nothing offered. A screenshot of each is kept for a person to read. Not read in Russian yet, among others: a new version along the copy's line, a deleted branch or plugin, an update that asks for different permissions or failed, the link sheet's other answers — merged, merged elsewhere, closed, nothing differs, not there, not found, a commit gone — **Switch to verified**'s own label, a window's **Reinstall** warning and a fork's branch on its row. |
+| `plugins.source-add-github` | **Add a source…** of `github.com/someone/team-plugins`, a repository of its own in the fake with a number of its own: from **Look up** on, the log holds `GET /repos/someone/team-plugins` once — the one request ever addressed by its name — then `/repositories/<id>/commits/main` and the passport at that commit from the raw host, and nothing else; the sheet shows the passport's name, and the line a test build carries says where `api.github.com` and `raw.githubusercontent.com` are read from. After **Add**, the block is named *Team plugins* from its passport, says *Not trusted: nobody vouches for these plugins — each asks again whenever its code changes.*, and its rows say **Unverified**; its catalogue was read by its number alone; `sources.json` holds the id derived from the number, the number, `access: none` and `trustedAt: null`. No request carries a credential. |
+| `plugins.source-install-unverified` | **Install** of `team-clock` from the source's block fetches every file of `plugins/team-clock/` at `t1` once, from `/raw/someone/team-plugins/…`, and nothing else; the folder hashes to the fixture's tree; `installed.json` says `source` the source's id, `repository` someone/team-plugins, `ref {default, "main"}`, `unverified` by `null`; the row says **Unverified**. Placed on a tab, its card asks — it asks for nothing — with **Unverified** in its header and *Nobody verified this code: it comes from the default branch of github.com/someone/team-plugins, a source you have not trusted. uDeck asks again whenever it changes.*; **Allow** runs it. |
+| `plugins.source-same-id-switch` | The official `uptime` 1.0.0 installed, placed and allowed: the source's row of its own `uptime` 1.0.0 — other files, the same permissions — says *Installed here: the verified 1.0.0 from github.com/iillyyaa1997/udeck-plugins* and offers **Install from here…**, whose warning names both copies; confirmed, the record is the source's with the official copy as `previous`, and the card asks again, its copy held to its tree. **Earlier versions…** left open over the official copy goes with it, and opened again lists the source's own history, asked by its number. The official row then says *Installed here from github.com/someone/team-plugins: unverified* with **Switch to verified 1.0.0**, whose warning names both; confirmed, the record is the official one's, **Verified**. |
+| `plugins.source-update-and-back` | The source's main moved to `t2`: **Check now** on its block asks the source alone, by its number, and `team-clock`'s row offers *1.1.0 available* from the source's own head; **Update** takes `t2`'s files from the source, recorded as the source's; **Back to 1.0.0** returns to `t1` from the source, the source's, pinned. |
+| `plugins.source-reinstall-and-earlier` | `team-clock` 1.1.0 from the source at `t2`, changed on disk: **Reinstall**, after its Trash warning, puts `t2`'s copy back, asking only `/repositories/<id>/…` and the source's raw files. **Earlier versions…** asks the history of the source's own default branch by its number and lists 1.0.0; installing it puts `t1`'s copy in place, still the source's, pinned. |
+| `plugins.source-official-off` | **Official catalogue** switched off with a source added: Settings says *The official catalogue is off: uDeck makes no request to the official repository or its forks, and does not look for updates of what was installed from them. Sources you added are still read; installed plugins keep running.*, and **Install from a link…** that it makes no request to the official repository or its forks. uDeck ended, the source's state made two days old and its main moved to `t2`, started again — it reads the source at launch, by its number, its log saying so. Ended again, the state made a minute and a half short of a day old and uDeck started with Settings closed: no read at launch, and the minute's clock reads it once it is due (*on schedule*). **Update**, **Back to**, **Earlier versions…** and **Reinstall** of its copy each work, from the source; from the switch on, no request reaches the official repository's paths. |
+| `plugins.source-renamed` | The fake renames someone/team-plugins to someone/team-plugins-2, its number the same, and serves another repository, someone/squatter, with another number and a team-clock 9.0.0, at the old name. With the source's default branch a day old, **Check now** describes it by its number: `sources.json` says the new name under the same id, and the block shows it. From the rename on, nothing asks the old name, through the API or its raw host, and nothing the other repository has is offered. |
+| `plugins.official-id-mismatch` | uptime 1.0.0 installed, verified; uDeck ended, main moved to `c2` and the official repository's description answering another number, the catalogue two days old: started again, uDeck describes the official repository and reads nothing of it after that — no head, no listing, no file — uptime stays 1.0.0, and Settings says *The address of the official catalogue now belongs to a different repository. uDeck stopped reading it, and nothing updates by itself; installed plugins keep running.* Meanwhile uptime's row offers no **Earlier versions…**, the catalogue's rows read before are gone, and **Install from a link…** on a branch of it says the same sentence with no request. **Check now** describes it again and stops again; with its own number back, **Check now** reads on, and **Earlier versions…** is offered again. |
+| `plugins.source-downgrade-to-0-7-0` | `team-clock` installed from the source and placed; uDeck ended, `officialCatalogue: false` written into `settings.json`, and the released 0.7.0, as GitHub publishes it, installed and started, its update feed one nobody serves: its Settings say **Unverified** of `team-clock`, and its card asks before it runs. 0.7.0 ended, `sources.json` and every file of `catalogue/<id>/` are byte for byte as they were, and the record's `source` is still the source's id. This build started again, **Check now** on the source reads it by its number, and the row says the copy is from it. GitHub not giving 0.7.0: it could not check. |
+| `plugins.source-remove` | **Remove…** on the source, after its warning: the entry and `catalogue/<id>/` go; `team-clock` stays, and its row says *From github.com/someone/team-plugins — a source no longer added*, with no **Reinstall**, **Back to**, **Update** or **Earlier versions…**; Settings opened again, nothing more is asked of the source. |
+| `plugins.source-refusals` | **Look up** refuses, each with its sentence and no **Add**: `http://`, git's SSH address and the official repository before any request; `github.com/someone/missing` after its description's 404 (*… could not be found, or it is private. If it is private, uDeck needs a token for it: Token…*); `someone/not-plugins`, with no passport at its default branch, after its description, its head and the passport's 404; and someone/team-plugins once it is added, after its description, *Team plugins (github.com/someone/team-plugins) is added already.* |
+| `plugins.link-offers-a-source` | **Install from a link…** on a branch of someone/team-plugins, no fork of the official repository: *github.com/someone/team-plugins is not a fork of github.com/iillyyaa1997/udeck-plugins. To install from it, add it as a source of its own.*, after its description alone, and **Add as a source…**, which opens **Add a source…** with `https://github.com/someone/team-plugins` in its field and adds nothing until **Add** is pressed. Added, the same link is refused before any request: *Installing from a branch or a merge request of a source is not possible yet; add the project and install from its default branch.* |
 | `smoke.real-pull-request` | Runs only when named, with `--pull-request <link>`, and only on a GitHub runner, against the real GitHub: a lab build that keeps the shipped addresses reads the official catalogue from github.com; the link of an open pull request of the official repository that changes one plugin, typed into **Install from a link…**, says *Pull request #N at …*; **Install** records `ref {pr, "N"}` at its head, `unverified`, by `null`, and the row says **Unverified** · *pull request #N at …*; once somebody has closed the pull request unmerged and deleted its branch, **Check now**, and the row says *Pull request #N was closed without being merged; the plugin keeps running*, the catalogue row *… unverified — closed without being merged*, the record as it was. Fewer than fifteen of the hour's sixty left to the runner's address, a pull request merged or closed before the install: it could not check. Screenshots of each. |
 
 ### Unit tests
@@ -2612,6 +2836,24 @@ never the network. What they cover:
   so addressed, nothing of any other repository (`ForkTests`); and the files
   0.7.0 wrote read and written back byte for byte, `settings.json` but for the
   order of a set (`FilesFrom070Tests`);
+* a public GitHub repository as a source (`SourceReadingTests`): **Look up**'s
+  three requests — the repository by its name once, its head by its number,
+  the passport from the raw host — and what it comes to for an address refused
+  before any request, a repository not there, one with no passport, one with
+  no number, one added already under any name, the official repository by its
+  number and an entry left out that is the same repository; a source's client
+  answering for its number alone, taking the name a describe gives it and
+  asking raw files by it, and believing no describe of another number; the
+  official repository's describe held to its number, another or none stopping
+  the read before its head, and standing — asked again first, kept by a read
+  that fails before a describe answers — with nothing else of the official
+  repository read meanwhile; a read that does not finish naming the
+  repository as GitHub spells it; a copy's earlier versions standing, and
+  installing, only for a copy of the source they were read from; what may be
+  read with **Official catalogue** off,
+  when each source is read, what a read that did not finish says for each
+  host, the test build's line, and a link into a source refused; **Reinstall**
+  of a copy of a source no longer added giving nothing (`ShownPlaceTests`);
 * what `Scripts/make-cli.sh` makes and refuses, and what `release.yml` may do
   and in which order, in the lab's own tests (`e2e/tests/test_make_cli.py`):
   the archives and their names, the signature of the Mac's, a static and
@@ -2732,7 +2974,9 @@ have agreed long enough ([The official repository](#the-official-repository)).
 
 ### Later stages
 
-* **Stage 4 — own and private sources.** `~/.udeck/sources.json`; GitLab,
+* **Stage 4 — own and private sources** (begun: a public GitHub repository as a
+  source of its own — [Sources of one's own](#sources-of-ones-own)).
+  `~/.udeck/sources.json`; GitLab,
   gitlab.com and self-hosted; tokens pasted from a pre-filled creation page, or
   **Sign in** — GitHub and gitlab.com by device flow, a self-hosted GitLab with
   its own application or a token; the Keychain; **Trust** per source and the

@@ -33,7 +33,9 @@
 # --test-plugins points the official plugin catalogue at a fake GitHub: its API
 # at BASE_URL/api and its raw file host at BASE_URL/raw, which is how the lab
 # tests installing plugins without going near github.com. The repository's name
-# stays the shipped one.
+# stays the shipped one; its number (UDeckPluginsRepositoryID), which the
+# catalogue's daily describe is held to, becomes the fake's own,
+# TEST_PLUGINS_REPOSITORY_ID below.
 #
 # The lab also needs three things an ordinary build does not. --out puts the
 # bundle somewhere other than dist/, so a test build never lands where the
@@ -237,10 +239,16 @@ fi
 
 # The same for the plugin catalogue: the address is baked in rather than passed
 # at run time for the same reason, and because the lab tests the release build.
+# With it, the number the fake answers the official repository's description
+# with: the one e2e/fixtures/plugin-repository/id says, which the lab's tests
+# hold this to — not GitHub's own, so that a lab build that kept the shipped
+# number would stop its catalogue at its first describe.
+TEST_PLUGINS_REPOSITORY_ID=900000001
 BASE="${TEST_PLUGINS%/}"
 if [ -n "$TEST_PLUGINS" ]; then
     /usr/libexec/PlistBuddy -c "Set :UDeckPluginsAPIBase $BASE/api" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :UDeckPluginsRawBase $BASE/raw" "$APP/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :UDeckPluginsRepositoryID $TEST_PLUGINS_REPOSITORY_ID" "$APP/Contents/Info.plist"
 fi
 
 # `NSAllowsLocalNetworking` is there so that either can be plain HTTP on the

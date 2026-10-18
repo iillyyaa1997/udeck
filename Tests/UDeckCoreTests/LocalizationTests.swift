@@ -128,7 +128,6 @@ struct LocalizationTests {
         .linkRefused(.unsupported(page: "issues"), official: "github.com/o/r"),
         .linkNotFound(.pullRequest(9), official: "github.com/o/r"), .linkNotFound(.branch("gone", plugin: nil), official: "github.com/o/r"),
         .linkNotFound(.officialRepository, official: "github.com/o/r"),
-        .linkNotAFork(repository: "github.com/someone/r", official: "github.com/o/r"),
         .linkIsTheCatalogue(official: "github.com/o/r", plugin: nil), .linkIsTheCatalogue(official: "github.com/o/r", plugin: "uptime"),
         .linkHead(ref: .pullRequest(3), commit: "a1b2c3d"), .linkHead(ref: .branch("fix/uptime"), commit: "a1b2c3d"),
         .linkPullRequestMerged, .linkPullRequestMergedElsewhere(base: "next"), .linkPullRequestClosed,
@@ -190,6 +189,10 @@ struct LocalizationTests {
         .catalogueSwitchConfirm(id: "uptime", from: .verified(version: "1.0.0", repository: "github.com/o/r"),
                                 to: .sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x"), toTrash: false),
         .windowReinstallBrings(.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x")),
+        .sourcesTitle, .sourcesAdd, .sourcesAddField, .sourcesAddConfirm, .sourcesAsking(host: "github.com"),
+        .sourceNotTrusted, .sourceRemove, .sourcesTestBuild(host: "api.github.com", base: "http://127.0.0.1:8766/api"),
+        .sourceGitLabNotYet(host: "gitlab.com"), .sourceAlreadyAdded(name: "Team", address: "github.com/o/r"),
+        .sourceBranchNotYet,
 
         .pluginLastRun(at: "21:04:05", reason: .interval, duration: 0.21, result: .card),
         .pluginLastRun(at: "21:04:05", reason: .launch, duration: 0.21, result: .failure(.exited(code: 3))),
@@ -273,7 +276,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 429,
+        #expect(Self.all.count == 439,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
@@ -582,11 +585,19 @@ struct LocalizationTests {
                 == "The address of the official catalogue now belongs to a different repository. uDeck stopped reading it, and nothing updates by itself; installed plugins keep running.")
         #expect(russian(.catalogueOfficialRepositoryChanged)
                 == "Адрес официального каталога теперь принадлежит другому репозиторию. uDeck перестал его читать, и ничего не обновляется само; установленные плагины продолжают работать.")
+        // S4-04: off, the switch stops the official repository alone — not a
+        // source added — and what is said under it says no more than that.
+        #expect(english(.catalogueOff)
+                == "The official catalogue is off: uDeck makes no request to the official repository or its forks, and does not look for updates of what was installed from them. Sources you added are still read; installed plugins keep running.")
+        #expect(russian(.catalogueOff)
+                == "Официальный каталог выключен: uDeck не делает запросов к официальному репозиторию и его форкам и не ищет обновлений установленного из них. Добавленные вами источники по-прежнему читаются; установленные плагины продолжают работать.")
+        #expect(english(.linkOff)
+                == "The official catalogue is off, so uDeck makes no request to the official repository or its forks: switch it on to install from a link.")
+        #expect(russian(.linkOff)
+                == "Официальный каталог выключен, и uDeck не делает запросов к официальному репозиторию и его форкам: включите его, чтобы установить по ссылке.")
         #expect(english(.sourceIDTaken(name: "Team")) == "uDeck cannot add this source: its id would be the same as Team's.")
         #expect(russian(.sourceIDTaken(name: "Team"))
                 == "uDeck не может добавить этот источник: его идентификатор совпал бы с идентификатором Team.")
-        // The not-a-fork sentence the link sheet says today is stage 3's, until Add as a source… is there.
-        #expect(english(.linkNotAFork(repository: "github.com/someone/r", official: "github.com/o/r")).contains("come later"))
     }
 
     /// What the sources file and its entries say carries what is wrong and where.

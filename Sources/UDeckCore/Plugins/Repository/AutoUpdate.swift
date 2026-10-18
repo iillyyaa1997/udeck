@@ -9,8 +9,9 @@ import Foundation
 /// A plugin updates itself only when everything below holds; anything else,
 /// and the row offers the update as it always has, for the operator to press:
 ///
-/// * **Update verified plugins by themselves** is on, and so is **Official
-///   catalogue** — off, uDeck makes no request about plugins at all;
+/// * **Update verified plugins by themselves** is on, and the copy's source can
+///   be read — for the official one, **Official catalogue** on (off, uDeck makes
+///   no request to the official repository) — as `switchedOn` says;
 /// * the head has a newer version, or the same version with other files
 ///   (`UpdateOffer.isWaiting`) — never an older one, one that cannot run here,
 ///   or none;
@@ -124,6 +125,24 @@ public enum AutoUpdate {
         if plugin.actionRunning { return .later(.actionRunning) }
         if busy { return .later(.busy) }
         return .update(version: version)
+    }
+
+    /// Whether copies of `source` — `official`, or a source of one's own by
+    /// its id — update themselves now, each copy deciding the rest itself
+    /// (`verdict`): **Update verified plugins by themselves** on, and the
+    /// source readable — the official one's under **Official catalogue**
+    /// (`AppSettings.verifiedPluginsUpdateThemselves`), and not while its
+    /// address answers another repository's number
+    /// (`CatalogueError.officialRepositoryChanged`, `officialChanged`); a
+    /// source of one's own's while it is among `sources`, the sources listed
+    /// in a `sources.json` that can be read, whatever **Official catalogue**
+    /// says (S4-04).
+    public static func switchedOn(_ source: String, settings: AppSettings, sources: [OwnSource],
+                                  officialChanged: Bool) -> Bool {
+        guard source != InstalledPlugins.officialSource else {
+            return settings.verifiedPluginsUpdateThemselves && !officialChanged
+        }
+        return settings.updatesVerifiedByThemselves && sources.contains { $0.id == source }
     }
 
     /// Whether two manifests ask for different things: as sets, each

@@ -389,10 +389,17 @@ public enum ShownPlace {
     /// the catalogue's head, has for the id: the installer records that as
     /// the default branch's (`Adoption`), and the warning names it so.
     /// `source` is the source's own repository, by which a fork's branch is
-    /// told from its own in that warning.
+    /// told from its own in that warning. A copy of a source of one's own is
+    /// put back from that source only while it is among `sources`, the sources
+    /// added: of one no longer added, nothing — nothing reinstalls it until it
+    /// is added again — as **Back to** gives nothing for it.
     public static func reinstall(_ id: String, in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?,
-                                 head: Adoption.DefaultBranch? = nil, source: RepositoryAddress? = nil) -> Step {
-        guard let record = installed.plugins[id] else { return .nothing }
+                                 head: Adoption.DefaultBranch? = nil, source: RepositoryAddress? = nil,
+                                 sources: [OwnSource] = []) -> Step {
+        guard let record = installed.plugins[id],
+              record.source == InstalledPlugins.officialSource || sources.contains(where: { $0.id == record.source }) else {
+            return .nothing
+        }
         return atCommit(.reinstall, id: id, commit: record.commit, version: record.version, from: record.origin,
                         in: paths, installed: installed, shown: shown, tree: record.tree, head: head,
                         official: source ?? head?.repository)

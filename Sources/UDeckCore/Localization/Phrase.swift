@@ -381,10 +381,6 @@ public enum Phrase: Sendable, Equatable {
     case linkOff
     case linkRefused(RepositoryLink.Refusal, official: String)
     case linkNotFound(RepositoryLink, official: String)
-    /// A repository that is not a fork of the official one — a repository of
-    /// its own, or a fork of another — `github.com/owner/repo`: a source of
-    /// its own, which comes later.
-    case linkNotAFork(repository: String, official: String)
     case linkIsTheCatalogue(official: String, plugin: String?)
     case linkHead(ref: PluginRef, commit: String, fork: String? = nil)
     case linkPullRequestMerged
@@ -405,8 +401,10 @@ public enum Phrase: Sendable, Equatable {
 
     // MARK: - Sources of one's own (stage 4)
 
-    /// A repository that is no fork of the official one, once a source of
-    /// one's own can be added: what to do with it, and the button that does it.
+    /// A repository that is no fork of the official one — a repository of its
+    /// own, or a fork of another, `github.com/owner/repo` — on **Install from a
+    /// link…**: what to do with it, and the button that does it, which opens
+    /// **Add a source…** with its address filled in.
     case linkNotAForkAddAsASource(repository: String, official: String)
     case linkAddAsASource
     /// Why an address pasted into **Add a source…** is not read (`SourceLink`).
@@ -428,6 +426,27 @@ public enum Phrase: Sendable, Equatable {
     case catalogueNotASourceAnyMore(address: String)
     /// The official repository's number is not the one this uDeck knows it by.
     case catalogueOfficialRepositoryChanged
+
+    /// Settings → Plugins → **Your sources** (S4-06): its title, **Add a
+    /// source…** and its sheet — the field, **Add**, what a lookup is doing —
+    /// a source's block — what nobody vouches for (S4-07), **Remove…** — and
+    /// the line a test build carries (S4-20, item 24).
+    case sourcesTitle
+    case sourcesAdd
+    case sourcesAddField
+    case sourcesAddConfirm
+    case sourcesAsking(host: String)
+    case sourceNotTrusted
+    case sourceRemove
+    case sourcesTestBuild(host: String, base: String)
+    /// **Look up** of a GitLab project, which this uDeck does not read yet —
+    /// said until GitLab is read, and never released.
+    case sourceGitLabNotYet(host: String)
+    /// **Look up** of a repository that is added already, named as its block
+    /// names it (`name`) and by its address.
+    case sourceAlreadyAdded(name: String, address: String)
+    /// **Install from a link…** of a link into a source of one's own: not yet.
+    case sourceBranchNotYet
 
     /// The run log of linked folders (Q127): its switch, what it does, and
     /// the button that shows the logs.

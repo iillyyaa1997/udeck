@@ -53,6 +53,22 @@ commits — a fork shares its network's objects — with branches of its own:
     GET /api/repos/{fork}/compare/{base}...{head}        two commits compared
     GET /raw/{fork}/{commit}/{path}                      one file
 
+**Repositories of their own** — each with its own history and its own number —
+are the fixture folders `sources/github/<owner>/<repo>/` (stage 4): each a
+`history`, an optional `parents`, its commit folders and an `id`, the number
+GitHub gives it. Each is served by its name and by its number, as GitHub serves
+a repository:
+
+    GET /api/repos/{o}/{r}[/…]                           by its name, as it is called now
+    GET /api/repositories/{id}[/…]                       by its number: its description (with `full_name`, as
+                                                         it is called now), its head with the ETag and 304, a
+                                                         folder's history, a listing, a comparison
+    GET /raw/{o}/{r}/{commit}/{path}                     one file, by its name now
+
+Which name each is called by is the lab's to say (`served`), so that a
+repository can be renamed — its number the same — and another one, with a
+number of its own, made at its old name.
+
 Every request to any of them spends the same hourly limit, as GitHub counts what
 an address asks whichever repository it asks about. A repository the lab does
 not name is 404.
@@ -87,6 +103,15 @@ afresh on every request:
                                                     says so, and runs out that much sooner
     {"alter": ["plugins/uptime/uptime.sh"]}         answer these files with different bytes
     {"truncated": true}                             say the whole-repository listing is truncated
+    {"official_id": 12345}                          the number the official repository's description
+                                                    answers (its `id` file's otherwise)
+    {"sources": {"someone/team-plugins": {"main": "t2"}}}
+                                                    which commit each repository of its own's main points
+                                                    at, by its fixture folder (its first commit otherwise)
+    {"served": {"someone/team-plugins-2": "someone/team-plugins",
+                "someone/team-plugins": "someone/squatter"}}
+                                                    which name serves which repository of its own: every
+                                                    one by its own folder's name unless the lab says
 
 Moving a branch's head, force-pushing it, merging or closing a pull request is
 one rewrite of the file: a head at another fixture commit — one that does not
@@ -94,10 +119,14 @@ descend from the one before, for a force push — `state` and `merged` changed, 
 branch left out; a fork's branch the same way, inside `forks`.
 
 **It keeps an access log**, one JSON object per line and per request — method,
-host, path, query, status, and the headers that decide an answer — which is the
-lab's oracle for what uDeck asked for and, just as much, for what it did not.
-The lab's own requests carry `X-UDeck-Lab: 1` and are logged as the lab's, so
-that asking the fake whether it is up is never read as uDeck asking.
+host, path, query, status, the port it came in on, and the headers that decide
+an answer — which is the lab's oracle for what uDeck asked for and, just as
+much, for what it did not. The lab's own requests carry `X-UDeck-Lab: 1` and are
+logged as the lab's, so that asking the fake whether it is up is never read as
+uDeck asking. Each line says whether the request carried a credential —
+`credential`: `none`, `accepted` or `rejected`, and never its value — and no
+credential is good for anything yet: one carried is answered `401 Bad
+credentials`, as GitHub answers a token it does not know.
 
     fake-github.py serve ROOT PORT OWNER/REPO LOG
     fake-github.py tree FOLDER            the git tree id of a folder on disk
@@ -124,6 +153,12 @@ LAB_HEADER = "X-UDeck-Lab"
 # What GitHub allows without signing in, per network address and hour.
 LIMIT = 60
 WINDOW_SECONDS = 3600
+
+# Where the repositories of their own are, under the fixture root: `<owner>/<repo>/`.
+SOURCES = os.path.join("sources", "github")
+
+# The headers a credential travels in, GitHub's and GitLab's.
+CREDENTIAL_HEADERS = ("authorization", "private-token")
 
 # What a fixture commit is dated: a fixed day, one day apart, so that ids never
 # depend on when the lab ran.
@@ -266,6 +301,14 @@ def read_lines(path: str) -> list[str]:
         return []
 
 
+def read_number(path: str) -> int:
+    """The number an `id` file gives, its comments and blank lines left out."""
+    lines = read_lines(path)
+    if len(lines) != 1 or not lines[0].isdigit() or int(lines[0]) <= 0:
+        raise ValueError(f"{path} does not say one number above 0: {lines}")
+    return int(lines[0])
+
+
 class Repository:
     """Every fixture commit with its parent: the main line in the order `history`
     gives, each the parent of the next, and the commits `parents` names off it —
@@ -392,6 +435,40 @@ class Repository:
         }
 
 
+class Source:
+    """A repository of its own (`sources/github/<owner>/<repo>/`): its commits, and its number."""
+
+    def __init__(self, folder: str, name: str) -> None:
+        self.name = name
+        self.id = read_number(os.path.join(folder, "id"))
+        self.repository = Repository(folder)
+
+    def facts(self) -> dict:
+        return {"id": self.id, **self.repository.facts()}
+
+
+def read_sources(root: str) -> dict[str, Source]:
+    """Every repository of its own under the fixture root, by its folder's `owner/repo`; none without the folder.
+
+    Two of one number, or one with the official repository's, would be one repository twice: refused."""
+    found: dict[str, Source] = {}
+    base = os.path.join(root, SOURCES)
+    if not os.path.isdir(base):
+        return found
+    for owner in sorted(os.listdir(base)):
+        if owner in IGNORED or not os.path.isdir(os.path.join(base, owner)):
+            continue
+        for repo in sorted(os.listdir(os.path.join(base, owner))):
+            folder = os.path.join(base, owner, repo)
+            if repo in IGNORED or not os.path.isdir(folder):
+                continue
+            found[f"{owner}/{repo}"] = Source(folder, f"{owner}/{repo}")
+    numbers = [source.id for source in found.values()]
+    if len(set(numbers)) != len(numbers):
+        raise ValueError(f"{base}: two repositories of their own share a number: {sorted(numbers)}")
+    return found
+
+
 # --- What the lab says --------------------------------------------------------------
 
 
@@ -402,7 +479,7 @@ def read_state(root: str, default_main: str) -> dict:
     place, and reads it back through `/lab/state` before it relies on it.
     """
     state = {"main": default_main, "branches": {}, "pulls": {}, "forks": {}, "limit_until": None, "spent": 0, "alter": [],
-             "truncated": False}
+             "truncated": False, "official_id": None, "sources": {}, "served": None}
     try:
         with open(os.path.join(root, "state.json")) as file:
             given = json.load(file)
@@ -444,6 +521,11 @@ class Fake:
         self.root = root
         self.owner_repo = owner_repo
         self.repository = Repository(root)
+        # The official repository's number: its `id` file beside `history`, or none.
+        self.official_id = read_number(os.path.join(root, "id")) if os.path.exists(os.path.join(root, "id")) else None
+        self.sources = read_sources(root)
+        if self.official_id is not None and self.official_id in {source.id for source in self.sources.values()}:
+            raise ValueError(f"{root}: a repository of its own has the official repository's number {self.official_id}")
         self.clock = clock
         self.limit = Limit(clock())
         self.log_lock = threading.Lock()
@@ -451,6 +533,30 @@ class Fake:
 
     def state(self) -> dict:
         return read_state(self.root, self.repository.names[0])
+
+    def served(self, state: dict) -> dict[str, str]:
+        """Which name serves which repository of its own now: each by its own folder's name, unless the lab says."""
+        given = state.get("served")
+        if not isinstance(given, dict):
+            return {name: name for name in self.sources}
+        return {str(name): str(folder) for name, folder in given.items() if str(folder) in self.sources}
+
+    def source_named(self, owner_repo: str, state: dict) -> Source | None:
+        """The repository of its own `owner/repo` serves now — GitHub's names are one whatever their case."""
+        for name, folder in self.served(state).items():
+            if name.lower() == owner_repo.lower():
+                return self.sources[folder]
+        return None
+
+    def name_of(self, source: Source, state: dict) -> str | None:
+        """What a repository of its own is called now — None when no name serves it, which GitHub answers 404 for."""
+        return next((name for name, folder in self.served(state).items() if folder == source.name), None)
+
+    def source_state(self, source: Source, state: dict) -> dict:
+        """A repository of its own's `main`, as the lab says it, in the shape `Repository.resolve` reads."""
+        given = (state.get("sources") or {}).get(source.name)
+        main = given.get("main") if isinstance(given, dict) else None
+        return {"main": main or source.repository.names[0], "branches": {}, "pulls": {}}
 
     def log(self, entry: dict) -> None:
         line = json.dumps(entry, sort_keys=True) + "\n"
@@ -481,7 +587,8 @@ class Fake:
         if path == "/lab/state":
             return self.json(200, self.state())
         if path == "/lab/facts":
-            return self.json(200, self.repository.facts())
+            return self.json(200, {**self.repository.facts(), "id": self.official_id,
+                                   "sources": {name: source.facts() for name, source in self.sources.items()}})
         return self.json(404, {"message": "Not Found"})
 
     def api(self, path: str, query: dict, headers: dict) -> tuple[int, dict, bytes]:
@@ -518,19 +625,34 @@ class Fake:
 
     def api_answer(self, path: str, query: dict, headers: dict, state: dict) -> tuple[int, dict, bytes]:
         parts = path.split("/")
+        # "", "repositories", id, ...: a repository of its own by its number.
+        if len(parts) >= 3 and parts[1] == "repositories":
+            source = next((s for s in self.sources.values() if parts[2].isdigit() and s.id == int(parts[2])), None)
+            name = self.name_of(source, state) if source else None
+            if source is None or name is None:
+                return self.json(404, {"message": "Not Found"})
+            return self.source_answer(source, name, path[len(f"/repositories/{parts[2]}") :], query, headers, state)
         # "", "repos", owner, repo, ...
         if len(parts) < 4 or parts[1] != "repos":
             return self.json(404, {"message": "Not Found"})
         owner_repo = f"{parts[2]}/{parts[3]}"
         rest = path[len(f"/repos/{owner_repo}") :]
         if owner_repo != self.owner_repo:
+            source = self.source_named(owner_repo, state)
+            if source is not None:
+                return self.source_answer(source, self.name_of(source, state) or owner_repo, rest, query, headers, state)
             fork = self.fork(owner_repo, state)
             if fork is None:
                 return self.json(404, {"message": "Not Found"})
             return self.fork_answer(owner_repo, fork, rest, query, headers, state)
         if rest in ("", "/"):
+            # Its number, as GitHub's description of a repository says it: its `id` file's, unless the lab says
+            # another — the official address taken by a different repository (plugins.official-id-mismatch).
+            number = state.get("official_id") or self.official_id
             return self.json(
-                200, {"full_name": self.owner_repo, "default_branch": DEFAULT_BRANCH, "private": False, "fork": False}
+                200,
+                {**({"id": number} if number is not None else {}), "full_name": self.owner_repo,
+                 "default_branch": DEFAULT_BRANCH, "private": False, "fork": False},
             )
         if rest == "/commits":
             return self.history(query, state)
@@ -565,11 +687,34 @@ class Fake:
             return self.compare(rest[len("/compare/") :], state, fork=fork)
         return self.json(404, {"message": "Not Found"})
 
-    def resolved(self, ref: str, state: dict, fork: dict | None) -> Commit | None:
-        return self.repository.resolve(ref, state) if fork is None else self.repository.resolve_in_fork(ref, fork)
+    def source_answer(self, source: Source, name: str, rest: str, query: dict, headers: dict,
+                      state: dict) -> tuple[int, dict, bytes]:
+        """A repository of its own's answers, by its name or its number: its description — its number, and what it is
+        called now — its head, a folder's history, a listing, a comparison. Its pull requests are not the lab's: 404."""
+        own = self.source_state(source, state)
+        repository = source.repository
+        if rest in ("", "/"):
+            owner = name.split("/")[0]
+            return self.json(200, {"id": source.id, "full_name": name, "default_branch": DEFAULT_BRANCH, "private": False,
+                                   "fork": False, "owner": {"login": owner, "type": "User"}})  # fmt: skip
+        if rest == "/commits":
+            return self.history(query, own, repository=repository)
+        if rest.startswith("/commits/"):
+            return self.commit(rest[len("/commits/") :], headers, own, repository=repository)
+        if rest.startswith("/git/trees/"):
+            recursive = query.get("recursive", ["0"])[0] not in ("", "0", "false")
+            return self.tree(rest[len("/git/trees/") :], recursive, False, repository=repository)
+        if rest.startswith("/compare/"):
+            return self.compare(rest[len("/compare/") :], own, repository=repository)
+        return self.json(404, {"message": "Not Found"})
 
-    def commit(self, ref: str, headers: dict, state: dict, fork: dict | None = None) -> tuple[int, dict, bytes]:
-        commit = self.resolved(ref, state, fork)
+    def resolved(self, ref: str, state: dict, fork: dict | None, repository: Repository | None = None) -> Commit | None:
+        repository = repository or self.repository
+        return repository.resolve(ref, state) if fork is None else repository.resolve_in_fork(ref, fork)
+
+    def commit(self, ref: str, headers: dict, state: dict, fork: dict | None = None,
+               repository: Repository | None = None) -> tuple[int, dict, bytes]:
+        commit = self.resolved(ref, state, fork, repository)
         if commit is None:
             return self.json(422, {"message": f"No commit found for SHA: {ref}"})
         etag = f'"{commit.sha}"'
@@ -632,16 +777,18 @@ class Fake:
             return 304, {"ETag": etag}, b""
         return status, {**extra, "ETag": etag}, data
 
-    def compare(self, spec: str, state: dict, fork: dict | None = None) -> tuple[int, dict, bytes]:
+    def compare(self, spec: str, state: dict, fork: dict | None = None,
+                repository: Repository | None = None) -> tuple[int, dict, bytes]:
         """`GET /compare/{base}...{head}` as GitHub answers it: the status, how many commits each side has that the
         other does not, the newest commit both have, the commits `head` has — and no files, which uDeck does not read.
         Either side a commit id or a ref — of the fork, asked of a fork; one that is not there is 404, as GitHub's."""
+        repository = repository or self.repository
         base_ref, dots, head_ref = spec.partition("...")
-        base = self.resolved(base_ref, state, fork) if dots else None
-        head = self.resolved(head_ref, state, fork) if dots else None
+        base = self.resolved(base_ref, state, fork, repository) if dots else None
+        head = self.resolved(head_ref, state, fork, repository) if dots else None
         if base is None or head is None:
             return self.json(404, {"message": "Not Found"})
-        status, ahead, behind, merge_base = self.repository.compare(base, head)
+        status, ahead, behind, merge_base = repository.compare(base, head)
         return self.json(
             200,
             {
@@ -651,13 +798,13 @@ class Fake:
                 "total_commits": ahead,
                 "base_commit": self.describe(base),
                 "merge_base_commit": self.describe(merge_base) if merge_base else None,
-                "commits": [self.describe(commit) for commit in reversed(self.repository.line(head)[:ahead])],
+                "commits": [self.describe(commit) for commit in reversed(repository.line(head)[:ahead])],
                 "files": [],
             },
         )
 
-    def history(self, query: dict, state: dict) -> tuple[int, dict, bytes]:
-        start = self.repository.resolve(query.get("sha", [DEFAULT_BRANCH])[0], state)
+    def history(self, query: dict, state: dict, repository: Repository | None = None) -> tuple[int, dict, bytes]:
+        start = (repository or self.repository).resolve(query.get("sha", [DEFAULT_BRANCH])[0], state)
         if start is None:
             return self.json(422, {"message": "No commit found"})
         path = query.get("path", [""])[0].strip("/")
@@ -675,11 +822,13 @@ class Fake:
             commit = commit.parent
         return self.json(200, found)
 
-    def tree(self, sha: str, recursive: bool, truncated: bool) -> tuple[int, dict, bytes]:
-        snapshot = self.repository.tree_owner(sha)
+    def tree(self, sha: str, recursive: bool, truncated: bool,
+             repository: Repository | None = None) -> tuple[int, dict, bytes]:
+        repository = repository or self.repository
+        snapshot = repository.tree_owner(sha)
         if snapshot is None:
             return self.json(404, {"message": "Not Found"})
-        tree_sha = snapshot.root if sha in self.repository.by_sha else sha
+        tree_sha = snapshot.root if sha in repository.by_sha else sha
         entries = []
         self.list_into(snapshot, tree_sha, "", recursive, entries)
         cut = truncated and recursive and tree_sha == snapshot.root
@@ -706,6 +855,17 @@ class Fake:
         parts = rest.split("/")
         owner_repo = "/".join(parts[:2])
         state = self.state()
+        # A repository of its own by the name it is called now, and its commits only.
+        source = None if owner_repo == self.owner_repo else self.source_named(owner_repo, state)
+        if source is not None:
+            if len(parts) < 4:
+                return 404, {"Content-Type": "text/plain; charset=utf-8"}, b"404: Not Found"
+            commit = source.repository.resolve(parts[2], self.source_state(source, state))
+            path = "/".join(parts[3:])
+            found = commit.snapshot.at(path) if commit else None
+            if found is None or found[0] == MODE_FOLDER:
+                return 404, {"Content-Type": "text/plain; charset=utf-8"}, b"404: Not Found"
+            return 200, {"Content-Type": "text/plain; charset=utf-8"}, commit.snapshot.blobs[found[1]]
         fork = None if owner_repo == self.owner_repo else self.fork(owner_repo, state)
         if (owner_repo != self.owner_repo and fork is None) or len(parts) < 4:
             return 404, {"Content-Type": "text/plain; charset=utf-8"}, b"404: Not Found"
@@ -736,8 +896,13 @@ def handler_for(fake: Fake):
 
         def respond(self, method: str) -> None:
             headers = {key.lower(): value for key, value in self.headers.items()}
+            # No credential is good for anything yet: one carried is GitHub's 401, and the log says so, never its value.
+            credential = "rejected" if any(name in headers for name in CREDENTIAL_HEADERS) else "none"
             try:
-                status, extra, body = fake.answer(method, self.path, headers)
+                if credential == "rejected":
+                    status, extra, body = fake.json(401, {"message": "Bad credentials"})
+                else:
+                    status, extra, body = fake.answer(method, self.path, headers)
             except Exception as error:  # noqa: BLE001 — a fake that dies answers nobody
                 status, extra, body = 500, {"Content-Type": "text/plain"}, f"the fake failed: {error!r}".encode()
             parsed = urllib.parse.urlsplit(self.path)
@@ -753,6 +918,8 @@ def handler_for(fake: Fake):
                     "user_agent": headers.get("user-agent", ""),
                     "accept": headers.get("accept", ""),
                     "if_none_match": headers.get("if-none-match", ""),
+                    "port": self.server.server_address[1],
+                    "credential": credential,
                 }
             )
             self.send_response(status)

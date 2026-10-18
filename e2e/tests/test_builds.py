@@ -53,7 +53,7 @@ class Script:
 
     def __init__(self, rc=0, out="==> Done", err="", leaves_bundle=False, makes_zip=True,
                  wrong_version="", identifier="place.unicorns.udeck", timeouts=0, interrupts=False,
-                 ignores_test_plugins=False, local_networking=True):
+                 ignores_test_plugins=False, local_networking=True, ignores_repository_id=False):
         self.rc, self.out, self.err = rc, out, err
         self.leaves_bundle = leaves_bundle
         self.makes_zip = makes_zip
@@ -65,6 +65,9 @@ class Script:
         # application ships with, which are GitHub's.
         self.ignores_test_plugins = ignores_test_plugins
         self.local_networking = local_networking
+        # A make-app.sh that set the fake's addresses and kept the number the
+        # application ships with for the official repository, which is GitHub's.
+        self.ignores_repository_id = ignores_repository_id
         self.stopped = False
         self.ignores_sigterm = False
         self.process = None
@@ -89,11 +92,14 @@ class Script:
                 "UDeckPluginsAPIBase": "https://api.github.com",
                 "UDeckPluginsRawBase": "https://raw.githubusercontent.com",
                 "UDeckPluginsRepository": "iillyyaa1997/udeck-plugins",
+                "UDeckPluginsRepositoryID": 1393324153,
             }
             base = (options.get("--test-plugins") or "").rstrip("/")
             if base and not self.ignores_test_plugins:
                 plist["UDeckPluginsAPIBase"] = f"{base}/api"
                 plist["UDeckPluginsRawBase"] = f"{base}/raw"
+                if not self.ignores_repository_id:
+                    plist["UDeckPluginsRepositoryID"] = 900000001
             if (options.get("--test-feed") or base) and self.local_networking:
                 plist["NSAppTransportSecurity"] = {"NSAllowsLocalNetworking": True}
             with zipfile.ZipFile(out / f"uDeck-{options['--version']}.zip", "w") as archive:
@@ -205,11 +211,32 @@ def test_a_build_that_would_read_github_is_refused(tmp_path):
     assert "UDeckPluginsRawBase is 'https://raw.githubusercontent.com'" in raised.value.reason
 
 
-def _shipped(tmp_path, api="https://api.github.com"):
-    """The checkout's Info.plist, as Sources/uDeck/Support/Info.plist ships the catalogue's addresses."""
+def _shipped(tmp_path, api="https://api.github.com", number=1393324153):
+    """The checkout's Info.plist, as Sources/uDeck/Support/Info.plist ships the catalogue's addresses and number."""
     plist = tmp_path / "repo" / "Sources" / "uDeck" / "Support" / "Info.plist"
     plist.parent.mkdir(parents=True, exist_ok=True)
-    plist.write_bytes(plistlib.dumps({"UDeckPluginsAPIBase": api, "UDeckPluginsRawBase": "https://raw.githubusercontent.com"}))
+    plist.write_bytes(plistlib.dumps({"UDeckPluginsAPIBase": api, "UDeckPluginsRawBase": "https://raw.githubusercontent.com",
+                                      "UDeckPluginsRepositoryID": number}))
+
+
+def test_every_lab_build_carries_the_fakes_number_for_the_official_repository(tmp_path):
+    """The mutant: make-app.sh pointed the catalogue at the fake and kept GitHub's number, which the fake never answers."""
+    builder(Script(), tmp_path).build("0.4.1", "6")
+    with pytest.raises(LabError, match="UDeckPluginsRepositoryID is 1393324153, not 900000001"):
+        builder(Script(ignores_repository_id=True), tmp_path / "again").build("0.4.1", "6")
+
+
+def test_the_smokes_build_carries_githubs_own_number_and_a_checkout_that_does_not_ship_it_gives_none(tmp_path):
+    """smoke.real-pull-request's build keeps 1393324153, and the shipped plist is held to it."""
+    _shipped(tmp_path)
+    the_builder = builder(Script(), tmp_path)
+    the_builder.plugins_url = None
+    the_builder.build("0.4.1", "6")
+    _shipped(tmp_path, number=900000001)
+    the_builder = builder(Script(), tmp_path)
+    the_builder.plugins_url = None
+    with pytest.raises(LabError, match="ships UDeckPluginsRepositoryID 900000001, not GitHub's own 1393324153"):
+        the_builder.build("0.4.1", "6")
 
 
 def test_the_smokes_build_keeps_githubs_addresses_and_is_held_to_them(tmp_path):

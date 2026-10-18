@@ -417,14 +417,18 @@ def test_the_reasons_the_checks_read_in_uDecks_log_are_the_ones_it_writes():
     decider = _source("Sources", "UDeckCore", "Plugins", "Repository", "AutoUpdate.swift")
     for reason in ("pinned", "asksDifferently", "actionRunning"):
         assert re.search(rf"^\s+case {reason}$", decider, re.M), f"AutoUpdate has no case {reason}"
-    # The tick the update that waited comes on.
-    assert f"Timer(timeInterval: {checks.TICK_SECONDS}, repeats: true)" in model
+    # The tick the update that waited comes on: the minute's clock, which runs while any source can be read.
+    sources = _source("Sources", "UDeckKit", "Plugins", "DeckModel+Sources.swift")
+    assert f"Timer(timeInterval: {checks.TICK_SECONDS}, repeats: true)" in sources
+    assert "func tick() {\n        updateVerifiedPlugins()" in sources
 
 
 def test_every_older_check_that_moves_main_starts_with_updates_by_themselves_off():
     """A check that moves main and then presses Update has to see an offer: with the switch as shipped, uDeck installs c2 by itself first."""
     tree = ast.parse((Path(__file__).resolve().parents[1] / "checks" / "check_plugins.py").read_text())
-    new = {"check_verified_updates_itself", "check_permissions_change_only_offers"}
+    # The ones whose point is what happens by itself after main moved — an update made, or, the official address
+    # another repository's, none made.
+    new = {"check_verified_updates_itself", "check_permissions_change_only_offers", "check_official_id_mismatch"}
     moving = []
     for function in tree.body:
         if not isinstance(function, ast.FunctionDef) or not function.name.startswith("check_"):
@@ -529,7 +533,7 @@ def test_the_words_the_link_checks_wait_for_are_uDecks_own():
     assert checks.NOT_IN_THE_PLUGINS_FOLDER == "{id} is not in " + checks.UDECK_HOME + "/plugins"
     gone = checks.INSTALLED_HERE_UNVERIFIED.format(line="pull request #3") + " — " + checks.NOT_IN_THE_PLUGINS_FOLDER.format(id="uptime")
     assert f'== "{gone}"' in flat
-    assert '"' + checks.LINK_OFF + '"' in english
+    assert '"' + checks.LINK_OFF + '"' in english and '"' + checks.CATALOGUE_OFF + '"' in english
 
 
 def test_the_controls_the_link_checks_press_and_read_are_the_views_own():
@@ -538,9 +542,12 @@ def test_the_controls_the_link_checks_press_and_read_are_the_views_own():
                        '"link.refused"', '"link.catalogue"', '"link.\\(id).install"', '"link.\\(id).confirm"',
                        '"link.\\(id).confirmText"', '"link.\\(id).problem"', '"plugin.\\(id).switchToVerified"',
                        '"plugin.\\(id).refPage"', '"plugin.\\(id).from"', '"plugin.\\(id).confirmText"',
-                       '"catalogue.\\(id).switchToVerified"', '"catalogue.\\(id).state"', '"catalogue.\\(id).reinstall"',
-                       '"link.off"'):
+                       '"catalogue.\\(id).switchToVerified"', '"\\(named).state"', '"\\(named).reinstall"',
+                       '"link.off"', '"link.addAsASource"'):
         assert identifier in views, identifier
+    # A catalogue row's controls are `catalogue.<id>.*` in the official catalogue, `source.<sid>.plugin.<id>.*` in a
+    # source's (S4-06).
+    assert 'isOfficial ? "catalogue.\\(id)" : "source.\\(source).plugin.\\(id)"' in views
     assert '"card.\\(window.pluginID.rawValue).unverified"' in _source("Sources", "UDeckKit", "Views", "DeckWindowView.swift")
     assert '"consent.\\(pluginID.rawValue).source"' in _source("Sources", "UDeckKit", "Views", "PermissionRequestView.swift")
 
@@ -933,3 +940,113 @@ def test_the_fake_serves_the_forks_the_fork_check_names():
     state = fake.read_state(str(plugin_repository.FIXTURES), "c1")
     assert state["forks"] == {}, "no fork unless the check names one"
     assert config.PLUGINS_REPOSITORY not in checks.FORKS
+
+
+# --- Sources of one's own (stage 4, R1b) -------------------------------------------------------
+
+
+def test_a_sources_id_is_the_one_uDeck_derives():
+    """`_source_id`, held against SourcesTests.swift's ids — made with `shasum -a 256`, not with uDeck's code."""
+    assert checks._source_id("someone/team-plugins", 123456789) == "github.com-team-plugins-87a735c2"
+    assert checks._source_id("someone/Team_Plugins", 123456789, host="GitHub.com") == "github.com-team-plugins-87a735c2"
+    assert checks._source_id("tools/udeck-plugins", 48, host="gitlab.unicorns.place", provider="gitlab") == \
+        "gitlab.unicorns.place-udeck-plugins-cbe44e4d"
+    assert checks._source_id("a/b", 7, host="gitlab.example:8443", provider="gitlab") == "gitlab.example-8443-b-cd486683"
+    swift = _source("Tests", "UDeckCoreTests", "SourcesTests.swift")
+    for said in ("github.com-team-plugins-87a735c2", "gitlab.unicorns.place-udeck-plugins-cbe44e4d", "gitlab.example-8443-b-cd486683"):
+        assert f'"{said}"' in swift
+
+
+def test_the_source_checks_name_the_fixtures_there_are():
+    """team-plugins has t1, t2, t3 and the plugins the checks install; not-plugins and squatter are there; the fake's
+    numbers are the ones the builds and the checks use."""
+    facts = _fake().Fake(str(plugin_repository.FIXTURES), config.PLUGINS_REPOSITORY, "/dev/null")
+    assert sorted(facts.sources) == sorted([checks.TEAM, checks.NOT_PLUGINS, checks.SQUATTER])
+    assert checks.MISSING not in facts.sources and checks.TEAM_RENAMED not in facts.sources
+    team = facts.sources[checks.TEAM].repository
+    assert team.names == ["t1", "t2", "t3"]
+    for plugin in (checks.TEAM_CLOCK, checks.TEAM_PING, checks.UPTIME):
+        assert team.commits["t1"].snapshot.at(f"plugins/{plugin}") is not None
+    assert facts.official_id == config.PLUGINS_REPOSITORY_ID != checks.ANOTHER_REPOSITORY
+    assert checks.BEFORE_SOURCES == "0.7.0"
+    assert checks.TEAM_BRANCH_LINK.startswith(checks.TEAM_PAGE + "/tree/main/")
+
+
+def test_the_words_the_source_checks_wait_for_are_uDecks_own():
+    """Every sentence the stage-4 checks compare a screen with is English.swift's, word for word."""
+    english = _source("Sources", "UDeckCore", "Localization", "English.swift")
+    flat = re.sub(r'"\s*\+\s*"', "", english)
+
+    def swift(text, **values):
+        return text.format(**{name: f"\\({value})" for name, value in values.items()})
+
+    assert f'"{checks.NOT_TRUSTED}"' in flat
+    assert '"Nobody verified this code: it comes from the default branch of \\(address), a source you have not trusted"' in flat
+    assert '". uDeck asks again whenever it changes."' in flat
+    assert checks.UNTRUSTED_SOURCE.format(repository="o/r") == (
+        "Nobody verified this code: it comes from the default branch of github.com/o/r, a source you have not trusted. "
+        "uDeck asks again whenever it changes.")
+    assert 'case .catalogueInstalledFromElsewhere(let copy): "Installed here: \\(Self.copy(copy))"' in english
+    assert 'case .verified(let version, let repository): "the verified \\(version) from \\(repository)"' in english
+    assert checks.FROM_ELSEWHERE.format(version="1.0.0", official="o/r") == "Installed here: the verified 1.0.0 from github.com/o/r"
+    assert '": unverified"' in english and '"\\(id) is \\(Self.copy(from)); installing \\(Self.copy(to)) replaces it. "' in english
+    assert 'case .catalogueInstalledFromSource(let address): "Installed here from \\(address): unverified"' in english
+    assert 'case .pluginFrom(let source, let commit): "From \\(source) at \\(commit)"' in english
+    assert 'case .sourceNoLongerAdded(let address): "From \\(address) — a source no longer added"' in english
+    assert swift(checks.REMOVE_THE_SOURCE, name="name", repository="address").replace("github.com/", "") in english
+    assert '"\\(name) (\\(address)) is added already."' in english
+    assert '"\\(source) is not a uDeck plugin repository: there is no udeck-plugins.json at the top of \\(branch)."' in english
+    assert '"\\(address) could not be found, or it is private. If it is private, uDeck needs a token for it: Token…"' in english
+    assert f'"{checks.HTTPS_ONLY}"' in english and f'"{checks.OVER_SSH}"' in english
+    assert '"That is \\(official), the official catalogue: its plugins are listed above, verified."' in english
+    assert f'"{checks.BRANCH_NOT_YET}"' in flat and f'"{checks.OFFICIAL_CHANGED}"' in flat
+    assert 'case .sourcesTestBuild(let host, let base): "Test build: \\(host) is read from \\(base)."' in english
+    assert checks.TEST_BUILD.format(host="api.github.com", port=8766, path="api") == \
+        "Test build: api.github.com is read from http://127.0.0.1:8766/api."
+    # The isolates a passport's name is shown inside, which the checks take out.
+    assert checks._strip("\u2068Team plugins\u2069") == "Team plugins" and checks.ISOLATES == ("\u2068", "\u2069")
+    assert '"\\u{2068}"' in _source("Sources", "UDeckCore", "Plugins", "Repository", "Sources.swift")
+
+
+def test_the_controls_the_source_checks_press_and_read_are_the_views_own():
+    """S4-06's identifiers, in SourceViews.swift and PluginRepositoryViews.swift as the checks press and read them."""
+    sources = _source("Sources", "UDeckKit", "Views", "SourceViews.swift")
+    for identifier in ('"sources.add"', '"sources.add.field"', '"sources.add.lookUp"', '"sources.add.close"',
+                       '"sources.add.result"', '"sources.add.confirm"', '"sources.testBuild"', '"sources.problem"',
+                       '"source.\\(sid).name"', '"source.\\(sid).address"', '"source.\\(sid).mark"',
+                       '"source.\\(sid).state"', '"source.\\(sid).checkNow"', '"source.\\(sid).remove"',
+                       '"source.\\(sid).confirm"', '"source.\\(sid).confirmText"'):
+        assert identifier in sources, identifier
+    views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift")
+    for identifier in ('"\\(named).mark"', '"\\(named).install"', '"\\(named).installFromHere"', '"\\(named).confirmText"',
+                       '"\\(named).confirm"', '"\\(named).problem"', '"plugin.\\(id).backTo"', '"plugin.\\(id).earlier"',
+                       '"plugin.\\(id).history.\\(line.version).install"', '"link.addAsASource"'):
+        assert identifier in views, identifier
+
+
+def test_the_fakes_number_is_one_number_in_make_app_the_fixture_and_the_lab():
+    """Scripts/make-app.sh writes the number the fake answers, and the shipped plist and uDeck's own default are GitHub's."""
+    import plistlib
+
+    script = _source("Scripts", "make-app.sh")
+    assert f"TEST_PLUGINS_REPOSITORY_ID={config.PLUGINS_REPOSITORY_ID}\n" in script
+    assert 'Set :UDeckPluginsRepositoryID $TEST_PLUGINS_REPOSITORY_ID' in script
+    fixture = [line for line in (plugin_repository.FIXTURES / "id").read_text().splitlines() if line and not line.startswith("#")]
+    assert fixture == [str(config.PLUGINS_REPOSITORY_ID)]
+    shipped = plistlib.loads(_source("Sources", "uDeck", "Support", "Info.plist").encode())
+    assert shipped["UDeckPluginsRepositoryID"] == config.SHIPPED_REPOSITORY_ID != config.PLUGINS_REPOSITORY_ID
+    swift = _source("Sources", "UDeckCore", "Plugins", "Repository", "GitHubClient.swift")
+    assert "officialRepositoryID = 1_393_324_153" in swift and f"{config.SHIPPED_REPOSITORY_ID:_}" == "1_393_324_153"
+
+
+def test_a_state_is_aged_by_the_keys_named_and_nothing_else(tmp_path, monkeypatch, capsys):
+    """The script `_age_a_state` runs in the guest, run here in this process on a copy: the keys named moved back, every
+    other kept."""
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({"head": "a" * 40, "lastSuccess": "2026-10-18T10:00:00Z", "defaultBranchReadAt": "2026-10-18T10:00:00Z"}))
+    monkeypatch.setattr(sys, "argv", ["age", str(state), "2", "defaultBranchReadAt"])
+    exec(compile(checks.AGE_A_STATE, "age", "exec"), {"__name__": "__main__"})
+    then = capsys.readouterr().out.strip()
+    aged = json.loads((tmp_path / "state.json.new").read_text())
+    assert aged["head"] == "a" * 40 and aged["lastSuccess"] == "2026-10-18T10:00:00Z"
+    assert aged["defaultBranchReadAt"] == then != "2026-10-18T10:00:00Z"

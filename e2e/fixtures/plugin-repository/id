@@ -1,0 +1,5 @@
+# The number the fake GitHub gives the official repository in the lab (`/repos/{o}/{r}` answers it as
+# `id`), which every lab build carries as UDeckPluginsRepositoryID (Scripts/make-app.sh --test-plugins) and
+# the lab knows as config.PLUGINS_REPOSITORY_ID. Not GitHub's own number for it (1393324153): a lab build
+# that kept the shipped one would stop its catalogue at the first describe.
+900000001

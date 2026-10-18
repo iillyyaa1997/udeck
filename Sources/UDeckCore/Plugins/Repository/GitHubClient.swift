@@ -303,21 +303,34 @@ public struct GitHubEndpoints: Equatable, Sendable {
     public var rawBase: URL
     /// `owner/repo`.
     public var repository: String
+    /// The number GitHub knows the official repository by
+    /// (`UDeckPluginsRepositoryID`), which its daily describe has to answer
+    /// (`OfficialRepositoryCheck`): nil when the build carries none, and then
+    /// nothing is compared.
+    public var repositoryID: Int?
 
-    public init(apiBase: URL, rawBase: URL, repository: String) {
+    public init(apiBase: URL, rawBase: URL, repository: String, repositoryID: Int? = nil) {
         self.apiBase = apiBase
         self.rawBase = rawBase
         self.repository = repository
+        self.repositoryID = repositoryID
     }
+
+    /// `iillyyaa1997/udeck-plugins`'s number, as `GET /repositories/1393324153`
+    /// answers it (**measured**, 2026-10-18).
+    public static let officialRepositoryID = 1_393_324_153
 
     public static let official = GitHubEndpoints(
         apiBase: URL(string: "https://api.github.com")!,
         rawBase: URL(string: "https://raw.githubusercontent.com")!,
-        repository: RepositoryAddress.official.path
+        repository: RepositoryAddress.official.path,
+        repositoryID: officialRepositoryID
     )
 
     /// From an `Info.plist`, each key falling back to the shipped value when it
-    /// is absent or not a URL.
+    /// is absent or not a URL — the repository's number to the shipped one when
+    /// it is absent, and to none when it is there and is not a whole number
+    /// above 0.
     public static func from(infoDictionary info: [String: Any]?) -> GitHubEndpoints {
         func url(_ key: String, _ fallback: URL) -> URL {
             guard let text = info?[key] as? String, let url = URL(string: text),
@@ -332,8 +345,21 @@ public struct GitHubEndpoints: Equatable, Sendable {
         return GitHubEndpoints(
             apiBase: url("UDeckPluginsAPIBase", official.apiBase),
             rawBase: url("UDeckPluginsRawBase", official.rawBase),
-            repository: repository
+            repository: repository,
+            repositoryID: info?["UDeckPluginsRepositoryID"].map(Self.number) ?? official.repositoryID
         )
+    }
+
+    /// A plist's number — an integer, or digits written as a string — when
+    /// it is a whole number above 0.
+    static func number(_ value: Any) -> Int? {
+        let number: Int?
+        switch value {
+        case let value as Int: number = value
+        case let value as String: number = value.allSatisfy({ ("0" ... "9").contains($0) }) ? Int(value) : nil
+        default: number = nil
+        }
+        return number.flatMap { $0 > 0 ? $0 : nil }
     }
 }
 
@@ -545,6 +571,21 @@ public struct GitHubClient: RepositoryProvider {
         var client = self
         client.endpoints.repository = repository.path
         client.address = RepositoryAddress(provider: address.provider, host: address.host, path: repository.path)
+        return client
+    }
+
+    /// This client, addressed by id, for its own repository under the name its
+    /// host gives it now — `path`, as a describe by its number answered it: the
+    /// same number for every API request, and `path` for its raw files and its
+    /// pages. Nil for a client addressed by path, whose name is all it has,
+    /// and for a path that is not GitHub's `owner/repo`.
+    public func renamed(to path: String) -> GitHubClient? {
+        guard case .id = addressing else { return nil }
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 2, RepositoryLink.isOwner(parts[0]), RepositoryLink.isRepository(parts[1]) else { return nil }
+        var client = self
+        client.endpoints.repository = path
+        client.address = RepositoryAddress(provider: address.provider, host: address.host, path: path)
         return client
     }
 
