@@ -2246,7 +2246,7 @@ problem.
 
 ### Plugins from a repository
 
-Forty-nine checks, one per row of the table in docs/plugin-repository.md ("The
+Fifty-seven checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks") but its last, `smoke.real-pull-request` ("Not in the full run"). None of them talks to github.com from the guest — in the lab only the update
 checks given a published release do, `updates.a-published-release` by default,
 and `plugins.source-downgrade-to-0-7-0`, which fetches the released 0.7.0 the
@@ -2304,6 +2304,28 @@ came in on and whether it carried a credential — `none`, or `rejected`, answer
 block lies far down Settings → Plugins, under **Your sources**: its controls are
 scrolled to as any other's, and a check that comes back to the official switch
 chooses the pane afresh, so that the switch is not under the window's title bar.
+
+**GitLab projects** (stage 4) are fixture folders under
+`e2e/fixtures/plugin-repository/sources/gitlab/<host>/<group>/…/<project>/` —
+`gitlab.example.test`'s `tools/udeck-plugins` (7: `g1` with `gl-hello` 1.0.0 in
+six entries under `plugins/`, `g2` with `gl-hello` 1.1.0 and `gl-big`, whose
+6 MB `big.bin` is made when the fake starts from `big.bin.generated` and never
+committed), `group/sub/team` (9, three groups down) and `tools/empty` (8, a
+passport and no `plugins/`), and `gitlab.com`'s `someone/gl-plugins` (1001). The
+same fake answers as both GitLabs, each on a port of its own of the guest's
+loopback (`config.GITLAB_PORTS`: 8768 and 8769), in GitLab's API, v4: a project
+by its encoded path or its number, a branch's head with a weak `ETag` and
+`304`, a tree three entries to a page with `x-next-page`, files through the
+files API with `X-Gitlab-Size`, a folder's history, GitLab's own `404` bodies —
+and, told `plain`, a web server's `404` to everything. gitlab.com counts every
+request by its two limiters, 500 a minute and 60 an hour, each answer naming
+one in turn, and answers `429` with `Retry-After` once the hour is spent
+(`spent`). Every lab build carries where they are as `UDeckPluginsHostMap`
+(`Scripts/make-app.sh --test-plugins`, which names the same ports), and the
+build step refuses a lab build without it and a build as shipped with one. Each
+line of the log of a GitLab's port names that GitLab (`site`) and keeps the
+path as it was sent (`raw_path`), its `%2F` undecoded — the oracle for "by its
+encoded path once, by its number after, on its own port".
 
 **The lab drives the fake by rewriting a small state file over SSH**: which
 commit `main` is at, which commit each other branch is at (a branch left out

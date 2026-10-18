@@ -118,9 +118,9 @@ struct AddSourceSheet: View {
             said(.catalogueNotARepository(source: address, branch: branch))
         case .refused(let phrase):
             said(phrase)
-        case .failed(let error, let host, let address):
+        case .failed(let error, let host, let address, let provider):
             said(CatalogueTrouble.phrase(error, address: address, host: host, readAt: nil,
-                                         until: { Clock.text($0, strings) }))
+                                         until: { Clock.text($0, strings) }, provider: provider))
         }
     }
 
@@ -201,7 +201,7 @@ struct SourceBlock: View {
         let readAt = catalogue == nil ? nil : state.lastSuccess.map { Clock.text($0, strings) }
         if let error = state.lastError {
             Label(strings(CatalogueTrouble.phrase(error, address: address, host: source.host, readAt: readAt,
-                                                  until: { Clock.text($0, strings) })),
+                                                  until: { Clock.text($0, strings) }, provider: source.provider)),
                   systemImage: "exclamationmark.triangle")
                 .font(.caption).foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)

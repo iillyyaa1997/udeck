@@ -182,6 +182,47 @@ struct CatalogueTests {
         #expect(verdict(deep).refusals.contains(.nestedTooDeep(path: "plugins/uptime/1/2/3/4/5/6/7/8/9/no.txt")))
     }
 
+    /// `listing` as a host that lists no sizes gives it: GitLab's.
+    func withoutSizes(_ listing: PluginListing) -> PluginListing {
+        PluginListing(tree: listing.tree, entries: listing.entries.map {
+            ListedEntry(path: $0.path, mode: $0.mode, sha: $0.sha, size: nil)
+        })
+    }
+
+    /// (what the folder holds beside the plugin, whether that breaks a rule the listing still shows)
+    static let withoutSizesTable: [(String, Bool)] = [
+        ("nothing", false),
+        ("201 files", true),
+        ("a name out of rule", true),
+        ("folders nine deep", true),
+    ]
+
+    @Test("a host that lists no sizes (GitLab): a size left out is no refusal there, and still one where sizes are listed",
+          arguments: 0..<withoutSizesTable.count)
+    func sizesNotListed(row: Int) {
+        let (holds, breaks) = Self.withoutSizesTable[row]
+        var repository = FakeRepository.withUptime()
+        switch holds {
+        case "201 files": for index in 0 ..< 198 { repository.files["plugins/uptime/data/f\(index)"] = .init("\(index)\n") }
+        case "a name out of rule": repository.files["plugins/uptime/Run Me.sh"] = .init("x\n")
+        case "folders nine deep": repository.files["plugins/uptime/1/2/3/4/5/6/7/8/9/no.txt"] = .init("x\n")
+        default: break
+        }
+        let listing = withoutSizes(repository.plugin("uptime"))
+        let manifest = repository.data(at: "plugins/uptime/manifest.json")
+        let listed = RepositoryRules.check(folder: "uptime", listing: listing, manifest: manifest, udeck: udeck)
+        let gitLab = RepositoryRules.check(folder: "uptime", listing: listing, manifest: manifest, udeck: udeck,
+                                           sizesListed: false)
+        func sizeNotListed(_ refusal: RepositoryRefusal) -> Bool { if case .sizeNotListed = refusal { true } else { false } }
+        // Where sizes are listed, one left out is refused — every file of it.
+        #expect(listed.refusals.filter(sizeNotListed).count == listing.files.count, "\(holds)")
+        #expect(!gitLab.refusals.contains(where: sizeNotListed), "\(holds): \(gitLab.refusals)")
+        // What the listing still shows is still checked: the number of files, the names, the depth.
+        #expect(gitLab.isInstallable == !breaks, "\(holds): \(gitLab.refusals)")
+        #expect(RepositoryRules.listingRefusals(folder: "uptime", listing: listing, sizesListed: false).isEmpty == !breaks,
+                "\(holds)")
+    }
+
     @Test("rule 9: an LFS pointer shows only in its content")
     func ruleNine() {
         let pointer = Data("version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 12\n".utf8)

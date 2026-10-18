@@ -84,20 +84,48 @@ public struct OfficialRepositoryCheck: RepositoryProvider {
 
 // MARK: - A source's own client
 
-/// What a GitHub source of one's own is read through, for one read or one
-/// press: its client addressed by its number (`GitHubClient.Addressing.id`),
-/// so that nothing after **Look up** asks for it by a name — and, once a
+/// What a source of one's own is read through, for one read or one press: its
+/// client addressed by its number — GitHub's `/repositories/{id}`
+/// (`GitHubClient.Addressing.id`), GitLab's `/projects/{id}` (`GitLabClient`)
+/// — so that nothing after **Look up** asks for it by a name; and, once a
 /// describe by that number says the repository is called something else now,
 /// that name from then on, for its raw files and its pages (`renamedTo`, which
 /// the caller writes back to `sources.json`). A describe that answers for
 /// another number than the source's is not believed.
 ///
 /// Its own repository only: `provider(for:)` answers itself for its own
-/// address, whatever its case, and nothing for any other — never another
-/// repository's files under its number.
+/// address — whatever its case on GitHub, byte for byte on GitLab — and
+/// nothing for any other: never another repository's files under its number.
 public final class SourceProvider: RepositoryProvider, @unchecked Sendable {
+    /// The client underneath: GitHub's or GitLab's.
+    enum Client: Sendable {
+        case github(GitHubClient)
+        case gitlab(GitLabClient)
+
+        var provider: any RepositoryProvider {
+            switch self {
+            case .github(let client): client
+            case .gitlab(let client): client
+            }
+        }
+
+        func renamed(to path: String) -> Client? {
+            switch self {
+            case .github(let client): client.renamed(to: path).map(Client.github)
+            case .gitlab(let client): client.renamed(to: path).map(Client.gitlab)
+            }
+        }
+
+        func isOwn(_ repository: RepositoryAddress) -> Bool {
+            switch self {
+            case .github(let client): client.client(for: repository) != nil
+            case .gitlab(let client): client.provider(for: repository) != nil
+            }
+        }
+    }
+
     private let lock = NSLock()
-    private var client: GitHubClient
+    private var client: Client
     private var heard: String?
     /// The number the host knows the repository by.
     public let remoteID: Int
@@ -105,11 +133,17 @@ public final class SourceProvider: RepositoryProvider, @unchecked Sendable {
     /// `client` must be addressed by id; one addressed by path is refused.
     public init?(_ client: GitHubClient) {
         guard case .id(let id) = client.addressing else { return nil }
-        self.client = client
+        self.client = .github(client)
         self.remoteID = id
     }
 
-    private var current: GitHubClient { lock.withLock { client } }
+    /// A GitLab project, which its client always addresses by its number.
+    public init(_ client: GitLabClient) {
+        self.client = .gitlab(client)
+        self.remoteID = client.remoteID
+    }
+
+    private var current: any RepositoryProvider { lock.withLock { client.provider } }
 
     public var address: RepositoryAddress { current.address }
 
@@ -118,12 +152,12 @@ public final class SourceProvider: RepositoryProvider, @unchecked Sendable {
     public var renamedTo: String? { lock.withLock { heard } }
 
     public func describe() async throws -> RepositoryDescription {
-        let asked = current
-        let description = try await asked.describe()
+        let asked = lock.withLock { client }
+        let description = try await asked.provider.describe()
         if let id = description.id, id != remoteID {
             throw ProviderError.badAnswer("the repository asked for as \(remoteID) answered as \(id)")
         }
-        if let name = description.fullName, name != asked.address.path, let renamed = asked.renamed(to: name) {
+        if let name = description.fullName, name != asked.provider.address.path, let renamed = asked.renamed(to: name) {
             lock.withLock {
                 client = renamed
                 heard = name
@@ -169,27 +203,55 @@ public final class SourceProvider: RepositoryProvider, @unchecked Sendable {
     }
 
     public func provider(for repository: RepositoryAddress) -> (any RepositoryProvider)? {
-        current.client(for: repository) == nil ? nil : self
+        lock.withLock { client }.isOwn(repository) ? self : nil
     }
 }
 
-/// How the clients of GitHub sources are made: the official source's API and
-/// raw host — the lab's fake in a lab build — and, asked without a token, the
-/// official source's limit: GitHub counts what an address asks without a
-/// token whatever the repository (S4-16), so an anonymous source does not
-/// have sixty an hour of its own.
+/// How the clients of sources are made. A GitHub source's: the official
+/// source's API and raw host — the lab's fake in a lab build — and, asked
+/// without a token, the official source's limit: GitHub counts what an
+/// address asks without a token whatever the repository (S4-16), so an
+/// anonymous source does not have sixty an hour of its own. A GitLab
+/// source's: its host's API — or the base `UDeckPluginsHostMap` gives it in a
+/// test build — and a limit of its own (`gitLabLimits`, by the source's id),
+/// seeded from and kept in its `state.json`: GitLab counts by limiters of its
+/// own, which a GitHub block must not stop. Two anonymous gitlab.com sources
+/// each keep their own count, though the network's is one; that is accepted.
 public struct SourceClients: Sendable {
     public var endpoints: GitHubEndpoints
     public var udeckVersion: String
     public var limits: RateLimitRecorder
     public var session: URLSession
+    /// `UDeckPluginsHostMap`'s hosts and bases (`HostMap`).
+    public var hostMap: [String: URL]
+    /// Each GitLab source's limit, by its id; one not here is read with a
+    /// fresh one.
+    public var gitLabLimits: [String: RateLimitRecorder]
 
     public init(endpoints: GitHubEndpoints, udeckVersion: String, limits: RateLimitRecorder,
-                session: URLSession = GitHubClient.makeSession()) {
+                session: URLSession = GitHubClient.makeSession(), hostMap: [String: URL] = [:],
+                gitLabLimits: [String: RateLimitRecorder] = [:]) {
         self.endpoints = endpoints
         self.udeckVersion = udeckVersion
         self.limits = limits
         self.session = session
+        self.hostMap = hostMap
+        self.gitLabLimits = gitLabLimits
+    }
+
+    /// A GitLab host's endpoints, as this build reads it.
+    public func gitLab(_ host: String) -> GitLabEndpoints? {
+        GitLabEndpoints.of(host, hostMap: hostMap)
+    }
+
+    /// What **Look up** of a GitLab project on `host` is counted against,
+    /// before the project is a source with a limit of its own: the host's,
+    /// kept while uDeck runs (`lookUpLimits`), which **Add** seeds the new
+    /// source's from — a fresh one for a host not given.
+    public var lookUpLimits: [String: RateLimitRecorder] = [:]
+
+    public func lookUpLimits(for host: String) -> RateLimitRecorder {
+        lookUpLimits[host] ?? RateLimitRecorder()
     }
 
     func client(_ path: String, addressing: GitHubClient.Addressing) -> GitHubClient {
@@ -205,11 +267,29 @@ public struct SourceClients: Sendable {
         client(path, addressing: .path)
     }
 
-    /// A GitHub source's provider (`SourceProvider`) — nil for any other
-    /// provider: a GitLab project is not read yet.
+    /// A source's provider (`SourceProvider`), by its number: a github.com
+    /// repository's, or a GitLab project's on its own host — nil for a host
+    /// no address could name.
     public func of(_ source: OwnSource) -> SourceProvider? {
-        guard source.provider == SourceLink.github, source.host == SourceLink.githubHost else { return nil }
-        return SourceProvider(client(source.path, addressing: .id(source.remoteID)))
+        switch source.provider {
+        case SourceLink.github:
+            guard source.host == SourceLink.githubHost else { return nil }
+            return SourceProvider(client(source.path, addressing: .id(source.remoteID)))
+        case SourceLink.gitlab:
+            guard let endpoints = gitLab(source.host) else { return nil }
+            return SourceProvider(GitLabClient(endpoints: endpoints, path: source.path, remoteID: source.remoteID,
+                                               udeckVersion: udeckVersion,
+                                               limits: gitLabLimits[source.id] ?? RateLimitRecorder(),
+                                               session: session))
+        default:
+            return nil
+        }
+    }
+
+    /// The limit a source is counted against: GitHub's anonymous one, which
+    /// the official source has, or a GitLab source's own.
+    public func limits(of source: OwnSource) -> RateLimitRecorder {
+        source.provider == SourceLink.gitlab ? gitLabLimits[source.id] ?? RateLimitRecorder() : limits
     }
 
     /// The provider of the repository `path` is at now, by its number.
@@ -222,12 +302,18 @@ public struct SourceClients: Sendable {
 
 /// **Look up** in **Add a source…**: an address read as a browser shows it
 /// (`SourceLink`) — a refusal said before any request — then asked of its
-/// host, anonymously: for a github.com repository `GET /repos/{o}/{r}`, the one
-/// request ever addressed by its name, which says its number, its name as
+/// host, anonymously. For a github.com repository: `GET /repos/{o}/{r}`, the
+/// one request ever addressed by its name, which says its number, its name as
 /// GitHub spells it and its default branch; that branch's head by the number,
 /// `GET /repositories/{id}/commits/{branch}`; and the passport at that commit,
-/// from the raw host — two requests to the API and one to the raw host. What
-/// it comes to is what the sheet shows, and **Add** adds only what it found.
+/// from the raw host — two requests to the API and one to the raw host. For a
+/// GitLab project: `GET /api/v4/projects/{group%2Fproject}`, the one request
+/// ever addressed by its path, which says its number, its path as GitLab spells
+/// it and its default branch; `GET /projects/{id}/repository/branches/{branch}`;
+/// and the passport at that commit, `GET
+/// /projects/{id}/repository/files/udeck-plugins.json/raw?ref={commit}` —
+/// three requests to the API, as GitLab has no raw host to read. What it comes
+/// to is what the sheet shows, and **Add** adds only what it found.
 public enum SourceLookUp {
     /// A repository with a passport at its default branch's head: what **Add**
     /// writes, and what the sheet shows of it.
@@ -245,6 +331,10 @@ public enum SourceLookUp {
         /// When the host answered: what the source's state says the default
         /// branch was read at.
         public var readAt: Date
+        /// What a GitLab's limiters said by the end of **Look up**: what the
+        /// source's own limit starts from (S4-16). Nil for GitHub, whose
+        /// anonymous limit is the official source's.
+        public var rateLimit: RateLimitState? = nil
 
         public var address: RepositoryAddress { RepositoryAddress(provider: provider, host: host, path: path) }
         public var identity: SourceIdentity { SourceIdentity(provider: provider, host: host, remoteID: remoteID) }
@@ -263,8 +353,9 @@ public enum SourceLookUp {
         case refused(Phrase)
         /// A request that got no good answer — the limit, the network, an
         /// answer that could not be read — said as a source's read says it,
-        /// of the address as it was read (`SourceLink`), not as it was pasted.
-        case failed(CatalogueError, host: String, address: String)
+        /// of the address as it was read (`SourceLink`), not as it was pasted,
+        /// on the host's provider.
+        case failed(CatalogueError, host: String, address: String, provider: String = SourceLink.github)
     }
 
     /// What an address pasted comes to before anything is asked.
@@ -276,42 +367,65 @@ public enum SourceLookUp {
     }
 
     /// What `text` names, before anything is asked: the address, or why it is
-    /// not read — of a GitLab project, that GitLab is not read yet.
+    /// not read.
     public static func read(_ text: String, official: RepositoryAddress) -> Pasted {
         switch SourceLink.read(text, official: official) {
-        case .failure(let refusal):
-            return .refused(.sourceLinkRefused(refusal, official: official.description))
-        case .success(let link):
-            guard link.provider == SourceLink.github else { return .refused(.sourceGitLabNotYet(host: link.host)) }
-            return .link(link)
+        case .failure(let refusal): .refused(.sourceLinkRefused(refusal, official: official.description))
+        case .success(let link): .link(link)
         }
     }
 
     /// `link` asked of its host through `clients`, `list` being the sources
     /// added, `official` the official repository and `officialID` its number.
     public static func lookUp(_ link: SourceLink, list: SourceList, official: RepositoryAddress, officialID: Int?,
-                              clients: SourceClients, now: @Sendable () -> Date = { Date() }) async -> Outcome {
-        guard link.provider == SourceLink.github else { return .refused(.sourceGitLabNotYet(host: link.host)) }
+                              clients: SourceClients,
+                              now: @escaping @Sendable () -> Date = { Date() }) async -> Outcome {
         let address = link.address.description
+        let gitLab = link.provider == SourceLink.gitlab
+        func failed(_ error: any Error, branch: String?, at address: String) -> Outcome {
+            .failed(CatalogueRefresher.reason(error, branch: branch), host: link.host, address: address,
+                    provider: link.provider)
+        }
         let description: RepositoryDescription
-        do {
-            description = try await clients.byPath(link.path).describe()
-        } catch ProviderError.notFound {
-            return .refused(.sourceNotFound(address: address))
-        } catch {
-            return .failed(CatalogueRefresher.reason(error, branch: nil), host: link.host, address: address)
+        if gitLab {
+            guard let endpoints = clients.gitLab(link.host) else {
+                return .refused(.sourceLinkRefused(.notALink, official: official.description))
+            }
+            do {
+                switch try await GitLabClient.lookUp(link.path, endpoints: endpoints, udeckVersion: clients.udeckVersion,
+                                                     limits: clients.lookUpLimits(for: link.host), session: clients.session,
+                                                     now: now) {
+                case .found(let found): description = found
+                case .notFound: return .refused(.sourceNotFound(address: address))
+                case .notGitLab: return .refused(.sourceNotGitLab(host: link.host))
+                }
+            } catch {
+                return failed(error, branch: nil, at: address)
+            }
+        } else {
+            do {
+                description = try await clients.byPath(link.path).describe()
+            } catch ProviderError.notFound {
+                return .refused(.sourceNotFound(address: address))
+            } catch {
+                return failed(error, branch: nil, at: address)
+            }
         }
         guard let id = description.id else {
-            return .failed(.badAnswer("the repository's description has no number"), host: link.host, address: address)
+            return .failed(.badAnswer("the repository's description has no number"), host: link.host, address: address,
+                           provider: link.provider)
         }
-        // GitHub's own spelling of it, when it gives one this uDeck reads as a
-        // name — the official repository's included, whatever was pasted.
+        // The host's own spelling of it, when it gives one this uDeck reads as
+        // the same provider's name — the official repository's included,
+        // whatever was pasted.
         var path = link.path
-        if let name = description.fullName, clients.byPath(name).client(for: link.address.with(path: name)) != nil {
-            path = name
+        if let name = description.fullName {
+            let spelt = gitLab ? SourceLink.refusal(of: link.address.with(path: name), official: official) == nil
+                               : clients.byPath(name).client(for: link.address.with(path: name)) != nil
+            if spelt { path = name }
         }
         let named = SourceLink(provider: link.provider, host: link.host, path: path)
-        if id == officialID || SourceLink.refusal(of: named.address, official: official) == .officialCatalogue {
+        if !gitLab, id == officialID || SourceLink.refusal(of: named.address, official: official) == .officialCatalogue {
             return .refused(.sourceLinkRefused(.officialCatalogue, official: official.description))
         }
         // What Add would come to, asked now, so that the sheet offers it only
@@ -325,8 +439,18 @@ public enum SourceLookUp {
         case .failure(.listedAsSkipped(let skipped)): return .refused(.sourceSkipped(skipped))
         }
         let spelt = named.address.description
-        guard let byID = clients.byID(id, path: path) else {
-            return .failed(.badAnswer("no client for the repository's number"), host: link.host, address: spelt)
+        let byID: SourceProvider?
+        if gitLab, let endpoints = clients.gitLab(link.host) {
+            byID = SourceProvider(GitLabClient(endpoints: endpoints, path: path, remoteID: id,
+                                               udeckVersion: clients.udeckVersion,
+                                               limits: clients.lookUpLimits(for: link.host), session: clients.session,
+                                               now: now))
+        } else {
+            byID = gitLab ? nil : clients.byID(id, path: path)
+        }
+        guard let byID else {
+            return .failed(.badAnswer("no client for the repository's number"), host: link.host, address: spelt,
+                           provider: link.provider)
         }
         let branch = description.defaultBranch
         let head: String
@@ -334,10 +458,11 @@ public enum SourceLookUp {
             switch try await byID.head(of: branch, ifNoneMatch: nil) {
             case .commit(let commit, _): head = commit
             case .unchanged:
-                return .failed(.badAnswer("the head of \(branch) was answered as unchanged"), host: link.host, address: spelt)
+                return .failed(.badAnswer("the head of \(branch) was answered as unchanged"), host: link.host,
+                               address: spelt, provider: link.provider)
             }
         } catch {
-            return .failed(CatalogueRefresher.reason(error, branch: branch), host: link.host, address: spelt)
+            return failed(error, branch: branch, at: spelt)
         }
         let data: Data
         do {
@@ -345,12 +470,13 @@ public enum SourceLookUp {
         } catch ProviderError.notFound {
             return .notAPluginRepository(address: spelt, branch: branch)
         } catch {
-            return .failed(CatalogueRefresher.reason(error, branch: branch), host: link.host, address: spelt)
+            return failed(error, branch: branch, at: spelt)
         }
         switch RepositoryPassport.read(data) {
         case .success(let passport):
             return .found(Found(provider: named.provider, host: named.host, path: path, remoteID: id, defaultBranch: branch,
-                                head: head, passport: passport, passportData: data, readAt: now()))
+                                head: head, passport: passport, passportData: data, readAt: now(),
+                                rateLimit: gitLab ? clients.lookUpLimits(for: link.host).current : nil))
         case .failure(.missing):
             return .notAPluginRepository(address: named.address.description, branch: branch)
         case .failure(.futureFormat(let declared)):
@@ -362,9 +488,10 @@ public enum SourceLookUp {
 
     /// A source's first state, from what **Look up** heard: its default
     /// branch and when — so that the read right after **Add** does not ask
-    /// for it again.
+    /// for it again — and, of a GitLab, what its limiters said.
     public static func firstState(of found: Found) -> CatalogueState {
-        CatalogueState(defaultBranch: found.defaultBranch, defaultBranchReadAt: found.readAt)
+        CatalogueState(defaultBranch: found.defaultBranch, defaultBranchReadAt: found.readAt,
+                       rateLimit: found.rateLimit ?? RateLimitState())
     }
 }
 
@@ -381,12 +508,20 @@ extension RepositoryLink {
 
     /// Whether `text`, read as **Install from a link…** reads it, is a link
     /// into a source of one's own among `sources` — a branch, its page, or a
-    /// pull request — which is not installed from yet (`Phrase.sourceBranchNotYet`).
+    /// pull request; of a GitLab project, a branch, its page or a merge
+    /// request, read as **Add a source…** reads it (`SourceLink`) — which is
+    /// not installed from yet (`Phrase.sourceBranchNotYet`).
     public static func namesASource(_ text: String, official: RepositoryAddress, sources: [OwnSource]) -> Bool {
         let named: RepositoryAddress?
         switch read(text, official: official) {
         case .success(let link): named = link.otherRepository
         case .failure(.otherRepositoryPullRequest(let address, _)): named = address
+        case .failure(.notGitHub), .failure(.notALink):
+            // Another host's — a host with a port is no link here — which
+            // may be a GitLab project added as a source.
+            guard case .success(let link) = SourceLink.read(text, official: official),
+                  link.provider == SourceLink.gitlab else { return false }
+            named = link.address
         case .failure: named = nil
         }
         guard let named else { return false }
@@ -495,14 +630,20 @@ public enum SourceSchedule {
 /// Why a source's list is not fresh, in the operator's words (S4-20): the
 /// official catalogue's sentences as they always were, naming GitHub; a
 /// source of one's own's naming its host and its address — its `404` as one
-/// that may be private (item 1), and every other reason with the host it is
-/// about (items 10 to 12). `readAt` is when the list below was read, already
-/// formatted, or nil when there is no list.
+/// that may be private (item 1), a GitLab's limit as the GitLab's (item 9:
+/// anonymous gitlab.com's with what a token would change), and every other
+/// reason with the host it is about (items 10 to 12). `readAt` is when the
+/// list below was read, already formatted, or nil when there is no list;
+/// `provider` the host's, `github` or `gitlab`. Read without a token: tokens
+/// come with R3.
 public enum CatalogueTrouble {
     public static func phrase(_ error: CatalogueError, address: String, host: String?, readAt: String?,
-                              until: (Date) -> String) -> Phrase {
+                              until: (Date) -> String, provider: String = SourceLink.github) -> Phrase {
         let host = host ?? "GitHub"
         switch error {
+        case .rateLimited(let date) where provider == SourceLink.gitlab:
+            return .sourceGitLabLimited(host: host, readAt: readAt, until: until(date),
+                                        anonymousGitLabCom: host == SourceLink.gitLabCom)
         case .rateLimited(let date): return .catalogueLimited(readAt: readAt, until: until(date))
         case .rawRateLimited(let date): return .catalogueRawLimited(until: until(date))
         case .unreachable(let reason): return .catalogueUnreachable(reason: reason, readAt: readAt, host: host)

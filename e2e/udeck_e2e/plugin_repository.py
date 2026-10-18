@@ -86,10 +86,19 @@ class Request:
     # value (stage 4). A line of a fake from before either is the fake's own port and no credential.
     port: int = 0
     credential: str = "none"
+    # The GitLab it was asked of, on that GitLab's own port — "" for GitHub's — and its path as it was sent, before
+    # its `%2F` was decoded (stage 4, R2).
+    site: str = ""
+    raw_path: str = ""
 
     @property
     def is_api(self) -> bool:
-        return self.host == "api"
+        """A request to GitHub's API."""
+        return self.host == "api" and not self.site
+
+    @property
+    def is_gitlab(self) -> bool:
+        return bool(self.site)
 
     @property
     def is_raw(self) -> bool:
@@ -139,6 +148,8 @@ def parse_log(text: str) -> list[Request]:
                     if_none_match=str(entry.get("if_none_match", "")),
                     port=int(entry.get("port", 0)),
                     credential=str(entry.get("credential", "none")),
+                    site=str(entry.get("site", "")),
+                    raw_path=str(entry.get("raw_path", entry["path"])),
                 )
             )
         except (ValueError, KeyError, TypeError) as error:
@@ -184,6 +195,7 @@ class FakeGitHub:
         fixtures: Path = FIXTURES,
         guest_dir: str = GUEST_DIR,
         python: str = GUEST_PYTHON,
+        gitlab_ports: dict[str, int] | None = None,
     ) -> None:
         self.machine = machine
         self.note = note
@@ -197,6 +209,7 @@ class FakeGitHub:
         self.state_file = f"{self.root}/state.json"
         self.serving = False
         self._facts: dict | None = None
+        self.gitlab_ports = dict(gitlab_ports if gitlab_ports is not None else config.GITLAB_PORTS)
 
     @property
     def base_url(self) -> str:
@@ -222,12 +235,17 @@ class FakeGitHub:
         ssh.run(
             f"cd {shlex.quote(self.dir)} && "
             f"({shlex.quote(self.python)} {shlex.quote(self.script)} serve {shlex.quote(self.root)} {self.port} "
-            f"{shlex.quote(config.PLUGINS_REPOSITORY)} {shlex.quote(self.log)} >server.out 2>&1 & echo $! >server.pid)",
+            f"{shlex.quote(config.PLUGINS_REPOSITORY)} {shlex.quote(self.log)}{self._gitlabs()} >server.out 2>&1 & "
+            "echo $! >server.pid)",
             step,
         )
         self.serving = True
         self._wait_until_it_answers(step)
         self._expect_state(state, step)
+
+    def _gitlabs(self) -> str:
+        """The GitLabs the fake answers as, each on its port (`config.GITLAB_PORTS`), as `serve` takes them."""
+        return "".join(f" {shlex.quote(f'{host}={port}')}" for host, port in self.gitlab_ports.items())
 
     def _wait_until_it_answers(self, step: str) -> None:
         """Until the fake says it listens, and then until it answers.
@@ -371,6 +389,26 @@ class FakeGitHub:
     def source_files(self, source: str, name: str, folder: str) -> dict[str, str]:
         """Every file under `folder` in commit `name` of a repository of its own, path → mode."""
         paths = self.facts()["sources"][source]["commits"][name]["paths"]
+        return {path: entry["mode"] for path, entry in paths.items() if path.startswith(folder + "/") and entry["mode"] != "40000"}
+
+    # A GitLab project (stage 4, R2), by `host/path` — `gitlab.example.test/tools/udeck-plugins`.
+
+    def project(self, key: str) -> dict:
+        return self.facts()["gitlab"][key]
+
+    def project_id(self, key: str) -> int:
+        """The number the fake gives a GitLab project."""
+        return self.project(key)["id"]
+
+    def project_commit(self, key: str, name: str) -> str:
+        return self.project(key)["commits"][name]["sha"]
+
+    def project_tree(self, key: str, name: str, path: str) -> str:
+        return self.project(key)["commits"][name]["paths"][path]["sha"]
+
+    def project_files(self, key: str, name: str, folder: str) -> dict[str, str]:
+        """Every file under `folder` in commit `name` of a GitLab project, path → mode."""
+        paths = self.project(key)["commits"][name]["paths"]
         return {path: entry["mode"] for path, entry in paths.items() if path.startswith(folder + "/") and entry["mode"] != "40000"}
 
     def tree_in_guest(self, folder: str, step: str) -> str:

@@ -924,6 +924,271 @@ def test_a_line_of_an_older_fake_reads_as_no_credential_on_no_port():
     assert request.credential == "rejected" and request.port == 8766
 
 
+# --- GitLab projects (stage 4, R2) ---------------------------------------------------------
+
+GITLAB = plugin_repository.FIXTURES / "sources" / "gitlab"
+GL_HOST = "gitlab.example.test"
+GL_PROJECT = f"{GL_HOST}/tools/udeck-plugins"
+
+
+class GitLabServed(Served):
+    """The fake on this Mac's loopback for one test: GitHub on one port, and each GitLab on one of its own."""
+
+    def __init__(self, tmp_path, clock=time.time):
+        super().__init__(tmp_path, clock)
+        self.gitlabs = {}
+        for site in ("gitlab.example.test", "gitlab.com"):
+            server = fake_github.Server(("127.0.0.1", 0), fake_github.handler_for(self.fake, site))
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            self.gitlabs[site] = server
+
+    def at(self, site, path, headers=None):
+        """(status, headers, body) of `path` asked of the GitLab `site`, on its own port, sent as it is written."""
+        port = self.gitlabs[site].server_address[1]
+        request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers=headers or {})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as answer:
+                return answer.status, dict(answer.headers), answer.read()
+        except urllib.error.HTTPError as error:
+            return error.code, dict(error.headers), error.read()
+
+    def at_json(self, site, path, headers=None):
+        status, headers, body = self.at(site, path, headers)
+        return status, headers, json.loads(body)
+
+    def close(self):
+        for server in self.gitlabs.values():
+            server.shutdown()
+            server.server_close()
+        super().close()
+
+
+@pytest.fixture
+def gitlab(tmp_path):
+    served = GitLabServed(tmp_path)
+    yield served
+    served.close()
+
+
+def test_the_gitlab_projects_are_what_the_gitlab_checks_are_written_against():
+    """tools/udeck-plugins (7): g1 with gl-hello 1.0.0 in six entries under plugins/, g2 with gl-hello 1.1.0 and gl-big,
+    whose 6 MB big.bin is made when the fake starts; group/sub/team (9), three groups down; tools/empty (8), a passport
+    and no plugins/; and someone/gl-plugins (1001) on gitlab.com."""
+    projects = fake_github.read_projects(str(plugin_repository.FIXTURES))
+    assert {key: project.id for key, project in projects.items()} == {
+        GL_PROJECT: 7, f"{GL_HOST}/group/sub/team": 9, f"{GL_HOST}/tools/empty": 8, "gitlab.com/someone/gl-plugins": 1001}
+    plugins = projects[GL_PROJECT].repository
+    assert plugins.names == ["g1", "g2"]
+    g1, g2 = plugins.commits["g1"].snapshot, plugins.commits["g2"].snapshot
+    assert len([path for path in g1.paths if path.startswith("plugins/")]) == 6, "six entries under plugins/"
+    big = g2.at("plugins/gl-big/big.bin")
+    assert big and big[0] == "100644" and len(g2.blobs[big[1]]) == 6 * 1024 * 1024 > 5 * 1024 * 1024
+    assert not list(GITLAB.rglob("big.bin")), "made when the fake starts, never committed"
+    for commit, version in (("g1", "1.0.0"), ("g2", "1.1.0")):
+        manifest = json.loads((GITLAB / GL_PROJECT / commit / "plugins" / "gl-hello" / "manifest.json").read_text())
+        assert manifest["version"] == version and "permissions" not in manifest
+    assert projects[f"{GL_HOST}/tools/empty"].repository.commits["e1"].snapshot.at("plugins") is None
+    assert projects[f"{GL_HOST}/tools/empty"].repository.commits["e1"].snapshot.at("udeck-plugins.json") is not None
+    for script in GITLAB.rglob("run.sh"):
+        assert os.access(script, os.X_OK) and "<<" not in script.read_text(), script
+
+
+def test_two_gitlab_projects_of_one_number_on_one_host_are_refused(tmp_path):
+    root = tmp_path / "repository"
+    shutil.copytree(plugin_repository.FIXTURES, root, symlinks=True)
+    (root / "sources" / "gitlab" / GL_HOST / "tools" / "empty" / "id").write_text("7\n")
+    with pytest.raises(ValueError, match="two GitLab projects share a number"):
+        fake_github.read_projects(str(root))
+
+
+def test_a_generated_file_is_its_line_over_and_over_cut_at_its_size(tmp_path):
+    spec = tmp_path / "x.bin.generated"
+    spec.write_text(json.dumps({"bytes": 10, "line": "abc\n"}))
+    assert fake_github.generated(str(spec)) == b"abc\nabc\nab"
+    spec.write_text(json.dumps({"bytes": 3, "line": ""}))
+    with pytest.raises(ValueError):
+        fake_github.generated(str(spec))
+
+
+@needs_git
+def test_every_commit_of_every_gitlab_project_hashes_as_git_hashes_it(tmp_path):
+    """GitLab's ids are git's (measured): the hashes the GitLab checks judge uDeck's Swift by — big.bin made as the fake
+    makes it — are git's own, for every commit of every project, trees and commits alike."""
+    projects = fake_github.read_projects(str(plugin_repository.FIXTURES))
+    for key, project in sorted(projects.items()):
+        folder = GITLAB / key
+        work = tmp_path / key.replace("/", "_")
+        work.mkdir()
+        git("init", "-q", cwd=work)
+        git("config", "core.fileMode", "true", cwd=work)
+        parent = None
+        for name in project.repository.names:
+            commit = project.repository.commits[name]
+            for child in work.iterdir():
+                if child.name != ".git":
+                    shutil.rmtree(child) if child.is_dir() else child.unlink()
+            shutil.copytree(folder / name, work, symlinks=True, dirs_exist_ok=True)
+            for spec in list(work.rglob("*.generated")):
+                spec.with_name(spec.name.removesuffix(".generated")).write_bytes(fake_github.generated(str(spec)))
+                spec.unlink()
+            git("add", "-A", cwd=work)
+            tree = git("write-tree", cwd=work)
+            assert commit.snapshot.root == tree, (key, name)
+            for path, (mode, sha) in commit.snapshot.paths.items():
+                if mode == fake_github.MODE_FOLDER:
+                    assert sha == git("rev-parse", f"{tree}:{path}", cwd=work), (key, name, path)
+            stamp = f"{commit.when} +0000"
+            env = {
+                "GIT_AUTHOR_NAME": "uDeck lab", "GIT_AUTHOR_EMAIL": "lab@udeck.invalid", "GIT_AUTHOR_DATE": stamp,
+                "GIT_COMMITTER_NAME": "uDeck lab", "GIT_COMMITTER_EMAIL": "lab@udeck.invalid", "GIT_COMMITTER_DATE": stamp,
+            }  # fmt: skip
+            made = git("commit-tree", tree, "-m", commit.message, *(["-p", parent] if parent else []), cwd=work, env=env)
+            assert commit.sha == made, (key, name)
+            parent = made
+
+
+def test_a_gitlab_project_is_looked_up_by_its_encoded_path_and_read_by_its_number(gitlab):
+    """`/projects/group%2Fsub%2Fteam` as sent, the description anonymous gitlab.com gives — no forked_from_project — and
+    everything after by its number; GitLab's own 404s."""
+    status, _, project = gitlab.at_json(GL_HOST, "/api/v4/projects/group%2Fsub%2Fteam")
+    assert status == 200 and project["id"] == 9 and project["path_with_namespace"] == "group/sub/team"
+    assert project["default_branch"] == "main" and "forked_from_project" not in project
+    assert gitlab.at_json(GL_HOST, "/api/v4/projects/9")[2] == project
+    assert gitlab.at_json(GL_HOST, "/api/v4/projects/tools%2Fnope")[:3:2] == (404, {"message": "404 Project Not Found"})
+    assert gitlab.at_json(GL_HOST, "/api/v4/projects/1001")[0] == 404, "gitlab.com's project is not on this host"
+    assert gitlab.at_json("gitlab.com", "/api/v4/projects/someone%2Fgl-plugins")[2]["id"] == 1001
+    logged = gitlab.requests()
+    assert logged[0].raw_path == "/api/v4/projects/group%2Fsub%2Fteam" and logged[0].path == "/api/v4/projects/group/sub/team"
+    assert {r.site for r in logged} == {GL_HOST, "gitlab.com"} and not any(r.is_api for r in logged)
+    assert {(r.site, r.port) for r in logged} == {(site, server.server_address[1]) for site, server in gitlab.gitlabs.items()}
+
+
+def test_a_gitlab_branch_has_a_weak_etag_that_answers_304(gitlab):
+    facts = gitlab.json("/lab/facts")[2]
+    g1 = facts["gitlab"][GL_PROJECT]["commits"]["g1"]["sha"]
+    status, headers, branch = gitlab.at_json(GL_HOST, "/api/v4/projects/7/repository/branches/main")
+    etag = headers["ETag"]
+    assert status == 200 and branch["commit"]["id"] == g1 and etag.startswith('W/"')
+    assert gitlab.at(GL_HOST, "/api/v4/projects/7/repository/branches/main", {"If-None-Match": etag})[0] == 304
+    assert gitlab.at(GL_HOST, "/api/v4/projects/7/repository/branches/main", {"If-None-Match": f'"{g1}"'})[0] == 200
+    gitlab.state(gitlab={GL_HOST: {"projects": {"tools/udeck-plugins": {"main": "g2"}}}})
+    status, headers, branch = gitlab.at_json(GL_HOST, "/api/v4/projects/7/repository/branches/main", {"If-None-Match": etag})
+    assert status == 200 and branch["commit"]["id"] == facts["gitlab"][GL_PROJECT]["commits"]["g2"]["sha"]
+    assert headers["ETag"] != etag
+    assert gitlab.at(GL_HOST, "/api/v4/projects/7/repository/branches/fix%2Fx")[0] == 404
+
+
+def test_a_gitlab_tree_is_its_root_or_everything_under_a_path_page_by_page(gitlab):
+    """`?ref=&path=plugins&recursive=true`, three entries to a page whatever is asked, x-next-page to follow; ids are the
+    fake's git ids, no size; a root without the path is GitLab's 404."""
+    facts = gitlab.json("/lab/facts")[2]
+    g1 = facts["gitlab"][GL_PROJECT]["commits"]["g1"]
+    seen, page = [], 1
+    while True:
+        status, headers, entries = gitlab.at_json(
+            GL_HOST, f"/api/v4/projects/7/repository/tree?ref={g1['sha']}&path=plugins&recursive=true&per_page=100&page={page}")
+        assert status == 200 and len(entries) <= 3 and headers["x-per-page"] == "3"
+        seen += entries
+        if not headers["x-next-page"]:
+            break
+        page = int(headers["x-next-page"])
+    assert page == 2 and len(seen) == 6
+    assert all(set(entry) == {"id", "name", "type", "path", "mode"} for entry in seen), "no size"
+    assert {entry["path"]: entry["id"] for entry in seen} == {
+        path: entry["sha"] for path, entry in g1["paths"].items() if path.startswith("plugins/")}
+    assert {entry["path"]: entry["mode"] for entry in seen}["plugins/gl-hello/run.sh"] == "100755"
+    assert {entry["path"]: entry["mode"] for entry in seen}["plugins/gl-hello/lib"] == "040000"
+    status, _, root = gitlab.at_json(GL_HOST, f"/api/v4/projects/7/repository/tree?ref={g1['sha']}&per_page=100")
+    assert status == 200 and sorted(entry["path"] for entry in root) == ["README.md", "plugins", "udeck-plugins.json"]
+    e1 = facts["gitlab"][f"{GL_HOST}/tools/empty"]["commits"]["e1"]["sha"]
+    status, _, body = gitlab.at_json(GL_HOST, f"/api/v4/projects/8/repository/tree?ref={e1}&path=plugins&recursive=true")
+    assert (status, body) == (404, {"message": "404 invalid revision or path Not Found"})
+    assert gitlab.at_json(GL_HOST, f"/api/v4/projects/7/repository/tree?ref={'f' * 40}")[:3:2] == (
+        404, {"message": "404 Tree Not Found"})
+    gitlab.state(gitlab_page_size=100)
+    assert len(gitlab.at_json(GL_HOST, f"/api/v4/projects/7/repository/tree?ref={g1['sha']}&path=plugins&recursive=true&per_page=100")[2]) == 6
+
+
+def test_a_gitlab_file_comes_from_the_files_api_with_its_size_and_its_blob_id(gitlab):
+    facts = gitlab.json("/lab/facts")[2]
+    commits = facts["gitlab"][GL_PROJECT]["commits"]
+    g1, g2 = commits["g1"]["sha"], commits["g2"]["sha"]
+    status, headers, data = gitlab.at(GL_HOST, f"/api/v4/projects/7/repository/files/plugins%2Fgl-hello%2Flib%2Fgreeting.txt/raw?ref={g1}")
+    assert status == 200 and data == b"hello from gitlab.example.test\n"
+    assert headers["X-Gitlab-Size"] == str(len(data)) and headers["X-Gitlab-Blob-Id"] == fake_github.blob_id(data)
+    status, headers, data = gitlab.at(GL_HOST, f"/api/v4/projects/7/repository/files/plugins%2Fgl-big%2Fbig.bin/raw?ref={g2}")
+    assert status == 200 and headers["X-Gitlab-Size"] == str(6 * 1024 * 1024) == str(len(data))
+    assert fake_github.blob_id(data) == commits["g2"]["paths"]["plugins/gl-big/big.bin"]["sha"]
+    assert gitlab.at_json(GL_HOST, f"/api/v4/projects/7/repository/files/plugins%2Fgl-big%2Fbig.bin/raw?ref={g1}")[:3:2] == (
+        404, {"message": "404 File Not Found"})
+    _, _, history = gitlab.at_json(GL_HOST, "/api/v4/projects/7/repository/commits?ref_name=main&path=plugins/gl-big&per_page=100")
+    assert history == [], "main at g1 never had gl-big"
+    gitlab.state(gitlab={GL_HOST: {"projects": {"tools/udeck-plugins": {"main": "g2"}}}})
+    _, _, history = gitlab.at_json(GL_HOST, "/api/v4/projects/7/repository/commits?ref_name=main&path=plugins/gl-hello&per_page=100")
+    assert [entry["id"] for entry in history] == [g2, g1] and history[0]["committed_date"].endswith("Z")
+
+
+def test_a_renamed_gitlab_project_keeps_its_number_and_its_old_path_is_gone(gitlab):
+    gitlab.state(gitlab={GL_HOST: {"served": {"tools/udeck-plugins-2": "tools/udeck-plugins"}}})
+    _, _, renamed = gitlab.at_json(GL_HOST, "/api/v4/projects/7")
+    assert renamed["path_with_namespace"] == "tools/udeck-plugins-2" and renamed["id"] == 7
+    assert gitlab.at(GL_HOST, "/api/v4/projects/tools%2Fudeck-plugins")[0] == 404
+    assert gitlab.at_json(GL_HOST, "/api/v4/projects/tools%2Fudeck-plugins-2")[2]["id"] == 7
+
+
+def test_a_gitlab_told_plain_answers_as_a_web_server_with_no_gitlab_behind_it(gitlab):
+    gitlab.state(gitlab={GL_HOST: {"plain": True}})
+    status, headers, body = gitlab.at(GL_HOST, "/api/v4/projects/tools%2Fudeck-plugins")
+    assert (status, body) == (404, b"404 page not found\n") and headers["Content-Type"].startswith("text/plain")
+    assert gitlab.at("gitlab.com", "/api/v4/projects/1001")[0] == 200, "the other GitLab answers as it did"
+
+
+def test_gitlab_com_names_its_two_limiters_in_turn_and_429s_once_the_hour_is_spent(tmp_path):
+    """500 a minute and 60 an hour, each request spending both — the answer naming one, then the other — and with the
+    hour spent by something else on the connection, 429 with Retry-After until it resets; the self-hosted GitLab sends
+    no limit at all."""
+    now = [1_800_000_000.0]
+    served = GitLabServed(tmp_path, clock=lambda: now[0])
+    try:
+        said = [served.at("gitlab.com", "/api/v4/projects/1001")[1] for _ in range(4)]
+        assert [headers["RateLimit-Name"] for headers in said] == [
+            "throttle_unauthenticated_api", "unauthenticated_traffic_per_ip"] * 2
+        assert [headers["RateLimit-Remaining"] for headers in said] == ["499", "58", "497", "56"]
+        assert said[1]["RateLimit-Reset"] == str(1_800_003_600) and said[0]["RateLimit-Reset"] == str(1_800_000_060)
+        served.state(gitlab={"gitlab.com": {"spent": 56}})
+        status, headers, body = served.at("gitlab.com", "/api/v4/projects/1001")
+        assert status == 429 and body == b"Retry later\n"
+        assert headers["RateLimit-Name"] == "unauthenticated_traffic_per_ip" and headers["RateLimit-Remaining"] == "0"
+        assert headers["Retry-After"] == "3600"
+        now[0] += 3601
+        assert served.at("gitlab.com", "/api/v4/projects/1001")[0] == 200, "the hour reset"
+        assert not any(name.lower().startswith("ratelimit") for name in served.at(GL_HOST, "/api/v4/projects/7")[1])
+    finally:
+        served.close()
+
+
+def test_the_lab_serves_the_gitlabs_on_their_own_ports_and_names_them(here, tmp_path):
+    """`serve … gitlab.example.test=<port> gitlab.com=<port>`: each GitLab answers on its own port, and the listening
+    line says so."""
+    machine, github = here
+    github.serve(tmp_path, main="c1")
+    for site, port in github.gitlab_ports.items():
+        answered = subprocess.run(["curl", "-s", f"http://127.0.0.1:{port}/api/v4/projects/1001"], capture_output=True,
+                                  text=True, check=True).stdout  # fmt: skip
+        assert (json.loads(answered).get("id") == 1001) == (site == "gitlab.com"), site
+    said = (tmp_path / "guest" / "server.out").read_text()
+    assert all(f"{site} on 127.0.0.1:{port}" in said for site, port in github.gitlab_ports.items()), said
+    assert {r.site for r in github.uDecks_requests("reading")} == set(github.gitlab_ports)
+
+
+def test_a_line_of_a_gitlab_says_its_site_and_the_path_as_sent():
+    (request,) = parse_log(line(site="gitlab.com", raw_path="/api/v4/projects/a%2Fb", path="/api/v4/projects/a/b") + "\n")
+    assert request.site == "gitlab.com" and request.raw_path == "/api/v4/projects/a%2Fb" and request.is_gitlab
+    assert not request.is_api, "a GitLab's API is not GitHub's"
+    (older,) = parse_log(line(path="/api/x") + "\n")
+    assert older.site == "" and older.raw_path == "/api/x" and older.is_api
+
+
 # --- Reading the log -----------------------------------------------------------------------
 
 
@@ -1011,7 +1276,8 @@ def free_port():
 def here(tmp_path):
     machine = Here()
     github = FakeGitHub(
-        machine, note=lambda text: None, port=free_port(), guest_dir=str(tmp_path / "guest"), python=sys.executable
+        machine, note=lambda text: None, port=free_port(), guest_dir=str(tmp_path / "guest"), python=sys.executable,
+        gitlab_ports={"gitlab.example.test": free_port(), "gitlab.com": free_port()},
     )
     yield machine, github
     github.stop()
@@ -1066,7 +1332,7 @@ def test_a_state_that_did_not_take_is_the_labs_failure(here, tmp_path):
 def test_a_fake_that_never_answers_is_a_lab_error_with_what_it_said(tmp_path):
     machine = Here()
     github = FakeGitHub(machine, note=lambda text: None, port=free_port(), guest_dir=str(tmp_path / "guest"),
-                        python="/bin/false")  # fmt: skip
+                        python="/bin/false", gitlab_ports={})  # fmt: skip
     clock = [0.0]
     machine.clock = lambda: clock[0]
     machine.sleep = lambda seconds: clock.__setitem__(0, clock[0] + seconds)
@@ -1125,7 +1391,8 @@ def test_a_question_the_fake_never_answers_is_a_lab_error_in_seconds_with_what_c
     stand_in.chmod(0o755)
     machine = Here()
     guest = tmp_path / "guest"
-    github = FakeGitHub(machine, note=lambda text: None, port=free_port(), guest_dir=str(guest), python=str(stand_in))
+    github = FakeGitHub(machine, note=lambda text: None, port=free_port(), guest_dir=str(guest), python=str(stand_in),
+                        gitlab_ports={})
     started = time.monotonic()
     try:
         with pytest.raises(LabError, match="did not answer within.*listening: a stand-in.*no answer.*curl: \\(28\\)"):

@@ -969,6 +969,187 @@ struct PluginInstallerTests {
         #expect(installer(FetchLog(FakeRepository())).recover() == [.discarded(directory: "orphan")])
         #expect(stagingIsEmpty())
     }
+
+    // MARK: - A listing without sizes (GitLab's, stage 4 R2)
+
+    static let gitLab = RepositoryAddress(provider: "gitlab", host: "gitlab.example.test", path: "tools/udeck-plugins")
+    static let gitLabSource = "gitlab.example.test-udeck-plugins-0123abcd"
+
+    /// `repository`'s plugin as GitLab lists it — every size left out — asked
+    /// for through a GitLab source of one's own.
+    func gitLabRequest(_ repository: FakeRepository, _ operation: InstallRequest.Operation = .install,
+                       id: String = "uptime", version: String = "1.0.0") -> InstallRequest {
+        let listed = repository.plugin(id)
+        let folder = PluginListing(tree: listed.tree, entries: listed.entries.map {
+            ListedEntry(path: $0.path, mode: $0.mode, sha: $0.sha, size: nil)
+        })
+        return InstallRequest(operation: operation, id: PluginIdentifier(rawValue: id)!, source: Self.gitLabSource,
+                              sourceRepository: Self.gitLab, repository: Self.gitLab, ref: PluginRef(name: "main"),
+                              commit: repository.commit, folder: folder, version: version, headCommit: repository.commit)
+    }
+
+    @Test("a listing without sizes installs: rule 8 waits for the files, and every file is still hashed")
+    func noSizesInstalls() async throws {
+        let repository = FakeRepository.withUptime()
+        let log = FetchLog(repository)
+        let installer = installer(log)
+        let record = try installer.commit(try await installer.stage(gitLabRequest(repository)))
+        #expect(record.source == Self.gitLabSource && record.repository == Self.gitLab)
+        #expect(record.verification.status == .unverified && record.verification.by == nil)
+        #expect(try GitHash.tree(ofDirectoryAt: live) == repository.treeID("plugins/uptime"))
+        #expect(Set(log.paths) == ["plugins/uptime/manifest.json", "plugins/uptime/uptime.sh", "plugins/uptime/README.md"])
+        // The same listing from a host that lists sizes is refused before a request: a size left out there is no host's way.
+        var asGitHub = gitLabRequest(repository)
+        (asGitHub.repository, asGitHub.sourceRepository, asGitHub.source) = (.official, .official, "official")
+        let none = FetchLog(repository)
+        await expectRefused({ _ = try await self.installer(none).stage(asGitHub) }) {
+            if case .sizeNotListed = $0 { true } else { false }
+        }
+        #expect(none.paths.isEmpty, "nothing asked")
+    }
+
+    @Test("a file of a listing without sizes that arrives larger than 5 MB is refused as it arrives, and nothing is installed")
+    func noSizesFileTooLarge() async throws {
+        var repository = FakeRepository.withUptime()
+        let big = Data(repeating: 0x61, count: RepositoryRules.maximumFileBytes + 1)
+        repository.files["plugins/uptime/big.bin"] = .init(data: big, mode: "100644")
+        let log = FetchLog(repository)
+        await expectRefused({ _ = try await self.installer(log).stage(self.gitLabRequest(repository)) }) {
+            $0 == .fileTooLarge(path: "plugins/uptime/big.bin", bytes: RepositoryRules.maximumFileBytes + 1)
+        }
+        #expect(log.paths.filter { $0 == "plugins/uptime/big.bin" }.count == 1, "refused, not asked again")
+        #expect(!FileManager.default.fileExists(atPath: live.path) && stagingIsEmpty())
+        #expect(try records().plugins.isEmpty)
+    }
+
+    @Test("files of a listing without sizes that add up to more than 10 MB stop the install, the rest not asked for")
+    func noSizesTooLarge() async throws {
+        var repository = FakeRepository.withUptime()
+        for index in 0 ..< 8 {
+            repository.files["plugins/uptime/part\(index).bin"] = .init(data: Data(repeating: UInt8(index), count: 4 * 1024 * 1024),
+                                                                       mode: "100644")
+        }
+        let log = FetchLog(repository)
+        await expectRefused({ _ = try await self.installer(log).stage(self.gitLabRequest(repository)) }) {
+            if case .tooLarge(let id, let bytes, let files) = $0 {
+                id == "uptime" && bytes > RepositoryRules.maximumBytes && files == repository.plugin("uptime").files.count
+            } else { false }
+        }
+        #expect(log.paths.count < repository.plugin("uptime").files.count, "asked for \(log.paths.count)")
+        #expect(!FileManager.default.fileExists(atPath: live.path) && stagingIsEmpty())
+    }
+
+    @Test("a file the provider refuses as too large is refused once, with the size the host said")
+    func providerSaysTooLarge() async throws {
+        let repository = FakeRepository.withUptime()
+        let asked = AskedPaths()
+        let files = repository.files.mapValues(\.data)
+        let installer = PluginInstaller(paths: paths, discovery: discovery, trash: TestTrash(in: temp.url),
+                                        fetchOfSource: { _, _, path, _ in
+                                            asked.add(path)
+                                            if path.hasSuffix("README.md") { throw ProviderError.tooLarge(bytes: 6_291_456) }
+                                            guard let data = files[path] else { throw ProviderError.notFound }
+                                            return data
+                                        })
+        await expectRefused({ _ = try await installer.stage(self.gitLabRequest(repository)) }) {
+            $0 == .fileTooLarge(path: "plugins/uptime/README.md", bytes: 6_291_456)
+        }
+        #expect(asked.names.filter { $0.hasSuffix("README.md") }.count == 1, "no retry")
+        #expect(stagingIsEmpty())
+    }
+
+    @Test("a host whose files come from its API, blocked, stops the install at once: nothing retried, the limit said")
+    func blockedAPIIsNotRetried() async throws {
+        let repository = FakeRepository.withUptime()
+        let asked = AskedPaths()
+        let until = Date(timeIntervalSince1970: 1_792_278_000)
+        let installer = PluginInstaller(paths: paths, discovery: discovery, trash: TestTrash(in: temp.url),
+                                        fetchOfSource: { _, _, path, _ in
+                                            asked.add(path)
+                                            throw ProviderError.rateLimited(until: until)
+                                        })
+        do {
+            _ = try await installer.stage(gitLabRequest(repository))
+            Issue.record("installed while the host was blocked")
+        } catch InstallError.rateLimited(let said) {
+            #expect(said == until)
+        }
+        #expect(asked.names.count <= PluginInstaller.width, "each file asked once at most: \(asked.names)")
+        #expect(Set(asked.names).count == asked.names.count)
+        #expect(stagingIsEmpty())
+    }
+
+    // MARK: - A previous copy after a rename (L9)
+
+    /// A source renamed from `old` to `new`: the copy installed at `old`,
+    /// updated later from `new` — its previous copy is kept under the name the
+    /// source has now, matched to the source by its id, so **Back to** finds it.
+    @Test("an update after a source was renamed keeps its previous copy under the source's name now, and Back to finds it")
+    func previousAfterARename() async throws {
+        let old = RepositoryAddress(provider: "github", host: "github.com", path: "someone/team-plugins")
+        let new = RepositoryAddress(provider: "github", host: "github.com", path: "someone/team-plugins-2")
+        let source = OwnSource(id: "github.com-team-plugins-87a735c2", provider: "github", host: "github.com",
+                               path: new.path, remoteID: 900_000_101, addedAt: nil)
+        func asked(_ repository: FakeRepository, _ operation: InstallRequest.Operation, _ at: RepositoryAddress,
+                   version: String) -> InstallRequest {
+            var made = request(repository, operation, version: version)
+            (made.source, made.repository, made.sourceRepository) = (source.id, at, at)
+            return made
+        }
+        let first = FakeRepository.withUptime(version: "1.0.0")
+        let i = installer(FetchLog(first))
+        try i.commit(try await i.stage(asked(first, .install, old, version: "1.0.0")))
+        var second = FakeRepository.withUptime(version: "1.1.0")
+        second.commit = String(repeating: "d", count: 40)
+        let u = installer(FetchLog(second))
+        let record = try u.commit(try await u.stage(asked(second, .update, new, version: "1.1.0")))
+        #expect(record.repository == new && record.previous?.repository == new, "\(String(describing: record.previous))")
+        #expect(record.previous?.commit == first.commit && record.previous?.version == "1.0.0")
+        guard case .source(let origin)? = record.previous?.source(record: record, official: .official, sources: [source]) else {
+            Issue.record("Back to finds no source: \(String(describing: record.previous))"); return
+        }
+        #expect(origin == PluginOrigin(repository: new, ref: PluginRef(name: "main"), source: source.id))
+    }
+
+    /// (the existing copy's source and repository, the coming one's, whether `previous` is kept under the coming name)
+    static let renamedPrevious: [(String, String, String, String, Bool)] = [
+        ("x", "someone/old", "x", "someone/new", true),
+        // Another source's copy replaced: its previous copy is that source's, under its own name.
+        ("y", "someone/old", "x", "someone/new", false),
+        // The official source: its forks are other repositories, kept as they were named.
+        ("official", "iillyyaa1997/udeck-plugins", "official", "someone/fork", false),
+    ]
+
+    @Test("a previous copy is renamed only between two copies of one source of one's own", arguments: 0..<renamedPrevious.count)
+    func renamedOnlyWithinASource(row: Int) {
+        let (fromSource, fromPath, toSource, toPath, renamed) = Self.renamedPrevious[row]
+        let from = RepositoryAddress(path: fromPath), to = RepositoryAddress(path: toPath)
+        let existing = InstalledRecord(source: fromSource, repository: from, ref: PluginRef(name: "main"),
+                                       commit: String(repeating: "a", count: 40), tree: String(repeating: "b", count: 40),
+                                       version: "1.0.0", installedAt: Date(), pinned: false,
+                                       verification: PluginVerification(status: .unverified, by: nil, checkedAgainst: nil,
+                                                                        checkedAt: Date()),
+                                       previous: nil)
+        let coming = InstallRequest(operation: .update, id: PluginIdentifier(rawValue: "uptime")!, source: toSource,
+                                    sourceRepository: to, repository: to, ref: PluginRef(name: "main"),
+                                    commit: String(repeating: "c", count: 40),
+                                    folder: PluginListing(tree: String(repeating: "d", count: 40), entries: []),
+                                    version: "1.1.0", headCommit: nil)
+        let kept = PreviousCopy.renamed(existing.asPrevious, of: existing, by: coming)
+        #expect(kept.repository == (renamed ? to : from), "\(row)")
+        // A branch's copy keeps its own repository whatever the source.
+        var branch = existing.asPrevious
+        branch.ref = .branch("fix")
+        #expect(PreviousCopy.renamed(branch, of: existing, by: coming).repository == from)
+    }
+}
+
+/// The paths a fetch was asked for, from any thread.
+final class AskedPaths: @unchecked Sendable {
+    private let lock = NSLock()
+    private var asked: [String] = []
+    func add(_ name: String) { lock.withLock { asked.append(name) } }
+    var names: [String] { lock.withLock { asked } }
 }
 
 extension TemporaryDirectory {

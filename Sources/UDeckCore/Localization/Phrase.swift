@@ -238,6 +238,9 @@ public enum Phrase: Sendable, Equatable {
     /// A catalogue row.
     case catalogueVerified
     case catalogueSize(files: Int, size: String)
+    /// The same, of a host whose listings give no sizes (GitLab's): how many
+    /// files, and no bytes (S4-15).
+    case catalogueFiles(files: Int)
     case catalogueAsksTo(String)
     case catalogueInstall
     case catalogueUpdate
@@ -259,7 +262,9 @@ public enum Phrase: Sendable, Equatable {
     case catalogueReinstall(version: String)
     case catalogueDetails
     case catalogueWhatChanged
-    case catalogueOpenOnGitHub
+    /// *Open on GitHub*, or *Open on gitlab.example* — the host the page is
+    /// on (`RepositoryAddress.hostName`).
+    case catalogueOpenOn(host: String)
     case catalogueEarlierVersions
     case catalogueBackTo(version: String)
     case catalogueRemove
@@ -407,6 +412,11 @@ public enum Phrase: Sendable, Equatable {
     /// **Add a source…** with its address filled in.
     case linkNotAForkAddAsASource(repository: String, official: String)
     case linkAddAsASource
+    /// A link to another host than github.com on **Install from a link…**
+    /// (S4-20, item 16): what can be done with it — and, when it reads as a
+    /// GitLab project, `page`, its page, which **Add as a source…** fills
+    /// **Add a source…** with.
+    case linkNotGitHubAddAsASource(host: String, page: String?)
     /// Why an address pasted into **Add a source…** is not read (`SourceLink`).
     case sourceLinkRefused(SourceLink.Refusal, official: String)
     /// `~/.udeck/sources.json` cannot be used (`SourceList.Broken`), and an
@@ -439,9 +449,13 @@ public enum Phrase: Sendable, Equatable {
     case sourceNotTrusted
     case sourceRemove
     case sourcesTestBuild(host: String, base: String)
-    /// **Look up** of a GitLab project, which this uDeck does not read yet —
-    /// said until GitLab is read, and never released.
-    case sourceGitLabNotYet(host: String)
+    /// A GitLab's limit used up, or its `429` (S4-20, item 9): `host` asked
+    /// uDeck to wait — and, of gitlab.com read without a token, that a token
+    /// raises the limit. `readAt` as for `catalogueLimited`.
+    case sourceGitLabLimited(host: String, readAt: String?, until: String, anonymousGitLabCom: Bool)
+    /// **Look up** of an address on a host that did not answer as GitLab
+    /// (S4-20, item 13): a `404`, or an answer, that is not GitLab's.
+    case sourceNotGitLab(host: String)
     /// **Look up** of a repository that is added already, named as its block
     /// names it (`name`) and by its address.
     case sourceAlreadyAdded(name: String, address: String)

@@ -159,7 +159,29 @@ public struct CatalogueStore: Sendable {
     }
 
     public func save(_ state: CatalogueState) throws {
-        try stateStore.save(state)
+        try Self.stateLock.withLock { try stateStore.save(state) }
+    }
+
+    /// Every write of a catalogue's `state.json`, in this process, one at a
+    /// time: a read writes its whole state when it ends, on whatever thread it
+    /// ran (`CatalogueRefresher`), and keeping the limit after a request reads
+    /// the state, changes it and writes it (`updateState`). Without one lock
+    /// over both, the second could read the state from before the read's own
+    /// write and write it back over it — the head, the error, the official
+    /// repository's number answered wrongly, all of it lost.
+    private static let stateLock = NSLock()
+
+    /// `change` made to the state as it is on disk now, and written, in one
+    /// step with every other write of a state (`save`): what keeping the limit
+    /// after a request does. Answers the state as changed.
+    @discardableResult
+    public func updateState(_ change: (inout CatalogueState) -> Void) -> CatalogueState {
+        Self.stateLock.withLock {
+            var state = self.state()
+            change(&state)
+            try? stateStore.save(state)
+            return state
+        }
     }
 
     // MARK: - Followed pull requests

@@ -1,0 +1,7 @@
+# tools/udeck-plugins on gitlab.example.test, oldest first, each the parent of the next (e2e/guest/fake-github.py).
+# g1: gl-hello 1.0.0, asking for nothing, in six entries under plugins/ — more than one page of the fake's tree
+#     answers, so that the listing is followed across pages.
+# g2: gl-hello 1.1.0, and gl-big, whose big.bin is made when the fake starts — 6 MB, more than a plugin's file
+#     may be — and never committed.
+g1
+g2

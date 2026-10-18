@@ -644,6 +644,16 @@ FEED_PORT = 8765
 # would read it from github.com. With nothing listening, it reads nothing.
 PLUGINS_PORT = 8766
 
+# The GitLabs the same fake answers as (stage 4, R2): each host on a port of its
+# own, so that each is an origin of its own as it is outside the lab, in GitLab's
+# API, v4, under `/api/v4`. Every lab build carries them as `UDeckPluginsHostMap`
+# — `{host: "http://127.0.0.1:<port>"}`, written by `Scripts/make-app.sh
+# --test-plugins`, which names the same ports — and `builds.Builder._verify`
+# holds it to this; a build as shipped carries no map at all. gitlab.example.test
+# is a self-hosted GitLab, which sends no limit; gitlab.com sends its two
+# limiters (`fake-github.py`).
+GITLAB_PORTS = {"gitlab.example.test": 8768, "gitlab.com": 8769}
+
 # The repository the fake answers for: the official one's own name, which is what
 # a lab build carries in `UDeckPluginsRepository` as it ships.
 PLUGINS_REPOSITORY = "iillyyaa1997/udeck-plugins"

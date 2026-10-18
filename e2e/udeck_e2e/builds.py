@@ -81,6 +81,16 @@ INFO_PLIST = "uDeck.app/Contents/Info.plist"
 # The plist the script starts from, which carries the addresses a release ships with — and GitHub's raw host.
 SHIPPED_PLIST = Path("Sources") / "uDeck" / "Support" / "Info.plist"
 GITHUB_RAW = "https://raw.githubusercontent.com"
+# The Info.plist key a lab build reads each GitLab's API at (stage 4, R2): `{host: base URL}`.
+HOST_MAP = "UDeckPluginsHostMap"
+
+
+def host_map(plugins_url: str) -> dict[str, str]:
+    """The host map a lab build pointed at the fake at `plugins_url` carries: each GitLab the fake answers as, on its own
+    port of the same host (`config.GITLAB_PORTS`, `Scripts/make-app.sh`'s TEST_GITLAB_PORTS)."""
+    scheme, _, rest = plugins_url.rstrip("/").partition("://")
+    host = rest.split("/", 1)[0].rsplit(":", 1)[0]
+    return {name: f"{scheme}://{host}:{port}" for name, port in config.GITLAB_PORTS.items()}
 
 # What a directory of binaries compiled elsewhere has to hold (`--prebuilt`):
 # the two products `make-app.sh` puts in the bundle, and the commit they were
@@ -325,6 +335,16 @@ class Builder:
                                          else config.PLUGINS_REPOSITORY_ID),
         }
         wrong = [f"{key} is {plist.get(key)!r}, not {value!r}" for key, value in wanted.items() if plist.get(key) != value]
+        # Where a lab build reads each GitLab: the fake's ports (`config.GITLAB_PORTS`), on the fake's host. A build as
+        # shipped, and the smoke's, carry no map at all — one put into an installed build would send a host's
+        # requests elsewhere, and the build says so under Your sources (stage 4, S4-21).
+        mapped = plist.get(HOST_MAP)
+        if self.plugins_url is None:
+            self._shipped_host_map(step)
+            if HOST_MAP in plist:
+                wrong.append(f"{HOST_MAP} is {mapped!r}, and a build as shipped carries none")
+        elif mapped != host_map(self.plugins_url):
+            wrong.append(f"{HOST_MAP} is {mapped!r}, not {host_map(self.plugins_url)!r}")
         transport = plist.get("NSAppTransportSecurity")
         if not (isinstance(transport, dict) and transport.get("NSAllowsLocalNetworking") is True):
             # For the fake, plain HTTP on the loopback: a catalogue fetch refused
@@ -352,6 +372,15 @@ class Builder:
         if addresses != {"UDeckPluginsAPIBase": config.GITHUB_API, "UDeckPluginsRawBase": GITHUB_RAW}:
             raise LabError(step, f"{SHIPPED_PLIST} does not ship GitHub's own addresses: {addresses}")
         return addresses
+
+    def _shipped_host_map(self, step: str) -> None:
+        """The checkout ships no host map (`SHIPPED_PLIST`): a lab build's own is written by make-app.sh alone."""
+        try:
+            shipped = plistlib.loads((self.repo_root / SHIPPED_PLIST).read_bytes())
+        except (OSError, ValueError) as error:
+            raise LabError(step, f"could not read {SHIPPED_PLIST}: {error}") from None
+        if HOST_MAP in shipped:
+            raise LabError(step, f"{SHIPPED_PLIST} ships {HOST_MAP} {shipped[HOST_MAP]!r}: a build as shipped carries none")
 
     def _shipped_repository_id(self, step: str) -> int:
         """The official repository's number as this checkout ships it (`SHIPPED_PLIST`): GitHub's own."""

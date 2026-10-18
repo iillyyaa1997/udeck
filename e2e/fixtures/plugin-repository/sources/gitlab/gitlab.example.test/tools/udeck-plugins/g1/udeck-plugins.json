@@ -1,0 +1,5 @@
+{
+  "format": 1,
+  "name": "GitLab lab plugins",
+  "description": "A self-hosted GitLab's plugins, in the lab. Nobody but its owner vouches for them."
+}

@@ -264,8 +264,9 @@ uDeck reads it from `api.github.com` and `raw.githubusercontent.com`, anonymousl
   none of these once fewer than ten of the hour's requests are left, and the
   plugin's row says since when it was not checked; **Check now** asks them.
 
-*What changed* and *Open on GitHub* open GitHub's pages in your browser; uDeck
-itself asks nothing for them. A read is usually one or two requests, and one
+*What changed* and *Open on GitHub* — *Open on* a GitLab's host, for a GitLab
+project — open that host's pages in your browser; uDeck itself asks nothing for
+them. A read is usually one or two requests, and one
 more for each plugin installed from a pull request or a branch, each carrying
 `User-Agent: uDeck/<version>` and the network address any request carries. **Verified
 plugins update themselves**: after a read that finds a new version of one —
@@ -289,8 +290,10 @@ Plugins → Update verified plugins by themselves** turns that off, and every
 update waits for a press. **Settings → Plugins → Official catalogue** turns all
 of it off for the official repository: uDeck then makes no request to it, the
 plugins you have from it keep running, and uDeck stops knowing about their
-updates. A repository you added yourself under **Settings → Plugins → Your
-sources** is read the same way, anonymously, until you remove it.
+updates. A GitHub repository or a GitLab project you added yourself under
+**Settings → Plugins → Your sources** is read the same way, anonymously, until
+you remove it — a GitLab project from its own host's API, `https://<host>/api/v4`,
+every file of it included.
 What exactly is read, cached and counted against GitHub's limits is in
 [docs/plugin-repository.md](docs/plugin-repository.md#what-udeck-fetches-and-when).
 

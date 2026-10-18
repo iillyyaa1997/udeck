@@ -10,6 +10,38 @@ for what that promises.
 
 ## [Unreleased]
 
+- **A public GitLab project as a source of its own** — on gitlab.com, or on a
+  GitLab of one's own at `https://<host>/api/v4`. **Add a source…** takes its
+  page as the browser shows it, nested groups, `/-/` pages, `.git` and a port
+  included; **Look up** asks for it by its encoded path once
+  (`/api/v4/projects/group%2Fproject`) and then, by the number GitLab knows it
+  by, for its default branch's head and its passport; a host whose `404` is not
+  GitLab's *did not answer as GitLab*. From then on it is read by its number
+  alone — `/api/v4/projects/{id}/…`: its root, and `plugins/` only when the root
+  has one, page after page; every file through the files API, hashed against
+  the listing; a rename written back under the same id — and installed,
+  updated, put back, reinstalled and given its earlier versions through it,
+  **Unverified**. GitLab's listings give no sizes: a row says *4 files* and no
+  bytes, and a file past 5 MB, or files past 10 MB, are refused as they arrive,
+  nothing installed and staging empty. GitLab's limits are read without the
+  `x-`, and gitlab.com's two limiters are kept apart by name, each GitLab source
+  with a limit of its own: a `429` stops that source alone, and says *gitlab.com
+  asked uDeck to wait …*, with what a token would change on gitlab.com. *Open on
+  <host>* opens its pages, on the real host. A manifest past 5 MB is its plugin's
+  alone, and a description naming no number, or another's, renames nothing.
+  **Install from a link…** of a GitLab project's page — a port and all — says
+  *… is not GitHub. A GitLab project can be added as a source of its own.* with
+  **Add as a source…**, and once the project is added, a link into it is refused
+  as a GitHub source's is. **Official catalogue**'s words
+  now say what it governs: no request to the official repository, nor to its
+  forks for **Install from a link…**. **Earlier versions…** of an official copy
+  goes from the screen while its address belongs to another repository, and a
+  link looked up before is said to be refused; a copy updated after its source
+  was renamed keeps its previous copy under the name the source has now, so
+  **Back to** is offered; and a catalogue's state is written one write at a
+  time. A test build says where it reads each GitLab from (`UDeckPluginsHostMap`,
+  which a build as shipped never carries). `installed.json`, `grants.json`,
+  `followed.json` and `settings.json` keep their shape.
 - **A public GitHub repository as a source of its own.** Settings → Plugins →
   **Your sources** → **Add a source…** takes a github.com repository's address
   as the browser shows it; **Look up** asks for it by its name once, then for

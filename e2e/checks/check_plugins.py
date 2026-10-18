@@ -1,6 +1,6 @@
 """Plugins from a repository: the catalogue, installing, updating, removing — and saying no.
 
-Forty-nine checks, one per row of the table in docs/plugin-repository.md ("The
+Fifty-seven checks, one per row of the table in docs/plugin-repository.md ("The
 lab's checks") but its last — `smoke.real-pull-request`, against the real GitHub,
 is in check_smoke.py — and all of them against the same two things: a release build of
 this checkout, and a fake GitHub served inside the guest
@@ -16,7 +16,10 @@ a published release — `releases`, `updates.github_answers` — and for one of 
 `plugins.source-downgrade-to-0-7-0` fetches the released 0.7.0 that way, and runs
 it with the official catalogue off.) The sources of one's own the stage-4 checks
 add are the fake's too: repositories of their own in
-`e2e/fixtures/plugin-repository/sources/github/`, each with its own number.
+`e2e/fixtures/plugin-repository/sources/github/`, each with its own number, and
+GitLab projects in `…/sources/gitlab/<host>/`, which the same fake answers as two
+GitLabs, each on a port of its own (`config.GITLAB_PORTS`), every lab build
+pointed at them by its host map (`UDeckPluginsHostMap`).
 
 **Three oracles, and none of them is what uDeck says about itself.** The fake's
 access log is the traffic: what uDeck asked for, and what it did not — a check
@@ -327,12 +330,13 @@ SWITCH_TO_VERIFIED = ("{id} is {old} from pull request #{number} at {commit}; in
 ASKS_NOTHING_UNVERIFIED = "{name} asks for nothing, but its code is unverified"
 INSTALLED_HERE_UNVERIFIED = "Installed here from {line}: unverified"
 NOT_IN_THE_PLUGINS_FOLDER = "{id} is not in ~/.udeck/plugins"
-LINK_OFF = ("The official catalogue is off, so uDeck makes no request to the official repository or its forks: switch it on "
-            "to install from a link.")
-# What Official catalogue says under it, off (English.swift: catalogueOff): the official repository alone stops (S4-04).
-CATALOGUE_OFF = ("The official catalogue is off: uDeck makes no request to the official repository or its forks, and does not "
-                 "look for updates of what was installed from them. Sources you added are still read; installed plugins keep "
-                 "running.")
+LINK_OFF = ("The official catalogue is off, so uDeck makes no request to the official repository, nor to its forks for a "
+            "link: switch it on to install from a link.")
+# What Official catalogue says under it, off (English.swift: catalogueOff): the official repository alone stops, and its
+# forks only as Install from a link… asks them — a fork added as a source of one's own is a source (S4-04).
+CATALOGUE_OFF = ("The official catalogue is off: uDeck makes no request to the official repository, nor to its forks for "
+                 "Install from a link…, and does not look for updates of what was installed from them. Sources you added are "
+                 "still read; installed plugins keep running.")
 NOBODY_VERIFIED = "Nobody verified this code: it comes from pull request #{number} of github.com/{repository}"
 # What asks-nothing's card says (e2e/fixtures/plugin-repository/pr3/plugins/asks-nothing/run.sh),
 # and where it counts its runs.
@@ -3786,8 +3790,8 @@ def check_source_official_off(machine, check_dir, lab):
 
     The source is added and team-clock 1.0.0 installed from it; then the switch
     goes off — Settings saying, under it and for **Install from a link…**, that
-    uDeck makes no request to the official repository or its forks, and that
-    the sources added are still read — uDeck is ended, the source's state is
+    uDeck makes no request to the official repository, nor to its forks for a
+    link, and that the sources added are still read — uDeck is ended, the source's state is
     made two days old and its main moved to t2, and uDeck started: it reads
     the source at launch, by its number, and says so in its log. Ended again,
     the source made a minute and a half short of a day old and uDeck started
@@ -3951,22 +3955,32 @@ def check_official_id_mismatch(machine, check_dir, lab):
     its own number back, **Check now** reads on, and **Earlier versions…** is
     offered again.
 
+    Before all that, while uDeck runs: uptime's **Earlier versions…** open,
+    listing 1.0.0, and **Install from a link…** of the branch fix/uptime
+    listing uptime to install — then the official address answers another
+    number, its default branch made old, and **Check now**: the list goes
+    from the screen, and the sheet says the same sentence in place of the
+    branch's plugins. Its own number back and read again, it is ended as
+    before.
+
     **Red for**: a catalogue read past a describe that answered another
     number, a verified copy updating itself from it, and anything of the
     repository at the official address offered — its history, its rows, its
-    branches — before its number is the official one's again.
+    branches, a list read of it before — before its number is the official
+    one's again.
     """
-    scene = _prepare(machine, check_dir, lab, main="c1")
+    scene = _prepare(machine, check_dir, lab, main="c1", branches=BRANCHES)
     try:
         _the_catalogue_read(scene, since=0, commit="c1")
         _install(scene, UPTIME)
+        describe = f"/api/repos/{config.PLUGINS_REPOSITORY}"
+        _what_was_read_goes(scene, describe)
         app.quit_app(machine, "ending uDeck")
         scene.github.tell("moving main to c2 and giving the official address another number", main="c2",
                           official_id=ANOTHER_REPOSITORY)
         _age_a_state(machine, CATALOGUE_STATE, AGED_DAYS, "lastSuccess", "lastAttempt", "defaultBranchReadAt")
         before = _count(scene)
         app.launch(machine)
-        describe = f"/api/repos/{config.PLUGINS_REPOSITORY}"
         described_it = _wait_for_disk(machine, lambda: any(r.path == describe for r in _since(scene, before)), CATALOGUE_SECONDS)
         expect(described_it, f"{CATALOGUE_SECONDS}s after a launch with the catalogue {AGED_DAYS} days old, uDeck had not "
                              f"described the official repository: {described(_since(scene, before))}")  # fmt: skip
@@ -4013,6 +4027,54 @@ def check_official_id_mismatch(machine, check_dir, lab):
         _expect_no_credential(scene)
     finally:
         scene.close()
+
+
+def _what_was_read_goes(scene, describe):
+    """uptime's **Earlier versions…** open and a branch looked up on **Install from a link…**, both read of the official
+    repository with its own number; then the official address answers another one, and **Check now**: the list goes
+    from the screen and the sheet says why, in place of the branch's plugins — never an **Install** that does nothing.
+    Its own number back and read again, so that what follows starts from a catalogue that knows of no other number."""
+    machine = scene.machine
+    ui.plugins_pane(machine, "opening Settings → Plugins with the official number")
+    version = f"plugin.{UPTIME}.history.1.0.0"
+    before = _count(scene)
+    _press(machine, f"plugin.{UPTIME}.earlier", "opening Earlier versions… with the official number")
+    listed = _wait_until(machine, version, lambda said: said is not None, OPERATION_SECONDS, present=True)
+    expect(listed is not None, f"Earlier versions… of uptime lists no 1.0.0; uDeck asked {described(_since(scene, before))}")
+    _, dump = _look_up(scene, BRANCH_LINK, "a branch with the official number")
+    expect(ui.element(dump, f"link.{UPTIME}.install") is not None,
+           f"{BRANCH_LINK} offers no uptime to install with the official number")  # fmt: skip
+
+    scene.github.tell("giving the official address another number, the list and the link sheet open",
+                      official_id=ANOTHER_REPOSITORY)
+    # Its default branch a day old, so that Check now describes the repository first (`CatalogueRefresher`).
+    _age_a_state(machine, CATALOGUE_STATE, AGED_DAYS, "defaultBranchReadAt")
+    before = _count(scene)
+    _press(machine, "catalogue.checkNow", "pressing Check now with the list and the link sheet open")
+    trouble = _wait_until(machine, "catalogue.trouble", lambda said: said == OFFICIAL_CHANGED, OPERATION_SECONDS)
+    expect(trouble == OFFICIAL_CHANGED, f"Settings says {trouble!r}, not {OFFICIAL_CHANGED!r}; uDeck asked "
+                                        f"{described(_since(scene, before))}")  # fmt: skip
+    refused = _wait_until(machine, "link.refused", lambda said: said == OFFICIAL_CHANGED, NOTICED_SECONDS)
+    gone = _wait_until(machine, version, lambda said: said is None, NOTICED_SECONDS, present=True)
+    dump = _keep_the_pane(machine, scene.check_dir, scene.lab, "what-was-read-goes.txt")
+    expect(refused == OFFICIAL_CHANGED, f"the link sheet read before says {refused!r}, not {OFFICIAL_CHANGED!r}")
+    expect(ui.element(dump, f"link.{UPTIME}.install") is None,
+           "with the official address another repository's, the branch read before still offers uptime to install")
+    expect(ui.element(dump, f"plugin.{UPTIME}.remove") is not None, "uptime's row is not on the screen to be read")
+    expect(gone is None and ui.element(dump, version) is None and ui.element(dump, f"{version}.install") is None,
+           "with the official address another repository's, the Earlier versions list read before is still on the screen")
+    past = [r for r in _since(scene, before) if r.path.startswith((f"{describe}/", f"/raw/{config.PLUGINS_REPOSITORY}/"))]
+    expect(not past, f"the official address answered another number, and uDeck read on: {described(past)}")
+    _close_the_link_sheet(scene, "after the address changed")
+
+    scene.github.tell("giving the official repository its own number back before uDeck is ended", official_id=None)
+    before = _count(scene)
+    _press(machine, "catalogue.checkNow", "pressing Check now with the number back, before uDeck is ended")
+    main = f"{describe}/commits/main"
+    read = _wait_for_disk(machine, lambda: any(r.path == main for r in _since(scene, before)), OPERATION_SECONDS)
+    expect(read, f"with its own number back, Check now asked {described(_since(scene, before))}, and not its head")
+    trouble = _wait_until(machine, "catalogue.trouble", lambda said: said is None, NOTICED_SECONDS)
+    expect(trouble is None, f"with its own number back and read, Settings says {trouble!r}")
 
 
 def check_source_downgrade_to_0_7_0(machine, check_dir, lab):
@@ -4199,6 +4261,522 @@ def check_link_offers_a_source(machine, check_dir, lab):
         _expect_no_credential(scene)
     finally:
         scene.close()
+
+
+# --- GitLab projects as sources (stage 4, R2) ------------------------------------------------
+#
+# The same fake answers as two GitLabs, each on a port of its own (`config.GITLAB_PORTS`), which every lab build is
+# pointed at through `UDeckPluginsHostMap`: gitlab.example.test, a self-hosted GitLab that sends no limit, with
+# tools/udeck-plugins (7: g1, and g2 with gl-big's 6 MB file), group/sub/team (9, three groups down) and tools/empty
+# (8, a passport and no plugins/); and gitlab.com, which counts by its two limiters, with someone/gl-plugins (1001).
+# Fixtures in `e2e/fixtures/plugin-repository/sources/gitlab/<host>/<path>/`.
+
+GL_HOST = "gitlab.example.test"
+GL_COM = "gitlab.com"
+GL_PROJECT = f"{GL_HOST}/tools/udeck-plugins"
+GL_PROJECT_PAGE = f"https://{GL_PROJECT}"
+GL_NAME = "GitLab lab plugins"
+GL_RENAMED = "tools/udeck-plugins-2"
+GL_TEAM = f"{GL_HOST}/group/sub/team"
+GL_TEAM_LINK = f"https://{GL_TEAM}/-/tree/main"
+GL_TEAM_NAME = "Team on GitLab"
+GL_EMPTY = f"{GL_HOST}/tools/empty"
+GL_EMPTY_NAME = "My uDeck plugins"
+GL_ON_COM = f"{GL_COM}/someone/gl-plugins"
+GL_ON_COM_NAME = "gitlab.com lab plugins"
+GL_HELLO = "gl-hello"
+GL_BIG = "gl-big"
+GL_TEAM_PLUGIN = "gl-team"
+GL_COM_PLUGIN = "gl-com"
+# gitlab.com's two limiters (`fake-github.py`'s GitLabLimits), by the names its answers give them.
+GL_MINUTE = "throttle_unauthenticated_api"
+GL_HOUR = "unauthenticated_traffic_per_ip"
+# What uDeck says of them (English.swift: catalogueFiles, sourceGitLabLimited, sourceNotGitLab, the notGitHub link
+# refusal of linkNotGitHubAddAsASource, catalogueEmpty, fileTooLarge's message, sourcesTestBuild, pluginFrom).
+FILES = "{n} files"
+GITLAB_LIMITED = "{host} asked uDeck to wait: its limit of requests from this network, or for this token, is used up. "
+GITLAB_COM_HINT = " Without a token gitlab.com allows only a few requests an hour from one network; a token raises the limit."
+NOT_GITLAB = "{host} did not answer as GitLab. uDeck reads sources on github.com and on GitLab — gitlab.com or your own."
+NOT_GITHUB = "{host} is not GitHub. A GitLab project can be added as a source of its own."
+EMPTY = "The repository offers no plugins yet."
+FILE_TOO_LARGE = "plugins/gl-big/big.bin is 6.0 MB; one file of a plugin may be up to 5 MB."
+TEST_BUILD_GITLAB = "Test build: {host} is read from http://127.0.0.1:{port}."
+FROM_THE_PROJECT = "From {address} at {commit}"
+# What a GitLab says of its file at a commit: the files API, by its whole path with its "/" as %2F.
+GL_FILE = "/api/v4/projects/{id}/repository/files/{path}/raw"
+
+
+def check_source_add_gitlab(machine, check_dir, lab):
+    """**Add a source…** of a GitLab project in nested groups, pasted as a page under `/-/`: Look up asks for it by its encoded path once, on its host's own port, everything after by its number; Add names it from its passport.
+
+    `https://gitlab.example.test/group/sub/team/-/tree/main` comes to
+    `group/sub/team`. From the press on, the fake's log holds, on
+    gitlab.example.test's own port and nowhere else, `GET
+    /api/v4/projects/group%2Fsub%2Fteam` — the one request ever addressed by its
+    path, `%2F` as it was sent — then `/projects/9/repository/branches/main` and
+    the passport at that commit through the files API. The sheet shows the
+    passport's name, and a test build says where it reads gitlab.example.test
+    and gitlab.com from. **Add**: every request of it after that is to
+    `/api/v4/projects/9/…`, on its port; the block is named *Team on GitLab*,
+    its address `gitlab.example.test/group/sub/team`, and its row says
+    **Unverified**; `sources.json` holds provider `gitlab`, the host, the path,
+    remoteID 9 and the id derived from them. No request carries a credential.
+
+    **Red for**: a project asked for by its path after Look up, a GitLab's
+    request on another port, a path whose `%2F` went decoded, and an id that is
+    not the derived one.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        number = scene.github.project_id(GL_TEAM)
+        n1 = scene.github.project_commit(GL_TEAM, "n1")
+        said, looked, dump = _look_up_a_source(scene, GL_TEAM_LINK, "a GitLab project in nested groups")
+        expect(said == GL_TEAM_NAME, f"Look up of {GL_TEAM_LINK} shows {said!r}, not its passport's name {GL_TEAM_NAME!r}")
+        expect(ui.element(dump, "sources.add.confirm") is not None, "Look up found the project and offers no Add")
+        wanted = [("/api/v4/projects/group%2Fsub%2Fteam", ""), (f"/api/v4/projects/{number}/repository/branches/main", ""),
+                  (GL_FILE.format(id=number, path="udeck-plugins.json"), f"ref={n1}")]
+        heard = [(r.raw_path, r.query) for r in looked]
+        expect(heard == wanted, f"Look up asked {_described_gitlab(looked)}: the project by its encoded path once, its "
+                                "head and its passport by its number, and nothing else")  # fmt: skip
+        _expect_on_its_port(looked, GL_HOST, "Look up")
+        notice = ui.says(ui.element(dump, "sources.testBuild"))
+        for host, port in config.GITLAB_PORTS.items():
+            line = TEST_BUILD_GITLAB.format(host=host, port=port)
+            expect(line in notice, f"a lab build says {notice!r} under Your sources, not {line!r}")
+
+        sid, added = _add_a_gitlab(scene, GL_TEAM, GL_TEAM_NAME, "adding it", plugin=GL_TEAM_PLUGIN, looked_up=True)
+        astray = [r for r in added if r.is_gitlab and not _of_the_project(r, number)]
+        expect(not astray, f"after Look up, uDeck asked the project otherwise than by its number: {_described_gitlab(astray)}")
+        _expect_on_its_port(added, GL_HOST, "Add")
+        expect(any(r.raw_path == f"/api/v4/projects/{number}/repository/tree" for r in added),
+               f"Add read no listing of {GL_TEAM} by its number: {_described_gitlab(added)}")
+        dump = _keep_the_pane(machine, check_dir, lab, "the-gitlab-source-added.txt",
+                              showing=f"source.{sid}.plugin.{GL_TEAM_PLUGIN}.mark")
+        address = ui.says(ui.element(dump, f"source.{sid}.address"))
+        expect(address == GL_TEAM, f"the source's block names its address {address!r}, not {GL_TEAM!r}")
+        mark = ui.says(ui.element(dump, f"source.{sid}.plugin.{GL_TEAM_PLUGIN}.mark"))
+        expect(mark == UNVERIFIED, f"{GL_TEAM_PLUGIN}'s row in the source's block is marked {mark!r}, not {UNVERIFIED!r}")
+        source = _the_source(machine)
+        expect(source == {"id": sid, "provider": "gitlab", "host": GL_HOST, "path": "group/sub/team", "remoteID": number,
+                          "access": "none", "trustedAt": None, "addedAt": (source or {}).get("addedAt")}
+               and (source or {}).get("addedAt"),
+               f"{SOURCES_FILE} says {source!r}: the id derived from its host and the number {number}, anonymous")  # fmt: skip
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_gitlab_install(machine, check_dir, lab):
+    """**Install** of gl-hello from a GitLab project: its listing followed across pages, every file from the files API alone, the hashes git's, the record GitLab's — and its row counts files, not bytes, and opens on the project's own host.
+
+    tools/udeck-plugins added: the read after **Add** lists `plugins`
+    recursively page after page — the fake answers three entries to a page,
+    and gl-hello alone has six — and gl-hello's row says *4 files*, no bytes,
+    and its **Open on gitlab.example.test** carries
+    `https://gitlab.example.test/tools/udeck-plugins/-/tree/<g1>/plugins/gl-hello`.
+    **Install**: from the click on, the log holds the four files of
+    `plugins/gl-hello/` at g1, each once, through `/api/v4/projects/7/repository/files/…/raw`,
+    and nothing else — no raw host, nothing of GitHub; the folder hashes to the
+    fixture's tree; `installed.json` says the source's id, `repository` provider
+    `gitlab` on gitlab.example.test at tools/udeck-plugins, the default branch,
+    and unverified by `null`; the row says where it came from. **Earlier
+    versions…** lists 1.0.0, asking the folder's history on main by the
+    project's number and its manifest at g1 through the files API, nothing else.
+
+    **Red for**: a listing read past its first page, a file taken from anywhere
+    but the files API, a size shown that GitLab never gave, a page on the lab's
+    port, a copy recorded as GitHub's, and a copy's history asked of anything
+    but its project by its number.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        number = scene.github.project_id(GL_PROJECT)
+        g1 = scene.github.project_commit(GL_PROJECT, "g1")
+        sid, added = _add_a_gitlab(scene, GL_PROJECT, GL_NAME, "adding tools/udeck-plugins", link=GL_PROJECT_PAGE)
+        pages = sorted(_page(r) for r in added if r.raw_path == f"/api/v4/projects/{number}/repository/tree"
+                       and "path=plugins" in r.query)  # fmt: skip
+        expect(pages == [1, 2], f"the listing of plugins/ at g1 was asked page by page as {pages}, not [1, 2]; uDeck "
+                                f"asked {_described_gitlab(added)}")  # fmt: skip
+        row = f"source.{sid}.plugin.{GL_HELLO}"
+        files = scene.github.project_files(GL_PROJECT, "g1", f"plugins/{GL_HELLO}")
+        size = _wait_until(machine, f"{row}.size", lambda said: bool(said), NOTICED_SECONDS)
+        expect(size == FILES.format(n=len(files)), f"gl-hello's row says {size!r} of its size, not {FILES.format(n=len(files))!r}")
+        page = _wait_until(machine, f"{row}.page", lambda said: bool(said), NOTICED_SECONDS)
+        wanted = f"{GL_PROJECT_PAGE}/-/tree/{g1}/plugins/{GL_HELLO}"
+        expect(page == wanted, f"gl-hello's Open on {GL_HOST} opens {page!r}, not {wanted!r}")
+        _keep_the_pane(machine, check_dir, lab, "the-gitlab-row.txt", showing=f"{row}.page")
+
+        record, asked = _install_from_the_source(scene, sid, GL_HELLO, "gl-hello from the GitLab project")
+        heard = sorted((r.raw_path, r.query) for r in asked)
+        wanted = sorted((GL_FILE.format(id=number, path=f"plugins%2F{GL_HELLO}%2F" + path.split("/", 2)[2].replace("/", "%2F")),
+                         f"ref={g1}") for path in files)  # fmt: skip
+        expect(heard == wanted, f"installing gl-hello, uDeck asked {_described_gitlab(asked)}: each of its files once, "
+                                "through the files API at g1, and nothing else")  # fmt: skip
+        _expect_on_its_port(asked, GL_HOST, "installing gl-hello")
+        tree = scene.github.tree_in_guest(f"{UDECK_HOME}/plugins/{GL_HELLO}", "hashing the installed folder")
+        expect(tree == scene.github.project_tree(GL_PROJECT, "g1", f"plugins/{GL_HELLO}"),
+               f"the folder uDeck installed hashes to {tree}, not g1's plugins/{GL_HELLO}")
+        wanted = {"source": sid, "repository": {"provider": "gitlab", "host": GL_HOST, "path": "tools/udeck-plugins"},
+                  "ref": {"kind": "default", "name": "main"}, "commit": g1, "version": "1.0.0"}  # fmt: skip
+        wrong = {key: record.get(key, "(missing)") for key, value in wanted.items() if record.get(key, "(missing)") != value}
+        expect(not wrong, f"installed.json says {wrong} of gl-hello, where the project's copy has {({k: wanted[k] for k in wrong})}")
+        verification = record.get("verification") or {}
+        expect(verification.get("status") == "unverified" and "by" in verification and verification.get("by") is None,
+               f"installed.json's verification of gl-hello is {verification!r}: unverified, by nobody")
+        said = _wait_until(machine, f"plugin.{GL_HELLO}.from",
+                           lambda said: said == FROM_THE_PROJECT.format(address=GL_PROJECT, commit=g1[:7]), NOTICED_SECONDS)
+        expect(said == FROM_THE_PROJECT.format(address=GL_PROJECT, commit=g1[:7]), f"gl-hello's row says {said!r} of where it came from")
+
+        before = _count(scene)
+        _press(machine, f"plugin.{GL_HELLO}.earlier", "opening Earlier versions… of gl-hello")
+        line = f"plugin.{GL_HELLO}.history.1.0.0"
+        listed = _wait_until(machine, line, lambda said: said is not None, OPERATION_SECONDS, present=True)
+        asked = _since(scene, before)
+        _keep_the_pane(machine, check_dir, lab, "earlier-versions-of-the-gitlab-copy.txt", showing=line)
+        expect(listed is not None, f"Earlier versions… of gl-hello lists no 1.0.0; uDeck asked {_described_gitlab(asked)}")
+        history = [r for r in asked if r.raw_path == f"/api/v4/projects/{number}/repository/commits"]
+        expect(len(history) == 1 and "ref_name=main" in history[0].query
+               and "path=plugins%2Fgl-hello" in history[0].query.replace("/", "%2F"),
+               f"Earlier versions… of gl-hello asked {_described_gitlab(asked)}: the folder's history on main, by the "
+               "project's number, once")  # fmt: skip
+        manifest = GL_FILE.format(id=number, path=f"plugins%2F{GL_HELLO}%2Fmanifest.json")
+        rest = [r for r in asked if r not in history and not (r.raw_path == manifest and r.query == f"ref={g1}")]
+        expect(not rest, f"Earlier versions… of gl-hello also asked {_described_gitlab(rest)}: its history and its "
+                         "manifest at g1 through the files API, nothing else")  # fmt: skip
+        _expect_on_its_port(asked, GL_HOST, "Earlier versions… of gl-hello")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_gitlab_renamed(machine, check_dir, lab):
+    """The GitLab project renamed, its number the same: the daily describe, by its number, writes the new path back; the source's id, and the copy's record, stay.
+
+    tools/udeck-plugins added and gl-hello installed from it. The fake serves
+    project 7 as tools/udeck-plugins-2. With the source's default branch a day
+    old, **Check now** on its block describes it — `/api/v4/projects/7` — and
+    `sources.json` says the new path under the same id and number; the block
+    shows it, and gl-hello's page is on the new path. From the rename on, every
+    request is to `/api/v4/projects/7…`, never by a path; gl-hello's record is
+    still the source's.
+
+    **Red for**: a project asked for by its path after it was added, a new path
+    not written back, an id or a record that changed with the path.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        number = scene.github.project_id(GL_PROJECT)
+        g1 = scene.github.project_commit(GL_PROJECT, "g1")
+        sid, _ = _add_a_gitlab(scene, GL_PROJECT, GL_NAME, "adding tools/udeck-plugins", link=GL_PROJECT_PAGE)
+        _install_from_the_source(scene, sid, GL_HELLO, "gl-hello before the rename")
+
+        renamed = _count(scene)
+        scene.github.tell("renaming tools/udeck-plugins", gitlab={GL_HOST: {"served": {GL_RENAMED: "tools/udeck-plugins"}}})
+        _age_a_state(machine, f"{UDECK_HOME}/catalogue/{sid}/state.json", AGED_DAYS, "defaultBranchReadAt")
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now on the source")
+        written = _wait_for_disk(machine, lambda: (_the_source(machine) or {}).get("path") == GL_RENAMED, CATALOGUE_SECONDS)
+        heard = _since(scene, renamed)
+        expect(written, f"the project was renamed and {SOURCES_FILE} says {_the_source(machine)!r}; uDeck asked "
+                        f"{_described_gitlab(heard)}")  # fmt: skip
+        source = _the_source(machine) or {}
+        expect(source.get("id") == sid and source.get("remoteID") == number, f"the renamed source is {source!r}, not {sid}")
+        expect(any(r.raw_path == f"/api/v4/projects/{number}" for r in heard), f"no describe by its number: {_described_gitlab(heard)}")
+        astray = [r for r in heard if r.is_gitlab and not _of_the_project(r, number)]
+        expect(not astray, f"after the rename, uDeck asked the project otherwise than by its number: {_described_gitlab(astray)}")
+        address = _wait_until(machine, f"source.{sid}.address", lambda said: said == f"{GL_HOST}/{GL_RENAMED}", NOTICED_SECONDS)
+        expect(address == f"{GL_HOST}/{GL_RENAMED}", f"the source's block names it {address!r}")
+        page = _wait_until(machine, f"source.{sid}.plugin.{GL_HELLO}.page", lambda said: GL_RENAMED in (said or ""),
+                           NOTICED_SECONDS)
+        expect(page == f"https://{GL_HOST}/{GL_RENAMED}/-/tree/{g1}/plugins/{GL_HELLO}", f"gl-hello's page is {page!r}")
+        _keep_the_pane(machine, check_dir, lab, "after-the-gitlab-rename.txt", showing=f"source.{sid}.plugin.{GL_HELLO}.page")
+        expect((_record(machine, GL_HELLO) or {}).get("source") == sid, f"after the rename gl-hello's record is {_record(machine, GL_HELLO)!r}")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_gitlab_too_large(machine, check_dir, lab):
+    """A GitLab file larger than 5 MB, which its listing never sized: refused as it arrives — asked once — nothing installed, staging empty.
+
+    tools/udeck-plugins at g2: gl-big's row offers **Install**, its listing
+    giving no size to refuse it by. **Install**: `plugins/gl-big/big.bin`, made
+    when the fake started, 6 MB, is asked for once and refused as it arrives —
+    *"plugins/gl-big/big.bin is 6.0 MB; one file of a plugin may be up to 5 MB."*
+    on the row — and there is no `plugins/gl-big`, no record of it, and nothing
+    in `~/.udeck/staging`.
+
+    **Red for**: a file past rule 8 installed, asked again, or left in staging;
+    and a plugin refused before anything arrived, for a size its host never lists.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", gitlab={GL_HOST: {"projects": {"tools/udeck-plugins": {"main": "g2"}}}})
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        number = scene.github.project_id(GL_PROJECT)
+        sid, _ = _add_a_gitlab(scene, GL_PROJECT, GL_NAME, "adding tools/udeck-plugins at g2", link=GL_PROJECT_PAGE,
+                               plugin=GL_BIG)
+        row = f"source.{sid}.plugin.{GL_BIG}"
+        before = _count(scene)
+        _press(machine, f"{row}.install", "installing gl-big")
+        problem = _wait_until(machine, f"{row}.problem", lambda said: bool(said), OPERATION_SECONDS)
+        asked = _since(scene, before)
+        _keep_the_pane(machine, check_dir, lab, "a-file-too-large.txt")
+        expect(problem is not None and FILE_TOO_LARGE in problem, f"Install of gl-big says {problem!r}, not {FILE_TOO_LARGE!r}; "
+                                                                  f"uDeck asked {_described_gitlab(asked)}")  # fmt: skip
+        big = GL_FILE.format(id=number, path="plugins%2Fgl-big%2Fbig.bin")
+        expect([r.raw_path for r in asked].count(big) == 1, f"big.bin was asked {[r.raw_path for r in asked].count(big)} times: "
+                                                            f"{_described_gitlab(asked)}")  # fmt: skip
+        expect(not _record(machine, GL_BIG), f"installed.json has a record of gl-big: {_record(machine, GL_BIG)!r}")
+        expect(not _exists(machine, f"{UDECK_HOME}/plugins/{GL_BIG}"), "a plugins/gl-big was put in place")
+        staging = machine.ssh.ask(f"ls -A {UDECK_HOME}/staging 2>/dev/null || true", "looking into staging").stdout.strip()
+        expect(not staging, f"~/.udeck/staging holds {staging!r} after the refusal")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_gitlab_empty(machine, check_dir, lab):
+    """A GitLab project with a passport and no plugins/ — the shape of a project made from the template: it offers no plugins yet, and each read lists its root alone, never path=plugins.
+
+    tools/empty looked up and added: its block says *The repository offers no
+    plugins yet.* The read after **Add** made one tree request, the root's,
+    without `path=plugins` — GitLab answers that path `404 invalid revision or
+    path Not Found` — and **Check now** asks no `path=plugins` either.
+
+    **Red for**: a root without plugins/ asked about plugins/ anyway, an empty
+    catalogue said as a failure, and a passport-only project refused.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        number = scene.github.project_id(GL_EMPTY)
+        sid, added = _add_a_gitlab(scene, GL_EMPTY, GL_EMPTY_NAME, "adding tools/empty", link=f"https://{GL_EMPTY}",
+                                   plugin=None)
+        empty = _wait_until(machine, f"source.{sid}.empty", lambda said: said == EMPTY, CATALOGUE_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "an-empty-gitlab-project.txt", showing=f"source.{sid}.empty")
+        expect(empty == EMPTY, f"tools/empty's block says {empty!r}, not {EMPTY!r}")
+        trees = [r for r in added if r.raw_path == f"/api/v4/projects/{number}/repository/tree"]
+        expect(len(trees) == 1 and "path=" not in trees[0].query,
+               f"the read after Add asked {_described_gitlab(trees)} of the listing: the root once, and no path=plugins")
+        before = _count(scene)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now on the empty project")
+        read = _wait_for_disk(machine, lambda: any(r.raw_path.endswith("/repository/branches/main") for r in _since(scene, before)),
+                              OPERATION_SECONDS)  # fmt: skip
+        machine.sleep(config.SETTLE_SECONDS)
+        heard = _since(scene, before)
+        expect(read, f"Check now on tools/empty asked {_described_gitlab(heard)}, and not its head")
+        trees = [r for r in heard if r.raw_path == f"/api/v4/projects/{number}/repository/tree"]
+        expect(len(trees) <= 1 and not [r for r in trees if "path=" in r.query],
+               f"Check now asked {_described_gitlab(trees)} of the listing")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_gitlab_com_limit(machine, check_dir, lab):
+    """gitlab.com's hour used up while its minute still has hundreds: the source says item 9 with gitlab.com's hint, nothing more goes to gitlab.com, and the official catalogue reads on.
+
+    someone/gl-plugins on gitlab.com looked up and added: its `state.json`
+    keeps both of gitlab.com's limiters, each by its name. The fake is told the
+    hour is used up by something else on the connection; **Check now** on the
+    block gets gitlab.com's `429`, naming the hour, and the block says
+    *"gitlab.com asked uDeck to wait: its limit of requests from this network,
+    or for this token, is used up. … Without a token gitlab.com allows only a
+    few requests an hour from one network; a token raises the limit."* — the
+    hour's remaining 0 and the minute's in the hundreds in `state.json`. Then
+    **Check now** again and **Install** of gl-com, and twenty seconds more:
+    nothing reaches gitlab.com's port. **Check now** of the official catalogue
+    reads it, and it says no trouble.
+
+    **Red for**: one limiter's hundreds hiding the other's nothing, a limit
+    said as GitHub's, a GitLab asked again before its reset, and a GitLab's
+    block stopping GitHub.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_a_gitlab(scene, GL_ON_COM, GL_ON_COM_NAME, "adding someone/gl-plugins on gitlab.com",
+                               link=f"https://{GL_ON_COM}", plugin=GL_COM_PLUGIN)
+        state = _read_json(machine, f"{UDECK_HOME}/catalogue/{sid}/state.json") or {}
+        limiters = (state.get("rateLimit") or {}).get("limiters") or {}
+        expect(sorted(limiters) == sorted([GL_MINUTE, GL_HOUR]),
+               f"the source's state keeps {sorted(limiters)} of gitlab.com's limiters, not both: {state.get('rateLimit')!r}")
+
+        scene.github.tell("using up gitlab.com's hour", gitlab={GL_COM: {"spent": 60}})
+        before = _count(scene)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now on the gitlab.com source")
+        said = _wait_until(machine, f"source.{sid}.state", lambda said: (said or "").startswith(GITLAB_LIMITED.format(host=GL_COM)),
+                           OPERATION_SECONDS)  # fmt: skip
+        limited = _since(scene, before)
+        _keep_the_pane(machine, check_dir, lab, "gitlab-com-limited.txt")
+        expect(said is not None and said.startswith(GITLAB_LIMITED.format(host=GL_COM)) and said.endswith(GITLAB_COM_HINT),
+               f"with gitlab.com's hour used up the source says {said!r}; uDeck asked {_described_gitlab(limited)}")
+        expect([r.status for r in limited if r.site == GL_COM] == [429],
+               f"Check now asked gitlab.com {_described_gitlab(limited)}: one request, and its 429")
+        rate = (_read_json(machine, f"{UDECK_HOME}/catalogue/{sid}/state.json") or {}).get("rateLimit") or {}
+        hour, minute = (rate.get("limiters") or {}).get(GL_HOUR) or {}, (rate.get("limiters") or {}).get(GL_MINUTE) or {}
+        expect(hour.get("remaining") == 0 and (minute.get("remaining") or 0) >= 400 and rate.get("blockedUntil"),
+               f"after the 429 the source's limit is {rate!r}: the hour's 0 kept apart from the minute's hundreds, and blocked")
+
+        after = _count(scene)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now again while gitlab.com is blocked")
+        _press(machine, f"source.{sid}.plugin.{GL_COM_PLUGIN}.install", "installing gl-com while gitlab.com is blocked")
+        problem = _wait_until(machine, f"source.{sid}.plugin.{GL_COM_PLUGIN}.problem", lambda said: bool(said), OPERATION_SECONDS)
+        machine.sleep(LEFT_ALONE_SECONDS)
+        asked = [r for r in _since(scene, after) if r.site == GL_COM or r.port == config.GITLAB_PORTS[GL_COM]]
+        expect(not asked, f"with gitlab.com blocked until its hour resets, uDeck asked it {_described_gitlab(asked)}")
+        expect(problem is not None and problem.startswith(GITLAB_LIMITED.format(host=GL_COM)),
+               f"Install of gl-com while gitlab.com is blocked says {problem!r}")
+
+        before = _count(scene)
+        _press(machine, "catalogue.checkNow", "pressing Check now on the official catalogue")
+        main = f"/api/repos/{config.PLUGINS_REPOSITORY}/commits/main"
+        read = _wait_for_disk(machine, lambda: any(r.path == main for r in _since(scene, before)), OPERATION_SECONDS)
+        expect(read, f"with gitlab.com blocked, Check now of the official catalogue asked {described(_since(scene, before))}")
+        trouble = _wait_until(machine, "catalogue.trouble", lambda said: said is None, NOTICED_SECONDS)
+        expect(trouble is None, f"with gitlab.com blocked, the official catalogue says {trouble!r}")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_gitlab_not_gitlab(machine, check_dir, lab):
+    """A host the map sends to something that is no GitLab — a web server's plain 404: Look up says item 13, after one request, and offers no Add.
+
+    The fake answers gitlab.example.test's port as a web server with no GitLab
+    behind it would: `404 page not found`, plain text, to everything. **Look
+    up** of `https://gitlab.example.test/tools/udeck-plugins` asks
+    `/api/v4/projects/tools%2Fudeck-plugins` once and says
+    *"gitlab.example.test did not answer as GitLab. uDeck reads sources on
+    github.com and on GitLab — gitlab.com or your own."*
+
+    **Red for**: a host that is no GitLab said to have no such project, asked
+    again, or offered for **Add**.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", gitlab={GL_HOST: {"plain": True}})
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        said, heard, dump = _look_up_a_source(scene, GL_PROJECT_PAGE, "a host that is no GitLab")
+        words = NOT_GITLAB.format(host=GL_HOST)
+        expect(said == words, f"Look up of {GL_PROJECT_PAGE} says {said!r}, not {words!r}")
+        expect(ui.element(dump, "sources.add.confirm") is None, "Look up of a host that is no GitLab offers Add")
+        expect([(r.raw_path, r.status, r.port) for r in heard]
+               == [("/api/v4/projects/tools%2Fudeck-plugins", 404, config.GITLAB_PORTS[GL_HOST])],
+               f"Look up asked {_described_gitlab(heard)}: the project by its path once, on its port")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_link_offers_gitlab_source(machine, check_dir, lab):
+    """**Install from a link…** of a GitLab project's page: item 16's sentence before any request, and **Add as a source…**, which opens Add a source… filled in with the project's page — and once it is added, the same link is refused with no request.
+
+    `https://gitlab.example.test/group/sub/team/-/tree/main` pasted into
+    **Install from a link…** says *"gitlab.example.test is not GitHub. A GitLab
+    project can be added as a source of its own."*, asking nothing; **Add as a
+    source…** opens **Add a source…** with `https://gitlab.example.test/group/sub/team`
+    in its field, adds nothing, and **Look up** there finds the project. Added,
+    the same link says *"Installing from a branch or a merge request of a source
+    is not possible yet; …"*, asking nothing.
+
+    **Red for**: a GitLab link refused with nothing to do about it, asked of
+    anybody, added before **Add** is pressed, or — into a project added —
+    offered as one to add.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        heard, dump = _look_up(scene, GL_TEAM_LINK, "a GitLab project's link", came_to="link.refused")
+        said = ui.says(ui.element(dump, "link.refused"))
+        words = NOT_GITHUB.format(host=GL_HOST)
+        expect(said == words, f"{GL_TEAM_LINK} is refused with {said!r}, not {words!r}")
+        expect(not heard, f"a GitLab link on Install from a link… asked {_described_gitlab(heard)}")
+        _press(machine, "link.addAsASource", "pressing Add as a source…")
+        page = f"https://{GL_TEAM}"
+        filled = _wait_until(machine, "sources.add.field", lambda said: said == page, NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "add-a-gitlab-project-as-a-source.txt")
+        expect(filled == page, f"Add as a source… opened the sheet with {filled!r}, not {page!r}")
+        expect(not _exists(machine, SOURCES_FILE), "Add as a source… added the source before Add was pressed")
+        before = _count(scene)
+        _press(machine, "sources.add.lookUp", "pressing Look up on the address filled in")
+        found = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == GL_TEAM_NAME, OPERATION_SECONDS)
+        expect(_strip(found) == GL_TEAM_NAME, f"Look up of {page} shows {found!r}; uDeck asked "
+                                              f"{_described_gitlab(_since(scene, before))}")  # fmt: skip
+        _add_a_gitlab(scene, GL_TEAM, GL_TEAM_NAME, "adding it from the link", plugin=GL_TEAM_PLUGIN, looked_up=True)
+        _close_the_link_sheet(scene, "before the link into the project added")
+        heard, dump = _look_up(scene, GL_TEAM_LINK, "a branch of a GitLab source added", came_to="link.refused")
+        said = ui.says(ui.element(dump, "link.refused"))
+        expect(said == BRANCH_NOT_YET, f"a link into a GitLab source added is refused with {said!r}, not {BRANCH_NOT_YET!r}")
+        expect(ui.element(dump, "link.addAsASource") is None, "a link into a GitLab source added offers Add as a source…")
+        expect(not heard, f"a link into a GitLab source added asked {_described_gitlab(heard)}")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+# --- The GitLab checks' helpers --------------------------------------------------------------
+
+
+def _add_a_gitlab(scene, key, name, label, plugin=GL_HELLO, looked_up=False, link=None):
+    """The GitLab project `key` (`host/path`) looked up at `link` — unless it was — and added: its id, and uDeck's
+    requests from **Add** on, once its block is named from its passport and, with `plugin`, that row offers Install."""
+    machine = scene.machine
+    host, _, path = key.partition("/")
+    if not looked_up:
+        said, _, _ = _look_up_a_source(scene, link or f"https://{key}", label)
+        expect(said == name, f"Look up of {link or key} shows {said!r}, not {name!r}")
+    sid = _source_id(path, scene.github.project_id(key), host=host, provider="gitlab")
+    before = _count(scene)
+    _press(machine, "sources.add.confirm", f"pressing Add: {label}")
+    shown = _wait_until(machine, f"source.{sid}.name", lambda said: _strip(said) == name, CATALOGUE_SECONDS)
+    if plugin:
+        row = _wait_until(machine, f"source.{sid}.plugin.{plugin}.install", lambda said: said is not None, CATALOGUE_SECONDS,
+                          present=True)  # fmt: skip
+        expect(row is not None, f"the source's block lists no {plugin} to install; uDeck asked {_described_gitlab(_since(scene, before))}")
+    added = _since(scene, before)
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-source-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt")
+    expect(_strip(shown) == name, f"the source's block is named {shown!r}, not {name!r}; uDeck asked {_described_gitlab(added)}")
+    return sid, added
+
+
+def _of_the_project(request, number):
+    """Whether a GitLab request is of project `number`, by its number."""
+    return request.raw_path == f"/api/v4/projects/{number}" or request.raw_path.startswith(f"/api/v4/projects/{number}/")
+
+
+def _expect_on_its_port(heard, host, what):
+    """Every one of `heard` that is GitLab's API is `host`'s, on `host`'s own port — and nothing else is: a GitLab's
+    requests go to its own origin, and a GitLab is asked nothing of GitHub's."""
+    port = config.GITLAB_PORTS[host]
+    astray = [r for r in heard if (r.path.startswith("/api/v4/") or r.site) and (r.port != port or r.site != host)]
+    expect(not astray, f"{what}: uDeck asked {_described_gitlab(astray)} somewhere else than {host} on port {port}")
+    others = [r for r in heard if not r.site]
+    expect(not others, f"{what}: uDeck also asked {_described_gitlab(others)}, which is no part of {host}")
+
+
+def _page(request):
+    """The page a GitLab listing was asked for."""
+    for part in request.query.split("&"):
+        name, _, value = part.partition("=")
+        if name == "page" and value.isdigit():
+            return int(value)
+    return 1
+
+
+def _described_gitlab(requests):
+    """Requests as a report says them, the path as it was sent and the port it came in on."""
+    return "; ".join(f"{r.method} {r.raw_path or r.path}{'?' + r.query if r.query else ''} → {r.status} on {r.port}"
+                     for r in requests) or "none"
 
 
 # --- The sources' helpers ------------------------------------------------------------------
@@ -4584,13 +5162,16 @@ def _count_of_runs(machine, path):
     return int(text) if text.isascii() and text.isdigit() else None
 
 
-def _keep_the_pane(machine, check_dir, lab, name, window=ui.SETTINGS_WINDOW):
-    """The settings window's walk, kept beside the report, and returned."""
+def _keep_the_pane(machine, check_dir, lab, name, window=ui.SETTINGS_WINDOW, showing=None):
+    """The settings window's walk, kept beside the report, and returned; its screenshot taken with the control
+    `showing` scrolled into view first where the machine can scroll (a runner's screen is too short for the pane)."""
     dump = _read_the_screen(machine, "reading Settings → Plugins", window)
     try:
         (check_dir / name).write_text(dump)
     except OSError as error:
         lab.note(f"   {name} could not be written: {error}")
+    if showing is not None and getattr(machine, "scroll", None) is not None:
+        ui.in_view(machine, showing, f"bringing {showing} into view", window)
     machine.screenshot(check_dir, name.removesuffix(".txt"))
     return dump
 

@@ -35,7 +35,10 @@
 # tests installing plugins without going near github.com. The repository's name
 # stays the shipped one; its number (UDeckPluginsRepositoryID), which the
 # catalogue's daily describe is held to, becomes the fake's own,
-# TEST_PLUGINS_REPOSITORY_ID below.
+# TEST_PLUGINS_REPOSITORY_ID below. The same fake answers as two GitLabs, each on
+# a port of its own on BASE_URL's host (TEST_GITLAB_PORTS below), and the build
+# carries where: UDeckPluginsHostMap, {host: base URL}, which a build as shipped
+# never has.
 #
 # The lab also needs three things an ordinary build does not. --out puts the
 # bundle somewhere other than dist/, so a test build never lands where the
@@ -244,11 +247,27 @@ fi
 # hold this to — not GitHub's own, so that a lab build that kept the shipped
 # number would stop its catalogue at its first describe.
 TEST_PLUGINS_REPOSITORY_ID=900000001
+# The GitLabs the fake answers as, each host on its own port of BASE_URL's host,
+# as e2e/udeck_e2e/config.py's GITLAB_PORTS names them — which the lab's tests
+# hold this to: "host=port", one a line.
+TEST_GITLAB_PORTS="gitlab.example.test=8768
+gitlab.com=8769"
 BASE="${TEST_PLUGINS%/}"
 if [ -n "$TEST_PLUGINS" ]; then
     /usr/libexec/PlistBuddy -c "Set :UDeckPluginsAPIBase $BASE/api" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :UDeckPluginsRawBase $BASE/raw" "$APP/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :UDeckPluginsRepositoryID $TEST_PLUGINS_REPOSITORY_ID" "$APP/Contents/Info.plist"
+    # http://127.0.0.1:8766 → http and 127.0.0.1: the fake's scheme and host, the GitLabs' ports.
+    SCHEME="${BASE%%://*}"
+    AUTHORITY="${BASE#*://}"
+    AUTHORITY="${AUTHORITY%%/*}"
+    HOSTNAME_ONLY="${AUTHORITY%:*}"
+    /usr/libexec/PlistBuddy -c "Delete :UDeckPluginsHostMap" "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
+    /usr/libexec/PlistBuddy -c "Add :UDeckPluginsHostMap dict" "$APP/Contents/Info.plist"
+    for entry in $TEST_GITLAB_PORTS; do
+        /usr/libexec/PlistBuddy -c "Add :UDeckPluginsHostMap:${entry%%=*} string $SCHEME://$HOSTNAME_ONLY:${entry#*=}" \
+            "$APP/Contents/Info.plist"
+    done
 fi
 
 # `NSAllowsLocalNetworking` is there so that either can be plain HTTP on the

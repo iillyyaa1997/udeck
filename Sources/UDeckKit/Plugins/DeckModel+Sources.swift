@@ -57,6 +57,11 @@ extension DeckModel {
         for id in ids { states[id] = CatalogueStore(paths: paths, source: id).state() }
         if states != sourceStates { sourceStates = states }
         for id in sourceCatalogues.keys where !ids.contains(id) { sourceCatalogues[id] = nil }
+        // Each GitLab source's limit, from what its state kept, while it is listed.
+        for source in sources where source.provider == SourceLink.gitlab && gitLabLimits[source.id] == nil {
+            gitLabLimits[source.id] = RateLimitRecorder(states[source.id]?.rateLimit ?? RateLimitState())
+        }
+        for id in gitLabLimits.keys where !ids.contains(id) { gitLabLimits[id] = nil }
     }
 
     /// What `sources.json`'s problem line says: why the file cannot be used,
@@ -85,13 +90,17 @@ extension DeckModel {
     }
 
     /// The clients the sources of one's own are read through: GitHub's API
-    /// and raw host as the official source has them, and its limit.
+    /// and raw host as the official source has them, and its limit; each
+    /// GitLab's API — where the host map sends it in a test build — and each
+    /// GitLab source's own limit, and **Look up**'s by host.
     var sourceClients: SourceClients {
-        SourceClients(endpoints: endpoints, udeckVersion: udeckVersion, limits: limits)
+        var clients = SourceClients(endpoints: endpoints, udeckVersion: udeckVersion, limits: limits, hostMap: hostMap,
+                                    gitLabLimits: gitLabLimits)
+        clients.lookUpLimits = lookUpLimits
+        return clients
     }
 
-    /// The provider `source` is read through now — nil while it is not added,
-    /// and for a source this uDeck does not read yet (GitLab).
+    /// The provider `source` is read through now — nil while it is not added.
     func sourceProvider(_ id: String) -> SourceProvider? {
         source(id).flatMap(sourceClients.of)
     }
@@ -194,7 +203,7 @@ extension DeckModel {
             guard let source = source(id), let provider = sourceClients.of(source) else { return }
             DeckLog.plugins.info("reading \(source.address.description, privacy: .public) (\(id, privacy: .public)): \(why, privacy: .public)")
             let store = CatalogueStore(paths: paths, source: id)
-            let refresher = CatalogueRefresher(provider: provider, store: store, limits: limits)
+            let refresher = CatalogueRefresher(provider: provider, store: store, limits: sourceClients.limits(of: source))
             let outcome = await refresher.refresh(unrequested: unrequested, language: strings.language.rawValue,
                                                   installedCommits: installed.commits)
             DeckLog.plugins.info("\(source.address.description, privacy: .public): \(String(describing: outcome), privacy: .public)")
@@ -278,8 +287,9 @@ extension DeckModel {
     }
 
     /// **Look up** on the address in the field (`SourceLookUp`): refused at
-    /// once without a request, or asked of its host anonymously — two
-    /// requests to the API and the passport from the raw host.
+    /// once without a request, or asked of its host anonymously — on GitHub
+    /// two requests to the API and the passport from the raw host, on a
+    /// GitLab three to its API, counted against that host's limit.
     public func lookUpSource() {
         sourceLookups += 1
         let asked = sourceLookups
@@ -298,6 +308,7 @@ extension DeckModel {
             link = read
         }
         sourceAdding = .reading(host: link.host)
+        if link.provider == SourceLink.gitlab, lookUpLimits[link.host] == nil { lookUpLimits[link.host] = RateLimitRecorder() }
         let list = sourceList
         let clients = sourceClients
         let officialID = endpoints.repositoryID
@@ -376,6 +387,7 @@ extension DeckModel {
         try? FileManager.default.removeItem(at: CatalogueStore(paths: paths, source: id).directory)
         sourceCatalogues[id] = nil
         sourceStates[id] = nil
+        gitLabLimits[id] = nil
         sourceCataloguesRead.remove(id)
         autoUpdates.forget(id)
         DeckLog.plugins.info("removed the source \(id, privacy: .public)")

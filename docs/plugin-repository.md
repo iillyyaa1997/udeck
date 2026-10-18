@@ -22,7 +22,8 @@ own (see [Stages](#stages)). **Everything in this document without a mark is
 built** — stages 1, 2 and 3, which [Stages](#stages) lists, all but one step of
 stage 2 marked in [The official repository](#the-official-repository): its
 script deleted once `udeck-plugin check-repo` has agreed with it long enough —
-and the first of stage 4: a public GitHub repository added as a source of its
+and the first two parts of stage 4: a public GitHub repository, and a public
+GitLab project — gitlab.com's or one's own GitLab's — added as a source of its
 own ([Sources of one's own](#sources-of-ones-own)).
 Anything that belongs to a later stage and is not built yet is marked where it
 appears:
@@ -42,7 +43,7 @@ builder to touch it confirms it.
 
 ## The whole path, in one paragraph
 
-A plugin repository is a GitHub repository (later also GitLab) with a small
+A plugin repository is a GitHub repository or a GitLab project with a small
 file at the top, `udeck-plugins.json`, and one folder per plugin under
 `plugins/`. uDeck builds its catalogue by listing the repository's files at one
 commit and reading each plugin's `manifest.json` — nothing else is downloaded
@@ -1131,10 +1132,14 @@ costs a download:
   (see [Verified, trusted, unverified](#verified-trusted-unverified));
 * what it asks for, in the same words as the consent sheet (*"Asks to run
   sysctl"*), or *"Asks for nothing"*;
-* its size, from the listing: *"4 files · 6 KB"*;
+* its size, from the listing: *"4 files · 6 KB"* — of a GitLab project, whose
+  listing gives no sizes, *"4 files"*;
 * a link to the folder on GitHub at that commit —
-  `https://github.com/{owner}/{repo}/tree/{commit}/plugins/{id}` — which opens
-  in the browser and is where the README is read;
+  `https://github.com/{owner}/{repo}/tree/{commit}/plugins/{id}`, or on its
+  GitLab, `https://{host}/{path}/-/tree/{commit}/plugins/{id}` — which opens in
+  the browser and is where the README is read: *Open on GitHub*, or *Open on
+  gitlab.example*, on the host the page is on, whatever a test build reads its
+  API from;
 * its state, and the one button that goes with it:
 
 | State | Row says | Button |
@@ -1158,26 +1163,83 @@ Rows are sorted by name, as the operator reads it.
 
 ### GitLab
 
-> **Later — stage 4.** The same reading, through GitLab's API (gitlab.com and
-> self-hosted). The project is addressed by its URL-encoded path
-> (`group%2Fproject`). Endpoints below are from GitLab's documentation and were
-> not exercised with a token.
->
-> | Step | GitHub | GitLab |
-> |---|---|---|
-> | Default branch | `GET /repos/{o}/{r}` → `default_branch` | `GET /api/v4/projects/{id}` → `default_branch` |
-> | Head commit, conditional | `GET /repos/{o}/{r}/commits/{branch}`, `Accept: application/vnd.github.sha` | `GET /api/v4/projects/{id}/repository/branches/{branch}` → `commit.id`; answers `304` to `If-None-Match` (measured) |
-> | Every path at a commit | `GET /repos/{o}/{r}/git/trees/{commit}?recursive=1` | `GET /api/v4/projects/{id}/repository/tree?ref={commit}&path=plugins&recursive=true&per_page=100`, paginated; each entry has `id` (the blob or tree SHA — measured to equal git's), `type`, `path` and `mode` |
-> | One file | `raw.githubusercontent.com/{o}/{r}/{commit}/{path}` | `GET /api/v4/projects/{id}/repository/blobs/{blob sha}/raw` |
-> | A folder's history | `GET /repos/{o}/{r}/commits?sha={branch}&path=plugins/{id}` | `GET /api/v4/projects/{id}/repository/commits?ref_name={branch}&path=plugins/{id}` |
-> | A whole folder in one request (optional) | not possible | `GET /api/v4/projects/{id}/repository/archive.tar.gz?sha={commit}&path=plugins/{id}` — limited to 5 a minute on gitlab.com |
-> | Token | `Authorization: Bearer <token>` | `PRIVATE-TOKEN: <token>` |
->
-> GitLab's listing does not give sizes, so the size limit is checked while the
-> files arrive rather than before. A private GitHub source is read through the
-> API's blob endpoint (`GET /repos/{o}/{r}/git/blobs/{sha}` with `Accept:
-> application/vnd.github.raw+json`) rather than the raw host, since how the raw
-> host treats a token is not documented. Tokens are kept in the Keychain, sent
+A GitLab project — on gitlab.com, or on a GitLab of one's own, at
+`https://<host>/api/v4` — is read the same way, through GitLab's API, v4
+(stage 4: [Sources of one's own](#sources-of-ones-own)). Every endpoint below
+was **measured** anonymously on gitlab.com, and read-only on a self-hosted
+GitLab 18.8.2, when stage 4 was designed. After **Look up** a project is always
+asked for by its number, `/projects/{id}`; its path, URL-encoded with its `/` as
+`%2F`, is used once, by **Look up** itself.
+
+| Step | GitHub | GitLab |
+|---|---|---|
+| The project, by its path (**Look up** alone) | `GET /repos/{o}/{r}` | `GET /api/v4/projects/{group%2Fproject}` → `id`, `path_with_namespace`, `default_branch`; `404 Project Not Found` when it is not there, or private |
+| Default branch, and its path now | `GET /repositories/{id}` → `default_branch`, `full_name` | `GET /api/v4/projects/{id}` → `default_branch`, `path_with_namespace` — and `forked_from_project` when the answer gives it, which anonymous gitlab.com's do not |
+| Head commit, conditional | `GET /repositories/{id}/commits/{branch}`, `Accept: application/vnd.github.sha` | `GET /api/v4/projects/{id}/repository/branches/{branch}`, the name escaped whole, `/` too → `commit.id`; a weak `ETag` (`W/"…"`), and `304` to exactly that |
+| Every path at a commit | `GET /repositories/{id}/git/trees/{commit}?recursive=1` | `GET /api/v4/projects/{id}/repository/tree?ref={commit}&per_page=100` — the root — and, only when the root has a `plugins` folder, `…&path=plugins&recursive=true&per_page=100`; each followed page by page by its `x-next-page`, until it names none. Each entry has `id` (the blob or tree SHA — git's own, measured), `type`, `path` (the whole path) and `mode`, and no size. A root without `plugins` is a repository that offers no plugins yet, and the second listing is never asked for: GitLab answers it `404 invalid revision or path Not Found` (measured) |
+| One file | `raw.githubusercontent.com/{o}/{r}/{commit}/{path}` | `GET /api/v4/projects/{id}/repository/files/{path, escaped whole}/raw?ref={commit}`, with `X-Gitlab-Size` |
+| A folder's history | `GET /repositories/{id}/commits?sha={branch}&path=plugins/{id}` | `GET /api/v4/projects/{id}/repository/commits?ref_name={branch}&path=plugins/{id}&per_page=100` → `id`, `committed_date` |
+| A merge request | `GET /repos/{o}/{r}/pulls/{n}` | `GET /api/v4/projects/{id}/merge_requests/{iid}`: `opened` is open, `closed` and `locked` closed, `merged` closed and merged, as `merge_commit_sha` — or `squash_commit_sha` (not asked in stage 4) |
+| Two commits compared | `GET …/compare/{base}...{head}` | `GET /api/v4/projects/{id}/repository/merge_base?refs[]={base}&refs[]={head}`: the same commit is identical, a merge base that is `base` ahead, one that is `head` behind, anything else diverged, with no counts; `400 Could not find ref` is a commit not there (not asked in stage 4) |
+| A folder's page | `https://github.com/{o}/{r}/tree/{commit}/plugins/{id}` | `https://{host}/{path}/-/tree/{commit}/plugins/{id}`, and `…/-/compare/{a}...{b}`, `…/-/merge_requests/{n}`, `…/-/tree/{branch}` |
+
+Every file is a request to the API — GitLab has no raw host to read a commit's
+file from anonymously — and every one is hashed against the listing's `id`
+before it is used, as GitHub's are. So **Earlier versions…** of a GitLab
+source's copy costs up to 51 requests to the API — the folder's history and one
+manifest per commit examined, at most 50 — where GitHub's raw host carries the
+manifests. Every request carries `User-Agent: uDeck/<version>` and `Accept:
+application/json`, from a session that keeps nothing; nothing carries a token
+yet.
+
+**A listing gives no sizes**, so rule 8 is held as the files arrive instead of
+before: a row says how many files a plugin has, *"4 files"*, and no bytes; a
+file that arrives larger than 5 MB — refused before it is read when GitLab says
+its size, and read no further than one byte past 5 MB when it does not — stops
+the install with *"plugins/gl-big/big.bin is 6.0 MB; one file of a plugin may
+be up to 5 MB."*, and once the files that arrived add up to more than 10 MB the
+rest is not asked for; either way staging is thrown away and nothing is
+installed. A manifest larger than 5 MB is its plugin's alone: the catalogue is
+read, and that row says its manifest could not be fetched. The number of files,
+the names and the depth are still checked from the listing.
+
+**What an answer's status says:** a success, and a `304` only for the head;
+`404` not found; a `400` not found only where the endpoint answers a missing
+ref or file so — the files endpoint, and the merge base's *Could not find ref*
+— and a refusal anywhere else, so that a request uDeck got wrong never reads as
+*"… or it is private"*; `401` and a `403` naming `insufficient_scope` are kept
+apart for tokens; other `403`s and `429`s are the limit; a `3xx` that comes
+back is a move; anything else a refusal. A request without a token follows a
+redirect, as uDeck's session always has — so a `3xx` comes back today only when
+it names nowhere to go — and a description that came through a redirect is
+believed only when it names the project's number, and then its path is taken
+as a rename; one naming another number, or none, is refused, and every file is
+hashed against the listing. A request with a token never follows one (later in stage 4).
+
+**GitLab's limits** come without the `x-` — `ratelimit-remaining`,
+`ratelimit-reset` in Unix seconds, `ratelimit-name` (measured) — and gitlab.com
+counts by more than one limiter, naming the one each answer was counted by:
+`throttle_unauthenticated_api`, which resets each minute, and
+`unauthenticated_traffic_per_ip`, which resets on the hour — from 2026-10-19 60
+an hour per network address without a token, `304`s counted (GitLab's own
+announcement; not measured). So each limiter's pair is kept apart, by its name,
+in the source's own `state.json`, and a read nobody asked for goes by the one
+with the least left that has not reset: the reserve of ten is kept of that one.
+A `429` with `Retry-After` stops every request of that source until then, and
+the source says *"gitlab.com asked uDeck to wait: its limit of requests from
+this network, or for this token, is used up. The list below is from 14:02; uDeck
+will look again after 15:07. Without a token gitlab.com allows only a few
+requests an hour from one network; a token raises the limit."* — the last
+sentence for gitlab.com read without a token alone. A self-hosted GitLab sends no
+limit at all (measured), and there only a `429` counts. Each GitLab source has a
+limit of its own — a GitHub block never stops a GitLab, nor one GitLab another
+— and two anonymous gitlab.com sources each keep their own count, though the
+network's is one.
+
+> **Later — stage 4.** Tokens: `PRIVATE-TOKEN: <token>` for a pasted GitLab
+> token, `Authorization: Bearer <token>` for GitHub's. A private GitHub source
+> is read through the API's contents endpoint rather than the raw host. Tokens
+> are kept in the Keychain, bound to the address they were checked against, sent
 > only to their own host, and never followed across a redirect.
 
 ---
@@ -1191,10 +1253,10 @@ and **Remove** as the official one has them. Nobody vouches for it: its
 plugins are **Unverified**, and ask before they run, whenever their code
 changes ([Consent for unverified code](#consent-for-unverified-code)).
 
-> **Later — stage 4.** GitLab projects (gitlab.com, or one's own) as sources,
-> private sources read with a token kept in the Keychain or by **Sign in**, and
-> **Trust…** with the **Trusted source** mark. Today a source is a public
-> repository on github.com.
+> **Later — stage 4.** Private sources read with a token kept in the Keychain
+> or by **Sign in**, and **Trust…** with the **Trusted source** mark. Today a
+> source is a public repository on github.com, or a public project on a GitLab
+> — gitlab.com, or one's own at `https://<host>/api/v4`.
 
 ### `sources.json`
 
@@ -1212,9 +1274,9 @@ It is written atomically, like `installed.json`, and it never holds a secret.
 | Field | Meaning |
 |---|---|
 | `id` | What every record of a copy of the source says it came from (`installed.json`'s `source`), the name of its cache, `~/.udeck/catalogue/<id>/`, and later the key of its token: `<slug>-<hash8>`. `hash8` is the first 8 hexadecimal digits of SHA-256 over `<provider>\n<lowercased host>\n<remoteID>`, so a renamed repository keeps it and a new repository made at the old name gets another. `slug` — the host, `-` and the path's last segment when it was added, lowercased, every character outside `[a-z0-9.-]` a `-`, at most 40 — is only for a person reading `~/.udeck`. An id always matches `^[a-z0-9][a-z0-9.-]{0,40}-[0-9a-f]{8}$`: never `official`, always a safe folder name. |
-| `provider`, `host` | `github`, and `github.com`. (`gitlab` and a GitLab's host later.) |
-| `path` | `owner/repo` as the host spells it now: for the pages a person opens and for GitHub's raw host. Written back whenever a describe of the repository, by its number, says another. |
-| `remoteID` | The number GitHub knows the repository by, which neither a rename nor a transfer changes. Every request after **Look up** addresses the repository by it. |
+| `provider`, `host` | `github` and `github.com`, or `gitlab` and a GitLab's host — `gitlab.com`, or one's own, lowercased, with a port when it has one other than 443. |
+| `path` | `owner/repo`, or `group/…/project`, as the host spells it now: for the pages a person opens and for GitHub's raw host. Written back whenever a describe of it, by its number, says another. |
+| `remoteID` | The number GitHub knows the repository by, or GitLab the project, which neither a rename nor a transfer changes. Every request after **Look up** addresses it by that number. |
 | `access` | What the Keychain is expected to hold for it: `none` today. |
 | `trustedAt` | `null` today; when it was trusted, later. |
 | `addedAt` | When it was added. |
@@ -1242,9 +1304,11 @@ the repository (`SourceLink`). Refused before any request, each saying what to
 paste instead: `http://` (*"Sources are read over HTTPS only…"*), git's SSH
 address, an address with a login in it, a github.com page that is no
 repository, and the official repository itself (*"That is
-github.com/iillyyaa1997/udeck-plugins, the official catalogue…"*). A GitLab
-address is read, and **Look up** says *"<host>: GitLab projects are not read
-yet"*.
+github.com/iillyyaa1997/udeck-plugins, the official catalogue…"*). Any other
+host is a GitLab's — gitlab.com, `www.` or not, or one's own, with a port if it
+has one: the project is the path before GitLab's separator `/-/`, `.git`
+dropped, 2 to 20 segments, nested groups and all, so
+`https://gitlab.example/group/sub/team/-/tree/main` is `group/sub/team`.
 
 **Look up** asks github.com anonymously, three requests (`SourceLookUp`):
 
@@ -1254,6 +1318,21 @@ yet"*.
 2. `GET /repositories/{id}/commits/{branch}` with `Accept:
    application/vnd.github.sha` — its head, by its number;
 3. `udeck-plugins.json` at that commit, from the raw host.
+
+Of a GitLab project it asks the GitLab's API anonymously, three requests:
+
+1. `GET /api/v4/projects/{group%2Fproject}` — the one request ever addressed by
+   its path — which says its number (`id`), its path as GitLab spells it and its
+   default branch;
+2. `GET /api/v4/projects/{id}/repository/branches/{branch}` — its head;
+3. `GET /api/v4/projects/{id}/repository/files/udeck-plugins.json/raw?ref={commit}`.
+
+A host whose `404` is not GitLab's — a web server's own page, no GitLab behind
+it — says *"gitlab.example did not answer as GitLab. uDeck reads sources on
+github.com and on GitLab — gitlab.com or your own."*, and offers nothing. A
+project GitLab answers with no default branch — an empty repository, or one
+whose code only its members may read (what GitLab answers then is not measured)
+— is said as one not found or private.
 
 The sheet shows the passport's name — cleaned, inside an isolate, or the
 address instead ([What a source is called](#what-a-source-is-called)) — its
@@ -1274,7 +1353,9 @@ address — **Check now**, **Remove…**, and its catalogue's rows, drawn as the
 official ones are, marked **Unverified**, never **Verified**. A build that
 reads github.com, or any host, from somewhere else than the build as shipped —
 the lab's — says so under **Your sources**: *"Test build: api.github.com is
-read from http://127.0.0.1:8766/api."*
+read from http://127.0.0.1:8766/api."*, and for each host `UDeckPluginsHostMap`
+sends elsewhere, *"Test build: gitlab.example.test is read from
+http://127.0.0.1:8768."*
 
 **Remove…** says first what it does — *"Remove Team plugins
 (github.com/someone/team-plugins)? uDeck stops reading it and forgets its token.
@@ -1289,8 +1370,12 @@ its own again.
 says *"github.com/someone/team-plugins is not a fork of
 github.com/iillyyaa1997/udeck-plugins. To install from it, add it as a source of
 its own."*, with **Add as a source…**, which opens **Add a source…** with the
-repository's address filled in. A link into a source added — a branch of it,
-its page, a pull request — is refused before any request: *"Installing from a
+repository's address filled in; and of a link to another host, *"gitlab.example
+is not GitHub. A GitLab project can be added as a source of its own."* — with
+**Add as a source…** and the project's page filled in when the link reads as a
+GitLab project's, a port and all. A link into a source added — a branch of
+it, its page, a pull request; of a GitLab project, a branch, its page, a merge
+request — is refused before any request: *"Installing from a
 branch or a merge request of a source is not possible yet; add the project and
 install from its default branch."*
 
@@ -1310,6 +1395,12 @@ something else now, that name is written back to `sources.json` under the same
 id, and from then on its files are asked by it. A source read without a token
 counts against the official source's hourly limit, as GitHub counts what an
 address asks whatever the repository.
+
+A GitLab project is read the same way through its GitLab's API
+([GitLab](#gitlab)), every request to `/api/v4/projects/{id}/…`: its describe
+writes its path back as GitHub's does, its files come from the files API, each
+hashed against the listing, and it is counted against a limit of its own, kept
+in its `state.json`.
 
 A source is read on the official source's schedule
 ([What uDeck fetches, and when](#what-udeck-fetches-and-when)), each by its own
@@ -2429,8 +2520,10 @@ is a verified one updating itself, and only when its new version asks for
 exactly what it asks for now. A failed refresh is tried again after an hour,
 then daily as usual.
 
-It talks to two hosts, `api.github.com` and `raw.githubusercontent.com`. What
-reaches GitHub is what any HTTPS request carries: the network address, the
+For the official catalogue it talks to two hosts, `api.github.com` and
+`raw.githubusercontent.com`; a GitLab project added as a source of its own is
+read from its own host's API, `https://<host>/api/v4`. What reaches GitHub — or
+that GitLab — is what any HTTPS request carries: the network address, the
 `User-Agent: uDeck/<version>` header, the repository and the files asked for —
 and so, when something is installed, which plugin. No account, no identifier,
 no cookie, no list of what is installed.
@@ -2537,6 +2630,20 @@ standard library.
   and raw files by the name they are called now. The official repository's
   description says its number too, the fixture's own (`id`, 900000001) unless
   the lab names another. A repository the lab names none of is `404`.
+* **It answers as two GitLabs too** (stage 4), each on a port of its own of the
+  same process, so that each is an origin of its own as it is outside the lab:
+  `gitlab.example.test`, a self-hosted GitLab that sends no limit, on 8768, and
+  `gitlab.com` on 8769, in GitLab's API, v4 ([GitLab](#gitlab)) — a project by
+  its encoded path or its number, its description without
+  `forked_from_project`, its branch's head with a weak `ETag` and `304`, a
+  tree's entries three to a page whatever is asked, with `x-next-page`, a file
+  through the files API with `X-Gitlab-Size` and `X-Gitlab-Blob-Id`, a folder's
+  history, and GitLab's own `404` bodies. The projects are fixture folders
+  under `sources/gitlab/<host>/<group>/…/<project>/`, each with its history and
+  its `id`; a file `<name>.generated` is a file made when the fake starts, never
+  committed — `gl-big`'s 6 MB `big.bin`. gitlab.com counts each request by its
+  two limiters, 500 a minute and 60 an hour, each answer naming one in turn, and
+  `429`s with `Retry-After` once the hour is spent.
 * **The lab drives it** by rewriting a small state file over SSH: which commit
   `main` is at; which commit each other branch is at, a branch left out being
   deleted; each pull request's head, state, merge commit and the repository it
@@ -2549,10 +2656,13 @@ standard library.
   listing is truncated"; which commit each repository of its own's `main` is
   at; which name serves which of them — a repository renamed, and another made
   at its old name; "the official repository's description answers this
-  number". Moving a head, force-pushing — a head at a commit that does not
+  number"; and of each GitLab, its projects' `main`, which path serves which
+  project, how much of gitlab.com's hour was spent elsewhere, and "answer as a
+  web server with no GitLab behind it" (`plain`). Moving a head, force-pushing — a head at a commit that does not
   continue the one before — merging and closing are each one rewrite.
-* **It keeps an access log** of every request — method, path, query, status,
-  the port it came in on, and whether it carried a credential (`none`,
+* **It keeps an access log** of every request — method, path — decoded, and as
+  it was sent, its `%2F` kept — query, status, the port it came in on and the
+  GitLab it is, and whether it carried a credential (`none`,
   `accepted`, `rejected`, never its value; any credential is answered `401`
   today) — which is the oracle for what uDeck asked for and, just as much, for
   what it did not.
@@ -2567,12 +2677,17 @@ does not keep environment variables:
 | `UDeckPluginsRawBase` | `https://raw.githubusercontent.com` | `http://127.0.0.1:<port>/raw` |
 | `UDeckPluginsRepository` | `iillyyaa1997/udeck-plugins` | the same |
 | `UDeckPluginsRepositoryID` | `1393324153` | `900000001`, the fake's |
+| `UDeckPluginsHostMap` | none | `{"gitlab.example.test": "http://127.0.0.1:8768", "gitlab.com": "http://127.0.0.1:8769"}` |
 
 `Scripts/make-app.sh` gains `--test-plugins <base URL>`, which sets the first two
-and the number, and adds `NSAllowsLocalNetworking`, as `--test-feed` does; the
-lab's build step verifies the keys in the zip as it already verifies
-`SUFeedURL`, and holds the build as shipped and the smoke's to GitHub's own
-number.
+and the number, writes the host map — each GitLab the fake answers as, on its
+own port of the base URL's host — and adds `NSAllowsLocalNetworking`, as
+`--test-feed` does; the lab's build step verifies the keys in the zip as it
+already verifies `SUFeedURL`, holds the build as shipped and the smoke's to
+GitHub's own number, and refuses a host map in either and a lab build without
+its own. A build that carries a map says so under **Your sources**; what it
+changes is only where a host's requests go — the pages a person opens keep the
+real host.
 
 ### The lab's checks
 
@@ -2624,13 +2739,21 @@ guest's `~/.udeck` over SSH.
 | `plugins.source-same-id-switch` | The official `uptime` 1.0.0 installed, placed and allowed: the source's row of its own `uptime` 1.0.0 — other files, the same permissions — says *Installed here: the verified 1.0.0 from github.com/iillyyaa1997/udeck-plugins* and offers **Install from here…**, whose warning names both copies; confirmed, the record is the source's with the official copy as `previous`, and the card asks again, its copy held to its tree. **Earlier versions…** left open over the official copy goes with it, and opened again lists the source's own history, asked by its number. The official row then says *Installed here from github.com/someone/team-plugins: unverified* with **Switch to verified 1.0.0**, whose warning names both; confirmed, the record is the official one's, **Verified**. |
 | `plugins.source-update-and-back` | The source's main moved to `t2`: **Check now** on its block asks the source alone, by its number, and `team-clock`'s row offers *1.1.0 available* from the source's own head; **Update** takes `t2`'s files from the source, recorded as the source's; **Back to 1.0.0** returns to `t1` from the source, the source's, pinned. |
 | `plugins.source-reinstall-and-earlier` | `team-clock` 1.1.0 from the source at `t2`, changed on disk: **Reinstall**, after its Trash warning, puts `t2`'s copy back, asking only `/repositories/<id>/…` and the source's raw files. **Earlier versions…** asks the history of the source's own default branch by its number and lists 1.0.0; installing it puts `t1`'s copy in place, still the source's, pinned. |
-| `plugins.source-official-off` | **Official catalogue** switched off with a source added: Settings says *The official catalogue is off: uDeck makes no request to the official repository or its forks, and does not look for updates of what was installed from them. Sources you added are still read; installed plugins keep running.*, and **Install from a link…** that it makes no request to the official repository or its forks. uDeck ended, the source's state made two days old and its main moved to `t2`, started again — it reads the source at launch, by its number, its log saying so. Ended again, the state made a minute and a half short of a day old and uDeck started with Settings closed: no read at launch, and the minute's clock reads it once it is due (*on schedule*). **Update**, **Back to**, **Earlier versions…** and **Reinstall** of its copy each work, from the source; from the switch on, no request reaches the official repository's paths. |
+| `plugins.source-official-off` | **Official catalogue** switched off with a source added: Settings says *The official catalogue is off: uDeck makes no request to the official repository, nor to its forks for Install from a link…, and does not look for updates of what was installed from them. Sources you added are still read; installed plugins keep running.*, and **Install from a link…** that it makes no request to the official repository, nor to its forks for a link. uDeck ended, the source's state made two days old and its main moved to `t2`, started again — it reads the source at launch, by its number, its log saying so. Ended again, the state made a minute and a half short of a day old and uDeck started with Settings closed: no read at launch, and the minute's clock reads it once it is due (*on schedule*). **Update**, **Back to**, **Earlier versions…** and **Reinstall** of its copy each work, from the source; from the switch on, no request reaches the official repository's paths. |
 | `plugins.source-renamed` | The fake renames someone/team-plugins to someone/team-plugins-2, its number the same, and serves another repository, someone/squatter, with another number and a team-clock 9.0.0, at the old name. With the source's default branch a day old, **Check now** describes it by its number: `sources.json` says the new name under the same id, and the block shows it. From the rename on, nothing asks the old name, through the API or its raw host, and nothing the other repository has is offered. |
-| `plugins.official-id-mismatch` | uptime 1.0.0 installed, verified; uDeck ended, main moved to `c2` and the official repository's description answering another number, the catalogue two days old: started again, uDeck describes the official repository and reads nothing of it after that — no head, no listing, no file — uptime stays 1.0.0, and Settings says *The address of the official catalogue now belongs to a different repository. uDeck stopped reading it, and nothing updates by itself; installed plugins keep running.* Meanwhile uptime's row offers no **Earlier versions…**, the catalogue's rows read before are gone, and **Install from a link…** on a branch of it says the same sentence with no request. **Check now** describes it again and stops again; with its own number back, **Check now** reads on, and **Earlier versions…** is offered again. |
+| `plugins.official-id-mismatch` | uptime 1.0.0 installed, verified; uDeck ended, main moved to `c2` and the official repository's description answering another number, the catalogue two days old: started again, uDeck describes the official repository and reads nothing of it after that — no head, no listing, no file — uptime stays 1.0.0, and Settings says *The address of the official catalogue now belongs to a different repository. uDeck stopped reading it, and nothing updates by itself; installed plugins keep running.* Meanwhile uptime's row offers no **Earlier versions…**, the catalogue's rows read before are gone, and **Install from a link…** on a branch of it says the same sentence with no request. **Check now** describes it again and stops again; with its own number back, **Check now** reads on, and **Earlier versions…** is offered again. Before all that, while uDeck runs with the official number: uptime's **Earlier versions…** open listing 1.0.0 and **Install from a link…** of `fix/uptime` listing uptime — the address answering another number and **Check now** read, the list goes from the screen and the sheet says the same sentence in place of the branch's plugins. |
 | `plugins.source-downgrade-to-0-7-0` | `team-clock` installed from the source and placed; uDeck ended, `officialCatalogue: false` written into `settings.json`, and the released 0.7.0, as GitHub publishes it, installed and started, its update feed one nobody serves: its Settings say **Unverified** of `team-clock`, and its card asks before it runs. 0.7.0 ended, `sources.json` and every file of `catalogue/<id>/` are byte for byte as they were, and the record's `source` is still the source's id. This build started again, **Check now** on the source reads it by its number, and the row says the copy is from it. GitHub not giving 0.7.0: it could not check. |
 | `plugins.source-remove` | **Remove…** on the source, after its warning: the entry and `catalogue/<id>/` go; `team-clock` stays, and its row says *From github.com/someone/team-plugins — a source no longer added*, with no **Reinstall**, **Back to**, **Update** or **Earlier versions…**; Settings opened again, nothing more is asked of the source. |
 | `plugins.source-refusals` | **Look up** refuses, each with its sentence and no **Add**: `http://`, git's SSH address and the official repository before any request; `github.com/someone/missing` after its description's 404 (*… could not be found, or it is private. If it is private, uDeck needs a token for it: Token…*); `someone/not-plugins`, with no passport at its default branch, after its description, its head and the passport's 404; and someone/team-plugins once it is added, after its description, *Team plugins (github.com/someone/team-plugins) is added already.* |
 | `plugins.link-offers-a-source` | **Install from a link…** on a branch of someone/team-plugins, no fork of the official repository: *github.com/someone/team-plugins is not a fork of github.com/iillyyaa1997/udeck-plugins. To install from it, add it as a source of its own.*, after its description alone, and **Add as a source…**, which opens **Add a source…** with `https://github.com/someone/team-plugins` in its field and adds nothing until **Add** is pressed. Added, the same link is refused before any request: *Installing from a branch or a merge request of a source is not possible yet; add the project and install from its default branch.* |
+| `plugins.source-add-gitlab` | **Add a source…** of `https://gitlab.example.test/group/sub/team/-/tree/main`, a project three groups down in the fake's self-hosted GitLab: it comes to `group/sub/team`, and from **Look up** on the log holds, on gitlab.example.test's own port and nowhere else, `GET /api/v4/projects/group%2Fsub%2Fteam` — `%2F` as it was sent, the one request ever addressed by its path — then `/projects/9/repository/branches/main` and the passport at that commit through the files API; the sheet shows the passport's name, and the test build's line says where gitlab.example.test and gitlab.com are read from. After **Add**, every request of it is to `/api/v4/projects/9/…`, on its port; the block is named *Team on GitLab* with its address, its row says **Unverified**, and `sources.json` holds `gitlab`, the host, the path, `remoteID` 9 and the id derived from them. No request carries a credential. |
+| `plugins.source-gitlab-install` | `tools/udeck-plugins` added: the read after **Add** lists `plugins/` page after page — three entries to a page, `gl-hello` has six — and `gl-hello`'s row says *4 files*, no bytes, its **Open on gitlab.example.test** carrying `https://gitlab.example.test/tools/udeck-plugins/-/tree/<g1>/plugins/gl-hello`. **Install**: the log holds each of the plugin's four files once, through `/api/v4/projects/7/repository/files/…/raw?ref=<g1>`, and nothing else; the folder hashes to the fixture's tree; `installed.json` says the source's id, `gitlab` on gitlab.example.test at `tools/udeck-plugins`, the default branch, `unverified` by `null`; the row says *From gitlab.example.test/tools/udeck-plugins at …*. **Earlier versions…** lists 1.0.0, asking `/api/v4/projects/7/repository/commits?ref_name=main&path=plugins/gl-hello` and the manifest at `g1` through the files API, nothing else. |
+| `plugins.source-gitlab-renamed` | `gl-hello` installed from `tools/udeck-plugins`; the fake serves project 7 as `tools/udeck-plugins-2`. With its default branch a day old, **Check now** describes it by its number: `sources.json` says the new path under the same id and number, the block and `gl-hello`'s page show it, every request is to `/api/v4/projects/7…`, and the copy's record is still the source's. |
+| `plugins.source-gitlab-too-large` | `tools/udeck-plugins` at `g2`: `gl-big`'s row offers **Install**, no size listed to refuse it by; **Install**: its 6 MB `big.bin`, made when the fake started, is asked once and refused as it arrives — *plugins/gl-big/big.bin is 6.0 MB; one file of a plugin may be up to 5 MB.* — and there is no `plugins/gl-big`, no record and nothing in `~/.udeck/staging`. |
+| `plugins.source-gitlab-empty` | `tools/empty`, a passport and no `plugins/`: its block says *The repository offers no plugins yet.*; the read after **Add** made one tree request, the root's, with no `path=plugins`, and **Check now** asks none either. |
+| `plugins.source-gitlab-com-limit` | `someone/gl-plugins` on the fake's gitlab.com, added: its `state.json` keeps both of gitlab.com's limiters by name. The fake says the hour was spent elsewhere; **Check now** gets one `429` naming the hour, and the block says *gitlab.com asked uDeck to wait: … Without a token gitlab.com allows only a few requests an hour from one network; a token raises the limit.*, the hour's remaining 0 and the minute's in the hundreds. **Check now** again, **Install** of `gl-com` — whose row says the same — and twenty seconds: nothing reaches gitlab.com's port; the official catalogue's **Check now** reads it, with no trouble said. |
+| `plugins.source-gitlab-not-gitlab` | The fake answers gitlab.example.test's port as a web server with no GitLab behind it, `404 page not found` in plain text: **Look up** of `https://gitlab.example.test/tools/udeck-plugins` asks once and says *gitlab.example.test did not answer as GitLab. uDeck reads sources on github.com and on GitLab — gitlab.com or your own.*, offering no **Add**. |
+| `plugins.link-offers-gitlab-source` | **Install from a link…** of `https://gitlab.example.test/group/sub/team/-/tree/main` says *gitlab.example.test is not GitHub. A GitLab project can be added as a source of its own.* with no request; **Add as a source…** opens **Add a source…** with `https://gitlab.example.test/group/sub/team` in its field, adds nothing, and **Look up** there finds the project. Added, the same link says *Installing from a branch or a merge request of a source is not possible yet; …*, with no request and no **Add as a source…**. |
 | `smoke.real-pull-request` | Runs only when named, with `--pull-request <link>`, and only on a GitHub runner, against the real GitHub: a lab build that keeps the shipped addresses reads the official catalogue from github.com; the link of an open pull request of the official repository that changes one plugin, typed into **Install from a link…**, says *Pull request #N at …*; **Install** records `ref {pr, "N"}` at its head, `unverified`, by `null`, and the row says **Unverified** · *pull request #N at …*; once somebody has closed the pull request unmerged and deleted its branch, **Check now**, and the row says *Pull request #N was closed without being merged; the plugin keeps running*, the catalogue row *… unverified — closed without being merged*, the record as it was. Fewer than fifteen of the hour's sixty left to the runner's address, a pull request merged or closed before the install: it could not check. Screenshots of each. |
 
 ### Unit tests
@@ -2854,6 +2977,30 @@ never the network. What they cover:
   when each source is read, what a read that did not finish says for each
   host, the test build's line, and a link into a source refused; **Reinstall**
   of a copy of a source no longer added giving nothing (`ShownPlaceTests`);
+* GitLab projects as sources (`GitLabClientTests`, `GitLabSourceTests`), against
+  stub answers shaped like the ones recorded: **Look up** by the encoded path —
+  GitLab's own `404`, and one that is not GitLab's — and everything after it by
+  the project's number; describe with and without `forked_from_project`, and one
+  of another number, or of none, not believed; the head with a weak `ETag` and its `304`; the
+  listing put together from the root and `plugins/` page after page, as git's
+  own tree less the sizes, an empty root asking once, and a next page that does
+  not go on; a file from the files API, refused by `X-Gitlab-Size` and cut one
+  byte past 5 MB; a folder's history; every merge request state; the merge
+  base's four answers and its `400`; every status — `401`, `403`
+  `insufficient_scope`, other `403`s, `404`, `429`, `3xx`, a `400` from the
+  files endpoint and from anywhere else; gitlab.com's two limiters each kept by
+  its name, the reserve kept of the one with the least left, and states with
+  and without them read back; the host map, its pages on the real host, and a
+  test build's line for it; item 9 and item 13 in both languages; **Install
+  from a link…** of a GitLab project's page, of one with a port, and of a link
+  into a GitLab project already added; a manifest past 5 MB refusing its own
+  row only; a listing without sizes in
+  `RepositoryRules` (`CatalogueTests`) and in a catalogue row; the installer
+  holding such a listing to rule 8 as the files arrive (`PluginInstallerTests`)
+  — a file past 5 MB, files past 10 MB, a file the provider refuses, a limit
+  that is not retried — and keeping a previous copy under the name its source
+  has now, matched to it by its id; and one write of a catalogue's state at a
+  time;
 * what `Scripts/make-cli.sh` makes and refuses, and what `release.yml` may do
   and in which order, in the lab's own tests (`e2e/tests/test_make_cli.py`):
   the archives and their names, the signature of the Mac's, a static and
@@ -2974,8 +3121,9 @@ have agreed long enough ([The official repository](#the-official-repository)).
 
 ### Later stages
 
-* **Stage 4 — own and private sources** (begun: a public GitHub repository as a
-  source of its own — [Sources of one's own](#sources-of-ones-own)).
+* **Stage 4 — own and private sources** (begun: a public GitHub repository and
+  a public GitLab project as a source of its own — [Sources of one's
+  own](#sources-of-ones-own)).
   `~/.udeck/sources.json`; GitLab,
   gitlab.com and self-hosted; tokens pasted from a pre-filled creation page, or
   **Sign in** — GitHub and gitlab.com by device flow, a self-hosted GitLab with

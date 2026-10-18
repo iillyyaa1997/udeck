@@ -38,6 +38,8 @@ public struct SourceLink: Equatable, Sendable {
     public static let github = "github"
     public static let gitlab = "gitlab"
     public static let githubHost = "github.com"
+    /// GitLab's own host, whose anonymous limit is GitLab's smallest.
+    public static let gitLabCom = "gitlab.com"
 
     /// The repository or the project, as a record and a sentence name it.
     public var address: RepositoryAddress { RepositoryAddress(provider: provider, host: host, path: path) }
@@ -106,7 +108,7 @@ public struct SourceLink: Equatable, Sendable {
         if name.hasSuffix(".\(githubHost)") || name == "githubusercontent.com" || name.hasSuffix(".githubusercontent.com") {
             return .failure(.notARepository(page: name))
         }
-        let host = (name == "www.gitlab.com" ? "gitlab.com" : name) + (port.map { ":\($0)" } ?? "")
+        let host = (name == "www.\(gitLabCom)" ? gitLabCom : name) + (port.map { ":\($0)" } ?? "")
         return gitLab(segments, host: host)
     }
 

@@ -122,6 +122,17 @@ public final class DeckModel {
     public let udeck: SemanticVersion?
     let endpoints: GitHubEndpoints
     let limits: RateLimitRecorder
+    /// Where a test build reads each host `UDeckPluginsHostMap` names
+    /// (`HostMap`): a GitLab's API, in the lab; none as shipped.
+    let hostMap: [String: URL]
+    /// Each GitLab source's limit, by its id (S4-16): its own, seeded from its
+    /// `catalogue/<id>/state.json` and kept there — GitLab counts by
+    /// limiters of its own, which a GitHub block must not stop. GitHub
+    /// sources read without a token count against the official source's.
+    @ObservationIgnored var gitLabLimits: [String: RateLimitRecorder] = [:]
+    /// What **Look up** of a GitLab project is counted against, by host,
+    /// before the project is a source: what **Add** seeds its limit from.
+    @ObservationIgnored var lookUpLimits: [String: RateLimitRecorder] = [:]
     let trash: any PluginTrash
     var catalogueTimer: Timer?
     var launchRefresh: Task<Void, Never>?
@@ -243,7 +254,8 @@ public final class DeckModel {
         udeckVersion: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0",
         endpoints: GitHubEndpoints = .from(infoDictionary: Bundle.main.infoDictionary),
         trash: any PluginTrash = SystemTrash(),
-        testBuild: [Phrase] = TestBuild.notices(infoDictionary: Bundle.main.infoDictionary)
+        testBuild: [Phrase] = TestBuild.notices(infoDictionary: Bundle.main.infoDictionary),
+        hostMap: [String: URL] = HostMap.from(infoDictionary: Bundle.main.infoDictionary)
     ) {
         self.paths = paths
         self.executor = executor
@@ -252,6 +264,7 @@ public final class DeckModel {
         self.endpoints = endpoints
         self.trash = trash
         self.testBuild = testBuild
+        self.hostMap = hostMap
 
         // Before the plugins folder is first read: an install, update or
         // removal a crash interrupted is finished or undone, so nothing below

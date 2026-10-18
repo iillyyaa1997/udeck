@@ -11,7 +11,7 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from udeck_e2e import config, plugin_repository
+from udeck_e2e import builds, config, plugin_repository
 from udeck_e2e.builds import Builder, SigningKey, make_key
 from udeck_e2e.errors import LabError
 
@@ -53,7 +53,8 @@ class Script:
 
     def __init__(self, rc=0, out="==> Done", err="", leaves_bundle=False, makes_zip=True,
                  wrong_version="", identifier="place.unicorns.udeck", timeouts=0, interrupts=False,
-                 ignores_test_plugins=False, local_networking=True, ignores_repository_id=False):
+                 ignores_test_plugins=False, local_networking=True, ignores_repository_id=False,
+                 ignores_host_map=False, host_map=None):
         self.rc, self.out, self.err = rc, out, err
         self.leaves_bundle = leaves_bundle
         self.makes_zip = makes_zip
@@ -68,6 +69,9 @@ class Script:
         # A make-app.sh that set the fake's addresses and kept the number the
         # application ships with for the official repository, which is GitHub's.
         self.ignores_repository_id = ignores_repository_id
+        # A make-app.sh that wrote no host map for the GitLabs the fake answers as — or wrote another one.
+        self.ignores_host_map = ignores_host_map
+        self.host_map = host_map
         self.stopped = False
         self.ignores_sigterm = False
         self.process = None
@@ -100,6 +104,10 @@ class Script:
                 plist["UDeckPluginsRawBase"] = f"{base}/raw"
                 if not self.ignores_repository_id:
                     plist["UDeckPluginsRepositoryID"] = 900000001
+                if not self.ignores_host_map:
+                    plist["UDeckPluginsHostMap"] = self.host_map or builds.host_map(base)
+            elif self.host_map is not None:
+                plist["UDeckPluginsHostMap"] = self.host_map
             if (options.get("--test-feed") or base) and self.local_networking:
                 plist["NSAppTransportSecurity"] = {"NSAllowsLocalNetworking": True}
             with zipfile.ZipFile(out / f"uDeck-{options['--version']}.zip", "w") as archive:
@@ -224,6 +232,39 @@ def test_every_lab_build_carries_the_fakes_number_for_the_official_repository(tm
     builder(Script(), tmp_path).build("0.4.1", "6")
     with pytest.raises(LabError, match="UDeckPluginsRepositoryID is 1393324153, not 900000001"):
         builder(Script(ignores_repository_id=True), tmp_path / "again").build("0.4.1", "6")
+
+
+def test_every_lab_build_carries_the_host_map_of_the_fakes_gitlabs_and_no_other(tmp_path):
+    """Each GitLab the fake answers as, on its own port of the fake's host (stage 4, R2): a build without the map, or
+    with another, is refused."""
+    assert builds.host_map("http://127.0.0.1:8766") == {"gitlab.example.test": "http://127.0.0.1:8768",
+                                                        "gitlab.com": "http://127.0.0.1:8769"}
+    assert builds.host_map(plugin_repository.base_url()) == {host: f"http://127.0.0.1:{port}"
+                                                             for host, port in config.GITLAB_PORTS.items()}
+    builder(Script(), tmp_path).build("0.4.1", "6")
+    with pytest.raises(LabError, match="UDeckPluginsHostMap is None, not"):
+        builder(Script(ignores_host_map=True), tmp_path / "without").build("0.4.1", "6")
+    with pytest.raises(LabError, match="UDeckPluginsHostMap is .*gitlab.example.test.*8766"):
+        builder(Script(host_map={"gitlab.example.test": "http://127.0.0.1:8766"}), tmp_path / "another").build("0.4.1", "6")
+
+
+def test_the_smokes_build_carries_no_host_map_and_a_checkout_that_ships_one_gives_none(tmp_path):
+    """A build as shipped, and the smoke's, carry no host map: one there would send a host's requests elsewhere."""
+    _shipped(tmp_path)
+    the_builder = builder(Script(), tmp_path)
+    the_builder.plugins_url = None
+    the_builder.build("0.4.1", "6")
+    the_builder = builder(Script(host_map={"gitlab.com": "http://127.0.0.1:8769"}), tmp_path)
+    the_builder.plugins_url = None
+    with pytest.raises(LabError, match="UDeckPluginsHostMap is .*a build as shipped carries none"):
+        the_builder.build("0.4.1", "6")
+    plist = tmp_path / "repo" / "Sources" / "uDeck" / "Support" / "Info.plist"
+    shipped = plistlib.loads(plist.read_bytes())
+    plist.write_bytes(plistlib.dumps({**shipped, "UDeckPluginsHostMap": {"gitlab.com": "http://127.0.0.1:8769"}}))
+    the_builder = builder(Script(), tmp_path)
+    the_builder.plugins_url = None
+    with pytest.raises(LabError, match="ships UDeckPluginsHostMap"):
+        the_builder.build("0.4.1", "6")
 
 
 def test_the_smokes_build_carries_githubs_own_number_and_a_checkout_that_does_not_ship_it_gives_none(tmp_path):

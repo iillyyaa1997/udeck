@@ -182,7 +182,7 @@ struct Russian: Vocabulary {
         case .catalogueNeverRead(let source): "\(source) · ещё не прочитан"
         case .catalogueReading: "Читаю каталог…"
         case .catalogueOff:
-            "Официальный каталог выключен: uDeck не делает запросов к официальному репозиторию и его форкам и не ищет обновлений установленного из них. Добавленные вами источники по-прежнему читаются; установленные плагины продолжают работать."
+            "Официальный каталог выключен: uDeck не делает запросов к официальному репозиторию, а для «Установить по ссылке…» и к его форкам, и не ищет обновлений установленного из них. Добавленные вами источники по-прежнему читаются; установленные плагины продолжают работать."
         case .catalogueEmpty: "В репозитории пока нет плагинов."
         case .catalogueUpdatesWaiting(let count): "Ждут обновления: \(count)"
         case .catalogueUpdatesByThemselves: "Обновлять проверенные плагины самостоятельно"
@@ -209,6 +209,7 @@ struct Russian: Vocabulary {
             "\(path) пришёл не таким, как его перечисляет репозиторий (ожидался \(expected), пришёл \(got))."
         case .catalogueVerified: "Проверен"
         case .catalogueSize(let files, let size): "файлов: \(files) · \(size)"
+        case .catalogueFiles(let files): "файлов: \(files)"
         case .catalogueAsksTo(let list): "Просит \(list)"
         case .catalogueInstall: "Установить"
         case .catalogueUpdate: "Обновить"
@@ -228,7 +229,7 @@ struct Russian: Vocabulary {
         case .catalogueReinstall(let version): "Переустановить \(version)"
         case .catalogueDetails: "Подробности"
         case .catalogueWhatChanged: "Что изменилось"
-        case .catalogueOpenOnGitHub: "Открыть на GitHub"
+        case .catalogueOpenOn(let host): "Открыть на \(host)"
         case .catalogueEarlierVersions: "Прежние версии…"
         case .catalogueBackTo(let version): "Вернуть \(version)"
         case .catalogueRemove: "Удалить"
@@ -323,7 +324,7 @@ struct Russian: Vocabulary {
         case .linkReading: "Спрашиваю GitHub…"
         case .linkClose: "Закрыть"
         case .linkOff:
-            "Официальный каталог выключен, и uDeck не делает запросов к официальному репозиторию и его форкам: включите его, чтобы установить по ссылке."
+            "Официальный каталог выключен, и uDeck не делает запросов к официальному репозиторию, а для ссылки и к его форкам: включите его, чтобы установить по ссылке."
         case .linkRefused(let refusal, let official): Self.linkRefusal(refusal, official: official)
         case .linkNotFound(let link, let official):
             switch link {
@@ -356,6 +357,7 @@ struct Russian: Vocabulary {
         case .linkNotAForkAddAsASource(let repository, let official):
             "\(repository) — не форк \(official). Чтобы ставить из него, добавьте его как отдельный источник."
         case .linkAddAsASource: "Добавить как источник…"
+        case .linkNotGitHubAddAsASource(let host, _): "\(host) — не GitHub. Проект GitLab можно добавить как отдельный источник."
         case .sourceLinkRefused(let refusal, let official): Self.sourceLinkRefusal(refusal, official: official)
         case .sourcesBroken(let broken): Self.sourcesBroken(broken)
         case .sourceSkipped(let skipped): Self.sourceSkipped(skipped)
@@ -378,7 +380,13 @@ struct Russian: Vocabulary {
             "Без доверия: за эти плагины никто не ручается — каждый спрашивает снова, когда меняется его код."
         case .sourceRemove: "Удалить…"
         case .sourcesTestBuild(let host, let base): "Тестовая сборка: \(host) читается с \(base)."
-        case .sourceGitLabNotYet(let host): "\(host): проекты GitLab пока не читаются"
+        case .sourceGitLabLimited(let host, let readAt, let until, let anonymousGitLabCom):
+            "\(host) попросил uDeck подождать: лимит запросов с этой сети или для этого токена исчерпан. "
+                + (readAt.map { "Список ниже — на \($0); " } ?? "")
+                + "uDeck посмотрит снова после \(until)."
+                + (anonymousGitLabCom ? " Без токена gitlab.com разрешает с одной сети лишь несколько запросов в час; с токеном лимит выше." : "")
+        case .sourceNotGitLab(let host):
+            "\(host) не ответил как GitLab. uDeck читает источники на github.com и на GitLab — gitlab.com или собственном."
         case .sourceAlreadyAdded(let name, let address):
             name == address ? "\(address) уже добавлен." : "\(name) (\(address)) уже добавлен."
         case .sourceBranchNotYet:
@@ -647,7 +655,7 @@ extension Russian {
         case .notALink:
             "Это не ссылка на github.com. Вставьте ссылку на запрос на слияние или на ветку \(official) — такую, как её показывает браузер."
         case .notGitHub(let host):
-            "\(host) — не GitHub. Плагины пока приходят из \(official) и его форков; другие сайты появятся позже, как отдельные источники."
+            "\(host) — не GitHub. Проект GitLab можно добавить как отдельный источник."
         case .commit(let sha):
             "Это ссылка на один коммит" + (sha.isEmpty ? "" : ", \(sha.prefix(7))")
                 + ". Установить отдельный коммит пока нельзя: вставьте ссылку на его запрос на слияние или ветку."

@@ -1,0 +1,14 @@
+{
+  "id": "gl-team",
+  "name": "GitLab team",
+  "version": "1.0.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "A team's plugin from a project in nested groups.",
+  "author": "uDeck lab",
+  "run": [
+    "./run.sh"
+  ],
+  "interval": 60,
+  "timeout": 2
+}

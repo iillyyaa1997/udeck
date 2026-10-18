@@ -160,12 +160,14 @@ public enum RepositoryRules {
     ///
     /// `manifest` is nil when the manifest could not be fetched or is not in
     /// the listing. `udeck` is this uDeck's own version; nil skips the
-    /// `minUDeck` comparison, as discovery does.
+    /// `minUDeck` comparison, as discovery does. `sizesListed` is whether the
+    /// host's listings give a file's size at all (`listingRefusals`).
     public static func check(
         folder: String,
         listing: PluginListing,
         manifest data: Data?,
-        udeck: SemanticVersion?
+        udeck: SemanticVersion?,
+        sizesListed: Bool = true
     ) -> Verdict {
         var refusals: [RepositoryRefusal] = []
         let base = "\(CommitListing.pluginsFolder)/\(folder)"
@@ -173,7 +175,7 @@ public enum RepositoryRules {
         if PluginIdentifier(rawValue: folder) == nil {
             refusals.append(.folderNameNotAnID(folder: folder))
         }
-        refusals += listingRefusals(folder: folder, listing: listing)
+        refusals += listingRefusals(folder: folder, listing: listing, sizesListed: sizesListed)
 
         let manifestPath = "\(base)/\(PluginDiscovery.manifestFilename)"
         guard listing.file(at: PluginDiscovery.manifestFilename) != nil else {
@@ -262,7 +264,16 @@ public enum RepositoryRules {
     }
 
     /// Rules 6, 7 and 8 — what the listing alone shows.
-    public static func listingRefusals(folder: String, listing: PluginListing) -> [RepositoryRefusal] {
+    ///
+    /// `sizesListed` false is a host whose listings give no file's size at
+    /// all — GitLab's tree answers carry `id`, `mode`, `name`, `path` and
+    /// `type`, and no size (**measured** when stage 4 was designed): a file
+    /// without one is then no refusal, and its size and the folder's are
+    /// held to rule 8 as the files arrive (`PluginInstaller`). The number of
+    /// files, the names and the depth are still checked from the listing. A
+    /// host that lists sizes and leaves one out is still refused for it.
+    public static func listingRefusals(folder: String, listing: PluginListing,
+                                       sizesListed: Bool = true) -> [RepositoryRefusal] {
         var refusals: [RepositoryRefusal] = []
         let base = "\(CommitListing.pluginsFolder)/\(folder)"
         var namesByParent: [String: [String: String]] = [:]
@@ -301,7 +312,7 @@ public enum RepositoryRules {
             if entry.isFile {
                 if let size = entry.size {
                     if size > maximumFileBytes { refusals.append(.fileTooLarge(path: path, bytes: size)) }
-                } else {
+                } else if sizesListed {
                     refusals.append(.sizeNotListed(path: path))
                 }
             }

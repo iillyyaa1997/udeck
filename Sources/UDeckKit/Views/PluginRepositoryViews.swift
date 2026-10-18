@@ -164,16 +164,15 @@ struct CatalogueRowView: View {
             }
             HStack(spacing: 10) {
                 Text(asks).font(.caption).foregroundStyle(.secondary)
-                Text(strings(.catalogueSize(
-                    files: entry.listing.files.count,
-                    size: ByteCount.text(entry.listing.totalBytes, kilo: strings.language == .russian ? "КБ" : "KB",
-                                         mega: strings.language == .russian ? "МБ" : "MB",
-                                         unit: strings.language == .russian ? "Б" : "B",
-                                         separator: strings.language == .russian ? "," : ".")
-                ))).font(.caption).foregroundStyle(.secondary)
+                Text(size).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("\(named).size")
                 if let page = model.folderPage(id, commit: commit, source: source) {
-                    Button(strings(.catalogueOpenOnGitHub)) { openURL(page) }
+                    // Its host's name, and the page in its value: what a person
+                    // opens, on the real host whatever a test build reads from.
+                    Button(strings(.catalogueOpenOn(host: address.hostName))) { openURL(page) }
                         .buttonStyle(.link).font(.caption)
+                        .accessibilityIdentifier("\(named).page")
+                        .accessibilityValue(page.absoluteString)
                 }
             }
             stateLine
@@ -198,6 +197,22 @@ struct CatalogueRowView: View {
         let requested = manifest?.permissions.capabilities ?? []
         guard !requested.isEmpty else { return strings(.permissionsAsksNothing) }
         return strings(.catalogueAsksTo(requested.map { strings($0.summaryPhrase) }.joined(separator: ", ")))
+    }
+
+    /// The repository whose catalogue this row is of.
+    private var address: RepositoryAddress { model.catalogue(of: source)?.address ?? model.catalogueAddress }
+
+    /// *4 files · 6 KB* — or, of a host whose listings give no sizes
+    /// (GitLab's), *4 files* and nothing about bytes (S4-15).
+    private var size: String {
+        let files = entry.listing.files.count
+        guard address.listsSizes else { return strings(.catalogueFiles(files: files)) }
+        let russian = strings.language == .russian
+        return strings(.catalogueSize(
+            files: files,
+            size: ByteCount.text(entry.listing.totalBytes, kilo: russian ? "КБ" : "KB", mega: russian ? "МБ" : "MB",
+                                 unit: russian ? "Б" : "B", separator: russian ? "," : ".")
+        ))
     }
 
     @ViewBuilder private var action: some View {
@@ -386,7 +401,13 @@ struct InstalledRepositoryControls: View {
     /// list is shown while the copy is of that source still, and goes when
     /// another source's copy takes its place (`EarlierVersions`).
     @State private var historyOf: String?
-    private var showingHistory: Bool { historyOf != nil && historyOf == record?.source }
+    /// Only while the copy's source can be read, too: a list read before the
+    /// official address answered another repository's number goes with it,
+    /// rather than stay with an **Install this version** that does nothing.
+    private var showingHistory: Bool {
+        guard let historyOf, let record, historyOf == record.source else { return false }
+        return model.canRead(record.source)
+    }
 
     /// The warning up on this row: what it said, and the button it goes
     /// with. Its button is held to it (`ShownPlace`).
@@ -430,7 +451,7 @@ struct InstalledRepositoryControls: View {
                         .font(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("plugin.\(id).from")
                     if let page = record.refPage {
-                        Button(strings(.catalogueOpenOnGitHub)) { openURL(page) }
+                        Button(strings(.catalogueOpenOn(host: record.repository.hostName))) { openURL(page) }
                             .buttonStyle(.link).font(.caption)
                             .accessibilityIdentifier("plugin.\(id).refPage")
                     }
@@ -901,10 +922,10 @@ struct LinkInstallSheet: View {
                 .font(.caption).foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("link.refused")
-            if case .linkNotAForkAddAsASource(let repository, _) = phrase {
+            if let page = Self.addAsASource(phrase) {
                 // Nothing is added until Add is pressed in its sheet.
                 Button(strings(.linkAddAsASource)) {
-                    model.openAddSource(prefilled: "https://\(repository)")
+                    model.openAddSource(prefilled: page)
                 }
                 .accessibilityIdentifier("link.addAsASource")
             }
@@ -920,6 +941,17 @@ struct LinkInstallSheet: View {
         }
     }
 
+    /// The page **Add as a source…** fills **Add a source…** with, after a
+    /// refusal that offers it: a repository that is no fork of the official
+    /// one, and a GitLab project's link (S4-20, item 16).
+    static func addAsASource(_ phrase: Phrase) -> String? {
+        switch phrase {
+        case .linkNotAForkAddAsASource(let repository, _): "https://\(repository)"
+        case .linkNotGitHubAddAsASource(_, let page): page
+        default: nil
+        }
+    }
+
     @ViewBuilder private func resolved(_ resolution: RefResolver.Resolution) -> some View {
         let said = LinkRefusal.head(of: resolution)
         HStack(spacing: 8) {
@@ -931,7 +963,7 @@ struct LinkInstallSheet: View {
                     .accessibilityIdentifier("link.head")
             }
             if let page = resolution.origin.repository.page(of: resolution.origin.ref) {
-                Button(strings(.catalogueOpenOnGitHub)) { openURL(page) }
+                Button(strings(.catalogueOpenOn(host: resolution.origin.repository.hostName))) { openURL(page) }
                     .buttonStyle(.link).font(.caption)
                     .accessibilityIdentifier("link.page")
             }
@@ -1110,6 +1142,11 @@ struct ProblemText: View {
         switch problem {
         case .refused(let refusals): refusals.map { strings(.catalogueRefusal($0)) }
         case .recordsBroken(let reason): [strings(.catalogueRecordsBroken(reason: reason))]
+        case .rateLimited(let until) where source?.provider == SourceLink.gitlab:
+            // A GitLab's limit is the GitLab's own (S4-20, item 9), not GitHub's sixty an hour.
+            [strings(CatalogueTrouble.phrase(.rateLimited(until: until), address: source?.address.description ?? "",
+                                             host: source?.host, readAt: nil, until: { Clock.text($0, strings) },
+                                             provider: SourceLink.gitlab))]
         case .rateLimited(let until): [strings(.catalogueLimited(readAt: nil, until: Clock.text(until, strings)))]
         case .rawRateLimited(let until): [strings(.catalogueRawLimited(until: Clock.text(until, strings)))]
         case .unreachable(let path, let reason): [strings(.catalogueFileUnreachable(path: path, reason: reason))]
@@ -1119,7 +1156,8 @@ struct ProblemText: View {
         case .commitGone(let commit): [strings(.catalogueCommitGone(commit: commit))]
         case .catalogue(let error) where source != nil:
             [strings(CatalogueTrouble.phrase(error, address: source?.address.description ?? "", host: source?.host,
-                                             readAt: nil, until: { Clock.text($0, strings) }))]
+                                             readAt: nil, until: { Clock.text($0, strings) },
+                                             provider: source?.provider ?? SourceLink.github))]
         case .catalogue(let error):
             switch error {
             case .unreachable(let reason): [strings(.catalogueUnreachable(reason: reason, readAt: nil))]

@@ -101,11 +101,15 @@ extension PluginOrigin {
 
 extension RepositoryAddress {
     /// Where a person reads `ref` of this repository in a browser: a pull
-    /// request's page, or a branch's; nil for the default branch — the
-    /// catalogue's own links read it — and for a kind this uDeck does not know.
+    /// request's page, or a branch's — on GitLab, after its separator `/-/`:
+    /// `…/-/merge_requests/3`, `…/-/tree/fix`; nil for the default branch —
+    /// the catalogue's own links read it — and for a kind this uDeck does not
+    /// know.
     public func page(of ref: PluginRef) -> URL? {
-        let base = "https://\(host)/\(path)"
-        if let number = ref.pullRequestNumber { return URL(string: "\(base)/pull/\(number)") }
+        let base = "https://\(host)/\(path)" + (provider == SourceLink.gitlab ? "/-" : "")
+        if let number = ref.pullRequestNumber {
+            return URL(string: provider == SourceLink.gitlab ? "\(base)/merge_requests/\(number)" : "\(base)/pull/\(number)")
+        }
         guard ref.kind == PluginRef.branchKind, let name = ref.name, !name.isEmpty,
               let escaped = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else { return nil }
         return URL(string: "\(base)/tree/\(escaped)")

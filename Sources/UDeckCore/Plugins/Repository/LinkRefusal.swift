@@ -23,6 +23,29 @@ public enum LinkRefusal {
         }
     }
 
+    /// What Settings says of `text`, a link `RepositoryLink` refused with
+    /// `refusal` before any request: what each refusal says — and of a link to
+    /// another host than github.com, that a GitLab project can be added as a
+    /// source of its own (S4-20, item 16), with the project's page when the
+    /// link reads as one (`SourceLink`) — which **Add as a source…** fills
+    /// **Add a source…** with — and none when it does not. A GitLab's with a
+    /// port, which is no link to GitHub's reading, is that project's too.
+    public static func refused(_ refusal: RepositoryLink.Refusal, text: String, official: RepositoryAddress) -> Phrase {
+        let project: SourceLink? = switch SourceLink.read(text, official: official) {
+        case .success(let link) where link.provider == SourceLink.gitlab: link
+        default: nil
+        }
+        switch refusal {
+        case .notGitHub(let host):
+            return .linkNotGitHubAddAsASource(host: project?.host ?? host, page: project?.page)
+        case .notALink:
+            guard let project else { return .linkRefused(refusal, official: official.description) }
+            return .linkNotGitHubAddAsASource(host: project.host, page: project.page)
+        default:
+            return .linkRefused(refusal, official: official.description)
+        }
+    }
+
     /// What a resolved link says above its list: the line of history and the
     /// commit it was read at (`linkHead`), whether a pull request was merged —
     /// into the default branch, whose merge is what the catalogue has, or into

@@ -40,6 +40,8 @@ public enum OperationProblem: Equatable, Sendable {
             case .refused(let status): self = .catalogue(.refused(status: status))
             case .unreachable(let reason): self = .catalogue(.unreachable(reason))
             case .badAnswer(let reason): self = .catalogue(.badAnswer(reason))
+            // Said as a read of the catalogue says them (`CatalogueRefresher.reason`).
+            case .unauthorized, .forbidden, .moved, .tooLarge: self = .catalogue(CatalogueRefresher.reason(error, branch: nil))
             }
         case let error as CatalogueError:
             self = .catalogue(error)
@@ -273,6 +275,7 @@ extension DeckModel {
             DeckLog.plugins.error("the official repository answered another number than \(String(describing: self.endpoints.repositoryID), privacy: .public): not read, and nothing updates by itself")
         }
         catalogueState = catalogueStore.state()
+        sayTheOfficialAddressChanged()
         // In the same read, after the catalogue: what became of the branch
         // or the pull request each copy installed from one came from — or,
         // when the read did not get that far, that none of them was asked
@@ -884,7 +887,9 @@ extension DeckModel {
         let link: RepositoryLink
         switch RepositoryLink.read(text, official: official) {
         case .failure(let refusal):
-            linkLookup = .refused(.linkRefused(refusal, official: official.description))
+            // Another host's link: a GitLab project's is offered as a source
+            // of its own (`LinkRefusal.refused`).
+            linkLookup = .refused(LinkRefusal.refused(refusal, text: text, official: official))
             return
         case .success(let read):
             link = read
@@ -923,6 +928,18 @@ extension DeckModel {
         commit.flatMap { store.listing($0) }
     }
 
+    /// While the official address belongs to another repository
+    /// (`readsOfficialRepository`), with **Official catalogue** on, what
+    /// **Install from a link…** found before is said to be what it is no
+    /// longer installed from — never a list whose **Install** does nothing.
+    func sayTheOfficialAddressChanged() {
+        guard settings.readsOfficialCatalogue, !readsOfficialRepository else { return }
+        switch linkLookup {
+        case .resolved?, .catalogue?: linkLookup = .refused(.catalogueOfficialRepositoryChanged)
+        default: break
+        }
+    }
+
     /// The sheet closed: what it said goes, and an answer still on its way
     /// is not shown.
     public func closeLinkLookup() {
@@ -936,7 +953,13 @@ extension DeckModel {
     /// (`ShownPlace.installFromLink`).
     @discardableResult
     public func installFromLink(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
-        guard readsOfficialRepository, case .resolved(let resolution)? = linkLookup else { return .goAhead }
+        guard readsOfficialRepository, case .resolved(let resolution)? = linkLookup else {
+            // What Look up found before the official address was answered by
+            // another repository's number is not installed: the sheet says why,
+            // rather than a press doing nothing.
+            sayTheOfficialAddressChanged()
+            return .goAhead
+        }
         return act(ShownPlace.installFromLink(id, resolution: resolution, in: paths, installed: installed, shown: shown,
                                               source: catalogueAddress), id: id)
     }
@@ -1365,10 +1388,22 @@ extension DeckModel {
         if !treesOnDisk.inQuestion { treesOnDisk.mayHaveChanged() }
     }
 
+    /// What every limit says now, kept: the official source's — which GitHub
+    /// sources read without a token share — in `catalogue/official/state.json`,
+    /// and each GitLab source's own in its `state.json`. Each a read of the
+    /// state as it is on disk, changed and written in one step with every
+    /// other write of it (`CatalogueStore.updateState`): a read ending on
+    /// another thread meanwhile writes its whole state either before — and its
+    /// state is what is changed here — or after, with the limit as it stood
+    /// then, never lost under one from before it.
     func persistRateLimit() {
-        var state = catalogueStore.state()
-        state.rateLimit = limits.current
-        try? catalogueStore.save(state)
-        catalogueState = state
+        let current = limits.current
+        catalogueState = catalogueStore.updateState { $0.rateLimit = current }
+        for source in sources where source.provider == SourceLink.gitlab {
+            guard let recorder = gitLabLimits[source.id] else { continue }
+            let limit = recorder.current
+            guard sourceStates[source.id]?.rateLimit != limit else { continue }
+            sourceStates[source.id] = CatalogueStore(paths: paths, source: source.id).updateState { $0.rateLimit = limit }
+        }
     }
 }

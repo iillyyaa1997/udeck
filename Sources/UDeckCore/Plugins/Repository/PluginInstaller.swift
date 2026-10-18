@@ -331,10 +331,13 @@ public struct PluginInstaller: Sendable {
         guard request.origin.mayBeTaken(forSourceAt: request.sourceRepository) else { throw ProviderError.notFound }
         _ = try loadRecords()
         let id = request.id.rawValue
-        var before = RepositoryRules.listingRefusals(folder: id, listing: request.folder)
+        // A host whose listings give no sizes (GitLab's) is held to rule 8 as
+        // the files arrive instead (`download`, `place`).
+        let sizesListed = request.repository.listsSizes
+        var before = RepositoryRules.listingRefusals(folder: id, listing: request.folder, sizesListed: sizesListed)
         if let manifest {
             before = RepositoryRules.check(folder: id, listing: request.folder, manifest: manifest,
-                                           udeck: discovery.udeckVersion).refusals
+                                           udeck: discovery.udeckVersion, sizesListed: sizesListed).refusals
         }
         guard before.isEmpty else { throw InstallError.refused(before) }
 
@@ -377,11 +380,18 @@ public struct PluginInstaller: Sendable {
         try? fileManager.removeItem(at: staged.directory)
     }
 
+    /// Every file of the folder, four at a time. Of a listing that gave no
+    /// sizes (GitLab's), rule 8 is held as the files arrive: one larger than a
+    /// plugin's file may be is refused (`place`, and the provider's own read,
+    /// `ProviderError.tooLarge`), and once those that arrived add up to more
+    /// than a plugin may be, the rest is not asked for (`tooLarge`).
     private func download(_ request: InstallRequest, into folder: URL) async throws {
         let files = request.folder.files
-        let base = "\(CommitListing.pluginsFolder)/\(request.id.rawValue)"
-        try await withThrowingTaskGroup(of: Void.self) { group in
+        let id = request.id.rawValue
+        let base = "\(CommitListing.pluginsFolder)/\(id)"
+        try await withThrowingTaskGroup(of: Int.self) { group in
             var next = 0
+            var unlisted = 0
             func add() {
                 let entry = files[next]
                 next += 1
@@ -389,10 +399,16 @@ public struct PluginInstaller: Sendable {
                     let data = try await fetchWithRetries("\(base)/\(entry.path)", commit: request.commit,
                                                           from: request.repository, of: request.source)
                     try place(data, as: entry, in: folder, base: base)
+                    return entry.size == nil ? data.count : 0
                 }
             }
             while next < min(Self.width, files.count) { add() }
-            while try await group.next() != nil {
+            while let arrived = try await group.next() {
+                unlisted += arrived
+                if unlisted > RepositoryRules.maximumBytes {
+                    group.cancelAll()
+                    throw InstallError.refused([.tooLarge(id: id, bytes: unlisted, files: files.count)])
+                }
                 if next < files.count { add() }
             }
         }
@@ -407,6 +423,14 @@ public struct PluginInstaller: Sendable {
                 return try await fetch(source, repository, path, commit)
             } catch ProviderError.rawRateLimited(let until) {
                 throw InstallError.rawRateLimited(until: until)
+            } catch ProviderError.rateLimited(let until) {
+                // A host whose files come from its API — GitLab's — blocked:
+                // nothing is asked of it before then, so nothing is retried.
+                throw InstallError.rateLimited(until: until)
+            } catch ProviderError.tooLarge(let bytes) {
+                // Larger than a plugin's file may be, said by the host or
+                // read past: asked again it is no smaller.
+                throw InstallError.refused([.fileTooLarge(path: path, bytes: bytes)])
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -419,6 +443,11 @@ public struct PluginInstaller: Sendable {
 
     private func place(_ data: Data, as entry: ListedEntry, in folder: URL, base: String) throws {
         let path = "\(base)/\(entry.path)"
+        // A listing without its size: rule 8 for it is held here, as it
+        // arrived, before anything is made of it.
+        if entry.size == nil, data.count > RepositoryRules.maximumFileBytes {
+            throw InstallError.refused([.fileTooLarge(path: path, bytes: data.count)])
+        }
         let got = GitHash.blob(data)
         guard got == entry.sha else {
             throw InstallError.refused([.arrivedDifferent(path: path, expected: String(entry.sha.prefix(7)),
@@ -530,7 +559,7 @@ public struct PluginInstaller: Sendable {
     }
 
     private func makeRecord(_ request: InstallRequest, existing: InstalledRecord?) -> InstalledRecord {
-        let previous: PreviousCopy?
+        var previous: PreviousCopy?
         let pinned: Bool
         switch request.operation {
         case .install, .replace:
@@ -546,6 +575,7 @@ public struct PluginInstaller: Sendable {
             previous = existing?.previous
             pinned = existing?.pinned ?? false
         }
+        if let existing { previous = previous.map { PreviousCopy.renamed($0, of: existing, by: request) } }
         let at = now()
         var record = InstalledRecord(
             source: request.source, repository: request.repository, ref: request.ref,
@@ -1057,6 +1087,10 @@ public struct PluginInstaller: Sendable {
         case .refused(let status): "HTTP \(status)"
         case .unreachable(let reason): reason
         case .badAnswer(let reason): reason
+        case .unauthorized: "HTTP 401"
+        case .forbidden: "HTTP 403"
+        case .moved(let status): "HTTP \(status)"
+        case .tooLarge(let bytes): "\(bytes) bytes"
         }
     }
 }

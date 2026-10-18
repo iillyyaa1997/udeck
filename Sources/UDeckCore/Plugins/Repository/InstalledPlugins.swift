@@ -173,6 +173,29 @@ public struct PreviousCopy: Codable, Equatable, Sendable {
         }
         return .notASource(from)
     }
+
+    /// `previous` — kept by `existing`'s record, and kept again by the record
+    /// `request` makes in its place — matched to its source by the source's
+    /// id, not by the name its repository had: when the copy it was the
+    /// previous of, and the copy that comes, are both of one source of one's
+    /// own — one id, so one repository by its number — and `previous` is that
+    /// same source's default branch (its repository the record's own), it is
+    /// kept under the name the source has now, which the copy that comes is
+    /// taken from (`request.repository`). So after a source is renamed, a copy
+    /// updated later still finds its previous copy's source (rule 1 of
+    /// `source(record:official:sources:)`) and offers **Back to**. Anything
+    /// else is kept as it was: the official source's — its forks are other
+    /// repositories — another source's copy, a ref that is not the default
+    /// branch, and a copy recorded with no repository, which is its record's
+    /// source's already.
+    static func renamed(_ previous: PreviousCopy, of existing: InstalledRecord, by request: InstallRequest) -> PreviousCopy {
+        guard request.source != InstalledPlugins.officialSource, existing.source == request.source,
+              existing.ref.isDefault, request.ref.isDefault, previous.ref.isDefault,
+              let repository = previous.repository, repository == existing.repository else { return previous }
+        var kept = previous
+        kept.repository = request.repository
+        return kept
+    }
 }
 
 /// Which source a previous copy is of (`PreviousCopy.source`).

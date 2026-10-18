@@ -78,14 +78,14 @@ struct LocalizationTests {
         .catalogueInvalidPassport(source: "github.com/o/r", reason: "no name"), .catalogueRefused(status: 451),
         .catalogueBadAnswer(reason: "garbled"),
         .catalogueArrivedDifferent(path: "udeck-plugins.json", expected: "1a2b3c4", got: "5d6e7f8"),
-        .catalogueVerified, .catalogueSize(files: 4, size: "6 KB"), .catalogueAsksTo("run sysctl"),
+        .catalogueVerified, .catalogueSize(files: 4, size: "6 KB"), .catalogueFiles(files: 4), .catalogueAsksTo("run sysctl"),
         .catalogueInstall, .catalogueUpdate, .catalogueReplace, .catalogueInstalled,
         .catalogueAvailable(version: "1.3.0"), .catalogueChangedStill(version: "1.2.0"), .catalogueAsksDifferently,
         .catalogueRepositoryNowHas(version: "1.1.0"), .catalogueSwitchTo(version: "1.1.0"),
         .catalogueUpdateNeedsAPI(version: "2.0.0", api: 2), .catalogueUpdateNeedsUDeck(version: "1.3.0", required: "0.8.0"),
         .catalogueUpdateCannotInstall(version: "1.3.0"), .catalogueGone, .catalogueOwnFolder(id: "uptime"),
         .catalogueMissing(id: "uptime", path: "~/.udeck/plugins"), .catalogueReinstall(version: "1.2.0"),
-        .catalogueDetails, .catalogueWhatChanged, .catalogueOpenOnGitHub, .catalogueEarlierVersions,
+        .catalogueDetails, .catalogueWhatChanged, .catalogueOpenOn(host: "GitHub"), .catalogueOpenOn(host: "gitlab.example"), .catalogueEarlierVersions,
         .catalogueBackTo(version: "1.0.0"), .catalogueRemove, .catalogueWorking,
         .catalogueReplaceConfirm(id: "uptime", path: "~/.udeck/plugins"),
         .catalogueUpdateOverChanges(id: "uptime", version: "1.3.0"),
@@ -164,6 +164,7 @@ struct LocalizationTests {
         .catalogueInstalledFromElsewhere(.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x")),
         .catalogueInstallFromHere,
         .linkNotAForkAddAsASource(repository: "github.com/someone/r", official: "github.com/o/r"), .linkAddAsASource,
+        .linkNotGitHubAddAsASource(host: "gitlab.example", page: "https://gitlab.example/g/p"),
         .sourceLinkRefused(.empty, official: "github.com/o/r"), .sourceLinkRefused(.notALink, official: "github.com/o/r"),
         .sourceLinkRefused(.notHTTPS, official: "github.com/o/r"), .sourceLinkRefused(.ssh, official: "github.com/o/r"),
         .sourceLinkRefused(.login, official: "github.com/o/r"),
@@ -191,7 +192,9 @@ struct LocalizationTests {
         .windowReinstallBrings(.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x")),
         .sourcesTitle, .sourcesAdd, .sourcesAddField, .sourcesAddConfirm, .sourcesAsking(host: "github.com"),
         .sourceNotTrusted, .sourceRemove, .sourcesTestBuild(host: "api.github.com", base: "http://127.0.0.1:8766/api"),
-        .sourceGitLabNotYet(host: "gitlab.com"), .sourceAlreadyAdded(name: "Team", address: "github.com/o/r"),
+        .sourceGitLabLimited(host: "gitlab.com", readAt: "14:02", until: "15:07", anonymousGitLabCom: true),
+        .sourceGitLabLimited(host: "gitlab.example", readAt: nil, until: "15:07", anonymousGitLabCom: false),
+        .sourceNotGitLab(host: "gitlab.example"), .sourceAlreadyAdded(name: "Team", address: "github.com/o/r"),
         .sourceBranchNotYet,
 
         .pluginLastRun(at: "21:04:05", reason: .interval, duration: 0.21, result: .card),
@@ -276,7 +279,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 439,
+        #expect(Self.all.count == 444,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
@@ -587,14 +590,17 @@ struct LocalizationTests {
                 == "Адрес официального каталога теперь принадлежит другому репозиторию. uDeck перестал его читать, и ничего не обновляется само; установленные плагины продолжают работать.")
         // S4-04: off, the switch stops the official repository alone — not a
         // source added — and what is said under it says no more than that.
+        // Its forks only as Install from a link… asks them: a fork of the
+        // official repository added as a source of one's own is a source, and
+        // is read whatever the switch says (R1b's review).
         #expect(english(.catalogueOff)
-                == "The official catalogue is off: uDeck makes no request to the official repository or its forks, and does not look for updates of what was installed from them. Sources you added are still read; installed plugins keep running.")
+                == "The official catalogue is off: uDeck makes no request to the official repository, nor to its forks for Install from a link…, and does not look for updates of what was installed from them. Sources you added are still read; installed plugins keep running.")
         #expect(russian(.catalogueOff)
-                == "Официальный каталог выключен: uDeck не делает запросов к официальному репозиторию и его форкам и не ищет обновлений установленного из них. Добавленные вами источники по-прежнему читаются; установленные плагины продолжают работать.")
+                == "Официальный каталог выключен: uDeck не делает запросов к официальному репозиторию, а для «Установить по ссылке…» и к его форкам, и не ищет обновлений установленного из них. Добавленные вами источники по-прежнему читаются; установленные плагины продолжают работать.")
         #expect(english(.linkOff)
-                == "The official catalogue is off, so uDeck makes no request to the official repository or its forks: switch it on to install from a link.")
+                == "The official catalogue is off, so uDeck makes no request to the official repository, nor to its forks for a link: switch it on to install from a link.")
         #expect(russian(.linkOff)
-                == "Официальный каталог выключен, и uDeck не делает запросов к официальному репозиторию и его форкам: включите его, чтобы установить по ссылке.")
+                == "Официальный каталог выключен, и uDeck не делает запросов к официальному репозиторию, а для ссылки и к его форкам: включите его, чтобы установить по ссылке.")
         #expect(english(.sourceIDTaken(name: "Team")) == "uDeck cannot add this source: its id would be the same as Team's.")
         #expect(russian(.sourceIDTaken(name: "Team"))
                 == "uDeck не может добавить этот источник: его идентификатор совпал бы с идентификатором Team.")

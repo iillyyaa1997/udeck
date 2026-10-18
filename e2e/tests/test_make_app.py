@@ -89,6 +89,24 @@ def test_a_lab_build_lands_where_it_was_told_carries_both_versions_and_leaves_on
     assert plist["CFBundleIdentifier"] == "place.unicorns.udeck"
 
 
+def test_a_lab_build_reads_each_gitlab_the_fake_answers_as_on_its_own_port(checkout):
+    """--test-plugins: GitHub at the fake's /api and /raw, and UDeckPluginsHostMap with each GitLab on its own port of the
+    fake's host, as config.GITLAB_PORTS and builds.host_map name them; a build without it carries no map."""
+    from udeck_e2e import builds, config
+
+    done = make_app(checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99", "--zip",
+                    "--test-plugins", "http://127.0.0.1:8766")
+    assert done.returncode == 0, done.stdout + done.stderr
+    plist = plist_in(checkout / "lab-builds" / "uDeck-9.9.9.zip")
+    assert plist["UDeckPluginsAPIBase"] == "http://127.0.0.1:8766/api"
+    assert plist["UDeckPluginsHostMap"] == builds.host_map("http://127.0.0.1:8766") == {
+        host: f"http://127.0.0.1:{port}" for host, port in config.GITLAB_PORTS.items()}
+    shutil.rmtree(checkout / "lab-builds")
+    done = make_app(checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99", "--zip")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "UDeckPluginsHostMap" not in plist_in(checkout / "lab-builds" / "uDeck-9.9.9.zip")
+
+
 def test_the_command_travels_inside_the_bundle_signed_with_it(checkout):
     """Settings' Install command links ~/.local/bin/udeck-plugin to Contents/Helpers/udeck-plugin.
 

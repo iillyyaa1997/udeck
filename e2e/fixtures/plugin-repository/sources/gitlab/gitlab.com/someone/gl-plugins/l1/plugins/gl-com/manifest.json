@@ -1,0 +1,14 @@
+{
+  "id": "gl-com",
+  "name": "gitlab.com hello",
+  "version": "1.0.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "Says hello from gitlab.com.",
+  "author": "uDeck lab",
+  "run": [
+    "./run.sh"
+  ],
+  "interval": 60,
+  "timeout": 2
+}

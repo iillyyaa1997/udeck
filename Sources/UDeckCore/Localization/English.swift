@@ -176,7 +176,7 @@ struct English: Vocabulary {
         case .catalogueNeverRead(let source): "\(source) · not read yet"
         case .catalogueReading: "Reading the catalogue…"
         case .catalogueOff:
-            "The official catalogue is off: uDeck makes no request to the official repository or its forks, and does not look for updates of what was installed from them. Sources you added are still read; installed plugins keep running."
+            "The official catalogue is off: uDeck makes no request to the official repository, nor to its forks for Install from a link…, and does not look for updates of what was installed from them. Sources you added are still read; installed plugins keep running."
         case .catalogueEmpty: "The repository offers no plugins yet."
         case .catalogueUpdatesWaiting(let count):
             count == 1 ? "1 update is waiting" : "\(count) updates are waiting"
@@ -204,6 +204,7 @@ struct English: Vocabulary {
             "\(path) arrived different from what the repository lists (expected \(expected), got \(got))."
         case .catalogueVerified: "Verified"
         case .catalogueSize(let files, let size): files == 1 ? "1 file · \(size)" : "\(files) files · \(size)"
+        case .catalogueFiles(let files): files == 1 ? "1 file" : "\(files) files"
         case .catalogueAsksTo(let list): "Asks to \(list)"
         case .catalogueInstall: "Install"
         case .catalogueUpdate: "Update"
@@ -223,7 +224,7 @@ struct English: Vocabulary {
         case .catalogueReinstall(let version): "Reinstall \(version)"
         case .catalogueDetails: "Details"
         case .catalogueWhatChanged: "What changed"
-        case .catalogueOpenOnGitHub: "Open on GitHub"
+        case .catalogueOpenOn(let host): "Open on \(host)"
         case .catalogueEarlierVersions: "Earlier versions…"
         case .catalogueBackTo(let version): "Back to \(version)"
         case .catalogueRemove: "Remove"
@@ -317,7 +318,7 @@ struct English: Vocabulary {
         case .linkReading: "Asking GitHub…"
         case .linkClose: "Close"
         case .linkOff:
-            "The official catalogue is off, so uDeck makes no request to the official repository or its forks: switch it on to install from a link."
+            "The official catalogue is off, so uDeck makes no request to the official repository, nor to its forks for a link: switch it on to install from a link."
         case .linkRefused(let refusal, let official): Self.linkRefusal(refusal, official: official)
         case .linkNotFound(let link, let official):
             switch link {
@@ -350,6 +351,7 @@ struct English: Vocabulary {
         case .linkNotAForkAddAsASource(let repository, let official):
             "\(repository) is not a fork of \(official). To install from it, add it as a source of its own."
         case .linkAddAsASource: "Add as a source…"
+        case .linkNotGitHubAddAsASource(let host, _): "\(host) is not GitHub. A GitLab project can be added as a source of its own."
         case .sourceLinkRefused(let refusal, let official): Self.sourceLinkRefusal(refusal, official: official)
         case .sourcesBroken(let broken): Self.sourcesBroken(broken)
         case .sourceSkipped(let skipped): Self.sourceSkipped(skipped)
@@ -371,7 +373,14 @@ struct English: Vocabulary {
             "Not trusted: nobody vouches for these plugins — each asks again whenever its code changes."
         case .sourceRemove: "Remove…"
         case .sourcesTestBuild(let host, let base): "Test build: \(host) is read from \(base)."
-        case .sourceGitLabNotYet(let host): "\(host): GitLab projects are not read yet"
+        case .sourceGitLabLimited(let host, let readAt, let until, let anonymousGitLabCom):
+            "\(host) asked uDeck to wait: its limit of requests from this network, or for this token, is used up. "
+                + (readAt.map { "The list below is from \($0); " } ?? "")
+                + "uDeck will look again after \(until)."
+                + (anonymousGitLabCom
+                    ? " Without a token gitlab.com allows only a few requests an hour from one network; a token raises the limit." : "")
+        case .sourceNotGitLab(let host):
+            "\(host) did not answer as GitLab. uDeck reads sources on github.com and on GitLab — gitlab.com or your own."
         case .sourceAlreadyAdded(let name, let address):
             name == address ? "\(address) is added already." : "\(name) (\(address)) is added already."
         case .sourceBranchNotYet:
@@ -619,7 +628,7 @@ struct English: Vocabulary {
         case .notALink:
             "That is not a github.com link. Paste the link of a pull request or a branch of \(official), as the browser shows it."
         case .notGitHub(let host):
-            "\(host) is not GitHub. Plugins come from \(official) and its forks for now; other hosts come later, as sources of their own."
+            "\(host) is not GitHub. A GitLab project can be added as a source of its own."
         case .commit(let sha):
             "That is the link of one commit" + (sha.isEmpty ? "" : ", \(sha.prefix(7))")
                 + ". Installing a single commit is not possible yet: paste the link of its pull request or its branch."

@@ -111,7 +111,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// On from the first launch, because it is what makes uDeck convenient to
     /// somebody who has never heard of a plugin repository — and optional so
     /// that the settings file says nothing until the operator switches it off.
-    /// Off, uDeck makes no request to the official repository or its forks;
+    /// Off, uDeck makes no request to the official repository, nor to its
+    /// forks for **Install from a link…** — a fork added as a source of one's
+    /// own is a source, read until it is removed;
     /// the sources added are read until they are removed (S4-04), installed
     /// plugins keep running, and uDeck stops knowing about the updates of
     /// those from the official repository.

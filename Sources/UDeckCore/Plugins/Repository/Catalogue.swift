@@ -101,7 +101,7 @@ public struct Catalogue: Equatable, Sendable {
         }
         let entries = listing.pluginFolders.compactMap { folder -> CatalogueEntry? in
             guard let plugin = listing.plugins[folder] else { return nil }
-            return entry(folder, plugin, store: store, udeck: udeck, language: language)
+            return entry(folder, plugin, store: store, udeck: udeck, language: language, sizesListed: address.listsSizes)
         }
         return Catalogue(
             address: address, commit: head, branch: state.defaultBranch, passport: passport,
@@ -113,16 +113,20 @@ public struct Catalogue: Equatable, Sendable {
     }
 
     /// One folder of a cached listing as a row: its rules checked, its
-    /// manifest and its translation read out of the blob store.
+    /// manifest and its translation read out of the blob store. `sizesListed`
+    /// false for a host whose listings give no sizes — GitLab's — whose files
+    /// are held to rule 8 as they arrive (`RepositoryRules.listingRefusals`).
     public static func entry(
         _ folder: String,
         _ plugin: PluginListing,
         store: CatalogueStore,
         udeck: SemanticVersion?,
-        language: String
+        language: String,
+        sizesListed: Bool = true
     ) -> CatalogueEntry {
         let manifestData = plugin.file(at: PluginDiscovery.manifestFilename).flatMap { store.blob($0.sha) }
-        let verdict = RepositoryRules.check(folder: folder, listing: plugin, manifest: manifestData, udeck: udeck)
+        let verdict = RepositoryRules.check(folder: folder, listing: plugin, manifest: manifestData, udeck: udeck,
+                                            sizesListed: sizesListed)
         var translations: [String: ManifestTranslation] = [:]
         let code = language.lowercased()
         if let file = plugin.file(at: "manifest.\(code).json"), let data = store.blob(file.sha),

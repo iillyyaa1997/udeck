@@ -73,7 +73,7 @@ struct SourceReadingTests {
         #expect(state.defaultBranch == "main" && state.defaultBranchReadAt == found.readAt && state.head == nil)
     }
 
-    @Test("Look up refuses before any request what SourceLink refuses, and a GitLab project is not read yet")
+    @Test("Look up refuses before any request what SourceLink refuses, and a GitLab project is asked of its host")
     func lookUpBeforeAnyRequest() {
         let official = RepositoryAddress.official
         #expect(SourceLookUp.read("http://github.com/someone/team-plugins", official: official)
@@ -83,11 +83,9 @@ struct SourceReadingTests {
         #expect(SourceLookUp.read("github.com/iillyyaa1997/udeck-plugins", official: official)
                 == .refused(.sourceLinkRefused(.officialCatalogue, official: official.description)))
         #expect(SourceLookUp.read("https://gitlab.example.test/group/sub/team/-/tree/main", official: official)
-                == .refused(.sourceGitLabNotYet(host: "gitlab.example.test")))
+                == .link(SourceLink(provider: "gitlab", host: "gitlab.example.test", path: "group/sub/team")))
         #expect(SourceLookUp.read("github.com/someone/team-plugins/tree/main/plugins/team-clock", official: official)
                 == .link(SourceLink(provider: "github", host: "github.com", path: "someone/team-plugins")))
-        #expect(Strings(.english)(.sourceGitLabNotYet(host: "gitlab.com")) == "gitlab.com: GitLab projects are not read yet")
-        #expect(Strings(.russian)(.sourceGitLabNotYet(host: "gitlab.com")) == "gitlab.com: проекты GitLab пока не читаются")
     }
 
     @Test("Look up: 404 is S4-20's item 1; no passport is not a plugin repository; an answer without a number is not believed")
@@ -111,7 +109,7 @@ struct SourceReadingTests {
         let unnumbered = "unnumbered-\(UUID().uuidString.lowercased()).invalid"
         Self.team(unnumbered, id: nil)
         defer { StubAnswers.forget(unnumbered) }
-        guard case .failed(.badAnswer, "github.com", "github.com/someone/team-plugins") = await SourceLookUp.lookUp(
+        guard case .failed(.badAnswer, "github.com", "github.com/someone/team-plugins", "github") = await SourceLookUp.lookUp(
             link, list: SourceList(), official: .official, officialID: Self.officialID, clients: Self.clients(unnumbered)) else {
             Issue.record("an answer with no number is not one a source can be added from"); return
         }
@@ -162,7 +160,7 @@ struct SourceReadingTests {
         let came = await SourceLookUp.lookUp(SourceLink(provider: "github", host: "github.com", path: "someone/team-plugins"),
                                              list: SourceList(), official: .official, officialID: Self.officialID,
                                              clients: Self.clients(host, limits: limits))
-        guard case .failed(.rateLimited, "github.com", "github.com/someone/team-plugins") = came else { Issue.record("came to \(came)"); return }
+        guard case .failed(.rateLimited, "github.com", "github.com/someone/team-plugins", "github") = came else { Issue.record("came to \(came)"); return }
         #expect(StubAnswers.asked(host).isEmpty)
     }
 
@@ -195,7 +193,8 @@ struct SourceReadingTests {
 
         let gitlab = OwnSource(id: "gitlab.example-team-00000000", provider: "gitlab", host: "gitlab.example",
                                path: "tools/team", remoteID: 7, addedAt: nil)
-        #expect(clients.of(gitlab) == nil, "GitLab is not read yet")
+        // A GitLab source is read through GitLab's client, on its own host, by its number (GitLabSourceTests).
+        #expect(clients.of(gitlab)?.address == gitlab.address && clients.of(gitlab)?.remoteID == 7)
         #expect(SourceProvider(clients.byPath("someone/team-plugins")) == nil, "only a client addressed by its number")
     }
 
@@ -351,7 +350,7 @@ struct SourceReadingTests {
         let came = await SourceLookUp.lookUp(SourceLink(provider: "github", host: "github.com", path: "Someone/Team-Plugins"),
                                              list: SourceList(), official: .official, officialID: Self.officialID,
                                              clients: Self.clients(host))
-        guard case .failed(_, "github.com", "github.com/someone/team-plugins") = came else {
+        guard case .failed(_, "github.com", "github.com/someone/team-plugins", "github") = came else {
             Issue.record("came to \(came)"); return
         }
     }
@@ -471,6 +470,10 @@ struct SourceReadingTests {
     func linksIntoASource() {
         let team = OwnSource(id: "github.com-team-plugins-12345678", provider: "github", host: "github.com",
                              path: "someone/team-plugins", remoteID: 1, addedAt: nil)
+        let project = OwnSource(id: "gitlab.example.test-udeck-plugins-12345678", provider: "gitlab",
+                                host: "gitlab.example.test", path: "tools/udeck-plugins", remoteID: 7, addedAt: nil)
+        let ported = OwnSource(id: "gitlab.example.test-8443-team-12345678", provider: "gitlab",
+                               host: "gitlab.example.test:8443", path: "group/sub/team", remoteID: 9, addedAt: nil)
         let official = RepositoryAddress.official
         for (link, names) in [
             ("https://github.com/someone/team-plugins/tree/main/plugins/team-clock", true),
@@ -480,8 +483,19 @@ struct SourceReadingTests {
             ("https://github.com/iillyyaa1997/udeck-plugins/tree/fix", false),
             ("https://github.com/iillyyaa1997/udeck-plugins/pull/3", false),
             ("https://gitlab.com/someone/team-plugins", false),
+            // A GitLab project added: a merge request, a branch, a folder on it, its page — as the browser shows them.
+            ("https://gitlab.example.test/tools/udeck-plugins/-/merge_requests/3", true),
+            ("https://gitlab.example.test/tools/udeck-plugins/-/tree/fix/plugins/gl-hello", true),
+            ("gitlab.example.test/tools/udeck-plugins.git", true),
+            ("https://gitlab.example.test:8443/group/sub/team/-/tree/main", true),
+            // Not that project: its path on another host or port, another case, another project of the host.
+            ("https://gitlab.com/tools/udeck-plugins/-/tree/fix", false),
+            ("https://gitlab.example.test:8443/tools/udeck-plugins", false),
+            ("https://gitlab.example.test/Tools/udeck-plugins/-/tree/fix", false),
+            ("https://gitlab.example.test/tools/other/-/merge_requests/3", false),
+            ("https://gitlab.example.test/group/sub/team/-/tree/main", false),
         ] {
-            #expect(RepositoryLink.namesASource(link, official: official, sources: [team]) == names, "\(link)")
+            #expect(RepositoryLink.namesASource(link, official: official, sources: [team, project, ported]) == names, "\(link)")
             #expect(!RepositoryLink.namesASource(link, official: official, sources: []), "\(link) with no source added")
         }
         #expect(Strings(.english)(.sourceBranchNotYet)

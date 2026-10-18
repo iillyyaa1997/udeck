@@ -1039,6 +1039,126 @@ def test_the_fakes_number_is_one_number_in_make_app_the_fixture_and_the_lab():
     assert "officialRepositoryID = 1_393_324_153" in swift and f"{config.SHIPPED_REPOSITORY_ID:_}" == "1_393_324_153"
 
 
+# --- GitLab projects as sources (stage 4, R2) ------------------------------------------------
+
+
+def test_the_gitlab_checks_name_the_projects_there_are():
+    """The projects, their numbers, commits and plugins the GitLab checks are written against, as the fake reads them."""
+    projects = _fake().read_projects(str(plugin_repository.FIXTURES))
+    assert sorted(projects) == sorted([checks.GL_PROJECT, checks.GL_TEAM, checks.GL_EMPTY, checks.GL_ON_COM])
+    assert {key: projects[key].id for key in projects} == {checks.GL_PROJECT: 7, checks.GL_TEAM: 9, checks.GL_EMPTY: 8,
+                                                          checks.GL_ON_COM: 1001}
+    plugins = projects[checks.GL_PROJECT].repository
+    assert plugins.names == ["g1", "g2"]
+    assert plugins.commits["g1"].snapshot.at(f"plugins/{checks.GL_HELLO}") is not None
+    assert plugins.commits["g1"].snapshot.at(f"plugins/{checks.GL_BIG}") is None
+    assert plugins.commits["g2"].snapshot.at(f"plugins/{checks.GL_BIG}/big.bin") is not None
+    assert projects[checks.GL_TEAM].repository.commits["n1"].snapshot.at(f"plugins/{checks.GL_TEAM_PLUGIN}") is not None
+    assert projects[checks.GL_ON_COM].repository.commits["l1"].snapshot.at(f"plugins/{checks.GL_COM_PLUGIN}") is not None
+    assert projects[checks.GL_EMPTY].repository.commits["e1"].snapshot.at("plugins") is None
+    names = {key: json.loads((plugin_repository.FIXTURES / "sources" / "gitlab" / key / projects[key].repository.names[0]
+                              / "udeck-plugins.json").read_text())["name"] for key in projects}
+    assert names == {checks.GL_PROJECT: checks.GL_NAME, checks.GL_TEAM: checks.GL_TEAM_NAME, checks.GL_EMPTY: checks.GL_EMPTY_NAME,
+                     checks.GL_ON_COM: checks.GL_ON_COM_NAME}
+    assert checks.GL_RENAMED not in {project.path for project in projects.values()}
+    assert checks.GL_TEAM_LINK == f"https://{checks.GL_TEAM}/-/tree/main" and checks.GL_PROJECT_PAGE == f"https://{checks.GL_PROJECT}"
+    # The id a check derives is uDeck's: provider, host and number.
+    assert checks._source_id("group/sub/team", 9, host=checks.GL_HOST, provider="gitlab").startswith("gitlab.example.test-team-")
+
+
+def test_the_words_the_gitlab_checks_wait_for_are_uDecks_own():
+    """Every sentence the GitLab checks compare a screen with is English.swift's, word for word."""
+    english = _source("Sources", "UDeckCore", "Localization", "English.swift")
+    flat = re.sub(r'"\s*\+\s*"', "", english)
+    assert 'case .catalogueFiles(let files): files == 1 ? "1 file" : "\\(files) files"' in english
+    assert checks.FILES.format(n=4) == "4 files"
+    assert '"\\(host) asked uDeck to wait: its limit of requests from this network, or for this token, is used up. "' in english
+    assert checks.GITLAB_LIMITED.format(host="h") == "h asked uDeck to wait: its limit of requests from this network, or for this token, is used up. "
+    assert f'"{checks.GITLAB_COM_HINT}"' in flat
+    assert '"\\(host) did not answer as GitLab. uDeck reads sources on github.com and on GitLab — gitlab.com or your own."' in flat
+    assert checks.NOT_GITLAB.format(host="h") == "h did not answer as GitLab. uDeck reads sources on github.com and on GitLab — gitlab.com or your own."
+    assert '"\\(host) is not GitHub. A GitLab project can be added as a source of its own."' in english
+    assert checks.NOT_GITHUB.format(host="h") == "h is not GitHub. A GitLab project can be added as a source of its own."
+    assert f'"{checks.EMPTY}"' in english
+    rules = _source("Packages", "UDeckPluginFormat", "Sources", "UDeckPluginFormat", "Plugins", "Repository", "RepositoryRules.swift")
+    assert '"\\(path) is \\(ByteCount.text(bytes, kilo: "KB", mega: "MB")); one file of a plugin may be up to 5 MB."' in rules
+    assert checks.FILE_TOO_LARGE == "plugins/gl-big/big.bin is 6.0 MB; one file of a plugin may be up to 5 MB.", "6291456 bytes"
+    assert checks.TEST_BUILD_GITLAB.format(host="gitlab.com", port=8769) == "Test build: gitlab.com is read from http://127.0.0.1:8769."
+    assert 'case .pluginFrom(let source, let commit): "From \\(source) at \\(commit)"' in english
+    assert checks.FROM_THE_PROJECT.format(address="a/b", commit="1234567") == "From a/b at 1234567"
+
+
+def test_the_controls_the_gitlab_checks_press_and_read_are_the_views_own():
+    """The row's size and page, its page's value, and a source's empty line, as the checks read them."""
+    views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift")
+    assert '.accessibilityIdentifier("\\(named).size")' in views
+    assert '.accessibilityIdentifier("\\(named).page")' in views and ".accessibilityValue(page.absoluteString)" in views
+    assert '"link.addAsASource"' in views and "case .linkNotGitHubAddAsASource(_, let page): page" in views
+    assert '"source.\\(sid).empty"' in _source("Sources", "UDeckKit", "Views", "SourceViews.swift")
+
+
+def test_the_gitlab_checks_judge_requests_by_their_port_their_site_and_their_path_as_sent():
+    """What the helpers make of the log: a GitLab's request is its own on its own port, by the project's number."""
+    from udeck_e2e.plugin_repository import Request
+
+    port = config.GITLAB_PORTS[checks.GL_HOST]
+    own = Request(0, "GET", "api", "/api/v4/projects/7/repository/tree", "ref=a&page=2", 200, False, port=port,
+                  site=checks.GL_HOST, raw_path="/api/v4/projects/7/repository/tree")
+    assert checks._page(own) == 2 and checks._of_the_project(own, 7) and not checks._of_the_project(own, 70)
+    by_path = Request(0, "GET", "api", "/api/v4/projects/tools/udeck-plugins", "", 200, False, port=port,
+                      site=checks.GL_HOST, raw_path="/api/v4/projects/tools%2Fudeck-plugins")
+    assert not checks._of_the_project(by_path, 7)
+    checks._expect_on_its_port([own, by_path], checks.GL_HOST, "a GitLab's own")
+    elsewhere = Request(0, "GET", "api", "/api/v4/projects/7", "", 200, False, port=config.PLUGINS_PORT, raw_path="/api/v4/projects/7")
+    with pytest.raises(CheckFailed, match="somewhere else than gitlab.example.test"):
+        checks._expect_on_its_port([own, elsewhere], checks.GL_HOST, "astray")
+    github = Request(0, "GET", "api", "/api/repos/x/y", "", 200, False, port=config.PLUGINS_PORT, raw_path="/api/repos/x/y")
+    with pytest.raises(CheckFailed, match="no part of gitlab.example.test"):
+        checks._expect_on_its_port([own, github], checks.GL_HOST, "GitHub too")
+    assert "/api/v4/projects/tools%2Fudeck-plugins" in checks._described_gitlab([by_path]) and f"on {port}" in checks._described_gitlab([by_path])
+
+
+def test_the_steps_added_after_the_review_can_say_what_they_say():
+    """What the steps added after R2's review need, or they would pass saying nothing: the mismatch check serves the
+    branch it looks up, and makes the default branch old before its first Check now — a fresh one is not described
+    (`CatalogueRefresher.defaultBranch`), so no number would be heard — all before uDeck is ended; a link into a GitLab
+    source added is looked up for its refusal; and the history step's line is the view's own."""
+    tree = ast.parse((Path(__file__).resolve().parents[1] / "checks" / "check_plugins.py").read_text())
+    functions = {f.name: ast.unparse(f) for f in tree.body if isinstance(f, ast.FunctionDef)}
+    mismatch = functions["check_official_id_mismatch"]
+    assert "branches=BRANCHES" in mismatch
+    assert mismatch.index("_what_was_read_goes(scene, describe)") < mismatch.index("app.quit_app(")
+    goes = functions["_what_was_read_goes"]
+    assert goes.index("'defaultBranchReadAt'") < goes.index("'catalogue.checkNow'")
+    assert goes.index("official_id=ANOTHER_REPOSITORY") < goes.index("'catalogue.checkNow'") < goes.index("official_id=None")
+    refresher = _source("Sources", "UDeckCore", "Plugins", "Repository", "CatalogueRefresher.swift")
+    assert "now().timeIntervalSince(readAt) < Self.defaultBranchLife" in refresher
+    link = functions["check_link_offers_gitlab_source"]
+    assert link.index("_add_a_gitlab(") < link.index("BRANCH_NOT_YET")
+    assert "came_to='link.refused'" in link[link.index("_add_a_gitlab("):]
+    views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift")
+    assert '.accessibilityIdentifier("plugin.\\(id).history.\\(line.version)")' in views
+    assert "return model.canRead(record.source)" in views, "the list goes while its source cannot be read"
+
+
+def test_the_gitlab_ports_are_the_ones_every_lab_build_reads_them_at():
+    """config.GITLAB_PORTS, Scripts/make-app.sh's TEST_GITLAB_PORTS, the build's verified host map and the fake the lab
+    serves name the same ports; the checkout ships no host map."""
+    import plistlib
+
+    from udeck_e2e import builds
+
+    said = _source("Scripts", "make-app.sh").split('TEST_GITLAB_PORTS="', 1)[1].split('"', 1)[0].split()
+    assert dict(item.split("=") for item in said) == {host: str(port) for host, port in config.GITLAB_PORTS.items()}
+    assert set(config.GITLAB_PORTS.values()).isdisjoint({config.FEED_PORT, config.PLUGINS_PORT})
+    assert builds.host_map(plugin_repository.base_url()) == {
+        host: f"http://127.0.0.1:{port}" for host, port in config.GITLAB_PORTS.items()}
+    assert plugin_repository.FakeGitHub(object(), note=lambda text: None).gitlab_ports == config.GITLAB_PORTS
+    shipped = plistlib.loads(_source("Sources", "uDeck", "Support", "Info.plist").encode())
+    assert builds.HOST_MAP not in shipped
+    assert sorted(config.GITLAB_PORTS) == sorted([checks.GL_HOST, checks.GL_COM])
+
+
 def test_a_state_is_aged_by_the_keys_named_and_nothing_else(tmp_path, monkeypatch, capsys):
     """The script `_age_a_state` runs in the guest, run here in this process on a copy: the keys named moved back, every
     other kept."""

@@ -18,6 +18,24 @@ public enum ProviderError: Error, Equatable, Sendable {
     case unreachable(String)
     /// An answer, but not one that could be read.
     case badAnswer(String)
+    /// `401`: the host wants a token, or did not accept the one sent. Said by
+    /// GitLab's client in stage 4 (S4-14); its words, and GitHub's, come with
+    /// tokens (R3) — until then a catalogue says it as the refusal it is.
+    case unauthorized
+    /// `403` naming the scope the token lacks (`insufficient_scope`, GitLab's
+    /// word) — the scope, when the answer named one.
+    case forbidden(scope: String?)
+    /// A `3xx` that came back as the answer: the repository says it has
+    /// moved. A request without a token follows a redirect, as uDeck's
+    /// session always has, so only one with nowhere to go comes back today;
+    /// a request carrying a token refuses every redirect (S4-19, R3), and
+    /// its `3xx` comes back here.
+    case moved(status: Int)
+    /// A file larger than a plugin's may be, refused as it arrived — before
+    /// it was read, when the host said its size, or once more than the
+    /// largest a file may be was read (`RepositoryRules.maximumFileBytes`):
+    /// `bytes` is what the host said, or what was read by then.
+    case tooLarge(bytes: Int)
 }
 
 /// The head of a branch, asked conditionally.

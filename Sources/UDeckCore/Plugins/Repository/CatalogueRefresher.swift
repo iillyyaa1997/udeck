@@ -183,14 +183,22 @@ public struct CatalogueRefresher: Sendable {
 
     /// The manifests of `folders` of a listing, and their translations into
     /// `language`, as a refresh fetches them: by commit, from the raw host,
-    /// each checked against its blob id — the ones not stored already.
+    /// each checked against its blob id — the ones not stored already. One
+    /// larger than a plugin's file may be, refused as it arrives where the
+    /// listing gives no sizes (GitLab's, S4-15), is that plugin's alone: it
+    /// is not stored, and its row says its manifest could not be fetched,
+    /// as rule 8 would have refused it from a listing with sizes.
     public func fetchManifests(of listing: CommitListing, folders: [String], language: String) async throws {
         for folder in folders {
             guard let plugin = listing.plugins[folder] else { continue }
             for name in [PluginDiscovery.manifestFilename, "manifest.\(language.lowercased()).json"] {
                 guard let file = plugin.file(at: name), store.blob(file.sha) == nil else { continue }
-                _ = try await blob(file.sha, path: "\(CommitListing.pluginsFolder)/\(folder)/\(name)",
-                                   commit: listing.commit)
+                do {
+                    _ = try await blob(file.sha, path: "\(CommitListing.pluginsFolder)/\(folder)/\(name)",
+                                       commit: listing.commit)
+                } catch ProviderError.tooLarge {
+                    continue
+                }
             }
         }
     }
@@ -207,7 +215,8 @@ public struct CatalogueRefresher: Sendable {
         return data
     }
 
-    static func reason(_ error: any Error, branch: String?) -> CatalogueError {
+    /// What `error`, thrown reading a source, is said as and kept as.
+    public static func reason(_ error: any Error, branch: String?) -> CatalogueError {
         switch error {
         case let error as CatalogueError: return error
         case let error as ProviderError:
@@ -218,6 +227,14 @@ public struct CatalogueRefresher: Sendable {
             case .refused(let status): return .refused(status: status)
             case .unreachable(let reason): return .unreachable(reason)
             case .badAnswer(let reason): return .badAnswer(reason)
+            // A read carries no token yet (stage 4, R3 brings them): a `401`,
+            // a `403` naming a scope and a move are the refusals they are,
+            // said with their status, as before stage 4.
+            case .unauthorized: return .refused(status: 401)
+            case .forbidden: return .refused(status: 403)
+            case .moved(let status): return .refused(status: status)
+            case .tooLarge(let bytes):
+                return .badAnswer("a file of \(bytes) bytes, more than the \(RepositoryRules.maximumFileBytes) a plugin's file may be")
             }
         default: return .badAnswer("\(error)")
         }

@@ -69,6 +69,35 @@ Which name each is called by is the lab's to say (`served`), so that a
 repository can be renamed — its number the same — and another one, with a
 number of its own, made at its old name.
 
+**GitLab projects** (stage 4, R2) are fixture folders under
+`sources/gitlab/<host>/<group>/…/<project>/` — a `history`, an optional
+`parents`, commit folders and an `id`, GitLab's number for it — and each host
+is answered on a port of its own (`serve … gitlab.example.test=8768
+gitlab.com=8769`), so that each is an origin of its own, as outside the lab, in
+GitLab's API, v4:
+
+    GET /api/v4/projects/{id, or group%2Fproject}       its description, as anonymous gitlab.com answers it: no
+                                                        `forked_from_project`; 404 '404 Project Not Found'
+    GET /api/v4/projects/{id}/repository/branches/main  its head, with a weak ETag and 304 to exactly that
+    GET /api/v4/projects/{id}/repository/tree?ref=&path=&recursive=&per_page=&page=
+                                                        a folder's entries — id, name, type, whole path, mode, no
+                                                        size — a few to a page (`gitlab_page_size`, 3), with
+                                                        x-next-page; 404 '404 Tree Not Found' for a ref and '404
+                                                        invalid revision or path Not Found' for a path not there
+    GET /api/v4/projects/{id}/repository/files/{path%2F…}/raw?ref={commit}
+                                                        one file, with X-Gitlab-Size and X-Gitlab-Blob-Id; 404 '404
+                                                        File Not Found'
+    GET /api/v4/projects/{id}/repository/commits?ref_name=&path=&per_page=
+                                                        the commits that changed a path
+
+gitlab.com counts every request by two limiters, as gitlab.com was seen to,
+each answer naming one in turn (`RateLimit-Name`): 500 a minute and 60 an hour,
+304s included — and once the hour's are used up, `429` with `Retry-After` until
+it resets. A self-hosted GitLab sends no limit at all. A file named
+`<name>.generated` in a commit folder is a file `<name>` made when the fake
+starts — `{"bytes": …, "line": …}` — and never committed: the file larger than
+a plugin's file may be.
+
 Every request to any of them spends the same hourly limit, as GitHub counts what
 an address asks whichever repository it asks about. A repository the lab does
 not name is 404.
@@ -112,6 +141,15 @@ afresh on every request:
                 "someone/team-plugins": "someone/squatter"}}
                                                     which name serves which repository of its own: every
                                                     one by its own folder's name unless the lab says
+    {"gitlab": {"gitlab.example.test": {"projects": {"tools/udeck-plugins": {"main": "g2"}},
+                                        "served": {"tools/udeck-plugins-2": "tools/udeck-plugins"},
+                                        "plain": true},
+                "gitlab.com": {"spent": 55}}}
+                                                    each GitLab: its projects' main, which path serves which
+                                                    project, a web server's plain 404 to everything instead
+                                                    of GitLab's answers, and the hour's requests spent by
+                                                    something else on the connection
+    {"gitlab_page_size": 3}                         the most entries a tree answer's page holds
 
 Moving a branch's head, force-pushing it, merging or closing a pull request is
 one rewrite of the file: a head at another fixture commit — one that does not
@@ -123,12 +161,15 @@ host, path, query, status, the port it came in on, and the headers that decide
 an answer — which is the lab's oracle for what uDeck asked for and, just as
 much, for what it did not. The lab's own requests carry `X-UDeck-Lab: 1` and are
 logged as the lab's, so that asking the fake whether it is up is never read as
-uDeck asking. Each line says whether the request carried a credential —
+uDeck asking. A line of a GitLab's port names it (`site`), and every line keeps
+the path as it was sent, before its `%2F` was decoded (`raw_path`). Each line
+says whether the request carried a credential —
 `credential`: `none`, `accepted` or `rejected`, and never its value — and no
 credential is good for anything yet: one carried is answered `401 Bad
 credentials`, as GitHub answers a token it does not know.
 
-    fake-github.py serve ROOT PORT OWNER/REPO LOG
+    fake-github.py serve ROOT PORT OWNER/REPO LOG [HOST=PORT …]
+                                          each HOST=PORT a GitLab, answered on its own port
     fake-github.py tree FOLDER            the git tree id of a folder on disk
 """
 
@@ -156,6 +197,15 @@ WINDOW_SECONDS = 3600
 
 # Where the repositories of their own are, under the fixture root: `<owner>/<repo>/`.
 SOURCES = os.path.join("sources", "github")
+
+# Where the GitLab projects are: `<host>/<group>/…/<project>/` (stage 4, R2).
+GITLAB = os.path.join("sources", "gitlab")
+# The GitLab that counts by limiters, and the most entries one of a GitLab's tree pages holds unless the lab says.
+GITLAB_COM = "gitlab.com"
+GITLAB_PAGE_SIZE = 3
+
+# A fixture file made when the fake starts rather than committed: `<name>.generated`, `{"bytes": …, "line": …}`.
+GENERATED = ".generated"
 
 # The headers a credential travels in, GitHub's and GitLab's.
 CREDENTIAL_HEADERS = ("authorization", "private-token")
@@ -245,6 +295,14 @@ class Snapshot:
             if name in IGNORED:
                 continue
             path = os.path.join(folder, name)
+            if not os.path.islink(path) and os.path.isfile(path) and name.endswith(GENERATED):
+                name = name[: -len(GENERATED)]
+                data = generated(path)
+                sha = blob_id(data)
+                self.blobs[sha] = data
+                entries.append((MODE_FILE, name, sha))
+                self.paths[prefix + name] = entries[-1][0], entries[-1][2]
+                continue
             relative = prefix + name
             if os.path.islink(path):
                 data = os.readlink(path).encode()
@@ -276,6 +334,16 @@ class Snapshot:
         if path.strip("/") == "":
             return MODE_FOLDER, self.root
         return self.paths.get(path.strip("/"))
+
+
+def generated(spec: str) -> bytes:
+    """The bytes a `<name>.generated` file stands for: `line` over and over, cut at `bytes`."""
+    with open(spec) as file:
+        said = json.load(file)
+    size, line = int(said["bytes"]), str(said["line"]).encode()
+    if size < 0 or not line:
+        raise ValueError(f"{spec} says {said}: a size of 0 or more and a line to repeat")
+    return (line * (size // len(line) + 1))[:size]
 
 
 class Commit:
@@ -469,6 +537,110 @@ def read_sources(root: str) -> dict[str, Source]:
     return found
 
 
+# --- GitLab (stage 4, R2) -----------------------------------------------------------
+
+
+class Project:
+    """A GitLab project of its own (`sources/gitlab/<host>/<group>/…/<project>/`): its commits, its number, and the
+    host it is on — a `history`, an optional `parents`, its commit folders and an `id`, GitLab's number for it."""
+
+    def __init__(self, folder: str, host: str, path: str) -> None:
+        self.host = host
+        self.path = path
+        self.id = read_number(os.path.join(folder, "id"))
+        self.repository = Repository(folder)
+
+    @property
+    def key(self) -> str:
+        return f"{self.host}/{self.path}"
+
+    def facts(self) -> dict:
+        return {"id": self.id, "host": self.host, "path": self.path, **self.repository.facts()}
+
+
+def read_projects(root: str) -> dict[str, Project]:
+    """Every GitLab project under the fixture root, by `host/path`: under `sources/gitlab/<host>/`, each folder that
+    has a `history` is a project, at whatever depth its groups put it. Two of one number on one host are one project
+    twice: refused."""
+    found: dict[str, Project] = {}
+    base = os.path.join(root, GITLAB)
+    if not os.path.isdir(base):
+        return found
+    for host in sorted(os.listdir(base)):
+        top = os.path.join(base, host)
+        if host in IGNORED or not os.path.isdir(top):
+            continue
+        for folder, names, files in os.walk(top):
+            names[:] = sorted(name for name in names if name not in IGNORED)
+            if "history" not in files:
+                continue
+            path = os.path.relpath(folder, top).replace(os.sep, "/")
+            project = Project(folder, host, path)
+            found[project.key] = project
+            # A project's commit folders are not projects of their own.
+            names[:] = []
+        numbers = [project.id for project in found.values() if project.host == host]
+        if len(set(numbers)) != len(numbers):
+            raise ValueError(f"{top}: two GitLab projects share a number: {sorted(numbers)}")
+    return found
+
+
+class Limiter:
+    """One of gitlab.com's counts: `limit` requests in each window of `seconds`, the window starting at its first."""
+
+    def __init__(self, name: str, limit: int, seconds: int) -> None:
+        self.name = name
+        self.limit = limit
+        self.seconds = seconds
+        self.used = 0
+        self.reset = 0
+
+    def spend(self, now: float) -> None:
+        if now >= self.reset:
+            self.used = 0
+            self.reset = int(now) + self.seconds
+        self.used += 1
+
+    def remaining(self, spent: int = 0) -> int:
+        return max(0, self.limit - self.used - spent)
+
+
+class GitLabLimits:
+    """gitlab.com's two limiters, as it was seen to count anonymous requests: `throttle_unauthenticated_api`, 500 a
+    minute, and `unauthenticated_traffic_per_ip`, 60 an hour — each request spends both, 304s too, and its answer names
+    one of them in turn. With the hour's used up — `spent` of it by something else on the connection — the answer is a
+    429 naming the hour, with `Retry-After` until it resets."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.minute = Limiter("throttle_unauthenticated_api", 500, 60)
+        self.hour = Limiter("unauthenticated_traffic_per_ip", 60, WINDOW_SECONDS)
+        self.answers = 0
+
+    def spend(self, now: float, spent: int) -> tuple[bool, dict]:
+        """(allowed, the headers that say so) for one request."""
+        with self.lock:
+            if now >= self.hour.reset:
+                self.hour.used, self.hour.reset = 0, int(now) + self.hour.seconds
+            if self.hour.remaining(spent) <= 0:
+                return False, {**self.headers(self.hour, spent), "Retry-After": str(max(1, int(self.hour.reset - now)))}
+            self.minute.spend(now)
+            self.hour.spend(now)
+            self.answers += 1
+            return True, self.headers(self.minute if self.answers % 2 == 1 else self.hour, spent)
+
+    @staticmethod
+    def headers(limiter: Limiter, spent: int) -> dict:
+        spent = spent if limiter.seconds == WINDOW_SECONDS else 0
+        return {
+            "RateLimit-Name": limiter.name,
+            "RateLimit-Limit": str(limiter.limit),
+            "RateLimit-Observed": str(min(limiter.limit, limiter.used + spent)),
+            "RateLimit-Remaining": str(limiter.remaining(spent)),
+            "RateLimit-Reset": str(limiter.reset),
+        }
+
+
 # --- What the lab says --------------------------------------------------------------
 
 
@@ -479,7 +651,8 @@ def read_state(root: str, default_main: str) -> dict:
     place, and reads it back through `/lab/state` before it relies on it.
     """
     state = {"main": default_main, "branches": {}, "pulls": {}, "forks": {}, "limit_until": None, "spent": 0, "alter": [],
-             "truncated": False, "official_id": None, "sources": {}, "served": None}
+             "truncated": False, "official_id": None, "sources": {}, "served": None, "gitlab": {},
+             "gitlab_page_size": GITLAB_PAGE_SIZE}
     try:
         with open(os.path.join(root, "state.json")) as file:
             given = json.load(file)
@@ -526,8 +699,10 @@ class Fake:
         self.sources = read_sources(root)
         if self.official_id is not None and self.official_id in {source.id for source in self.sources.values()}:
             raise ValueError(f"{root}: a repository of its own has the official repository's number {self.official_id}")
+        self.projects = read_projects(root)
         self.clock = clock
         self.limit = Limit(clock())
+        self.gitlab_limits = GitLabLimits()
         self.log_lock = threading.Lock()
         self.log_path = log_path
 
@@ -588,7 +763,8 @@ class Fake:
             return self.json(200, self.state())
         if path == "/lab/facts":
             return self.json(200, {**self.repository.facts(), "id": self.official_id,
-                                   "sources": {name: source.facts() for name, source in self.sources.items()}})
+                                   "sources": {name: source.facts() for name, source in self.sources.items()},
+                                   "gitlab": {key: project.facts() for key, project in self.projects.items()}})
         return self.json(404, {"message": "Not Found"})
 
     def api(self, path: str, query: dict, headers: dict) -> tuple[int, dict, bytes]:
@@ -879,12 +1055,201 @@ class Fake:
             data = data + ALTERATION
         return 200, {"Content-Type": "text/plain; charset=utf-8"}, data
 
+    # --- Its GitLabs (stage 4, R2) ---------------------------------------------------------
+
+    def gitlab_state(self, site: str, state: dict) -> dict:
+        """What the lab says of the GitLab `site`: `plain`, `projects` (each one's `main`), `served`, `spent`."""
+        given = (state.get("gitlab") or {}).get(site)
+        return given if isinstance(given, dict) else {}
+
+    def gitlab_served(self, site: str, state: dict) -> dict[str, Project]:
+        """Which path serves which project on `site` now: each by its own folder's path, unless the lab says."""
+        own = {project.path: project for project in self.projects.values() if project.host == site}
+        given = self.gitlab_state(site, state).get("served")
+        if not isinstance(given, dict):
+            return own
+        return {str(name): own[str(path)] for name, path in given.items() if str(path) in own}
+
+    def gitlab_project(self, site: str, named: str, state: dict) -> tuple[Project | None, str]:
+        """The project `named` names — its number, or its path, decoded — and the path it is served at now."""
+        served = self.gitlab_served(site, state)
+        if named.isdigit():
+            for name, project in served.items():
+                if project.id == int(named):
+                    return project, name
+            return None, ""
+        return served.get(named), named
+
+    def gitlab_main(self, project: Project, state: dict) -> dict:
+        """A project's `main`, as the lab says it, in the shape `Repository.resolve` reads."""
+        given = (self.gitlab_state(project.host, state).get("projects") or {}).get(project.path)
+        main = given.get("main") if isinstance(given, dict) else None
+        return {"main": main or project.repository.names[0], "branches": {}, "pulls": {}}
+
+    def gitlab(self, site: str, method: str, target: str, headers: dict) -> tuple[int, dict, bytes]:
+        """An answer of the GitLab `site`, on its own port: GitLab's API, v4 — or, told `plain`, a web server's 404,
+        which no GitLab answers. gitlab.com counts by its two limiters; a self-hosted GitLab sends no limit."""
+        state = self.state()
+        mine = self.gitlab_state(site, state)
+        if mine.get("plain"):
+            return 404, {"Content-Type": "text/plain; charset=utf-8"}, b"404 page not found\n"
+        if method not in ("GET", "HEAD"):
+            return self.json(405, {"message": "405 Method Not Allowed"})
+        parsed = urllib.parse.urlsplit(target)
+        limits: dict = {}
+        if site == GITLAB_COM:
+            try:
+                spent = max(0, int(mine.get("spent") or 0))
+            except (TypeError, ValueError):
+                spent = 0
+            allowed, limits = self.gitlab_limits.spend(self.clock(), spent)
+            if not allowed:
+                return 429, {"Content-Type": "text/plain; charset=utf-8", **limits}, b"Retry later\n"
+        status, extra, body = self.gitlab_answer(site, parsed.path, urllib.parse.parse_qs(parsed.query), headers, state)
+        return status, {**extra, **limits}, body
+
+    def gitlab_answer(self, site: str, raw: str, query: dict, headers: dict, state: dict) -> tuple[int, dict, bytes]:
+        segments = raw.split("/")
+        # "", "api", "v4", "projects", <id, or the path with its "/" as %2F>, ...
+        if segments[:4] != ["", "api", "v4", "projects"] or len(segments) < 5 or not segments[4]:
+            return self.json(404, {"error": "404 Not Found"})
+        project, name = self.gitlab_project(site, urllib.parse.unquote(segments[4]), state)
+        if project is None:
+            return self.json(404, {"message": "404 Project Not Found"})
+        rest = [urllib.parse.unquote(segment) for segment in segments[5:]]
+        own = self.gitlab_main(project, state)
+        if rest in ([], [""]):
+            return self.json(200, self.gitlab_description(site, project, name))
+        if len(rest) == 3 and rest[:2] == ["repository", "branches"]:
+            return self.gitlab_branch(site, project, name, rest[2], own, headers)
+        if rest == ["repository", "tree"]:
+            return self.gitlab_tree(project, query, own, state)
+        if len(rest) == 4 and rest[:2] == ["repository", "files"] and rest[3] == "raw":
+            return self.gitlab_file(project, rest[2], query, own)
+        if rest == ["repository", "commits"]:
+            return self.gitlab_history(project, query, own)
+        return self.json(404, {"error": "404 Not Found"})
+
+    @staticmethod
+    def gitlab_description(site: str, project: Project, name: str) -> dict:
+        """`GET /projects/:id` as gitlab.com answers it anonymously: no `forked_from_project`."""
+        group, _, last = name.rpartition("/")
+        return {"id": project.id, "description": None, "name": last, "name_with_namespace": name.replace("/", " / "),
+                "path": last, "path_with_namespace": name, "default_branch": DEFAULT_BRANCH, "visibility": "public",
+                "web_url": f"https://{site}/{name}", "namespace": {"full_path": group, "kind": "group"}}
+
+    def gitlab_branch(self, site: str, project: Project, name: str, branch: str, own: dict,
+                      headers: dict) -> tuple[int, dict, bytes]:
+        """A branch, with the weak `ETag` GitLab derives from its answer and a `304` to exactly that."""
+        commit = project.repository.resolve(branch, own) if branch == DEFAULT_BRANCH else None
+        if commit is None:
+            return self.json(404, {"message": "404 Branch Not Found"})
+        status, extra, body = self.json(200, {
+            "name": branch, "merged": False, "protected": True, "default": True,
+            "commit": {**self.gitlab_commit(commit), "web_url": f"https://{site}/{name}/-/commit/{commit.sha}"},
+            "web_url": f"https://{site}/{name}/-/tree/{branch}",
+        })
+        etag = f'W/"{hashlib.md5(body).hexdigest()}"'  # noqa: S324 — GitLab's own ETag is a digest of its answer
+        if headers.get("if-none-match", "") == etag:
+            return 304, {"ETag": etag}, b""
+        return status, {**extra, "ETag": etag}, body
+
+    @staticmethod
+    def gitlab_commit(commit: Commit) -> dict:
+        return {"id": commit.sha, "short_id": commit.sha[:8], "title": commit.message, "message": commit.message,
+                "authored_date": commit.date, "committed_date": commit.date, "created_at": commit.date,
+                "parent_ids": [commit.parent.sha] if commit.parent else []}
+
+    def page_size(self, state: dict, asked: dict) -> int:
+        """The entries a page holds: what was asked, at most the lab's (`gitlab_page_size`), so that a listing takes
+        more than one page and its client has to follow `x-next-page`."""
+        try:
+            lab = max(1, int(state.get("gitlab_page_size") or GITLAB_PAGE_SIZE))
+        except (TypeError, ValueError):
+            lab = GITLAB_PAGE_SIZE
+        try:
+            wanted = max(1, min(100, int(asked.get("per_page", ["20"])[0])))
+        except ValueError:
+            wanted = 20
+        return min(lab, wanted)
+
+    def gitlab_tree(self, project: Project, query: dict, own: dict, state: dict) -> tuple[int, dict, bytes]:
+        """`GET /repository/tree?ref=&path=&recursive=&per_page=&page=`: a folder's entries — every one under it,
+        recursively — `id`, `name`, `type`, whole `path` and `mode`, and no size; page by page, offset pagination."""
+        commit = project.repository.resolve(query.get("ref", [DEFAULT_BRANCH])[0], own)
+        if commit is None:
+            return self.json(404, {"message": "404 Tree Not Found"})
+        path = query.get("path", [""])[0].strip("/")
+        found = commit.snapshot.at(path)
+        if found is None or found[0] != MODE_FOLDER:
+            return self.json(404, {"message": "404 invalid revision or path Not Found"})
+        recursive = query.get("recursive", ["false"])[0] in ("true", "1")
+        entries: list = []
+        self.gitlab_list(commit.snapshot, found[1], f"{path}/" if path else "", recursive, entries)
+        size = self.page_size(state, query)
+        try:
+            page = max(1, int(query.get("page", ["1"])[0]))
+        except ValueError:
+            page = 1
+        pages = max(1, -(-len(entries) // size))
+        status, extra, body = self.json(200, entries[(page - 1) * size: page * size])
+        return status, {**extra, "x-page": str(page), "x-per-page": str(size), "x-total": str(len(entries)),
+                        "x-total-pages": str(pages), "x-next-page": str(page + 1) if page < pages else "",
+                        "x-prev-page": str(page - 1) if page > 1 else ""}, body
+
+    def gitlab_list(self, snapshot: Snapshot, tree_sha: str, prefix: str, recursive: bool, out: list) -> None:
+        """A folder's entries as GitLab lists them: its folders first, then the rest, each by name."""
+        children = snapshot.trees[tree_sha]
+        for mode, name, sha in sorted(children, key=lambda entry: (entry[0] != MODE_FOLDER, entry[1])):
+            path = prefix + name
+            if mode == MODE_FOLDER:
+                out.append({"id": sha, "name": name, "type": "tree", "path": path, "mode": "040000"})
+                if recursive:
+                    self.gitlab_list(snapshot, sha, path + "/", recursive, out)
+            else:
+                out.append({"id": sha, "name": name, "type": "blob", "path": path, "mode": mode})
+
+    def gitlab_file(self, project: Project, path: str, query: dict, own: dict) -> tuple[int, dict, bytes]:
+        """`GET /repository/files/:path/raw?ref=`: one file at one commit, with what GitLab says of it."""
+        commit = project.repository.resolve(query.get("ref", [""])[0], own)
+        if commit is None:
+            return self.json(404, {"message": "404 Commit Not Found"})
+        found = commit.snapshot.at(path)
+        if found is None or found[0] == MODE_FOLDER:
+            return self.json(404, {"message": "404 File Not Found"})
+        data = commit.snapshot.blobs[found[1]]
+        return 200, {"Content-Type": "text/plain; charset=utf-8", "X-Gitlab-Size": str(len(data)),
+                     "X-Gitlab-Blob-Id": found[1], "X-Gitlab-Commit-Id": commit.sha, "X-Gitlab-File-Path": path,
+                     "X-Gitlab-Ref": commit.sha}, data
+
+    def gitlab_history(self, project: Project, query: dict, own: dict) -> tuple[int, dict, bytes]:
+        """`GET /repository/commits?ref_name=&path=&per_page=`: the commits on the branch that changed a path, newest first."""
+        start = project.repository.resolve(query.get("ref_name", [DEFAULT_BRANCH])[0], own)
+        if start is None:
+            return self.json(404, {"message": "404 Reference Not Found"})
+        path = query.get("path", [""])[0].strip("/")
+        try:
+            per_page = max(1, min(100, int(query.get("per_page", ["20"])[0])))
+        except ValueError:
+            per_page = 20
+        found = []
+        commit = start
+        while commit is not None and len(found) < per_page:
+            here = commit.snapshot.at(path) if path else None
+            before = commit.parent.snapshot.at(path) if (path and commit.parent) else None
+            if not path or here != before:
+                found.append(self.gitlab_commit(commit))
+            commit = commit.parent
+        return self.json(200, found)
+
     @staticmethod
     def json(status: int, value) -> tuple[int, dict, bytes]:
         return status, {"Content-Type": "application/json; charset=utf-8"}, json.dumps(value, indent=1).encode()
 
 
-def handler_for(fake: Fake):
+def handler_for(fake: Fake, site: str = ""):
+    """The handler of one port: GitHub's — the API, the raw host, the lab's own — or, with `site`, that GitLab's."""
+
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -900,7 +1265,9 @@ def handler_for(fake: Fake):
             credential = "rejected" if any(name in headers for name in CREDENTIAL_HEADERS) else "none"
             try:
                 if credential == "rejected":
-                    status, extra, body = fake.json(401, {"message": "Bad credentials"})
+                    status, extra, body = fake.json(401, {"message": "401 Unauthorized" if site else "Bad credentials"})
+                elif site and not urllib.parse.urlsplit(self.path).path.startswith("/lab/"):
+                    status, extra, body = fake.gitlab(site, method, self.path, headers)
                 else:
                     status, extra, body = fake.answer(method, self.path, headers)
             except Exception as error:  # noqa: BLE001 — a fake that dies answers nobody
@@ -912,6 +1279,8 @@ def handler_for(fake: Fake):
                     "method": method,
                     "host": parsed.path.split("/")[1] if parsed.path.count("/") >= 1 else "",
                     "path": urllib.parse.unquote(parsed.path),
+                    "raw_path": parsed.path,
+                    "site": site,
                     "query": parsed.query,
                     "status": status,
                     "lab": LAB_HEADER.lower() in headers,
@@ -964,25 +1333,43 @@ class Server(http.server.ThreadingHTTPServer):
         self.server_name, self.server_port = self.server_address[:2]
 
 
-def serve(root: str, port: int, owner_repo: str, log_path: str) -> None:
+def serve(root: str, port: int, owner_repo: str, log_path: str, gitlabs: dict[str, int] | None = None) -> None:
+    """GitHub on `port` and each GitLab of `gitlabs` on its own — one fake, one log — every socket listening before
+    the line that says so."""
     started = time.monotonic()
     fake = Fake(root, owner_repo, log_path)
     # 127.0.0.1 and nothing else: the guest's own network is reachable from the
     # Mac the lab runs on (measured for the update feed), and nothing outside the
     # machine has any business with this.
     server = Server(("127.0.0.1", port), handler_for(fake))
+    others = [Server(("127.0.0.1", other), handler_for(fake, site)) for site, other in (gitlabs or {}).items()]
+    for other in others:
+        threading.Thread(target=other.serve_forever, daemon=True).start()
     # How long it took is part of the line: a fake slow to start is what the lab
     # has to be able to tell from a fake that never answers.
+    also = "".join(f", {site} on 127.0.0.1:{other}" for site, other in (gitlabs or {}).items())
     print(
-        f"{LISTENING}: {owner_repo} from {root} on 127.0.0.1:{port}, {time.monotonic() - started:.2f}s after it started",
+        f"{LISTENING}: {owner_repo} from {root} on 127.0.0.1:{port}{also}, {time.monotonic() - started:.2f}s after it "
+        "started",
         flush=True,
     )
     server.serve_forever()
 
 
+def gitlab_ports(given: list[str]) -> dict[str, int]:
+    """`HOST=PORT` arguments, as `serve` takes them."""
+    found: dict[str, int] = {}
+    for item in given:
+        host, _, port = item.partition("=")
+        if not host or not port.isdigit():
+            raise ValueError(f"{item!r} is not HOST=PORT")
+        found[host] = int(port)
+    return found
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) == 5 and argv[0] == "serve":
-        serve(argv[1], int(argv[2]), argv[3], argv[4])
+    if len(argv) >= 5 and argv[0] == "serve":
+        serve(argv[1], int(argv[2]), argv[3], argv[4], gitlab_ports(argv[5:]))
         return 0
     if len(argv) == 2 and argv[0] == "tree":
         print(Snapshot(argv[1]).root)
