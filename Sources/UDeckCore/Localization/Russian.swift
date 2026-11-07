@@ -365,6 +365,24 @@ struct Russian: Vocabulary {
             "uDeck не может добавить этот источник: его идентификатор совпал бы с идентификатором \(name)."
         case .sourceNotFound(let address):
             "\(address) не найден или закрыт. Если он закрытый, uDeck нужен токен для него: «Токен…»."
+        case .sourceTokenNotFound(let address):
+            "С токеном \(address) не найден: токен может не давать к нему доступа, или репозитория больше нет."
+        case .sourceTokenRejected(let host, let address):
+            "\(host) не принял токен для \(address): он неверный, истёк или отозван. uDeck больше ничего с ним не отправляет; вставьте новый в «Токен…»."
+        case .sourceTokenScope(let address, let host, let scope):
+            "Токену для \(address) не хватает прав: \(host) требует токен с правом \(scope)."
+        case .sourceTokenRefused(let host, let address, let status):
+            "\(host) отказал токену для \(address) (HTTP \(status))."
+        case .sourceMoved(let address):
+            "\(address) сообщает, что переехал. uDeck не передаёт токен по другому адресу: удалите этот источник и добавьте его по новому адресу."
+        case .sourceTokenLimited(let address, let readAt, let until):
+            "Часовой лимит GitHub для токена \(address) исчерпан. "
+                + (readAt.map { "Список ниже — на \($0); " } ?? "")
+                + "uDeck посмотрит снова после \(until)."
+        case .sourceKeychainUnavailable(let address, let reason):
+            "uDeck не смог прочитать токен для \(address) из Связки ключей (\(reason)). Он не обратится к Связке ключей снова, пока вы не нажмёте «Проверить» или «Токен…» либо не перезапустите uDeck. Разрешите uDeck доступ, когда macOS спросит, или вставьте токен заново в «Токен…»."
+        case .sourceTokenUnbound(let address, let origin):
+            "Токен для \(address) проверялся с \(origin ?? "другим адресом"), а источник теперь указывает в другое место, поэтому uDeck его не отправляет. Если новый адрес верный, вставьте токен заново в «Токен…»."
         case .sourceNoLongerAdded(let address): "Из \(address) — источник больше не добавлен"
         case .sourceRemoveConfirm(let name, let address):
             "Удалить \(name) (\(address))? uDeck перестанет его читать и забудет его токен. Установленное из него останется и продолжит работать; если вы ему доверяли, эти плагины станут непроверенными и спросят снова перед следующим запуском, а обновить или переустановить их нельзя, пока источник не добавлен снова."

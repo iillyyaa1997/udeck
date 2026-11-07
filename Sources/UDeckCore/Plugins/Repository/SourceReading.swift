@@ -242,6 +242,10 @@ public struct SourceClients: Sendable {
     /// Each GitLab source's limit, by its id; one not here is read with a
     /// fresh one.
     public var gitLabLimits: [String: RateLimitRecorder]
+    /// Each GitHub source read with its token: a limit of its own, by its id
+    /// (S4-13) — GitHub counts a token's requests apart from what the
+    /// address asks without one.
+    public var tokenLimits: [String: RateLimitRecorder] = [:]
 
     public init(endpoints: GitHubEndpoints, udeckVersion: String, limits: RateLimitRecorder,
                 session: URLSession = GitHubClient.makeSession(), hostMap: [String: URL] = [:],
@@ -269,12 +273,13 @@ public struct SourceClients: Sendable {
         lookUpLimits[host] ?? RateLimitRecorder()
     }
 
-    func client(_ path: String, addressing: GitHubClient.Addressing) -> GitHubClient {
+    func client(_ path: String, addressing: GitHubClient.Addressing, credential: SourceCredential? = nil,
+                limits: RateLimitRecorder? = nil) -> GitHubClient {
         var endpoints = self.endpoints
         endpoints.repository = path
         endpoints.repositoryID = nil
-        return GitHubClient(endpoints: endpoints, udeckVersion: udeckVersion, limits: limits, session: session,
-                            addressing: addressing)
+        return GitHubClient(endpoints: endpoints, udeckVersion: udeckVersion, limits: limits ?? self.limits,
+                            session: session, addressing: addressing, credential: credential)
     }
 
     /// The one request ever addressed by a name: **Look up**'s describe.
@@ -284,27 +289,43 @@ public struct SourceClients: Sendable {
 
     /// A source's provider (`SourceProvider`), by its number: a github.com
     /// repository's, or a GitLab project's on its own host — nil for a host
-    /// no address could name.
-    public func of(_ source: OwnSource) -> SourceProvider? {
+    /// no address could name. With `credential` — what the vault handed out
+    /// for this source's API origin (`apiOrigin(of:)`) — its requests carry
+    /// it there and nowhere else.
+    public func of(_ source: OwnSource, credential: SourceCredential? = nil) -> SourceProvider? {
         switch source.provider {
         case SourceLink.github:
             guard source.host == SourceLink.githubHost else { return nil }
-            return SourceProvider(client(source.path, addressing: .id(source.remoteID)))
+            return SourceProvider(client(source.path, addressing: .id(source.remoteID), credential: credential,
+                                         limits: credential == nil ? limits : limits(of: source, tokened: true)))
         case SourceLink.gitlab:
             guard let endpoints = gitLab(source.host) else { return nil }
             return SourceProvider(GitLabClient(endpoints: endpoints, path: source.path, remoteID: source.remoteID,
                                                udeckVersion: udeckVersion,
                                                limits: gitLabLimits[source.id] ?? RateLimitRecorder(),
-                                               session: session))
+                                               session: session, credential: credential))
         default:
             return nil
         }
     }
 
+    /// The origin a source's API requests go to in this build — GitHub's API
+    /// base, or a GitLab's, after any host map: what its token's binding is
+    /// held to (S4-18).
+    public func apiOrigin(of source: OwnSource) -> Origin? {
+        switch source.provider {
+        case SourceLink.github: Origin(endpoints.apiBase)
+        case SourceLink.gitlab: gitLab(source.host).flatMap { Origin($0.apiBase) }
+        default: nil
+        }
+    }
+
     /// The limit a source is counted against: GitHub's anonymous one, which
-    /// the official source has, or a GitLab source's own.
-    public func limits(of source: OwnSource) -> RateLimitRecorder {
-        source.provider == SourceLink.gitlab ? gitLabLimits[source.id] ?? RateLimitRecorder() : limits
+    /// the official source has, a GitHub source's own while it is read with
+    /// its token (`tokened`), or a GitLab source's own.
+    public func limits(of source: OwnSource, tokened: Bool = false) -> RateLimitRecorder {
+        if source.provider == SourceLink.gitlab { return gitLabLimits[source.id] ?? RateLimitRecorder() }
+        return tokened ? tokenLimits[source.id] ?? RateLimitRecorder() : limits
     }
 
     /// The provider of the repository `path` is at now, by its number.
@@ -665,14 +686,28 @@ public enum SourceSchedule {
 /// `provider` the host's, `github` or `gitlab`. Read without a token: tokens
 /// come with R3.
 public enum CatalogueTrouble {
+    /// `tokened` is whether the source is read with its token: its `404`, a
+    /// `403` and GitHub's limit say so (S4-20, items 2, 5 and 8).
     public static func phrase(_ error: CatalogueError, address: String, host: String?, readAt: String?,
-                              until: (Date) -> String, provider: String = SourceLink.github) -> Phrase {
+                              until: (Date) -> String, provider: String = SourceLink.github,
+                              tokened: Bool = false) -> Phrase {
         let host = host ?? "GitHub"
         switch error {
         case .rateLimited(let date) where provider == SourceLink.gitlab:
             return .sourceGitLabLimited(host: host, readAt: readAt, until: until(date),
-                                        anonymousGitLabCom: host == SourceLink.gitLabCom)
+                                        anonymousGitLabCom: host == SourceLink.gitLabCom && !tokened)
+        case .rateLimited(let date) where tokened:
+            return .sourceTokenLimited(address: address, readAt: readAt, until: until(date))
         case .rateLimited(let date): return .catalogueLimited(readAt: readAt, until: until(date))
+        case .notFound where tokened: return .sourceTokenNotFound(address: address)
+        case .refused(let status) where tokened && status == 403:
+            return .sourceTokenRefused(host: host, address: address, status: status)
+        case .unauthorized: return .sourceTokenRejected(host: host, address: address)
+        case .forbidden(let scope?): return .sourceTokenScope(address: address, host: host, scope: scope)
+        case .forbidden(nil): return .sourceTokenRefused(host: host, address: address, status: 403)
+        case .moved: return .sourceMoved(address: address)
+        case .credentialUnbound(let origin): return .sourceTokenUnbound(address: address, origin: origin)
+        case .keychainUnavailable(let reason): return .sourceKeychainUnavailable(address: address, reason: reason)
         case .rawRateLimited(let date): return .catalogueRawLimited(until: until(date))
         case .unreachable(let reason): return .catalogueUnreachable(reason: reason, readAt: readAt, host: host)
         case .notFound: return host == "GitHub" ? .catalogueNotFound(source: address) : .sourceNotFound(address: address)

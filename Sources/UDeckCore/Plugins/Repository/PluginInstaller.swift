@@ -1100,6 +1100,7 @@ public struct PluginInstaller: Sendable {
         case .forbidden: "HTTP 403"
         case .moved(let status): "HTTP \(status)"
         case .tooLarge(let bytes): "\(bytes) bytes"
+        case .credentialUnbound: "the token is not for this address"
         }
     }
 }

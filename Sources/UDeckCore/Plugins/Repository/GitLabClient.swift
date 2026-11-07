@@ -104,6 +104,11 @@ public struct GitLabClient: RepositoryProvider {
     private let userAgent: String
     private let limits: RateLimitRecorder
     private let now: @Sendable () -> Date
+    /// The project's token, when it has one (S4-17): a pasted one in
+    /// `PRIVATE-TOKEN`, one from **Sign in** in `Authorization: Bearer` —
+    /// sent only to the origin it was checked with, every such request
+    /// refusing every redirect (`RedirectRefusal`).
+    public private(set) var credential: SourceCredential?
 
     /// The most pages a listing is followed across: a hundred entries each,
     /// past what any plugin repository holds.
@@ -116,8 +121,10 @@ public struct GitLabClient: RepositoryProvider {
         udeckVersion: String,
         limits: RateLimitRecorder,
         session: URLSession = GitHubClient.makeSession(),
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        credential: SourceCredential? = nil
     ) {
+        self.credential = credential
         self.endpoints = endpoints
         self.address = RepositoryAddress(provider: SourceLink.gitlab, host: endpoints.host, path: path)
         self.remoteID = remoteID
@@ -284,6 +291,13 @@ public struct GitLabClient: RepositoryProvider {
             } catch let error as ProviderError {
                 switch error {
                 case .rateLimited, .unreachable: throw error
+                // With a token, what GraphQL says of it is the read's answer:
+                // the token refused, the scope it lacks, a move — never asked
+                // again of the files API, which would send it once more.
+                case .unauthorized, .forbidden, .moved, .credentialUnbound:
+                    if credential != nil { throw error }
+                    rest += commits[start...]
+                    start = commits.count
                 default:
                     rest += commits[start...]
                     start = commits.count
@@ -561,7 +575,17 @@ public struct GitLabClient: RepositoryProvider {
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        try carry(&request)
         return request
+    }
+
+    /// `request` given the project's token, when it has one — only to the
+    /// origin the token was checked with (S4-19).
+    private func carry(_ request: inout URLRequest) throws {
+        guard let credential else { return }
+        guard let url = request.url, credential.mayGo(to: url) else { throw ProviderError.credentialUnbound }
+        let header = credential.header
+        request.setValue(header.value, forHTTPHeaderField: header.name)
     }
 
     private func api(
@@ -575,7 +599,9 @@ public struct GitLabClient: RepositoryProvider {
         let request = try request(path, query: query, headers: headers)
         let (data, response): (Data, HTTPURLResponse)
         do {
-            let (got, answer) = try await session.data(for: request)
+            let (got, answer) = credential != nil
+                ? try await session.data(for: request, delegate: RedirectRefusal.shared)
+                : try await session.data(for: request)
             guard let http = answer as? HTTPURLResponse else { throw ProviderError.badAnswer("not an HTTP answer") }
             (data, response) = (got, http)
         } catch let error as ProviderError {
@@ -602,10 +628,13 @@ public struct GitLabClient: RepositoryProvider {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
+        try carry(&request)
         let stream: URLSession.AsyncBytes
         let response: HTTPURLResponse
         do {
-            let (got, answer) = try await session.bytes(for: request)
+            let (got, answer) = credential != nil
+                ? try await session.bytes(for: request, delegate: RedirectRefusal.shared)
+                : try await session.bytes(for: request)
             guard let http = answer as? HTTPURLResponse else { throw ProviderError.badAnswer("not an HTTP answer") }
             (stream, response) = (got, http)
         } catch let error as ProviderError {
@@ -645,7 +674,9 @@ public struct GitLabClient: RepositoryProvider {
         let stream: URLSession.AsyncBytes
         let response: HTTPURLResponse
         do {
-            let (got, answer) = try await session.bytes(for: request)
+            let (got, answer) = credential != nil
+                ? try await session.bytes(for: request, delegate: RedirectRefusal.shared)
+                : try await session.bytes(for: request)
             guard let http = answer as? HTTPURLResponse else { throw ProviderError.badAnswer("not an HTTP answer") }
             (stream, response) = (got, http)
         } catch let error as ProviderError {
@@ -735,11 +766,19 @@ public struct GitLabClient: RepositoryProvider {
 
     /// The scope a `403` says the token lacks, when it says
     /// `insufficient_scope` — `""` when it names none; nil for any other `403`.
+    /// The scope is said only when it is one GitLab names — never the
+    /// answer's own text, which could carry anything, a token echoed back
+    /// included (S4-19).
     static func insufficientScope(_ body: Data) -> String? {
         guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               object["error"] as? String == "insufficient_scope" else { return nil }
-        return object["scope"] as? String ?? ""
+        guard let scope = object["scope"] as? String, knownScopes.contains(scope) else { return "" }
+        return scope
     }
+
+    /// GitLab's scopes a token step could ask for — what a `403` may name.
+    static let knownScopes: Set<String> = ["read_api", "api", "read_repository", "read_user", "read_registry",
+                                           "read_virtual_registry", "openid", "profile", "email"]
 
     /// A segment of a path, everything but GitLab's unreserved characters
     /// escaped: `group/project` is `group%2Fproject`.

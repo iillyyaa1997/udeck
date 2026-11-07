@@ -358,6 +358,24 @@ struct English: Vocabulary {
         case .sourceIDTaken(let name): "uDeck cannot add this source: its id would be the same as \(name)'s."
         case .sourceNotFound(let address):
             "\(address) could not be found, or it is private. If it is private, uDeck needs a token for it: Token…"
+        case .sourceTokenNotFound(let address):
+            "\(address) could not be found with its token: the token may not cover this repository, or the repository is gone."
+        case .sourceTokenRejected(let host, let address):
+            "\(host) did not accept the token for \(address): it is wrong, has expired or was revoked. uDeck sends nothing more with it; paste a new one under Token…"
+        case .sourceTokenScope(let address, let host, let scope):
+            "The token for \(address) may not read it: \(host) wants a token with \(scope)."
+        case .sourceTokenRefused(let host, let address, let status):
+            "\(host) refused the token for \(address) (HTTP \(status))."
+        case .sourceMoved(let address):
+            "\(address) says it has moved. uDeck does not take a token to another address: remove this source and add it at its new address."
+        case .sourceTokenLimited(let address, let readAt, let until):
+            "GitHub's hourly limit for the token of \(address) is used up. "
+                + (readAt.map { "The list below is from \($0); " } ?? "")
+                + "uDeck will look again after \(until)."
+        case .sourceKeychainUnavailable(let address, let reason):
+            "uDeck could not read the token for \(address) from the Keychain (\(reason)). It does not ask the Keychain again until you press Check now or Token…, or start uDeck again. Allow uDeck when macOS asks, or paste the token again under Token…"
+        case .sourceTokenUnbound(let address, let origin):
+            "The token for \(address) was checked with \(origin ?? "another address"), and the source now points elsewhere, so uDeck does not send it. If the new address is right, paste the token again under Token…"
         case .sourceNoLongerAdded(let address): "From \(address) — a source no longer added"
         case .sourceRemoveConfirm(let name, let address):
             "Remove \(name) (\(address))? uDeck stops reading it and forgets its token. What was installed from it stays and keeps running; if you trusted it, those plugins become Unverified and ask again before they next run, and nothing updates or reinstalls them until you add it again."

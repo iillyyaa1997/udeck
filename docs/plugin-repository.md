@@ -1273,11 +1273,85 @@ limit of its own — a GitHub block never stops a GitLab, nor one GitLab another
 — and two anonymous gitlab.com sources each keep their own count, though the
 network's is one.
 
-> **Later — stage 4.** Tokens: `PRIVATE-TOKEN: <token>` for a pasted GitLab
-> token, `Authorization: Bearer <token>` for GitHub's. A private GitHub source
-> is read through the API's contents endpoint rather than the raw host. Tokens
-> are kept in the Keychain, bound to the address they were checked against, sent
-> only to their own host, and never followed across a redirect.
+### Tokens
+
+A private source is read with a read-only token (S4-17). Pasted: GitHub's
+fine-grained (`github_pat_`) or classic (`ghp_`) personal tokens, GitLab's
+personal, project or group access tokens (`glpat-`); from **Sign in** (R6),
+GitHub App user tokens and GitLab OAuth tokens. A prefix that proves the token
+is the other provider's — a GitHub prefix (`ghp_`, `github_pat_`, `gho_`,
+`ghu_`, `ghs_`, `ghr_`) for a GitLab source, `glpat-` for a GitHub one — is
+refused before any request; any other prefix proves nothing, as a GitLab of
+one's own may change its own, and is accepted.
+
+**How a token is sent** (S4-19). GitHub's in `Authorization: Bearer <token>`;
+a pasted GitLab token in `PRIVATE-TOKEN: <token>`, which Apple does not
+reserve; one from **Sign in** in `Authorization: Bearer`. Only to the origin —
+scheme, host and port — the token was checked with, and only over HTTPS or to
+this machine (the lab): a request anywhere else is not sent at all. Never
+through the official client, which is addressed by its path and carries none;
+never through another repository's client; never to GitHub's raw host — a
+GitHub source read with a token asks the API for its files too,
+`GET /repositories/{id}/contents/{path}?ref={commit}` with
+`Accept: application/vnd.github.raw+json`, one request each, counted against a
+limit of its own. Every request carrying a token is sent with a delegate of
+that one task that refuses every redirect: a `3xx` comes back as the answer and
+is said as a move, so a token — or, from R6, a refresh token — is never
+replayed to wherever it points (**measured** in a unit test: the token reaches
+nothing at the new host, while a request without a token follows as it always
+has). A `401` is said as the host not accepting the token, a `403` naming the
+scope it lacks as that scope (GitLab's `insufficient_scope`), any other `403`
+as a refusal of the token, a `404` as not found with its token — the token may
+not cover it — and GitHub's limit as the token's own (S4-20, items 2 to 6 and
+8). No error of a request that carried a token quotes the answer's body, and a
+token is held in a value (`Secret`) that prints, interpolates, dumps and
+mirrors as `<redacted>`.
+
+**Where tokens are kept** (S4-18). One generic-password item in the login
+keychain: service `<bundle identifier>.sources` (`place.unicorns.udeck.sources`;
+a debug build's own identifier for it), account `tokens`, labelled *uDeck:
+tokens for plugin sources* — a file-based item, as an ad-hoc signed app has no
+entitlement for a data-protection access group. Its data is JSON:
+
+```json
+{"version": 1, "tokens": {"<source id>": {"kind": "pat", "token": "…",
+  "binding": {"provider": "gitlab", "apiOrigin": "https://gitlab.unicorns.place", "remoteID": 48}}}}
+```
+
+The binding is what the token was checked against: the provider, the number
+the check read, and the origin the check request actually went to, after any
+host map of a lab build. A token is handed out only for a source whose
+provider and number in `sources.json` are the binding's, whose requests go to
+the binding's origin now, and only when that origin is HTTPS or this machine;
+otherwise nothing is sent, and the source says so (S4-20, item 18) — a plugin
+that rewrites `sources.json`, or a host map put into an installed app, sends
+the token nowhere new. The item is read once, the first time a source with a
+token needs it — one question from macOS after each update of uDeck. A read
+that fails — denied, not allowed, any other error — is remembered for the
+process, every source with a token saying so (item 14), and no read nobody
+asked for touches the Keychain again until **Check now**, **Token…** or a
+relaunch; no item is no failure. Every change reads the item afresh right
+before, changes what it read — never what it remembered — and writes it in
+one step, so a denial is never followed by a write that erases the other
+sources' tokens; the last token gone, the item is deleted; an item a later
+uDeck wrote in a format this one does not read is never written over. A token
+is never written into `sources.json`, a `state.json`, a log or a URL. Only
+`KeychainCredentialStore.swift` imports Security, and a test reads the sources
+to hold that; every other part reaches the item through a seam the tests fake,
+so no test touches a keychain.
+
+**The pages that make a token**, with their fields filled in (S4-17):
+
+* GitHub: `https://github.com/settings/personal-access-tokens/new?name=uDeck%3A%20<repo>&description=…&target_name=<owner>&expires_in=366&contents=read`
+  — a name of 40 characters at the most, GitHub's limit; GitHub has no
+  parameter that selects the repository, so the sheet asks the person to
+  choose it.
+* GitLab: `https://<host>/-/user_settings/personal_access_tokens?name=uDeck%3A%20<project>&description=…&scopes=read_api`.
+
+> **Later — stage 4.** The token step in **Add a source…** and **Token…** on a
+> source, which keep a token only once it has read the repository, and clear
+> the clipboard of it (R3b); the runner's keychain checked end to end, and a
+> real token measured over real HTTPS before 0.8.0 (R3c).
 
 ---
 
@@ -1314,7 +1388,7 @@ It is written atomically, like `installed.json`, and it never holds a secret.
 | `provider`, `host` | `github` and `github.com`, or `gitlab` and a GitLab's host — `gitlab.com`, or one's own, lowercased, with a port when it has one other than 443. |
 | `path` | `owner/repo`, or `group/…/project`, as the host spells it now: for the pages a person opens and for GitHub's raw host. Written back whenever a describe of it, by its number, says another — a describe that names that number: one naming another, or none, is not believed, on GitHub as on GitLab. |
 | `remoteID` | The number GitHub knows the repository by, or GitLab the project, which neither a rename nor a transfer changes. Every request after **Look up** addresses it by that number. |
-| `access` | What the Keychain is expected to hold for it: `none` today. |
+| `access` | What the Keychain is expected to hold for it — never the token itself: `none`; `token` once a token is kept for it (R3b); `signIn` from R6. A source whose `access` is `none` never reads the Keychain. |
 | `trustedAt` | `null` today; when it was trusted, later. |
 | `addedAt` | When it was added. |
 
@@ -3041,6 +3115,22 @@ never the network. What they cover:
   when each source is read, what a read that did not finish says for each
   host, the test build's line, and a link into a source refused; **Reinstall**
   of a copy of a source no longer added giving nothing (`ShownPlaceTests`);
+* tokens (`CredentialTests`): a secret that prints, interpolates, dumps and
+  mirrors as `<redacted>`; origins, and where a token may go — its own origin,
+  over HTTPS or to this machine; the header each provider and kind is carried
+  in; what a prefix proves; the pre-filled pages, exactly; and the vault over a
+  fake Keychain — a token kept as JSON and handed out for its binding alone, a
+  denial remembered with no read nobody asked for after it, every change read
+  afresh and nothing written after a failed read, the item deleted with the
+  last token and never written over when a later uDeck wrote it, changes side
+  by side all kept — and that only `KeychainCredentialStore.swift` imports
+  Security; and tokens on the wire (`RedirectTests`): every request the API's
+  with a token, files through contents with raw media and never the raw host,
+  nothing sent to another origin or over plain HTTP, none on the official
+  client nor another repository's, `401`, `403`, `404` and a `3xx` said as the
+  token's, no answer quoted, a redirect refused with nothing reaching the new
+  host while a request without a token follows, GitLab's headers — GraphQL's
+  too — a source's clients with their token and limit, and what each says;
 * GitLab projects as sources (`GitLabClientTests`, `GitLabSourceTests`), against
   stub answers shaped like the ones recorded: **Look up** by the encoded path —
   GitLab's own `404`, and one that is not GitLab's — and everything after it by

@@ -41,7 +41,8 @@ public enum OperationProblem: Equatable, Sendable {
             case .unreachable(let reason): self = .catalogue(.unreachable(reason))
             case .badAnswer(let reason): self = .catalogue(.badAnswer(reason))
             // Said as a read of the catalogue says them (`CatalogueRefresher.reason`).
-            case .unauthorized, .forbidden, .moved, .tooLarge: self = .catalogue(CatalogueRefresher.reason(error, branch: nil))
+            case .unauthorized, .forbidden, .moved, .tooLarge, .credentialUnbound:
+                self = .catalogue(CatalogueRefresher.reason(error, branch: nil))
             }
         case let error as CatalogueError:
             self = .catalogue(error)

@@ -24,6 +24,9 @@ public struct CatalogueRefresher: Sendable {
     public let store: CatalogueStore
     public let limits: RateLimitRecorder
     private let now: @Sendable () -> Date
+    /// Whether its reads carry the source's token: what a refusal is kept as
+    /// depends on it (`reason(_:branch:tokened:)`).
+    public let tokened: Bool
 
     /// How long a default branch is believed before it is asked again.
     public static let defaultBranchLife: TimeInterval = 24 * 3600
@@ -32,12 +35,14 @@ public struct CatalogueRefresher: Sendable {
         provider: any RepositoryProvider,
         store: CatalogueStore,
         limits: RateLimitRecorder,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        tokened: Bool = false
     ) {
         self.provider = provider
         self.store = store
         self.limits = limits
         self.now = now
+        self.tokened = tokened
     }
 
     /// What one refresh came to.
@@ -71,7 +76,7 @@ public struct CatalogueRefresher: Sendable {
             state.failuresInARow = 0
             outcome = .refreshed(head: head, changed: changed)
         } catch {
-            var reason = Self.reason(error, branch: state.defaultBranch)
+            var reason = Self.reason(error, branch: state.defaultBranch, tokened: tokened)
             // The official address answered another repository's number
             // (`OfficialRepositoryCheck`): the next read asks the number again
             // before anything else, and a read that fails before a describe
@@ -220,7 +225,11 @@ public struct CatalogueRefresher: Sendable {
     }
 
     /// What `error`, thrown reading a source, is said as and kept as.
-    public static func reason(_ error: any Error, branch: String?) -> CatalogueError {
+    /// `tokened` is whether the read carried the source's token: only then is
+    /// a `401`, a `403` naming a scope or a move said as what it says of the
+    /// token (S4-20, items 3, 4 and 6) — without one each is the refusal it
+    /// is, said with its status, as before tokens.
+    public static func reason(_ error: any Error, branch: String?, tokened: Bool = false) -> CatalogueError {
         switch error {
         case let error as CatalogueError: return error
         case let error as ProviderError:
@@ -231,12 +240,10 @@ public struct CatalogueRefresher: Sendable {
             case .refused(let status): return .refused(status: status)
             case .unreachable(let reason): return .unreachable(reason)
             case .badAnswer(let reason): return .badAnswer(reason)
-            // A read carries no token yet (stage 4, R3 brings them): a `401`,
-            // a `403` naming a scope and a move are the refusals they are,
-            // said with their status, as before stage 4.
-            case .unauthorized: return .refused(status: 401)
-            case .forbidden: return .refused(status: 403)
-            case .moved(let status): return .refused(status: status)
+            case .unauthorized: return tokened ? .unauthorized : .refused(status: 401)
+            case .forbidden(let scope): return tokened ? .forbidden(scope: scope) : .refused(status: 403)
+            case .moved(let status): return tokened ? .moved(status: status) : .refused(status: status)
+            case .credentialUnbound: return .credentialUnbound(origin: nil)
             case .tooLarge(let bytes):
                 return .badAnswer("a file of \(bytes) bytes, more than the \(RepositoryRules.maximumFileBytes) a plugin's file may be")
             }

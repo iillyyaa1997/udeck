@@ -10,6 +10,18 @@ for what that promises.
 
 ## [Unreleased]
 
+- **Tokens, underneath** (not yet offered on any screen). A source's token is
+  kept in one Keychain item, bound to the provider, the number and the origin
+  it was checked with, and handed out only for requests to that origin, over
+  HTTPS or to this machine: never to GitHub's raw host — a GitHub source read
+  with a token takes its files from the API's contents endpoint — never on the
+  official catalogue, never across a redirect, which a request carrying a token
+  refuses. A Keychain that will not be read is remembered, and asked again only
+  when the person asks; every change reads the item afresh and writes nothing
+  after a failed read. A `401`, a `403`, a `404` and a move are said as what
+  they say of the token, in English and Russian, and no error of a request that
+  carried a token quotes its answer. GitHub's `401` and a move without a token
+  are said as before.
 - **Earlier versions… on GitLab costs six requests, not fifty-one.** The
   manifests of a dozen commits come in one request to GitLab's GraphQL — the
   project by the path the source has now, believed only when the answer comes

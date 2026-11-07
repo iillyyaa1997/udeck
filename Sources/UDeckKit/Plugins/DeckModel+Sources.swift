@@ -102,7 +102,7 @@ extension DeckModel {
 
     /// The provider `source` is read through now — nil while it is not added.
     func sourceProvider(_ id: String) -> SourceProvider? {
-        source(id).flatMap(sourceClients.of)
+        source(id).flatMap { sourceClients.of($0) }
     }
 
     // MARK: - One read at a time

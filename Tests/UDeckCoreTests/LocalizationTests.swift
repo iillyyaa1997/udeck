@@ -197,6 +197,16 @@ struct LocalizationTests {
         .sourceNotGitLab(host: "gitlab.example"), .sourceAlreadyAdded(name: "Team", address: "github.com/o/r"),
         .sourceBranchNotYet,
 
+        // A source read with its token (stage 4, R3a: S4-20, items 2 to 6, 8, 14 and 18).
+        .sourceTokenNotFound(address: "github.com/o/r"), .sourceTokenRejected(host: "GitHub", address: "github.com/o/r"),
+        .sourceTokenScope(address: "gitlab.example/g/p", host: "gitlab.example", scope: "read_api"),
+        .sourceTokenRefused(host: "GitHub", address: "github.com/o/r", status: 403), .sourceMoved(address: "github.com/o/r"),
+        .sourceTokenLimited(address: "github.com/o/r", readAt: "14:02", until: "15:07"),
+        .sourceTokenLimited(address: "github.com/o/r", readAt: nil, until: "15:07"),
+        .sourceKeychainUnavailable(address: "github.com/o/r", reason: "User interaction is not allowed. (-25308)"),
+        .sourceTokenUnbound(address: "gitlab.example/g/p", origin: "https://gitlab.example"),
+        .sourceTokenUnbound(address: "gitlab.example/g/p", origin: nil),
+
         .pluginLastRun(at: "21:04:05", reason: .interval, duration: 0.21, result: .card),
         .pluginLastRun(at: "21:04:05", reason: .launch, duration: 0.21, result: .failure(.exited(code: 3))),
         .pluginLastRun(at: "21:04:05", reason: .manual, duration: 2, result: .lateCard(.timedOut(after: 2))),
@@ -279,7 +289,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 444,
+        #expect(Self.all.count == 454,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

@@ -29,6 +29,23 @@ public enum CatalogueError: Codable, Equatable, Sendable {
     /// updated by itself — until it answers its own number again. An older
     /// uDeck, which does not know this case, reads the state without it.
     case officialRepositoryChanged
+    /// The host did not accept the source's token — `401` (S4-19): wrong,
+    /// expired or revoked. Nothing more is sent for the source, with it or
+    /// without it, until **Check now** or **Token…**. Like every case below,
+    /// said only of a read that carried a token; an older uDeck reads the
+    /// state without it.
+    case unauthorized
+    /// `403` to a request carrying a token: naming the scope it lacks
+    /// (GitLab's `insufficient_scope`), or none.
+    case forbidden(scope: String?)
+    /// A `3xx` came back to a request carrying a token, which never follows
+    /// one: the repository says it has moved.
+    case moved(status: Int)
+    /// The source's token was checked with `origin` — another than the one
+    /// its requests would go to now — and is not sent (S4-18).
+    case credentialUnbound(origin: String?)
+    /// The Keychain could not be read, for `reason` (S4-18).
+    case keychainUnavailable(reason: String)
 }
 
 /// What one source's catalogue remembers between refreshes and launches.

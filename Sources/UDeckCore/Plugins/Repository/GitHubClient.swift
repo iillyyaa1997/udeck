@@ -36,6 +36,25 @@ public enum ProviderError: Error, Equatable, Sendable {
     /// largest a file may be was read (`RepositoryRules.maximumFileBytes`):
     /// `bytes` is what the host said, or what was read by then.
     case tooLarge(bytes: Int)
+    /// A request that would have carried a token to another origin than the
+    /// one it was checked with — or to one no secret may travel to: not sent
+    /// (S4-19).
+    case credentialUnbound
+}
+
+/// What every request carrying a secret is sent with (S4-19): a delegate of
+/// that one task, which refuses every redirect, so that a token — or, from
+/// R6, a refresh token or a device code — is never replayed to wherever a
+/// `3xx` points. The `3xx` comes back as the answer, said as a move
+/// (`ProviderError.moved`). Of the task, not the session: a session keeps its
+/// delegate until it is invalidated, and uDeck makes a client for each read.
+final class RedirectRefusal: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    static let shared = RedirectRefusal()
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest) async -> URLRequest? {
+        nil
+    }
 }
 
 /// The head of a branch, asked conditionally.
@@ -419,15 +438,23 @@ public struct GitHubEndpoints: Equatable, Sendable {
     }
 }
 
-/// GitHub, read anonymously through its REST API and its raw file host.
+/// GitHub, read through its REST API and its raw file host — anonymously, or
+/// with a source's token.
 ///
 /// The transport is a parameter — a `URLSession` — so tests answer it with
 /// recorded responses through a stub `URLProtocol` and never reach the
 /// network. Every request carries `User-Agent: uDeck/<version>` (GitHub
 /// refuses requests without one); API requests also carry
 /// `Accept: application/vnd.github+json`, except the conditional head, and
-/// `X-GitHub-Api-Version: 2022-11-28`. Nothing carries a token or a cookie,
-/// and each request gives up after 30 seconds.
+/// `X-GitHub-Api-Version: 2022-11-28`. Nothing carries a cookie, and each
+/// request gives up after 30 seconds.
+///
+/// With a `credential` (S4-17, S4-19) — a source of one's own, addressed by
+/// its number, and never the official source — every request is the API's:
+/// files too, through `/repositories/{id}/contents/{path}?ref={commit}` with
+/// raw media, never the raw host. Each carries `Authorization: Bearer`, but
+/// only to the origin the token was checked with, and is sent refusing every
+/// redirect (`RedirectRefusal`); no error of one quotes the answer's body.
 public struct GitHubClient: RepositoryProvider {
     public private(set) var endpoints: GitHubEndpoints
     public private(set) var address: RepositoryAddress
@@ -437,6 +464,8 @@ public struct GitHubClient: RepositoryProvider {
     private let userAgent: String
     private let limits: RateLimitRecorder
     private let now: @Sendable () -> Date
+    /// The source's token, when it has one (`SourceCredential`).
+    public private(set) var credential: SourceCredential?
 
     public static let requestTimeout: TimeInterval = 30
 
@@ -458,11 +487,16 @@ public struct GitHubClient: RepositoryProvider {
         limits: RateLimitRecorder,
         session: URLSession = GitHubClient.makeSession(),
         now: @escaping @Sendable () -> Date = { Date() },
-        addressing: Addressing = .path
+        addressing: Addressing = .path,
+        credential: SourceCredential? = nil
     ) {
         self.endpoints = endpoints
         self.address = RepositoryAddress(provider: "github", host: "github.com", path: endpoints.repository)
         self.addressing = addressing
+        // A token is a source's of one's own, which is addressed by its
+        // number: one addressed by its path — the official repository, and
+        // its forks — never carries one.
+        if case .id = addressing { self.credential = credential } else { self.credential = nil }
         self.session = session
         self.userAgent = "uDeck/\(udeckVersion)"
         self.limits = limits
@@ -515,7 +549,9 @@ public struct GitHubClient: RepositoryProvider {
         if response.statusCode == 304 { return .unchanged }
         let sha = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         guard GitHash.isObjectID(sha) else {
-            throw ProviderError.badAnswer("the head of \(branch) is not a commit id: \(sha.prefix(60))")
+            // An answer to a request that carried a token is never quoted.
+            let quoted = credential == nil ? ": \(sha.prefix(60))" : ""
+            throw ProviderError.badAnswer("the head of \(branch) is not a commit id\(quoted)")
         }
         return .commit(sha, etag: response.value(forHTTPHeaderField: "ETag"))
     }
@@ -526,11 +562,21 @@ public struct GitHubClient: RepositoryProvider {
         do {
             return try JSONDecoder().decode(GitTree.self, from: data)
         } catch {
-            throw ProviderError.badAnswer("the listing of \(sha.prefix(7)) could not be read: \(error)")
+            let quoted = credential == nil ? ": \(error)" : ""
+            throw ProviderError.badAnswer("the listing of \(sha.prefix(7)) could not be read\(quoted)")
         }
     }
 
     public func file(at path: String, commit: String) async throws -> Data {
+        if credential != nil {
+            // With a token, from the API: one request each, never the raw host.
+            let escaped = path.split(separator: "/", omittingEmptySubsequences: false)
+                .map { Self.escape(String($0)) }.joined(separator: "/")
+            let (data, _) = try await api("\(repositoryPath)/contents/\(escaped)",
+                                          query: [URLQueryItem(name: "ref", value: commit)],
+                                          headers: ["Accept": "application/vnd.github.raw+json"])
+            return data
+        }
         if let until = limits.current.rawBlocked(now: now()) { throw ProviderError.rawRateLimited(until: until) }
         let url = Self.appending(endpoints.rawBase, "\(endpoints.repository)/\(commit)/\(path)")
         var request = URLRequest(url: url, timeoutInterval: Self.requestTimeout)
@@ -625,6 +671,8 @@ public struct GitHubClient: RepositoryProvider {
         guard parts.count == 2, RepositoryLink.isOwner(parts[0]), RepositoryLink.isRepository(parts[1]) else { return nil }
         if case .id = addressing { return repository.path.lowercased() == address.path.lowercased() ? self : nil }
         var client = self
+        // Another repository's client never carries this one's token.
+        client.credential = nil
         client.endpoints.repository = repository.path
         client.address = RepositoryAddress(provider: address.provider, host: address.host, path: repository.path)
         return client
@@ -662,8 +710,13 @@ public struct GitHubClient: RepositoryProvider {
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        if let credential {
+            guard credential.mayGo(to: url) else { throw ProviderError.credentialUnbound }
+            let header = credential.header
+            request.setValue(header.value, forHTTPHeaderField: header.name)
+        }
 
-        let (data, response) = try await send(request)
+        let (data, response) = try await send(request, refusingRedirects: credential != nil)
         var fields: [String: String] = [:]
         for (key, value) in response.allHeaderFields {
             if let key = key as? String, let value = value as? String { fields[key] = value }
@@ -674,13 +727,17 @@ public struct GitHubClient: RepositoryProvider {
         case (200 ..< 300, _): return (data, response)
         case (304, _) where allowNotModified: return (data, response)
         case (404, _), (422, _): throw ProviderError.notFound
+        case (401, _): throw ProviderError.unauthorized
+        case (300 ..< 400, _): throw ProviderError.moved(status: response.statusCode)
         default: throw ProviderError.refused(status: response.statusCode)
         }
     }
 
-    private func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+    private func send(_ request: URLRequest, refusingRedirects: Bool = false) async throws -> (Data, HTTPURLResponse) {
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = refusingRedirects
+                ? try await session.data(for: request, delegate: RedirectRefusal.shared)
+                : try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 throw ProviderError.badAnswer("not an HTTP answer")
             }

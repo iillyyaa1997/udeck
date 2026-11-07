@@ -427,6 +427,20 @@ public enum Phrase: Sendable, Equatable {
     case sourceIDTaken(name: String)
     /// A source's `404`, asked without a token.
     case sourceNotFound(address: String)
+    /// A source read with its token (S4-20): its `404` (item 2); the host
+    /// refusing the token, `401` (item 3); a `403` naming the scope it lacks
+    /// (item 4), or none (item 5); a move, which a token is never taken across
+    /// (item 6); GitHub's hourly limit for the token (item 8); the Keychain
+    /// that could not be read (item 14); and a token checked with another
+    /// origin than the one its source's requests go to now (item 18).
+    case sourceTokenNotFound(address: String)
+    case sourceTokenRejected(host: String, address: String)
+    case sourceTokenScope(address: String, host: String, scope: String)
+    case sourceTokenRefused(host: String, address: String, status: Int)
+    case sourceMoved(address: String)
+    case sourceTokenLimited(address: String, readAt: String?, until: String)
+    case sourceKeychainUnavailable(address: String, reason: String)
+    case sourceTokenUnbound(address: String, origin: String?)
     /// A copy of a source that is no longer added: its row, after its mark.
     case sourceNoLongerAdded(address: String)
     /// **Remove…** of a source: what it does.
