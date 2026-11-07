@@ -524,6 +524,7 @@ final class StubAnswers: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var answers: [String: Answer] = [:]
     nonisolated(unsafe) private static var requests: [String: [URLRequest]] = [:]
     nonisolated(unsafe) private static var headers: [String: @Sendable (URLRequest) -> [String: String]] = [:]
+    nonisolated(unsafe) private static var failingBodies: Set<String> = []
 
     static func answer(_ host: String, with answer: @escaping Answer) {
         lock.withLock { answers[host] = answer }
@@ -535,11 +536,18 @@ final class StubAnswers: URLProtocol, @unchecked Sendable {
         lock.withLock { headers[host] = make }
     }
 
+    /// Every answer to `host` stops after its headers: the connection lost
+    /// before its body arrived.
+    static func failBodies(_ host: String) {
+        _ = lock.withLock { failingBodies.insert(host) }
+    }
+
     static func forget(_ host: String) {
         lock.withLock {
             answers[host] = nil
             requests[host] = nil
             headers[host] = nil
+            failingBodies.remove(host)
         }
     }
 
@@ -552,15 +560,20 @@ final class StubAnswers: URLProtocol, @unchecked Sendable {
 
     override func startLoading() {
         let host = request.url?.host ?? ""
-        let (answer, extra) = Self.lock.withLock { () -> (Answer?, (@Sendable (URLRequest) -> [String: String])?) in
+        let (answer, extra, failing) = Self.lock.withLock {
+            () -> (Answer?, (@Sendable (URLRequest) -> [String: String])?, Bool) in
             Self.requests[host, default: []].append(request)
-            return (Self.answers[host], Self.headers[host])
+            return (Self.answers[host], Self.headers[host], Self.failingBodies.contains(host))
         }
         let (status, body) = answer?(request) ?? (599, Data())
         let fields = (extra?(request) ?? [:]).merging(["Content-Type": "application/json"]) { given, _ in given }
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1",
                                        headerFields: fields)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if failing {
+            client?.urlProtocol(self, didFailWithError: URLError(.networkConnectionLost))
+            return
+        }
         client?.urlProtocol(self, didLoad: body)
         client?.urlProtocolDidFinishLoading(self)
     }

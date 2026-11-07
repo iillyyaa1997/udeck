@@ -142,9 +142,10 @@ public struct GitLabClient: RepositoryProvider {
     /// its path, URL-encoded with its `/` as `%2F` — through `endpoints`.
     public static func lookUp(_ path: String, endpoints: GitLabEndpoints, udeckVersion: String,
                               limits: RateLimitRecorder, session: URLSession = GitHubClient.makeSession(),
-                              now: @escaping @Sendable () -> Date = { Date() }) async throws -> GitLabProjectLookUp {
+                              now: @escaping @Sendable () -> Date = { Date() },
+                              credential: SourceCredential? = nil) async throws -> GitLabProjectLookUp {
         let asking = GitLabClient(endpoints: endpoints, path: path, remoteID: 0, udeckVersion: udeckVersion,
-                                  limits: limits, session: session, now: now)
+                                  limits: limits, session: session, now: now, credential: credential)
         let answer: (Data, HTTPURLResponse)
         do {
             answer = try await asking.api("projects/\(escape(path))", lookingUp: true)
@@ -294,7 +295,7 @@ public struct GitLabClient: RepositoryProvider {
                 // With a token, what GraphQL says of it is the read's answer:
                 // the token refused, the scope it lacks, a move — never asked
                 // again of the files API, which would send it once more.
-                case .unauthorized, .forbidden, .moved, .credentialUnbound:
+                case .unauthorized, .forbidden, .moved, .credentialUnbound, .tokenWithdrawn:
                     if credential != nil { throw error }
                     rest += commits[start...]
                     start = commits.count
@@ -583,6 +584,8 @@ public struct GitLabClient: RepositoryProvider {
     /// origin the token was checked with (S4-19).
     private func carry(_ request: inout URLRequest) throws {
         guard let credential else { return }
+        // Taken back since it was handed out: not sent, not even once more.
+        try credential.stillHeld()
         guard let url = request.url, credential.mayGo(to: url) else { throw ProviderError.credentialUnbound }
         let header = credential.header
         request.setValue(header.value, forHTTPHeaderField: header.name)
@@ -642,6 +645,13 @@ public struct GitLabClient: RepositoryProvider {
         } catch {
             throw ProviderError.unreachable(error.localizedDescription)
         }
+        // Refused the moment its headers arrive, whatever its body does
+        // after: no client holding the token sends it again (S4-19).
+        if response.statusCode == 401, let credential {
+            stream.task.cancel()
+            credential.lease?.end(.rejected)
+            throw ProviderError.unauthorized
+        }
         // An answer from anywhere but where it was asked — a redirect followed
         // to another host, port or scheme — says nothing of this GitLab's
         // project, whatever number it names: GraphQL is not asked here, and
@@ -683,6 +693,13 @@ public struct GitLabClient: RepositoryProvider {
             throw error
         } catch {
             throw ProviderError.unreachable(error.localizedDescription)
+        }
+        // Refused the moment its headers arrive, whatever its body does
+        // after: no client holding the token sends it again (S4-19).
+        if response.statusCode == 401, let credential {
+            stream.task.cancel()
+            credential.lease?.end(.rejected)
+            throw ProviderError.unauthorized
         }
         guard (200 ..< 300).contains(response.statusCode) else {
             // A refusal's body is GitLab's few words: read whole, and judged.
@@ -751,7 +768,10 @@ public struct GitLabClient: RepositoryProvider {
         case (304, _) where allowNotModified: return
         case (404, _): throw ProviderError.notFound
         case (400, _) where notFoundOn400(body): throw ProviderError.notFound
-        case (401, _): throw ProviderError.unauthorized
+        case (401, _):
+            // Refused: no client holding it sends it again (S4-19).
+            credential?.lease?.end(.rejected)
+            throw ProviderError.unauthorized
         case (300 ..< 400, _): throw ProviderError.moved(status: status)
         default: throw ProviderError.refused(status: status)
         }

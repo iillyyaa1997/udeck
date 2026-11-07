@@ -1,0 +1,14 @@
+{
+  "id": "gl-hello",
+  "name": "GitLab hello",
+  "version": "1.0.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "Says hello from a GitLab project: how many times it ran.",
+  "author": "uDeck lab",
+  "run": [
+    "./run.sh"
+  ],
+  "interval": 60,
+  "timeout": 2
+}

@@ -40,6 +40,19 @@ public enum ProviderError: Error, Equatable, Sendable {
     /// one it was checked with — or to one no secret may travel to: not sent
     /// (S4-19).
     case credentialUnbound
+    /// The token's lease had ended before the request (`CredentialLease`):
+    /// taken back, or refused by the host earlier — not sent.
+    case tokenWithdrawn(CredentialLease.Ending)
+
+    /// Whether it is the token's answer — refused, short of a scope, sent
+    /// elsewhere by a move, not for this address, taken back: asked again,
+    /// the token would only be sent again, so nothing retries it (S4-19).
+    public var isTheTokens: Bool {
+        switch self {
+        case .unauthorized, .forbidden, .moved, .credentialUnbound, .tokenWithdrawn: true
+        default: false
+        }
+    }
 }
 
 /// What every request carrying a secret is sent with (S4-19): a delegate of
@@ -488,15 +501,17 @@ public struct GitHubClient: RepositoryProvider {
         session: URLSession = GitHubClient.makeSession(),
         now: @escaping @Sendable () -> Date = { Date() },
         addressing: Addressing = .path,
-        credential: SourceCredential? = nil
+        credential: SourceCredential? = nil,
+        checking: Bool = false
     ) {
         self.endpoints = endpoints
         self.address = RepositoryAddress(provider: "github", host: "github.com", path: endpoints.repository)
         self.addressing = addressing
         // A token is a source's of one's own, which is addressed by its
         // number: one addressed by its path — the official repository, and
-        // its forks — never carries one.
-        if case .id = addressing { self.credential = credential } else { self.credential = nil }
+        // its forks — never carries one, but for the one check **Look up**
+        // makes of a token pasted for a repository it names (`checking`).
+        if case .id = addressing { self.credential = credential } else { self.credential = checking ? credential : nil }
         self.session = session
         self.userAgent = "uDeck/\(udeckVersion)"
         self.limits = limits
@@ -534,11 +549,20 @@ public struct GitHubClient: RepositoryProvider {
     /// `GET /repos/{o}/{r}` — one request, which says the default branch and
     /// whether it is a fork, and of which, together.
     public func describe() async throws -> RepositoryDescription {
-        let (data, _) = try await api(repositoryPath)
+        try await describeWithScopes().description
+    }
+
+    /// `describe`, and the scopes GitHub says the token carried —
+    /// `X-OAuth-Scopes`, which it sends for a classic or OAuth token: what
+    /// **Look up** warns of when they include `repo` (S4-20, item 21).
+    public func describeWithScopes() async throws -> (description: RepositoryDescription, scopes: [String]) {
+        let (data, response) = try await api(repositoryPath)
         guard let description = RepositoryDescription.read(data) else {
             throw ProviderError.badAnswer("the repository's description has no default branch")
         }
-        return description
+        let scopes = (response.value(forHTTPHeaderField: "X-OAuth-Scopes") ?? "")
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return (description, scopes)
     }
 
     public func head(of branch: String, ifNoneMatch etag: String?) async throws -> HeadAnswer {
@@ -711,6 +735,8 @@ public struct GitHubClient: RepositoryProvider {
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         if let credential {
+            // Taken back since it was handed out: not sent, not even once more.
+            try credential.stillHeld()
             guard credential.mayGo(to: url) else { throw ProviderError.credentialUnbound }
             let header = credential.header
             request.setValue(header.value, forHTTPHeaderField: header.name)
@@ -727,7 +753,10 @@ public struct GitHubClient: RepositoryProvider {
         case (200 ..< 300, _): return (data, response)
         case (304, _) where allowNotModified: return (data, response)
         case (404, _), (422, _): throw ProviderError.notFound
-        case (401, _): throw ProviderError.unauthorized
+        case (401, _):
+            // Refused: no client holding it sends it again (S4-19).
+            credential?.lease?.end(.rejected)
+            throw ProviderError.unauthorized
         case (300 ..< 400, _): throw ProviderError.moved(status: response.statusCode)
         default: throw ProviderError.refused(status: response.statusCode)
         }

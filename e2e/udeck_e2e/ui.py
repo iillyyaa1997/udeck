@@ -813,6 +813,85 @@ def type_text(machine: Any, text: str, step: str) -> None:
     ask(machine, _applescript(_TYPE, process=PROCESS, text=text), step, seconds=config.UI_APPEAR_SECONDS)
 
 
+# What uDeck has focused, as accessibility says it: the element's identifier and subrole, `|` between — `|` alone
+# when nothing is focused, or the focused element says neither.
+# Its variables are named so that none is a property of a process — `subrole`, `focused` and `identifier` are, and a
+# `set` of one inside `tell process` sets the process's (run 42396041543: *Can't set subrole of application process*).
+_FOCUSED = """
+tell application "System Events" to tell process %(process)s
+  set frontmost to true
+  try
+    set theElement to value of attribute "AXFocusedUIElement"
+  on error
+    return "|"
+  end try
+  set theName to ""
+  set theKind to ""
+  try
+    set theName to value of attribute "AXIdentifier" of theElement
+  end try
+  try
+    set theKind to value of attribute "AXSubrole" of theElement
+  end try
+  return theName & "|" & theKind
+end tell
+"""
+
+# The subrole of a field whose text is never shown: SwiftUI's SecureField, AppKit's NSSecureTextField.
+SECURE_FIELD = "AXSecureTextField"
+
+# How many times a secure field is clicked to take the focus before nothing is typed at all.
+SECRET_FOCUS_TRIES = 3
+
+
+def focused(machine: Any, step: str) -> tuple[str, str]:
+    """The identifier and the subrole of the element uDeck has focused — empty strings for what it does not say."""
+    identifier, _, subrole = ask(machine, _applescript(_FOCUSED, process=PROCESS), step).partition("|")
+    return identifier, subrole
+
+
+def enter_secret(machine: Any, identifier: str, text: str, step: str) -> None:
+    """`text` typed into the secure field `identifier` — and nowhere else (S4-22).
+
+    A click does not always give a SwiftUI SecureField the focus: in run 42335961364 a GitLab token was typed into
+    the address field beside it, which showed it. So the focus is read first — the field's identifier and the subrole
+    of a field that shows no text — clicked for when it is elsewhere, read again, and only then typed into; after
+    the typing the focus must still be there. When the field never takes it, nothing is typed: a lab problem, never
+    a secret in a field that shows it. The lab's tokens are fixture strings; a real one never comes through here.
+    """
+    now = ("", "")
+    for attempt in range(1, SECRET_FOCUS_TRIES + 1):
+        now = focused(machine, f"{step}: reading what has the focus")
+        if now == (identifier, SECURE_FIELD):
+            type_text(machine, text, step)
+            after = focused(machine, f"{step}: reading the focus after typing")
+            if after != (identifier, SECURE_FIELD):
+                raise LabError(step, f"the focus left {identifier} while it was typed into: now {after}")
+            return
+        click(machine, identifier, f"{step}: putting the cursor in the secure field (try {attempt})")
+        machine.sleep(0.5)
+    raise LabError(step, f"{identifier} never took the focus — it stayed on {now}: nothing was typed")
+
+
+_RETURN = """
+tell application "System Events" to tell process %(process)s
+  set frontmost to true
+  key code 36
+end tell
+return "pressed"
+"""
+
+
+def press_return(machine: Any, step: str) -> None:
+    """Return pressed in the field uDeck has focused, as a person ends what they typed: the field's own action.
+
+    A secret's field is left this way rather than by its button: the focus is already proven on it
+    (`enter_secret`), and a button at the very bottom of the settings window can sit where the Dock takes the click
+    (run 42398202427: *Look up with the token* at y 986–1010, the window ending at 1000, the click on Photos).
+    """
+    ask(machine, _applescript(_RETURN, process=PROCESS), step, seconds=config.UI_APPEAR_SECONDS)
+
+
 def element(dump: str, identifier: str, step: str = "reading the screen") -> Element | None:
     """The control with this identifier in a walk, or None."""
     for row in controls(dump, step):

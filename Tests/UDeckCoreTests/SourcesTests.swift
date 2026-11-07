@@ -209,6 +209,7 @@ struct SourcesTests {
             Self.entry())
         var list = try Self.read(later).get()
         let gitea = try #require(list.skipped.first)
+        #expect(gitea.id == "gitea.example-p-00000000", "its id, so a token a later uDeck kept for it is never pruned")
         let added = try list.add(provider: "gitlab", host: "gitlab.unicorns.place", path: "tools/udeck-plugins",
                                  remoteID: 48, at: Self.at).get()
         let data = try JSONFileStore<SourceList>.encoder.encode(list)

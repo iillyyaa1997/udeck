@@ -1,0 +1,20 @@
+{
+  "id": "uptime",
+  "name": "Uptime",
+  "version": "1.0.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "The team's own uptime, under the official one's id: not the official copy.",
+  "author": "uDeck lab",
+  "run": [
+    "./uptime.sh"
+  ],
+  "interval": 60,
+  "timeout": 2,
+  "permissions": {
+    "exec": [
+      "sysctl",
+      "./hold.sh"
+    ]
+  }
+}

@@ -92,8 +92,33 @@ public final class DeckModel {
     /// **Add a source…**: whether its sheet is open, what its field holds —
     /// **Add as a source…** fills it — and what **Look up** came to.
     public var sourceSheetOpen = false
-    public var sourceField = ""
+    public var sourceField = "" {
+        // The token step is for the address that was looked up: another
+        // address in the field, and the step and what was pasted in it go.
+        didSet {
+            if let draft = addSourceDraft, SourceLookUp.link(sourceField, official: catalogueAddress) != draft.link {
+                addSourceDraft = nil
+            }
+        }
+    }
     public internal(set) var sourceAdding: SourceAdding?
+    /// Whether the last **Look up** carried a token: what it came to is said
+    /// as a token's (S4-20).
+    public internal(set) var sourceAddingTokened = false
+    /// The token step of **Add a source…** (S4-17): the address the
+    /// anonymous look-up could not find — the step's link and the only
+    /// address its token goes to — and the token pasted for it, in memory
+    /// only, gone once it is kept, the address changes or the sheet closes.
+    public var addSourceDraft: TokenDraft?
+    /// Which source's **Token…** is open, if one is, and the token pasted
+    /// under it — its own, never the Add sheet's; gone once it is kept,
+    /// forgotten, the source removed or **Token…** closed.
+    public var sourceTokenOpen: String?
+    public var sourceTokenDraft = ""
+    /// What a source says once, after its token was kept — the clipboard
+    /// cleared (S4-20, item 20), a classic token's write scope (item 21) —
+    /// and what the last **Token…** came to, by the source's id.
+    public internal(set) var sourceNotices: [String: [Phrase]] = [:]
     /// What the last **Add** or **Remove…** of a source could not do, by the
     /// source's id — `""` for an **Add** — said where it was pressed.
     public internal(set) var sourceOperationProblems: [String: String] = [:]
@@ -130,6 +155,33 @@ public final class DeckModel {
     /// limiters of its own, which a GitHub block must not stop. GitHub
     /// sources read without a token count against the official source's.
     @ObservationIgnored var gitLabLimits: [String: RateLimitRecorder] = [:]
+    /// Each GitHub source read with its token: a limit of its own, by its id
+    /// (S4-13), seeded from and kept in its state as a GitLab source's is.
+    @ObservationIgnored var tokenLimits: [String: RateLimitRecorder] = [:]
+    /// Every source's token, kept in one Keychain item and handed out only for
+    /// its own origin (`CredentialVault`, S4-18). Asked only for a source
+    /// whose `access` is not `none`: with no token anywhere, uDeck never
+    /// touches the Keychain.
+    @ObservationIgnored lazy var credentialVault = CredentialVault(
+        store: KeychainCredentialStore(bundleIdentifier: Bundle.main.bundleIdentifier ?? "place.unicorns.udeck"))
+    /// What the vault last handed out for each source, under a lease every
+    /// client holding it asks before each request, and whose turn it is to
+    /// change a token (`SourceTokenBook`).
+    @ObservationIgnored var sourceTokens = SourceTokenBook()
+    /// The token check under way for each source, cancelled by Forget and
+    /// Remove — whose ticket takes its turn anyway.
+    @ObservationIgnored var sourceTokenChecks: [String: Task<Void, Never>] = [:]
+    /// The sources asked to be read again while a read of theirs was under
+    /// way — the anonymous read after Forget — read once it ends.
+    @ObservationIgnored var sourcesRereading: Set<String> = []
+    /// The sources whose token is being forgotten — Forget the token, Remove…
+    /// — nothing handed out for them until it is, and Remove… not offered.
+    public internal(set) var sourcesForgetting: Set<String> = []
+    /// The sources whose token is being written — Add with a token, Token… —
+    /// from before the Keychain write until `sources.json` says so or the
+    /// write is taken back: pruning leaves them alone. By the ticket of the
+    /// write, so that only that write's end clears it.
+    @ObservationIgnored var sourcesKeeping: [String: SourceTokenBook.Ticket] = [:]
     /// What **Look up** of a GitLab project is counted against, by host,
     /// before the project is a source: what **Add** seeds its limit from.
     @ObservationIgnored var lookUpLimits: [String: RateLimitRecorder] = [:]

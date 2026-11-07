@@ -46,6 +46,12 @@ public enum CatalogueError: Codable, Equatable, Sendable {
     case credentialUnbound(origin: String?)
     /// The Keychain could not be read, for `reason` (S4-18).
     case keychainUnavailable(reason: String)
+    /// The source is read with a token, and the Keychain item holds none
+    /// for it: nothing was sent, with a token or without.
+    case tokenMissing
+    /// The token was taken back while the read used it — forgotten,
+    /// replaced, its source removed or changed: nothing more was sent.
+    case tokenWithdrawn
 }
 
 /// What one source's catalogue remembers between refreshes and launches.

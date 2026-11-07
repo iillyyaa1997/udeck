@@ -441,6 +441,27 @@ public enum Phrase: Sendable, Equatable {
     case sourceTokenLimited(address: String, readAt: String?, until: String)
     case sourceKeychainUnavailable(address: String, reason: String)
     case sourceTokenUnbound(address: String, origin: String?)
+    /// A source read with a token, and none kept for it: nothing sent.
+    case sourceTokenMissing(address: String)
+    /// The token taken back while a read or a press used it (Forget,
+    /// Remove, a changed source): nothing more sent with it.
+    case sourceTokenWithdrawn(address: String)
+    /// The token step and **Token…** (S4-17): a token whose prefix proves it
+    /// the other provider's, not sent (S4-20, item 23); the clipboard
+    /// cleared of it (item 20); a classic token's write scope (item 21); a
+    /// fine-grained token and a collaborator (item 22); GitHub's page, which
+    /// cannot choose the repository; GitLab's scope; and the step's labels.
+    case sourceTokenWrongProvider(host: String, looksLikeGitHub: Bool)
+    case sourceTokenClipboardCleared
+    case sourceTokenWriteScope
+    case sourceTokenCollaborator(owner: String, repository: String)
+    case sourceTokenChooseRepository(owner: String, repository: String)
+    case sourceTokenGitLabScopeHelp
+    case sourceToken
+    case sourceMakeToken(host: String)
+    case sourceLookUpWithToken
+    case sourceTokenField
+    case sourceForgetToken
     /// A copy of a source that is no longer added: its row, after its mark.
     case sourceNoLongerAdded(address: String)
     /// **Remove…** of a source: what it does.

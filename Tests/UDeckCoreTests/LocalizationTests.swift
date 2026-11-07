@@ -206,6 +206,13 @@ struct LocalizationTests {
         .sourceKeychainUnavailable(address: "github.com/o/r", reason: "User interaction is not allowed. (-25308)"),
         .sourceTokenUnbound(address: "gitlab.example/g/p", origin: "https://gitlab.example"),
         .sourceTokenUnbound(address: "gitlab.example/g/p", origin: nil),
+        .sourceTokenMissing(address: "github.com/o/r"),
+        .sourceTokenWithdrawn(address: "github.com/o/r"),
+        .sourceTokenWrongProvider(host: "gitlab.example", looksLikeGitHub: true),
+        .sourceTokenWrongProvider(host: "GitHub", looksLikeGitHub: false),
+        .sourceTokenClipboardCleared, .sourceTokenWriteScope, .sourceTokenCollaborator(owner: "o", repository: "r"),
+        .sourceTokenChooseRepository(owner: "o", repository: "r"), .sourceTokenGitLabScopeHelp, .sourceToken,
+        .sourceMakeToken(host: "gitlab.example"), .sourceLookUpWithToken, .sourceTokenField, .sourceForgetToken,
 
         .pluginLastRun(at: "21:04:05", reason: .interval, duration: 0.21, result: .card),
         .pluginLastRun(at: "21:04:05", reason: .launch, duration: 0.21, result: .failure(.exited(code: 3))),
@@ -289,7 +296,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 454,
+        #expect(Self.all.count == 468,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

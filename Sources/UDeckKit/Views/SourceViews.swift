@@ -64,6 +64,11 @@ struct AddSourceSheet: View {
                     .accessibilityIdentifier("sources.add.close")
             }
             result
+            if let draft = model.addSourceDraft {
+                TokenStep(link: draft.link, token: Binding(get: { model.addSourceDraft?.token ?? "" },
+                                                           set: { model.addSourceDraft?.token = $0 }),
+                          identifier: "sources.add") { model.lookUpSource(withToken: true) }
+            }
             if let problem = model.sourceOperationProblems[""] {
                 Text(problem).font(.caption).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
@@ -120,7 +125,8 @@ struct AddSourceSheet: View {
             said(phrase)
         case .failed(let error, let host, let address, let provider):
             said(CatalogueTrouble.phrase(error, address: address, host: host, readAt: nil,
-                                         until: { Clock.text($0, strings) }, provider: provider))
+                                         until: { Clock.text($0, strings) }, provider: provider,
+                                         tokened: model.sourceAddingTokened))
         }
     }
 
@@ -163,8 +169,11 @@ struct SourceBlock: View {
                 Button(strings(.catalogueCheckNow)) { model.checkSourceNow(sid) }
                     .disabled(reading)
                     .accessibilityIdentifier("source.\(sid).checkNow")
+                Button(strings(.sourceToken)) { model.toggleToken(sid) }
+                    .disabled(reading)
+                    .accessibilityIdentifier("source.\(sid).token")
                 Button(strings(.sourceRemove), role: .destructive) { removing = true }
-                    .disabled(reading || model.busyPlugin != nil)
+                    .disabled(reading || model.busyPlugin != nil || model.sourcesForgetting.contains(sid))
                     .accessibilityIdentifier("source.\(sid).remove")
                 if reading {
                     ProgressView().controlSize(.small)
@@ -172,6 +181,20 @@ struct SourceBlock: View {
                 }
             }
             statusLine
+            if model.sourceTokenOpen == sid {
+                TokenStep(link: SourceLink(provider: source.provider, host: source.host, path: source.path),
+                          token: $model.sourceTokenDraft, identifier: "source.\(sid).token") { model.keepToken(for: sid) }
+                if source.access != OwnSource.Access.none {
+                    Button(strings(.sourceForgetToken)) { model.forgetToken(of: sid) }
+                        .accessibilityIdentifier("source.\(sid).token.forget")
+                }
+            }
+            if let notices = model.sourceNotices[sid], !notices.isEmpty {
+                Text(notices.map { strings($0) }.joined(separator: "\n"))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("source.\(sid).notice")
+            }
             if removing {
                 confirmation
             }
@@ -201,7 +224,8 @@ struct SourceBlock: View {
         let readAt = catalogue == nil ? nil : state.lastSuccess.map { Clock.text($0, strings) }
         if let error = state.lastError {
             Label(strings(CatalogueTrouble.phrase(error, address: address, host: source.host, readAt: readAt,
-                                                  until: { Clock.text($0, strings) }, provider: source.provider)),
+                                                  until: { Clock.text($0, strings) }, provider: source.provider,
+                                                  tokened: source.access != OwnSource.Access.none)),
                   systemImage: "exclamationmark.triangle")
                 .font(.caption).foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true)
@@ -229,12 +253,68 @@ struct SourceBlock: View {
                 }
                 // Not while it is read: the removal would not be made
                 // (`removeSource`), and the warning would close on nothing.
-                .disabled(reading || model.busyPlugin != nil)
+                .disabled(reading || model.busyPlugin != nil || model.sourcesForgetting.contains(sid))
                 .accessibilityIdentifier("source.\(sid).confirm")
                 Button(strings(.actionCancel)) { removing = false }
             }
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.1)))
+    }
+}
+
+/// The token step (S4-17), under **Add a source…** and a source's **Token…**:
+/// **Make a token on <host>**, opening the page with its fields filled in —
+/// its address the link's accessibility value, which the lab reads — what
+/// that page cannot do for the person, the token's field, and **Look up with
+/// the token**. The token is held in the model's memory alone, in the draft
+/// of the one step it was pasted under.
+struct TokenStep: View {
+    let link: SourceLink
+    @Binding var token: String
+    let identifier: String
+    let lookUp: () -> Void
+    @Environment(\.strings) private var strings
+    /// The token's field takes the focus when the step appears: what is
+    /// pasted next goes there, never into the address field above it.
+    @FocusState private var fieldFocused: Bool
+
+    private var page: URL {
+        if link.provider == SourceLink.gitlab { return TokenLinks.gitlab(host: link.host, project: link.path) }
+        let parts = link.path.split(separator: "/", maxSplits: 1).map(String.init)
+        return TokenLinks.github(owner: parts.first ?? "", repository: parts.count > 1 ? parts[1] : "")
+    }
+
+    private var help: [Phrase] {
+        guard link.provider == SourceLink.github else { return [.sourceTokenGitLabScopeHelp] }
+        let parts = link.path.split(separator: "/", maxSplits: 1).map(String.init)
+        let owner = parts.first ?? "", repository = parts.count > 1 ? parts[1] : ""
+        return [.sourceTokenChooseRepository(owner: owner, repository: repository),
+                .sourceTokenCollaborator(owner: owner, repository: repository)]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Link(strings(.sourceMakeToken(host: link.host)), destination: page)
+                .font(.caption)
+                .accessibilityIdentifier("\(identifier).makeToken")
+                .accessibilityValue(page.absoluteString)
+            Text(help.map { strings($0) }.joined(separator: "\n"))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("\(identifier).tokenHelp")
+            HStack(spacing: 8) {
+                SecureField(strings(.sourceTokenField), text: $token)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 360)
+                    .focused($fieldFocused)
+                    .onAppear { fieldFocused = true }
+                    .onSubmit(lookUp)
+                    .accessibilityIdentifier("\(identifier).tokenField")
+                Button(strings(.sourceLookUpWithToken), action: lookUp)
+                    .disabled(token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("\(identifier).lookUpWithToken")
+            }
+        }
     }
 }

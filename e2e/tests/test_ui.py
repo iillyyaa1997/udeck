@@ -600,3 +600,62 @@ def test_a_control_still_moving_is_aimed_at_only_once_it_has_come_to_rest():
     restless = FakeMachine(walks=[ABOUT.replace("808;355;", f"808;{y};") for y in range(300, 400)])
     element = ui.wait_for(restless, "section.about", "opening About", seconds=2)
     assert restless._clock.now >= 2 and element.y < 400
+
+
+def test_the_focus_is_read_as_its_identifier_and_subrole():
+    machine = FakeMachine(typed="sources.add.tokenField|AXSecureTextField")
+    assert ui.focused(machine, "reading the focus") == ("sources.add.tokenField", "AXSecureTextField")
+    assert 'value of attribute "AXFocusedUIElement"' in machine.ssh.scripts[0]
+    assert 'tell process "uDeck"' in machine.ssh.scripts[0]
+    # No variable named for a property of a process: inside `tell process`, setting one sets the process's.
+    for word in ("subrole", "focused", "identifier", "role", "value", "name", "title"):
+        assert f"set {word} to" not in machine.ssh.scripts[0], word
+    assert ui.focused(FakeMachine(typed="|"), "reading the focus") == ("", "")
+
+
+def _secret_scene(monkeypatch, focus):
+    """`enter_secret` with the focus read from `focus` in turn, and every click and every typing recorded."""
+    answers = iter(focus)
+    monkeypatch.setattr(ui, "focused", lambda machine, step: next(answers))
+    clicks, typed = [], []
+    monkeypatch.setattr(ui, "click", lambda machine, identifier, step, window=ui.SETTINGS_WINDOW: clicks.append(identifier))
+    monkeypatch.setattr(ui, "type_text", lambda machine, text, step: typed.append(text))
+    return clicks, typed
+
+
+SECURE = ("sources.add.tokenField", ui.SECURE_FIELD)
+
+
+def test_a_secret_is_typed_only_once_its_secure_field_has_the_focus(monkeypatch):
+    """Run 42335961364: the click left the focus in the address field, and the token was typed there, in the clear."""
+    clicks, typed = _secret_scene(monkeypatch, [("sources.add.field", "AXTextField"), SECURE, SECURE])
+    ui.enter_secret(FakeMachine(), "sources.add.tokenField", "glpat-fixture", "typing the token")
+    assert clicks == ["sources.add.tokenField"] and typed == ["glpat-fixture"]
+
+
+def test_a_secret_is_never_typed_into_a_field_that_shows_it(monkeypatch):
+    clicks, typed = _secret_scene(monkeypatch, [("sources.add.field", "AXTextField")] * ui.SECRET_FOCUS_TRIES)
+    with pytest.raises(LabError, match="never took the focus"):
+        ui.enter_secret(FakeMachine(), "sources.add.tokenField", "glpat-fixture", "typing the token")
+    assert typed == [] and clicks == ["sources.add.tokenField"] * ui.SECRET_FOCUS_TRIES
+
+
+def test_the_right_identifier_in_a_field_that_shows_its_text_is_not_enough(monkeypatch):
+    plain = ("sources.add.tokenField", "")
+    clicks, typed = _secret_scene(monkeypatch, [plain] * ui.SECRET_FOCUS_TRIES)
+    with pytest.raises(LabError, match="never took the focus"):
+        ui.enter_secret(FakeMachine(), "sources.add.tokenField", "glpat-fixture", "typing the token")
+    assert typed == []
+
+
+def test_the_focus_leaving_while_typing_is_a_lab_problem(monkeypatch):
+    clicks, typed = _secret_scene(monkeypatch, [SECURE, ("sources.add.field", "AXTextField")])
+    with pytest.raises(LabError, match="left sources.add.tokenField"):
+        ui.enter_secret(FakeMachine(), "sources.add.tokenField", "glpat-fixture", "typing the token")
+    assert typed == ["glpat-fixture"]
+
+
+def test_return_is_pressed_in_the_focused_field_by_its_key_code():
+    machine = FakeMachine(typed="pressed")
+    ui.press_return(machine, "ending the token")
+    assert "key code 36" in machine.ssh.scripts[0] and 'tell process "uDeck"' in machine.ssh.scripts[0]

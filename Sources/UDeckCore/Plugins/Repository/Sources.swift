@@ -330,6 +330,17 @@ public struct SourceList: Equatable, Sendable {
         return source
     }
 
+    /// What the Keychain is expected to hold for the source — `token` once
+    /// one is kept for it, `none` once it is forgotten — written back.
+    @discardableResult
+    public mutating func setAccess(_ id: String, _ access: String) -> Bool {
+        guard let index = entries.firstIndex(where: { if case .source(let source) = $0 { source.id == id } else { false } }),
+              case .source(var source) = entries[index] else { return false }
+        source.access = access
+        entries[index] = .source(source)
+        return true
+    }
+
     /// What the host spells the source's path as now, written back — the
     /// same id, the same repository. Nothing for a path `SourceLink` would
     /// not read as this source's.

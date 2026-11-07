@@ -3487,6 +3487,9 @@ TEAM_CLOCK = "team-clock"
 TEAM_PING = "team-ping"
 TEAM_RENAMED = "someone/team-plugins-2"
 NOT_PLUGINS = "someone/not-plugins"
+# Private, read only with its fixture token (stage 4, R3b): team-plugins' t1.
+PRIVATE = "someone/private-plugins"
+PRIVATE_TOKEN = "github_pat_lab_private_plugins_fixture_0001"
 SQUATTER = "someone/squatter"
 MISSING = "someone/missing"
 TEAM_BRANCH_LINK = f"https://github.com/{TEAM}/tree/main/plugins/{TEAM_CLOCK}"
@@ -3513,8 +3516,7 @@ NO_LONGER_ADDED = "From github.com/{repository} — a source no longer added"
 REMOVE_THE_SOURCE = "Remove {name} (github.com/{repository})? uDeck stops reading it and forgets its token."
 ALREADY_ADDED = "{name} (github.com/{repository}) is added already."
 NOT_A_PLUGIN_REPOSITORY = "github.com/{repository} is not a uDeck plugin repository: there is no udeck-plugins.json at the top of main."
-NOT_FOUND_OR_PRIVATE = ("github.com/{repository} could not be found, or it is private. If it is private, uDeck needs a token "
-                        "for it: Token…")
+NOT_FOUND_OR_PRIVATE = "{address} could not be found, or it is private. If it is private, uDeck needs a token for it: Token…"
 HTTPS_ONLY = "Sources are read over HTTPS only: paste the address that starts with https://."
 OVER_SSH = "That is git's address over SSH. Paste the page of the repository or the project instead, as the browser shows it."
 THE_OFFICIAL_CATALOGUE = "That is github.com/{official}, the official catalogue: its plugins are listed above, verified."
@@ -4273,7 +4275,8 @@ def check_source_refusals(machine, check_dir, lab):
             (f"http://{TEAM_ADDRESS}", HTTPS_ONLY, []),
             (f"git@github.com:{TEAM}.git", OVER_SSH, []),
             (f"github.com/{official}", THE_OFFICIAL_CATALOGUE.format(official=official), []),
-            (f"github.com/{MISSING}", NOT_FOUND_OR_PRIVATE.format(repository=MISSING), [f"/api/repos/{MISSING}"]),
+            (f"github.com/{MISSING}", NOT_FOUND_OR_PRIVATE.format(address=f"github.com/{MISSING}"),
+             [f"/api/repos/{MISSING}"]),
             (f"github.com/{NOT_PLUGINS}", NOT_A_PLUGIN_REPOSITORY.format(repository=NOT_PLUGINS),
              [f"/api/repos/{NOT_PLUGINS}", f"/api/repositories/{scene.github.source_id(NOT_PLUGINS)}/commits/main",
               None]),
@@ -4350,6 +4353,9 @@ GL_TEAM = f"{GL_HOST}/group/sub/team"
 GL_TEAM_LINK = f"https://{GL_TEAM}/-/tree/main"
 GL_TEAM_NAME = "Team on GitLab"
 GL_EMPTY = f"{GL_HOST}/tools/empty"
+# Private, read only with its fixture token, in PRIVATE-TOKEN (stage 4, R3b): udeck-plugins' g1.
+GL_PRIVATE = f"{GL_HOST}/tools/udeck-private"
+GL_PRIVATE_TOKEN = "glpat-lab-udeck-private-fixture-0001"
 GL_EMPTY_NAME = "My uDeck plugins"
 GL_ON_COM = f"{GL_COM}/someone/gl-plugins"
 GL_ON_COM_NAME = "gitlab.com lab plugins"
@@ -4692,6 +4698,214 @@ def check_source_gitlab_manifest_too_large(machine, check_dir, lab):
         expect(state == MANIFEST_TOO_LARGE, f"after Check now gl-huge's row says {state!r}")
         _expect_on_its_port(added + again, GL_HOST, "reading gl-huge's source")
         _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+# --- Private sources (stage 4, R3b) --------------------------------------------------------
+
+WRONG_PROVIDER = "This looks like a GitHub token, and {host} is GitLab: uDeck did not send it."
+TOKEN_MISSING = "is read with a token, and uDeck keeps none for it, so nothing was sent."
+GITHUB_TOKEN_PAGE = ("https://github.com/settings/personal-access-tokens/new?name=uDeck%3A%20private-plugins"
+                     "&description=Read-only%2C%20for%20uDeck%20to%20read%20plugins%20from%20someone%2Fprivate-plugins."
+                     "&target_name=someone&expires_in=366&contents=read")
+GITLAB_TOKEN_PAGE = ("https://gitlab.example.test/-/user_settings/personal_access_tokens?name=uDeck%3A%20tools%2Fudeck-private"
+                     "&description=Read-only%2C%20for%20uDeck%20to%20read%20plugins%20from%20tools%2Fudeck-private."
+                     "&scopes=read_api")
+
+
+def _the_token_step(scene, address, page, token, name, label):
+    """`address` looked up without a token — not found, or private — its token step's page checked, `token` typed into
+    it and looked up again: uDeck's requests from that press on, once the sheet shows `name`."""
+    machine = scene.machine
+    said, _, _ = _look_up_a_source(scene, f"https://{address}", f"{label}, without a token")
+    expect(said == NOT_FOUND_OR_PRIVATE.format(address=address), f"{address} without a token came to {said!r}")
+    link = _wait_until(machine, "sources.add.makeToken", lambda said: said == page, NOTICED_SECONDS)
+    expect(link == page, f"Make a token on its host opens {link!r}, not {page!r}")
+    ui.enter_secret(machine, "sources.add.tokenField", token, f"typing the lab's fixture token: {label}")
+    before = _count(scene)
+    # Return in the token's field — its own action, Look up with the token — where the focus was proven.
+    ui.press_return(machine, f"pressing Return in the token field: {label}")
+    shown = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == name, OPERATION_SECONDS)
+    asked = _since(scene, before)
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-token-step-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt")
+    expect(_strip(shown) == name, f"looked up with its token, {address} shows {shown!r}, not {name!r}; uDeck asked "
+                                  f"{_described_gitlab(asked)}")  # fmt: skip
+    return asked
+
+
+def _add_with_its_token(scene, sid, label):
+    """**Add** on what the token step found: the source's block named, its entry `access: token` — or, the runner's
+    Keychain refusing uDeck, a lab problem: could not check (S4-22)."""
+    machine = scene.machine
+    before = _count(scene)
+    _press(machine, "sources.add.confirm", f"pressing Add: {label}")
+    deadline = machine.clock() + CATALOGUE_SECONDS
+    while machine.clock() < deadline:
+        if (_the_source(machine) or {}).get("access") == "token":
+            break
+        problem = ui.reads(machine, "sources.add.problem", f"reading what Add said: {label}")
+        if problem and "Keychain" in problem:
+            raise LabError(f"keeping the token: {label}", f"this machine's Keychain refused uDeck: {problem!r}")
+        machine.sleep(2)
+    source = _the_source(machine) or {}
+    expect(source.get("id") == sid and source.get("access") == "token", f"after Add, {SOURCES_FILE} says {source!r}")
+    _wait_until(machine, f"source.{sid}.name", lambda said: bool(said), CATALOGUE_SECONDS)
+    return _since(scene, before)
+
+
+def _expect_the_token_only_at(heard, routes, what):
+    """Every request that carried a token was taken, and was one of `routes` (path prefixes): a token goes to its own
+    source's API alone — never the raw host, the official repository or another source."""
+    carried = [r for r in heard if r.credential != "none"]
+    astray = [r for r in carried if r.credential != "accepted" or not any(r.raw_path.startswith(route) for route in routes)]
+    expect(not astray, f"{what}: a token went where it may not, or was refused: {_described_gitlab(astray)}")
+    return carried
+
+
+def check_source_private_github(machine, check_dir, lab):
+    """A private GitHub repository: not found without a token; its token step — the page that makes one, exactly — and
+    the fixture token; added, read and installed from with it through the API alone; then its token forgotten.
+
+    someone/private-plugins, private in the fake, looked up without a token says it could not be found or is private,
+    and **Make a token on github.com** carries GitHub's pre-filled page exactly. The fixture token typed in and looked
+    up: the sheet names it *Team plugins*; **Add** keeps the token — `sources.json` says `access: token` — and the
+    log holds every request with the token taken, on `/api/repos/someone/private-plugins` (the one check) and
+    `/api/repositories/900000301/…` alone: its passport and files through `contents`, never the raw host. team-clock
+    installs from it — its files through `contents` with the token, nothing from the raw host, which answers a private
+    repository's files 404. **Token…** → **Forget the token**: `access: none`, the source read without one again — not
+    found — and no request carries a token from then on. uDeck quit, `access: token` written back by hand and uDeck
+    launched again: **Check now** says it keeps no token for the source, and nothing is asked of it.
+
+    **Red for**: a token sent anywhere but its source's own API, a private repository's file taken from the raw host,
+    a token kept that read nothing, a forgotten token still sent or still in the Keychain, and a source whose token is
+    missing read without one.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        number = scene.github.source_id(PRIVATE)
+        sid = _source_id(PRIVATE, number)
+        start = _count(scene)
+        looked = _the_token_step(scene, f"github.com/{PRIVATE}", GITHUB_TOKEN_PAGE, PRIVATE_TOKEN, TEAM_NAME,
+                                 "the private repository")
+        expect(any(r.raw_path == f"/api/repos/{PRIVATE}" and r.credential == "accepted" for r in looked),
+               f"the token's check was not the repository by its name, taken: {_described_gitlab(looked)}")
+        added = _add_with_its_token(scene, sid, "the private repository")
+        routes = [f"/api/repos/{PRIVATE}", f"/api/repositories/{number}"]
+        carried = _expect_the_token_only_at(_since(scene, start), routes, "adding the private repository")
+        expect(any("/contents/" in r.raw_path for r in carried), f"no file was read through contents: {_described_gitlab(added)}")
+        raw = [r for r in _since(scene, start) if r.raw_path.startswith(f"/raw/{PRIVATE}")]
+        expect(not raw, f"the private repository's files were asked of the raw host: {_described_gitlab(raw)}")
+        record, asked = _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock from the private repository")
+        expect(record.get("source") == sid, f"team-clock's record is {record!r}")
+        _expect_the_token_only_at(asked, routes, "installing team-clock")
+        expect(all(r.credential == "accepted" for r in asked if r.raw_path.startswith(f"/api/repositories/{number}")),
+               f"installing from the private repository, a request went without its token: {_described_gitlab(asked)}")
+        # Its files came through contents, every one with the token — and not one from the raw host, which the fake
+        # answers 404 for a private repository as GitHub does.
+        files = [r for r in asked if r.raw_path.startswith(f"/api/repositories/{number}/contents/")]
+        expect(files and all(r.credential == "accepted" for r in files),
+               f"installing team-clock, its files did not come through contents with the token: {_described_gitlab(asked)}")
+        raw = [r for r in asked if r.raw_path.startswith("/raw/")]
+        expect(not raw, f"installing from the private repository, the raw host was asked: {_described_gitlab(raw)}")
+
+        forgot = _count(scene)
+        _press(machine, f"source.{sid}.token", "opening Token… on the source")
+        _press(machine, f"source.{sid}.token.forget", "pressing Forget the token")
+        gone = _wait_for_disk(machine, lambda: (_the_source(machine) or {}).get("access") == "none", CATALOGUE_SECONDS)
+        expect(gone, f"after Forget the token, {SOURCES_FILE} says {_the_source(machine)!r}")
+        said = _wait_until(machine, f"source.{sid}.state", lambda said: bool(said) and "could not be found" in said,
+                           CATALOGUE_SECONDS)  # fmt: skip
+        after = _since(scene, forgot)
+        _keep_the_pane(machine, check_dir, lab, "the-token-forgotten.txt")
+        expect(not [r for r in after if r.credential != "none"],
+               f"after the token was forgotten, a request still carried one: {_described_gitlab(after)}")
+        expect(said is not None, f"read without its token, the private source's block says {said!r}")
+
+        # Forgotten in the Keychain, not only in sources.json: uDeck quit, the entry set back to `access: token` by
+        # hand, and uDeck launched again keeps no token for the source — it says so, and asks nothing of it.
+        app.quit_app(machine, "ending uDeck to see the forgotten token is gone from the Keychain")
+        listed = _read_json(machine, SOURCES_FILE) or {}
+        for entry in listed.get("sources") or []:
+            if entry.get("id") == sid:
+                entry["access"] = "token"
+        _write_file(machine, SOURCES_FILE, json.dumps(listed, indent=2))
+        relaunched = _count(scene)
+        app.launch(machine)
+        ui.plugins_pane(machine, "opening Settings → Plugins after the relaunch")
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now on the source set back to a token by hand")
+        missing = _wait_until(machine, f"source.{sid}.state", lambda said: bool(said) and TOKEN_MISSING in said,
+                              CATALOGUE_SECONDS)  # fmt: skip
+        _keep_the_pane(machine, check_dir, lab, "a-token-gone-from-the-keychain.txt")
+        expect(missing is not None and TOKEN_MISSING in missing,
+               f"set back to a token after Forget, the source's block says {missing!r}: the token was not forgotten in "
+               f"the Keychain, or uDeck read the source without it")  # fmt: skip
+        asked = [r for r in _since(scene, relaunched)
+                 if r.raw_path.startswith((f"/api/repositories/{number}", f"/api/repos/{PRIVATE}", f"/raw/{PRIVATE}"))]
+        expect(not asked, f"a source whose token is missing was asked anyway: {_described_gitlab(asked)}")
+    finally:
+        scene.close()
+
+
+def check_source_private_gitlab(machine, check_dir, lab):
+    """A private GitLab project: not found without a token; the fixture token in PRIVATE-TOKEN; added and installed from.
+
+    tools/udeck-private on gitlab.example.test, looked up without a token, could not be found or is private; **Make a
+    token on gitlab.example.test** carries GitLab's pre-filled page exactly. The fixture token looked up and added:
+    `access: token`, and every request carrying it taken, on the project's own routes on its own port. gl-hello
+    installs from it through the files API, every file with the token.
+
+    **Red for**: a GitLab token sent anywhere but its project, or in a header GitLab does not read for it.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        number = scene.github.project_id(GL_PRIVATE)
+        sid = _source_id("tools/udeck-private", number, host=GL_HOST, provider="gitlab")
+        start = _count(scene)
+        _the_token_step(scene, GL_PRIVATE, GITLAB_TOKEN_PAGE, GL_PRIVATE_TOKEN, GL_NAME, "the private project")
+        _add_with_its_token(scene, sid, "the private project")
+        routes = ["/api/v4/projects/tools%2Fudeck-private", f"/api/v4/projects/{number}", "/api/graphql"]
+        _expect_the_token_only_at(_since(scene, start), routes, "adding the private project")
+        _expect_on_its_port(_since(scene, start), GL_HOST, "adding the private project")
+        record, asked = _install_from_the_source(scene, sid, GL_HELLO, "gl-hello from the private project")
+        expect(record.get("source") == sid, f"gl-hello's record is {record!r}")
+        files = [r for r in asked if r.raw_path.startswith(f"/api/v4/projects/{number}/repository/files/")]
+        expect(files and all(r.credential == "accepted" for r in files),
+               f"installing from the private project, its files went without its token: {_described_gitlab(asked)}")
+        _expect_the_token_only_at(asked, routes, "installing gl-hello")
+    finally:
+        scene.close()
+
+
+def check_source_token_wrong_provider(machine, check_dir, lab):
+    """A GitHub-shaped token pasted for a GitLab project is refused before any request: nothing carries it.
+
+    tools/udeck-private looked up without a token; a `ghp_` token typed into its token step and looked up: the sheet
+    says *This looks like a GitHub token, and gitlab.example.test is GitLab: uDeck did not send it.*, and no request
+    carries a token.
+
+    **Red for**: a token sent to a host whose provider its prefix proves it is not.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        said, _, _ = _look_up_a_source(scene, f"https://{GL_PRIVATE}", "the private project, without a token")
+        expect(said == NOT_FOUND_OR_PRIVATE.format(address=GL_PRIVATE), f"{GL_PRIVATE} without a token came to {said!r}")
+        ui.enter_secret(machine, "sources.add.tokenField", "ghp_lab_github_shaped_fixture",
+                        "typing a GitHub-shaped fixture token")
+        before = _count(scene)
+        ui.press_return(machine, "pressing Return in the token field")
+        wanted = WRONG_PROVIDER.format(host=GL_HOST)
+        said = _wait_until(machine, "sources.add.result", lambda said: said == wanted, NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "a-token-of-the-other-provider.txt")
+        expect(said == wanted, f"a GitHub-shaped token for a GitLab project came to {said!r}, not {wanted!r}")
+        sent = [r for r in _since(scene, before) if r.credential != "none"]
+        expect(not sent, f"the token was sent: {_described_gitlab(sent)}")
     finally:
         scene.close()
 

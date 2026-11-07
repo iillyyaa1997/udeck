@@ -781,7 +781,7 @@ def test_the_repositories_of_their_own_are_what_the_source_checks_are_written_ag
     squatter = fake_github.Source(str(SOURCES / "someone" / "squatter"), "someone/squatter")
     assert squatter.id != team.id and fake_github.read_number(str(plugin_repository.FIXTURES / "id")) == config.PLUGINS_REPOSITORY_ID
     found = fake_github.read_sources(str(plugin_repository.FIXTURES))
-    assert sorted(found) == ["someone/not-plugins", "someone/squatter", TEAM]
+    assert sorted(found) == ["someone/not-plugins", "someone/private-plugins", "someone/squatter", TEAM]
 
 
 def test_two_repositories_of_their_own_with_one_number_are_refused(tmp_path):
@@ -976,7 +976,8 @@ def test_the_gitlab_projects_are_what_the_gitlab_checks_are_written_against():
     three groups down; tools/empty (8), a passport and no plugins/; and someone/gl-plugins (1001) on gitlab.com."""
     projects = fake_github.read_projects(str(plugin_repository.FIXTURES))
     assert {key: project.id for key, project in projects.items()} == {
-        GL_PROJECT: 7, f"{GL_HOST}/group/sub/team": 9, f"{GL_HOST}/tools/empty": 8, "gitlab.com/someone/gl-plugins": 1001}
+        GL_PROJECT: 7, f"{GL_HOST}/group/sub/team": 9, f"{GL_HOST}/tools/empty": 8, "gitlab.com/someone/gl-plugins": 1001,
+        f"{GL_HOST}/tools/udeck-private": 11}
     plugins = projects[GL_PROJECT].repository
     assert plugins.names == ["g1", "g2", "g3"]
     g1, g2, g3 = plugins.commits["g1"].snapshot, plugins.commits["g2"].snapshot, plugins.commits["g3"].snapshot
@@ -1512,3 +1513,63 @@ def test_the_real_fake_listens_at_once_and_only_then_says_so(tmp_path):
     finally:
         fake.kill()
         fake.wait()
+
+
+# --- Private repositories (stage 4, R3b) -------------------------------------------------
+
+
+def test_a_private_repository_answers_its_token_alone(gitlab):
+    """Without a token a private repository is not there; with another it is 401; with its own, in its own header, it
+    answers — its files through contents as raw media — and the log says accepted or rejected, never the value."""
+    private = "github_pat_lab_private_plugins_fixture_0001"
+    assert gitlab.get("/api/repositories/900000301")[0] == 404
+    assert gitlab.get("/api/repos/someone/private-plugins")[0] == 404
+    assert gitlab.get("/api/repositories/900000301", {"Authorization": "Bearer ghp_wrong"})[0] == 401
+    status, _, body = gitlab.get("/api/repositories/900000301", {"Authorization": f"Bearer {private}"})
+    assert status == 200 and json.loads(body)["full_name"] == "someone/private-plugins"
+    t1 = gitlab.json("/lab/facts")[2]["sources"]["someone/private-plugins"]["commits"]["t1"]["sha"]
+    # Its raw files are GitHub's 404 without a token, and uDeck never sends one there: an installer that lost its
+    # token and fell back to the raw host fails here as on GitHub.
+    assert gitlab.get(f"/raw/someone/private-plugins/{t1}/udeck-plugins.json")[0] == 404
+    status, headers, body = gitlab.get(f"/api/repositories/900000301/contents/udeck-plugins.json?ref={t1}",
+                                       {"Authorization": f"Bearer {private}"})
+    assert status == 200 and json.loads(body)["format"] == 1
+    # Its token is good for its own routes alone: not the raw host, not the official repository, not a public source.
+    for path in [f"/raw/someone/private-plugins/{t1}/udeck-plugins.json", f"/api/repos/{REPOSITORY}",
+                 "/api/repositories/900000101"]:
+        assert gitlab.get(path, {"Authorization": f"Bearer {private}"})[0] == 401, path
+    gitlab.state(tokens={"someone/private-plugins": "github_pat_rotated"})
+    assert gitlab.get("/api/repositories/900000301", {"Authorization": f"Bearer {private}"})[0] == 401, "rotated"
+    said = {r.credential for r in gitlab.requests()}
+    assert said == {"none", "accepted", "rejected"}
+    assert all(private not in line for line in gitlab.log.read_text().splitlines()), "never the value"
+
+
+def test_a_private_gitlab_project_answers_its_token_in_private_token(gitlab):
+    """tools/udeck-private: 404 without, 401 with another, 200 with its own in PRIVATE-TOKEN or Bearer; its GraphQL shows
+    the project only to its token."""
+    token = "glpat-lab-udeck-private-fixture-0001"
+    assert gitlab.at(GL_HOST, "/api/v4/projects/11")[0] == 404
+    assert gitlab.at(GL_HOST, "/api/v4/projects/tools%2Fudeck-private")[0] == 404
+    assert gitlab.at(GL_HOST, "/api/v4/projects/11", {"PRIVATE-TOKEN": "glpat-wrong"})[0] == 401
+    assert gitlab.at(GL_HOST, "/api/v4/projects/7", {"PRIVATE-TOKEN": token})[0] == 401, "not another project's"
+    for headers in [{"PRIVATE-TOKEN": token}, {"Authorization": f"Bearer {token}"}]:
+        status, _, body = gitlab.at(GL_HOST, "/api/v4/projects/11", headers)
+        assert status == 200 and json.loads(body)["path_with_namespace"] == "tools/udeck-private", headers
+    g1 = gitlab.json("/lab/facts")[2]["gitlab"][f"{GL_HOST}/tools/udeck-private"]["commits"]["g1"]["sha"]
+    port = gitlab.gitlabs[GL_HOST].server_address[1]
+    query = {"query": "query($path: ID!, $paths: [String!]!, $r0: String!) { project(fullPath: $path) { id repository "
+                      "{ c0: blobs(paths: $paths, ref: $r0) { nodes { oid rawTextBlob } } } } }",
+             "variables": {"path": "tools/udeck-private", "paths": ["udeck-plugins.json"], "r0": g1}}
+    def ask(headers):
+        request = urllib.request.Request(f"http://127.0.0.1:{port}/api/graphql", data=json.dumps(query).encode(),
+                                         method="POST", headers={"Content-Type": "application/json", **headers})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as answer:
+                return answer.status, json.loads(answer.read())
+        except urllib.error.HTTPError as error:
+            return error.code, {}
+    assert ask({}) == (200, {"data": {"project": None}})
+    assert ask({"PRIVATE-TOKEN": "glpat-wrong"})[0] == 401
+    status, answer = ask({"PRIVATE-TOKEN": token})
+    assert status == 200 and answer["data"]["project"]["id"] == "gid://gitlab/Project/11"

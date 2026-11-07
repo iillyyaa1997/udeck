@@ -383,6 +383,27 @@ struct Russian: Vocabulary {
             "uDeck не смог прочитать токен для \(address) из Связки ключей (\(reason)). Он не обратится к Связке ключей снова, пока вы не нажмёте «Проверить» или «Токен…» либо не перезапустите uDeck. Разрешите uDeck доступ, когда macOS спросит, или вставьте токен заново в «Токен…»."
         case .sourceTokenUnbound(let address, let origin):
             "Токен для \(address) проверялся с \(origin ?? "другим адресом"), а источник теперь указывает в другое место, поэтому uDeck его не отправляет. Если новый адрес верный, вставьте токен заново в «Токен…»."
+        case .sourceTokenMissing(let address):
+            "\(address) читается с токеном, а uDeck не хранит для него ни одного, поэтому ничего не отправлено. Вставьте токен заново в «Токен…» или забудьте его там, чтобы читать источник без токена."
+        case .sourceTokenWithdrawn(let address):
+            "Токен для \(address) отозван, пока использовался, поэтому с ним больше ничего не отправлено."
+        case .sourceTokenWrongProvider(let host, let looksLikeGitHub):
+            looksLikeGitHub ? "Это похоже на токен GitHub, а \(host) — GitLab: uDeck его не отправил."
+                : "Это похоже на токен GitLab, а \(host) — GitHub: uDeck его не отправил."
+        case .sourceTokenClipboardCleared: "Токен убран из буфера обмена."
+        case .sourceTokenWriteScope:
+            "У этого классического токена есть право repo: он может и писать во все доступные вам репозитории. uDeck только читает; безопаснее детальный токен (fine-grained) с правом Contents только на чтение."
+        case .sourceTokenCollaborator(let owner, let repository):
+            "Детальный токен (fine-grained) читает только репозитории вашего аккаунта и организаций, в которых вы состоите. Если в \(owner)/\(repository) вы лишь соавтор, используйте классический токен — он может и писать."
+        case .sourceTokenChooseRepository(let owner, let repository):
+            "На странице выберите Only select repositories → \(repository) и проверьте, что владелец ресурса — \(owner)."
+        case .sourceTokenGitLabScopeHelp:
+            "read_api даёт токену читать все ваши проекты; на своём GitLab токен доступа проекта (Settings → Access tokens проекта, роль Reporter, право read_api) читает только этот проект."
+        case .sourceToken: "Токен…"
+        case .sourceMakeToken(let host): "Создать токен на \(host)"
+        case .sourceLookUpWithToken: "Проверить с токеном"
+        case .sourceTokenField: "Вставьте токен"
+        case .sourceForgetToken: "Забыть токен"
         case .sourceNoLongerAdded(let address): "Из \(address) — источник больше не добавлен"
         case .sourceRemoveConfirm(let name, let address):
             "Удалить \(name) (\(address))? uDeck перестанет его читать и забудет его токен. Установленное из него останется и продолжит работать; если вы ему доверяли, эти плагины станут непроверенными и спросят снова перед следующим запуском, а обновить или переустановить их нельзя, пока источник не добавлен снова."

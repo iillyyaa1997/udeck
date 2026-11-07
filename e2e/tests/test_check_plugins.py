@@ -962,7 +962,8 @@ def test_the_source_checks_name_the_fixtures_there_are():
     """team-plugins has t1, t2, t3 and the plugins the checks install; not-plugins and squatter are there; the fake's
     numbers are the ones the builds and the checks use."""
     facts = _fake().Fake(str(plugin_repository.FIXTURES), config.PLUGINS_REPOSITORY, "/dev/null")
-    assert sorted(facts.sources) == sorted([checks.TEAM, checks.NOT_PLUGINS, checks.SQUATTER])
+    assert sorted(facts.sources) == sorted([checks.TEAM, checks.NOT_PLUGINS, checks.SQUATTER, checks.PRIVATE])
+    assert facts.sources[checks.PRIVATE].token == checks.PRIVATE_TOKEN and facts.sources[checks.TEAM].token is None
     assert checks.MISSING not in facts.sources and checks.TEAM_RENAMED not in facts.sources
     team = facts.sources[checks.TEAM].repository
     assert team.names == ["t1", "t2", "t3"]
@@ -1046,9 +1047,11 @@ def test_the_fakes_number_is_one_number_in_make_app_the_fixture_and_the_lab():
 def test_the_gitlab_checks_name_the_projects_there_are():
     """The projects, their numbers, commits and plugins the GitLab checks are written against, as the fake reads them."""
     projects = _fake().read_projects(str(plugin_repository.FIXTURES))
-    assert sorted(projects) == sorted([checks.GL_PROJECT, checks.GL_TEAM, checks.GL_EMPTY, checks.GL_ON_COM])
+    assert sorted(projects) == sorted([checks.GL_PROJECT, checks.GL_TEAM, checks.GL_EMPTY, checks.GL_ON_COM,
+                                       checks.GL_PRIVATE])
     assert {key: projects[key].id for key in projects} == {checks.GL_PROJECT: 7, checks.GL_TEAM: 9, checks.GL_EMPTY: 8,
-                                                          checks.GL_ON_COM: 1001}
+                                                          checks.GL_ON_COM: 1001, checks.GL_PRIVATE: 11}
+    assert projects[checks.GL_PRIVATE].token == checks.GL_PRIVATE_TOKEN and projects[checks.GL_PROJECT].token is None
     plugins = projects[checks.GL_PROJECT].repository
     assert plugins.names == ["g1", "g2", "g3"]
     assert plugins.commits["g1"].snapshot.at(f"plugins/{checks.GL_HELLO}") is not None
@@ -1065,7 +1068,7 @@ def test_the_gitlab_checks_name_the_projects_there_are():
     names = {key: json.loads((plugin_repository.FIXTURES / "sources" / "gitlab" / key / projects[key].repository.names[0]
                               / "udeck-plugins.json").read_text())["name"] for key in projects}
     assert names == {checks.GL_PROJECT: checks.GL_NAME, checks.GL_TEAM: checks.GL_TEAM_NAME, checks.GL_EMPTY: checks.GL_EMPTY_NAME,
-                     checks.GL_ON_COM: checks.GL_ON_COM_NAME}
+                     checks.GL_ON_COM: checks.GL_ON_COM_NAME, checks.GL_PRIVATE: checks.GL_NAME}
     assert checks.GL_RENAMED not in {project.path for project in projects.values()}
     assert checks.GL_TEAM_LINK == f"https://{checks.GL_TEAM}/-/tree/main" and checks.GL_PROJECT_PAGE == f"https://{checks.GL_PROJECT}"
     # The id a check derives is uDeck's: provider, host and number.
@@ -1176,3 +1179,23 @@ def test_a_state_is_aged_by_the_keys_named_and_nothing_else(tmp_path, monkeypatc
     aged = json.loads((tmp_path / "state.json.new").read_text())
     assert aged["head"] == "a" * 40 and aged["lastSuccess"] == "2026-10-18T10:00:00Z"
     assert aged["defaultBranchReadAt"] == then != "2026-10-18T10:00:00Z"
+
+
+@pytest.mark.parametrize("module", sorted(p.name for p in (Path(__file__).resolve().parents[1] / "checks").glob("*.py")))
+def test_no_check_module_defines_a_name_twice(module):
+    """A later constant of the same name silently replaces the first: R3b's second NOT_FOUND_OR_PRIVATE ({address})
+    made plugins.source-refusals format the first one's {repository} and stop on a KeyError, read as could-not-check."""
+    tree = ast.parse((Path(__file__).resolve().parents[1] / "checks" / module).read_text())
+    seen, twice = set(), []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names = [node.name]
+        elif isinstance(node, ast.Assign):
+            names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names = [node.target.id]
+        else:
+            continue
+        twice += [name for name in names if name in seen]
+        seen.update(names)
+    assert not twice, f"{module} defines {twice} more than once"

@@ -1080,6 +1080,22 @@ struct PluginInstallerTests {
         #expect(stagingIsEmpty())
     }
 
+    @Test("a token's answer stops the install at once: a refused or taken-back token is not sent again by a retry")
+    func tokensAnswerIsNotRetried() async throws {
+        for answer in [ProviderError.unauthorized, .tokenWithdrawn(.rejected), .forbidden(scope: "read_api")] {
+            let repository = FakeRepository.withUptime()
+            let asked = AskedPaths()
+            let installer = PluginInstaller(paths: paths, discovery: discovery, trash: TestTrash(in: temp.url),
+                                            fetchOfSource: { _, _, path, _ in
+                                                asked.add(path)
+                                                throw answer
+                                            })
+            await #expect(throws: answer) { _ = try await installer.stage(gitLabRequest(repository)) }
+            #expect(Set(asked.names).count == asked.names.count, "no file asked twice: \(asked.names)")
+            #expect(stagingIsEmpty())
+        }
+    }
+
     // MARK: - A previous copy after a rename (L9)
 
     /// A source renamed from `old` to `new`: the copy installed at `old`,

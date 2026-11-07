@@ -376,6 +376,27 @@ struct English: Vocabulary {
             "uDeck could not read the token for \(address) from the Keychain (\(reason)). It does not ask the Keychain again until you press Check now or Token…, or start uDeck again. Allow uDeck when macOS asks, or paste the token again under Token…"
         case .sourceTokenUnbound(let address, let origin):
             "The token for \(address) was checked with \(origin ?? "another address"), and the source now points elsewhere, so uDeck does not send it. If the new address is right, paste the token again under Token…"
+        case .sourceTokenMissing(let address):
+            "\(address) is read with a token, and uDeck keeps none for it, so nothing was sent. Paste its token again under Token…, or forget it there to read the source without one."
+        case .sourceTokenWithdrawn(let address):
+            "The token for \(address) was taken back while it was in use, so nothing more was sent with it."
+        case .sourceTokenWrongProvider(let host, let looksLikeGitHub):
+            looksLikeGitHub ? "This looks like a GitHub token, and \(host) is GitLab: uDeck did not send it."
+                : "This looks like a GitLab token, and \(host) is GitHub: uDeck did not send it."
+        case .sourceTokenClipboardCleared: "The token was removed from the clipboard."
+        case .sourceTokenWriteScope:
+            "This classic token has the repo scope: it can also write to every repository you can reach. uDeck only reads; a fine-grained token with Contents read-only is safer."
+        case .sourceTokenCollaborator(let owner, let repository):
+            "A fine-grained token reads only repositories of your own account and of organisations you belong to. If you are only a collaborator on \(owner)/\(repository), use a classic token, which can also write."
+        case .sourceTokenChooseRepository(let owner, let repository):
+            "On the page, choose Only select repositories → \(repository), and check that the resource owner is \(owner)."
+        case .sourceTokenGitLabScopeHelp:
+            "read_api lets this token read every project you can; on your own GitLab, a project access token (the project's Settings → Access tokens, role Reporter, scope read_api) reads only this project."
+        case .sourceToken: "Token…"
+        case .sourceMakeToken(let host): "Make a token on \(host)"
+        case .sourceLookUpWithToken: "Look up with the token"
+        case .sourceTokenField: "Paste the token"
+        case .sourceForgetToken: "Forget the token"
         case .sourceNoLongerAdded(let address): "From \(address) — a source no longer added"
         case .sourceRemoveConfirm(let name, let address):
             "Remove \(name) (\(address))? uDeck stops reading it and forgets its token. What was installed from it stays and keeps running; if you trusted it, those plugins become Unverified and ask again before they next run, and nothing updates or reinstalls them until you add it again."

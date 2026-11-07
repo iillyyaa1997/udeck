@@ -1307,6 +1307,31 @@ not cover it — and GitHub's limit as the token's own (S4-20, items 2 to 6 and
 token is held in a value (`Secret`) that prints, interpolates, dumps and
 mirrors as `<redacted>`.
 
+**Taken back at once** (S4-17 to S4-20). A token is handed out for reads and
+presses under a lease (`CredentialLease`) that every client holding a copy asks
+before each request; ending it reaches an installer half-way through its files
+and a history read alike, which then send nothing more — with the token or
+without it. **Forget the token**, **Remove…**, `sources.json` no longer listing
+the source with a token or listing it under another number, and another token
+kept end it; so does the host's `401`, after which nothing is sent for the source
+until **Check now** or **Token…** — the clock, the launch read and Settings
+opening skip it, and an install never retries a token's answer. Every change of
+a source's token takes a turn (`SourceTokenBook`): a check that comes back after
+Forget, Remove or another paste keeps nothing, and takes back only its own write
+to the Keychain item, never a token kept after it. A source whose `sources.json`
+entry says it is read with a token is never read without one: an install, a
+put-back or a history read looks its token up first — after a relaunch, before
+the source's first read — and a source the item holds no token for says so
+(*… is read with a token, and uDeck keeps none for it …*) instead of asking
+anonymously, GitHub's raw host least of all. **Remove…** forgets the token
+before the entry goes: when the Keychain cannot be written, the source stays,
+and says why. Tokens left in the item for a source that has none — written while
+`sources.json` could not be, or before uDeck quit — are forgotten the next time
+the item is read. The token step belongs to the address that was looked up: its
+link and its token go with that address, and typing another address in the field
+takes the step away with what was pasted in it; a source's **Token…** has a
+field of its own.
+
 **Where tokens are kept** (S4-18). One generic-password item in the login
 keychain: service `<bundle identifier>.sources` (`place.unicorns.udeck.sources`;
 a debug build's own identifier for it), account `tokens`, labelled *uDeck:
@@ -2887,6 +2912,9 @@ guest's `~/.udeck` over SSH.
 | `plugins.source-gitlab-renamed` | `gl-hello` installed from `tools/udeck-plugins`; the fake serves project 7 as `tools/udeck-plugins-2`. With its default branch a day old, **Check now** describes it by its number: `sources.json` says the new path under the same id and number, the block and `gl-hello`'s page show it, every request is to `/api/v4/projects/7…`, and the copy's record is still the source's. |
 | `plugins.source-gitlab-too-large` | `tools/udeck-plugins` at `g2`: `gl-big`'s row offers **Install**, no size listed to refuse it by; **Install**: its 6 MB `big.bin`, made when the fake started, is asked once and refused as it arrives — *plugins/gl-big/big.bin is 6.0 MB; one file of a plugin may be up to 5 MB.* — and there is no `plugins/gl-big`, no record and nothing in `~/.udeck/staging`. |
 | `plugins.source-gitlab-manifest-too-large` | `tools/udeck-plugins` at `g3`, whose `gl-huge` has a `manifest.json` made when the fake starts — 6 MB — and a listing with no sizes: after **Add**, `gl-huge`'s row says *plugins/gl-huge/manifest.json is 6.0 MB; one file of a plugin may be up to 5 MB.*, offers no **Install**, and its manifest was asked for once. **Check now** on the source, its head unchanged and its read seen to its end: the manifest is not asked for again, and the row says the same. |
+| `plugins.source-private-github` | someone/private-plugins, private in the fake: looked up without a token it *could not be found, or it is private*, and **Make a token on github.com** carries GitHub's pre-filled page exactly. The fixture token typed in: the sheet names it, **Add** keeps it — `access: token` — and every request carrying it was taken, on `/api/repos/someone/private-plugins` (the one check) and `/api/repositories/900000301/…` alone, files through `contents`, nothing of the raw host; team-clock installs with it. **Token…** → **Forget the token**: `access: none`, read without one again — not found — and nothing carries a token after; uDeck quit, `access: token` written back by hand and relaunched, **Check now** says it keeps no token for the source and asks nothing. Install takes no file from the raw host, which answers a private repository's files 404. Could not check where the runner's Keychain refuses uDeck. |
+| `plugins.source-private-gitlab` | tools/udeck-private on gitlab.example.test, private: not found without a token; **Make a token on gitlab.example.test** carries GitLab's page exactly; the fixture token in `PRIVATE-TOKEN` looked up and added, every request carrying it taken on the project's own routes and port; gl-hello installs, every file with the token. |
+| `plugins.source-token-wrong-provider` | A `ghp_` token typed into tools/udeck-private's token step: *This looks like a GitHub token, and gitlab.example.test is GitLab: uDeck did not send it.*, and no request carries a token. |
 | `plugins.source-gitlab-empty` | `tools/empty`, a passport and no `plugins/`: its block says *The repository offers no plugins yet.*; the read after **Add** made one tree request, the root's, with no `path=plugins`, and **Check now** asks none either. |
 | `plugins.source-gitlab-com-limit` | `someone/gl-plugins` on the fake's gitlab.com, added: its `state.json` keeps both of gitlab.com's limiters by name. The fake says the hour was spent elsewhere; **Check now** gets one `429` naming the hour, and the block says *gitlab.com asked uDeck to wait: … Without a token gitlab.com allows only a few requests an hour from one network; a token raises the limit.*, the hour's remaining 0 and the minute's in the hundreds. **Check now** again, **Install** of `gl-com` — whose row says the same — and twenty seconds: nothing reaches gitlab.com's port; the official catalogue's **Check now** reads it, with no trouble said. |
 | `plugins.source-gitlab-not-gitlab` | The fake answers gitlab.example.test's port as a web server with no GitLab behind it, `404 page not found` in plain text: **Look up** of `https://gitlab.example.test/tools/udeck-plugins` asks once and says *gitlab.example.test did not answer as GitLab. uDeck reads sources on github.com and on GitLab — gitlab.com or your own.*, offering no **Add**. |

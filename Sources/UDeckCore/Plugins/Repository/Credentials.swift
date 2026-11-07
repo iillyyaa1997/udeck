@@ -117,11 +117,29 @@ public struct SourceCredential: Equatable, Sendable {
     public var kind: Kind
     public var token: Secret
     public var binding: CredentialBinding
+    /// The lease it was handed out under for reads (`SourceTokenBook`): every
+    /// request asks it first, so Forget, Remove, a changed source or the
+    /// host's `401` take the token back from every client holding a copy —
+    /// an installer half-way through its files, a history read — before
+    /// their next request. Nil for a token being checked, which no other
+    /// client holds. Not part of what the credential is.
+    public var lease: CredentialLease?
 
-    public init(kind: Kind = .pat, token: Secret, binding: CredentialBinding) {
+    public init(kind: Kind = .pat, token: Secret, binding: CredentialBinding, lease: CredentialLease? = nil) {
         self.kind = kind
         self.token = token
         self.binding = binding
+        self.lease = lease
+    }
+
+    public static func == (lhs: SourceCredential, rhs: SourceCredential) -> Bool {
+        lhs.kind == rhs.kind && lhs.token == rhs.token && lhs.binding == rhs.binding
+    }
+
+    /// Whether it may still be sent: its lease not ended. Throws what a
+    /// client says instead of sending it (S4-19).
+    public func stillHeld() throws(ProviderError) {
+        if let ending = lease?.ending { throw .tokenWithdrawn(ending) }
     }
 
     /// The header a request carries it in, and its value.
@@ -135,6 +153,35 @@ public struct SourceCredential: Equatable, Sendable {
     public func mayGo(to url: URL) -> Bool {
         guard let origin = Origin(url) else { return false }
         return origin == binding.apiOrigin && origin.mayCarryASecret
+    }
+}
+
+/// What a token was handed out under (`SourceCredential.lease`): held until
+/// it ends — the token forgotten, its source removed or changed, or refused
+/// by the host — and ended once, for the first reason. Shared by every copy
+/// of the credential, so ending it reaches every client at once.
+public final class CredentialLease: @unchecked Sendable {
+    /// Why a lease ended.
+    public enum Ending: Equatable, Sendable {
+        /// Forgotten, replaced, its source removed or no longer the one it
+        /// was checked for.
+        case withdrawn
+        /// The host answered `401` to it (S4-19): nothing more is sent until
+        /// Check now or Token….
+        case rejected
+    }
+
+    private let lock = NSLock()
+    private var ended: Ending?
+
+    public init() {}
+
+    /// Why it ended, or nil while it holds.
+    public var ending: Ending? { lock.withLock { ended } }
+
+    /// Ended for `why`, unless it already had ended — the first reason stays.
+    public func end(_ why: Ending) {
+        lock.withLock { if ended == nil { ended = why } }
     }
 }
 
@@ -295,6 +342,10 @@ public actor CredentialVault {
     public enum Lookup: Equatable, Sendable {
         /// No token: the source is read without one.
         case none
+        /// The source says it is read with a token, and the item holds none
+        /// for it — another build's item, an entry deleted by hand: nothing
+        /// is sent, with a token or without one, until Token… pastes one.
+        case missing
         /// Its token, for requests to its binding's API origin.
         case credential(SourceCredential)
         /// A token checked with `origin`, and the source now elsewhere — or
@@ -320,6 +371,11 @@ public actor CredentialVault {
     private static let unreadable = "the item is not one this uDeck reads"
     private var known: [String: CredentialPayload.Entry]?
     private var failure: String?
+    /// The entries this vault wrote since uDeck started: each write's
+    /// revision — what a rollback names as its own — and when it was made,
+    /// on the clock that only goes forward (`systemUptime`).
+    private var written: [String: (revision: Int, at: TimeInterval)] = [:]
+    private var revisions = 0
 
     public init(store: any CredentialStore) {
         self.store = store
@@ -340,14 +396,14 @@ public actor CredentialVault {
                 return .unavailable(error.reason)
             }
         }
-        guard let entry = known?[source.id] else { return .none }
+        guard let entry = known?[source.id] else { return .missing }
         let binding = entry.binding
         guard binding.provider == source.provider, binding.remoteID == source.remoteID,
               binding.apiOrigin == apiOrigin, apiOrigin.mayCarryASecret else {
             return .unbound(binding.apiOrigin)
         }
         guard let kind = SourceCredential.Kind(rawValue: entry.kind),
-              let token = kind == .pat ? entry.token : entry.access else { return .none }
+              let token = kind == .pat ? entry.token : entry.access else { return .missing }
         return .credential(SourceCredential(kind: kind, token: Secret(token), binding: binding))
     }
 
@@ -355,18 +411,45 @@ public actor CredentialVault {
     /// A pasted token is kept as `token`, Sign in's access token as
     /// `access`: each where a later read looks for it. An empty one is not
     /// kept.
-    public func keep(_ credential: SourceCredential, for sourceID: String) throws(ChangeError) {
+    /// Its revision comes back: what a rollback of this one write names
+    /// (`forget(_:written:)`).
+    @discardableResult
+    public func keep(_ credential: SourceCredential, for sourceID: String) throws(ChangeError) -> Int {
         guard !credential.token.isEmpty else { throw .notWritten("an empty token is not kept") }
         let secret = credential.token.revealed
         let entry = credential.kind == .pat
             ? CredentialPayload.Entry(kind: credential.kind.rawValue, token: secret, binding: credential.binding)
             : CredentialPayload.Entry(kind: credential.kind.rawValue, access: secret, binding: credential.binding)
         try change { tokens in tokens[sourceID] = entry }
+        revisions += 1
+        written[sourceID] = (revisions, ProcessInfo.processInfo.systemUptime)
+        return revisions
     }
 
     /// The token of `sourceID` forgotten; the item deleted with the last.
-    public func forget(_ sourceID: String) throws(ChangeError) {
+    /// With `written`, forgotten only while the entry is still the one that
+    /// write made — what a check that lost its turn takes back of its own
+    /// write, never a token kept after it, the same token or another.
+    public func forget(_ sourceID: String, written revision: Int? = nil) throws(ChangeError) {
+        if let revision, written[sourceID]?.revision != revision { return }
         try change { tokens in tokens[sourceID] = nil }
+        written[sourceID] = nil
+    }
+
+    /// Every token kept for a source not in `keeping` forgotten — a source
+    /// removed or switched to no token while the item could not be written,
+    /// or uDeck quit in between — but none this vault wrote at or after
+    /// `cutoff` (`systemUptime`): a token being added meanwhile is not in the
+    /// list it was given. Only once the item was read; nothing is written when
+    /// nothing is to go.
+    public func prune(keeping: Set<String>, writtenBefore cutoff: TimeInterval) throws(ChangeError) {
+        guard let known else { return }
+        let going = Set(known.keys.filter { id in
+            !keeping.contains(id) && (written[id].map { $0.at < cutoff } ?? true)
+        })
+        guard !going.isEmpty else { return }
+        try change { tokens in tokens = tokens.filter { !going.contains($0.key) } }
+        for id in going { written[id] = nil }
     }
 
     /// The Keychain asked again at the next lookup, whatever failed before:

@@ -244,6 +244,8 @@ public struct CatalogueRefresher: Sendable {
             case .forbidden(let scope): return tokened ? .forbidden(scope: scope) : .refused(status: 403)
             case .moved(let status): return tokened ? .moved(status: status) : .refused(status: status)
             case .credentialUnbound: return .credentialUnbound(origin: nil)
+            case .tokenWithdrawn(.rejected): return .unauthorized
+            case .tokenWithdrawn(.withdrawn): return .tokenWithdrawn
             case .tooLarge(let bytes):
                 return .badAnswer("a file of \(bytes) bytes, more than the \(RepositoryRules.maximumFileBytes) a plugin's file may be")
             }

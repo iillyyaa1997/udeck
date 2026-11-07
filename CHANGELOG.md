@@ -10,6 +10,21 @@ for what that promises.
 
 ## [Unreleased]
 
+- **Private repositories as sources, with a token.** When **Look up** cannot
+  find a repository, it may be private: the step under it opens the host's page
+  for a read-only token with its fields filled in, and a token pasted there is
+  checked with one request, sent to the address looked up and no other — one of
+  the other provider's, by its prefix, is not sent at all — and kept only when it
+  read the repository. A source's **Token…** replaces it or forgets it. Every
+  request asks the token's lease first: **Forget the token**, **Remove…**,
+  `sources.json` switched to no token or to another repository, and the host's
+  `401` take it back from every read and install under way, and a refused token
+  is not sent again — not by the clock, not when Settings opens, not by an
+  install retrying — until **Check now** or **Token…**. A source read with a token
+  is never read without one: after a relaunch an install or a history read looks
+  its token up first, and a token missing from the Keychain is said, not worked
+  around. **Remove…** forgets the token first, and keeps the source, saying why,
+  when the Keychain cannot be written.
 - **Tokens, underneath** (not yet offered on any screen). A source's token is
   kept in one Keychain item, bound to the provider, the number and the origin
   it was checked with, and handed out only for requests to that origin, over

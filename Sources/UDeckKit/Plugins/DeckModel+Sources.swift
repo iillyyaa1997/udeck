@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import UDeckCore
 
@@ -43,7 +44,7 @@ extension DeckModel {
     func loadSources() {
         switch sourceStore.load() {
         case .success(let list):
-            sourceList = list
+            if list != sourceList { sourceList = list }
             sourcesProblem = nil
         case .failure(let broken):
             sourceList = SourceList()
@@ -62,6 +63,17 @@ extension DeckModel {
             gitLabLimits[source.id] = RateLimitRecorder(states[source.id]?.rateLimit ?? RateLimitState())
         }
         for id in gitLabLimits.keys where !ids.contains(id) { gitLabLimits[id] = nil }
+        // Each GitHub source with a token, its own limit the same way.
+        for source in sources where source.provider == SourceLink.github && source.access != OwnSource.Access.none
+            && tokenLimits[source.id] == nil {
+            tokenLimits[source.id] = RateLimitRecorder(states[source.id]?.rateLimit ?? RateLimitState())
+        }
+        for id in tokenLimits.keys where !ids.contains(id) { tokenLimits[id] = nil }
+        // A token held for a source gone from the file, switched to no token,
+        // or now another repository's number: taken back from every client.
+        for id in sourceTokens.reconcile(with: sources) {
+            DeckLog.plugins.info("the token of \(id, privacy: .public) taken back: sources.json no longer reads it with this one")
+        }
     }
 
     /// What `sources.json`'s problem line says: why the file cannot be used,
@@ -97,12 +109,123 @@ extension DeckModel {
         var clients = SourceClients(endpoints: endpoints, udeckVersion: udeckVersion, limits: limits, hostMap: hostMap,
                                     gitLabLimits: gitLabLimits)
         clients.lookUpLimits = lookUpLimits
+        clients.tokenLimits = tokenLimits
         return clients
     }
 
-    /// The provider `source` is read through now — nil while it is not added.
+    /// The provider `source` is read through now — nil while it is not added
+    /// — carrying the token held for it under its lease. A source read with a
+    /// token is never read without one: nil while none is held (S4-18), so
+    /// nothing goes anonymously — to GitHub's raw host least of all.
     func sourceProvider(_ id: String) -> SourceProvider? {
-        source(id).flatMap { sourceClients.of($0) }
+        guard let source = source(id) else { return nil }
+        let credential = sourceTokens.credential(of: id)
+        if source.access != OwnSource.Access.none, credential == nil { return nil }
+        return sourceClients.of(source, credential: credential)
+    }
+
+    /// The source's token asked of the vault for its API origin in this
+    /// build (S4-18) — `requested` for a press, which tries the Keychain once
+    /// more after a failure — and held for its reads and presses. What stops
+    /// it being sent comes back: a token checked with another origin
+    /// (S4-20, item 18), a Keychain that could not be read (item 14), none
+    /// kept at all, a token the host refused — asked again only by a press —
+    /// or one taken back while the vault was asked. Nothing at all is asked
+    /// for a source whose `access` is `none`.
+    ///
+    /// `pressed` is Check now, Token… or Add: the only presses that send a
+    /// token the host refused once more (S4-19).
+    func lookUpCredential(of source: OwnSource, requested: Bool, pressed: Bool = false) async -> CatalogueError? {
+        guard source.access != OwnSource.Access.none else { return nil }
+        if sourcesForgetting.contains(source.id) { return .tokenWithdrawn }
+        if !pressed, sourceTokens.wasRejected(source.id) { return .unauthorized }
+        if !requested, let held = sourceTokens.credential(of: source.id), held.binding.remoteID == source.remoteID { return nil }
+        guard let origin = sourceClients.apiOrigin(of: source) else { return nil }
+        let ticket = sourceTokens.ticket(source.id)
+        let vault = credentialVault
+        let found = await vault.credential(for: source, apiOrigin: origin, requested: requested)
+        // Forgotten, replaced or removed while the vault was asked — in uDeck
+        // or in `sources.json` by hand, read again now: what it said is not
+        // held. Nor is a token the host refused meanwhile, unless pressed.
+        loadSources()
+        guard !sourcesForgetting.contains(source.id), let now = self.source(source.id),
+              now.access != OwnSource.Access.none, now.remoteID == source.remoteID else { return .tokenWithdrawn }
+        // A Token… press took the turn meanwhile and has changed nothing yet:
+        // the token still held is read with, as before the press.
+        guard sourceTokens.isCurrent(ticket) else {
+            if let held = sourceTokens.credential(of: source.id), held.binding.remoteID == now.remoteID { return nil }
+            return sourceTokens.wasRejected(source.id) ? .unauthorized : .tokenWithdrawn
+        }
+        switch found {
+        case .credential(let credential):
+            guard sourceTokens.hold(credential, for: ticket, renewingRejected: pressed) != nil else {
+                return sourceTokens.wasRejected(source.id) ? .unauthorized : .tokenWithdrawn
+            }
+            pruneTokens()
+            return nil
+        case .none:
+            return nil
+        case .missing:
+            sourceTokens.release(source.id)
+            return .tokenMissing
+        case .unbound(let checked):
+            sourceTokens.release(source.id)
+            return .credentialUnbound(origin: checked.description)
+        case .unavailable(let reason):
+            sourceTokens.release(source.id)
+            return .keychainUnavailable(reason: reason)
+        }
+    }
+
+    /// Tokens left in the item for a source that has none — removed, or
+    /// switched to no token, while the item could not be written, or uDeck
+    /// quit in between — forgotten, once the item has been read anyway.
+    func pruneTokens() {
+        // Every source with a token, every token being written, and anything
+        // written from now on is kept.
+        let keeping = Set(sources.filter { $0.access != OwnSource.Access.none }.map(\.id)).union(sourcesKeeping.keys)
+            .union(sourceList.skipped.compactMap(\.id))
+        let cutoff = ProcessInfo.processInfo.systemUptime
+        let vault = credentialVault
+        Task {
+            do throws(CredentialVault.ChangeError) {
+                try await vault.prune(keeping: keeping, writtenBefore: cutoff)
+            } catch {
+                DeckLog.plugins.error("tokens of sources no longer added were not forgotten: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    /// Whether `source` is read with its token now.
+    func isTokened(_ id: String) -> Bool { sourceTokens.credential(of: id) != nil }
+
+    /// The token of the source `id` ready before an install, an update, a
+    /// put-back or a history read uses its provider (S4-18): looked up when
+    /// none is held — after a relaunch, before the source's first read — so
+    /// that a source read with a token is never asked anything without it;
+    /// `sources.json` read again first, so a source switched to no token or
+    /// removed by hand is no longer read with one. A token the host refused
+    /// is not sent again until Check now or Token… (S4-19). Nil for the
+    /// official source and a source read without a token.
+    func readyToken(for id: String) async -> CatalogueError? {
+        guard id != InstalledPlugins.officialSource else { return nil }
+        loadSources()
+        guard let source = source(id), source.access != OwnSource.Access.none else { return nil }
+        if sourceStates[id]?.lastError == .unauthorized || sourceTokens.wasRejected(id) { return .unauthorized }
+        if sourceTokens.credential(of: id) != nil { return nil }
+        if let problem = await lookUpCredential(of: source, requested: true) { return problem }
+        return sourceTokens.credential(of: id) == nil ? .tokenMissing : nil
+    }
+
+    /// What became of the source `id`'s token in an install, a put-back or a
+    /// history read: refused by the host, its block says so as a read's
+    /// `401` does, and nothing more is sent until Check now or Token….
+    func noteTokenRefusal(_ id: String) {
+        guard sourceTokens.wasRejected(id), source(id) != nil else { return }
+        sourceStates[id] = CatalogueStore(paths: paths, source: id).updateState { state in
+            state.lastAttempt = Date()
+            state.lastError = .unauthorized
+        }
     }
 
     // MARK: - One read at a time
@@ -182,9 +305,16 @@ extension DeckModel {
         }
     }
 
-    /// **Check now** on a source's block.
+    /// **Check now** on a source's block: a press, which asks the Keychain
+    /// again, whatever failed before (S4-18), and sends a token the host
+    /// refused once more (S4-19).
     public func checkSourceNow(_ id: String) {
-        Task { await refreshSource(id, unrequested: false, why: "Check now") }
+        let tokened = (source(id)?.access ?? OwnSource.Access.none) != OwnSource.Access.none
+        let vault = credentialVault
+        Task {
+            if tokened { await vault.tryAgain() }
+            await refreshSource(id, unrequested: false, pressed: true, why: "Check now")
+        }
     }
 
     // MARK: - Reading a source
@@ -195,15 +325,51 @@ extension DeckModel {
     /// describe that names the repository anew is written back to
     /// `sources.json`, the id the same. Not while it is not listed, and never
     /// two of one source at once.
-    func refreshSource(_ id: String, unrequested: Bool, why: String) async {
-        guard source(id) != nil, !sourcesRefreshing.contains(id) else { return }
+    func refreshSource(_ id: String, unrequested: Bool, pressed: Bool = false, why: String) async {
+        guard source(id) != nil else { return }
+        guard !sourcesRefreshing.contains(id) else {
+            // A press while it is read — the read without a token after
+            // Forget — waits for the read under way, and comes after it.
+            if pressed { sourcesRereading.insert(id) }
+            return
+        }
         sourcesRefreshing.insert(id)
         await inTurn { [self] in
-            defer { sourcesRefreshing.remove(id) }
-            guard let source = source(id), let provider = sourceClients.of(source) else { return }
-            DeckLog.plugins.info("reading \(source.address.description, privacy: .public) (\(id, privacy: .public)): \(why, privacy: .public)")
+            defer {
+                sourcesRefreshing.remove(id)
+                if sourcesRereading.remove(id) != nil {
+                    Task { await refreshSource(id, unrequested: false, pressed: true, why: "asked again while it was read") }
+                }
+            }
+            // `sources.json` as it is now: a source removed or switched to no
+            // token by hand is not read with its token.
+            loadSources()
+            guard let source = source(id) else { return }
             let store = CatalogueStore(paths: paths, source: id)
-            let refresher = CatalogueRefresher(provider: provider, store: store, limits: sourceClients.limits(of: source))
+            // A token the host refused (`401`): nothing more is sent for the
+            // source, with it or without it, until Check now or Token…
+            // (S4-19) — a read nobody pressed for leaves it alone.
+            if !pressed, source.access != OwnSource.Access.none,
+               sourceStates[id]?.lastError == .unauthorized || sourceTokens.wasRejected(id) {
+                return
+            }
+            if let problem = await lookUpCredential(of: source, requested: pressed || !unrequested, pressed: pressed) {
+                DeckLog.plugins.info("\(source.address.description, privacy: .public): not read, \(String(describing: problem), privacy: .public)")
+                sourceStates[id] = store.updateState { state in
+                    state.lastAttempt = Date()
+                    // A token the host refused stays refused, whatever the
+                    // Keychain said to a press since: nothing reads the source
+                    // by itself until a token is read with again (S4-19).
+                    if state.lastError == .unauthorized, problem != .tokenWithdrawn { return }
+                    state.lastError = problem
+                }
+                return
+            }
+            guard let provider = sourceProvider(id) else { return }
+            let tokened = isTokened(id)
+            DeckLog.plugins.info("reading \(source.address.description, privacy: .public) (\(id, privacy: .public)): \(why, privacy: .public)\(tokened ? " with its token" : "", privacy: .public)")
+            let refresher = CatalogueRefresher(provider: provider, store: store,
+                                               limits: sourceClients.limits(of: source, tokened: tokened), tokened: tokened)
             let outcome = await refresher.refresh(unrequested: unrequested, language: strings.language.rawValue,
                                                   installedCommits: installed.commits)
             DeckLog.plugins.info("\(source.address.description, privacy: .public): \(String(describing: outcome), privacy: .public)")
@@ -272,6 +438,7 @@ extension DeckModel {
         sourceLookups += 1
         if let prefilled { sourceField = prefilled }
         sourceAdding = nil
+        addSourceDraft = nil
         sourceOperationProblems[""] = nil
         sourceSheetOpen = true
     }
@@ -282,6 +449,7 @@ extension DeckModel {
         sourceLookups += 1
         sourceSheetOpen = false
         sourceField = ""
+        addSourceDraft = nil
         sourceAdding = nil
         sourceOperationProblems[""] = nil
     }
@@ -290,7 +458,14 @@ extension DeckModel {
     /// once without a request, or asked of its host anonymously — on GitHub
     /// two requests to the API and the passport from the raw host, on a
     /// GitLab three to its API, counted against that host's limit.
-    public func lookUpSource() {
+    /// `withToken`: **Look up with the token** under the token step — the
+    /// token pasted there, sent only to the address the step is for, and
+    /// only while the field still names it (S4-17).
+    public func lookUpSource(withToken: Bool = false) {
+        let draft = withToken ? addSourceDraft : nil
+        let pasted = draft?.token.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let token: Secret? = pasted.isEmpty ? nil : Secret(pasted)
+        if withToken, token == nil { return }
         sourceLookups += 1
         let asked = sourceLookups
         sourceOperationProblems[""] = nil
@@ -300,26 +475,56 @@ extension DeckModel {
         }
         let official = catalogueAddress
         let link: SourceLink
-        switch SourceLookUp.read(sourceField, official: official) {
-        case .refused(let phrase):
-            sourceAdding = .came(.refused(phrase))
-            return
-        case .link(let read):
-            link = read
+        if let draft {
+            guard SourceLookUp.link(sourceField, official: official) == draft.link else {
+                addSourceDraft = nil
+                return
+            }
+            link = draft.link
+        } else {
+            switch SourceLookUp.read(sourceField, official: official) {
+            case .refused(let phrase):
+                sourceAdding = .came(.refused(phrase))
+                addSourceDraft = nil
+                return
+            case .link(let read):
+                link = read
+            }
         }
         sourceAdding = .reading(host: link.host)
+        sourceAddingTokened = token != nil
         if link.provider == SourceLink.gitlab, lookUpLimits[link.host] == nil { lookUpLimits[link.host] = RateLimitRecorder() }
         let list = sourceList
         let clients = sourceClients
         let officialID = endpoints.repositoryID
-        DeckLog.plugins.info("looking up a source: \(link.address.description, privacy: .public)")
+        DeckLog.plugins.info("looking up a source: \(link.address.description, privacy: .public)\(token == nil ? "" : " with a token", privacy: .public)")
         Task {
             let came = await SourceLookUp.lookUp(link, list: list, official: official, officialID: officialID,
-                                                 clients: clients)
+                                                 clients: clients, token: token)
             DeckLog.plugins.info("the source came to \(String(describing: came), privacy: .public)")
             persistRateLimit()
             guard asked == sourceLookups else { return }
             sourceAdding = .came(came)
+            // The token step, for this address alone: after a `404` without
+            // a token — it may be private — and after anything said of a
+            // token tried, so another can be pasted; the one tried is not
+            // kept in the field.
+            if Self.offersTheTokenStep(came) {
+                addSourceDraft = TokenDraft(link: link, token: "")
+            } else {
+                addSourceDraft = nil
+            }
+        }
+    }
+
+    /// Whether what **Look up** came to offers the token step (S4-17).
+    static func offersTheTokenStep(_ came: SourceLookUp.Outcome) -> Bool {
+        guard case .refused(let phrase) = came else { return false }
+        switch phrase {
+        case .sourceNotFound, .sourceTokenNotFound, .sourceTokenRejected, .sourceTokenScope, .sourceTokenWrongProvider:
+            return true
+        default:
+            return false
         }
     }
 
@@ -330,32 +535,111 @@ extension DeckModel {
     /// `sources.json` cannot be read.
     public func addSource() {
         guard case .came(.found(let found))? = sourceAdding, sourcesProblem == nil else { return }
+        guard let credential = found.credential else {
+            add(found, access: OwnSource.Access.none)
+            return
+        }
+        // A token that read the repository is kept first, under the id the
+        // source will have; the source is added only once it is (S4-17). A
+        // source already listed under that id keeps its own token: Add says
+        // it is added, and writes nothing.
+        let id = SourceID.derive(found.identity, path: found.path)
+        if let listed = source(id) {
+            sourceAdding = .came(.alreadyAdded(listed))
+            return
+        }
+        let ticket = sourceTokens.begin(id)
+        let vault = credentialVault
+        sourcesKeeping[id] = ticket
+        Task {
+            defer { if sourcesKeeping[id] == ticket { sourcesKeeping[id] = nil } }
+            let revision: Int
+            do throws(CredentialVault.ChangeError) {
+                revision = try await vault.keep(credential, for: id)
+            } catch {
+                sourceOperationProblems[""] = strings(.sourceKeychainUnavailable(
+                    address: found.address.description, reason: Self.said(error)))
+                return
+            }
+            // Its turn lost meanwhile, or the entry not written: its own write
+            // taken back — that write alone, never a token kept after it.
+            guard sourceTokens.isCurrent(ticket), source(id) == nil,
+                  add(found, access: OwnSource.Access.token),
+                  sourceTokens.hold(credential, for: ticket, renewingRejected: true) != nil else {
+                await takeBack(id, written: revision, address: found.address.description)
+                return
+            }
+            sourceNotices[id] = tokenNotices(pasted: credential.token, writeScope: found.writeScope)
+        }
+    }
+
+    /// A token write that lost its turn taken back — that write alone. When
+    /// the Keychain will not, it is said where it was pressed, and the token
+    /// is pruned the next time the item is read (`pruneTokens`).
+    func takeBack(_ id: String, written revision: Int, address: String) async {
+        do throws(CredentialVault.ChangeError) {
+            try await credentialVault.forget(id, written: revision)
+        } catch {
+            DeckLog.plugins.error("a token written for \(id, privacy: .public) and not kept could not be taken back: \(String(describing: error), privacy: .public)")
+            let said = strings(.sourceKeychainUnavailable(address: address, reason: Self.said(error)))
+            sourceOperationProblems[source(id) == nil ? "" : id] = said
+            pruneTokens()
+        }
+    }
+
+    /// What a change of the vault failed with, as a sentence says it.
+    static func said(_ error: CredentialVault.ChangeError) -> String {
+        switch error {
+        case .unavailable(let reason), .notWritten(let reason): reason
+        case .unreadable: "the item is not one this uDeck reads"
+        }
+    }
+
+    /// What a source says once its token is kept: the clipboard cleared of
+    /// it, when it still held exactly that token (S4-20, item 20) — which
+    /// narrows the time a plugin could read it there, and does not close it
+    /// — and a classic token's write scope (item 21).
+    func tokenNotices(pasted token: Secret, writeScope: Bool) -> [Phrase] {
+        var notices: [Phrase] = []
+        let board = NSPasteboard.general
+        let seen = board.changeCount
+        if board.string(forType: .string) == token.revealed, board.changeCount == seen {
+            board.clearContents()
+            notices.append(.sourceTokenClipboardCleared)
+        }
+        if writeScope { notices.append(.sourceTokenWriteScope) }
+        return notices
+    }
+
+    /// The entry written, and the source read: whether it was added.
+    @discardableResult
+    private func add(_ found: SourceLookUp.Found, access: String) -> Bool {
         let added: Result<OwnSource, SourceList.AddRefusal>
         do {
             added = try sourceStore.modify { list in
                 list.add(provider: found.provider, host: found.host, path: found.path, remoteID: found.remoteID,
-                         at: Date(), official: catalogueAddress)
+                         access: access, at: Date(), official: catalogueAddress)
             }
         } catch {
             sourceOperationProblems[""] = "\(error)"
             loadSources()
-            return
+            return false
         }
         let source: OwnSource
         switch added {
         case .success(let new): source = new
         case .failure(.alreadyAdded(let listed)):
             sourceAdding = .came(.alreadyAdded(listed))
-            return
+            return false
         case .failure(.idTaken(let taken)):
             sourceAdding = .came(.refused(.sourceIDTaken(name: taken.address.description)))
-            return
+            return false
         case .failure(.address(let refusal)):
             sourceAdding = .came(.refused(.sourceLinkRefused(refusal, official: catalogueAddress.description)))
-            return
+            return false
         case .failure(.listedAsSkipped(let skipped)):
             sourceAdding = .came(.refused(.sourceSkipped(skipped)))
-            return
+            return false
         }
         let store = CatalogueStore(paths: paths, source: source.id)
         try? store.save(SourceLookUp.firstState(of: found))
@@ -364,19 +648,182 @@ extension DeckModel {
         loadSources()
         closeAddSource()
         updateClock()
-        Task { await refreshSource(source.id, unrequested: false, why: "added") }
+        Task { await refreshSource(source.id, unrequested: false, pressed: true, why: "added") }
+        return true
+    }
+
+    // MARK: - Token…
+
+    /// **Token…** on a source's block: its sheet opened, or closed — what
+    /// was pasted under it gone either way.
+    public func toggleToken(_ id: String) {
+        sourceTokenDraft = ""
+        sourceTokenOpen = sourceTokenOpen == id ? nil : id
+    }
+
+    /// **Look up with the token** under **Token…**: the pasted token checked
+    /// with one request by the source's number — refused before any request
+    /// when its prefix proves it the other provider's (S4-20, item 23) —
+    /// and kept, bound to that number and the origin it went to, only when it
+    /// read the repository; then the source read with it (S4-17). A check
+    /// that comes back after Forget, Remove or another token was pressed
+    /// keeps nothing (`SourceTokenBook`).
+    public func keepToken(for id: String) {
+        let pasted = sourceTokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let source = source(id), !pasted.isEmpty, sourcesProblem == nil, !sourcesForgetting.contains(id),
+              let origin = sourceClients.apiOrigin(of: source) else { return }
+        // Every press takes the turn from the check before it — a token of the
+        // other provider refused at once included.
+        let ticket = sourceTokens.begin(id)
+        sourceTokenChecks[id]?.cancel()
+        sourceTokenChecks[id] = nil
+        if TokenPrefix.isTheOtherProviders(pasted, source: source.provider) {
+            sourceNotices[id] = [.sourceTokenWrongProvider(host: source.host, looksLikeGitHub: source.provider == SourceLink.gitlab)]
+            return
+        }
+        let credential = SourceCredential(token: Secret(pasted), binding: CredentialBinding(
+            provider: source.provider, remoteID: source.remoteID, apiOrigin: origin))
+        guard let provider = sourceClients.of(source, credential: credential) else { return }
+        let vault = credentialVault
+        let address = source.address.description
+        sourceNotices[id] = nil
+        sourcesKeeping[id] = ticket
+        sourceTokenChecks[id] = Task {
+            defer {
+                if sourceTokens.isCurrent(ticket) { sourceTokenChecks[id] = nil }
+                if sourcesKeeping[id] == ticket { sourcesKeeping[id] = nil }
+            }
+            let writeScope: Bool
+            do {
+                writeScope = try await provider.describeWithScopes().scopes.contains("repo")
+            } catch {
+                guard sourceTokens.isCurrent(ticket), !Task.isCancelled else { return }
+                let reason = CatalogueRefresher.reason(error, branch: nil, tokened: true)
+                sourceNotices[id] = [CatalogueTrouble.phrase(reason, address: address, host: source.host, readAt: nil,
+                                                             until: { Clock.text($0, self.strings) },
+                                                             provider: source.provider, tokened: true)]
+                return
+            }
+            guard sourceTokens.isCurrent(ticket), let now = self.source(id), now.remoteID == source.remoteID else { return }
+            // A replacement leaves `sources.json` as it is — it already says
+            // the source has a token — so a failed write never costs the token
+            // it replaced; a first token writes `access`, or is taken back.
+            let replacing = now.access != OwnSource.Access.none
+            let revision: Int
+            do throws(CredentialVault.ChangeError) {
+                revision = try await vault.keep(credential, for: id)
+            } catch {
+                guard sourceTokens.isCurrent(ticket) else { return }
+                sourceNotices[id] = [.sourceKeychainUnavailable(address: address, reason: Self.said(error))]
+                return
+            }
+            var written = false
+            var problem: String?
+            if sourceTokens.isCurrent(ticket), self.source(id) != nil {
+                if replacing {
+                    written = true
+                } else {
+                    do {
+                        written = try sourceStore.modify { list in list.setAccess(id, OwnSource.Access.token) }
+                    } catch {
+                        problem = "\(error)"
+                    }
+                }
+            }
+            loadSources()
+            guard written, sourceTokens.hold(credential, for: ticket, renewingRejected: true) != nil else {
+                await takeBack(id, written: revision, address: address)
+                if let problem, sourceTokens.isCurrent(ticket) { sourceOperationProblems[id] = problem }
+                return
+            }
+            sourceNotices[id] = tokenNotices(pasted: credential.token, writeScope: writeScope)
+            // Its own Token… closed — never another source's opened since.
+            if sourceTokenOpen == id {
+                sourceTokenDraft = ""
+                sourceTokenOpen = nil
+            }
+            await refreshSource(id, unrequested: false, pressed: true, why: "a token kept")
+        }
+    }
+
+    /// **Forget the token** under **Token…**: taken back from every client
+    /// at once — a read or an install under way sends it no more — then its
+    /// entry gone from the Keychain item, and the item with the last token,
+    /// and only then the source written as read without one and read so.
+    /// When the Keychain cannot be written, the token stays, and is said to.
+    public func forgetToken(of id: String) {
+        guard source(id) != nil, sourcesProblem == nil, !sourcesForgetting.contains(id) else { return }
+        sourceTokens.withdraw(id)
+        sourceTokenChecks[id]?.cancel()
+        sourceTokenChecks[id] = nil
+        sourcesForgetting.insert(id)
+        sourceTokenDraft = ""
+        sourceTokenOpen = nil
+        sourceNotices[id] = nil
+        let vault = credentialVault
+        Task {
+            do throws(CredentialVault.ChangeError) {
+                try await vault.forget(id)
+            } catch {
+                sourcesForgetting.remove(id)
+                sourceNotices[id] = [.sourceKeychainUnavailable(address: source(id)?.address.description ?? id,
+                                                                reason: Self.said(error))]
+                return
+            }
+            do {
+                try sourceStore.modify { list in _ = list.setAccess(id, OwnSource.Access.none) }
+            } catch {
+                sourceOperationProblems[id] = "\(error)"
+            }
+            sourcesForgetting.remove(id)
+            loadSources()
+            await refreshSource(id, unrequested: false, pressed: true, why: "its token forgotten")
+        }
     }
 
     // MARK: - Remove…
 
-    /// **Remove…** on a source's block, confirmed: its entry and
+    /// **Remove…** on a source's block, confirmed: its token taken back at
+    /// once and forgotten (S4-20, item 17) — the source stays, and says why,
+    /// when the Keychain cannot be written — then its entry and
     /// `catalogue/<id>/` go, and nothing more is asked of it. What was
     /// installed from it stays, and runs, its row saying the source is no
     /// longer added; nothing updates, reinstalls or puts it back until the
     /// source is added again.
     public func removeSource(_ id: String) {
-        guard sourcesProblem == nil, !sourcesRefreshing.contains(id) else { return }
+        guard sourcesProblem == nil, !sourcesRefreshing.contains(id), !sourcesForgetting.contains(id) else { return }
+        // A token being written counts: its write may land after the entry
+        // goes, so the Keychain is cleared first either way.
+        let hadAToken = (source(id)?.access ?? OwnSource.Access.none) != OwnSource.Access.none
+            || sourcesKeeping[id] != nil
         sourceOperationProblems[id] = nil
+        sourceTokens.withdraw(id)
+        sourceTokenChecks[id]?.cancel()
+        sourceTokenChecks[id] = nil
+        if sourceTokenOpen == id {
+            sourceTokenOpen = nil
+            sourceTokenDraft = ""
+        }
+        guard hadAToken else {
+            finishRemoving(id)
+            return
+        }
+        sourcesForgetting.insert(id)
+        let vault = credentialVault
+        Task {
+            defer { sourcesForgetting.remove(id) }
+            do throws(CredentialVault.ChangeError) {
+                try await vault.forget(id)
+            } catch {
+                sourceOperationProblems[id] = strings(.sourceKeychainUnavailable(
+                    address: source(id)?.address.description ?? id, reason: Self.said(error)))
+                return
+            }
+            finishRemoving(id)
+        }
+    }
+
+    private func finishRemoving(_ id: String) {
         do {
             try sourceStore.modify { list in _ = list.remove(id) }
         } catch {
@@ -388,11 +835,22 @@ extension DeckModel {
         sourceCatalogues[id] = nil
         sourceStates[id] = nil
         gitLabLimits[id] = nil
+        tokenLimits[id] = nil
+        sourceNotices[id] = nil
         sourceCataloguesRead.remove(id)
         autoUpdates.forget(id)
         DeckLog.plugins.info("removed the source \(id, privacy: .public)")
         loadSources()
         updateClock()
         reverify()
+        // Whatever a write that lost its turn left behind, once the item is read.
+        pruneTokens()
     }
+}
+
+/// The token step of **Add a source…** (S4-17): the address the anonymous
+/// look-up could not find, and the token pasted for it.
+public struct TokenDraft: Equatable, Sendable {
+    public let link: SourceLink
+    public var token: String
 }

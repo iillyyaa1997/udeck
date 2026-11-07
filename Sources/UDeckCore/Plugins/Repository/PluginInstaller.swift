@@ -440,6 +440,9 @@ public struct PluginInstaller: Sendable {
                 // Larger than a plugin's file may be, said by the host or
                 // read past: asked again it is no smaller.
                 throw InstallError.refused([.fileTooLarge(path: path, bytes: bytes)])
+            } catch let error as ProviderError where error.isTheTokens {
+                // The token's answer goes up as it is, never asked again.
+                throw error
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -1101,6 +1104,7 @@ public struct PluginInstaller: Sendable {
         case .moved(let status): "HTTP \(status)"
         case .tooLarge(let bytes): "\(bytes) bytes"
         case .credentialUnbound: "the token is not for this address"
+        case .tokenWithdrawn: "the token was taken back"
         }
     }
 }

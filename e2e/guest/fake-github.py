@@ -378,6 +378,17 @@ def read_lines(path: str) -> list[str]:
         return []
 
 
+def read_token(folder: str) -> str | None:
+    """A private repository's fixture token, from its `private` file — None for a public one (stage 4, R3b)."""
+    path = os.path.join(folder, "private")
+    if not os.path.exists(path):
+        return None
+    lines = read_lines(path)
+    if len(lines) != 1 or not lines[0]:
+        raise ValueError(f"{path} does not say one token: {lines}")
+    return lines[0]
+
+
 def read_number(path: str) -> int:
     """The number an `id` file gives, its comments and blank lines left out."""
     lines = read_lines(path)
@@ -519,6 +530,8 @@ class Source:
         self.name = name
         self.id = read_number(os.path.join(folder, "id"))
         self.repository = Repository(folder)
+        # Private: read only with this token, in Authorization: Bearer (stage 4, R3b).
+        self.token = read_token(folder)
 
     def facts(self) -> dict:
         return {"id": self.id, **self.repository.facts()}
@@ -558,6 +571,8 @@ class Project:
         self.path = path
         self.id = read_number(os.path.join(folder, "id"))
         self.repository = Repository(folder)
+        # Private: read only with this token, in PRIVATE-TOKEN or Authorization: Bearer (stage 4, R3b).
+        self.token = read_token(folder)
 
     @property
     def key(self) -> str:
@@ -751,12 +766,45 @@ class Fake:
 
     # Each answer is (status, headers, body).
 
+    # --- Tokens (stage 4, R3b) ---------------------------------------------------------------
+
+    @staticmethod
+    def carried(headers: dict, gitlab: bool) -> str | None:
+        """The token a request carried — GitHub's in Authorization: Bearer, a GitLab's there or in PRIVATE-TOKEN."""
+        bearer = headers.get("authorization", "")
+        if bearer.lower().startswith("bearer "):
+            return bearer[len("bearer "):].strip()
+        if gitlab and headers.get("private-token"):
+            return headers["private-token"].strip()
+        return None
+
+    def token_of(self, key: str, fixture: str | None, state: dict) -> str | None:
+        """A private repository's token now: its fixture's, unless the lab rotated it (`tokens`)."""
+        given = (state.get("tokens") or {}).get(key)
+        return given if isinstance(given, str) and given else fixture
+
+    def guarded(self, key: str, fixture: str | None, headers: dict, state: dict, gitlab: bool, answer):
+        """GitHub's and GitLab's rule for a repository asked with or without a token: one carried and not this one's
+        is 401 — public or private — a private one asked without is 404, and the right one is answered."""
+        token = self.token_of(key, fixture, state)
+        given = self.carried(headers, gitlab)
+        if any(name in headers for name in CREDENTIAL_HEADERS) and (given is None or given != token):
+            return self.json(401, {"message": "401 Unauthorized" if gitlab else "Bad credentials"})
+        if token is not None and given is None:
+            return self.json(404, {"message": "404 Project Not Found" if gitlab else "Not Found"})
+        return answer()
+
     def answer(self, method: str, target: str, headers: dict) -> tuple[int, dict, bytes]:
         parsed = urllib.parse.urlsplit(target)
         path = urllib.parse.unquote(parsed.path)
         query = urllib.parse.parse_qs(parsed.query)
         if method not in ("GET", "HEAD"):
             return self.json(405, {"message": "Method Not Allowed"})
+        # A token goes to its own repository's API routes alone: anywhere else on GitHub's port — the raw host, the
+        # official repository, a fork — it is GitHub's 401.
+        if any(name in headers for name in CREDENTIAL_HEADERS) and not path.startswith("/api/repositories/") \
+                and self.source_named_in(path, self.state()) is None:
+            return self.json(401, {"message": "Bad credentials"})
         if path.startswith("/lab/"):
             return self.lab(path)
         if path.startswith("/api/"):
@@ -803,6 +851,13 @@ class Fake:
         status, extra, body = self.api_answer(path, query, headers, state)
         return status, {**extra, **limits}, body
 
+    def source_named_in(self, path: str, state: dict):
+        """The repository of its own `/api/repos/<owner>/<repo>/…` names, or None."""
+        parts = path.split("/")
+        if len(parts) < 5 or parts[1] != "api" or parts[2] != "repos":
+            return None
+        return self.source_named(f"{parts[3]}/{parts[4]}", state)
+
     def fork(self, owner_repo: str, state: dict) -> dict | None:
         """What the lab says of `owner/repo` as another repository on the host — None when it names none."""
         given = (state.get("forks") or {}).get(owner_repo)
@@ -815,8 +870,12 @@ class Fake:
             source = next((s for s in self.sources.values() if parts[2].isdigit() and s.id == int(parts[2])), None)
             name = self.name_of(source, state) if source else None
             if source is None or name is None:
+                if any(header in headers for header in CREDENTIAL_HEADERS):
+                    return self.json(401, {"message": "Bad credentials"})
                 return self.json(404, {"message": "Not Found"})
-            return self.source_answer(source, name, path[len(f"/repositories/{parts[2]}") :], query, headers, state)
+            rest = path[len(f"/repositories/{parts[2]}") :]
+            return self.guarded(source.name, source.token, headers, state, False,
+                                lambda: self.source_answer(source, name, rest, query, headers, state))
         # "", "repos", owner, repo, ...
         if len(parts) < 4 or parts[1] != "repos":
             return self.json(404, {"message": "Not Found"})
@@ -825,7 +884,9 @@ class Fake:
         if owner_repo != self.owner_repo:
             source = self.source_named(owner_repo, state)
             if source is not None:
-                return self.source_answer(source, self.name_of(source, state) or owner_repo, rest, query, headers, state)
+                named = self.name_of(source, state) or owner_repo
+                return self.guarded(source.name, source.token, headers, state, False,
+                                    lambda: self.source_answer(source, named, rest, query, headers, state))
             fork = self.fork(owner_repo, state)
             if fork is None:
                 return self.json(404, {"message": "Not Found"})
@@ -891,6 +952,13 @@ class Fake:
             return self.tree(rest[len("/git/trees/") :], recursive, False, repository=repository)
         if rest.startswith("/compare/"):
             return self.compare(rest[len("/compare/") :], own, repository=repository)
+        if rest.startswith("/contents/"):
+            # A file at a commit, as raw media: how a source read with its token takes its files (stage 4, R3a).
+            commit = repository.resolve(query.get("ref", [""])[0], own)
+            found = commit.snapshot.at(rest[len("/contents/") :]) if commit else None
+            if found is None or found[0] == MODE_FOLDER:
+                return self.json(404, {"message": "Not Found"})
+            return 200, {"Content-Type": "application/vnd.github.raw"}, commit.snapshot.blobs[found[1]]
         return self.json(404, {"message": "Not Found"})
 
     def resolved(self, ref: str, state: dict, fork: dict | None, repository: Repository | None = None) -> Commit | None:
@@ -1043,7 +1111,10 @@ class Fake:
         # A repository of its own by the name it is called now, and its commits only.
         source = None if owner_repo == self.owner_repo else self.source_named(owner_repo, state)
         if source is not None:
-            if len(parts) < 4:
+            # A private repository's raw files are GitHub's 404 to a request without its token — and uDeck never
+            # sends one to the raw host, so a private file asked for here is always this 404: an installer that lost
+            # its token and fell back to the raw host fails, as it would on GitHub.
+            if len(parts) < 4 or source.token is not None:
                 return 404, {"Content-Type": "text/plain; charset=utf-8"}, b"404: Not Found"
             commit = source.repository.resolve(parts[2], self.source_state(source, state))
             path = "/".join(parts[3:])
@@ -1117,13 +1188,13 @@ class Fake:
             if not allowed:
                 return 429, {"Content-Type": "text/plain; charset=utf-8", **limits}, b"Retry later\n"
         if graphql:
-            status, extra, answered = self.gitlab_graphql(site, body, state)
+            status, extra, answered = self.gitlab_graphql(site, body, state, headers)
         else:
             status, extra, answered = self.gitlab_answer(site, parsed.path, urllib.parse.parse_qs(parsed.query), headers,
                                                          state)
         return status, {**extra, **limits}, answered
 
-    def gitlab_graphql(self, site: str, body: bytes, state: dict) -> tuple[int, dict, bytes]:
+    def gitlab_graphql(self, site: str, body: bytes, state: dict, headers: dict | None = None) -> tuple[int, dict, bytes]:
         """`POST /api/graphql`, as gitlab.com answers uDeck's one query (measured): the project at `$path` — any case,
         as GitLab finds a path — its `id` as `gid://gitlab/Project/<number>`, and for each commit asked the file at
         `$paths`: its blob id and its text, or no node where it is not. Weighed as GitLab weighs it, against the
@@ -1152,6 +1223,14 @@ class Fake:
         project = next((p for name, p in served.items() if name.lower() == named.lower()), None)
         if project is None:
             return self.json(200, {"data": {"project": None}})
+        headers = headers or {}
+        carried = self.carried(headers, True)
+        token = self.token_of(project.key, project.token, state)
+        if any(name in headers for name in CREDENTIAL_HEADERS) and carried != token:
+            return self.json(401, {"message": "401 Unauthorized"})
+        if token is not None and carried is None:
+            # GitLab's GraphQL answers a project it does not show as none at all.
+            return self.json(200, {"data": {"project": None}})
         path = str((variables.get("paths") or [""])[0]).strip("/")
         own = self.gitlab_main(project, state)
         repository = {}
@@ -1176,7 +1255,14 @@ class Fake:
             return self.json(404, {"error": "404 Not Found"})
         project, name = self.gitlab_project(site, urllib.parse.unquote(segments[4]), state)
         if project is None:
+            if any(header in headers for header in CREDENTIAL_HEADERS):
+                return self.json(401, {"message": "401 Unauthorized"})
             return self.json(404, {"message": "404 Project Not Found"})
+        return self.guarded(project.key, project.token, headers, state, True,
+                            lambda: self.gitlab_routes(site, project, name, segments, query, headers, state))
+
+    def gitlab_routes(self, site: str, project, name: str, segments: list, query: dict, headers: dict,
+                      state: dict) -> tuple[int, dict, bytes]:
         rest = [urllib.parse.unquote(segment) for segment in segments[5:]]
         own = self.gitlab_main(project, state)
         if rest in ([], [""]):
@@ -1329,17 +1415,17 @@ def handler_for(fake: Fake, site: str = ""):
 
         def respond(self, method: str, body: bytes = b"") -> None:
             headers = {key.lower(): value for key, value in self.headers.items()}
-            # No credential is good for anything yet: one carried is GitHub's 401, and the log says so, never its value.
-            credential = "rejected" if any(name in headers for name in CREDENTIAL_HEADERS) else "none"
+            # A token is good only for its own private repository's routes (stage 4, R3b): the log says whether one was
+            # carried and taken — `accepted` — or refused, `rejected`, never its value.
+            carried = any(name in headers for name in CREDENTIAL_HEADERS)
             try:
-                if credential == "rejected":
-                    status, extra, answer = fake.json(401, {"message": "401 Unauthorized" if site else "Bad credentials"})
-                elif site and not urllib.parse.urlsplit(self.path).path.startswith("/lab/"):
+                if site and not urllib.parse.urlsplit(self.path).path.startswith("/lab/"):
                     status, extra, answer = fake.gitlab(site, method, self.path, headers, body)
                 else:
                     status, extra, answer = fake.answer(method, self.path, headers)
             except Exception as error:  # noqa: BLE001 — a fake that dies answers nobody
                 status, extra, answer = 500, {"Content-Type": "text/plain"}, f"the fake failed: {error!r}".encode()
+            credential = "none" if not carried else ("rejected" if status == 401 else "accepted")
             parsed = urllib.parse.urlsplit(self.path)
             # A GraphQL request's commits, by the fields it asked — never its variables' values.
             graphql_commits = len(GRAPHQL_FIELD.findall(body.decode("utf-8", "replace"))) if method == "POST" else 0

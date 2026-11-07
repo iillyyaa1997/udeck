@@ -247,7 +247,8 @@ struct CredentialTests {
         _ = await vault.credential(for: source, apiOrigin: Self.origin, requested: true)
         #expect(store.calls == ["read", "read"], "a press tries once more")
         store.fail(nil)
-        #expect(await vault.credential(for: source, apiOrigin: Self.origin, requested: true) == .none)
+        #expect(await vault.credential(for: source, apiOrigin: Self.origin, requested: true) == .missing,
+                "read with a token, and the item holds none for it")
         #expect(await vault.lastFailure == nil)
         // Check now, Token…: asked again whatever was remembered.
         store.fail(CredentialStoreError("denied"))

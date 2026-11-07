@@ -19,7 +19,8 @@ public enum OperationProblem: Equatable, Sendable {
     /// rewritten, perhaps, and cleaned up since.
     case commitGone(String)
 
-    init(_ error: any Error) {
+    /// `tokened`: whether the operation's requests carried the source's token.
+    init(_ error: any Error, tokened: Bool = false) {
         switch error {
         case let error as InstallError:
             switch error {
@@ -41,8 +42,10 @@ public enum OperationProblem: Equatable, Sendable {
             case .unreachable(let reason): self = .catalogue(.unreachable(reason))
             case .badAnswer(let reason): self = .catalogue(.badAnswer(reason))
             // Said as a read of the catalogue says them (`CatalogueRefresher.reason`).
-            case .unauthorized, .forbidden, .moved, .tooLarge, .credentialUnbound:
-                self = .catalogue(CatalogueRefresher.reason(error, branch: nil))
+            // Said as a read of the catalogue says them (`CatalogueRefresher.reason`):
+            // with the token the operation carried, its token's (S4-20).
+            case .unauthorized, .forbidden, .moved, .tooLarge, .credentialUnbound, .tokenWithdrawn:
+                self = .catalogue(CatalogueRefresher.reason(error, branch: nil, tokened: tokened))
             }
         case let error as CatalogueError:
             self = .catalogue(error)
@@ -132,6 +135,15 @@ extension DeckModel {
         return sourceProvider(origin.source)
     }
 
+    /// Whether a copy from `origin` may be taken at all: the official
+    /// source's from a repository its provider takes, a source of one's
+    /// own's from its default branch while it is added — its token, when it
+    /// has one, looked up when the work starts (`readyToken`).
+    func mayBeTaken(_ origin: PluginOrigin) -> Bool {
+        guard origin.source != InstalledPlugins.officialSource else { return provider(for: origin) != nil }
+        return origin.ref.isDefault && source(origin.source) != nil
+    }
+
     /// `origin` as a copy of it is taken now: a source of one's own's at the
     /// address the source has now — the repository as the record keeps it is
     /// where it was when it was installed, and a source renamed since is read
@@ -163,7 +175,7 @@ extension DeckModel {
         let official = provider
         var own: [String: SourceProvider] = [:]
         for source in sources {
-            if let provider = sourceClients.of(source) { own[source.id] = provider }
+            if let provider = sourceProvider(source.id) { own[source.id] = provider }
         }
         return PluginInstaller(
             paths: paths, discovery: discovery, trash: trash,
@@ -487,7 +499,8 @@ extension DeckModel {
     public func folderPage(_ id: String, commit: String, source: String = InstalledPlugins.officialSource) -> URL? {
         let path = "\(CommitListing.pluginsFolder)/\(id)"
         guard source != InstalledPlugins.officialSource else { return provider.folderPage(path, commit: commit) }
-        return sourceProvider(source)?.folderPage(path, commit: commit)
+        // A page's address only: nothing is sent, so no token is needed.
+        return self.source(source).flatMap { sourceClients.of($0) }?.folderPage(path, commit: commit)
     }
 
     /// *What changed*: the installed commit against the head of its own
@@ -497,7 +510,8 @@ extension DeckModel {
         guard record.source != InstalledPlugins.officialSource else {
             return provider.comparePage(from: record.commit, to: head)
         }
-        return sourceProvider(record.source)?.comparePage(from: record.commit, to: head)
+        // A page's address only: nothing is sent, so no token is needed.
+        return source(record.source).flatMap { sourceClients.of($0) }?.comparePage(from: record.commit, to: head)
     }
 
     /// *What changed* along the line a copy of code nobody verified came
@@ -972,23 +986,25 @@ extension DeckModel {
         let source = installed.plugins[id]?.source ?? InstalledPlugins.officialSource
         guard canRead(source), let head = catalogue(of: source)?.commit,
               let branch = catalogueState(of: source).defaultBranch ?? catalogue(of: source)?.branch else { return }
-        let reader: PluginHistoryReader
-        if source == InstalledPlugins.officialSource {
-            reader = PluginHistoryReader(provider: provider, store: catalogueStore)
-        } else if let own = sourceProvider(source) {
-            reader = PluginHistoryReader(provider: own, store: CatalogueStore(paths: paths, source: source))
-        } else {
-            return
-        }
+        guard source == InstalledPlugins.officialSource || self.source(source) != nil else { return }
         if EarlierVersions.stands(readHistory(id), readOf: historySources[id], copyOf: source, head: head) { return }
         histories[id] = .reading
         historySources[id] = source
         Task {
             let came: HistoryLoad
-            do {
-                came = .read(try await reader.read(id, branch: branch, head: head))
-            } catch {
-                came = .failed(OperationProblem(error))
+            // A source read with a token: its token first (`readyToken`).
+            if let problem = await readyToken(for: source) {
+                came = .failed(.catalogue(problem))
+            } else if let reader = historyReader(of: source) {
+                let tokened = isTokened(source)
+                do {
+                    came = .read(try await reader.read(id, branch: branch, head: head))
+                } catch {
+                    noteTokenRefusal(source)
+                    came = .failed(OperationProblem(error, tokened: tokened))
+                }
+            } else {
+                came = .failed(.catalogue(.notFound))
             }
             // An answer for a copy that is of another source since is not
             // shown as its history.
@@ -996,6 +1012,17 @@ extension DeckModel {
             catalogueState.rateLimit = limits.current
             persistRateLimit()
         }
+    }
+
+    /// The history of `source`'s default branch is read through: the official
+    /// source's provider, or a source of one's own's — nil while it is not
+    /// added, or its token is not held.
+    private func historyReader(of source: String) -> PluginHistoryReader? {
+        if source == InstalledPlugins.officialSource {
+            return PluginHistoryReader(provider: provider, store: catalogueStore)
+        }
+        guard let own = sourceProvider(source) else { return nil }
+        return PluginHistoryReader(provider: own, store: CatalogueStore(paths: paths, source: source))
     }
 
     /// The history last read for `id`, when it was read.
@@ -1012,15 +1039,23 @@ extension DeckModel {
         // whichever button was pressed, and whatever screen it was on.
         let origin = takenNow(origin)
         guard canRead(origin.source), busyPlugin == nil else { return }
-        guard let provider = client(for: origin) else {
-            operationProblems[id] = .catalogue(.notFound)
-            return
-        }
         busyPlugin = id
         operationProblems[id] = nil
-        let refresher = CatalogueRefresher(provider: provider, store: CatalogueStore(paths: paths, source: origin.source),
-                                           limits: limits)
         Task {
+            // A source read with a token: its token first (`readyToken`).
+            if let problem = await readyToken(for: origin.source) {
+                operationProblems[id] = .catalogue(problem)
+                busyPlugin = nil
+                return
+            }
+            guard let provider = client(for: origin) else {
+                operationProblems[id] = .catalogue(.notFound)
+                busyPlugin = nil
+                return
+            }
+            let tokened = isTokened(origin.source)
+            let refresher = CatalogueRefresher(provider: provider, store: CatalogueStore(paths: paths, source: origin.source),
+                                               limits: limits)
             do {
                 let listing = try await refresher.listing(commit)
                 guard let folder = listing.plugins[id] else {
@@ -1034,7 +1069,8 @@ extension DeckModel {
                 operationProblems[id] = .commitGone(String(commit.prefix(7)))
                 busyPlugin = nil
             } catch {
-                operationProblems[id] = OperationProblem(error)
+                noteTokenRefusal(origin.source)
+                operationProblems[id] = OperationProblem(error, tokened: tokened)
                 busyPlugin = nil
             }
             catalogueState.rateLimit = limits.current
@@ -1075,7 +1111,7 @@ extension DeckModel {
         // Taken from where it came, and only from a repository a copy of its
         // line may be taken from: the installer refuses the rest too, before
         // a file is asked for (`PluginInstaller.stage`).
-        guard client(for: origin) != nil else {
+        guard mayBeTaken(origin) else {
             operationProblems[id] = .catalogue(.notFound)
             return
         }
@@ -1105,7 +1141,6 @@ extension DeckModel {
             branchHead = resolution.branchHead
             heardAt = resolution.heardAt
         }
-        let installer = self.installer
         let store = catalogueStore
         // The copy the permission decision was made for, read before the swap.
         let before = copyForTheDecision(id)
@@ -1117,7 +1152,13 @@ extension DeckModel {
                 // An update by itself that waited on this one goes now.
                 updateVerifiedPlugins()
             }
+            var tokened = false
             do {
+                // A source read with a token: its token first (`readyToken`),
+                // and the installer made with it.
+                if let problem = await readyToken(for: origin.source) { throw problem }
+                tokened = isTokened(origin.source)
+                let installer = self.installer
                 DeckLog.plugins.info("\(operation.rawValue, privacy: .public) \(id, privacy: .public) at \(commit, privacy: .public)\(automatic ? " by itself" : "", privacy: .public)")
                 let manifest = await store.manifest(of: folder)
                 let staged = try await installer.stage(request, manifest: manifest)
@@ -1140,7 +1181,8 @@ extension DeckModel {
                     DeckLog.plugins.info("\(id, privacy: .public) is left as it was by its update by itself: \(String(describing: error), privacy: .public)")
                 } else {
                     DeckLog.plugins.error("\(operation.rawValue, privacy: .public) \(id, privacy: .public) failed: \(String(describing: error), privacy: .public)")
-                    operationProblems[id] = OperationProblem(error)
+                    noteTokenRefusal(origin.source)
+                    operationProblems[id] = OperationProblem(error, tokened: tokened)
                 }
                 reloadInstalled()
                 discoverPlugins()
@@ -1402,8 +1444,9 @@ extension DeckModel {
     func persistRateLimit() {
         let current = limits.current
         catalogueState = catalogueStore.updateState { $0.rateLimit = current }
-        for source in sources where source.provider == SourceLink.gitlab {
-            guard let recorder = gitLabLimits[source.id] else { continue }
+        for source in sources {
+            guard let recorder = source.provider == SourceLink.gitlab ? gitLabLimits[source.id]
+                    : isTokened(source.id) ? tokenLimits[source.id] : nil else { continue }
             let limit = recorder.current
             guard sourceStates[source.id]?.rateLimit != limit else { continue }
             sourceStates[source.id] = CatalogueStore(paths: paths, source: source.id).updateState { $0.rateLimit = limit }

@@ -1157,7 +1157,8 @@ struct ProblemText: View {
         case .catalogue(let error) where source != nil:
             [strings(CatalogueTrouble.phrase(error, address: source?.address.description ?? "", host: source?.host,
                                              readAt: nil, until: { Clock.text($0, strings) },
-                                             provider: source?.provider ?? SourceLink.github))]
+                                             provider: source?.provider ?? SourceLink.github,
+                                             tokened: (source?.access ?? OwnSource.Access.none) != OwnSource.Access.none))]
         case .catalogue(let error):
             switch error {
             case .unreachable(let reason): [strings(.catalogueUnreachable(reason: reason, readAt: nil))]

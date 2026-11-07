@@ -155,6 +155,20 @@ public final class SourceProvider: RepositoryProvider, @unchecked Sendable {
     /// another than the one this was made with — nil otherwise.
     public var renamedTo: String? { lock.withLock { heard } }
 
+    /// The describe of a token's check, and the scopes GitHub answered it
+    /// with (`X-OAuth-Scopes`: a classic token's, S4-17 item 21) — none on
+    /// GitLab, or for a fine-grained token. Only an answer naming the
+    /// source's own number is believed.
+    public func describeWithScopes() async throws -> (description: RepositoryDescription, scopes: [String]) {
+        let asked = lock.withLock { client }
+        guard case .github(let github) = asked else { return (try await describe(), []) }
+        let checked = try await github.describeWithScopes()
+        guard checked.description.id == remoteID else {
+            throw ProviderError.badAnswer("the repository asked for as \(remoteID) answered as \(checked.description.id.map(String.init) ?? "no number")")
+        }
+        return checked
+    }
+
     public func describe() async throws -> RepositoryDescription {
         let asked = lock.withLock { client }
         let description = try await asked.provider.describe()
@@ -283,8 +297,13 @@ public struct SourceClients: Sendable {
     }
 
     /// The one request ever addressed by a name: **Look up**'s describe.
-    public func byPath(_ path: String) -> GitHubClient {
-        client(path, addressing: .path)
+    public func byPath(_ path: String, credential: SourceCredential? = nil) -> GitHubClient {
+        var endpoints = self.endpoints
+        endpoints.repository = path
+        endpoints.repositoryID = nil
+        return GitHubClient(endpoints: endpoints, udeckVersion: udeckVersion,
+                            limits: credential == nil ? limits : RateLimitRecorder(), session: session,
+                            addressing: .path, credential: credential, checking: credential != nil)
     }
 
     /// A source's provider (`SourceProvider`), by its number: a github.com
@@ -329,8 +348,9 @@ public struct SourceClients: Sendable {
     }
 
     /// The provider of the repository `path` is at now, by its number.
-    public func byID(_ id: Int, path: String) -> SourceProvider? {
-        SourceProvider(client(path, addressing: .id(id)))
+    public func byID(_ id: Int, path: String, credential: SourceCredential? = nil,
+                     limits: RateLimitRecorder? = nil) -> SourceProvider? {
+        SourceProvider(client(path, addressing: .id(id), credential: credential, limits: limits))
     }
 }
 
@@ -371,6 +391,12 @@ public enum SourceLookUp {
         /// source's own limit starts from (S4-16). Nil for GitHub, whose
         /// anonymous limit is the official source's.
         public var rateLimit: RateLimitState? = nil
+        /// The token **Look up** was asked with, bound to the number it read
+        /// and the origin it was sent to: what **Add** keeps (S4-18).
+        public var credential: SourceCredential? = nil
+        /// GitHub said the token carries `repo` — full read and write — which
+        /// the sheet warns of once (S4-20, item 21).
+        public var writeScope: Bool = false
 
         public var address: RepositoryAddress { RepositoryAddress(provider: provider, host: host, path: path) }
         public var identity: SourceIdentity { SourceIdentity(provider: provider, host: host, remoteID: remoteID) }
@@ -411,28 +437,69 @@ public enum SourceLookUp {
         }
     }
 
+    /// The address `text` names, or nil when it is refused.
+    public static func link(_ text: String, official: RepositoryAddress) -> SourceLink? {
+        if case .link(let link) = read(text, official: official) { return link }
+        return nil
+    }
+
     /// `link` asked of its host through `clients`, `list` being the sources
     /// added, `official` the official repository and `officialID` its number.
+    /// With `token` — pasted under the token step (S4-17) — every request
+    /// carries it, to the origin it would be bound to and nowhere else: the
+    /// one check by the address, then the head and the passport by the
+    /// number the check read. A prefix that proves it the other provider's
+    /// is refused before any request (item 23); a `404` with it says the
+    /// token may not cover the repository (item 2), a `401` that the host
+    /// refused it (item 3), a `403` naming a scope that scope (item 4).
     public static func lookUp(_ link: SourceLink, list: SourceList, official: RepositoryAddress, officialID: Int?,
-                              clients: SourceClients,
+                              clients: SourceClients, token: Secret? = nil,
                               now: @escaping @Sendable () -> Date = { Date() }) async -> Outcome {
         let address = link.address.description
         let gitLab = link.provider == SourceLink.gitlab
+        let hostName = gitLab ? link.host : "GitHub"
         func failed(_ error: any Error, branch: String?, at address: String) -> Outcome {
-            .failed(CatalogueRefresher.reason(error, branch: branch), host: link.host, address: address,
-                    provider: link.provider)
+            if token != nil {
+                switch error {
+                case ProviderError.notFound: return .refused(.sourceTokenNotFound(address: address))
+                case ProviderError.unauthorized: return .refused(.sourceTokenRejected(host: hostName, address: address))
+                case ProviderError.forbidden(let scope?):
+                    return .refused(.sourceTokenScope(address: address, host: hostName, scope: scope))
+                default: break
+                }
+            }
+            return .failed(CatalogueRefresher.reason(error, branch: branch, tokened: token != nil), host: link.host,
+                           address: address, provider: link.provider)
         }
+        var credential: SourceCredential?
+        if let token {
+            if TokenPrefix.isTheOtherProviders(token.revealed, source: link.provider) {
+                return .refused(.sourceTokenWrongProvider(host: link.host, looksLikeGitHub: gitLab))
+            }
+            let base = gitLab ? clients.gitLab(link.host)?.apiBase : clients.endpoints.apiBase
+            guard let base, let origin = Origin(base) else {
+                return .refused(.sourceLinkRefused(.notALink, official: official.description))
+            }
+            // Bound to its number once the check has read it.
+            credential = SourceCredential(token: token, binding: CredentialBinding(provider: link.provider, remoteID: 0,
+                                                                                   apiOrigin: origin))
+        }
+        // One limit for the whole look-up, what the host said to each request
+        // counted together and handed on to the source Add makes.
+        let hostLimits = clients.lookUpLimits(for: link.host)
         let description: RepositoryDescription
+        var writeScope = false
         if gitLab {
             guard let endpoints = clients.gitLab(link.host) else {
                 return .refused(.sourceLinkRefused(.notALink, official: official.description))
             }
             do {
                 switch try await GitLabClient.lookUp(link.path, endpoints: endpoints, udeckVersion: clients.udeckVersion,
-                                                     limits: clients.lookUpLimits(for: link.host), session: clients.session,
-                                                     now: now) {
+                                                     limits: hostLimits, session: clients.session,
+                                                     now: now, credential: credential) {
                 case .found(let found): description = found
-                case .notFound: return .refused(.sourceNotFound(address: address))
+                case .notFound:
+                    return .refused(token == nil ? .sourceNotFound(address: address) : .sourceTokenNotFound(address: address))
                 case .notGitLab: return .refused(.sourceNotGitLab(host: link.host))
                 }
             } catch {
@@ -440,8 +507,10 @@ public enum SourceLookUp {
             }
         } else {
             do {
-                description = try await clients.byPath(link.path).describe()
-            } catch ProviderError.notFound {
+                let checked = try await clients.byPath(link.path, credential: credential).describeWithScopes()
+                description = checked.description
+                writeScope = credential != nil && checked.scopes.contains("repo")
+            } catch ProviderError.notFound where token == nil {
                 return .refused(.sourceNotFound(address: address))
             } catch {
                 return failed(error, branch: nil, at: address)
@@ -451,6 +520,8 @@ public enum SourceLookUp {
             return .failed(.badAnswer("the repository's description has no number"), host: link.host, address: address,
                            provider: link.provider)
         }
+        credential?.binding.remoteID = id
+        let tokenLimits = RateLimitRecorder()
         // The host's own spelling of it, when it gives one this uDeck reads as
         // the same provider's name — the official repository's included,
         // whatever was pasted.
@@ -479,10 +550,11 @@ public enum SourceLookUp {
         if gitLab, let endpoints = clients.gitLab(link.host) {
             byID = SourceProvider(GitLabClient(endpoints: endpoints, path: path, remoteID: id,
                                                udeckVersion: clients.udeckVersion,
-                                               limits: clients.lookUpLimits(for: link.host), session: clients.session,
-                                               now: now))
+                                               limits: hostLimits, session: clients.session,
+                                               now: now, credential: credential))
         } else {
-            byID = gitLab ? nil : clients.byID(id, path: path)
+            byID = gitLab ? nil : clients.byID(id, path: path, credential: credential,
+                                               limits: credential == nil ? nil : tokenLimits)
         }
         guard let byID else {
             return .failed(.badAnswer("no client for the repository's number"), host: link.host, address: spelt,
@@ -512,7 +584,9 @@ public enum SourceLookUp {
         case .success(let passport):
             return .found(Found(provider: named.provider, host: named.host, path: path, remoteID: id, defaultBranch: branch,
                                 head: head, passport: passport, passportData: data, readAt: now(),
-                                rateLimit: gitLab ? clients.lookUpLimits(for: link.host).current : nil))
+                                rateLimit: gitLab ? hostLimits.current
+                                    : credential == nil ? nil : tokenLimits.current,
+                                credential: credential, writeScope: writeScope))
         case .failure(.missing):
             return .notAPluginRepository(address: named.address.description, branch: branch)
         case .failure(.futureFormat(let declared)):
@@ -654,7 +728,10 @@ public enum EarlierVersions {
 public enum SourceSchedule {
     /// The sources read at launch, in order.
     public static func atLaunch(_ sources: [OwnSource], states: [String: CatalogueState], now: Date) -> [String] {
-        sources.map(\.id).filter { CatalogueSchedule.refreshesAtLaunch(states[$0] ?? CatalogueState(), now: now) }
+        sources.map(\.id).filter {
+            let state = states[$0] ?? CatalogueState()
+            return !refused(state) && CatalogueSchedule.refreshesAtLaunch(state, now: now)
+        }
     }
 
     /// The sources due on this minute's tick, in order: due by the schedule,
@@ -663,14 +740,24 @@ public enum SourceSchedule {
                            now: Date) -> [String] {
         sources.map(\.id).filter { id in
             let state = states[id] ?? CatalogueState()
-            return !reading.contains(id) && CatalogueSchedule.nextDue(state, now: now) <= now
+            return !reading.contains(id) && !refused(state) && CatalogueSchedule.nextDue(state, now: now) <= now
                 && (state.lastAttempt.map { now.timeIntervalSince($0) > 60 } ?? true)
         }
     }
 
     /// The sources read when Settings → Plugins is opened, in order.
     public static func whenSettingsOpen(_ sources: [OwnSource], states: [String: CatalogueState], now: Date) -> [String] {
-        sources.map(\.id).filter { CatalogueSchedule.refreshesWhenSettingsOpen(states[$0] ?? CatalogueState(), now: now) }
+        sources.map(\.id).filter {
+            let state = states[$0] ?? CatalogueState()
+            return !refused(state) && CatalogueSchedule.refreshesWhenSettingsOpen(state, now: now)
+        }
+    }
+
+    /// A source whose token the host refused (`401`) is read only when
+    /// Check now or Token… is pressed (S4-19): never by the clock, at launch
+    /// or when Settings opens, which would send the refused token again.
+    static func refused(_ state: CatalogueState) -> Bool {
+        state.lastError == .unauthorized
     }
 }
 
@@ -708,6 +795,8 @@ public enum CatalogueTrouble {
         case .moved: return .sourceMoved(address: address)
         case .credentialUnbound(let origin): return .sourceTokenUnbound(address: address, origin: origin)
         case .keychainUnavailable(let reason): return .sourceKeychainUnavailable(address: address, reason: reason)
+        case .tokenMissing: return .sourceTokenMissing(address: address)
+        case .tokenWithdrawn: return .sourceTokenWithdrawn(address: address)
         case .rawRateLimited(let date): return .catalogueRawLimited(until: until(date))
         case .unreachable(let reason): return .catalogueUnreachable(reason: reason, readAt: readAt, host: host)
         case .notFound: return host == "GitHub" ? .catalogueNotFound(source: address) : .sourceNotFound(address: address)
