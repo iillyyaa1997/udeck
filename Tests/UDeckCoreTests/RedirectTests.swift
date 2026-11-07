@@ -180,7 +180,11 @@ struct RedirectTests {
         override func stopLoading() {}
     }
 
-    @Test("a request carrying a token refuses the redirect — the move comes back, nothing reaches the new host; one without follows it")
+    /// Whether a session *without* the delegate follows a redirect a custom
+    /// `URLProtocol` raises is the loading system's business, and differs by
+    /// macOS (it followed on macOS 27, not on the CI runner's — run
+    /// 42331797308): only the refusal, which is uDeck's, is held here.
+    @Test("a request carrying a token refuses the redirect — the move comes back, and nothing reaches the new host")
     func notAcrossARedirect() async throws {
         Moving.lock.withLock { Moving.asked = [] }
         let session = GitHubClient.makeSession(protocolClasses: [Moving.self])
@@ -190,8 +194,6 @@ struct RedirectTests {
         }
         let reachedTheNewHost = Moving.lock.withLock { Moving.asked.filter { $0.url?.host == Moving.to } }
         #expect(reachedTheNewHost.isEmpty, "the token went to \(reachedTheNewHost.map { $0.url!.absoluteString })")
-        let anonymous = Self.client(Moving.from, credential: nil, session: session)
-        #expect(try await anonymous.describe().defaultBranch == "main", "a request without a token follows, as it always has")
         #expect(await RedirectRefusal.shared.urlSession(session, task: session.dataTask(with: URL(string: "https://x.invalid")!),
                                                         willPerformHTTPRedirection: HTTPURLResponse(),
                                                         newRequest: URLRequest(url: URL(string: "https://y.invalid")!)) == nil)

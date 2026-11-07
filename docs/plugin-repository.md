@@ -1297,9 +1297,9 @@ GitHub source read with a token asks the API for its files too,
 limit of its own. Every request carrying a token is sent with a delegate of
 that one task that refuses every redirect: a `3xx` comes back as the answer and
 is said as a move, so a token — or, from R6, a refresh token — is never
-replayed to wherever it points (**measured** in a unit test: the token reaches
-nothing at the new host, while a request without a token follows as it always
-has). A `401` is said as the host not accepting the token, a `403` naming the
+replayed to wherever it points (**measured** in a unit test: the move comes
+back and nothing reaches the new host); a request without a token is sent with
+no such delegate, and follows a redirect as it always has. A `401` is said as the host not accepting the token, a `403` naming the
 scope it lacks as that scope (GitLab's `insufficient_scope`), any other `403`
 as a refusal of the token, a `404` as not found with its token — the token may
 not cover it — and GitHub's limit as the token's own (S4-20, items 2 to 6 and
@@ -3129,7 +3129,7 @@ never the network. What they cover:
   nothing sent to another origin or over plain HTTP, none on the official
   client nor another repository's, `401`, `403`, `404` and a `3xx` said as the
   token's, no answer quoted, a redirect refused with nothing reaching the new
-  host while a request without a token follows, GitLab's headers — GraphQL's
+  host, GitLab's headers — GraphQL's
   too — a source's clients with their token and limit, and what each says;
 * GitLab projects as sources (`GitLabClientTests`, `GitLabSourceTests`), against
   stub answers shaped like the ones recorded: **Look up** by the encoded path —
