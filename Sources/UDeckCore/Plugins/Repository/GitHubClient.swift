@@ -252,6 +252,12 @@ public protocol RepositoryProvider: Sendable {
     func file(at path: String, commit: String) async throws -> Data
     /// The commits on `branch` that changed `path`, newest first.
     func commits(touching path: String, on branch: String) async throws -> [CommitSummary]
+    /// The file at `path` at each of `commits`, by commit — one where it is
+    /// not there, or larger than a plugin's file may be, left out: what a
+    /// plugin's history reads its manifests with (`PluginHistoryReader`). By
+    /// default one `file(at:commit:)` each, four at a time; GitLab's asks
+    /// for a dozen in one request (`GitLabClient`).
+    func files(at path: String, commits: [String]) async throws -> [String: Data]
     /// Pull request `number`: its head, and whether it was merged or closed.
     func pull(_ number: Int) async throws -> PullRequest
     /// Whether `head` continues `base` (`Comparison`) — `notFound` when
@@ -272,6 +278,38 @@ public protocol RepositoryProvider: Sendable {
 }
 
 extension RepositoryProvider {
+    public func files(at path: String, commits: [String]) async throws -> [String: Data] {
+        try await filesOneByOne(at: path, commits: commits)
+    }
+
+    /// `files(at:commits:)` one `file(at:commit:)` each, four at a time, like
+    /// an install.
+    public func filesOneByOne(at path: String, commits: [String]) async throws -> [String: Data] {
+        var found: [String: Data] = [:]
+        try await withThrowingTaskGroup(of: (String, Data?).self) { group in
+            var next = 0
+            func add() {
+                let commit = commits[next]
+                next += 1
+                group.addTask {
+                    do {
+                        return (commit, try await file(at: path, commit: commit))
+                    } catch ProviderError.notFound, ProviderError.tooLarge {
+                        // Not there at that commit — or larger than a
+                        // plugin's file may be, which no version shown is.
+                        return (commit, nil)
+                    }
+                }
+            }
+            while next < min(4, commits.count) { add() }
+            while let (commit, data) = try await group.next() {
+                if let data { found[commit] = data }
+                if next < commits.count { add() }
+            }
+        }
+        return found
+    }
+
     /// One file of `repository` at `commit`, from its raw host — through this
     /// provider when that is its repository, through the same host's provider
     /// for it otherwise (`provider(for:)`), and never from another host:

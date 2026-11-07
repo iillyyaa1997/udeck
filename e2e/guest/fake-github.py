@@ -179,6 +179,7 @@ import hashlib
 import http.server
 import json
 import os
+import re
 import socketserver
 import sys
 import threading
@@ -203,6 +204,14 @@ GITLAB = os.path.join("sources", "gitlab")
 # The GitLab that counts by limiters, and the most entries one of a GitLab's tree pages holds unless the lab says.
 GITLAB_COM = "gitlab.com"
 GITLAB_PAGE_SIZE = 3
+# GitLab's GraphQL weighs each commit's `blobs` at 14 and the project and its `id` at 3, against a ceiling of 200
+# for a request without a token (measured on gitlab.com, 2026-11-07: 13 commits answered, 16 refused at 227).
+GRAPHQL_PER_COMMIT = 14
+GRAPHQL_PROJECT = 3
+GRAPHQL_CEILING = 200
+# The one query uDeck sends (GitLabClient.blobs): a file at a dozen commits, its commits as variables.
+GRAPHQL_FIELD = re.compile(r"c(\d+): blobs\(paths: \$paths, ref: \$r(\d+)\) \{ nodes \{ oid rawTextBlob \} \}")
+GRAPHQL_PROJECT_FIELD = "project(fullPath: $path) { id repository {"
 
 # A fixture file made when the fake starts rather than committed: `<name>.generated`, `{"bytes": …, "line": …}`.
 GENERATED = ".generated"
@@ -1086,16 +1095,18 @@ class Fake:
         main = given.get("main") if isinstance(given, dict) else None
         return {"main": main or project.repository.names[0], "branches": {}, "pulls": {}}
 
-    def gitlab(self, site: str, method: str, target: str, headers: dict) -> tuple[int, dict, bytes]:
-        """An answer of the GitLab `site`, on its own port: GitLab's API, v4 — or, told `plain`, a web server's 404,
-        which no GitLab answers. gitlab.com counts by its two limiters; a self-hosted GitLab sends no limit."""
+    def gitlab(self, site: str, method: str, target: str, headers: dict, body: bytes = b"") -> tuple[int, dict, bytes]:
+        """An answer of the GitLab `site`, on its own port: GitLab's API, v4, and its GraphQL — or, told `plain`, a web
+        server's 404, which no GitLab answers. gitlab.com counts by its two limiters; a self-hosted GitLab sends no
+        limit."""
         state = self.state()
         mine = self.gitlab_state(site, state)
         if mine.get("plain"):
             return 404, {"Content-Type": "text/plain; charset=utf-8"}, b"404 page not found\n"
-        if method not in ("GET", "HEAD"):
-            return self.json(405, {"message": "405 Method Not Allowed"})
         parsed = urllib.parse.urlsplit(target)
+        graphql = parsed.path == "/api/graphql"
+        if (method == "POST") != graphql or method not in ("GET", "HEAD", "POST"):
+            return self.json(405, {"message": "405 Method Not Allowed"})
         limits: dict = {}
         if site == GITLAB_COM:
             try:
@@ -1105,8 +1116,58 @@ class Fake:
             allowed, limits = self.gitlab_limits.spend(self.clock(), spent)
             if not allowed:
                 return 429, {"Content-Type": "text/plain; charset=utf-8", **limits}, b"Retry later\n"
-        status, extra, body = self.gitlab_answer(site, parsed.path, urllib.parse.parse_qs(parsed.query), headers, state)
-        return status, {**extra, **limits}, body
+        if graphql:
+            status, extra, answered = self.gitlab_graphql(site, body, state)
+        else:
+            status, extra, answered = self.gitlab_answer(site, parsed.path, urllib.parse.parse_qs(parsed.query), headers,
+                                                         state)
+        return status, {**extra, **limits}, answered
+
+    def gitlab_graphql(self, site: str, body: bytes, state: dict) -> tuple[int, dict, bytes]:
+        """`POST /api/graphql`, as gitlab.com answers uDeck's one query (measured): the project at `$path` — any case,
+        as GitLab finds a path — its `id` as `gid://gitlab/Project/<number>`, and for each commit asked the file at
+        `$paths`: its blob id and its text, or no node where it is not. Weighed as GitLab weighs it, against the
+        lab's `graphql_ceiling` or GitLab's own; told `graphql: absent`, a GitLab without it — a 404."""
+        mine = self.gitlab_state(site, state)
+        if mine.get("graphql") == "absent":
+            return self.json(404, {"message": "404 Not Found"})
+        try:
+            asked = json.loads(body.decode("utf-8"))
+            query, variables = str(asked["query"]), dict(asked["variables"])
+        except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+            return self.json(200, {"errors": [{"message": "the fake reads only the query uDeck sends"}]})
+        fields = GRAPHQL_FIELD.findall(query)
+        if GRAPHQL_PROJECT_FIELD not in query or not fields or any(alias != ref for alias, ref in fields):
+            return self.json(200, {"errors": [{"message": "the fake reads only the query uDeck sends"}]})
+        try:
+            ceiling = int(mine.get("graphql_ceiling") or GRAPHQL_CEILING)
+        except (TypeError, ValueError):
+            ceiling = GRAPHQL_CEILING
+        complexity = GRAPHQL_PER_COMMIT * len(fields) + GRAPHQL_PROJECT
+        if complexity > ceiling:
+            message = f"Query has complexity of {complexity}, which exceeds max complexity of {ceiling}"
+            return self.json(200, {"errors": [{"message": message}]})
+        named = str(variables.get("path", ""))
+        served = self.gitlab_served(site, state)
+        project = next((p for name, p in served.items() if name.lower() == named.lower()), None)
+        if project is None:
+            return self.json(200, {"data": {"project": None}})
+        path = str((variables.get("paths") or [""])[0]).strip("/")
+        own = self.gitlab_main(project, state)
+        repository = {}
+        for alias, _ in fields:
+            commit = project.repository.resolve(str(variables.get(f"r{alias}", "")), own)
+            found = commit.snapshot.at(path) if commit else None
+            if found is None or found[0] == MODE_FOLDER:
+                repository[f"c{alias}"] = {"nodes": []}
+                continue
+            data = commit.snapshot.blobs[found[1]]
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                text = None
+            repository[f"c{alias}"] = {"nodes": [{"oid": found[1], "rawTextBlob": text}]}
+        return self.json(200, {"data": {"project": {"id": f"gid://gitlab/Project/{project.id}", "repository": repository}}})
 
     def gitlab_answer(self, site: str, raw: str, query: dict, headers: dict, state: dict) -> tuple[int, dict, bytes]:
         segments = raw.split("/")
@@ -1259,20 +1320,29 @@ def handler_for(fake: Fake, site: str = ""):
         def do_HEAD(self) -> None:  # noqa: N802
             self.respond("HEAD")
 
-        def respond(self, method: str) -> None:
+        def do_POST(self) -> None:  # noqa: N802
+            try:
+                length = max(0, min(int(self.headers.get("Content-Length") or 0), 1024 * 1024))
+            except ValueError:
+                length = 0
+            self.respond("POST", self.rfile.read(length) if length else b"")
+
+        def respond(self, method: str, body: bytes = b"") -> None:
             headers = {key.lower(): value for key, value in self.headers.items()}
             # No credential is good for anything yet: one carried is GitHub's 401, and the log says so, never its value.
             credential = "rejected" if any(name in headers for name in CREDENTIAL_HEADERS) else "none"
             try:
                 if credential == "rejected":
-                    status, extra, body = fake.json(401, {"message": "401 Unauthorized" if site else "Bad credentials"})
+                    status, extra, answer = fake.json(401, {"message": "401 Unauthorized" if site else "Bad credentials"})
                 elif site and not urllib.parse.urlsplit(self.path).path.startswith("/lab/"):
-                    status, extra, body = fake.gitlab(site, method, self.path, headers)
+                    status, extra, answer = fake.gitlab(site, method, self.path, headers, body)
                 else:
-                    status, extra, body = fake.answer(method, self.path, headers)
+                    status, extra, answer = fake.answer(method, self.path, headers)
             except Exception as error:  # noqa: BLE001 — a fake that dies answers nobody
-                status, extra, body = 500, {"Content-Type": "text/plain"}, f"the fake failed: {error!r}".encode()
+                status, extra, answer = 500, {"Content-Type": "text/plain"}, f"the fake failed: {error!r}".encode()
             parsed = urllib.parse.urlsplit(self.path)
+            # A GraphQL request's commits, by the fields it asked — never its variables' values.
+            graphql_commits = len(GRAPHQL_FIELD.findall(body.decode("utf-8", "replace"))) if method == "POST" else 0
             fake.log(
                 {
                     "at": round(fake.clock(), 3),
@@ -1289,15 +1359,16 @@ def handler_for(fake: Fake, site: str = ""):
                     "if_none_match": headers.get("if-none-match", ""),
                     "port": self.server.server_address[1],
                     "credential": credential,
+                    "graphql_commits": graphql_commits,
                 }
             )
             self.send_response(status)
             for key, value in extra.items():
                 self.send_header(key, value)
-            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Length", str(len(answer)))
             self.end_headers()
             if method != "HEAD" and status != 304:
-                self.wfile.write(body)
+                self.wfile.write(answer)
 
         def log_message(self, format: str, *args) -> None:  # noqa: A002 — http.server's name
             # The JSON log above is the record; stderr stays for the fake's own failures.

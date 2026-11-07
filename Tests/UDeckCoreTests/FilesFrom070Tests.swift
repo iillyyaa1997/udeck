@@ -10,9 +10,12 @@ import UDeckPluginFormatFixtures
 /// whose previous copy has no repository, and a first install; `grants.json`
 /// with decisions held to a version and to a tree; `followed.json` and
 /// `state.json` of the official catalogue; and `settings.json` with both
-/// switches off. Stage 4 adds no key to any of them: each reads, means what it
-/// meant, and is written back byte for byte — `settings.json` but for the
-/// order of a set, which 0.7.0 does not keep from one run to the next either.
+/// switches off. Reading them adds no key to any of them: each reads, means
+/// what it meant, and is written back byte for byte — `settings.json` but for
+/// the order of a set, which 0.7.0 does not keep from one run to the next
+/// either. An install since 0.8.0 gives the previous copy it keeps a `source`,
+/// and a `pinned` when it was pinned, which 0.7.0 reads past
+/// (`PreviousCopySourceTests.swift`).
 @Suite("Files 0.7.0 wrote")
 struct FilesFrom070Tests {
     let udeck = TemporaryDirectory()

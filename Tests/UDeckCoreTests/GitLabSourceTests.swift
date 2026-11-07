@@ -269,6 +269,16 @@ struct GitLabSourceTests {
                 == .linkNotGitHubAddAsASource(host: "gitlab.example.test:8443", page: "https://gitlab.example.test:8443/group/sub/team"))
         #expect(LinkRefusal.refused(.notALink, text: "git@gitlab.com:g/p.git", official: official)
                 == .linkRefused(.notALink, official: official.description), "git's SSH address is no project's page")
+        // Written with http://: the same page, offered over HTTPS — what Add a source… reads.
+        let plain = "http://gitlab.example.test/group/sub/team/-/tree/main"
+        guard case .failure(let plainRefusal) = RepositoryLink.read(plain, official: official) else {
+            Issue.record("a GitLab link over http:// was read as GitHub's"); return
+        }
+        #expect(LinkRefusal.refused(plainRefusal, text: plain, official: official)
+                == .linkNotGitHubAddAsASource(host: "gitlab.example.test", page: "https://gitlab.example.test/group/sub/team"))
+        #expect(RepositoryLink.overHTTPS("  HTTP://gitlab.example.test/g/p") == "https://gitlab.example.test/g/p")
+        #expect(RepositoryLink.overHTTPS("https://gitlab.example.test/g/p") == "https://gitlab.example.test/g/p")
+        #expect(RepositoryLink.overHTTPS("ftp://x/y") == "ftp://x/y")
         let english = Strings(.english), russian = Strings(.russian)
         let phrase = Phrase.linkNotGitHubAddAsASource(host: "gitlab.example.test", page: "https://gitlab.example.test/g/p")
         #expect(english(phrase) == "gitlab.example.test is not GitHub. A GitLab project can be added as a source of its own.")

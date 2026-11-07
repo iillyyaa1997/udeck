@@ -90,6 +90,14 @@ class Request:
     # its `%2F` was decoded (stage 4, R2).
     site: str = ""
     raw_path: str = ""
+    # A GraphQL request's commits — how many files at how many commits it asked a GitLab for (stage 4, R2b) — 0 for
+    # any other request, and for every line of a fake from before GraphQL.
+    graphql_commits: int = 0
+
+    @property
+    def is_graphql(self) -> bool:
+        """A GitLab's GraphQL asked: `POST /api/graphql` on its own port."""
+        return bool(self.site) and self.method == "POST" and self.raw_path == "/api/graphql"
 
     @property
     def is_api(self) -> bool:
@@ -150,6 +158,7 @@ def parse_log(text: str) -> list[Request]:
                     credential=str(entry.get("credential", "none")),
                     site=str(entry.get("site", "")),
                     raw_path=str(entry.get("raw_path", entry["path"])),
+                    graphql_commits=int(entry.get("graphql_commits", 0)),
                 )
             )
         except (ValueError, KeyError, TypeError) as error:

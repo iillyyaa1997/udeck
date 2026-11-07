@@ -61,6 +61,10 @@ public struct OfficialRepositoryCheck: RepositoryProvider {
         try await client.commits(touching: path, on: branch)
     }
 
+    public func files(at path: String, commits: [String]) async throws -> [String: Data] {
+        try await client.files(at: path, commits: commits)
+    }
+
     public func pull(_ number: Int) async throws -> PullRequest {
         try await client.pull(number)
     }
@@ -154,7 +158,14 @@ public final class SourceProvider: RepositoryProvider, @unchecked Sendable {
     public func describe() async throws -> RepositoryDescription {
         let asked = lock.withLock { client }
         let description = try await asked.provider.describe()
-        if let id = description.id, id != remoteID {
+        // Only an answer naming the source's own number is believed — on
+        // GitHub as on GitLab: one naming none is no answer about it, and
+        // never renames the source (GitHub's `/repositories/<id>` always
+        // names it, **measured**).
+        guard let id = description.id else {
+            throw ProviderError.badAnswer("the repository asked for as \(remoteID) answered with no number")
+        }
+        guard id == remoteID else {
             throw ProviderError.badAnswer("the repository asked for as \(remoteID) answered as \(id)")
         }
         if let name = description.fullName, name != asked.provider.address.path, let renamed = asked.renamed(to: name) {
@@ -184,6 +195,10 @@ public final class SourceProvider: RepositoryProvider, @unchecked Sendable {
 
     public func commits(touching path: String, on branch: String) async throws -> [CommitSummary] {
         try await current.commits(touching: path, on: branch)
+    }
+
+    public func files(at path: String, commits: [String]) async throws -> [String: Data] {
+        try await current.files(at: path, commits: commits)
     }
 
     public func pull(_ number: Int) async throws -> PullRequest {
@@ -511,6 +526,11 @@ extension RepositoryLink {
     /// pull request; of a GitLab project, a branch, its page or a merge
     /// request, read as **Add a source…** reads it (`SourceLink`) — which is
     /// not installed from yet (`Phrase.sourceBranchNotYet`).
+    ///
+    /// Nothing is asked to tell: a GitLab link written with `http://` is read
+    /// as the same page over HTTPS — a GitHub one is, by `read` — and a
+    /// GitLab project's path is matched whatever its case, as GitLab finds
+    /// a project by it (**measured**: `GitLab-Org/CLI` is `gitlab-org/cli`).
     public static func namesASource(_ text: String, official: RepositoryAddress, sources: [OwnSource]) -> Bool {
         let named: RepositoryAddress?
         switch read(text, official: official) {
@@ -519,13 +539,21 @@ extension RepositoryLink {
         case .failure(.notGitHub), .failure(.notALink):
             // Another host's — a host with a port is no link here — which
             // may be a GitLab project added as a source.
-            guard case .success(let link) = SourceLink.read(text, official: official),
+            guard case .success(let link) = SourceLink.read(overHTTPS(text), official: official),
                   link.provider == SourceLink.gitlab else { return false }
-            named = link.address
+            return sources.contains { $0.isAtWhateverItsCase(link.address) }
         case .failure: named = nil
         }
         guard let named else { return false }
         return sources.contains { $0.isAt(named) }
+    }
+
+    /// `text` with an `http://` it starts with read as `https://`: what a
+    /// browser's address bar shows of a page that redirects to HTTPS.
+    static func overHTTPS(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasPrefix("http://") else { return text }
+        return "https://" + trimmed.dropFirst("http://".count)
     }
 }
 

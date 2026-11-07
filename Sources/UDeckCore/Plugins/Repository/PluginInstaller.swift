@@ -62,7 +62,8 @@ public struct InstallRequest: Codable, Equatable, Sendable {
         /// `previous`, and `pinned` goes back to false.
         case update
         /// An earlier version from history, or **Back to** `previous`: marked
-        /// pinned.
+        /// pinned — unless the request says otherwise (`pinned`), as **Back
+        /// to** from another line of history does.
         case earlier
         /// What the record says was installed, put back — over a copy changed
         /// on disk, or where the folder has gone.
@@ -104,11 +105,17 @@ public struct InstallRequest: Codable, Equatable, Sendable {
     /// swap replaces only uDeck's own copy: anything else at the place by
     /// then leaves it as it is (`AutoUpdate.OperatorsWorkCame`).
     public var automatic: Bool
+    /// What the record says of the operator's choice of version, when the
+    /// button decides it: **Back to** from another line of history puts the
+    /// copy back as it was, pinned only if it was (`PreviousCopy.pinned`).
+    /// Nil is the operation's own: an earlier version is pinned, anything
+    /// else is not.
+    public var pinned: Bool?
 
     public init(operation: Operation, id: PluginIdentifier, source: String = InstalledPlugins.officialSource,
                 sourceRepository: RepositoryAddress, repository: RepositoryAddress, ref: PluginRef, commit: String,
                 folder: PluginListing, version: String, headCommit: String?, headTree: String? = nil,
-                defaultBranch: String? = nil, automatic: Bool = false) {
+                defaultBranch: String? = nil, automatic: Bool = false, pinned: Bool? = nil) {
         self.operation = operation
         self.id = id
         self.source = source
@@ -122,6 +129,7 @@ public struct InstallRequest: Codable, Equatable, Sendable {
         self.headTree = headTree
         self.defaultBranch = defaultBranch
         self.automatic = automatic
+        self.pinned = pinned
     }
 
     /// A request for the copy a button brings `from` its origin — the
@@ -130,10 +138,11 @@ public struct InstallRequest: Codable, Equatable, Sendable {
     /// the origin's, never assumed.
     public init(operation: Operation, id: PluginIdentifier, from origin: PluginOrigin, sourceRepository: RepositoryAddress,
                 commit: String, folder: PluginListing, version: String, headCommit: String?, headTree: String? = nil,
-                defaultBranch: String? = nil, automatic: Bool = false) {
+                defaultBranch: String? = nil, automatic: Bool = false, pinned: Bool? = nil) {
         self.init(operation: operation, id: id, source: origin.source, sourceRepository: sourceRepository,
                   repository: origin.repository, ref: origin.ref, commit: commit, folder: folder, version: version,
-                  headCommit: headCommit, headTree: headTree, defaultBranch: defaultBranch, automatic: automatic)
+                  headCommit: headCommit, headTree: headTree, defaultBranch: defaultBranch, automatic: automatic,
+                  pinned: pinned)
     }
 
     /// Where the copy comes from, and the source it is a copy of.
@@ -570,7 +579,7 @@ public struct PluginInstaller: Sendable {
             pinned = false
         case .earlier:
             previous = existing?.asPrevious
-            pinned = true
+            pinned = request.pinned ?? true
         case .reinstall:
             previous = existing?.previous
             pinned = existing?.pinned ?? false

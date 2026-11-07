@@ -126,7 +126,9 @@ public struct PluginHistory: Codable, Equatable, Sendable {
 /// followed.json         what was last heard of the pull request each copy installed from one came from
 /// trees/<commit>.json   the listing of one commit
 /// blobs/<blob sha>      passports, manifests and translations, stored under their own hash
+/// too-large/<blob sha>  a blob refused as larger than a plugin's file may be: its size
 /// history/<id>.json     a plugin's earlier versions, valid while the head commit is unchanged
+/// versions/<id>.json    the manifest each commit of a plugin's history had, by blob, for the next read
 /// ```
 ///
 /// Not under `~/.udeck/cache/`: every folder there belongs to the plugin of the
@@ -148,6 +150,8 @@ public struct CatalogueStore: Sendable {
     private var trees: URL { directory.appendingPathComponent("trees", isDirectory: true) }
     private var blobs: URL { directory.appendingPathComponent("blobs", isDirectory: true) }
     private var histories: URL { directory.appendingPathComponent("history", isDirectory: true) }
+    private var tooLarge: URL { directory.appendingPathComponent("too-large", isDirectory: true) }
+    private var versionIndexes: URL { directory.appendingPathComponent("versions", isDirectory: true) }
 
     // MARK: - State
 
@@ -240,6 +244,24 @@ public struct CatalogueStore: Sendable {
         return sha
     }
 
+    /// How large a blob was said or found to be when it was refused for being
+    /// larger than a plugin's file may be — nil for one never refused. A
+    /// blob's id is its content's hash, so what was too large once always is,
+    /// and it is not asked for again while a kept listing names it.
+    public func refusedAsTooLarge(_ sha: String) -> Int? {
+        guard GitHash.isObjectID(sha),
+              let text = try? String(contentsOf: tooLarge.appendingPathComponent(sha), encoding: .utf8),
+              let bytes = Int(text.trimmingCharacters(in: .whitespacesAndNewlines)), bytes > 0 else { return nil }
+        return bytes
+    }
+
+    /// Remembers that the blob `sha` was refused at `bytes`.
+    public func refuseAsTooLarge(_ sha: String, bytes: Int) throws {
+        guard GitHash.isObjectID(sha) else { return }
+        try fileManager.createDirectory(at: tooLarge, withIntermediateDirectories: true)
+        try Data(String(bytes).utf8).write(to: tooLarge.appendingPathComponent(sha), options: .atomic)
+    }
+
     // MARK: - History
 
     public func history(_ id: String) -> PluginHistory? {
@@ -250,15 +272,57 @@ public struct CatalogueStore: Sendable {
         try JSONFileStore<PluginHistory>(url: histories.appendingPathComponent("\(history.id).json")).save(history)
     }
 
+    /// What the last read of `id`'s history found at each commit it examined
+    /// (`VersionIndex`), or nothing.
+    public func versionIndex(_ id: String) -> VersionIndex? {
+        try? JSONFileStore<VersionIndex>(url: versionIndexes.appendingPathComponent("\(id).json")).load()
+    }
+
+    public func save(_ index: VersionIndex, for id: String) throws {
+        try JSONFileStore<VersionIndex>(url: versionIndexes.appendingPathComponent("\(id).json")).save(index)
+    }
+
+    /// What a read of `id`'s history found, kept in one step with every
+    /// pruning (`prune`): each of `fetched`'s manifests — every one the read
+    /// has, those it found in the store as well — stored under its own hash
+    /// and named in `index` by its commit, and the index written. So no index
+    /// names a blob a prune deleted while the read went on, and no prune
+    /// deletes a blob an index written meanwhile names. Answers the index as
+    /// written; a manifest that could not be stored is left out of it, and
+    /// asked for again by the next read.
+    @discardableResult
+    public func keep(_ index: VersionIndex, adding fetched: [String: Data], for id: String) -> VersionIndex {
+        Self.blobLock.withLock {
+            var kept = index
+            for (commit, data) in fetched {
+                if let blob = try? save(blob: data) { kept.manifests[commit] = blob }
+            }
+            try? save(kept, for: id)
+            return kept
+        }
+    }
+
+    /// Every prune, and every keeping of a read history (`keep`), in this
+    /// process, one at a time.
+    private static let blobLock = NSLock()
+
     // MARK: - Pruning
 
     /// Keeps a listing while it is the head, or while a plugin in
     /// `installed.json` was installed from it (as its current or its previous
-    /// copy); keeps a blob while a kept listing names it; keeps a history while
-    /// its head is the head. Everything else goes.
+    /// copy); keeps a blob while a kept listing or a kept version index names
+    /// it, and a too-large mark while a kept listing names its blob; keeps a
+    /// history while its head is the head, and a version index while the
+    /// head's listing has its plugin — or while no listing of the head is
+    /// kept to say. Everything else goes.
     public func prune(head: String?, installedCommits: Set<String>) {
+        Self.blobLock.withLock { pruneNow(head: head, installedCommits: installedCommits) }
+    }
+
+    private func pruneNow(head: String?, installedCommits: Set<String>) {
         let keptCommits = installedCommits.union(head.map { [$0] } ?? [])
         var keptBlobs = Set<String>()
+        var listed = Set<String>()
 
         for name in (try? fileManager.contentsOfDirectory(atPath: trees.path)) ?? [] {
             let commit = (name as NSString).deletingPathExtension
@@ -273,6 +337,19 @@ public struct CatalogueStore: Sendable {
                 }
             }
         }
+        for name in (try? fileManager.contentsOfDirectory(atPath: tooLarge.path)) ?? [] where !keptBlobs.contains(name) {
+            try? fileManager.removeItem(at: tooLarge.appendingPathComponent(name))
+        }
+        let headListing = head.flatMap { listing($0) }
+        if let headListing { listed = Set(headListing.plugins.keys) }
+        for name in (try? fileManager.contentsOfDirectory(atPath: versionIndexes.path)) ?? [] {
+            let id = (name as NSString).deletingPathExtension
+            guard headListing == nil || listed.contains(id), let index = versionIndex(id) else {
+                try? fileManager.removeItem(at: versionIndexes.appendingPathComponent(name))
+                continue
+            }
+            keptBlobs.formUnion(index.manifests.values)
+        }
         for name in (try? fileManager.contentsOfDirectory(atPath: blobs.path)) ?? [] where !keptBlobs.contains(name) {
             try? fileManager.removeItem(at: blobs.appendingPathComponent(name))
         }
@@ -282,5 +359,23 @@ public struct CatalogueStore: Sendable {
                 try? fileManager.removeItem(at: histories.appendingPathComponent(name))
             }
         }
+    }
+}
+
+/// What a read of a plugin's history found at each commit it examined, kept
+/// so the next read asks only about commits it has not seen
+/// (`PluginHistoryReader`): a commit's manifest is what it is for good, as
+/// its blob id says. The commits of the last read alone — at most
+/// `PluginHistoryReader.deepest` — so it never grows past one read.
+public struct VersionIndex: Codable, Equatable, Sendable {
+    /// Each commit whose folder had a manifest, and that manifest's blob id
+    /// — the blob kept in the store while this index is.
+    public var manifests: [String: String]
+    /// Each commit where the folder, or its manifest, was not there.
+    public var absent: [String]
+
+    public init(manifests: [String: String] = [:], absent: [String] = []) {
+        self.manifests = manifests
+        self.absent = absent
     }
 }

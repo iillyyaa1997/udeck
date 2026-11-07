@@ -330,7 +330,7 @@ struct GitLabClientTests {
         #expect(try await exactly.client().file(at: "five.bin", commit: Self.head).count == most, "5 MB is allowed")
     }
 
-    @Test("a manifest past 5 MB is its plugin's alone: the catalogue is read, and that row says its manifest could not be fetched")
+    @Test("a manifest past 5 MB is its plugin's alone: the catalogue is read, its row says the file is too large, and it is not asked for again")
     func manifestTooLarge() async throws {
         var repository = FakeRepository.withUptime()
         repository.addPlugin("second")
@@ -368,8 +368,21 @@ struct GitLabClientTests {
         let catalogue = try #require(Catalogue.load(from: store, address: address, udeck: SemanticVersion("0.8.0"),
                                                     language: "en", source: "x"))
         #expect(catalogue.entry("uptime")?.verdict.isInstallable == true, "\(catalogue.entry("uptime")?.verdict.refusals ?? [])")
-        #expect(catalogue.entry("second")?.verdict.refusals == [.manifestUnreadable(path: big, detail: "it could not be fetched")])
+        #expect(catalogue.entry("second")?.verdict.refusals == [.fileTooLarge(path: big, bytes: 6_291_456)],
+                "said as rule 8 says it, with the size GitLab gave")
+        let said = Strings(.english)(.catalogueRefusal(.fileTooLarge(path: big, bytes: 6_291_456)))
+        #expect(said.hasPrefix("plugins/second/manifest.json is 6") && said.hasSuffix("may be up to 5 MB."), "\(said)")
         #expect(store.state().lastError == nil)
+
+        // Its blob id is its content's: the next read does not ask for it again — the mark stays while a kept listing
+        // names it, and goes with the listing.
+        let sha = try #require(store.listing(commit)?.plugins["second"]?.file(at: "manifest.json")?.sha)
+        #expect(store.refusedAsTooLarge(sha) == 6_291_456)
+        let before = stub.asked.count
+        try await refresher.fetchManifests(of: try #require(store.listing(commit)), folders: ["second"], language: "en")
+        #expect(stub.asked.count == before, "asked again: \(stub.asked.dropFirst(before))")
+        store.prune(head: String(repeating: "e", count: 40), installedCommits: [])
+        #expect(store.refusedAsTooLarge(sha) == nil, "the mark goes with the last listing that named it")
     }
 
     // MARK: - History, merge requests, merge bases

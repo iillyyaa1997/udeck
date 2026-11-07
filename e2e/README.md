@@ -2310,14 +2310,19 @@ chooses the pane afresh, so that the switch is not under the window's title bar.
 `gitlab.example.test`'s `tools/udeck-plugins` (7: `g1` with `gl-hello` 1.0.0 in
 six entries under `plugins/`, `g2` with `gl-hello` 1.1.0 and `gl-big`, whose
 6 MB `big.bin` is made when the fake starts from `big.bin.generated` and never
-committed), `group/sub/team` (9, three groups down) and `tools/empty` (8, a
+committed, `g3` with `gl-huge` too, whose 6 MB `manifest.json` is made the same
+way), `group/sub/team` (9, three groups down) and `tools/empty` (8, a
 passport and no `plugins/`), and `gitlab.com`'s `someone/gl-plugins` (1001). The
 same fake answers as both GitLabs, each on a port of its own of the guest's
 loopback (`config.GITLAB_PORTS`: 8768 and 8769), in GitLab's API, v4: a project
 by its encoded path or its number, a branch's head with a weak `ETag` and
 `304`, a tree three entries to a page with `x-next-page`, files through the
-files API with `X-Gitlab-Size`, a folder's history, GitLab's own `404` bodies —
-and, told `plain`, a web server's `404` to everything. gitlab.com counts every
+files API with `X-Gitlab-Size`, a folder's history, GitLab's own `404` bodies,
+and `POST /api/graphql` answering the one query uDeck sends — a dozen commits'
+manifests, weighed as gitlab.com weighs them against a ceiling of 200 the lab
+may lower (`graphql_ceiling`), or a `404` told `graphql: absent` — and, told
+`plain`, a web server's `404` to everything. A GraphQL request's line says how
+many commits it asked (`graphql_commits`), never which. gitlab.com counts every
 request by its two limiters, 500 a minute and 60 an hour, each answer naming
 one in turn, and answers `429` with `Retry-After` once the hour is spent
 (`spent`). Every lab build carries where they are as `UDeckPluginsHostMap`

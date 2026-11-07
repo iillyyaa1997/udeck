@@ -551,8 +551,8 @@ struct ForkTests {
         #expect(warning.switching?.to == .branch(name: "x", commit: "fffffff", version: "1.0.1", fork: "someone/udeck-plugins"))
         let step = ShownPlace.backToPrevious("uptime", source: .official, in: udeck.paths, installed: records, shown: warning)
         #expect(step == .atCommit(.earlier, commit: Self.forkHead.commit, version: "1.0.1",
-                                  from: PluginOrigin(repository: Self.fork, ref: .branch("x"))),
-                "taken from the fork it came from, at its branch")
+                                  from: PluginOrigin(repository: Self.fork, ref: .branch("x")), pinned: false),
+                "taken from the fork it came from, at its branch — from another line, so not pinned")
         // A previous copy recorded before forks — no repository — comes from the source's own.
         var old = records
         old.plugins["uptime"]?.previous?.repository = nil

@@ -1630,6 +1630,72 @@ def check_switch_to_verified_names_both(machine, check_dir, lab):
         scene.close()
 
 
+def check_back_from_a_pull_request_updates_itself(machine, check_dir, lab):
+    """**Back to** the verified copy from a pull request's copy puts it back unpinned, and it goes on updating itself.
+
+    The verified uptime 1.0.0 is installed, placed and allowed; uptime from
+    pull request #3 is installed over it, warned of and confirmed. **Back to
+    1.0.0** on the pull request's row — another line of history — warns, and
+    once confirmed `installed.json` says the default branch's 1.0.0 at c1,
+    Verified, and `pinned: false`: the copy comes back as it was. Then, as in
+    `plugins.verified-updates-itself`, uDeck is ended, `main` moved to c2 and
+    the catalogue made two days old, and the launch puts 1.1.0 in place with
+    nothing pressed — `automatic: true`.
+
+    **Red for**: a verified copy that a tried pull request leaves pinned, and so
+    never updates itself again; and a Back to that puts the copy back as
+    anything but the verified copy it was.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", pulls=PULLS)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        _place(scene, UPTIME)
+        _allow_and_read_the_card(scene, UPTIME, "the verified copy")
+        head = scene.github.commit("pr3")
+        c1, c2 = scene.github.commit("c1"), scene.github.commit("c2")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        _look_up(scene, PULL_LINK, "the pull request")
+        _press(machine, f"link.{UPTIME}.install", "pressing Install on the pull request's uptime")
+        _wait_until(machine, f"link.{UPTIME}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        record = _operate(scene, f"link.{UPTIME}.confirm", "confirming the switch to the pull request",
+                          lambda r: r is not None and (r.get("ref") or {}).get("kind") == "pr" and r.get("commit") == head)
+        expect(record is not None, f"the switch to the pull request was confirmed and installed.json says {_read_json(machine, INSTALLED)!r}")
+        _close_the_link_sheet(scene, "after the switch")
+
+        _press(machine, f"plugin.{UPTIME}.backTo", "pressing Back to 1.0.0 on the pull request's copy")
+        warning = _wait_until(machine, f"plugin.{UPTIME}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "back-to-the-verified-copy.txt")
+        expect(warning is not None, "Back to the verified copy, from another line of history, did not warn first")
+        record = _operate(scene, f"plugin.{UPTIME}.confirm", "confirming Back to 1.0.0",
+                          lambda r: r is not None and (r.get("ref") or {}).get("kind") == "default" and r.get("commit") == c1)
+        expect(record is not None and (record.get("verification") or {}).get("status") == "verified",
+               f"Back to 1.0.0 was confirmed and installed.json says {record!r}: the verified 1.0.0 at c1")  # fmt: skip
+        expect(record is not None and record.get("pinned") is False,
+               f"Back to the verified copy from the pull request's left it pinned: {record!r}")  # fmt: skip
+
+        app.quit_app(machine, "ending uDeck before main moves")
+        scene.github.tell("moving main to c2", main="c2")
+        _age_the_catalogue(machine, AGED_DAYS)
+        heard_from = _count(scene)
+        app.launch(machine)
+        record = None
+        deadline = machine.clock() + CATALOGUE_SECONDS + OPERATION_SECONDS
+        while machine.clock() < deadline:
+            record = ((_read_json(machine, INSTALLED) or {}).get("plugins") or {}).get(UPTIME)
+            if record and record.get("version") == "1.1.0":
+                break
+            machine.sleep(2)
+        expect(record is not None and record.get("version") == "1.1.0" and record.get("automatic") is True
+               and record.get("commit") == c2,
+               f"{CATALOGUE_SECONDS + OPERATION_SECONDS}s after a launch with main at c2, the verified copy put back from "
+               f"the pull request's is {record!r}, not updated by itself to 1.1.0; uDeck asked "
+               f"{described(_since(scene, heard_from))}")  # fmt: skip
+    finally:
+        scene.close()
+
+
 def check_a_merged_pull_request_becomes_verified(machine, check_dir, lab):
     """Pull request #3 squash-merged as exactly its head: **Check now**, and its copy is **Verified** — nothing downloaded, nothing swapped, nothing asked.
 
@@ -2490,10 +2556,11 @@ def check_every_replacement_warns_first(machine, check_dir, lab):
                                "1.1.0", lambda r: r and r.get("version") == "1.1.0")  # fmt: skip
         _expect_it_in_the_trash(machine, token, "Update on the catalogue row")
 
-        # Back to 1.0.0.
+        # Back to 1.0.0: along the copy's own line, an update undone — pinned, as an earlier version is.
         token = _keep_a_dot_env(machine, "before Back to")
-        _warned_then_confirmed(scene, f"plugin.{UPTIME}.backTo", f"plugin.{UPTIME}", "Back to 1.0.0", "1.0.0",
-                               lambda r: r and r.get("version") == "1.0.0")  # fmt: skip
+        back = _warned_then_confirmed(scene, f"plugin.{UPTIME}.backTo", f"plugin.{UPTIME}", "Back to 1.0.0", "1.0.0",
+                                      lambda r: r and r.get("version") == "1.0.0")  # fmt: skip
+        expect(back is not None and back.get("pinned") is True, f"Back to 1.0.0 after the update left it unpinned: {back!r}")
         _expect_it_in_the_trash(machine, token, "Back to 1.0.0")
 
         # Remove.
@@ -3279,6 +3346,8 @@ def _the_screens_of_stage_3_in_russian(scene, window):
                       lambda r: r is not None and (r.get("ref") or {}).get("kind") == "pr" and r.get("commit") == pr3,
                       window=window)  # fmt: skip
     expect(record is not None, f"Back to the pull request's copy was confirmed and installed.json says {_read_json(machine, INSTALLED)!r}")
+    expect(record is None or record.get("pinned") is False,
+           f"Back to the pull request's copy, from another line of history, pinned it: {record!r}")  # fmt: skip
 
     # The Не проверен row, and the catalogue row of the same id.
     mark = _wait_until(machine, f"plugin.{UPTIME}.mark", lambda said: said == RU_UNVERIFIED, NOTICED_SECONDS, window)
@@ -4286,6 +4355,7 @@ GL_ON_COM = f"{GL_COM}/someone/gl-plugins"
 GL_ON_COM_NAME = "gitlab.com lab plugins"
 GL_HELLO = "gl-hello"
 GL_BIG = "gl-big"
+GL_HUGE = "gl-huge"
 GL_TEAM_PLUGIN = "gl-team"
 GL_COM_PLUGIN = "gl-com"
 # gitlab.com's two limiters (`fake-github.py`'s GitLabLimits), by the names its answers give them.
@@ -4300,6 +4370,7 @@ NOT_GITLAB = "{host} did not answer as GitLab. uDeck reads sources on github.com
 NOT_GITHUB = "{host} is not GitHub. A GitLab project can be added as a source of its own."
 EMPTY = "The repository offers no plugins yet."
 FILE_TOO_LARGE = "plugins/gl-big/big.bin is 6.0 MB; one file of a plugin may be up to 5 MB."
+MANIFEST_TOO_LARGE = "plugins/gl-huge/manifest.json is 6.0 MB; one file of a plugin may be up to 5 MB."
 TEST_BUILD_GITLAB = "Test build: {host} is read from http://127.0.0.1:{port}."
 FROM_THE_PROJECT = "From {address} at {commit}"
 # What a GitLab says of its file at a commit: the files API, by its whole path with its "/" as %2F.
@@ -4383,12 +4454,19 @@ def check_source_gitlab_install(machine, check_dir, lab):
     `gitlab` on gitlab.example.test at tools/udeck-plugins, the default branch,
     and unverified by `null`; the row says where it came from. **Earlier
     versions…** lists 1.0.0, asking the folder's history on main by the
-    project's number and its manifest at g1 through the files API, nothing else.
+    project's number and nothing else: g1 is the head, its listing kept and its
+    manifest fetched by the catalogue's read. Then main moves to g3 — which
+    leaves gl-hello as g2 made it — and **Check now** on the source reads it:
+    **Earlier versions…** opened again lists 1.1.0 and 1.0.0, asking the
+    history again and one GraphQL request about g2 alone — the one commit of
+    gl-hello's history whose listing is not kept: g3 is the head, g1 what is
+    installed.
 
     **Red for**: a listing read past its first page, a file taken from anywhere
     but the files API, a size shown that GitLab never gave, a page on the lab's
-    port, a copy recorded as GitHub's, and a copy's history asked of anything
-    but its project by its number.
+    port, a copy recorded as GitHub's, a copy's history asked of anything but
+    its project by its number, a manifest per request where GraphQL answers a
+    dozen, and a commit's manifest asked about twice.
     """
     scene = _prepare(machine, check_dir, lab, main="c1")
     try:
@@ -4443,11 +4521,36 @@ def check_source_gitlab_install(machine, check_dir, lab):
                and "path=plugins%2Fgl-hello" in history[0].query.replace("/", "%2F"),
                f"Earlier versions… of gl-hello asked {_described_gitlab(asked)}: the folder's history on main, by the "
                "project's number, once")  # fmt: skip
-        manifest = GL_FILE.format(id=number, path=f"plugins%2F{GL_HELLO}%2Fmanifest.json")
-        rest = [r for r in asked if r not in history and not (r.raw_path == manifest and r.query == f"ref={g1}")]
-        expect(not rest, f"Earlier versions… of gl-hello also asked {_described_gitlab(rest)}: its history and its "
-                         "manifest at g1 through the files API, nothing else")  # fmt: skip
+        rest = [r for r in asked if r not in history]
+        expect(not rest, f"Earlier versions… of gl-hello also asked {_described_gitlab(rest)}: its history alone — g1 is "
+                         "the head, its manifest fetched by the catalogue's read")  # fmt: skip
         _expect_on_its_port(asked, GL_HOST, "Earlier versions… of gl-hello")
+
+        # main moves to g3, which leaves gl-hello as g2 made it: the history read again, and g2's manifest — the one
+        # commit of it whose listing is not kept — asked in one GraphQL request.
+        g3 = scene.github.project_commit(GL_PROJECT, "g3")
+        scene.github.tell("moving tools/udeck-plugins' main to g3", gitlab={GL_HOST: {"projects": {"tools/udeck-plugins": {"main": "g3"}}}})
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now on the source")
+        moved = _wait_for_disk(machine, lambda: (_read_json(machine, f"{UDECK_HOME}/catalogue/{sid}/state.json") or {})
+                               .get("head") == g3, CATALOGUE_SECONDS)  # fmt: skip
+        expect(moved, f"after Check now with main at g3, the source's state says "
+                      f"{(_read_json(machine, f'{UDECK_HOME}/catalogue/{sid}/state.json') or {}).get('head')!r}")  # fmt: skip
+        _press(machine, f"plugin.{GL_HELLO}.earlier", "closing Earlier versions… of gl-hello")
+        before = _count(scene)
+        _press(machine, f"plugin.{GL_HELLO}.earlier", "opening Earlier versions… of gl-hello at g3")
+        line = f"plugin.{GL_HELLO}.history.1.1.0"
+        listed = _wait_until(machine, line, lambda said: said is not None, OPERATION_SECONDS, present=True)
+        asked = _since(scene, before)
+        _keep_the_pane(machine, check_dir, lab, "earlier-versions-of-the-gitlab-copy-at-g3.txt", showing=line)
+        expect(listed is not None, f"Earlier versions… of gl-hello at g3 lists no 1.1.0; uDeck asked {_described_gitlab(asked)}")
+        history = [r for r in asked if r.raw_path == f"/api/v4/projects/{number}/repository/commits"]
+        graphql = [r for r in asked if r.is_graphql]
+        expect(len(history) == 1 and [r.graphql_commits for r in graphql] == [1],
+               f"Earlier versions… at g3 asked {_described_gitlab(asked)}: the history once and one GraphQL request about "
+               "g2 alone — g1 installed and known, g3 the head")  # fmt: skip
+        rest = [r for r in asked if r not in history and r not in graphql]
+        expect(not rest, f"Earlier versions… at g3 also asked {_described_gitlab(rest)}: no manifest through the files API")
+        _expect_on_its_port(asked, GL_HOST, "Earlier versions… of gl-hello at g3")
         _expect_no_credential(scene)
     finally:
         scene.close()
@@ -4536,6 +4639,58 @@ def check_source_gitlab_too_large(machine, check_dir, lab):
         expect(not _exists(machine, f"{UDECK_HOME}/plugins/{GL_BIG}"), "a plugins/gl-big was put in place")
         staging = machine.ssh.ask(f"ls -A {UDECK_HOME}/staging 2>/dev/null || true", "looking into staging").stdout.strip()
         expect(not staging, f"~/.udeck/staging holds {staging!r} after the refusal")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_gitlab_manifest_too_large(machine, check_dir, lab):
+    """A GitLab manifest larger than 5 MB: its row says the file is too large, as rule 8 says it — asked for once, and not again by the next read.
+
+    tools/udeck-plugins at g3, whose gl-huge has a `manifest.json` made when
+    the fake starts — 6 MB — and a listing that gives no size to refuse it by.
+    After **Add**: gl-huge's row says *plugins/gl-huge/manifest.json is 6.0 MB;
+    one file of a plugin may be up to 5 MB.*, offers no **Install**, and the
+    log holds that manifest asked for once. **Check now** on the source, its
+    head unchanged: the manifest is not asked for again, and the row says the
+    same.
+
+    **Red for**: a manifest past rule 8 said as one that could not be fetched,
+    and one asked for again at every read.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", gitlab={GL_HOST: {"projects": {"tools/udeck-plugins": {"main": "g3"}}}})
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        number = scene.github.project_id(GL_PROJECT)
+        sid, added = _add_a_gitlab(scene, GL_PROJECT, GL_NAME, "adding tools/udeck-plugins at g3", link=GL_PROJECT_PAGE)
+        row = f"source.{sid}.plugin.{GL_HUGE}"
+        state = _wait_until(machine, f"{row}.state", lambda said: said == MANIFEST_TOO_LARGE, NOTICED_SECONDS)
+        dump = _keep_the_pane(machine, check_dir, lab, "a-manifest-too-large.txt", showing=f"{row}.state")
+        manifest = GL_FILE.format(id=number, path=f"plugins%2F{GL_HUGE}%2Fmanifest.json")
+        expect(state == MANIFEST_TOO_LARGE, f"gl-huge's row says {state!r}, not {MANIFEST_TOO_LARGE!r}; uDeck asked "
+                                            f"{_described_gitlab(added)}")  # fmt: skip
+        expect(ui.element(dump, f"{row}.install") is None, "gl-huge, its manifest past 5 MB, is offered Install")
+        asked = [r.raw_path for r in added].count(manifest)
+        expect(asked == 1, f"gl-huge's manifest was asked {asked} times reading the source after Add: {_described_gitlab(added)}")
+
+        # The read ends when the source's state says so: every request of it is in the log by then.
+        state_file = f"{UDECK_HOME}/catalogue/{sid}/state.json"
+        succeeded = (_read_json(machine, state_file) or {}).get("lastSuccess")
+        machine.sleep(1.1)  # the state's times are whole seconds: the next read's is another
+        before = _count(scene)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now on the source, its head unchanged")
+        read = _wait_for_disk(machine, lambda: (_read_json(machine, state_file) or {}).get("lastSuccess") != succeeded,
+                              CATALOGUE_SECONDS)  # fmt: skip
+        again = _since(scene, before)
+        head = f"/api/v4/projects/{number}/repository/branches/main"
+        expect(read and head in [r.raw_path for r in again],
+               f"Check now on the source did not read it to its end: {_described_gitlab(again)}")  # fmt: skip
+        expect(manifest not in [r.raw_path for r in again],
+               f"Check now asked for gl-huge's manifest again, refused for its size before: {_described_gitlab(again)}")
+        state = _wait_until(machine, f"{row}.state", lambda said: said == MANIFEST_TOO_LARGE, NOTICED_SECONDS)
+        expect(state == MANIFEST_TOO_LARGE, f"after Check now gl-huge's row says {state!r}")
+        _expect_on_its_port(added + again, GL_HOST, "reading gl-huge's source")
         _expect_no_credential(scene)
     finally:
         scene.close()

@@ -398,7 +398,8 @@ struct PluginInstallerTests {
         #expect(record.version == "1.1.0" && record.pinned == false)
         #expect(record.previous == PreviousCopy(ref: PluginRef(name: "main"), commit: first.commit,
                                                 tree: first.treeID("plugins/uptime")!, version: "1.0.0",
-                                                repository: .official))
+                                                repository: .official, sourceID: InstalledPlugins.officialSource),
+                "the previous copy names its source")
         #expect(try GitHash.tree(ofDirectoryAt: live) == second.treeID("plugins/uptime"))
         #expect(trash.names.isEmpty, "uDeck's own copy is deleted, not trashed")
         #expect(stagingIsEmpty())

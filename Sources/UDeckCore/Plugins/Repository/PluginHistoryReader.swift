@@ -7,14 +7,19 @@ import Foundation
 ///
 /// 1. the commits on the default branch that changed `plugins/<id>`, newest
 ///    first — one API request;
-/// 2. for each, newest first, up to 50, that commit's `manifest.json` from the
-///    raw host; a commit where the folder did not exist is skipped;
+/// 2. for each, newest first, up to 50, that commit's `manifest.json` — from
+///    the raw host on GitHub, a dozen to a request on GitLab
+///    (`RepositoryProvider.files(at:commits:)`) — unless the last read found
+///    it already (`VersionIndex`): a commit's manifest is what it is for
+///    good; a commit where the folder did not exist is skipped;
 /// 3. one line per distinct `version`, taken from the newest commit that has
 ///    it — that version as it finally was — with its date.
 ///
 /// The "newest commit per version" rule is what keeps a half-finished state
 /// in a repository that merges with merge commits from being offered as a
-/// version. The result is kept while the head commit is unchanged.
+/// version. The result is kept while the head commit is unchanged; after the
+/// head moves, a read asks for the folder's history and the manifests of the
+/// commits it brought.
 public struct PluginHistoryReader: Sendable {
     public let provider: any RepositoryProvider
     public let store: CatalogueStore
@@ -33,40 +38,47 @@ public struct PluginHistoryReader: Sendable {
             touching: "\(CommitListing.pluginsFolder)/\(id)", on: branch
         ).prefix(Self.deepest))
 
-        // Four at a time, like an install; the order is put back afterwards.
-        var manifests: [Int: Data] = [:]
-        try await withThrowingTaskGroup(of: (Int, Data?).self) { group in
-            var next = 0
-            func add() {
-                let index = next
-                let commit = commits[index]
-                next += 1
-                group.addTask {
-                    do {
-                        let data = try await provider.file(
-                            at: "\(CommitListing.pluginsFolder)/\(id)/\(PluginDiscovery.manifestFilename)",
-                            commit: commit.sha)
-                        return (index, data)
-                    } catch ProviderError.notFound {
-                        // The folder did not exist at that commit.
-                        return (index, nil)
-                    }
-                }
-            }
-            while next < min(4, commits.count) { add() }
-            while let (index, data) = try await group.next() {
-                if let data { manifests[index] = data }
-                if next < commits.count { add() }
+        // What the last read found, held to the blob store: a manifest whose
+        // blob is gone, or no longer hashes to its id, is asked for again. And
+        // what the catalogue has: a commit whose listing is kept — the head's,
+        // most often — names its manifest's blob, which a read of the
+        // catalogue has fetched, or refused for its size, already.
+        let known = store.versionIndex(id) ?? VersionIndex()
+        var index = VersionIndex()
+        var manifests: [String: Data] = [:]
+        var unknown: [String] = []
+        for commit in commits where index.manifests[commit.sha] == nil && !index.absent.contains(commit.sha) {
+            let listing = store.listing(commit.sha)
+            let listed = listing?.plugins[id]?.file(at: PluginDiscovery.manifestFilename)?.sha
+            if known.absent.contains(commit.sha) || (listing != nil && listed == nil) {
+                // Not there at that commit: the last read said so, or the
+                // listing of it has no manifest for this plugin.
+                index.absent.append(commit.sha)
+            } else if let blob = known.manifests[commit.sha] ?? listed, let data = store.blob(blob) {
+                manifests[commit.sha] = data
+            } else if let listed, store.refusedAsTooLarge(listed) != nil {
+                index.absent.append(commit.sha)
+            } else if !unknown.contains(commit.sha) {
+                unknown.append(commit.sha)
             }
         }
+        let fetched = unknown.isEmpty ? [:] : try await provider.files(
+            at: "\(CommitListing.pluginsFolder)/\(id)/\(PluginDiscovery.manifestFilename)", commits: unknown)
+        // The folder did not exist at a commit not fetched, or its manifest
+        // was larger than a plugin's file may be.
+        index.absent += unknown.filter { fetched[$0] == nil }
+        manifests.merge(fetched) { kept, _ in kept }
+        // Every manifest of this read stored by its own hash — those found in
+        // the store too, which a prune since may have taken — so installing
+        // this version later finds the manifest its listing names without
+        // asking again, and the next read finds it by its commit: in one step
+        // with any pruning (`keep`).
+        store.keep(index, adding: manifests, for: id)
 
         var seen = Set<String>()
         var lines: [PluginHistory.Line] = []
-        for (index, commit) in commits.enumerated() {
-            guard let data = manifests[index] else { continue }
-            // Stored by its own hash, so installing this version later finds
-            // the manifest its listing names without asking again.
-            _ = try? store.save(blob: data)
+        for commit in commits {
+            guard let data = manifests[commit.sha] else { continue }
             guard let manifest = try? JSONDecoder().decode(PluginManifest.self, from: data) else { continue }
             guard seen.insert(manifest.version).inserted else { continue }
             lines.append(PluginHistory.Line(version: manifest.version, commit: commit.sha,

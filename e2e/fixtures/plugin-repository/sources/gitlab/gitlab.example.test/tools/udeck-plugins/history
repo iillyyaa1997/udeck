@@ -3,5 +3,8 @@
 #     answers, so that the listing is followed across pages.
 # g2: gl-hello 1.1.0, and gl-big, whose big.bin is made when the fake starts — 6 MB, more than a plugin's file
 #     may be — and never committed.
+# g3: g2, and gl-huge, whose manifest.json is made when the fake starts — 6 MB, more than a plugin's file may be, so
+#     its row is refused as the manifest arrives (stage 4, R2b).
 g1
 g2
+g3

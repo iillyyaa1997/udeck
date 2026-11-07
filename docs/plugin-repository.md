@@ -1185,12 +1185,45 @@ asked for by its number, `/projects/{id}`; its path, URL-encoded with its `/` as
 
 Every file is a request to the API — GitLab has no raw host to read a commit's
 file from anonymously — and every one is hashed against the listing's `id`
-before it is used, as GitHub's are. So **Earlier versions…** of a GitLab
-source's copy costs up to 51 requests to the API — the folder's history and one
-manifest per commit examined, at most 50 — where GitHub's raw host carries the
-manifests. Every request carries `User-Agent: uDeck/<version>` and `Accept:
-application/json`, from a session that keeps nothing; nothing carries a token
-yet.
+before it is used, as GitHub's are. **Earlier versions…** of a GitLab source's
+copy asks for the folder's history, and then the manifests of a dozen commits
+in one request to GitLab's GraphQL, `POST /api/graphql` (**measured** on
+gitlab.com, 2026-11-07):
+
+```graphql
+query($path: ID!, $paths: [String!]!, $r0: String!, …) {
+  project(fullPath: $path) { id repository {
+    c0: blobs(paths: $paths, ref: $r0) { nodes { oid rawTextBlob } } … } } }
+```
+
+— the commits as variables, the project by the path the source has now. Its
+answer is believed only when it comes from where it was asked — a redirect
+followed to another host, port or scheme is no answer about this GitLab — and
+names the project's `id` as `gid://gitlab/Project/<the source's number>`; each
+file only when its text hashes to the blob id (`oid`) given with it, and then
+one larger than 5 MB is left out, as the files API would refuse it. A commit
+whose folder had no manifest answers no blob. GitLab weighs each commit at 14 and the project at 3 against
+a ceiling of 200 without a token, so a dozen fit; a GitLab whose ceiling is
+lower says it — *"Query has complexity of 171, which exceeds max complexity of
+100"* — and is asked for as many as fit. Whatever GraphQL does not answer — a
+GitLab without it, another project at the path, a file that is not text, an
+answer that is not GraphQL's — is asked of the files API by the project's
+number, one file at a time; the limit and no answer at all end the read. So
+fifty versions cost six requests, not fifty-one, against gitlab.com's limit.
+
+And on any host a read keeps what it found at each commit — the manifest's
+blob, or none — in `~/.udeck/catalogue/<source>/versions/<id>.json`, the
+commits of that read alone, written in one step with any pruning of the store:
+a commit's manifest is what it is for good. Once the head moves, the next
+**Earlier versions…** asks for the folder's history again and the manifests of
+the commits it brought, nothing else; a manifest whose blob is gone from the
+store is asked for again. A commit whose listing the catalogue keeps — the
+head's, most often — is not asked about at all: its manifest is in the store
+already, or was refused for its size, or its listing has none.
+
+Every request carries `User-Agent: uDeck/<version>` and `Accept:
+application/json` — GraphQL's `Content-Type: application/json` too — from a
+session that keeps nothing; nothing carries a token yet.
 
 **A listing gives no sizes**, so rule 8 is held as the files arrive instead of
 before: a row says how many files a plugin has, *"4 files"*, and no bytes; a
@@ -1200,8 +1233,12 @@ the install with *"plugins/gl-big/big.bin is 6.0 MB; one file of a plugin may
 be up to 5 MB."*, and once the files that arrived add up to more than 10 MB the
 rest is not asked for; either way staging is thrown away and nothing is
 installed. A manifest larger than 5 MB is its plugin's alone: the catalogue is
-read, and that row says its manifest could not be fetched. The number of files,
-the names and the depth are still checked from the listing.
+read, and that row says so as rule 8 does — *"plugins/gl-huge/manifest.json is
+6.0 MB; one file of a plugin may be up to 5 MB."* — offering no **Install**. Its
+size is kept by its blob id, in `~/.udeck/catalogue/<source>/too-large/`, and the
+manifest is not asked for again while a listing kept names it: a blob id is its
+content's hash. The number of files, the names and the depth are still checked
+from the listing.
 
 **What an answer's status says:** a success, and a `304` only for the head;
 `404` not found; a `400` not found only where the endpoint answers a missing
@@ -1275,7 +1312,7 @@ It is written atomically, like `installed.json`, and it never holds a secret.
 |---|---|
 | `id` | What every record of a copy of the source says it came from (`installed.json`'s `source`), the name of its cache, `~/.udeck/catalogue/<id>/`, and later the key of its token: `<slug>-<hash8>`. `hash8` is the first 8 hexadecimal digits of SHA-256 over `<provider>\n<lowercased host>\n<remoteID>`, so a renamed repository keeps it and a new repository made at the old name gets another. `slug` — the host, `-` and the path's last segment when it was added, lowercased, every character outside `[a-z0-9.-]` a `-`, at most 40 — is only for a person reading `~/.udeck`. An id always matches `^[a-z0-9][a-z0-9.-]{0,40}-[0-9a-f]{8}$`: never `official`, always a safe folder name. |
 | `provider`, `host` | `github` and `github.com`, or `gitlab` and a GitLab's host — `gitlab.com`, or one's own, lowercased, with a port when it has one other than 443. |
-| `path` | `owner/repo`, or `group/…/project`, as the host spells it now: for the pages a person opens and for GitHub's raw host. Written back whenever a describe of it, by its number, says another. |
+| `path` | `owner/repo`, or `group/…/project`, as the host spells it now: for the pages a person opens and for GitHub's raw host. Written back whenever a describe of it, by its number, says another — a describe that names that number: one naming another, or none, is not believed, on GitHub as on GitLab. |
 | `remoteID` | The number GitHub knows the repository by, or GitLab the project, which neither a rename nor a transfer changes. Every request after **Look up** addresses it by that number. |
 | `access` | What the Keychain is expected to hold for it: `none` today. |
 | `trustedAt` | `null` today; when it was trusted, later. |
@@ -1373,9 +1410,11 @@ its own."*, with **Add as a source…**, which opens **Add a source…** with th
 repository's address filled in; and of a link to another host, *"gitlab.example
 is not GitHub. A GitLab project can be added as a source of its own."* — with
 **Add as a source…** and the project's page filled in when the link reads as a
-GitLab project's, a port and all. A link into a source added — a branch of
-it, its page, a pull request; of a GitLab project, a branch, its page, a merge
-request — is refused before any request: *"Installing from a
+GitLab project's, a port and all — written with `http://` too, the page offered
+over HTTPS. A link into a source added — a branch of it, its page, a pull
+request; of a GitLab project, a branch, its page, a merge request, its path in
+any case, as GitLab finds a project by it (**measured**), and over `http://` as
+over HTTPS — is refused before any request: *"Installing from a
 branch or a merge request of a source is not possible yet; add the project and
 install from its default branch."*
 
@@ -1964,12 +2003,12 @@ its hash be compared at all.
 | `tree` | 40 hex characters | The tree SHA of `plugins/<id>` at that commit — and so of the folder on disk, as it was installed. |
 | `version` | string | The manifest's `version` at that commit. |
 | `installedAt` | ISO-8601 time, UTC, whole seconds | When this copy was put in place. |
-| `pinned` | boolean | `true` when the operator chose this version over the newest one — an earlier version, or **Back to 1.0.0**. A pinned plugin is still told about newer versions, and [updates by themselves](#automatic-updates) leave it alone. **Update** clears it. |
+| `pinned` | boolean | `true` when the operator chose this version over the newest one — an earlier version, or **Back to 1.0.0** along the copy's own line, an update undone. **Back to** from another line of history — a pull request or a branch tried, a copy of another source — puts the copy back as it was, pinned only if it was (`previous.pinned`), so a verified copy returned to goes on updating itself. A pinned plugin is still told about newer versions, and [updates by themselves](#automatic-updates) leave it alone. **Update** clears it. |
 | `verification.status` | string | What the folder was, the last time uDeck looked: `verified`, `modified`, `unverified`; `trusted` later. A status uDeck does not know — a later uDeck's — is read as `modified`, rather than making the whole file unreadable: it is recomputed anyway. |
 | `verification.by` | string or null | Whose guarantee it is: `official`, or (later) the trusted source's id; `null` when nobody's. |
 | `verification.checkedAgainst` | 40 hex characters or null | The commit of the default branch the folder was compared against. |
 | `verification.checkedAt` | ISO-8601 time | When. |
-| `previous` | object or null | The copy this one replaced — `ref`, `commit`, `tree`, `version`, and the `repository` it came from — so that **Back to 1.0.0** is one click, from where that copy came: a pull request's copy goes back as the pull request's. `null` after a first install. A copy recorded before there were branches and pull requests has no `repository`: it came from the source's own. |
+| `previous` | object or null | The copy this one replaced — `ref`, `commit`, `tree`, `version`, the `repository` it came from, the `source` it was a copy of (since 0.8.0), and `pinned: true` when it was pinned (since 0.8.0, written only then) — so that **Back to 1.0.0** is one click, from where that copy came: a pull request's copy goes back as the pull request's, a renamed source's from the address it has now. `null` after a first install. A copy recorded before there were branches and pull requests has no `repository`: it came from the source's own. One recorded before 0.8.0 has no `source`, and its source is worked out from its `repository` ([One id, one copy](#one-id-one-copy)); 0.7.0 reads past both keys, and drops them when it writes the record again. |
 | `automatic` | `true`, or absent | Present only on a copy uDeck put in place by itself — a verified plugin [updating itself](#automatic-updates) — and the row says *Updated by itself on October 10, 2026*. Any press that installs writes the record without it. A uDeck from before automatic updates reads the record and skips the key. |
 
 **`verification` is recorded, not trusted.** It is recomputed every time the
@@ -2108,6 +2147,18 @@ within one source: a copy of one source's default branch never takes another's
 place unsaid, an update is offered from the copy's own source's head alone, and
 **Back to** takes the copy it replaced from the source that copy was of.
 
+Since 0.8.0 the copy it replaced names that source in `previous.source`, and
+that decides: the official source's copy comes from where it came, a fork's
+branch too; a source of one's own's from the address the source has now, so a
+source renamed since still gives **Back to**; and a source no longer added
+gives none — not from another source added at its old address since, which is
+another repository by its number. A copy recorded before 0.8.0 names no source,
+and its source is worked out from what it keeps, in this order: no
+`repository`, or the record's own — the record's source; a ref that is not a
+default branch — the official source; the official repository — the official
+source; a source's address as it is now — that source; anything else is no
+source any more, and **Back to** is not offered.
+
 ---
 
 ## Updates
@@ -2220,7 +2271,9 @@ rule is `ShownPlace` in UDeckCore, tested there.
 ### Earlier versions
 
 The row's menu has **Earlier versions…**, and after an update the row offers
-**Back to 1.0.0**, which is the same thing for `previous`. Over a copy holding
+**Back to 1.0.0**, which is the same thing for `previous` — pinned, as an
+earlier version is, when it goes back along the copy's own line; from another
+line, as it was ([`pinned`](#installedjson)). Over a copy holding
 anything of the operator's, both say first that it goes to the Trash, as
 **Update** does.
 
@@ -2230,8 +2283,10 @@ uDeck looks for them — there is no list of releases to maintain:
 1. `GET https://api.github.com/repos/{owner}/{repo}/commits?sha={default branch}&path=plugins/{id}&per_page=100`
    lists the commits that changed the plugin's folder, newest first (**measured**).
 2. For each, newest first, up to 50 commits, uDeck reads that commit's
-   `plugins/{id}/manifest.json` from the raw host. A commit where the folder
-   did not exist is skipped.
+   `plugins/{id}/manifest.json` from the raw host — on GitLab a dozen commits to
+   a GraphQL request ([GitLab](#gitlab)) — unless a read before found it
+   (`versions/<id>.json`): a commit's manifest is what it is for good. A commit
+   where the folder did not exist is skipped.
 3. One line per distinct `version` — taken from the newest commit that has it,
    which is that version as it finally was — with its date, and whether it can
    run here (`api`, `minUDeck`). The installed one is marked.
@@ -2638,10 +2693,16 @@ standard library.
   `forked_from_project`, its branch's head with a weak `ETag` and `304`, a
   tree's entries three to a page whatever is asked, with `x-next-page`, a file
   through the files API with `X-Gitlab-Size` and `X-Gitlab-Blob-Id`, a folder's
-  history, and GitLab's own `404` bodies. The projects are fixture folders
+  history, GitLab's own `404` bodies, and `POST /api/graphql` answering the one
+  query uDeck sends — the project by its path in any case, its `id`, and each
+  commit's file with its blob id and text, or no node — weighed 14 a commit and
+  3 the project against a ceiling of 200 the lab may lower
+  (`graphql_ceiling`), or a `404` when told the GitLab has none (`graphql:
+  absent`); its log says how many commits each GraphQL request asked, never
+  which. The projects are fixture folders
   under `sources/gitlab/<host>/<group>/…/<project>/`, each with its history and
   its `id`; a file `<name>.generated` is a file made when the fake starts, never
-  committed — `gl-big`'s 6 MB `big.bin`. gitlab.com counts each request by its
+  committed — `gl-big`'s 6 MB `big.bin`, `gl-huge`'s 6 MB `manifest.json`. gitlab.com counts each request by its
   two limiters, 500 a minute and 60 an hour, each answer naming one in turn, and
   `429`s with `Retry-After` once the hour is spent.
 * **The lab drives it** by rewriting a small state file over SSH: which commit
@@ -2724,8 +2785,9 @@ guest's `~/.udeck` over SSH.
 | `plugins.a-branch-is-followed` | `uptime` installed from the branch `fix/uptime`, at `pr3`, placed and allowed. **Check now**: the log holds the branch's head by `refs/heads/fix/uptime` once, asked with `If-None-Match` and `pr3`, answered `304`, and no listing or comparison. The fake moves the branch on to `p2`: after **Check now** the head is answered `200`, `p2` is listed and compared with `pr3` once, the row says *Changed in branch fix/uptime, still 1.0.1* with **Update** and *What changed*, and Settings *1 update is waiting*. The fake deletes the branch: after **Check now** the head is answered `422`, the row says *Branch fix/uptime no longer exists; the plugin keeps running* and offers **Switch to verified** and **Remove** and no **Update**; the record and the folder are as they were throughout, and the card runs again, its count of runs going up. The fake makes the branch again at `p2`, and `uptime` is installed from it through **Look up**: the record is the branch's at `p2`, `followed.json` keeps the head **Look up** heard, and — no request about the branch since — the row says nothing of a branch gone and offers nothing. |
 | `plugins.a-closed-pull-request-keeps-running` | `uptime` installed from pull request #3, placed and allowed; the fake closes the pull request unmerged. After **Check now** the row says *Pull request #3 was closed without being merged; the plugin keeps running*, the catalogue row *… unverified — closed without being merged*, and **Switch to verified** and **Remove** are there; the record, the folder, the window and the decision are as they were, and the card's count of runs goes on growing. Opened again, after **Check now** uDeck asks about it again, `followed.json` says it is open, and the row says **Unverified** and nothing of it. |
 | `plugins.switch-to-verified-names-both` | The verified `uptime` 1.0.0 installed, placed with a setting value and allowed; **Install** on the pull request's `uptime` first says *uptime is the verified 1.0.0 from github.com/…; installing 1.0.1 from pull request #3 at … replaces it. Its windows and settings stay. Nobody verified the code that comes: it asks before it runs…*, and while that is up the folder and the record are as they were; confirmed, the record is the pull request's, with the verified copy as `previous`. **Switch to verified 1.0.0** on the row warns the other way round and again changes nothing until it is confirmed; then the row says **Verified**, the record is `main`'s at `c1`, the window and the setting value are where they were, and the card runs 1.0.0 without asking. |
+| `plugins.back-from-a-pull-request-updates-itself` | The verified `uptime` 1.0.0 installed, placed and allowed; `uptime` from pull request #3 installed over it, warned of and confirmed. **Back to 1.0.0** on the pull request's row warns, and once confirmed `installed.json` says the default branch's 1.0.0 at `c1`, `verified`, `pinned: false` — back from another line of history, the copy comes back as it was. uDeck ended, `main` moved to `c2`, the catalogue two days old: the launch puts 1.1.0 in place with nothing pressed, `automatic: true`. |
 | `plugins.window-survives-a-broken-manifest` | A placed plugin's manifest broken over SSH keeps its window in `layout.json`, which says what is wrong; fixed, the card comes back without being added again. |
-| `plugins.every-replacement-warns-first` | Over a folder with a `.env` put in over SSH — for **Reinstall**, also a line appended to `uptime.sh` — **Reinstall**, **Update** on the catalogue row, **Back to 1.0.0** and **Remove** each say first that the copy goes to the Trash; confirmed, each does what it says, and every `.env` is in the guest's Trash and no longer in the folder. |
+| `plugins.every-replacement-warns-first` | Over a folder with a `.env` put in over SSH — for **Reinstall**, also a line appended to `uptime.sh` — **Reinstall**, **Update** on the catalogue row, **Back to 1.0.0** and **Remove** each say first that the copy goes to the Trash; confirmed, each does what it says — **Back to 1.0.0**, an update undone along the copy's own line, leaving it `pinned` — and every `.env` is in the guest's Trash and no longer in the folder. |
 | `plugins.an-update-ends-a-running-action` | With the fixture card's **Hold** action running, **Update** ends it before it replaces the folder: the action wrote that it was ended and never that its folder changed under it, nothing of it runs afterwards, and 1.1.0 is in place. |
 | `plugins.linked-folder` | A plugin in a working copy outside `~/.udeck` — beside a `.git`, a `.env`, files named like `installed.json` and `cache/`, and a link — linked into `~/.udeck/plugins` is listed: placed and allowed, its card comes; its manifest changed in the working copy to run another producer, the card says that producer's word; polled every 5 s, with a file in the working copy touched every 3 s for 21 s and the panel open, it runs at least three times; in Settings its row is marked **Linked** and says where the link leads, and **Remove** says first that only the link goes and names the folder, with no word of the Trash; after it the link is gone, uDeck's cache of it too, and the working copy is byte for byte as it was, its `.env` not in the Trash. |
 | `plugins.link-a-folder` | **Link a folder…** in Settings → Plugins, the folder chosen in the system's folder panel by typing its path (⌘⇧G): a working copy whose id nothing has is linked at once — the outcome says *Linked <id> to …*, `plugins/<id>` leads to the folder, the row says **Linked**; one with `uptime`'s id, over the `uptime` just installed from the catalogue, first says *"uptime is installed from github.com/iillyyaa1997/udeck-plugins. Linking … deletes the installed copy"* and changes nothing; the working copy's id changed to `link-me` while that warning is up, **Link** warns of `link-me` — *"link-me is a link to …"* — and changes nothing, and with the id back to `uptime` it warns of `uptime` again; confirmed, `plugins/uptime` leads to the working copy, `installed.json` has no `uptime`, and the working copy is byte for byte as it was. |
@@ -2747,9 +2809,10 @@ guest's `~/.udeck` over SSH.
 | `plugins.source-refusals` | **Look up** refuses, each with its sentence and no **Add**: `http://`, git's SSH address and the official repository before any request; `github.com/someone/missing` after its description's 404 (*… could not be found, or it is private. If it is private, uDeck needs a token for it: Token…*); `someone/not-plugins`, with no passport at its default branch, after its description, its head and the passport's 404; and someone/team-plugins once it is added, after its description, *Team plugins (github.com/someone/team-plugins) is added already.* |
 | `plugins.link-offers-a-source` | **Install from a link…** on a branch of someone/team-plugins, no fork of the official repository: *github.com/someone/team-plugins is not a fork of github.com/iillyyaa1997/udeck-plugins. To install from it, add it as a source of its own.*, after its description alone, and **Add as a source…**, which opens **Add a source…** with `https://github.com/someone/team-plugins` in its field and adds nothing until **Add** is pressed. Added, the same link is refused before any request: *Installing from a branch or a merge request of a source is not possible yet; add the project and install from its default branch.* |
 | `plugins.source-add-gitlab` | **Add a source…** of `https://gitlab.example.test/group/sub/team/-/tree/main`, a project three groups down in the fake's self-hosted GitLab: it comes to `group/sub/team`, and from **Look up** on the log holds, on gitlab.example.test's own port and nowhere else, `GET /api/v4/projects/group%2Fsub%2Fteam` — `%2F` as it was sent, the one request ever addressed by its path — then `/projects/9/repository/branches/main` and the passport at that commit through the files API; the sheet shows the passport's name, and the test build's line says where gitlab.example.test and gitlab.com are read from. After **Add**, every request of it is to `/api/v4/projects/9/…`, on its port; the block is named *Team on GitLab* with its address, its row says **Unverified**, and `sources.json` holds `gitlab`, the host, the path, `remoteID` 9 and the id derived from them. No request carries a credential. |
-| `plugins.source-gitlab-install` | `tools/udeck-plugins` added: the read after **Add** lists `plugins/` page after page — three entries to a page, `gl-hello` has six — and `gl-hello`'s row says *4 files*, no bytes, its **Open on gitlab.example.test** carrying `https://gitlab.example.test/tools/udeck-plugins/-/tree/<g1>/plugins/gl-hello`. **Install**: the log holds each of the plugin's four files once, through `/api/v4/projects/7/repository/files/…/raw?ref=<g1>`, and nothing else; the folder hashes to the fixture's tree; `installed.json` says the source's id, `gitlab` on gitlab.example.test at `tools/udeck-plugins`, the default branch, `unverified` by `null`; the row says *From gitlab.example.test/tools/udeck-plugins at …*. **Earlier versions…** lists 1.0.0, asking `/api/v4/projects/7/repository/commits?ref_name=main&path=plugins/gl-hello` and the manifest at `g1` through the files API, nothing else. |
+| `plugins.source-gitlab-install` | `tools/udeck-plugins` added: the read after **Add** lists `plugins/` page after page — three entries to a page, `gl-hello` has six — and `gl-hello`'s row says *4 files*, no bytes, its **Open on gitlab.example.test** carrying `https://gitlab.example.test/tools/udeck-plugins/-/tree/<g1>/plugins/gl-hello`. **Install**: the log holds each of the plugin's four files once, through `/api/v4/projects/7/repository/files/…/raw?ref=<g1>`, and nothing else; the folder hashes to the fixture's tree; `installed.json` says the source's id, `gitlab` on gitlab.example.test at `tools/udeck-plugins`, the default branch, `unverified` by `null`; the row says *From gitlab.example.test/tools/udeck-plugins at …*. **Earlier versions…** lists 1.0.0, asking `/api/v4/projects/7/repository/commits?ref_name=main&path=plugins/gl-hello` and nothing else: `g1` is the head, its manifest fetched by the catalogue's read. Then `main` moves to `g3`, which leaves `gl-hello` as `g2` made it, and **Check now** on the source reads it: **Earlier versions…** opened again lists 1.1.0, asking the history again and one `POST /api/graphql` about `g2` alone — the one commit of its history whose listing is not kept — and no manifest through the files API. |
 | `plugins.source-gitlab-renamed` | `gl-hello` installed from `tools/udeck-plugins`; the fake serves project 7 as `tools/udeck-plugins-2`. With its default branch a day old, **Check now** describes it by its number: `sources.json` says the new path under the same id and number, the block and `gl-hello`'s page show it, every request is to `/api/v4/projects/7…`, and the copy's record is still the source's. |
 | `plugins.source-gitlab-too-large` | `tools/udeck-plugins` at `g2`: `gl-big`'s row offers **Install**, no size listed to refuse it by; **Install**: its 6 MB `big.bin`, made when the fake started, is asked once and refused as it arrives — *plugins/gl-big/big.bin is 6.0 MB; one file of a plugin may be up to 5 MB.* — and there is no `plugins/gl-big`, no record and nothing in `~/.udeck/staging`. |
+| `plugins.source-gitlab-manifest-too-large` | `tools/udeck-plugins` at `g3`, whose `gl-huge` has a `manifest.json` made when the fake starts — 6 MB — and a listing with no sizes: after **Add**, `gl-huge`'s row says *plugins/gl-huge/manifest.json is 6.0 MB; one file of a plugin may be up to 5 MB.*, offers no **Install**, and its manifest was asked for once. **Check now** on the source, its head unchanged and its read seen to its end: the manifest is not asked for again, and the row says the same. |
 | `plugins.source-gitlab-empty` | `tools/empty`, a passport and no `plugins/`: its block says *The repository offers no plugins yet.*; the read after **Add** made one tree request, the root's, with no `path=plugins`, and **Check now** asks none either. |
 | `plugins.source-gitlab-com-limit` | `someone/gl-plugins` on the fake's gitlab.com, added: its `state.json` keeps both of gitlab.com's limiters by name. The fake says the hour was spent elsewhere; **Check now** gets one `429` naming the hour, and the block says *gitlab.com asked uDeck to wait: … Without a token gitlab.com allows only a few requests an hour from one network; a token raises the limit.*, the hour's remaining 0 and the minute's in the hundreds. **Check now** again, **Install** of `gl-com` — whose row says the same — and twenty seconds: nothing reaches gitlab.com's port; the official catalogue's **Check now** reads it, with no trouble said. |
 | `plugins.source-gitlab-not-gitlab` | The fake answers gitlab.example.test's port as a web server with no GitLab behind it, `404 page not found` in plain text: **Look up** of `https://gitlab.example.test/tools/udeck-plugins` asks once and says *gitlab.example.test did not answer as GitLab. uDeck reads sources on github.com and on GitLab — gitlab.com or your own.*, offering no **Add**. |
@@ -2966,7 +3029,8 @@ never the network. What they cover:
   no number, one added already under any name, the official repository by its
   number and an entry left out that is the same repository; a source's client
   answering for its number alone, taking the name a describe gives it and
-  asking raw files by it, and believing no describe of another number; the
+  asking raw files by it, and believing no describe of another number, or of
+  none; the
   official repository's describe held to its number, another or none stopping
   the read before its head, and standing — asked again first, kept by a read
   that fails before a describe answers — with nothing else of the official
@@ -2992,15 +3056,32 @@ never the network. What they cover:
   its name, the reserve kept of the one with the least left, and states with
   and without them read back; the host map, its pages on the real host, and a
   test build's line for it; item 9 and item 13 in both languages; **Install
-  from a link…** of a GitLab project's page, of one with a port, and of a link
-  into a GitLab project already added; a manifest past 5 MB refusing its own
-  row only; a listing without sizes in
+  from a link…** of a GitLab project's page, of one with a port, over
+  `http://`, and of a link into a GitLab project already added, its path in any
+  case; a manifest past 5 MB refusing its own row only, said as rule 8 says
+  it, and not asked for again while a kept listing names it; **Earlier
+  versions…** on GitLab (`GitLabHistoryTests`) — a dozen commits to a GraphQL
+  request by the project's path, the commits as variables, believed only from
+  the source's number and each file only when it hashes to its blob, a lower
+  ceiling asked again for as many as fit, a GitLab without GraphQL, another
+  project at the path, an answer from another origin, a file with no text or
+  not its blob — past 5 MB too — a file past 5 MB, an answer past 8 MB, and the
+  limit — each falling back to the files API by the number, or not; through
+  `SourceProvider` too; and, on any host, a read after the head moved asking
+  only about the commits it brought, a commit whose listing the catalogue keeps
+  not asked about, a manifest whose blob is gone asked again, the index kept in
+  one step, and pruned with its plugin; a listing without sizes in
   `RepositoryRules` (`CatalogueTests`) and in a catalogue row; the installer
   holding such a listing to rule 8 as the files arrive (`PluginInstallerTests`)
   — a file past 5 MB, files past 10 MB, a file the provider refuses, a limit
   that is not retried — and keeping a previous copy under the name its source
-  has now, matched to it by its id; and one write of a catalogue's state at a
-  time;
+  has now, matched to it by its id; a previous copy naming its source
+  (`ShownPlaceTests`, `PreviousCopySourceTests.swift`) — **Back to** from a renamed source's address now,
+  never from a newcomer at a removed one's, the official source's from where it
+  came — and its pin: written as `source` and `pinned` only when there is
+  something to say, read past by 0.7.0's shape, **Back to** along the line
+  pinned and from another line as it was, the installer writing what the
+  request says; and one write of a catalogue's state at a time;
 * what `Scripts/make-cli.sh` makes and refuses, and what `release.yml` may do
   and in which order, in the lab's own tests (`e2e/tests/test_make_cli.py`):
   the archives and their names, the signature of the Mac's, a static and

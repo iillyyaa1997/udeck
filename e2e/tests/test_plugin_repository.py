@@ -972,18 +972,22 @@ def gitlab(tmp_path):
 
 def test_the_gitlab_projects_are_what_the_gitlab_checks_are_written_against():
     """tools/udeck-plugins (7): g1 with gl-hello 1.0.0 in six entries under plugins/, g2 with gl-hello 1.1.0 and gl-big,
-    whose 6 MB big.bin is made when the fake starts; group/sub/team (9), three groups down; tools/empty (8), a passport
-    and no plugins/; and someone/gl-plugins (1001) on gitlab.com."""
+    whose 6 MB big.bin is made when the fake starts, g3 with gl-huge too, whose 6 MB manifest.json is; group/sub/team (9),
+    three groups down; tools/empty (8), a passport and no plugins/; and someone/gl-plugins (1001) on gitlab.com."""
     projects = fake_github.read_projects(str(plugin_repository.FIXTURES))
     assert {key: project.id for key, project in projects.items()} == {
         GL_PROJECT: 7, f"{GL_HOST}/group/sub/team": 9, f"{GL_HOST}/tools/empty": 8, "gitlab.com/someone/gl-plugins": 1001}
     plugins = projects[GL_PROJECT].repository
-    assert plugins.names == ["g1", "g2"]
-    g1, g2 = plugins.commits["g1"].snapshot, plugins.commits["g2"].snapshot
+    assert plugins.names == ["g1", "g2", "g3"]
+    g1, g2, g3 = plugins.commits["g1"].snapshot, plugins.commits["g2"].snapshot, plugins.commits["g3"].snapshot
     assert len([path for path in g1.paths if path.startswith("plugins/")]) == 6, "six entries under plugins/"
     big = g2.at("plugins/gl-big/big.bin")
     assert big and big[0] == "100644" and len(g2.blobs[big[1]]) == 6 * 1024 * 1024 > 5 * 1024 * 1024
     assert not list(GITLAB.rglob("big.bin")), "made when the fake starts, never committed"
+    huge = g3.at("plugins/gl-huge/manifest.json")
+    assert huge and len(g3.blobs[huge[1]]) == 6 * 1024 * 1024 > 5 * 1024 * 1024
+    assert not list(GITLAB.rglob("gl-huge/manifest.json")), "made when the fake starts, never committed"
+    assert {path for path in g3.paths if not path.startswith("plugins/gl-huge")} == set(g2.paths), "g3 is g2 and gl-huge"
     for commit, version in (("g1", "1.0.0"), ("g2", "1.1.0")):
         manifest = json.loads((GITLAB / GL_PROJECT / commit / "plugins" / "gl-hello" / "manifest.json").read_text())
         assert manifest["version"] == version and "permissions" not in manifest
@@ -1126,6 +1130,76 @@ def test_a_gitlab_file_comes_from_the_files_api_with_its_size_and_its_blob_id(gi
     gitlab.state(gitlab={GL_HOST: {"projects": {"tools/udeck-plugins": {"main": "g2"}}}})
     _, _, history = gitlab.at_json(GL_HOST, "/api/v4/projects/7/repository/commits?ref_name=main&path=plugins/gl-hello&per_page=100")
     assert [entry["id"] for entry in history] == [g2, g1] and history[0]["committed_date"].endswith("Z")
+
+
+def graphql_query(commits):
+    """The query uDeck sends (GitLabClient.blobs), for `commits`, as variables."""
+    declared = ", ".join(f"$r{index}: String!" for index in range(len(commits)))
+    fields = " ".join(f"c{index}: blobs(paths: $paths, ref: $r{index}) {{ nodes {{ oid rawTextBlob }} }}"
+                      for index in range(len(commits)))
+    return f"query($path: ID!, $paths: [String!]!, {declared}) {{ project(fullPath: $path) {{ id repository {{ {fields} }} }} }}"
+
+
+def ask_graphql(gitlab, site, path, file, commits, query=None):
+    """(status, answer) of uDeck's GraphQL request to `site`, on its own port."""
+    port = gitlab.gitlabs[site].server_address[1]
+    variables = {"path": path, "paths": [file], **{f"r{index}": commit for index, commit in enumerate(commits)}}
+    body = json.dumps({"query": query or graphql_query(commits), "variables": variables}).encode()
+    request = urllib.request.Request(f"http://127.0.0.1:{port}/api/graphql", data=body, method="POST",
+                                     headers={"Content-Type": "application/json", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=10) as answer:
+            return answer.status, json.loads(answer.read())
+    except urllib.error.HTTPError as error:
+        return error.code, json.loads(error.read() or b"{}")
+
+
+def test_a_gitlabs_graphql_answers_uDecks_query_as_gitlab_com_does(gitlab):
+    """`POST /api/graphql`, as measured on gitlab.com on 2026-11-07: the project by its path in any case and its id as a
+    global id; per commit the file's blob id and text, or no node where it is not — a commit that does not exist too."""
+    facts = gitlab.json("/lab/facts")[2]
+    commits = facts["gitlab"][GL_PROJECT]["commits"]
+    g1, g2, g3 = commits["g1"]["sha"], commits["g2"]["sha"], commits["g3"]["sha"]
+    status, answer = ask_graphql(gitlab, GL_HOST, "Tools/UDeck-Plugins", "plugins/gl-big/manifest.json", [g1, g2, "0" * 40])
+    assert status == 200
+    project = answer["data"]["project"]
+    assert project["id"] == "gid://gitlab/Project/7"
+    found = project["repository"]
+    assert found["c0"] == {"nodes": []}, "g1 has no gl-big"
+    assert found["c2"] == {"nodes": []}, "a commit that is not there answers no blob, as gitlab.com's does"
+    (node,) = found["c1"]["nodes"]
+    assert node["oid"] == commits["g2"]["paths"]["plugins/gl-big/manifest.json"]["sha"]
+    assert fake_github.blob_id(node["rawTextBlob"].encode()) == node["oid"]
+    # The 6 MB manifest made when the fake starts comes whole, as text: uDeck leaves it out by its size.
+    _, answer = ask_graphql(gitlab, GL_HOST, "tools/udeck-plugins", "plugins/gl-huge/manifest.json", [g3])
+    (huge,) = answer["data"]["project"]["repository"]["c0"]["nodes"]
+    assert len(huge["rawTextBlob"].encode()) == 6 * 1024 * 1024
+    assert ask_graphql(gitlab, GL_HOST, "tools/nothing-here", "x", [g1])[1] == {"data": {"project": None}}
+    asked = [r for r in gitlab.requests() if r.is_graphql]
+    assert [r.graphql_commits for r in asked] == [3, 1, 1] and all(r.site == GL_HOST for r in asked)
+
+
+def test_a_gitlabs_graphql_weighs_the_query_and_reads_only_uDecks(gitlab):
+    """14 a commit and 3 the project against 200, or the lab's lower ceiling; GitLab's own words past it; a query that
+    is not uDeck's, and a GitLab told it has no GraphQL, a GET or a POST anywhere else, answered as refusals."""
+    g1 = gitlab.json("/lab/facts")[2]["gitlab"][GL_PROJECT]["commits"]["g1"]["sha"]
+    assert ask_graphql(gitlab, GL_HOST, "tools/udeck-plugins", "README.md", [g1] * 14)[1]["data"]["project"]
+    _, refused = ask_graphql(gitlab, GL_HOST, "tools/udeck-plugins", "README.md", [g1] * 15)
+    assert refused == {"errors": [{"message": "Query has complexity of 213, which exceeds max complexity of 200"}]}
+    gitlab.state(gitlab={GL_HOST: {"graphql_ceiling": 100}})
+    _, refused = ask_graphql(gitlab, GL_HOST, "tools/udeck-plugins", "README.md", [g1] * 7)
+    assert refused["errors"][0]["message"].endswith("which exceeds max complexity of 100")
+    assert ask_graphql(gitlab, GL_HOST, "tools/udeck-plugins", "README.md", [g1] * 6)[1]["data"]["project"]
+    _, other = ask_graphql(gitlab, GL_HOST, "tools/udeck-plugins", "README.md", [g1], query="{ currentUser { id } }")
+    assert other["errors"][0]["message"] == "the fake reads only the query uDeck sends"
+    gitlab.state(gitlab={GL_HOST: {"graphql": "absent"}})
+    assert ask_graphql(gitlab, GL_HOST, "tools/udeck-plugins", "README.md", [g1])[0] == 404
+    assert gitlab.at(GL_HOST, "/api/graphql")[0] == 405, "GraphQL is POSTed"
+    port = gitlab.gitlabs[GL_HOST].server_address[1]
+    request = urllib.request.Request(f"http://127.0.0.1:{port}/api/v4/projects/7", data=b"{}", method="POST")
+    with pytest.raises(urllib.error.HTTPError) as posted:
+        urllib.request.urlopen(request, timeout=10)
+    assert posted.value.code == 405
 
 
 def test_a_renamed_gitlab_project_keeps_its_number_and_its_old_path_is_gone(gitlab):

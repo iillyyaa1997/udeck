@@ -131,13 +131,32 @@ public struct PreviousCopy: Codable, Equatable, Sendable {
     /// there were branches and pull requests: those came from the source's
     /// own repository.
     public var repository: RepositoryAddress?
+    /// The source it was a copy of — `official`, or a source of one's own by
+    /// its id — written as `source`. Absent from every copy recorded before
+    /// 0.8.0, whose source is worked out from `repository` instead
+    /// (`source(record:official:sources:)`); a uDeck from before skips the
+    /// key, and drops it when it writes the record again.
+    public var sourceID: String?
+    /// Whether the operator had chosen that version over the newest one — the
+    /// record's `pinned` when it was replaced, written only when true. What
+    /// **Back to** from another line of history puts back with the copy.
+    public var pinned: Bool?
 
-    public init(ref: PluginRef, commit: String, tree: String, version: String, repository: RepositoryAddress? = nil) {
+    public init(ref: PluginRef, commit: String, tree: String, version: String, repository: RepositoryAddress? = nil,
+                sourceID: String? = nil, pinned: Bool? = nil) {
         self.ref = ref
         self.commit = commit
         self.tree = tree
         self.version = version
         self.repository = repository
+        self.sourceID = sourceID
+        self.pinned = pinned
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ref, commit, tree, version, repository
+        case sourceID = "source"
+        case pinned
     }
 
     /// Where it came from — `source` being the source's own repository,
@@ -146,11 +165,19 @@ public struct PreviousCopy: Codable, Equatable, Sendable {
         PluginOrigin(repository: repository ?? source, ref: ref)
     }
 
-    /// Which source this copy is the copy of — `previous` keeps no source of
-    /// its own, so that a uDeck from before sources reads and writes it as it
-    /// always did — worked out from what it does keep, in this order, `record`
-    /// being the record it is the previous copy of, `official` the official
-    /// repository and `sources` the sources added:
+    /// Which source this copy is the copy of, `record` being the record it is
+    /// the previous copy of, `official` the official repository and `sources`
+    /// the sources added.
+    ///
+    /// A copy recorded since 0.8.0 names its source (`sourceID`), and that is
+    /// the answer: the official source's from where it came; a source of
+    /// one's own's from the address the source has now — renamed since, or
+    /// not — while it is added; one no longer added is no source any more,
+    /// whatever has been added at its old address since.
+    ///
+    /// A copy recorded before keeps no source of its own — so that a uDeck
+    /// from before sources read and wrote it as it always did — and its source
+    /// is worked out from what it does keep, in this order:
     ///
     /// 1. no repository, or `record`'s: `record`'s source;
     /// 2. a ref that is not the default branch: the official source — a
@@ -160,6 +187,15 @@ public struct PreviousCopy: Codable, Equatable, Sendable {
     /// 4. a source's address as it is now (`OwnSource.isAt`): that source;
     /// 5. anything else is no source any more, and **Back to** is not offered.
     public func source(record: InstalledRecord, official: RepositoryAddress, sources: [OwnSource]) -> PreviousSource {
+        if let sourceID {
+            if sourceID == InstalledPlugins.officialSource {
+                return .source(PluginOrigin(repository: repository ?? official, ref: ref, source: sourceID))
+            }
+            guard let added = sources.first(where: { $0.id == sourceID }) else {
+                return .notASource(repository ?? record.repository)
+            }
+            return .source(PluginOrigin(repository: added.address, ref: ref, source: added.id))
+        }
         let from = repository ?? (record.source == InstalledPlugins.officialSource
             ? official : sources.first { $0.id == record.source }?.address ?? record.repository)
         if repository == nil || repository == record.repository {
@@ -321,9 +357,11 @@ public struct InstalledRecord: Codable, Equatable, Sendable {
         if automatic == true { try c.encode(true, forKey: .automatic) }
     }
 
-    /// This record's own copy, as the one a later install would replace.
+    /// This record's own copy, as the one a later install would replace: its
+    /// source by id, and its pin when it has one.
     public var asPrevious: PreviousCopy {
-        PreviousCopy(ref: ref, commit: commit, tree: tree, version: version, repository: repository)
+        PreviousCopy(ref: ref, commit: commit, tree: tree, version: version, repository: repository,
+                     sourceID: source, pinned: pinned ? true : nil)
     }
 
     /// Where this copy came from, and the source it is a copy of: what

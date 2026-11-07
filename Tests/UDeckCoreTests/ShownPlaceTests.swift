@@ -447,7 +447,7 @@ struct ShownPlaceTests {
                 && record.verification.by == nil, "the premise: installed from pull request #3, unverified")
         let pullRequest = PluginOrigin(repository: .official, ref: .pullRequest(3))
 
-        guard case .atCommit(.reinstall, let commit, let version, let origin)
+        guard case .atCommit(.reinstall, let commit, let version, let origin, _)
                 = ShownPlace.reinstall("uptime", in: paths, installed: records, shown: nil) else {
             Issue.record("Reinstall over uDeck's own copy goes ahead"); return
         }
@@ -470,14 +470,14 @@ struct ShownPlaceTests {
         let elsewhere = RepositoryAddress(path: "someone/udeck-plugins")
         records.plugins["uptime"]?.previous = PreviousCopy(ref: .pullRequest(2), commit: String(repeating: "9", count: 40),
                                                            tree: String(repeating: "7", count: 40), version: "0.9.0")
-        guard case .atCommit(.earlier, _, _, let back) = throughTheSwitch({
+        guard case .atCommit(.earlier, _, _, let back, _) = throughTheSwitch({
             ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: $0)
         }) else {
             Issue.record("Back to over uDeck's own copy goes ahead once warned"); return
         }
         #expect(back == PluginOrigin(repository: .official, ref: .pullRequest(2)))
         records.plugins["uptime"]?.previous?.repository = elsewhere
-        guard case .atCommit(.earlier, _, _, let backElsewhere) = throughTheSwitch({
+        guard case .atCommit(.earlier, _, _, let backElsewhere, _) = throughTheSwitch({
             ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: $0)
         }) else {
             Issue.record("Back to over uDeck's own copy goes ahead once warned"); return
@@ -726,7 +726,7 @@ extension ShownPlaceTests {
         }
         #expect(back.switching == ShownPlace.Switch(from: switching.to, to: .verified(version: "1.0.0",
                                                                                       repository: "github.com/iillyyaa1997/udeck-plugins")))
-        guard case .atCommit(.earlier, _, "1.0.0", let backFrom)
+        guard case .atCommit(.earlier, _, "1.0.0", let backFrom, _)
                 = ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: after, shown: back) else {
             Issue.record("Back to on its warning goes ahead"); return
         }
@@ -734,7 +734,7 @@ extension ShownPlaceTests {
         // Reinstall of the source's copy: from the source, while it is added.
         let added = OwnSource(id: Self.teamID, provider: "gitlab", host: "gitlab.example", path: "tools/team-plugins",
                               remoteID: 48, addedAt: nil)
-        guard case .atCommit(.reinstall, _, _, let again) = ShownPlace.reinstall("uptime", in: paths, installed: after,
+        guard case .atCommit(.reinstall, _, _, let again, _) = ShownPlace.reinstall("uptime", in: paths, installed: after,
                                                                                 shown: nil, sources: [added])
         else { Issue.record("Reinstall over uDeck's own copy goes ahead"); return }
         #expect(again == Self.teamOrigin)
@@ -782,7 +782,8 @@ extension ShownPlaceTests {
         #expect(ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: records, shown: back,
                                           sources: [added])
                 == .atCommit(.earlier, commit: previousCommit, version: "0.9.0",
-                             from: PluginOrigin(repository: Self.team, ref: .defaultBranch("main"), source: Self.teamID)))
+                             from: PluginOrigin(repository: Self.team, ref: .defaultBranch("main"), source: Self.teamID),
+                             pinned: false))
 
         // A copy of the source whose previous copy is the same source's (rule 1
         // of `PreviousCopy.source`): while the source is added, Back to takes it
@@ -820,7 +821,7 @@ extension ShownPlaceTests {
         try await install("uptime", from: repository, with: base)
         var records = try base.loadRecords()
         let official = ShownPlace.reinstall("uptime", in: paths, installed: records, shown: nil)
-        guard case .atCommit(.reinstall, _, _, let officialFrom) = official else {
+        guard case .atCommit(.reinstall, _, _, let officialFrom, _) = official else {
             Issue.record("the official copy reinstalls without any source added: \(official)"); return
         }
         #expect(officialFrom.source == InstalledPlugins.officialSource)
@@ -835,7 +836,7 @@ extension ShownPlaceTests {
                 "no source added: nothing reinstalls the copy")
         #expect(ShownPlace.reinstall("uptime", in: paths, installed: records, shown: nil, sources: [other]) == .nothing,
                 "another source added is not this one")
-        guard case .atCommit(.reinstall, let commit, _, let from)
+        guard case .atCommit(.reinstall, let commit, _, let from, _)
                 = ShownPlace.reinstall("uptime", in: paths, installed: records, shown: nil, sources: [other, added]) else {
             Issue.record("while it is added, Reinstall goes ahead over uDeck's own copy"); return
         }

@@ -10,6 +10,32 @@ for what that promises.
 
 ## [Unreleased]
 
+- **Earlier versions… on GitLab costs six requests, not fifty-one.** The
+  manifests of a dozen commits come in one request to GitLab's GraphQL — the
+  project by the path the source has now, believed only when the answer comes
+  from where it was asked and names the source's number, each file only when it
+  hashes to the blob id given with it, one past 5 MB left out; a GitLab whose
+  ceiling is lower is asked for as many as fit, and one without GraphQL is
+  asked through the files API, by the number, as before. On any host, what a
+  read found at each commit is kept in `catalogue/<source>/versions/<id>.json`,
+  so a read after the head moved asks only about the commits it brought, and a
+  commit whose listing the catalogue keeps — the head's — is not asked about.
+- **Back to from a pull request's copy no longer pins the verified copy.**
+  Back along the copy's own line — an update undone — still pins it; back from
+  another line of history — a pull request or a branch tried, a copy of
+  another source — puts the copy back as it was, pinned only if it was, so a
+  verified copy returned to goes on updating itself. `installed.json`'s
+  `previous` now names the source it was a copy of, and its pin when it had
+  one (`source`, `pinned`): **Back to** finds a source renamed since by its id,
+  and never takes a copy from another source added at a removed one's old
+  address. 0.7.0 reads past both keys and drops them when it writes the record.
+- **A manifest past 5 MB on GitLab is said as rule 8 says it** — *plugins/…/
+  manifest.json is 6.0 MB; one file of a plugin may be up to 5 MB.* — and, its
+  blob id being its content's, not asked for again at every read.
+- A GitHub source's describe that names no number is not believed, as a
+  GitLab's was not already; a link into a GitLab project added is told apart in
+  any case and over `http://` too, and an `http://` GitLab link offers its page
+  over HTTPS to **Add as a source…**.
 - **A public GitLab project as a source of its own** — on gitlab.com, or on a
   GitLab of one's own at `https://<host>/api/v4`. **Add a source…** takes its
   page as the browser shows it, nested groups, `/-/` pages, `.git` and a port
@@ -40,8 +66,8 @@ for what that promises.
   was renamed keeps its previous copy under the name the source has now, so
   **Back to** is offered; and a catalogue's state is written one write at a
   time. A test build says where it reads each GitLab from (`UDeckPluginsHostMap`,
-  which a build as shipped never carries). `installed.json`, `grants.json`,
-  `followed.json` and `settings.json` keep their shape.
+  which a build as shipped never carries). `grants.json`, `followed.json` and
+  `settings.json` keep their shape.
 - **A public GitHub repository as a source of its own.** Settings → Plugins →
   **Your sources** → **Add a source…** takes a github.com repository's address
   as the browser shows it; **Look up** asks for it by its name once, then for

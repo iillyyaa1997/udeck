@@ -23,6 +23,11 @@ public struct GitLabEndpoints: Equatable, Sendable {
         self.webBase = webBase
     }
 
+    /// GitLab's GraphQL, beside its API: `https://<host>/api/graphql`.
+    public var graphQL: URL {
+        apiBase.deletingLastPathComponent().appendingPathComponent("graphql")
+    }
+
     /// `host`'s endpoints: its own, or its API at `hostMap`'s base for it —
     /// nil for a host that is not one an address could name.
     public static func of(_ host: String, hostMap: [String: URL] = [:]) -> GitLabEndpoints? {
@@ -234,6 +239,150 @@ public struct GitLabClient: RepositoryProvider {
         return commits.filter { GitHash.isObjectID($0.id) }.map { CommitSummary(sha: $0.id, date: $0.committed_date.flatMap(Self.date)) }
     }
 
+    // MARK: - Many commits' files at once
+
+    /// How many commits one GraphQL request asks for. GitLab weighs each
+    /// commit's `blobs` at 14, and the project and its `id` at 3, against a
+    /// ceiling of 200 for a request without a token (**measured** on
+    /// gitlab.com: 13 answered, 16 refused at 227) — a dozen leaves room. A
+    /// GitLab whose ceiling is lower says it, and is asked for fewer.
+    public static let commitsPerQuery = 12
+
+    /// The most of a GraphQL answer read: room for one manifest as large as
+    /// a plugin's file may be, written out as JSON text, and the rest small.
+    public static let mostAnswered = 8 * 1024 * 1024
+
+    /// The file at `path` at each of `commits` (`RepositoryProvider`): a
+    /// dozen commits to a request through GitLab's GraphQL, rather than one
+    /// request each through the files API — **Earlier versions…** of fifty
+    /// versions costs five requests, not fifty, against gitlab.com's limit.
+    ///
+    /// The project is asked for by the path the source has now, and believed
+    /// only when it answers as the source's own number
+    /// (`gid://gitlab/Project/<id>`); each file's text is hashed to the blob
+    /// id GitLab gives with it, and one larger than a plugin's file may be is
+    /// left out, as the files API would refuse it. A commit whose folder had
+    /// no such file answers no blob, and is left out. Whatever GraphQL does
+    /// not answer — a GitLab without it, another project at the path, a file
+    /// that is not text, an answer that is not GraphQL's — is asked of the
+    /// files API, by the project's number, one by one (`filesOneByOne`); the
+    /// limit, and no answer at all, end the read, as they end any.
+    public func files(at path: String, commits: [String]) async throws -> [String: Data] {
+        var found: [String: Data] = [:]
+        var rest: [String] = []
+        var size = Self.commitsPerQuery
+        var start = 0
+        while start < commits.count {
+            let batch = Array(commits[start ..< min(start + size, commits.count)])
+            do {
+                let answer = try await blobs(at: path, commits: batch)
+                found.merge(answer.found) { kept, _ in kept }
+                rest += answer.unanswered
+                start += batch.count
+            } catch GraphQLRefusal.tooComplex(let ceiling) where Self.fitting(ceiling) < batch.count {
+                size = Self.fitting(ceiling)
+            } catch let error as ProviderError {
+                switch error {
+                case .rateLimited, .unreachable: throw error
+                default:
+                    rest += commits[start...]
+                    start = commits.count
+                }
+            } catch {
+                // GraphQL will not answer here: the rest one by one.
+                rest += commits[start...]
+                start = commits.count
+            }
+        }
+        if !rest.isEmpty {
+            found.merge(try await filesOneByOne(at: path, commits: rest)) { kept, _ in kept }
+        }
+        return found
+    }
+
+    /// How many commits fit under a complexity `ceiling` — at least one.
+    static func fitting(_ ceiling: Int) -> Int {
+        max(1, (ceiling - 3) / 14)
+    }
+
+    /// Why GraphQL answered nothing to use.
+    enum GraphQLRefusal: Error, Equatable {
+        /// The query weighs more than GitLab's `ceiling` allows.
+        case tooComplex(ceiling: Int)
+        /// No project at the path, another project's number, errors, or an
+        /// answer that is not GraphQL's.
+        case notAnswered
+    }
+
+    /// One GraphQL request: `path` at each of `commits` (at most a dozen),
+    /// those it gave — hashed to their blob ids — and those it gave no usable
+    /// text for. A commit with no blob at `path` is in neither.
+    func blobs(at path: String, commits: [String]) async throws -> (found: [String: Data], unanswered: [String]) {
+        let declared = commits.indices.map { "$r\($0): String!" }.joined(separator: ", ")
+        let fields = commits.indices.map { "c\($0): blobs(paths: $paths, ref: $r\($0)) { nodes { oid rawTextBlob } }" }
+            .joined(separator: " ")
+        let query = "query($path: ID!, $paths: [String!]!, \(declared)) "
+            + "{ project(fullPath: $path) { id repository { \(fields) } } }"
+        var variables: [String: Any] = ["path": address.path, "paths": [path]]
+        for (index, commit) in commits.enumerated() { variables["r\(index)"] = commit }
+        let body = try JSONSerialization.data(withJSONObject: ["query": query, "variables": variables])
+        let data = try await post(endpoints.graphQL, body: body)
+
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw GraphQLRefusal.notAnswered
+        }
+        if let errors = object["errors"] as? [[String: Any]], !errors.isEmpty {
+            let message = errors.compactMap { $0["message"] as? String }.joined(separator: " ")
+            if let ceiling = Self.complexityCeiling(message) { throw GraphQLRefusal.tooComplex(ceiling: ceiling) }
+            throw GraphQLRefusal.notAnswered
+        }
+        guard let project = (object["data"] as? [String: Any])?["project"] as? [String: Any],
+              project["id"] as? String == "gid://gitlab/Project/\(remoteID)",
+              let repository = project["repository"] as? [String: Any] else {
+            throw GraphQLRefusal.notAnswered
+        }
+        var found: [String: Data] = [:]
+        var unanswered: [String] = []
+        for (index, commit) in commits.enumerated() {
+            guard let field = repository["c\(index)"] as? [String: Any],
+                  let nodes = field["nodes"] as? [[String: Any]] else {
+                unanswered.append(commit)
+                continue
+            }
+            guard let node = nodes.first else { continue }
+            guard let oid = node["oid"] as? String, let text = node["rawTextBlob"] as? String else {
+                unanswered.append(commit)
+                continue
+            }
+            // Its blob first: text that is not the blob GitLab named is no
+            // answer about it, whatever its size — the files API is asked.
+            let bytes = Data(text.utf8)
+            guard GitHash.blob(bytes) == oid else {
+                unanswered.append(commit)
+                continue
+            }
+            guard bytes.count <= RepositoryRules.maximumFileBytes else { continue }
+            found[commit] = bytes
+        }
+        return (found, unanswered)
+    }
+
+    /// Whether `answered` — where an answer came from — is `asked`'s origin:
+    /// its scheme, its host and its port.
+    static func sameOrigin(_ answered: URL?, _ asked: URL) -> Bool {
+        guard let answered else { return false }
+        return answered.scheme?.lowercased() == asked.scheme?.lowercased()
+            && answered.host?.lowercased() == asked.host?.lowercased() && answered.port == asked.port
+    }
+
+    /// The ceiling GitLab names in *"Query has complexity of 227, which
+    /// exceeds max complexity of 200"* — nil for any other message.
+    static func complexityCeiling(_ message: String) -> Int? {
+        guard let range = message.range(of: "exceeds max complexity of ") else { return nil }
+        let digits = message[range.upperBound...].prefix { ("0" ... "9").contains($0) }
+        return Int(digits).flatMap { $0 > 0 ? $0 : nil }
+    }
+
     /// `GET /merge_requests/:iid` — a merge request, as a pull request reads:
     /// `opened` is open; `closed` and `locked` closed; `merged` closed and
     /// merged, as `merge_commit_sha` — or `squash_commit_sha` when GitLab
@@ -437,6 +586,57 @@ public struct GitLabClient: RepositoryProvider {
         if lookingUp, response.statusCode == 404, !Self.isGitLabError(data) { throw GitLabAnswer.notGitLab }
         try judge(response, body: data, allowNotModified: allowNotModified, notFoundOn400: notFoundOn400)
         return (data, response)
+    }
+
+    /// A `POST` of the JSON `body` to `url` — GraphQL's — its answer read as
+    /// it arrives and no further than `most` bytes, and judged as every answer
+    /// is (`judge`), the limit read from it too. By default `mostAnswered`:
+    /// a dozen manifests are a few kilobytes, and a batch whose answer runs
+    /// past it is asked of the files API one file at a time, 5 MB each at the
+    /// most — never a dozen of the largest held at once.
+    private func post(_ url: URL, body: Data, most: Int = GitLabClient.mostAnswered) async throws -> Data {
+        if let until = limits.current.apiBlocked(now: now()) { throw ProviderError.rateLimited(until: until) }
+        var request = URLRequest(url: url, timeoutInterval: GitHubClient.requestTimeout)
+        request.httpMethod = "POST"
+        request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        let stream: URLSession.AsyncBytes
+        let response: HTTPURLResponse
+        do {
+            let (got, answer) = try await session.bytes(for: request)
+            guard let http = answer as? HTTPURLResponse else { throw ProviderError.badAnswer("not an HTTP answer") }
+            (stream, response) = (got, http)
+        } catch let error as ProviderError {
+            throw error
+        } catch {
+            throw ProviderError.unreachable(error.localizedDescription)
+        }
+        // An answer from anywhere but where it was asked — a redirect followed
+        // to another host, port or scheme — says nothing of this GitLab's
+        // project, whatever number it names: GraphQL is not asked here, and
+        // the files API is, by the project's number.
+        guard Self.sameOrigin(response.url, url) else {
+            stream.task.cancel()
+            throw GraphQLRefusal.notAnswered
+        }
+        var data = Data()
+        do {
+            for try await byte in stream {
+                data.append(byte)
+                if data.count > most {
+                    stream.task.cancel()
+                    throw ProviderError.tooLarge(bytes: data.count)
+                }
+            }
+        } catch let error as ProviderError {
+            throw error
+        } catch {
+            throw ProviderError.unreachable(error.localizedDescription)
+        }
+        try judge(response, body: data, allowNotModified: false, notFoundOn400: { _ in false })
+        return data
     }
 
     /// One file, read as it arrives, no further than one byte past `most`.

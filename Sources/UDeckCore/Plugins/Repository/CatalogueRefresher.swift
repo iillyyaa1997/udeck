@@ -186,17 +186,21 @@ public struct CatalogueRefresher: Sendable {
     /// each checked against its blob id — the ones not stored already. One
     /// larger than a plugin's file may be, refused as it arrives where the
     /// listing gives no sizes (GitLab's, S4-15), is that plugin's alone: it
-    /// is not stored, and its row says its manifest could not be fetched,
-    /// as rule 8 would have refused it from a listing with sizes.
+    /// is not stored, its size is (`CatalogueStore.refuseAsTooLarge`), and
+    /// its row says the file is larger than a plugin's file may be, as rule 8
+    /// would have refused it from a listing with sizes. Its blob id is its
+    /// content's, so it is not asked for again while a kept listing names it.
     public func fetchManifests(of listing: CommitListing, folders: [String], language: String) async throws {
         for folder in folders {
             guard let plugin = listing.plugins[folder] else { continue }
             for name in [PluginDiscovery.manifestFilename, "manifest.\(language.lowercased()).json"] {
-                guard let file = plugin.file(at: name), store.blob(file.sha) == nil else { continue }
+                guard let file = plugin.file(at: name), store.blob(file.sha) == nil,
+                      store.refusedAsTooLarge(file.sha) == nil else { continue }
                 do {
                     _ = try await blob(file.sha, path: "\(CommitListing.pluginsFolder)/\(folder)/\(name)",
                                        commit: listing.commit)
-                } catch ProviderError.tooLarge {
+                } catch ProviderError.tooLarge(let bytes) {
+                    try? store.refuseAsTooLarge(file.sha, bytes: bytes)
                     continue
                 }
             }

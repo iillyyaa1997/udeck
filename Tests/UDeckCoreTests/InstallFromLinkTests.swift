@@ -87,7 +87,7 @@ struct InstallFromLinkTests {
             request = InstallRequest(operation: operation, id: PluginIdentifier(rawValue: id)!, sourceRepository: .official,
                                      repository: origin.repository, ref: origin.ref, commit: commit, folder: folder,
                                      version: version, headCommit: Self.headCommit)
-        case .atCommit(let operation, let commit, let version, let origin):
+        case .atCommit(let operation, let commit, let version, let origin, _):
             let source = commit == Self.headCommit ? Self.head : Self.pullRequestHead
             request = InstallRequest(operation: operation, id: PluginIdentifier(rawValue: id)!, sourceRepository: .official,
                                      repository: origin.repository, ref: origin.ref, commit: commit,
@@ -173,7 +173,8 @@ struct InstallFromLinkTests {
         let record = try await perform(confirmed, "uptime", with: installer)
         #expect(record.ref == .pullRequest(3) && record.verification.status == .unverified)
         #expect(record.previous == PreviousCopy(ref: verified.ref, commit: Self.headCommit, tree: verified.tree,
-                                                version: "1.0.0", repository: .official),
+                                                version: "1.0.0", repository: .official,
+                                                sourceID: InstalledPlugins.officialSource),
                 "the verified copy is what Back to puts back")
     }
 
@@ -291,8 +292,8 @@ struct InstallFromLinkTests {
         // the verified copy for the verified copy, the same line: nothing to warn of.
         let merged = Adoption.DefaultBranch(repository: .official, name: "main", head: Self.laterCommit, trees: ["uptime": pullTree])
         let step = ShownPlace.backToPrevious("uptime", source: .official, in: paths, installed: back, shown: nil, head: merged)
-        #expect(step == .atCommit(.earlier, commit: Self.pullCommit, version: "1.0.1", from: Self.pullRequest),
-                "no warning, and the files from where they came")
+        #expect(step == .atCommit(.earlier, commit: Self.pullCommit, version: "1.0.1", from: Self.pullRequest, pinned: false),
+                "no warning, and the files from where they came — from another line, so not pinned")
         let request = InstallRequest(operation: .earlier, id: PluginIdentifier(rawValue: "uptime")!, sourceRepository: .official,
                                      repository: .official, ref: .pullRequest(3), commit: Self.pullCommit,
                                      folder: Self.pullRequestHead.plugin("uptime"), version: "1.0.1", headCommit: Self.laterCommit,

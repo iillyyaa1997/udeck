@@ -124,9 +124,21 @@ public struct Catalogue: Equatable, Sendable {
         language: String,
         sizesListed: Bool = true
     ) -> CatalogueEntry {
-        let manifestData = plugin.file(at: PluginDiscovery.manifestFilename).flatMap { store.blob($0.sha) }
-        let verdict = RepositoryRules.check(folder: folder, listing: plugin, manifest: manifestData, udeck: udeck,
+        let manifestFile = plugin.file(at: PluginDiscovery.manifestFilename)
+        let manifestData = manifestFile.flatMap { store.blob($0.sha) }
+        var verdict = RepositoryRules.check(folder: folder, listing: plugin, manifest: manifestData, udeck: udeck,
                                             sizesListed: sizesListed)
+        // A manifest refused as it arrived for being larger than a plugin's
+        // file may be — where the listing gives no sizes — is said so, as
+        // rule 8 says it from a listing that does, not as one that could not
+        // be fetched.
+        if manifestData == nil, let manifestFile, let bytes = store.refusedAsTooLarge(manifestFile.sha) {
+            let path = "\(CommitListing.pluginsFolder)/\(folder)/\(PluginDiscovery.manifestFilename)"
+            verdict.refusals = verdict.refusals.map { refusal in
+                if case .manifestUnreadable(path, _) = refusal { return .fileTooLarge(path: path, bytes: bytes) }
+                return refusal
+            }
+        }
         var translations: [String: ManifestTranslation] = [:]
         let code = language.lowercased()
         if let file = plugin.file(at: "manifest.\(code).json"), let data = store.blob(file.sha),

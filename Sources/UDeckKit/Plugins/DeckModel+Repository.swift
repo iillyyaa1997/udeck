@@ -842,8 +842,8 @@ extension DeckModel {
         case .install(let operation, let commit, let folder, let version, let origin):
             run(operation, id: id, commit: commit, folder: folder, version: version, from: origin)
             return .goAhead
-        case .atCommit(let operation, let commit, let version, let origin):
-            runAtCommit(operation, id: id, commit: commit, version: version, from: origin)
+        case .atCommit(let operation, let commit, let version, let origin, let pinned):
+            runAtCommit(operation, id: id, commit: commit, version: version, from: origin, pinned: pinned)
             return .goAhead
         case .remove:
             // Removal has its own call; no step but `remove`'s answers this.
@@ -1005,7 +1005,7 @@ extension DeckModel {
     /// An operation at a commit that is not the head: its listing from the
     /// cache, or one request for it — to the repository the copy comes from.
     private func runAtCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
-                             from origin: PluginOrigin) {
+                             from origin: PluginOrigin, pinned: Bool? = nil) {
         // Nothing is asked of a source that cannot be read — the official one
         // with **Official catalogue** off, a source no longer added —
         // whichever button was pressed, and whatever screen it was on.
@@ -1026,7 +1026,7 @@ extension DeckModel {
                     throw InstallError.refused([.noManifest(path: "plugins/\(id)/manifest.json")])
                 }
                 busyPlugin = nil
-                run(operation, id: id, commit: commit, folder: folder, version: version, from: origin)
+                run(operation, id: id, commit: commit, folder: folder, version: version, from: origin, pinned: pinned)
             } catch ProviderError.notFound {
                 // uDeck keeps no copy of what a rewritten history took away:
                 // the commit is gone, and that is what is said.
@@ -1061,7 +1061,8 @@ extension DeckModel {
         folder: PluginListing,
         version: String,
         from origin: PluginOrigin,
-        automatic: Bool = false
+        automatic: Bool = false,
+        pinned: Bool? = nil
     ) {
         let origin = takenNow(origin)
         guard canRead(origin.source), busyPlugin == nil,
@@ -1087,7 +1088,8 @@ extension DeckModel {
             operation: operation, id: identifier, from: origin, sourceRepository: sourceRepository(of: origin.source),
             commit: commit, folder: folder, version: version,
             headCommit: head?.commit, headTree: head?.entry(id)?.listing.tree,
-            defaultBranch: head?.branch ?? catalogueState(of: origin.source).defaultBranch, automatic: automatic
+            defaultBranch: head?.branch ?? catalogueState(of: origin.source).defaultBranch, automatic: automatic,
+            pinned: pinned
         )
         // What **Look up** heard of the pull request or the branch this copy
         // comes from, if that is where it comes from, and when: kept with what

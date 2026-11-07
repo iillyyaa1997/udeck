@@ -149,6 +149,15 @@ public struct OwnSource: Equatable, Sendable {
         guard repository.provider == provider, repository.host.lowercased() == host else { return false }
         return provider == SourceLink.github ? repository.path.lowercased() == path.lowercased() : repository.path == path
     }
+
+    /// Whether `repository` names this source's current address with its
+    /// path in any case: how GitLab finds a project by its path (**measured**),
+    /// so what a link names — never what a copy is taken from, which `isAt`
+    /// holds byte for byte on GitLab.
+    public func isAtWhateverItsCase(_ repository: RepositoryAddress) -> Bool {
+        guard repository.provider == provider, repository.host.lowercased() == host else { return false }
+        return repository.path.lowercased() == path.lowercased()
+    }
 }
 
 /// `~/.udeck/sources.json`: the sources the operator added, in the order

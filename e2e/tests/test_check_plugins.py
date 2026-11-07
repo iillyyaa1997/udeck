@@ -428,7 +428,8 @@ def test_every_older_check_that_moves_main_starts_with_updates_by_themselves_off
     tree = ast.parse((Path(__file__).resolve().parents[1] / "checks" / "check_plugins.py").read_text())
     # The ones whose point is what happens by itself after main moved — an update made, or, the official address
     # another repository's, none made.
-    new = {"check_verified_updates_itself", "check_permissions_change_only_offers", "check_official_id_mismatch"}
+    new = {"check_verified_updates_itself", "check_permissions_change_only_offers", "check_official_id_mismatch",
+           "check_back_from_a_pull_request_updates_itself"}
     moving = []
     for function in tree.body:
         if not isinstance(function, ast.FunctionDef) or not function.name.startswith("check_"):
@@ -1049,10 +1050,15 @@ def test_the_gitlab_checks_name_the_projects_there_are():
     assert {key: projects[key].id for key in projects} == {checks.GL_PROJECT: 7, checks.GL_TEAM: 9, checks.GL_EMPTY: 8,
                                                           checks.GL_ON_COM: 1001}
     plugins = projects[checks.GL_PROJECT].repository
-    assert plugins.names == ["g1", "g2"]
+    assert plugins.names == ["g1", "g2", "g3"]
     assert plugins.commits["g1"].snapshot.at(f"plugins/{checks.GL_HELLO}") is not None
     assert plugins.commits["g1"].snapshot.at(f"plugins/{checks.GL_BIG}") is None
     assert plugins.commits["g2"].snapshot.at(f"plugins/{checks.GL_BIG}/big.bin") is not None
+    assert plugins.commits["g2"].snapshot.at(f"plugins/{checks.GL_HUGE}") is None
+    # g3's gl-huge has a manifest past 5 MB, made when the fake starts; its words are rule 8's for it.
+    huge = plugins.commits["g3"].snapshot.at(f"plugins/{checks.GL_HUGE}/manifest.json")
+    assert huge is not None and len(plugins.commits["g3"].snapshot.blobs[huge[1]]) == 6 * 1024 * 1024
+    assert checks.MANIFEST_TOO_LARGE == checks.FILE_TOO_LARGE.replace("gl-big/big.bin", f"{checks.GL_HUGE}/manifest.json")
     assert projects[checks.GL_TEAM].repository.commits["n1"].snapshot.at(f"plugins/{checks.GL_TEAM_PLUGIN}") is not None
     assert projects[checks.GL_ON_COM].repository.commits["l1"].snapshot.at(f"plugins/{checks.GL_COM_PLUGIN}") is not None
     assert projects[checks.GL_EMPTY].repository.commits["e1"].snapshot.at("plugins") is None

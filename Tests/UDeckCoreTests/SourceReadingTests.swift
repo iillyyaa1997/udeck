@@ -210,6 +210,18 @@ struct SourceReadingTests {
         #expect(provider.renamedTo == nil && provider.address.path == "someone/team-plugins", "its name not taken either")
     }
 
+    @Test("a describe by the source's number that names no number is not believed either, on GitHub as on GitLab")
+    func noNumber() async throws {
+        let host = "unnumbered-\(UUID().uuidString.lowercased()).invalid"
+        StubAnswers.answer(host) { _ in (200, Self.describe("someone/elsewhere", id: nil)) }
+        defer { StubAnswers.forget(host) }
+        let provider = try #require(Self.clients(host).byID(Self.teamID, path: "someone/team-plugins"))
+        await #expect(throws: ProviderError.badAnswer("the repository asked for as \(Self.teamID) answered with no number")) {
+            _ = try await provider.describe()
+        }
+        #expect(provider.renamedTo == nil && provider.address.path == "someone/team-plugins", "its name not taken")
+    }
+
     @Test("renamed: only a client addressed by its number, and only to a name GitHub allows")
     func renamed() {
         let endpoints = GitHubEndpoints(apiBase: URL(string: "https://x.invalid/api")!, rawBase: URL(string: "https://x.invalid/raw")!,
@@ -488,10 +500,17 @@ struct SourceReadingTests {
             ("https://gitlab.example.test/tools/udeck-plugins/-/tree/fix/plugins/gl-hello", true),
             ("gitlab.example.test/tools/udeck-plugins.git", true),
             ("https://gitlab.example.test:8443/group/sub/team/-/tree/main", true),
-            // Not that project: its path on another host or port, another case, another project of the host.
+            // Its path in another case is the project, as GitLab finds it (measured); so is its page over http://,
+            // which the browser takes to HTTPS — as a GitHub source's is.
+            ("https://gitlab.example.test/Tools/UDeck-Plugins/-/tree/fix", true),
+            ("http://gitlab.example.test/tools/udeck-plugins/-/merge_requests/3", true),
+            ("HTTP://gitlab.example.test:8443/group/sub/team", true),
+            ("http://github.com/someone/team-plugins/tree/fix", true),
+            // Not that project: its path on another host or port, another project of the host.
             ("https://gitlab.com/tools/udeck-plugins/-/tree/fix", false),
+            ("http://gitlab.com/tools/udeck-plugins/-/tree/fix", false),
             ("https://gitlab.example.test:8443/tools/udeck-plugins", false),
-            ("https://gitlab.example.test/Tools/udeck-plugins/-/tree/fix", false),
+            ("https://gitlab.example.test/tools/udeck-plugins-2/-/tree/fix", false),
             ("https://gitlab.example.test/tools/other/-/merge_requests/3", false),
             ("https://gitlab.example.test/group/sub/team/-/tree/main", false),
         ] {

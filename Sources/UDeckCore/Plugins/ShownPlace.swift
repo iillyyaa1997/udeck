@@ -334,8 +334,12 @@ public enum ShownPlace {
         /// repository and the line of history the copy belongs to:
         /// **Reinstall** and **Back to** where the copy came from — a pull
         /// request's copy stays one — and an earlier version from the
-        /// default branch.
-        case atCommit(InstallRequest.Operation, commit: String, version: String, from: PluginOrigin)
+        /// default branch. `pinned` is what the record will say of the
+        /// operator's choice when the button decides it
+        /// (`InstallRequest.pinned`): **Back to** from another line of
+        /// history's.
+        case atCommit(InstallRequest.Operation, commit: String, version: String, from: PluginOrigin,
+                      pinned: Bool? = nil)
         /// **Remove**.
         case remove
     }
@@ -413,6 +417,13 @@ public enum ShownPlace {
     /// sources added (`PreviousCopy.source`): nothing for a copy from what is
     /// no source any more — nor for one of a source no longer added: Back to
     /// gives nothing for it until the source is added again.
+    ///
+    /// Back along the copy's own line — an update undone — the copy put back
+    /// is pinned, as an earlier version is: the operator chose it over the
+    /// newest. Back from another line — a pull request or a branch tried, a
+    /// copy of another source — it is put back as it was, pinned only if it
+    /// was (`PreviousCopy.pinned`), so a verified copy returned to goes on
+    /// updating by itself.
     public static func backToPrevious(_ id: String, source: RepositoryAddress, in paths: UDeckPaths,
                                       installed: InstalledPlugins, shown: Place?,
                                       head: Adoption.DefaultBranch? = nil, sources: [OwnSource] = []) -> Step {
@@ -421,9 +432,10 @@ public enum ShownPlace {
               origin.source == InstalledPlugins.officialSource || sources.contains(where: { $0.id == origin.source }) else {
             return .nothing
         }
+        let pinned: Bool? = record.origin.followsTheSameLine(as: origin) ? nil : (previous.pinned ?? false)
         return atCommit(.earlier, id: id, commit: previous.commit, version: previous.version,
                         from: origin, in: paths, installed: installed, shown: shown,
-                        tree: previous.tree, head: head, official: source)
+                        tree: previous.tree, head: head, official: source, pinned: pinned)
     }
 
     /// **Update** along the line a copy of code nobody verified came from: the
@@ -480,11 +492,11 @@ public enum ShownPlace {
     static func atCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
                          from origin: PluginOrigin, in paths: UDeckPaths, installed: InstalledPlugins,
                          shown: Place?, tree: String? = nil, head: Adoption.DefaultBranch? = nil,
-                         official: RepositoryAddress? = nil) -> Step {
+                         official: RepositoryAddress? = nil, pinned: Bool? = nil) -> Step {
         let now = Place.now(id, in: paths, record: installed.plugins[id], bringing: .atCommit(version: version, commit: commit),
                             from: recordedAs(origin, tree: tree, id: id, head: head), official: official)
         if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
-        return .atCommit(operation, commit: commit, version: version, from: origin)
+        return .atCommit(operation, commit: commit, version: version, from: origin, pinned: pinned)
     }
 
     /// **Install** on a plugin **Install from a link…** listed: its folder at

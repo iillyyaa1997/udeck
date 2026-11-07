@@ -1,0 +1,14 @@
+{
+  "id": "gl-big",
+  "name": "GitLab big",
+  "version": "1.0.0",
+  "api": 1,
+  "kind": "poll",
+  "description": "A plugin with a file larger than a plugin's file may be.",
+  "author": "uDeck lab",
+  "run": [
+    "./run.sh"
+  ],
+  "interval": 60,
+  "timeout": 2
+}

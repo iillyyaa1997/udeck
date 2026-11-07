@@ -29,9 +29,11 @@ public enum LinkRefusal {
     /// source of its own (S4-20, item 16), with the project's page when the
     /// link reads as one (`SourceLink`) — which **Add as a source…** fills
     /// **Add a source…** with — and none when it does not. A GitLab's with a
-    /// port, which is no link to GitHub's reading, is that project's too.
+    /// port, which is no link to GitHub's reading, is that project's too; so
+    /// is one written with `http://`, whose page over HTTPS is the one offered
+    /// (`RepositoryLink.overHTTPS`).
     public static func refused(_ refusal: RepositoryLink.Refusal, text: String, official: RepositoryAddress) -> Phrase {
-        let project: SourceLink? = switch SourceLink.read(text, official: official) {
+        let project: SourceLink? = switch SourceLink.read(RepositoryLink.overHTTPS(text), official: official) {
         case .success(let link) where link.provider == SourceLink.gitlab: link
         default: nil
         }
