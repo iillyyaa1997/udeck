@@ -614,45 +614,129 @@ def test_the_focus_is_read_as_its_identifier_and_subrole():
 
 
 def _secret_scene(monkeypatch, focus):
-    """`enter_secret` with the focus read from `focus` in turn, and every click and every typing recorded."""
+    """`enter_secret` with the focus read from `focus` in turn, and every click and every script asked recorded."""
     answers = iter(focus)
     monkeypatch.setattr(ui, "focused", lambda machine, step: next(answers))
-    clicks, typed = [], []
+    clicks = []
     monkeypatch.setattr(ui, "click", lambda machine, identifier, step, window=ui.SETTINGS_WINDOW: clicks.append(identifier))
-    monkeypatch.setattr(ui, "type_text", lambda machine, text, step: typed.append(text))
-    return clicks, typed
+    machine = FakeMachine()
+    return machine, clicks
 
 
 SECURE = ("sources.add.tokenField", ui.SECURE_FIELD)
+SECRET_FILE = "/Users/runner/.udeck-e2e-secrets/gitlab-private"
+
+
+def _typed(machine):
+    return [script for script in machine.ssh.scripts if "keystroke" in script]
 
 
 def test_a_secret_is_typed_only_once_its_secure_field_has_the_focus(monkeypatch):
     """Run 42335961364: the click left the focus in the address field, and the token was typed there, in the clear."""
-    clicks, typed = _secret_scene(monkeypatch, [("sources.add.field", "AXTextField"), SECURE, SECURE])
-    ui.enter_secret(FakeMachine(), "sources.add.tokenField", "glpat-fixture", "typing the token")
-    assert clicks == ["sources.add.tokenField"] and typed == ["glpat-fixture"]
+    machine, clicks = _secret_scene(monkeypatch, [("sources.add.field", "AXTextField"), SECURE, SECURE])
+    ui.enter_secret(machine, "sources.add.tokenField", SECRET_FILE, "typing the token")
+    assert clicks == ["sources.add.tokenField"] and len(_typed(machine)) == 1
+
+
+def test_a_secret_is_typed_from_its_file_and_its_value_is_in_no_command(monkeypatch):
+    """S4-22: the script names the file and reads it in the guest — the value is never in `osascript -e`'s argument."""
+    machine, _ = _secret_scene(monkeypatch, [SECURE, SECURE])
+    ui.enter_secret(machine, "sources.add.tokenField", SECRET_FILE, "typing the token")
+    [script] = _typed(machine)
+    assert f'read (POSIX file "{SECRET_FILE}")' in script
+    assert "keystroke theSecret" in script and 'tell process "uDeck"' in script
+    # Its variable is no process's property, and it is set outside `tell process`.
+    assert script.index("set theSecret to") < script.index("tell application")
 
 
 def test_a_secret_is_never_typed_into_a_field_that_shows_it(monkeypatch):
-    clicks, typed = _secret_scene(monkeypatch, [("sources.add.field", "AXTextField")] * ui.SECRET_FOCUS_TRIES)
+    machine, clicks = _secret_scene(monkeypatch, [("sources.add.field", "AXTextField")] * ui.SECRET_FOCUS_TRIES)
     with pytest.raises(LabError, match="never took the focus"):
-        ui.enter_secret(FakeMachine(), "sources.add.tokenField", "glpat-fixture", "typing the token")
-    assert typed == [] and clicks == ["sources.add.tokenField"] * ui.SECRET_FOCUS_TRIES
+        ui.enter_secret(machine, "sources.add.tokenField", SECRET_FILE, "typing the token")
+    assert _typed(machine) == [] and clicks == ["sources.add.tokenField"] * ui.SECRET_FOCUS_TRIES
 
 
 def test_the_right_identifier_in_a_field_that_shows_its_text_is_not_enough(monkeypatch):
     plain = ("sources.add.tokenField", "")
-    clicks, typed = _secret_scene(monkeypatch, [plain] * ui.SECRET_FOCUS_TRIES)
+    machine, _ = _secret_scene(monkeypatch, [plain] * ui.SECRET_FOCUS_TRIES)
     with pytest.raises(LabError, match="never took the focus"):
-        ui.enter_secret(FakeMachine(), "sources.add.tokenField", "glpat-fixture", "typing the token")
-    assert typed == []
+        ui.enter_secret(machine, "sources.add.tokenField", SECRET_FILE, "typing the token")
+    assert _typed(machine) == []
 
 
 def test_the_focus_leaving_while_typing_is_a_lab_problem(monkeypatch):
-    clicks, typed = _secret_scene(monkeypatch, [SECURE, ("sources.add.field", "AXTextField")])
+    machine, _ = _secret_scene(monkeypatch, [SECURE, ("sources.add.field", "AXTextField")])
     with pytest.raises(LabError, match="left sources.add.tokenField"):
-        ui.enter_secret(FakeMachine(), "sources.add.tokenField", "glpat-fixture", "typing the token")
-    assert typed == ["glpat-fixture"]
+        ui.enter_secret(machine, "sources.add.tokenField", SECRET_FILE, "typing the token")
+    assert len(_typed(machine)) == 1
+
+
+class _Pasteboard(FakeGuest):
+    """A guest whose shell answers the pasteboard's commands, recording them."""
+
+    def __init__(self, compared=0):
+        super().__init__()
+        self.compared = compared
+
+    def run(self, command, step, seconds=None, check=True):
+        if command.startswith(("pbcopy ", "pbpaste ")):
+            self.scripts.append(command)
+            return done([], self.compared if command.startswith("pbpaste") else 0, "")
+        return super().run(command, step, seconds, check)
+
+
+def test_a_pasted_secret_goes_from_its_file_to_the_pasteboard_and_in_with_command_v_where_the_focus_is(monkeypatch):
+    machine, clicks = _secret_scene(monkeypatch, [("sources.add.field", "AXTextField"), SECURE, SECURE])
+    machine.ssh = _Pasteboard()
+    ui.paste_secret(machine, "sources.add.tokenField", SECRET_FILE, "pasting the token")
+    copied, compared, pasted = machine.ssh.scripts
+    assert copied == f"pbcopy < {SECRET_FILE}"
+    assert compared == f"pbpaste | cmp -s - {SECRET_FILE}"
+    assert 'keystroke "v" using command down' in pasted
+    assert clicks == ["sources.add.tokenField"]
+
+
+def test_a_copy_that_left_the_pasteboard_without_the_secret_pastes_nothing(monkeypatch):
+    """A ⌘V into an empty field says something of uDeck only when the pasteboard held the token first."""
+    machine, clicks = _secret_scene(monkeypatch, [SECURE, SECURE])
+    machine.ssh = _Pasteboard(compared=1)
+    with pytest.raises(LabError, match="does not hold the secret after pbcopy"):
+        ui.paste_secret(machine, "sources.add.tokenField", SECRET_FILE, "pasting the token")
+    assert not [script for script in machine.ssh.scripts if "command down" in script] and clicks == []
+
+
+def test_a_secret_is_not_pasted_into_a_field_that_shows_it(monkeypatch):
+    machine, _ = _secret_scene(monkeypatch, [("sources.add.field", "AXTextField")] * ui.SECRET_FOCUS_TRIES)
+    machine.ssh = _Pasteboard()
+    with pytest.raises(LabError, match="never took the focus"):
+        ui.paste_secret(machine, "sources.add.tokenField", SECRET_FILE, "pasting the token")
+    assert not [script for script in machine.ssh.scripts if "command down" in script]
+
+
+def test_the_pasteboard_is_compared_with_the_secret_in_the_guest_never_read_out():
+    machine = FakeMachine()
+    machine.ssh = _Pasteboard(compared=0)
+    assert ui.pasteboard_holds(machine, SECRET_FILE, "reading the pasteboard")
+    assert machine.ssh.scripts == [f"pbpaste | cmp -s - {SECRET_FILE}"]
+    machine.ssh = _Pasteboard(compared=1)
+    assert not ui.pasteboard_holds(machine, SECRET_FILE, "reading the pasteboard")
+
+
+class _Shell(FakeGuest):
+    def run(self, command, step, seconds=None, check=True):
+        self.scripts.append(command)
+        return done([], 0, "/Users/runner/.udeck-e2e-secrets\n")
+
+
+def test_a_fixture_secret_is_kept_in_a_file_its_owner_alone_reads_at_an_absolute_path():
+    machine = FakeMachine()
+    machine.ssh = _Shell()
+    path = ui.keep_secret(machine, "gitlab-private", "glpat-fixture", "keeping the token")
+    assert path == SECRET_FILE
+    [command] = machine.ssh.scripts
+    assert command.startswith("umask 077 && ") and "glpat-fixture" in command
+    with pytest.raises(LabError, match="letters, digits and dashes"):
+        ui.keep_secret(machine, "../escape", "x", "keeping the token")
 
 
 def test_return_is_pressed_in_the_focused_field_by_its_key_code():

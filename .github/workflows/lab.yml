@@ -39,13 +39,15 @@ jobs:
   # Which jobs run what. All of it by default, in five jobs — a free account
   # runs at most five macOS jobs at once — with the plugins group, the longest,
   # dealt into three parts (`--shard`). What was asked for, in one job, when
-  # something was.
+  # something was — but for the smoke that carries a real secret, which runs
+  # only in a job of its own (`secret`) and only when it is named.
   plan:
     name: Plan
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
+      secret: ${{ steps.plan.outputs.secret }}
     steps:
       - id: plan
         env:
@@ -58,8 +60,17 @@ jobs:
           if [ -n "$FROM" ]; then pair+=(--from "$FROM"); fi
           if [ -n "$TO" ]; then pair+=(--to "$TO"); fi
           pair_text="${pair[*]:-}"
-          if [ -n "$RUN" ]; then
-            matrix=$(jq -cn --arg run "$RUN" --arg pair "$pair_text" \
+          secret=false
+          rest=()
+          read -r -a words <<< "$RUN"
+          for word in "${words[@]+"${words[@]}"}"; do
+            if [ "$word" = "smoke.real-github-token" ]; then secret=true; else rest+=("$word"); fi
+          done
+          asked="${rest[*]:-}"
+          if [ -n "$RUN" ] && [ -z "$asked" ]; then
+            matrix='[]'
+          elif [ -n "$RUN" ]; then
+            matrix=$(jq -cn --arg run "$asked" --arg pair "$pair_text" \
               '[{name: $run, slug: "asked", args: ($run + " " + $pair)}]')
           else
             matrix=$(jq -cn --arg pair "$pair_text" '[
@@ -71,7 +82,9 @@ jobs:
             ]')
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "secret=$secret" >> "$GITHUB_OUTPUT"
           echo "$matrix" | jq .
+          echo "the smoke with the job's token: $secret"
 
   # uDeck compiled once, for every job that runs checks: they assemble, sign and
   # zip the builds a check asks for from these binaries (`--prebuilt`), which
@@ -119,6 +132,7 @@ jobs:
   lab:
     name: ${{ matrix.name }}
     needs: [plan, builds]
+    if: needs.plan.outputs.matrix != '[]'
     runs-on: macos-26
     # The plugins group's longest part, with room: on Tart a third of it took
     # about an hour, most of which was the walks the accessibility helper replaced.
@@ -200,5 +214,131 @@ jobs:
             !.build/e2e/[0-9]*Z/signing/
             !.build/e2e/[0-9]*Z/ssh/
             !.build/e2e/[0-9]*Z/*/another-key/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # smoke.real-github-token: uDeck given the job's own token, which reads and
+  # nothing else, for a public repository of github.com (S4-22). The token goes
+  # to a file only this job reads, which the check types from — never an
+  # argument, never the guest's environment — and the check deletes. Nothing of
+  # the run is kept but its report — the job's summary included — and only
+  # after a search of everything the run left, of ~/.udeck and of uDeck's
+  # caches, preferences and Application Support has found the token's value
+  # nowhere.
+  secret:
+    name: The smoke with the job's token
+    needs: [plan, builds]
+    if: needs.plan.outputs.secret == 'true'
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: prebuilt
+
+      - name: Unpack the binaries
+        run: |
+          set -euo pipefail
+          tar -xzf prebuilt.tar.gz
+          rm prebuilt.tar.gz
+          test "$(cat prebuilt/commit)" = "$(git rev-parse HEAD)"
+
+      - name: Install uv
+        run: |
+          set -euo pipefail
+          /usr/bin/python3 -m venv "$RUNNER_TEMP/uv"
+          echo "uv==0.12.22 --hash=sha256:72516e1edef5950b556bdaf3b382f537e4249e06362378daa811a6eefc165a14" > "$RUNNER_TEMP/uv.txt"
+          "$RUNNER_TEMP/uv/bin/pip" install --quiet --disable-pip-version-check --only-binary :all: \
+            --require-hashes -r "$RUNNER_TEMP/uv.txt"
+          echo "$RUNNER_TEMP/uv/bin" >> "$GITHUB_PATH"
+
+      # The variable taken out of the environment before anything is started, and
+      # printf is the shell's own: the value is in no process's arguments and no
+      # child's environment.
+      - name: Keep the job's token in a file only this job reads
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export -n TOKEN
+          umask 077
+          mkdir -p "$RUNNER_TEMP/secret"
+          printf '%s' "$TOKEN" > "$RUNNER_TEMP/secret/github-token"
+          unset TOKEN
+          test -s "$RUNNER_TEMP/secret/github-token"
+
+      - name: Run the smoke with the job's token
+        env:
+          UDECK_E2E_TOKEN_FILE: ${{ runner.temp }}/secret/github-token
+        run: |
+          set -euo pipefail
+          ./e2e/run.sh --target here --prebuilt prebuilt smoke.real-github-token
+
+      # The token's value looked for in every file the run left — its checks'
+      # walks, screenshots' text, uDeck's log lines, the ledger — and in
+      # ~/.udeck, as a fixed string read from a file: grep prints the names of
+      # the files it is in, never the value. Found anywhere, the job fails and
+      # keeps nothing.
+      # grep's own answer decides: 1 is "not there", 0 is "there", and anything
+      # else — a pattern that could not be read, a file that could not — fails
+      # the job as surely as a find: the gate never opens on an error.
+      - name: Look for the token in what the run left
+        id: scan
+        if: always()
+        shell: bash
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          # Actions starts bash with -e: off, so that grep's 1 is read, not obeyed.
+          set +e -uo pipefail
+          export -n TOKEN
+          umask 077
+          mkdir -p "$RUNNER_TEMP/scan" || exit 1
+          pattern="$RUNNER_TEMP/scan/pattern"
+          printf '%s' "$TOKEN" > "$pattern" || exit 1
+          unset TOKEN
+          [ -s "$pattern" ] || { echo "::error::the token could not be written down to look for it"; exit 1; }
+          verdict=0
+          for place in .build/e2e "$HOME/.udeck" "$HOME/Library/HTTPStorages/place.unicorns.udeck" \
+                       "$HOME/Library/Caches/place.unicorns.udeck" \
+                       "$HOME/Library/Preferences/place.unicorns.udeck.plist" \
+                       "$HOME/Library/Application Support/place.unicorns.udeck"; do
+            [ -e "$place" ] || continue
+            grep -rlF -f "$pattern" "$place"
+            said=$?
+            if [ "$said" -eq 0 ]; then
+              echo "::error::the job's token is in the files named above, under $place: nothing of this run is kept"
+              verdict=1
+            elif [ "$said" -ne 1 ]; then
+              echo "::error::looking for the job's token under $place failed (grep exited $said): nothing is kept"
+              verdict=1
+            fi
+          done
+          rm -rf "$RUNNER_TEMP/scan" "$RUNNER_TEMP/secret"
+          [ "$verdict" -eq 0 ] || exit 1
+          echo "the job's token is in no file the run left, nor in ~/.udeck, uDeck's caches or its preferences"
+
+      # The summary only after the search, and only when it found nothing: a
+      # reason in the ledger is text the run wrote.
+      - name: Say what the smoke came to
+        if: always() && steps.scan.outcome == 'success'
+        run: |
+          set -uo pipefail
+          run_dir="$(ls -d .build/e2e/[0-9]*Z 2>/dev/null | tail -1)"
+          export UV_PROJECT_ENVIRONMENT="$PWD/.build/e2e/venv"
+          uv run --frozen --project e2e python -m udeck_e2e.report "$run_dir" "the smoke with the job's token" >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Keep the run's report, and nothing else
+        if: always() && steps.scan.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lab-secret
+          path: .build/e2e/[0-9]*Z/ledger.jsonl
           retention-days: 14
           if-no-files-found: warn

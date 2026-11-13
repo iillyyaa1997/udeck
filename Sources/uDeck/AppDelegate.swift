@@ -17,6 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: PanelController!
     private var statusItem: NSStatusItem!
     private var settings: SettingsWindowController!
+    /// The language the main menu was last built in: it is built again only
+    /// when that changes, not on every change of a setting — a slider dragged
+    /// in Look fires many a second, and a menu replaced while it is open closes.
+    private var mainMenuLanguage: Language?
     private var updater: SparkleUpdater!
     private var loginItem: SystemLoginItem!
 
@@ -48,8 +52,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller?.settingsChanged()
             self?.settings.applyAppearance()
             self?.rebuildStatusMenu()
+            self?.rebuildMainMenu()
         }
         self.model = model
+        rebuildMainMenu()
         self.screens = screens
         self.controller = controller
         // Built here rather than lazily: Sparkle's scheduler has to be running
@@ -154,6 +160,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = menu
     }
 
+    /// The application's main menu, in the language in force: what the menu
+    /// bar shows while the settings window makes uDeck a regular application —
+    /// and, the part that matters, where AppKit finds the key equivalents of a
+    /// text field's own commands. Without an Edit menu ⌘V pasted nothing into
+    /// any field, a token's included: the lab's `plugins.source-token-clipboard`
+    /// found it (run 43511904754), the token step's field empty after ⌘V. The
+    /// items go to the first responder, as a standard Edit menu's do.
+    private func rebuildMainMenu() {
+        let strings = model.strings
+        guard strings.language != mainMenuLanguage else { return }
+        mainMenuLanguage = strings.language
+        let main = NSMenu()
+        let application = NSMenu()
+        // ⌘Q from Settings, as from any window; not from the panel, which may
+        // take the keyboard and where it never quit uDeck (`validateMenuItem`).
+        application.addItem(withTitle: strings(.menuQuit), action: #selector(quitFromSettings), keyEquivalent: "q")
+            .target = self
+        let applicationItem = NSMenuItem()
+        applicationItem.submenu = application
+        main.addItem(applicationItem)
+
+        let edit = NSMenu(title: strings(.menuEdit))
+        edit.addItem(withTitle: strings(.menuUndo), action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: strings(.menuRedo), action: Selector(("redo:")), keyEquivalent: "z")
+            .keyEquivalentModifierMask = [.command, .shift]
+        edit.addItem(.separator())
+        edit.addItem(withTitle: strings(.menuCut), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: strings(.menuCopy), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: strings(.menuPaste), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: strings(.menuSelectAll), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let editItem = NSMenuItem(title: strings(.menuEdit), action: nil, keyEquivalent: "")
+        editItem.submenu = edit
+        main.addItem(editItem)
+        NSApp.mainMenu = main
+    }
+
+    @objc private func quitFromSettings() { NSApp.terminate(nil) }
+
     @objc private func showPanel() { controller.reveal() }
     @objc private func refreshAll() { model.refreshAll(reason: .manual) }
     @objc private func openPlugins() { model.revealPluginsDirectory() }
@@ -174,5 +218,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller?.debugDescription ?? "uDeck has no panel yet",
             forType: .string
         )
+    }
+}
+
+extension AppDelegate: NSMenuItemValidation {
+    /// Every item of uDeck's own is offered, but the main menu's **Quit uDeck**
+    /// only while the settings window takes the keyboard: a disabled item's key
+    /// equivalent does nothing, so ⌘Q in the panel stays what it always was.
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        item.action != #selector(quitFromSettings) || settings?.isKey == true
     }
 }

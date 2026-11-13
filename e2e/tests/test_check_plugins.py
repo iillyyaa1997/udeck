@@ -1199,3 +1199,75 @@ def test_no_check_module_defines_a_name_twice(module):
         twice += [name for name in names if name in seen]
         seen.update(names)
     assert not twice, f"{module} defines {twice} more than once"
+
+
+# --- uDeck's Keychain item of tokens, as the lab asks of it (stage 4, R3c) ---------------------
+
+
+class _Keychain:
+    """A guest whose `security` answers by its exit codes in turn, recording what was asked."""
+
+    def __init__(self, *codes):
+        self.codes = list(codes)
+        self.asked = []
+        self.ssh = self
+
+    def run(self, command, step, seconds=None, check=True):
+        from types import SimpleNamespace
+        self.asked.append(command)
+        return SimpleNamespace(returncode=self.codes.pop(0), stdout="", stderr="the Keychain said something")
+
+
+def test_the_token_item_is_asked_by_its_metadata_and_only_there_or_not_there_is_an_answer():
+    """S4-22: without `-w`, nothing decrypted; exit 44 is "no such item", 0 "there", anything else the lab's problem."""
+    there = _Keychain(0)
+    assert checks._the_token_item_is_there(there, "asking")
+    assert there.asked == [f"security find-generic-password -s place.unicorns.udeck.sources -a tokens >/dev/null"]
+    assert "-w" not in there.asked[0]
+    assert not checks._the_token_item_is_there(_Keychain(checks.NO_SUCH_ITEM), "asking")
+    with pytest.raises(LabError, match="could not be asked"):
+        checks._the_token_item_is_there(_Keychain(51), "asking")
+
+
+def test_a_token_item_left_by_an_earlier_check_is_deleted_or_the_check_could_not_check():
+    gone = _Keychain(checks.NO_SUCH_ITEM)
+    checks._no_token_item_left(gone, "preparing")
+    assert len(gone.asked) == 1, "nothing deleted when there is nothing"
+    deleted = _Keychain(0, 0, checks.NO_SUCH_ITEM)
+    checks._no_token_item_left(deleted, "preparing")
+    assert deleted.asked[1].startswith("security delete-generic-password -s place.unicorns.udeck.sources -a tokens")
+    with pytest.raises(LabError, match="could not be deleted"):
+        checks._no_token_item_left(_Keychain(0, 0, 0), "preparing")
+
+
+def test_a_states_last_error_is_read_as_uDeck_writes_it():
+    """Swift codes an enum case as an object of one key (run 43511904754: `{"unauthorized": {}}`), not as a string."""
+    assert checks._error_kind({"unauthorized": {}}) == "unauthorized"
+    assert checks._error_kind({"refused": {"status": 403}}) == "refused"
+    assert checks._error_kind(None) is None
+    assert checks._error_kind("unauthorized") == "unauthorized"
+    assert checks._error_kind({"a": {}, "b": {}}) is None
+
+
+
+def test_a_stalled_deletion_of_another_checks_token_item_is_said_and_never_fails_a_check_that_keeps_no_token():
+    """For a check that keeps no token the item is deleted as far as the machine lets it: a timeout is said, not raised."""
+    said = []
+
+    class Stalls:
+        def __init__(self):
+            self.ssh = self
+            self.asked = []
+
+        def run(self, command, step, seconds=None, check=True):
+            self.asked.append(command)
+            raise LabError(step, f"the command did not finish in {seconds:.0f}s")
+
+    class Lab:
+        def note(self, text):
+            said.append(text)
+
+    machine = Stalls()
+    checks._token_item_gone_if_it_can(machine, Lab(), "preparing")
+    assert machine.asked == ["security delete-generic-password -s place.unicorns.udeck.sources -a tokens >/dev/null 2>&1"]
+    assert said == ["   uDeck's Keychain item of tokens was not deleted: the command did not finish in 20s"]

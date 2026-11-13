@@ -466,7 +466,7 @@ struct GitLabClientTests {
     /// (status, body, headers, what the client throws)
     static let statuses: [(Int, String, [String: String], ProviderError)] = [
         (401, #"{"message":"401 Unauthorized"}"#, [:], .unauthorized),
-        (403, #"{"error":"insufficient_scope","error_description":"The request requires higher privileges than provided by the access token.","scope":"read_api"}"#,
+        (403, #"{"error":"insufficient_scope","error_description":"The request requires higher privileges than provided by the access token.","scope":"api read_api"}"#,
          [:], .forbidden(scope: "read_api")),
         (403, #"{"error":"insufficient_scope"}"#, [:], .forbidden(scope: nil)),
         (403, #"{"message":"403 Forbidden"}"#, [:], .refused(status: 403)),

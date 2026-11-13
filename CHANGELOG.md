@@ -25,6 +25,24 @@ for what that promises.
   its token up first, and a token missing from the Keychain is said, not worked
   around. **Remove…** forgets the token first, and keeps the source, saying why,
   when the Keychain cannot be written.
+- **⌘V, ⌘C, ⌘X, ⌘A and ⌘Z work in Settings' fields.** uDeck had no main menu,
+  and AppKit finds a field's key equivalents there: ⌘V pasted nothing, a token
+  under **Token…** or the token step included — only the field's own menu
+  could. uDeck now has one, with **Edit** in the language in force, shown in the
+  menu bar while Settings is open. Found by the lab's
+  `plugins.source-token-clipboard`.
+- **A token given under Token… is used at once, whatever the limit without one
+  said.** A source whose reads without a token ran into the hour's limit kept
+  that block for the token too: the read with it sent nothing until the
+  address's hour was over. A token kept now starts from what its host says of
+  it. Found by the lab's smoke against the real GitHub, from a runner whose
+  address had none of its sixty left.
+- **A GitLab token whose scope falls short is said as the scope it wants.**
+  GitLab's `403 insufficient_scope` names every scope that would do, joined by
+  spaces (`api read_api`); uDeck read only an answer naming one, and said the
+  rest as a bare *HTTP 403*. It now says *wants a token with read_api* when
+  `read_api` is among them, and the first scope GitLab names otherwise — still
+  never anything but a scope GitLab has.
 - **Tokens, underneath** (not yet offered on any screen). A source's token is
   kept in one Keychain item, bound to the provider, the number and the origin
   it was checked with, and handed out only for requests to that origin, over

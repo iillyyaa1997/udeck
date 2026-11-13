@@ -296,9 +296,15 @@ _WINDOWS = """
 tell application "System Events" to tell process %(process)s to get name of every window
 """
 
+# uDeck's status item's menu: in its own menu bar — the second, now that uDeck has a main menu, or the only one.
 _MENU_ITEMS = """
 tell application "System Events" to tell process %(process)s
-  set titles to name of every menu item of menu 1 of menu bar item 1 of menu bar 1
+  if (count of menu bars) > 1 then
+    set theBar to menu bar 2
+  else
+    set theBar to menu bar 1
+  end if
+  set titles to name of every menu item of menu 1 of menu bar item 1 of theBar
 end tell
 set text item delimiters to ", "
 return titles as text

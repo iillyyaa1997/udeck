@@ -13,6 +13,15 @@ struct English: Vocabulary {
         case .menuCopyDiagnostics: "Copy diagnostics"
         case .menuQuit: "Quit uDeck"
 
+        // The main menu
+        case .menuEdit: "Edit"
+        case .menuUndo: "Undo"
+        case .menuRedo: "Redo"
+        case .menuCut: "Cut"
+        case .menuCopy: "Copy"
+        case .menuPaste: "Paste"
+        case .menuSelectAll: "Select All"
+
         // The settings window
         case .settingsWindowTitle: "uDeck Settings"
         case .sectionGeneral: "General"

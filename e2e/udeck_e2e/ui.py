@@ -77,7 +77,9 @@ and nothing in it scrolls out of reach.
 
 from __future__ import annotations
 
+import re
 import shlex
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -850,27 +852,103 @@ def focused(machine: Any, step: str) -> tuple[str, str]:
     return identifier, subrole
 
 
-def enter_secret(machine: Any, identifier: str, text: str, step: str) -> None:
-    """`text` typed into the secure field `identifier` — and nowhere else (S4-22).
+# A secret typed from a file in the guest: the script carries the file's path and never its value, so no process on
+# the machine sees the value in an argument list (S4-22). The file is read as it is, its last line feed dropped.
+_TYPE_FROM_FILE = """
+set theSecret to read (POSIX file %(path)s)
+if theSecret ends with (ASCII character 10) then set theSecret to text 1 thru -2 of theSecret
+tell application "System Events" to tell process %(process)s
+  set frontmost to true
+  keystroke theSecret
+end tell
+return "typed"
+"""
+
+# The pasteboard's text pasted where the focus is, as ⌘V does.
+_PASTE = """
+tell application "System Events" to tell process %(process)s
+  set frontmost to true
+  keystroke "v" using command down
+end tell
+return "pasted"
+"""
+
+# Where the lab keeps the fixture secrets it types, in the guest: outside the run's directory, so that no artifact
+# can carry one, and readable by its owner alone.
+SECRETS = "~/.udeck-e2e-secrets"
+
+
+def keep_secret(machine: Any, name: str, text: str, step: str) -> str:
+    """A fixture secret written to a file of its own in the guest, readable by its owner alone: the path to give
+    `enter_secret`. The lab's fixture tokens only — a real one is written by the job that has it, never here, since
+    this puts the value in the command that writes it."""
+    if not re.fullmatch(r"[a-z0-9-]+", name):
+        raise LabError(step, f"a secret's file is named {name!r}: letters, digits and dashes only")
+    # The folder as an absolute path: AppleScript's POSIX file takes no `~`.
+    folder = machine.ssh.run(f"umask 077 && mkdir -p {SECRETS} && printf %s {shlex.quote(text)} > {SECRETS}/{name} "
+                             f"&& cd {SECRETS} && pwd -P", step).stdout.strip()
+    if not folder.startswith("/"):
+        raise LabError(step, f"the guest's folder for the lab's secrets is {folder!r}")
+    return f"{folder}/{name}"
+
+
+def forget_secrets(machine: Any, step: str) -> None:
+    """Every fixture secret the lab wrote in the guest, gone."""
+    machine.ssh.run(f"rm -rf {SECRETS}", step, check=False)
+
+
+def _with_the_focus_on(machine: Any, identifier: str, step: str, put: Callable[[], None]) -> None:
+    """`put` run — what puts a secret into the field — only once the secure field `identifier` has the focus, and the
+    focus there still afterwards.
 
     A click does not always give a SwiftUI SecureField the focus: in run 42335961364 a GitLab token was typed into
     the address field beside it, which showed it. So the focus is read first — the field's identifier and the subrole
-    of a field that shows no text — clicked for when it is elsewhere, read again, and only then typed into; after
-    the typing the focus must still be there. When the field never takes it, nothing is typed: a lab problem, never
-    a secret in a field that shows it. The lab's tokens are fixture strings; a real one never comes through here.
+    of a field that shows no text — clicked for when it is elsewhere, read again, and only then put into; after that
+    the focus must still be there. When the field never takes it, nothing is put: a lab problem, never a secret in a
+    field that shows it.
     """
     now = ("", "")
     for attempt in range(1, SECRET_FOCUS_TRIES + 1):
         now = focused(machine, f"{step}: reading what has the focus")
         if now == (identifier, SECURE_FIELD):
-            type_text(machine, text, step)
-            after = focused(machine, f"{step}: reading the focus after typing")
+            put()
+            after = focused(machine, f"{step}: reading the focus after it")
             if after != (identifier, SECURE_FIELD):
                 raise LabError(step, f"the focus left {identifier} while it was typed into: now {after}")
             return
         click(machine, identifier, f"{step}: putting the cursor in the secure field (try {attempt})")
         machine.sleep(0.5)
     raise LabError(step, f"{identifier} never took the focus — it stayed on {now}: nothing was typed")
+
+
+def enter_secret(machine: Any, identifier: str, path: str, step: str) -> None:
+    """The secret in the guest's file `path` typed into the secure field `identifier` — and nowhere else (S4-22).
+
+    Typed by a script that reads the file itself, so the value is in no argument list on the machine
+    (`type_text` would put it in `osascript -e`'s); the focus proven on the field before and after
+    (`_with_the_focus_on`).
+    """
+    _with_the_focus_on(machine, identifier, step,
+                       lambda: ask(machine, _applescript(_TYPE_FROM_FILE, process=PROCESS, path=path), step,
+                                   seconds=config.UI_APPEAR_SECONDS))
+
+
+def paste_secret(machine: Any, identifier: str, path: str, step: str) -> None:
+    """The secret in the guest's file `path` put on the pasteboard and pasted into the secure field `identifier`
+    with ⌘V, as a person pastes a token they copied — the pasteboard filled from the file, never from an argument."""
+    machine.ssh.run(f"pbcopy < {shlex.quote(path)}", f"{step}: copying the token")
+    # The pasteboard holding it, before anything is pasted: a ⌘V that put nothing in says so of uDeck, not of a copy
+    # that never happened.
+    if not pasteboard_holds(machine, path, f"{step}: reading the pasteboard after the copy"):
+        raise LabError(step, "the pasteboard does not hold the secret after pbcopy: nothing was pasted")
+    _with_the_focus_on(machine, identifier, step,
+                       lambda: ask(machine, _applescript(_PASTE, process=PROCESS), step, seconds=config.UI_APPEAR_SECONDS))
+
+
+def pasteboard_holds(machine: Any, path: str, step: str) -> bool:
+    """Whether the pasteboard holds exactly the secret in the guest's file `path` — compared there, never read out."""
+    done = machine.ssh.run(f"pbpaste | cmp -s - {shlex.quote(path)}", step, check=False)
+    return done.returncode == 0
 
 
 _RETURN = """

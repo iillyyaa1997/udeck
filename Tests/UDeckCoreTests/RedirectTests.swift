@@ -237,6 +237,10 @@ struct RedirectTests {
     @Test("GitLab with a token: a scope GitLab names is said; anything else in its place — a token echoed back — is not")
     func scopeNeverQuoted() async throws {
         for (scope, wanted) in [("read_api", ProviderError.forbidden(scope: "read_api")),
+                                // As GitLab says it: every scope that would do, joined by spaces.
+                                ("api read_api", .forbidden(scope: "read_api")), ("read_api api", .forbidden(scope: "read_api")),
+                                ("api read_user", .forbidden(scope: "api")),
+                                ("api glpat-the-token-echoed", .forbidden(scope: nil)),
                                 ("glpat-the-token-echoed", .forbidden(scope: nil)), ("", .forbidden(scope: nil))] {
             let stub = GitLabClientTests.Stub("scope")
             stub.answer { _ in (403, Data(#"{"error": "insufficient_scope", "scope": "\#(scope)"}"#.utf8)) }

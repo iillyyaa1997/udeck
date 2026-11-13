@@ -17,6 +17,15 @@ struct Russian: Vocabulary {
         case .menuCopyDiagnostics: "Скопировать диагностику"
         case .menuQuit: "Завершить uDeck"
 
+        // Главное меню
+        case .menuEdit: "Правка"
+        case .menuUndo: "Отменить"
+        case .menuRedo: "Повторить"
+        case .menuCut: "Вырезать"
+        case .menuCopy: "Скопировать"
+        case .menuPaste: "Вставить"
+        case .menuSelectAll: "Выбрать все"
+
         // Окно настроек
         case .settingsWindowTitle: "Настройки uDeck"
         case .sectionGeneral: "Общие"

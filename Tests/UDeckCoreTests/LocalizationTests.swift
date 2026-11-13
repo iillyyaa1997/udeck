@@ -27,6 +27,7 @@ struct LocalizationTests {
     static let all: [Phrase] = [
         .menuShowPanel, .menuRefreshAll, .menuSettings, .menuOpenPluginsFolder,
         .menuCopyDiagnostics, .menuQuit,
+        .menuEdit, .menuUndo, .menuRedo, .menuCut, .menuCopy, .menuPaste, .menuSelectAll,
 
         .settingsWindowTitle, .sectionGeneral, .sectionOpening, .sectionLook, .sectionPlugins,
         .sectionAbout,
@@ -296,7 +297,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 468,
+        #expect(Self.all.count == 475,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

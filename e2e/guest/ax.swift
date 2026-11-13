@@ -326,9 +326,18 @@ func window(_ app: AXUIElement, _ spec: String, process: String) -> AXUIElement 
     refuse("\(process) has no window called \(title); its windows: \(titles(all))")
 }
 
-/// `menu 1 of menu bar item 1 of menu bar 1`: the first child of each kind.
+/// The menu of the process's first status item: `menu 1 of menu bar item 1` of
+/// its extras menu bar — where an `NSStatusItem` lives — or, for a process that
+/// says it has none, of `menu bar 1`, which is where uDeck's status item was found
+/// while uDeck had no main menu. Since uDeck has one (its Edit menu), `menu bar 1`
+/// is that, its first item the Apple menu (run 43515379586).
 func firstMenu(_ app: AXUIElement, process: String) -> AXUIElement {
-    guard let bar = children(app).first(where: { role($0) == "AXMenuBar" }) else { refuse("\(process) has no menu bar") }
+    let extras = attribute(app, "AXExtrasMenuBar").flatMap { value -> AXUIElement? in
+        CFGetTypeID(value) == AXUIElementGetTypeID() ? (value as! AXUIElement) : nil
+    }
+    guard let bar = extras ?? children(app).first(where: { role($0) == "AXMenuBar" }) else {
+        refuse("\(process) has no menu bar")
+    }
     guard let item = children(bar).first(where: { role($0) == "AXMenuBarItem" }) else {
         refuse("\(process)'s menu bar has no item")
     }

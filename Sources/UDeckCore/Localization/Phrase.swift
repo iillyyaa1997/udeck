@@ -26,6 +26,16 @@ public enum Phrase: Sendable, Equatable {
     case menuCopyDiagnostics
     case menuQuit
 
+    // MARK: - The main menu, while the settings window is open
+
+    case menuEdit
+    case menuUndo
+    case menuRedo
+    case menuCut
+    case menuCopy
+    case menuPaste
+    case menuSelectAll
+
     // MARK: - The settings window
 
     case settingsWindowTitle

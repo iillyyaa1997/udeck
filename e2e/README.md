@@ -19,9 +19,10 @@ the last section.
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, the accessibility helper that reads uDeck's windows, a
 > self-check, the builds a check needs, a fake GitHub for the plugin catalogue,
-> the same lab on a GitHub runner, and eighty-two checks of uDeck itself in five groups
-> (`e2e/run.sh --list`) — and one more, `smoke.real-pull-request`, against the
-> real GitHub, which runs only when it is named ("Not in the full run"). `updates`: the
+> the same lab on a GitHub runner, and a hundred and two checks of uDeck itself in five groups
+> (`e2e/run.sh --list`) — and two more against the real GitHub,
+> `smoke.real-pull-request` and `smoke.real-github-token`, which run only when
+> each is named ("Not in the full run"). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
 > itself as it ships, and by itself again once an operator who switched that off
 > switches it back on; and a published release updating itself from GitHub, as
@@ -68,6 +69,7 @@ e2e/run.sh --jobs 2            # boot the next check's machine while this one ru
 e2e/run.sh plugins --shard 2/3 # the second of three parts of the plugins group
 e2e/run.sh --prebuilt DIR      # assemble the builds from binaries compiled in DIR
 e2e/run.sh smoke.real-pull-request --pull-request LINK   # the real GitHub; a runner only, and only when named
+e2e/run.sh smoke.real-github-token                       # a real token; only in lab.yml's secret job
 e2e/run.sh cleanup --list      # what cleanup would remove, removing nothing
 e2e/run.sh cleanup             # remove kept or left-behind clones
 e2e/run.sh cleanup --golden --guest 26   # …and macOS 26's golden image
@@ -951,6 +953,37 @@ after **Check now** its row said it was closed without being merged; the
 runner's address had 43 of its sixty left before and 30 after. Screenshots of
 the catalogue read from GitHub, the sheet, the row and both closed rows are in the
 run's report.
+
+**The smoke with a real token**, `smoke.real-github-token`, gives uDeck the lab
+job's own `github.token` — which reads and nothing else — for the public
+`iillyyaa1997/udeck-plugins-template` (number 1412415366), and holds uDeck to
+reading it with that token (S4-22). It carries a real secret, so it runs only in
+`lab.yml`'s `secret` job, dispatched by its name — `gh workflow run lab.yml --ref
+<branch> -f run=smoke.real-github-token` — which the plan job takes out of the
+ordinary jobs' matrix:
+
+- the job writes the token to `$RUNNER_TEMP/secret/github-token`, readable by
+  its owner alone, with the shell's own `printf` after taking the variable out
+  of the environment, and names the file in `UDECK_E2E_TOKEN_FILE`; the check
+  refuses a file that is not a regular one of this user's that only its owner
+  reads, and deletes it at its end;
+- uDeck starts with the template written into `sources.json` without a token
+  and the official catalogue off — as **Add** writes them, since a runner's
+  address often has none of its sixty left to look anything up without a token
+  (run 43511904754: 0); the token is typed under **Token…** from the file
+  (`ui.enter_secret`, AppleScript's `read POSIX file`: the value in no argument
+  list), the focus proven on the secure field;
+- kept, a read succeeds after it with no error, and the source's `state.json`
+  says GitHub left it more of the hour than an address has without a token;
+  **Forget the token** leaves `access: none` and no Keychain item;
+- no screenshot is taken, the lab's own at the end included
+  (`smoke.carries_a_secret`): a picture is something a byte search cannot look
+  into;
+- before anything is kept, a step looks for the token's exact value — as a
+  fixed string read from a file — in everything under `.build/e2e`, in
+  `~/.udeck` and in uDeck's caches, and fails the job on a find or on any error
+  of the search; only then are the summary written and the run's `ledger.jsonl`
+  uploaded, and nothing else of the run.
 
 ### Looking for an update by itself
 

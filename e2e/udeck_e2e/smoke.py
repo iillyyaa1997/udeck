@@ -15,6 +15,12 @@ requests of the address it runs from. It takes the pull request as
 `--pull-request <link>`, which nothing else takes, and it runs only on a GitHub
 runner (`--target here`): the Tart guests on this Mac would ask GitHub from the
 operator's own address.
+
+`smoke.real-github-token` is the other: uDeck given a real token — the lab job's
+own github.token, which reads and nothing else — for a public repository of
+github.com, and read with it. It carries a real secret, so it runs only in the
+lab workflow's secret job, which writes the token to a file of its own and keeps
+nothing of the run but its report (S4-22); it takes no option.
 """
 
 from __future__ import annotations
@@ -27,24 +33,43 @@ from typing import Any
 PULL_REQUEST_OPTION = "--pull-request"
 REAL_PULL_REQUEST = "smoke.real-pull-request"
 
+# The smoke that carries a real secret — the job's own github.token — and the variable naming the file the lab's
+# secret job wrote it to (.github/workflows/lab.yml): only that job runs it, and its artifact is the report alone.
+REAL_GITHUB_TOKEN = "smoke.real-github-token"
+TOKEN_FILE_VARIABLE = "UDECK_E2E_TOKEN_FILE"
+
 # A pull request of a repository on github.com, as a browser shows its link: the scheme and `www.` or not, and any
 # page under it (`…/files`, `…/commits`).
 _PULL_REQUEST = re.compile(r"^(?:https?://)?(?:www\.)?github\.com/([^/\s]+/[^/\s]+)/pull/([1-9][0-9]{0,8})(?:/[^\s]*)?$")
 
 
-def only_when_named(takes: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Mark a check as one that runs only when its own name is given, and say which option it takes."""
+def only_when_named(takes: str | None = None, secret: bool = False) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Mark a check as one that runs only when its own name is given, and say which option it takes, if any — and,
+    `secret`, that it carries a real secret: the lab takes no screenshot of it (`carries_a_secret`)."""
 
     def mark(check: Callable[..., Any]) -> Callable[..., Any]:
-        check.only_when_named = takes  # type: ignore[attr-defined]
+        check.only_when_named = True  # type: ignore[attr-defined]
+        check.takes = takes  # type: ignore[attr-defined]
+        check.carries_a_secret = secret  # type: ignore[attr-defined]
         return check
 
     return mark
 
 
+def carries_a_secret(check: Any) -> bool:
+    """Whether a check carries a real secret: a picture of its screen is one no search for the secret's bytes can look
+    into, so the lab takes none (S4-22)."""
+    return is_named_only(check) and getattr(check, "carries_a_secret", None) is True
+
+
+def is_named_only(check: Any) -> bool:
+    """Whether a check runs only when its own name is given."""
+    return getattr(check, "only_when_named", None) is True
+
+
 def what_it_takes(check: Any) -> str | None:
-    """The option a check run only when named takes, or None for any other check."""
-    takes = getattr(check, "only_when_named", None)
+    """The option a check run only when named takes, or None for one that takes none and for any other check."""
+    takes = getattr(check, "takes", None) if is_named_only(check) else None
     return takes if isinstance(takes, str) and takes else None
 
 

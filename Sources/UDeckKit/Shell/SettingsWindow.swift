@@ -27,6 +27,11 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         super.init()
     }
 
+    /// Whether the settings window is the one taking the keyboard: what the
+    /// main menu's **Quit uDeck** waits for, so that ⌘Q quits from Settings as
+    /// from any window, and never from the panel.
+    public var isKey: Bool { window?.isKeyWindow == true }
+
     public func show() {
         if window == nil {
             let window = NSWindow(

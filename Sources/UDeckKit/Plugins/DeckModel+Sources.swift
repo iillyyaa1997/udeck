@@ -730,6 +730,7 @@ extension DeckModel {
                     }
                 }
             }
+            if written { startTheLimitOfANewToken(id) }
             loadSources()
             guard written, sourceTokens.hold(credential, for: ticket, renewingRejected: true) != nil else {
                 await takeBack(id, written: revision, address: address)
@@ -744,6 +745,20 @@ extension DeckModel {
             }
             await refreshSource(id, unrequested: false, pressed: true, why: "a token kept")
         }
+    }
+
+    /// A token just kept under **Token…** starts from what its host says of
+    /// it: the limit the source's reads were held to until now — an address's
+    /// sixty an hour on GitHub, an address's limiter on GitLab, or another
+    /// token's hour — is not the new token's. Carried over, a read with it was
+    /// held back until that block ended, an hour at most, and sent nothing
+    /// (the lab's smoke.real-github-token, run 43521794191: the runner's
+    /// address had none of its sixty left). Its kept limit and its recorders
+    /// start afresh; `loadSources` seeds them from the state as written now.
+    func startTheLimitOfANewToken(_ id: String) {
+        sourceStates[id] = CatalogueStore(paths: paths, source: id).updateState { $0.rateLimit = RateLimitState() }
+        tokenLimits[id] = nil
+        gitLabLimits[id] = nil
     }
 
     /// **Forget the token** under **Token…**: taken back from every client

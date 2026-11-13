@@ -1055,6 +1055,33 @@ def test_the_smoke_is_listed_with_what_it_takes_and_left_out_of_a_run_without_na
     assert "smoke.real-pull-request" not in out
 
 
+SMOKES = SMOKE + """
+
+@smoke.only_when_named(secret=True)
+def check_real_github_token(machine, check_dir, lab):
+    pass
+"""
+
+
+def test_a_smoke_that_takes_nothing_is_listed_as_only_when_named_and_runs_by_its_name_alone(lab):
+    lab.write("check_smoke.py", SMOKES)
+    lab.write("check_panel.py", "def check_dwell(machine): pass\n")
+    code, out = lab.run(listing=True)
+    assert code == 0
+    assert out.splitlines() == ["panel.dwell", "smoke.real-pull-request  only when named, with --pull-request <link>",
+                                "smoke.real-github-token  only when named"]
+    code, out = lab.run()
+    assert code == 0 and "smoke.real-github-token" not in out
+    before = len(lab.machines)
+    code, out = lab.run("smoke.real-github-token")
+    assert code == 0 and "✅ smoke.real-github-token" in out and "takes --pull-request" not in out
+    # A check that carries a real secret leaves no picture of its screen.
+    assert "no screenshot at the end of smoke.real-github-token: it carries a real secret" in out
+    assert lab.machines[before:] and not any(event == "screenshot at the end" for m in lab.machines[before:] for event in m.events)
+    code, out = lab.run("smoke.real-github-token", pull_request=PULL_LINK)
+    assert code == 2 and "--pull-request does nothing without smoke.real-pull-request" in out
+
+
 def test_the_smoke_without_a_pull_request_and_a_pull_request_without_the_smoke_are_refused(lab):
     write_the_smoke(lab)
     code, out = lab.run("smoke.real-pull-request")

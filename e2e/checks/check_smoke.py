@@ -21,7 +21,12 @@ with the job's read-only token, says what the pull request is, which plugin it
 changes and when it was closed.
 """
 
+import hashlib
 import json
+import os
+import shlex
+import stat
+import time
 
 from udeck_e2e import app, config, panel, releases, smoke, targets, ui, updates
 from udeck_e2e.errors import CheckFailed, LabError, NotThere, expect
@@ -193,6 +198,207 @@ def check_real_pull_request(machine, check_dir, lab):
                 (check_dir / "installed.json").write_text(text)
         except (LabError, OSError):
             pass
+
+
+# --- A real token (stage 4, R3c) -----------------------------------------------------------
+
+# The public repository the token smoke adds as a source: the template one's own plugins start from, its number and
+# its passport's name (measured 2026-11-13; S4-22).
+TEMPLATE = "iillyyaa1997/udeck-plugins-template"
+TEMPLATE_ID = 1412415366
+TEMPLATE_NAME = "My uDeck plugins"
+SOURCES = f"{UDECK_HOME}/sources.json"
+SETTINGS = f"{UDECK_HOME}/settings.json"
+# What GitHub allows an address without a token in an hour: a read with a token says more is left than that.
+ANONYMOUS_HOURLY = 60
+# The isolates a passport's name is shown inside (`SourceName`).
+ISOLATES = ("\u2068", "\u2069")
+# What `security find-generic-password` exits with when there is no such item (errSecItemNotFound).
+NO_SUCH_ITEM = 44
+
+
+def _the_token_file():
+    """The file the lab's secret job wrote the job's token to, as `TOKEN_FILE_VARIABLE` names it: a regular file only
+    its owner reads, holding something — or the lab could not check. Its value is never read here: uDeck is given it
+    by `ui.enter_secret`, from the file."""
+    step = "finding the job's token"
+    named = os.environ.get(smoke.TOKEN_FILE_VARIABLE, "")
+    if not named:
+        raise LabError(step, f"{smoke.REAL_GITHUB_TOKEN} runs only in the lab workflow's secret job, which names the "
+                             f"file it wrote the job's token to in {smoke.TOKEN_FILE_VARIABLE}")  # fmt: skip
+    try:
+        status = os.lstat(named)
+    except OSError as error:
+        raise LabError(step, f"{smoke.TOKEN_FILE_VARIABLE} names {named}, which cannot be read: {error}") from None
+    if not stat.S_ISREG(status.st_mode) or status.st_mode & 0o077 or status.st_uid != os.getuid() or status.st_size == 0:
+        raise LabError(step, f"{named} is not a non-empty file of this user's that only its owner reads "
+                             f"(mode {stat.filemode(status.st_mode)})")  # fmt: skip
+    return named
+
+
+@smoke.only_when_named(secret=True)
+def check_real_github_token(machine, check_dir, lab):
+    """uDeck given a real token for a public repository of github.com, and reading it with it.
+
+    The lab job's own github.token, which reads and nothing else, written by the job to a file only it reads. A lab
+    build with GitHub's own addresses starts with iillyyaa1997/udeck-plugins-template listed as a source without a
+    token and the official catalogue off — written into `~/.udeck` as **Add** writes them, since a runner's address
+    often has none of the hour's sixty left to look anything up without a token (run 43511904754). The token is typed
+    under **Token…** from the file, the focus proven on the secure field, never in an argument; the check of it and
+    every read after go with the token alone. Kept, the source is read with it: `sources.json` says `access: token`,
+    a read succeeds after it was kept, its block is named *My uDeck plugins*, and its `state.json` says GitHub left it
+    more of the hour than the sixty an address has without one. **Forget the token**: `access: none`, and uDeck's
+    Keychain item of tokens gone with its last token.
+
+    It runs only in the secret job (`TOKEN_FILE_VARIABLE`), whose artifact is the report alone and which fails if the
+    token's value is anywhere in the run's directory, and only on a GitHub runner; it takes no picture of the screen.
+
+    **Red for**: a real token uDeck does not keep, does not read with, or keeps after Forget.
+    """
+    if lab.target != targets.HERE:
+        raise LabError("asking the real GitHub with a token",
+                       "this check gives uDeck a real token, and the lab does that only on a GitHub runner (--target here)")
+    secret = _the_token_file()
+    _left_to_the_address(machine, check_dir, "before")
+
+    feed = updates.Feed(machine, lab.note)
+    build = lab.builder(feed.url, check_dir.name, real_plugins=True).build(*VERSION)
+    app.install(machine, build.zip, lab.note)
+    sid = _source_id(TEMPLATE, TEMPLATE_ID)
+    listed = {"version": 1, "sources": [{"id": sid, "provider": "github", "host": "github.com", "path": TEMPLATE,
+                                         "remoteID": TEMPLATE_ID, "access": "none", "trustedAt": None,
+                                         "addedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}]}
+    step = "starting uDeck with the template as a source and the official catalogue off"
+    machine.ssh.run(f"rm -rf {UDECK_HOME} && mkdir -p {UDECK_HOME} && "
+                    f"printf %s {shlex.quote(json.dumps(listed, indent=2))} > {SOURCES} && "
+                    f"printf %s {shlex.quote(json.dumps({'officialCatalogue': False}))} > {SETTINGS}", step)  # fmt: skip
+    log = panel.GestureLog(machine, lab.note)
+    log.keep("asking the guest to keep uDeck's own account")
+    mark = log.mark("marking the start")
+    try:
+        app.launch(machine)
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        # The read at launch without a token, to its end — whatever the address had left — since Token… is not
+        # offered while it runs; and when it last succeeded, if it did.
+        state = f"{UDECK_HOME}/catalogue/{sid}/state.json"
+        tried = _wait_for(machine, lambda: (_read_json(machine, state) or {}).get("lastAttempt"))
+        if tried is None:
+            # The lab's own sources.json refused — a format uDeck no longer reads — is the lab's problem, not uDeck's.
+            dump = _keep_the_walk(machine, check_dir, lab, "the-template-not-read.txt")
+            refused = ui.says(ui.element(dump, "sources.problem"))
+            if refused:
+                raise LabError("starting uDeck with the template written by hand", f"uDeck refused the lab's sources.json: {refused!r}")
+        expect(tried is not None, f"uDeck did not read the template at launch: {_read_json(machine, state)!r}")
+        anonymous = (_read_json(machine, state) or {}).get("lastSuccess")
+        machine.sleep(1.1)  # the state's times are whole seconds: the next read's is another
+
+        _open_token(machine, sid, "on the template")
+        ui.enter_secret(machine, f"source.{sid}.token.tokenField", secret, "typing the job's token under Token…")
+        ui.press_return(machine, "pressing Return in Token…'s field")
+        kept = _wait_for(machine, lambda: (_the_source(machine) or {}).get("access") == "token" or None)
+        dump = _keep_the_walk(machine, check_dir, lab, "the-token-kept.txt")
+        if not kept:
+            said = [ui.says(ui.element(dump, f"source.{sid}.{part}")) for part in ("notice", "problem", "state")]
+            if any("Keychain" in s for s in said if s):
+                raise LabError("keeping the job's token", f"this runner's Keychain refused uDeck: {said!r}")
+            raise CheckFailed(f"the job's token under Token… was not kept: {SOURCES} says {_the_source(machine)!r}; "
+                              f"the block says {[s for s in said if s]!r}")
+        # Read again with it, to its end: a read that succeeded after the token was kept, and the hour GitHub left it
+        # more than an address has without one.
+        tokened = _wait_for(machine, lambda: _read_with_the_token(machine, state, anonymous, ANONYMOUS_HOURLY))
+        _keep(check_dir, "state-with-the-token.json", _read_json(machine, state))
+        expect(tokened is not None, f"read with the job's token, {state} says {_read_json(machine, state)!r}: no read "
+                                    f"succeeded after it was kept with more of the hour left than {ANONYMOUS_HOURLY}")  # fmt: skip
+        said = _wait_until(machine, f"source.{sid}.name", lambda said: _bare(said) == TEMPLATE_NAME, OPERATION_SECONDS)
+        _keep_the_walk(machine, check_dir, lab, "read-with-the-token.txt")
+        expect(_bare(said) == TEMPLATE_NAME, f"read with the token, the template's block is named {said!r}")
+
+        _open_token(machine, sid, "to forget the token")
+        _press(machine, f"source.{sid}.token.forget", "pressing Forget the token")
+        gone = _wait_for(machine, lambda: (_the_source(machine) or {}).get("access") == "none" or None)
+        expect(gone, f"after Forget the token, {SOURCES} says {_the_source(machine)!r}")
+        step = "asking the Keychain for uDeck's item of tokens by its metadata"
+        item = machine.ssh.run(f"security find-generic-password -s {app.BUNDLE_ID}.sources -a tokens >/dev/null", step,
+                               seconds=20, check=False)  # fmt: skip
+        if item.returncode not in (0, NO_SUCH_ITEM):
+            raise LabError(step, f"security exited {item.returncode}: {item.stderr.strip()!r}")
+        expect(item.returncode == NO_SUCH_ITEM, "its last token forgotten, uDeck's Keychain item of tokens is still there")
+        _left_to_the_address(machine, check_dir, "at the end")
+    finally:
+        log.collect(check_dir, mark, "collecting uDeck's own account", name="udeck.log")
+        try:
+            os.remove(secret)
+        except OSError:
+            pass
+
+
+def _open_token(machine, sid, label):
+    """**Token…** on the source pressed until its field is there: the button is not offered while the source is read,
+    and a press then lands on nothing."""
+    for attempt in range(1, 4):
+        _press(machine, f"source.{sid}.token", f"opening Token… {label} (try {attempt})")
+        if _wait_until(machine, f"source.{sid}.token.tokenField", lambda said: said is not None, 15, present=True) is not None:
+            return
+    raise CheckFailed(f"Token… {label} opened no field to paste a token into")
+
+
+def _source_id(path, remote_id, host="github.com", provider="github"):
+    """A source's id as uDeck derives it (`SourceID.derive`), as the plugin checks derive it: the host and the path's
+    last segment, then 8 hexadecimal digits of SHA-256 over provider, host and number."""
+    slug = ""
+    for character in f"{host}-{path.split('/')[-1]}".lower():
+        kept = character if character in "abcdefghijklmnopqrstuvwxyz0123456789.-" else "-"
+        if kept == "-" and slug.endswith("-"):
+            continue
+        slug += kept
+    slug = slug.lstrip("-.")[:40].rstrip("-") or "source"
+    identity = "\n".join((provider, host.lower(), str(remote_id)))
+    return f"{slug}-{hashlib.sha256(identity.encode()).hexdigest()[:8]}"
+
+
+def _keep_the_walk(machine, check_dir, lab, name):
+    """Settings → Plugins as the walk reads it, kept beside the report — without a screenshot: a check that carries a
+    real secret keeps no picture a byte search could not look into (S4-22)."""
+    dump = ui.identified(machine, "reading Settings → Plugins", ui.SETTINGS_WINDOW, depth=ui.IDENTIFIED_DEPTH)
+    try:
+        (check_dir / name).write_text(dump)
+    except OSError as error:
+        lab.note(f"   {name} could not be written: {error}")
+    return dump
+
+
+def _bare(text):
+    """`text` without the isolates a passport's name is shown inside."""
+    for mark in ISOLATES:
+        text = (text or "").replace(mark, "")
+    return text
+
+
+def _the_source(machine):
+    """The one source `sources.json` lists, or None."""
+    listed = (_read_json(machine, SOURCES) or {}).get("sources") or []
+    return listed[0] if len(listed) == 1 else None
+
+
+def _wait_for(machine, found, seconds=OPERATION_SECONDS):
+    """What `found` gives once it gives something, or None after `seconds`."""
+    deadline = machine.clock() + seconds
+    while True:
+        value = found()
+        if value or machine.clock() >= deadline:
+            return value or None
+        machine.sleep(1)
+
+
+def _read_with_the_token(machine, state, before, floor):
+    """The source's state once a read after `before` succeeded with no error and GitHub left it more than `floor` of
+    the hour — else None."""
+    said = _read_json(machine, state) or {}
+    left = (said.get("rateLimit") or {}).get("remaining")
+    success = said.get("lastSuccess")
+    if success and success != before and said.get("lastError") is None and isinstance(left, int) and left > floor:
+        return said
+    return None
 
 
 # --- GitHub, asked by the lab ---------------------------------------------------------

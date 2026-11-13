@@ -82,7 +82,8 @@ def test_the_words_the_smoke_waits_for_are_uDecks_own():
 def test_the_smoke_has_its_row_in_the_specifications_table():
     table = _source("docs", "plugin-repository.md").split("### The lab's checks", 1)[1].split("\n### ", 1)[0]
     rows = [line.split("`")[1] for line in table.splitlines() if line.startswith("| `smoke.")]
-    assert rows == [smoke.REAL_PULL_REQUEST]
+    defined = sorted("smoke." + name.removeprefix("check_").replace("_", "-") for name in dir(checks) if name.startswith("check_"))
+    assert sorted(rows) == defined == sorted([smoke.REAL_PULL_REQUEST, smoke.REAL_GITHUB_TOKEN])
 
 
 # --- The walk on a runner, against GitHub and a uDeck made of answers ------------------------------------------------
@@ -375,3 +376,79 @@ def test_what_github_says_before_anything_is_built_can_refuse_the_run(tmp_path, 
     with pytest.raises(LabError, match=re.escape(said)):
         checks.check_real_pull_request(machine, check_dir, lab)
     assert lab.builders == [] and world.presses == [] and machine.ssh.commands == []
+
+
+# --- smoke.real-github-token ---------------------------------------------------------------
+
+
+def test_the_token_smoke_runs_only_when_named_and_takes_no_option():
+    assert smoke.carries_a_secret(checks.check_real_github_token)
+    assert not smoke.carries_a_secret(checks.check_real_pull_request)
+    assert smoke.is_named_only(checks.check_real_github_token)
+    assert smoke.what_it_takes(checks.check_real_github_token) is None
+    assert not smoke.is_named_only(lambda: None)
+    assert smoke.REAL_GITHUB_TOKEN == "smoke.real-github-token"
+
+
+def test_the_token_smoke_gives_uDeck_nothing_on_a_guest_on_this_mac(tmp_path, monkeypatch):
+    lab = Lab(tmp_path)
+    token = tmp_path / "token"
+    token.write_text("ghs_fixture")
+    token.chmod(0o600)
+    monkeypatch.setenv(smoke.TOKEN_FILE_VARIABLE, str(token))
+    with pytest.raises(LabError, match="only on a GitHub runner"):
+        checks.check_real_github_token(Machine(), tmp_path, lab)
+
+
+@pytest.mark.parametrize("named, mode, text, why", [
+    (None, 0o600, "ghs_fixture", "runs only in the lab workflow's secret job"),
+    ("missing", 0o600, "ghs_fixture", "cannot be read"),
+    ("token", 0o644, "ghs_fixture", "only its owner reads"),
+    ("token", 0o600, "", "non-empty"),
+])
+def test_the_token_file_is_the_secret_jobs_and_only_its_owner_reads_it(tmp_path, monkeypatch, named, mode, text, why):
+    """S4-22: a real secret only from a file the secret job wrote, which nobody else reads — never from argv."""
+    token = tmp_path / "token"
+    token.write_text(text)
+    token.chmod(mode)
+    if named is None:
+        monkeypatch.delenv(smoke.TOKEN_FILE_VARIABLE, raising=False)
+    else:
+        monkeypatch.setenv(smoke.TOKEN_FILE_VARIABLE, str(tmp_path / named))
+    with pytest.raises(LabError, match=why):
+        checks._the_token_file()
+
+
+def test_a_link_to_the_token_file_is_refused(tmp_path, monkeypatch):
+    token = tmp_path / "token"
+    token.write_text("ghs_fixture")
+    token.chmod(0o600)
+    (tmp_path / "link").symlink_to(token)
+    monkeypatch.setenv(smoke.TOKEN_FILE_VARIABLE, str(tmp_path / "link"))
+    with pytest.raises(LabError, match="only its owner reads"):
+        checks._the_token_file()
+    monkeypatch.setenv(smoke.TOKEN_FILE_VARIABLE, str(token))
+    assert checks._the_token_file() == str(token)
+
+
+def test_the_template_is_listed_by_the_id_uDeck_and_the_plugin_checks_derive():
+    """The smoke writes the source as Add would: its id must be the one `SourceID.derive` gives — the plugin checks'."""
+    path = Path(__file__).resolve().parents[1] / "checks" / "check_plugins.py"
+    spec = importlib.util.spec_from_file_location("check_plugins_for_the_smoke", path)
+    plugins = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = plugins
+    spec.loader.exec_module(plugins)
+    for repository, number in [(checks.TEMPLATE, checks.TEMPLATE_ID), ("someone/private-plugins", 900000301)]:
+        assert checks._source_id(repository, number) == plugins._source_id(repository, number)
+    assert checks._source_id(checks.TEMPLATE, checks.TEMPLATE_ID).startswith("github.com-udeck-plugins-template-")
+
+
+def test_the_token_smoke_types_the_token_from_its_file_and_never_as_text():
+    """The token reaches uDeck through `ui.enter_secret`, from the file: `type_text` carries only the address."""
+    text = _source("e2e", "checks", "check_smoke.py")
+    body = text[text.index("def check_real_github_token"):text.index("def _bare(")]
+    assert "ui.enter_secret(machine, f\"source.{sid}.token.tokenField\", secret," in body
+    assert "ui.type_text(" not in body
+    assert "open(secret" not in body and "read_text" not in body
+    # No picture of its screen: a byte search cannot look into one.
+    assert "machine.screenshot" not in body and "_keep_the_pane(" not in body

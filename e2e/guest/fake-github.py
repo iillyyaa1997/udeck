@@ -125,8 +125,10 @@ afresh on every request:
                                                     it a repository of its own, "source" and "parent" a
                                                     fork of something else, "default_branch" names its
                                                     default (main)
-    {"limit_until": 1790000000}                     the hourly limit is used up until then:
-                                                    403 with remaining 0 and that reset
+    {"limit_until": 1790000000}                     the address's hourly limit is used up until then:
+                                                    403 with remaining 0 and that reset; a request
+                                                    with a token spends that token's hour (5,000),
+                                                    which neither this nor `spent` touches
     {"spent": 50}                                   that many of the hour's requests already spent by
                                                     something else on the connection: what is left
                                                     says so, and runs out that much sooner
@@ -150,6 +152,17 @@ afresh on every request:
                                                     of GitLab's answers, and the hour's requests spent by
                                                     something else on the connection
     {"gitlab_page_size": 3}                         the most entries a tree answer's page holds
+    {"tokens": {"someone/private-plugins": "ghp_…"}}
+                                                    a private repository's token now, by its key — a
+                                                    GitHub `owner/repo`, a GitLab `host/path` — in place
+                                                    of its fixture's: the token rotated, the old one 401
+    {"read_repository_tokens": {"gitlab.example.test/tools/udeck-private": "glpat-…"}}
+                                                    a token the GitLab knows for that project whose only
+                                                    scope is read_repository: GitLab's 403
+                                                    insufficient_scope to every API request it carries
+    {"moved": {"someone/private-plugins": 900000399}}
+                                                    a repository that says it moved: every API request
+                                                    of it answered 301 to the same route of that number
 
 Moving a branch's head, force-pushing it, merging or closing a pull request is
 one rewrite of the file: a head at another fixture commit — one that does not
@@ -164,9 +177,13 @@ logged as the lab's, so that asking the fake whether it is up is never read as
 uDeck asking. A line of a GitLab's port names it (`site`), and every line keeps
 the path as it was sent, before its `%2F` was decoded (`raw_path`). Each line
 says whether the request carried a credential —
-`credential`: `none`, `accepted` or `rejected`, and never its value — and no
-credential is good for anything yet: one carried is answered `401 Bad
-credentials`, as GitHub answers a token it does not know.
+`credential`: `none`, `accepted` or `rejected`, and never its value. A token is
+good only for its own private repository's routes, as the repository's
+`private` file says it (or `tokens`); anything else carried is answered `401
+Bad credentials`, as GitHub answers a token it does not know, and a token
+whose scope falls short GitLab's `403 insufficient_scope` — both `rejected`.
+A classic-shaped GitHub token (`ghp_`) is answered with `X-OAuth-Scopes: repo`,
+as GitHub answers a classic token with the repo scope.
 
     fake-github.py serve ROOT PORT OWNER/REPO LOG [HOST=PORT …]
                                           each HOST=PORT a GitLab, answered on its own port
@@ -192,8 +209,10 @@ DEFAULT_BRANCH = "main"
 # The header the lab marks its own requests with.
 LAB_HEADER = "X-UDeck-Lab"
 
-# What GitHub allows without signing in, per network address and hour.
+# What GitHub allows without signing in, per network address and hour — and with a token, per token and hour, counted
+# apart from the address's (GitHub's documentation: 5,000 for a personal access token).
 LIMIT = 60
+TOKEN_LIMIT = 5000
 WINDOW_SECONDS = 3600
 
 # Where the repositories of their own are, under the fixture root: `<owner>/<repo>/`.
@@ -218,6 +237,13 @@ GENERATED = ".generated"
 
 # The headers a credential travels in, GitHub's and GitLab's.
 CREDENTIAL_HEADERS = ("authorization", "private-token")
+# A classic GitHub token's prefix, and the scopes GitHub says such a token carries with every answer.
+CLASSIC_PREFIX = "ghp_"
+CLASSIC_SCOPES = "repo"
+# GitLab's answer to a token whose scope falls short, as gitlab-org/gitlab's lib/api/api_guard.rb writes it through
+# rack-oauth2 (`InsufficientScopeForbidden`, read 2026-11-13): every scope that would do, joined by spaces.
+INSUFFICIENT_SCOPE = "The request requires higher privileges than provided by the access token."
+API_SCOPES = "api read_api"
 
 # What a fixture commit is dated: a fixed day, one day apart, so that ids never
 # depend on when the lab ran.
@@ -688,11 +714,13 @@ def read_state(root: str, default_main: str) -> dict:
 
 
 class Limit:
-    """GitHub's hourly allowance, counted down by every API request uDeck makes."""
+    """GitHub's hourly allowance, counted down by every API request uDeck makes: an address's (`LIMIT`), or a token's
+    (`TOKEN_LIMIT`)."""
 
-    def __init__(self, now: float) -> None:
+    def __init__(self, now: float, allowance: int = LIMIT) -> None:
         self.lock = threading.Lock()
-        self.remaining = LIMIT
+        self.allowance = allowance
+        self.remaining = allowance
         self.reset = int(now) + WINDOW_SECONDS
 
     def spend(self, now: float, used_up_until: int | None, spent: int = 0) -> tuple[bool, int, int]:
@@ -702,7 +730,7 @@ class Limit:
             if used_up_until is not None and now < used_up_until:
                 return False, 0, int(used_up_until)
             if now >= self.reset:
-                self.remaining = LIMIT
+                self.remaining = self.allowance
                 self.reset = int(now) + WINDOW_SECONDS
             if self.remaining - spent <= 0:
                 return False, 0, self.reset
@@ -726,6 +754,8 @@ class Fake:
         self.projects = read_projects(root)
         self.clock = clock
         self.limit = Limit(clock())
+        # Each token's own hour, by the token — the value is the key in memory and never written anywhere.
+        self.token_limits: dict[str, Limit] = {}
         self.gitlab_limits = GitLabLimits()
         self.log_lock = threading.Lock()
         self.log_path = log_path
@@ -783,16 +813,45 @@ class Fake:
         given = (state.get("tokens") or {}).get(key)
         return given if isinstance(given, str) and given else fixture
 
-    def guarded(self, key: str, fixture: str | None, headers: dict, state: dict, gitlab: bool, answer):
-        """GitHub's and GitLab's rule for a repository asked with or without a token: one carried and not this one's
-        is 401 — public or private — a private one asked without is 404, and the right one is answered."""
+    @staticmethod
+    def insufficient_scope() -> tuple[int, dict, bytes]:
+        """GitLab's 403 to a token that may not use the API — its body and its challenge saying the same scopes."""
+        status, headers, body = Fake.json(403, {"error": "insufficient_scope", "error_description": INSUFFICIENT_SCOPE,
+                                                "scope": API_SCOPES})
+        challenge = (f'Bearer realm="Protected by OAuth 2.0", error="insufficient_scope", '
+                     f'error_description="{INSUFFICIENT_SCOPE}", scope="{API_SCOPES}"')
+        return status, {**headers, "WWW-Authenticate": challenge}, body
+
+    def moved_to(self, key: str, state: dict) -> int | None:
+        """The number a repository says it moved to (`moved`), or None."""
+        given = (state.get("moved") or {}).get(key)
+        return given if isinstance(given, int) and not isinstance(given, bool) and given > 0 else None
+
+    def guarded(self, key: str, fixture: str | None, headers: dict, state: dict, gitlab: bool, answer,
+                rest: str = ""):
+        """GitHub's and GitLab's rule for a repository asked with or without a token: a GitLab token of too narrow a
+        scope is 403 insufficient_scope; one carried and not this one's is 401 — public or private —; a private one
+        asked without is 404, moved or not; a repository that moved is 301 to the same route by its new number; and
+        the right one is answered, a classic GitHub token's answer saying its scopes."""
         token = self.token_of(key, fixture, state)
         given = self.carried(headers, gitlab)
+        narrow = (state.get("read_repository_tokens") or {}).get(key)
+        if gitlab and given is not None and isinstance(narrow, str) and narrow and given == narrow:
+            return self.insufficient_scope()
         if any(name in headers for name in CREDENTIAL_HEADERS) and (given is None or given != token):
             return self.json(401, {"message": "401 Unauthorized" if gitlab else "Bad credentials"})
         if token is not None and given is None:
             return self.json(404, {"message": "404 Project Not Found" if gitlab else "Not Found"})
-        return answer()
+        moved = self.moved_to(key, state)
+        if moved is not None:
+            route = f"/api/v4/projects/{moved}{rest}" if gitlab else f"/api/repositories/{moved}{rest}"
+            status, extra, body = self.json(301, {"message": "Moved Permanently", "url": route,
+                                                  "documentation_url": "https://docs.github.com/v3/#http-redirects"})
+            return status, {**extra, "Location": route}, body
+        status, extra, body = answer()
+        if not gitlab and given is not None and given.startswith(CLASSIC_PREFIX):
+            extra = {**extra, "X-OAuth-Scopes": CLASSIC_SCOPES}
+        return status, extra, body
 
     def answer(self, method: str, target: str, headers: dict) -> tuple[int, dict, bytes]:
         parsed = urllib.parse.urlsplit(target)
@@ -830,12 +889,20 @@ class Fake:
             spent = max(0, int(state.get("spent") or 0))
         except (TypeError, ValueError):
             spent = 0
-        allowed, remaining, reset = self.limit.spend(self.clock(), state.get("limit_until"), spent)
+        # A request with a token spends that token's hour, not the address's: what `limit_until` and `spent` say of the
+        # address leaves it alone, as GitHub counts them apart.
+        token = self.carried(headers, False)
+        if token is not None:
+            limit = self.token_limits.setdefault(token, Limit(self.clock(), TOKEN_LIMIT))
+            allowed, remaining, reset = limit.spend(self.clock(), None)
+        else:
+            limit = self.limit
+            allowed, remaining, reset = limit.spend(self.clock(), state.get("limit_until"), spent)
         limits = {
-            "x-ratelimit-limit": str(LIMIT),
+            "x-ratelimit-limit": str(limit.allowance),
             "x-ratelimit-remaining": str(remaining),
             "x-ratelimit-reset": str(reset),
-            "x-ratelimit-used": str(LIMIT - remaining),
+            "x-ratelimit-used": str(limit.allowance - remaining),
             "x-ratelimit-resource": "core",
         }
         if not allowed:
@@ -875,7 +942,7 @@ class Fake:
                 return self.json(404, {"message": "Not Found"})
             rest = path[len(f"/repositories/{parts[2]}") :]
             return self.guarded(source.name, source.token, headers, state, False,
-                                lambda: self.source_answer(source, name, rest, query, headers, state))
+                                lambda: self.source_answer(source, name, rest, query, headers, state), rest)
         # "", "repos", owner, repo, ...
         if len(parts) < 4 or parts[1] != "repos":
             return self.json(404, {"message": "Not Found"})
@@ -886,7 +953,7 @@ class Fake:
             if source is not None:
                 named = self.name_of(source, state) or owner_repo
                 return self.guarded(source.name, source.token, headers, state, False,
-                                    lambda: self.source_answer(source, named, rest, query, headers, state))
+                                    lambda: self.source_answer(source, named, rest, query, headers, state), rest)
             fork = self.fork(owner_repo, state)
             if fork is None:
                 return self.json(404, {"message": "Not Found"})
@@ -1258,8 +1325,9 @@ class Fake:
             if any(header in headers for header in CREDENTIAL_HEADERS):
                 return self.json(401, {"message": "401 Unauthorized"})
             return self.json(404, {"message": "404 Project Not Found"})
+        rest = "".join(f"/{segment}" for segment in segments[5:])
         return self.guarded(project.key, project.token, headers, state, True,
-                            lambda: self.gitlab_routes(site, project, name, segments, query, headers, state))
+                            lambda: self.gitlab_routes(site, project, name, segments, query, headers, state), rest)
 
     def gitlab_routes(self, site: str, project, name: str, segments: list, query: dict, headers: dict,
                       state: dict) -> tuple[int, dict, bytes]:
@@ -1425,7 +1493,9 @@ def handler_for(fake: Fake, site: str = ""):
                     status, extra, answer = fake.answer(method, self.path, headers)
             except Exception as error:  # noqa: BLE001 — a fake that dies answers nobody
                 status, extra, answer = 500, {"Content-Type": "text/plain"}, f"the fake failed: {error!r}".encode()
-            credential = "none" if not carried else ("rejected" if status == 401 else "accepted")
+            # Refused: GitHub's and GitLab's 401, and GitLab's 403 to a token whose scope falls short.
+            refused = status == 401 or (status == 403 and "insufficient_scope" in str(extra.get("WWW-Authenticate", "")))
+            credential = "none" if not carried else ("rejected" if refused else "accepted")
             parsed = urllib.parse.urlsplit(self.path)
             # A GraphQL request's commits, by the fields it asked — never its variables' values.
             graphql_commits = len(GRAPHQL_FIELD.findall(body.decode("utf-8", "replace"))) if method == "POST" else 0

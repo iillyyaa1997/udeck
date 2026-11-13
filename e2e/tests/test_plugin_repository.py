@@ -1545,6 +1545,82 @@ def test_a_private_repository_answers_its_token_alone(gitlab):
     assert all(private not in line for line in gitlab.log.read_text().splitlines()), "never the value"
 
 
+def test_a_classic_token_is_answered_with_its_scopes_and_a_fine_grained_one_without(gitlab):
+    """GitHub says `X-OAuth-Scopes` to a classic token — the lab's `ghp_` one, rotated in, says `repo` — and nothing of
+    the kind to a fine-grained one."""
+    fine = "github_pat_lab_private_plugins_fixture_0001"
+    _, headers, _ = gitlab.get("/api/repositories/900000301", {"Authorization": f"Bearer {fine}"})
+    assert "X-OAuth-Scopes" not in headers
+    classic = "ghp_lab_classic_private_plugins_fixture_0001"
+    gitlab.state(tokens={"someone/private-plugins": classic})
+    status, headers, _ = gitlab.get("/api/repos/someone/private-plugins", {"Authorization": f"Bearer {classic}"})
+    assert status == 200 and headers.get("X-OAuth-Scopes") == "repo"
+    assert gitlab.get("/api/repositories/900000301", {"Authorization": f"Bearer {fine}"})[0] == 401, "the old one"
+
+
+def test_a_token_spends_an_hour_of_its_own_and_never_the_addresss(gitlab):
+    """GitHub counts a token's requests apart from its address's: with the address's hour used up a token is still
+    answered, on 5,000 of its own, and spending it leaves the address's count as it was."""
+    private = "github_pat_lab_private_plugins_fixture_0001"
+    gitlab.state(limit_until=int(time.time()) + 3600)
+    status, headers, _ = gitlab.get("/api/repositories/900000301", {"Authorization": f"Bearer {private}"})
+    assert status == 200 and headers["x-ratelimit-limit"] == "5000" and headers["x-ratelimit-remaining"] == "4999"
+    assert gitlab.get("/api/repositories/900000301", {"Authorization": f"Bearer {private}"})[1]["x-ratelimit-remaining"] == "4998"
+    status, headers, _ = gitlab.get("/api/repos/someone/team-plugins")
+    assert status == 403 and headers["x-ratelimit-limit"] == "60" and headers["x-ratelimit-remaining"] == "0"
+    gitlab.state()
+    assert gitlab.get("/api/repos/someone/team-plugins")[1]["x-ratelimit-remaining"] == "59", "the address's untouched"
+
+
+def test_a_token_of_too_narrow_a_scope_is_gitlabs_403_insufficient_scope(gitlab):
+    """A token GitLab knows for the project whose only scope is read_repository: 403 insufficient_scope, naming every
+    scope that would do as GitLab does — in the body and the challenge alike — and logged as refused."""
+    narrow = "glpat-lab-udeck-private-read-repository-0001"
+    gitlab.state(read_repository_tokens={f"{GL_HOST}/tools/udeck-private": narrow})
+    for path in ["/api/v4/projects/11", "/api/v4/projects/tools%2Fudeck-private",
+                 "/api/v4/projects/11/repository/branches/main"]:
+        status, headers, body = gitlab.at(GL_HOST, path, {"PRIVATE-TOKEN": narrow})
+        assert status == 403, path
+        assert json.loads(body) == {"error": "insufficient_scope", "error_description": fake_github.INSUFFICIENT_SCOPE,
+                                    "scope": "api read_api"}
+        assert 'error="insufficient_scope"' in headers["WWW-Authenticate"] and 'scope="api read_api"' in headers["WWW-Authenticate"]
+    # Not on GitHub's port, and not for another project: there it is a token nobody knows.
+    assert gitlab.at(GL_HOST, "/api/v4/projects/7", {"PRIVATE-TOKEN": narrow})[0] == 401
+    assert gitlab.at(GL_HOST, "/api/v4/projects/11", {"PRIVATE-TOKEN": "glpat-lab-udeck-private-fixture-0001"})[0] == 200
+    said = [r.credential for r in gitlab.requests()]
+    assert said == ["rejected"] * 4 + ["accepted"]
+    assert narrow not in gitlab.log.read_text()
+
+
+def test_a_repository_that_moved_answers_301_to_its_new_number_and_nothing_else(gitlab):
+    """`moved`: every API request of the repository with its token is 301 to the same route by the new number —
+    GitHub's by number or by name, a GitLab's; without its token a private one is 404, a wrong token 401."""
+    import http.client
+    private = "github_pat_lab_private_plugins_fixture_0001"
+    gitlab.state(moved={"someone/private-plugins": 900000399, f"{GL_HOST}/tools/udeck-private": 99})
+
+    def asked(port, path, headers):
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        try:
+            connection.request("GET", path, headers=headers)
+            answer = connection.getresponse()
+            answer.read()
+            return answer.status, answer.getheader("Location")
+        finally:
+            connection.close()
+
+    github = gitlab.server.server_address[1]
+    bearer = {"Authorization": f"Bearer {private}"}
+    assert asked(github, "/api/repositories/900000301/commits/main", bearer) == (301, "/api/repositories/900000399/commits/main")
+    assert asked(github, "/api/repos/someone/private-plugins", bearer) == (301, "/api/repositories/900000399")
+    # Without its token a private repository is not there, moved or not, as GitHub answers it.
+    assert asked(github, "/api/repositories/900000301", {}) == (404, None)
+    assert asked(github, "/api/repositories/900000301", {"Authorization": "Bearer github_pat_wrong"})[0] == 401
+    port = gitlab.gitlabs[GL_HOST].server_address[1]
+    assert asked(port, "/api/v4/projects/11/repository/tree", {"PRIVATE-TOKEN": "glpat-lab-udeck-private-fixture-0001"}) \
+        == (301, "/api/v4/projects/99/repository/tree")
+
+
 def test_a_private_gitlab_project_answers_its_token_in_private_token(gitlab):
     """tools/udeck-private: 404 without, 401 with another, 200 with its own in PRIVATE-TOKEN or Bearer; its GraphQL shows
     the project only to its token."""

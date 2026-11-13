@@ -786,14 +786,19 @@ public struct GitLabClient: RepositoryProvider {
 
     /// The scope a `403` says the token lacks, when it says
     /// `insufficient_scope` — `""` when it names none; nil for any other `403`.
-    /// The scope is said only when it is one GitLab names — never the
-    /// answer's own text, which could carry anything, a token echoed back
+    /// GitLab names every scope that would do, joined by spaces — `"api
+    /// read_api"` for its API (`InsufficientScopeForbidden`, rack-oauth2's
+    /// `Forbidden#protocol_params`) — so the one said is `read_api`, the
+    /// least uDeck asks for, when it is among them, and otherwise the first
+    /// GitLab names. A scope is said only when it is one GitLab has — never
+    /// the answer's own text, which could carry anything, a token echoed back
     /// included (S4-19).
     static func insufficientScope(_ body: Data) -> String? {
         guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               object["error"] as? String == "insufficient_scope" else { return nil }
-        guard let scope = object["scope"] as? String, knownScopes.contains(scope) else { return "" }
-        return scope
+        let named = ((object["scope"] as? String) ?? "").split(separator: " ").map(String.init)
+        guard named.allSatisfy(knownScopes.contains) else { return "" }
+        return named.contains("read_api") ? "read_api" : named.first ?? ""
     }
 
     /// GitLab's scopes a token step could ask for — what a `403` may name.

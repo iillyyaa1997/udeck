@@ -489,13 +489,15 @@ class LabPlugin:
             by_name[name] = item
 
         # Checks that run only when named (`smoke`) are listed, and run only by their own name.
-        named_only = {name for name, item in by_name.items() if smoke.what_it_takes(getattr(item, "obj", None))}
+        named_only = {name for name, item in by_name.items() if smoke.is_named_only(getattr(item, "obj", None))}
         try:
             chosen = names.select(by_name, self.wanted, () if self.listing else named_only)
         except names.CheckNameError as error:
             self.collection_errors.append(str(error))
             chosen = []
-        self._ask_for_the_pull_request(chosen, named_only)
+        takers = {name for name, item in by_name.items()
+                  if smoke.what_it_takes(getattr(item, "obj", None)) == smoke.PULL_REQUEST_OPTION}
+        self._ask_for_the_pull_request(chosen, takers)
         if self.shard is not None:
             chosen = names.shard(chosen, *self.shard)
         for name in chosen:
@@ -513,7 +515,7 @@ class LabPlugin:
         self.chosen_items = keep
         self._plan_the_warming(keep)
 
-    def _ask_for_the_pull_request(self, chosen: list[str], named_only: set[str]) -> None:
+    def _ask_for_the_pull_request(self, chosen: list[str], takers_of_it: set[str]) -> None:
         """`--pull-request` given to the check that takes it and to nothing else, and naming the official repository's.
 
         Refused before anything starts, as a pair is: a run that took the option and
@@ -522,7 +524,7 @@ class LabPlugin:
         """
         if self.listing:
             return
-        takers = [name for name in chosen if name in named_only]
+        takers = [name for name in chosen if name in takers_of_it]
         if self.pull_request is None:
             if takers:
                 self.collection_errors.append(
@@ -699,11 +701,14 @@ class LabPlugin:
             items = {item.nodeid: item for item in self.chosen_items}
             for nodeid, name in self.names.items():
                 rule = self.rules.get(name)
-                takes = smoke.what_it_takes(getattr(items.get(nodeid), "obj", None))
+                check = getattr(items.get(nodeid), "obj", None)
+                takes = smoke.what_it_takes(check)
                 if rule is not None:
                     self.say(f"{name}  {rule.default}")
                 elif takes is not None:
                     self.say(f"{name}  only when named, with {takes} <link>")
+                elif smoke.is_named_only(check):
+                    self.say(f"{name}  only when named")
                 else:
                     self.say(name)
             if not self.names:
@@ -945,6 +950,9 @@ class LabPlugin:
         machine = getattr(item, "funcargs", {}).get("machine")
         record = self.records.get(item.nodeid)
         if machine is None or record is None or self.run_dir is None:
+            return
+        if smoke.carries_a_secret(getattr(item, "obj", None)):
+            self.note(f"   no screenshot at the end of {record.name}: it carries a real secret")
             return
         try:
             machine.screenshot(self.run_dir / record.name, "at the end")
