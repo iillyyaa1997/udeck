@@ -82,8 +82,10 @@ public struct Reverification: Equatable, Sendable {
 
     /// What `plugins`, as the plugins folder was read, and the `trees` of the
     /// folders `folders(of:installed:)` named come to, against the official
-    /// catalogue's `head` alone: a copy of a source of one's own is not
-    /// checked against it, and its record is not written.
+    /// catalogue's `head` alone, no source trusted: a copy of a source of
+    /// one's own is not checked against it, and its record is not written —
+    /// unless it is still written trusted, which nothing is here, and so it
+    /// is written unverified (`of(_:installed:trees:heads:trusted:now:)`).
     public static func of(
         _ plugins: [DiscoveredPlugin],
         installed: InstalledPlugins,
@@ -91,20 +93,24 @@ public struct Reverification: Equatable, Sendable {
         head: Head,
         now: Date
     ) -> Reverification {
-        of(plugins, installed: installed, trees: trees, heads: [InstalledPlugins.officialSource: head], now: now)
+        of(plugins, installed: installed, trees: trees, heads: [InstalledPlugins.officialSource: head], trusted: [], now: now)
     }
 
     /// The same, each copy checked against the head of its own source —
     /// `heads`, by source id; a source missing from it is not read yet — and
     /// `trusted` the sources the operator trusted, by id: a copy of one's
     /// default branch, exactly as installed, stands and is recorded trusted
-    /// by it; the moment it is no longer trusted, unverified again.
+    /// by it; the moment it is no longer trusted, unverified again — and a
+    /// record still written trusted by a source no longer trusted is written
+    /// again even while that source is not read, as **Remove…** leaves it,
+    /// against the commit it was last checked against: nothing on disk goes
+    /// on saying a guarantee nobody gives any more.
     public static func of(
         _ plugins: [DiscoveredPlugin],
         installed: InstalledPlugins,
         trees: [String: String?],
         heads: [String: Head],
-        trusted: Set<String> = [],
+        trusted: Set<String>,
         now: Date
     ) -> Reverification {
         var standings: [String: PluginStanding] = [:]
@@ -118,7 +124,14 @@ public struct Reverification: Equatable, Sendable {
             }
             let tree = trees[id] ?? nil
             standings[id] = PluginStanding.of(record: record, folderExists: true, treeOnDisk: tree, trusted: trusted)
-            guard case .read(let headCommit) = heads[record.source] ?? .notReadYet else { continue }
+            let headCommit: String?
+            switch heads[record.source] ?? .notReadYet {
+            case .read(let commit):
+                headCommit = commit
+            case .notReadYet:
+                guard record.verification.status == .trusted, !record.isTrustedDefault(trusted) else { continue }
+                headCommit = record.verification.checkedAgainst
+            }
             let found = record.verification(treeOnDisk: tree, headCommit: headCommit, now: now, trusted: trusted)
             if !found.saysTheSame(as: record.verification) {
                 records.plugins[id]?.verification = found

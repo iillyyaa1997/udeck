@@ -208,6 +208,11 @@ public enum Phrase: Sendable, Equatable {
     /// Where the code of a source of one's own that nobody vouches for comes
     /// from (`ConsentSource`): its default branch, at `address`.
     case permissionsUntrustedSource(address: String, changedHere: Bool)
+    /// Whose guarantee a copy of a trusted source's default branch runs on,
+    /// on the card that asks about it (`ConsentSource`): the source's name
+    /// and its address (S4-07), and whether its folder was changed on this
+    /// Mac since — a change nobody vouches for.
+    case permissionsTrustedSource(name: String, address: String, changedHere: Bool)
     case permissionsUnsandboxed
     case permissionsAllowAndRun
 
@@ -224,7 +229,7 @@ public enum Phrase: Sendable, Equatable {
     case catalogueOff
     case catalogueEmpty
     case catalogueUpdatesWaiting(Int)
-    /// **Update verified plugins by themselves** (`AutoUpdate`): the switch,
+    /// **Update verified and trusted plugins by themselves** (`AutoUpdate`): the switch,
     /// and what it does and leaves to the operator.
     case catalogueUpdatesByThemselves
     case catalogueUpdatesByThemselvesHelp
@@ -303,6 +308,9 @@ public enum Phrase: Sendable, Equatable {
     /// The same, of a copy of the default branch of a source of one's own,
     /// at `address`, in the official catalogue (`CatalogueRowState.unverifiedLine`).
     case catalogueInstalledFromSource(address: String)
+    /// The same once the source is trusted: by its name, never unverified
+    /// (S4-07).
+    case catalogueInstalledFromTrustedSource(address: String, name: String)
     /// A row of a source of one's own whose id is installed from elsewhere
     /// (`CatalogueRowState.fromElsewhere`), and its button.
     case catalogueInstalledFromElsewhere(CopyName)
@@ -496,6 +504,14 @@ public enum Phrase: Sendable, Equatable {
     case sourcesAsking(host: String)
     case sourceNotTrusted
     case sourceRemove
+    /// **Trust…** and **Stop trusting…** of a source (S4-08): each button,
+    /// what it does, and the button that does it.
+    case sourceTrust
+    case sourceTrustConfirm(name: String, address: String)
+    case sourceTrustConfirmButton
+    case sourceStopTrusting
+    case sourceStopTrustingConfirm(name: String)
+    case sourceStopTrustingConfirmButton
     case sourcesTestBuild(host: String, base: String)
     /// A GitLab's limit used up, or its `429` (S4-20, item 9): `host` asked
     /// uDeck to wait — and, of gitlab.com read without a token, that a token

@@ -780,8 +780,17 @@ def test_the_repositories_of_their_own_are_what_the_source_checks_are_written_ag
     assert bare.repository.commits["n1"].snapshot.at("udeck-plugins.json") is None
     squatter = fake_github.Source(str(SOURCES / "someone" / "squatter"), "someone/squatter")
     assert squatter.id != team.id and fake_github.read_number(str(plugin_repository.FIXTURES / "id")) == config.PLUGINS_REPOSITORY_ID
+    # Two passports a name of their own cannot be shown for: the official passport's name, and nothing but characters
+    # uDeck takes out (`SourceName`). Each repository has its own number.
+    for repository, commit, name in (("someone/not-official", "o1", "uDeck plugins"),
+                                     ("someone/zero-width", "z1", "\u200b\u2060\u200e")):
+        source = fake_github.Source(str(SOURCES / repository), repository)
+        assert source.repository.names == [commit] and source.id not in (team.id, squatter.id)
+        assert json.loads((SOURCES / repository / commit / "udeck-plugins.json").read_text())["name"] == name
+        assert sorted(p.name for p in (SOURCES / repository / commit / "plugins").iterdir()) == ["team-clock"]
     found = fake_github.read_sources(str(plugin_repository.FIXTURES))
-    assert sorted(found) == ["someone/not-plugins", "someone/private-plugins", "someone/squatter", TEAM]
+    assert sorted(found) == ["someone/not-official", "someone/not-plugins", "someone/private-plugins", "someone/squatter",
+                             TEAM, "someone/zero-width"]
 
 
 def test_two_repositories_of_their_own_with_one_number_are_refused(tmp_path):

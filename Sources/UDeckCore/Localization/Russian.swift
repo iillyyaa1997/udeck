@@ -176,6 +176,9 @@ struct Russian: Vocabulary {
             "Этот код никто не проверял: он из основной ветки \(address) — источника, которому вы не доверяли"
                 + (changedHere ? ", и после установки изменён на этом Mac" : "")
                 + ". uDeck спросит снова, когда он изменится."
+        case .permissionsTrustedSource(let name, let address, let changedHere):
+            "Этот код из основной ветки \(address) — источника, которому вы доверяете как \(name). uDeck его не читает: ручается тот, кто может вливать в \(address)."
+                + (changedHere ? " После установки он изменён на этом Mac, и за это изменение никто не ручается." : "")
         case .permissionsSourceUnknown:
             "uDeck не может прочитать ~/.udeck/installed.json, поэтому неизвестно, откуда этот код: о нём спрашивают по тому, что он есть, и снова — как только он изменится."
         case .permissionsUnsandboxed:
@@ -194,9 +197,9 @@ struct Russian: Vocabulary {
             "Официальный каталог выключен: uDeck не делает запросов к официальному репозиторию, а для «Установить по ссылке…» и к его форкам, и не ищет обновлений установленного из них. Добавленные вами источники по-прежнему читаются; установленные плагины продолжают работать."
         case .catalogueEmpty: "В репозитории пока нет плагинов."
         case .catalogueUpdatesWaiting(let count): "Ждут обновления: \(count)"
-        case .catalogueUpdatesByThemselves: "Обновлять проверенные плагины самостоятельно"
+        case .catalogueUpdatesByThemselves: "Обновлять проверенные и доверенные плагины самостоятельно"
         case .catalogueUpdatesByThemselvesHelp:
-            "После каждого чтения каталога проверенный плагин, чья новая версия просит ровно то же, что и нынешняя, обновляется без нажатия: его окно остаётся на месте, ваше решение о разрешениях тоже. Новая версия, которая просит другие разрешения, плагин, который вы изменили или куда положили свой файл, и плагин, оставленный на прежней версии, ждут здесь, пока вы не нажмёте «Обновить»."
+            "После каждого чтения его каталога проверенный плагин или плагин из основной ветки источника, которому вы доверяете, чья новая версия просит ровно то же, что и нынешняя, обновляется без нажатия: его окно остаётся на месте, ваше решение о разрешениях тоже. Новая версия, которая просит другие разрешения, плагин, который вы изменили или куда положили свой файл, и плагин, оставленный на прежней версии, ждут здесь, пока вы не нажмёте «Обновить»."
         case .catalogueLimited(let readAt, let until):
             "GitHub без входа разрешает 60 запросов в час с одного адреса, и они израсходованы — uDeck или чем-то ещё на этом же подключении. "
                 + (readAt.map { "Список ниже — на \($0); " } ?? "")
@@ -262,6 +265,7 @@ struct Russian: Vocabulary {
         case .catalogueLinkedHere(let id): "\(id) подключён здесь ссылкой на вашу папку"
         case .catalogueInstalledUnverified(let ref, let fork): "Здесь установлен из \(Self.lineFrom(ref, fork: fork)): не проверен"
         case .catalogueInstalledFromSource(let address): "Здесь установлен из \(address): не проверен"
+        case .catalogueInstalledFromTrustedSource(let address, let name): "Здесь установлен из \(address): доверенный источник \(name)"
         case .catalogueInstalledFromElsewhere(let copy): "Здесь установлена \(Self.copy(copy))"
         case .catalogueInstallFromHere: "Установить отсюда…"
         case .catalogueSwitchToVerified(let version): "Перейти на проверенную \(version)"
@@ -428,6 +432,14 @@ struct Russian: Vocabulary {
         case .sourceNotTrusted:
             "Без доверия: за эти плагины никто не ручается — каждый спрашивает снова, когда меняется его код."
         case .sourceRemove: "Удалить…"
+        case .sourceTrust: "Доверять…"
+        case .sourceTrustConfirm(let name, let address):
+            "Доверять \(name) (\(address))? Плагины из его основной ветки получат отметку «Доверенный источник», будут сохранять ваше решение о разрешениях для каждой версии и обновляться сами, как проверенные, если не просят нового. Те, что ничего не просят, запускаются сразу после установки, без вопроса. uDeck их код не читает: ручается тот, кто может вливать в \(address)."
+        case .sourceTrustConfirmButton: "Доверять"
+        case .sourceStopTrusting: "Перестать доверять…"
+        case .sourceStopTrustingConfirm(let name):
+            "Перестать доверять \(name)? Его плагины станут непроверенными и спросят снова перед следующим запуском, если только вы уже не разрешали именно этот их код."
+        case .sourceStopTrustingConfirmButton: "Перестать доверять"
         case .sourcesTestBuild(let host, let base): "Тестовая сборка: \(host) читается с \(base)."
         case .sourceGitLabLimited(let host, let readAt, let until, let anonymousGitLabCom):
             "\(host) попросил uDeck подождать: лимит запросов с этой сети или для этого токена исчерпан. "
@@ -504,7 +516,9 @@ struct Russian: Vocabulary {
         case .windowWillNotRun(let id): "\(id) не запустится:"
         case .windowReinstall: "Переустановить"
         // Копия своего источника не говорит своей отметки перед той, что говорит фраза.
-        case .windowReinstallBrings(.sourceDefault(let version, let address, _)):
+        case .windowReinstallBrings(.sourceDefault(let version, let address, let trustedName?)):
+            "«Переустановить» вернёт: версия \(version) из \(address), доверенный источник \(trustedName)."
+        case .windowReinstallBrings(.sourceDefault(let version, let address, nil)):
             "«Переустановить» вернёт: версия \(version) из \(address). Этот код никто не проверял."
         case .windowReinstallBrings(let copy): "«Переустановить» вернёт: \(Self.copy(copy)). Этот код никто не проверял."
 
@@ -672,6 +686,10 @@ extension Russian {
     /// не разрешали.
     static func staysAfterSwitching(to copy: CopyName) -> String {
         if case .verified = copy { return "Окна плагина, его настройки и ваше решение о разрешениях останутся." }
+        // Копия доверенного источника: чьё поручительство и решение по версии этого источника (S4-09).
+        if case .sourceDefault(_, _, _?) = copy {
+            return "Окна плагина и его настройки останутся. Код, который встанет, — из источника, которому вы доверяете: плагин спросит разрешения перед запуском, если только он ничего не просит или вы уже разрешали эту версию из этого источника."
+        }
         return "Окна плагина и его настройки останутся. Код, который встанет, никто не проверял: плагин спросит разрешения перед запуском, если только вы уже не разрешали именно этот код."
     }
 

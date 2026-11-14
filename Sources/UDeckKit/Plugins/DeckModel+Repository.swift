@@ -401,7 +401,7 @@ extension DeckModel {
     /// A catalogue row's state, in the catalogue of `source`.
     public func rowState(for entry: CatalogueEntry, in source: String = InstalledPlugins.officialSource) -> CatalogueRowState {
         CatalogueRowState.of(entry, record: installed.plugins[entry.id], folderExists: folderExists(entry.id),
-                             source: source, official: catalogueAddress)
+                             source: source, official: catalogueAddress, trustedNames: trustedSourceNames)
     }
 
     /// How many updates are waiting: the verified copies' — and those of
@@ -438,7 +438,7 @@ extension DeckModel {
     /// when that is code nobody verified (`InstalledRecord.reinstallSays`).
     public func reinstallSays(_ id: PluginIdentifier) -> Phrase? {
         installed.plugins[id.rawValue]?.reinstallSays(headTree: catalogue?.entry(id.rawValue)?.listing.tree,
-                                                      official: catalogueAddress)
+                                                      official: catalogueAddress, trustedNames: trustedSourceNames)
     }
 
     /// Whether the version the catalogue's head has for `id` asks for other
@@ -486,12 +486,16 @@ extension DeckModel {
     }
 
     /// What the card asking about `id` says of where its code comes from —
-    /// for a decision held to its tree; nil for one held to its version
+    /// for a decision held to its tree, and whose guarantee it is for a
+    /// trusted source's copy; nil for any other held to its version
     /// (`ConsentSource`).
     public func consentSource(for id: PluginIdentifier) -> Phrase? {
         ConsentSource.of(installed.plugins[id.rawValue], basis: consentBasis(of: id),
                          recordsReadable: installedProblem == nil,
-                         changedHere: standings[id.rawValue] == .modifiedLocally)
+                         changedHere: standings[id.rawValue] == .modifiedLocally, trustedNames: trustedSourceNames,
+                         addresses: Dictionary(sources.map { ($0.id, $0.address.description) },
+                                               uniquingKeysWith: { first, _ in first }),
+                         linked: plugin(withID: id)?.isLinked ?? false)
     }
 
     /// The page where a plugin's folder is read, at a commit, in the
@@ -562,7 +566,8 @@ extension DeckModel {
             for source in sources where sourceCataloguesRead.contains(source.id) {
                 heads[source.id] = .read(sourceCatalogues[source.id]?.commit)
             }
-            let found = Reverification.of(plugins, installed: records, trees: trees, heads: heads, now: Date())
+            let found = Reverification.of(plugins, installed: records, trees: trees, heads: heads,
+                                          trusted: trustedSources, now: Date())
             if found.standings != standings { standings = found.standings }
             // What code held to its tree runs on from now (`requiredTree`):
             // its loop starts or stops only when its tree is another.
@@ -628,8 +633,10 @@ extension DeckModel {
     /// starts from here on, and a card action that is running is not ended
     /// for it — the answer is false then, the folder is left as it was, and
     /// the update is asked about again on the minute's tick. False too when
-    /// **Update verified plugins by themselves** or **Official catalogue** was
-    /// switched off while it downloaded: then it is not made at all.
+    /// **Update verified and trusted plugins by themselves** or **Official catalogue** was
+    /// switched off while it downloaded, or the copy no longer stands verified
+    /// or trusted — **Stop trusting…** pressed meanwhile: then it is not made
+    /// at all.
     func quietUnlessActing(_ id: PluginIdentifier, source: String) async -> Bool {
         guard switchedOnStill(id, source: source) else { return false }
         pluginRuns.quiet(id.rawValue)
@@ -643,6 +650,11 @@ extension DeckModel {
     private func switchedOnStill(_ id: PluginIdentifier, source: String) -> Bool {
         guard updatesByThemselves(source) else {
             DeckLog.plugins.info("\(id.rawValue, privacy: .public) does not update itself: switched off while it downloaded")
+            return false
+        }
+        // Where it stands is recomputed at once when its source stops being trusted (`trustChanged`).
+        guard standings[id.rawValue] == .verified || standings[id.rawValue] == .trusted else {
+            DeckLog.plugins.info("\(id.rawValue, privacy: .public) does not update itself: no longer verified or trusted while it downloaded")
             return false
         }
         return true
@@ -712,7 +724,7 @@ extension DeckModel {
         guard let record = installed.plugins[id] else { return .not(.nothingWaiting) }
         let offer = updateOffer(for: id)
         let standing = standings[id]
-        let asked = offer?.isWaiting == true && standing == .verified && !record.pinned
+        let asked = offer?.isWaiting == true && (standing == .verified || standing == .trusted) && !record.pinned
         let place = asked ? ShownPlace.Place.now(id, in: paths, record: record, bringing: .nothing).fate : .nothing
         let plugin = AutoUpdate.Plugin(
             record: record, offer: offer, standing: standing,
@@ -731,14 +743,14 @@ extension DeckModel {
         let source = installed.plugins[id]?.source ?? InstalledPlugins.officialSource
         guard case .install(let operation, let commit, let folder, let version, let origin)
                 = ShownPlace.update(id, catalogue: catalogue(of: source), in: paths, installed: installed, shown: nil,
-                                    official: catalogueAddress) else {
+                                    official: catalogueAddress, trustedNames: trustedSourceNames) else {
             return false
         }
         run(operation, id: id, commit: commit, folder: folder, version: version, from: origin, automatic: true)
         return busyPlugin == id
     }
 
-    /// **Update verified plugins by themselves**, on or off. On, it counts
+    /// **Update verified and trusted plugins by themselves**, on or off. On, it counts
     /// from the next read of the catalogue.
     public func setAutoUpdateVerified(_ on: Bool) {
         var changed = settings
@@ -766,7 +778,7 @@ extension DeckModel {
     public func install(_ id: String, from source: String = InstalledPlugins.officialSource,
                         shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
         act(ShownPlace.install(id, catalogue: catalogue(of: source), in: paths, installed: installed, shown: shown,
-                               official: catalogueAddress), id: id)
+                               official: catalogueAddress, trustedNames: trustedSourceNames), id: id)
     }
 
     /// **Update**, or **Switch to** a version the repository went back to: the
@@ -776,7 +788,7 @@ extension DeckModel {
     public func update(_ id: String, from source: String = InstalledPlugins.officialSource,
                        shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
         act(ShownPlace.update(id, catalogue: catalogue(of: source), in: paths, installed: installed, shown: shown,
-                              official: catalogueAddress), id: id)
+                              official: catalogueAddress, trustedNames: trustedSourceNames), id: id)
     }
 
     /// **Reinstall**: what the record says was installed, put back — over a
@@ -799,7 +811,7 @@ extension DeckModel {
     @discardableResult
     public func backToPrevious(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
         act(ShownPlace.backToPrevious(id, source: catalogueAddress, in: paths, installed: installed, shown: shown,
-                                      head: defaultHead, sources: sources), id: id)
+                                      head: defaultHead, sources: sources, trustedNames: trustedSourceNames), id: id)
     }
 
     /// The source **Back to** of `id` takes its copy from, when it offers one
@@ -838,12 +850,14 @@ extension DeckModel {
         guard source != InstalledPlugins.officialSource else {
             return act(ShownPlace.earlier(id, line: line, source: catalogueAddress,
                                           branch: catalogueState.defaultBranch ?? catalogue?.branch,
-                                          in: paths, installed: installed, shown: shown), id: id)
+                                          in: paths, installed: installed, shown: shown,
+                                          trustedNames: trustedSourceNames), id: id)
         }
         guard let own = self.source(source) else { return .goAhead }
         return act(ShownPlace.earlier(id, line: line, source: own.address,
                                       branch: sourceStates[source]?.defaultBranch ?? sourceCatalogues[source]?.branch,
-                                      in: paths, installed: installed, shown: shown, sourceID: source), id: id)
+                                      in: paths, installed: installed, shown: shown, sourceID: source,
+                                      trustedNames: trustedSourceNames), id: id)
     }
 
     /// Does what `step` says — every argument it carries is `ShownPlace`'s —
@@ -976,7 +990,7 @@ extension DeckModel {
             return .goAhead
         }
         return act(ShownPlace.installFromLink(id, resolution: resolution, in: paths, installed: installed, shown: shown,
-                                              source: catalogueAddress), id: id)
+                                              source: catalogueAddress, trustedNames: trustedSourceNames), id: id)
     }
 
     /// Reads a plugin's earlier versions from its folder's history — the
@@ -1126,7 +1140,7 @@ extension DeckModel {
             commit: commit, folder: folder, version: version,
             headCommit: head?.commit, headTree: head?.entry(id)?.listing.tree,
             defaultBranch: head?.branch ?? catalogueState(of: origin.source).defaultBranch, automatic: automatic,
-            pinned: pinned
+            pinned: pinned, sourceTrusted: trustedSources.contains(origin.source)
         )
         // What **Look up** heard of the pull request or the branch this copy
         // comes from, if that is where it comes from, and when: kept with what
@@ -1222,11 +1236,12 @@ extension DeckModel {
     private func carryTheDecision(of id: PluginIdentifier, from before: GrantCarry.Copy?, to record: InstalledRecord,
                                   asking manifest: PluginManifest?) {
         guard let manifest else { return }
-        let guarantee: GrantCarry.Guarantee? = switch record.verification.status {
-        case .verified: .verified
-        case .trusted: .trusted(source: record.source)
-        default: nil
-        }
+        // Whose guarantee the new copy has, worked out from what it is — as it
+        // was just put in place, exactly as installed — and from the sources
+        // trusted now, never from the status the installer wrote.
+        let standing = PluginStanding.of(record: record, folderExists: true, treeOnDisk: record.tree,
+                                         trusted: trustedSources)
+        let guarantee = GrantCarry.Copy.guarantee(of: standing, record: record)
         let after = GrantCarry.Copy(version: record.version, asks: manifest.permissions.capabilities, guarantee: guarantee)
         let carried = GrantCarry.after(grants[id], old: before, new: after)
         guard carried != grants[id] else { return }

@@ -491,7 +491,7 @@ public final class DeckModel {
     /// `installed.json` cannot be read.
     public func consentBasis(of id: PluginIdentifier) -> ConsentBasis {
         ConsentBasis.of(installed.plugins[id.rawValue], linked: plugin(withID: id)?.isLinked ?? false,
-                        recordsReadable: installedProblem == nil)
+                        recordsReadable: installedProblem == nil, trusted: trustedSources)
     }
 
     /// The tree the gate requires of `id` for a run that starts now, or a
@@ -566,8 +566,10 @@ public final class DeckModel {
     /// Starts and ends poll loops as the plugins, the layout, the decisions and
     /// the panel now say — starting again only the loops whose plugin or
     /// decision changed (`PollLoops`): every other plugin's next run is when it
-    /// was due. `again` starts every loop afresh.
-    public func restartPolling(again: Bool = false) {
+    /// was due. `again` starts every loop afresh. Answers the plugins whose
+    /// loop was not running before and is now.
+    @discardableResult
+    public func restartPolling(again: Bool = false) -> Set<String> {
         let polling = panelIsVisible || settings.pollWhileCollapsed
         if !polling { refreshTask?.cancel() }
         let pluginRuns = self.pluginRuns
@@ -576,6 +578,7 @@ public final class DeckModel {
                                       requiredTree: { treeLastHashed(for: $0) },
                                       requiredSource: { requiredSource(for: $0) })
         let plan = PollLoops.plan(running: pollLoops, wanted: wanted, again: again)
+        let begun = plan.start.subtracting(pollLoops.keys)
         for id in plan.stop {
             pollTasks[id]?.cancel()
             pollTasks[id] = nil
@@ -597,6 +600,7 @@ public final class DeckModel {
                 }
             }
         }
+        return begun
     }
 
     /// Cancels one plugin's poll loop. Part of quieting it: see `quiet`.

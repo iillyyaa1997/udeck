@@ -1387,12 +1387,13 @@ Beside the official catalogue, the operator can add a repository of their own
 with **Install**, **Update**, **Earlier versions**, **Back to**, **Reinstall**
 and **Remove** as the official one has them. Nobody vouches for it: its
 plugins are **Unverified**, and ask before they run, whenever their code
-changes ([Consent for unverified code](#consent-for-unverified-code)).
+changes ([Consent for unverified code](#consent-for-unverified-code)) — until
+the operator trusts it ([Trusting a source](#trusting-a-source)).
 
-> **Later — stage 4.** Private sources read with a token kept in the Keychain
-> or by **Sign in**, and **Trust…** with the **Trusted source** mark. Today a
-> source is a public repository on github.com, or a public project on a GitLab
-> — gitlab.com, or one's own at `https://<host>/api/v4`.
+> **Later — stage 4.** **Sign in**. Today a source is a repository on
+> github.com, or a project on a GitLab — gitlab.com, or one's own at
+> `https://<host>/api/v4` — public, or private and read with a token kept in
+> the Keychain.
 
 ### `sources.json`
 
@@ -1414,7 +1415,7 @@ It is written atomically, like `installed.json`, and it never holds a secret.
 | `path` | `owner/repo`, or `group/…/project`, as the host spells it now: for the pages a person opens and for GitHub's raw host. Written back whenever a describe of it, by its number, says another — a describe that names that number: one naming another, or none, is not believed, on GitHub as on GitLab. |
 | `remoteID` | The number GitHub knows the repository by, or GitLab the project, which neither a rename nor a transfer changes. Every request after **Look up** addresses it by that number. |
 | `access` | What the Keychain is expected to hold for it — never the token itself: `none`; `token` once a token is kept for it (R3b); `signIn` from R6. A source whose `access` is `none` never reads the Keychain. |
-| `trustedAt` | `null` today; when it was trusted, later. |
+| `trustedAt` | When the operator pressed **Trust**, in whole seconds; `null` while it is not trusted ([Trusting a source](#trusting-a-source)). |
 | `addedAt` | When it was added. |
 
 A key uDeck does not know is ignored, and written back as it was. An entry it
@@ -1577,6 +1578,69 @@ The address is shown instead when no passport has been read, when nothing is
 left of the name, and when it is — trimmed, whatever its case — the official
 passport's name or `uDeck plugins`: a passport cannot dress up as the official
 one. Every row and every warning names the address too.
+
+### Trusting a source
+
+**Trust…** on a source's block opens a confirmation there: *"Trust Team plugins
+(github.com/someone/team-plugins)? Plugins from its default branch will be
+marked Trusted source, keep your permission decision for each version, and
+update themselves like verified ones when they ask for nothing new. Those that
+ask for nothing run as soon as they are installed, with no question. uDeck does
+not read their code: the guarantee is that of whoever can merge into
+github.com/someone/team-plugins."* — **Trust** and **Cancel**. **Trust** writes
+`trustedAt`, and from that moment:
+
+* a copy of the source's default branch, its folder still exactly as installed,
+  stands **Trusted source: Team plugins** (`checkmark.shield`, in a colour of
+  its own, never Verified's green) — on its row, on the source's catalogue rows
+  and on the block, which no longer says *Not trusted…*; its record says
+  `verification.status` `trusted`, `by` the source's id. Changed on disk, it is
+  **Modified locally**, as any copy is; its folder gone, **Missing**. A branch
+  or a pull request of a trusted source — which stage 4 does not install — would
+  stay **Unverified**;
+* its permission decision is held to its version, as a verified copy's is, and
+  to the source it was made for ([Consent for unverified
+  code](#consent-for-unverified-code)); a copy that asks for nothing runs at once —
+  one already placed and waiting on its card, the moment the source is trusted;
+* it updates itself as a verified copy does ([Automatic
+  updates](#automatic-updates)), after a read of its own source;
+* a copy that asks for nothing and was declined while the source was not
+  trusted was switched off then, and stays off: switching it on is the
+  operator's act;
+* a warning, the catalogue row of another source and a window's **Reinstall**
+  name its copy *1.0.0 from github.com/someone/team-plugins: trusted source
+  Team plugins*, the official catalogue's row of the same id says *Installed
+  here from github.com/someone/team-plugins: trusted source Team plugins*, and
+  the card asking about it says *"This code comes from the
+  default branch of github.com/someone/team-plugins, a source you trust as Team
+  plugins. uDeck does not read it: the guarantee is that of whoever can merge
+  into github.com/someone/team-plugins."* — the source's address as it is now,
+  once it was renamed: the old one may be somebody else's — and, once its
+  folder was changed on this Mac, that nobody vouches for that change. Where a
+  copy came from is still named by the address it was installed from.
+
+**Stop trusting…** asks *"Stop trusting Team plugins? Its plugins become
+Unverified and ask again before they next run, unless you allowed exactly
+their code before."*; **Stop trusting** clears `trustedAt`. At once — before a
+folder is hashed again, from the trees last hashed — its copies stand
+**Unverified**, nothing of them updates itself or carries a decision (an
+update by itself already downloading is not swapped in), and every poll loop
+is planned again: their decisions are held to their trees now. A decision
+made while the source was trusted holds no tree, so that copy asks again
+before it next runs, one that asks for nothing included; a decision made for
+exactly its code before the source was trusted still holds it. **Remove…** of
+a trusted source does the same to its copies, and so does a `sources.json`
+that stops saying it is trusted, or that cannot be read — uDeck reads it again
+on the minute's tick, which runs while a source is listed or the official
+catalogue is on, so a trust taken away by hand counts from the next minute. While it cannot be read, nothing is trusted, and **Trust…**
+is not offered, since no block is shown.
+
+Trust is kept on this Mac only, in `sources.json`, and never sent anywhere.
+Every request after the add addresses the source by its number, so Trust
+follows the repository, not its name. In stage 4 it covers only the default
+branch, since a source of one's own has no other refs yet. Which copies stand
+trusted is `PluginStanding.of`, `InstalledRecord.verification` and
+`Reverification` with the trusted set (`SourceList.trusted`), in UDeckCore.
 
 ---
 
@@ -1793,9 +1857,8 @@ the default branch's, **Verified**, like any other (`Adoption`). A fork's
 default branch is never taken as the official one's (`PluginOrigin.mayBeTaken`).
 
 Other repositories — one of their own, or a fork of something else — are
-sources of their own ([Sources of one's own](#sources-of-ones-own)).
-
-> **Later — stage 4.** **Trust** on a source.
+sources of their own ([Sources of one's own](#sources-of-ones-own)), which can
+be trusted ([Trusting a source](#trusting-a-source)).
 
 ### When the pull request is merged or closed
 
@@ -2104,7 +2167,7 @@ its hash be compared at all.
 | `installedAt` | ISO-8601 time, UTC, whole seconds | When this copy was put in place. |
 | `pinned` | boolean | `true` when the operator chose this version over the newest one — an earlier version, or **Back to 1.0.0** along the copy's own line, an update undone. **Back to** from another line of history — a pull request or a branch tried, a copy of another source — puts the copy back as it was, pinned only if it was (`previous.pinned`), so a verified copy returned to goes on updating itself. A pinned plugin is still told about newer versions, and [updates by themselves](#automatic-updates) leave it alone. **Update** clears it. |
 | `verification.status` | string | What the folder was, the last time uDeck looked: `verified`, `modified`, `unverified`; `trusted` later. A status uDeck does not know — a later uDeck's — is read as `modified`, rather than making the whole file unreadable: it is recomputed anyway. |
-| `verification.by` | string or null | Whose guarantee it is: `official`, or (later) the trusted source's id; `null` when nobody's. |
+| `verification.by` | string or null | Whose guarantee it is: `official`, or the trusted source's id; `null` when nobody's. |
 | `verification.checkedAgainst` | 40 hex characters or null | The commit of the default branch the folder was compared against. |
 | `verification.checkedAt` | ISO-8601 time | When. |
 | `previous` | object or null | The copy this one replaced — `ref`, `commit`, `tree`, `version`, the `repository` it came from, the `source` it was a copy of (since 0.8.0), and `pinned: true` when it was pinned (since 0.8.0, written only then) — so that **Back to 1.0.0** is one click, from where that copy came: a pull request's copy goes back as the pull request's, a renamed source's from the address it has now. `null` after a first install. A copy recorded before there were branches and pull requests has no `repository`: it came from the source's own. One recorded before 0.8.0 has no `source`, and its source is worked out from its `repository` ([One id, one copy](#one-id-one-copy)); 0.7.0 reads past both keys, and drops them when it writes the record again. |
@@ -2411,8 +2474,9 @@ which puts back what was installed and moves the changed copy to the Trash.
 
 ### Automatic updates
 
-A verified plugin updates itself, with nothing pressed, after a read of the
-catalogue that finds a newer version — or the same version with other files —
+A verified plugin — or a trusted source's ([Trusting a
+source](#trusting-a-source)) — updates itself, with nothing pressed, after a
+read of its catalogue that finds a newer version — or the same version with other files —
 asking for exactly what the installed one asks for. It is the update
 **Update** makes, every step of it, run by uDeck one plugin at a time: the
 files of that one plugin downloaded at the head, hashed, checked, swapped in,
@@ -2424,12 +2488,17 @@ itself on October 10, 2026*, with **Back to 1.0.0** as after any update.
 It happens only when all of these hold, and the row offers the update as usual
 when any does not:
 
-* **Update verified plugins by themselves**, under Settings → Plugins → Official
-  catalogue, is on. It is on as uDeck ships (`autoUpdateVerified` in
-  `settings.json`, absent until it is switched off), and does nothing while
-  **Official catalogue** is off;
-* the installed copy stands **Verified** — not **Modified locally**, not a
-  folder of the operator's own, not a linked folder;
+* **Update verified and trusted plugins by themselves**, under Settings →
+  Plugins → Official catalogue, is on. It is on as uDeck ships
+  (`autoUpdateVerified` in `settings.json`, absent until it is switched off).
+  It is shown while **Official catalogue** is on or a source is trusted. For the
+  official catalogue's copies it does nothing while **Official catalogue** is
+  off; a trusted source's copies update themselves whatever **Official
+  catalogue** says, while the source is listed in a `sources.json` that can be
+  read, after a read of that source by its number — so never from a squatter at
+  its name;
+* the installed copy stands **Verified** or **Trusted source** — not **Modified
+  locally**, not a folder of the operator's own, not a linked folder;
 * it is not `pinned`: an earlier version the operator chose stays;
 * the new version asks for the same permissions, every capability compared
   byte for byte as a set. One more, one fewer or another, and the row says
@@ -2516,6 +2585,34 @@ The gate is `PermissionGate.launchDecision` and `mayRun` in the plugin format,
 given the tree required (`requiredTree`); without one — `udeck-plugin run`, a
 verified plugin — it is the rule it always was.
 
+**A trusted source's copies** ([Trusting a source](#trusting-a-source)) are
+held to their version, as verified ones are — and to the source the decision
+was made for, so that one source's decision never runs another source's copy
+of the same id and version:
+
+* `grants.json` keeps, beside the version, `decidedForSource`: the source of
+  the copy **Allow** or **Decline** was pressed for — `official`, or a source's
+  id — and nothing for a folder that has no record. A decision without it reads
+  as the official source's, since before stage 4 every record was.
+* For a copy held to its version that uDeck installed, the gate requires the
+  decision to have been made for its record's source (`requiredSource`); for a
+  link, a folder of one's own and a copy held to its tree it requires none,
+  since a tree names the content. **Allow** pressed on a card drawn for one
+  source's copy records nothing once another source's copy is there.
+* An update carries the decision only between two copies with the same
+  guarantee — both **Verified**, or both **Trusted source** of the same source —
+  asking for exactly the same, and keeps the source it was made for
+  (`GrantCarry`). From **Verified** to a trusted source's copy, or between two
+  trusted sources, the card asks.
+* `udeck-plugin run` requires no source, as it requires no tree.
+
+Two things are accepted as they are. A decision that uDeck 0.7.0 writes again —
+it does not know `decidedForSource`, and drops it — reads as the official
+source's: a trusted copy then asks again, the safe direction. And a trusted
+copy changed on disk stays held to its version and its source, as a verified
+copy changed on disk does: the mark says **Modified locally**, and an edit made
+on this Mac is the operator's own.
+
 Installing such a copy is [Installing from a branch or a pull
 request](#installing-from-a-branch-or-a-pull-request).
 
@@ -2568,7 +2665,7 @@ read it*. That is what these marks answer — and each says whose word it is.
 | **Verified** — `checkmark.seal.fill` | Installed from the default branch of the official repository — or from its pull request or branch, once exactly that folder was merged — and the folder on disk is still exactly what was merged there. A maintainer of the official repository read it before merging. | 1; 3 |
 | **A folder of your own** — `folder` | Put into `~/.udeck/plugins` by anyone but uDeck. uDeck claims nothing about it. | 1 |
 | **Modified locally** — `pencil` | Installed from a repository, but the folder has changed since. Whatever mark it had is gone. | 1 |
-| **Trusted source: \<name\>** — `checkmark.shield` | Installed from the default branch of a repository the operator explicitly trusted (**Trust** on the source, as `brew trust` works for Homebrew). The guarantee is that source's owner's, not uDeck's — a different mark, so nobody mistakes one for the other. | 4 |
+| **Trusted source: \<name\>** — `checkmark.shield` | Installed from the default branch of a repository the operator explicitly trusted (**Trust…** on the source's block, as `brew trust` works for Homebrew), and the folder on disk is still exactly what was installed. The guarantee is that source's owner's, not uDeck's — a different mark and colour, so nobody mistakes one for the other. On its rows, the source's catalogue rows and its block; nothing on the card's header, as for Verified ([Trusting a source](#trusting-a-source)). | 4 |
 | **Unverified** — `exclamationmark.triangle` | From a branch, a pull request, a fork, a specific commit, or the default branch of a source nobody trusted. Nobody vouches for it. Shown on the card's header as well as in Settings. | 3 (a branch or a pull request of the official repository, a branch of a fork of it); 4 (the default branch of a source nobody trusted — on its rows, its copies' rows and their cards, its block saying *Not trusted…*) |
 
 In the official repository **only what is merged is verified**; its branches and
@@ -2903,7 +3000,13 @@ guest's `~/.udeck` over SSH.
 | `plugins.source-official-off` | **Official catalogue** switched off with a source added: Settings says *The official catalogue is off: uDeck makes no request to the official repository, nor to its forks for Install from a link…, and does not look for updates of what was installed from them. Sources you added are still read; installed plugins keep running.*, and **Install from a link…** that it makes no request to the official repository, nor to its forks for a link. uDeck ended, the source's state made two days old and its main moved to `t2`, started again — it reads the source at launch, by its number, its log saying so. Ended again, the state made a minute and a half short of a day old and uDeck started with Settings closed: no read at launch, and the minute's clock reads it once it is due (*on schedule*). **Update**, **Back to**, **Earlier versions…** and **Reinstall** of its copy each work, from the source; from the switch on, no request reaches the official repository's paths. |
 | `plugins.source-renamed` | The fake renames someone/team-plugins to someone/team-plugins-2, its number the same, and serves another repository, someone/squatter, with another number and a team-clock 9.0.0, at the old name. With the source's default branch a day old, **Check now** describes it by its number: `sources.json` says the new name under the same id, and the block shows it. From the rename on, nothing asks the old name, through the API or its raw host, and nothing the other repository has is offered. |
 | `plugins.official-id-mismatch` | uptime 1.0.0 installed, verified; uDeck ended, main moved to `c2` and the official repository's description answering another number, the catalogue two days old: started again, uDeck describes the official repository and reads nothing of it after that — no head, no listing, no file — uptime stays 1.0.0, and Settings says *The address of the official catalogue now belongs to a different repository. uDeck stopped reading it, and nothing updates by itself; installed plugins keep running.* Meanwhile uptime's row offers no **Earlier versions…**, the catalogue's rows read before are gone, and **Install from a link…** on a branch of it says the same sentence with no request. **Check now** describes it again and stops again; with its own number back, **Check now** reads on, and **Earlier versions…** is offered again. Before all that, while uDeck runs with the official number: uptime's **Earlier versions…** open listing 1.0.0 and **Install from a link…** of `fix/uptime` listing uptime — the address answering another number and **Check now** read, the list goes from the screen and the sheet says the same sentence in place of the branch's plugins. |
-| `plugins.source-downgrade-to-0-7-0` | `team-clock` installed from the source and placed; uDeck ended, `officialCatalogue: false` written into `settings.json`, and the released 0.7.0, as GitHub publishes it, installed and started, its update feed one nobody serves: its Settings say **Unverified** of `team-clock`, and its card asks before it runs. 0.7.0 ended, `sources.json` and every file of `catalogue/<id>/` are byte for byte as they were, and the record's `source` is still the source's id. This build started again, **Check now** on the source reads it by its number, and the row says the copy is from it. GitHub not giving 0.7.0: it could not check. |
+| `plugins.source-downgrade-to-0-7-0` | The source trusted, and `team-clock` — asking for nothing — installed from it, recorded `trusted`, placed and run at once; uDeck ended, `officialCatalogue: false` written into `settings.json`, and the released 0.7.0, as GitHub publishes it, installed and started, its update feed one nobody serves: its Settings say **Unverified** of `team-clock`, and its card asks before it runs. 0.7.0 ended, `sources.json` and every file of `catalogue/<id>/` are byte for byte as they were, and the record's `source` is still the source's id. This build started again, **Check now** on the source reads it by its number, the row says the copy is from it, the copy is *Trusted source: Team plugins* and recorded `trusted`, and its card runs without asking. GitHub not giving 0.7.0: it could not check. |
+| `plugins.source-trust` | `team-clock` 1.0.0 installed from the source, unverified, and placed: its card asks. **Trust…** says, in the block, *"Trust Team plugins (github.com/someone/team-plugins)? Plugins from its default branch will be marked Trusted source, …"* in full, and **Trust** writes `trustedAt` in whole seconds. The block, every row of its catalogue and `team-clock`'s row say *Trusted source: Team plugins* — none Unverified, none Verified — `installed.json` says `trusted`, by the source's id, and, uDeck polling with the panel away and the panel left away, `team-clock`'s own count of its runs appears — its loop started by the trust alone — and then its card runs without asking, nothing in its header. |
+| `plugins.source-trusted-updates-itself` | The source trusted, `team-ping` 1.0.0 installed from it, placed and allowed — the decision made for the source (`decidedForSource`). **Official catalogue** off: *Update verified and trusted plugins by themselves* is still shown. The source's main moved to t2 and **Check now** pressed on its block: `team-ping` is 1.1.0 by itself (`automatic: true`, still `trusted`), its card runs 1.1.0 without asking, and the decision is for 1.1.0, still the source's; nothing reaches the official repository from the switch on. |
+| `plugins.source-trusted-permissions-change` | The source trusted, `team-clock` 1.0.0 run at once. Its main moved to t3, where `team-clock` 1.2.0 asks for one command: after **Check now**, *1.2.0 available, asks for different permissions*, nothing of 1.2.0 but its manifest fetched, the record still t1's. **Update** puts 1.2.0 in place, still `trusted`, and its card asks, saying *"This code comes from the default branch of github.com/someone/team-plugins, a source you trust as Team plugins. …"* |
+| `plugins.source-decision-not-carried` | The official `uptime` 1.0.0 allowed, the decision the official source's. The source trusted, and **Install from here…** of its own `uptime` 1.0.0 — the same permissions — names the official copy and *1.0.0 from github.com/someone/team-plugins: trusted source Team plugins*, and says whose code comes; confirmed, the copy is the source's, `trusted`, the official catalogue's row says *Installed here from github.com/someone/team-plugins: trusted source Team plugins*, and its card asks. **Allow** records the source. **Switch to verified** back, the official copy's card asks again. |
+| `plugins.source-stop-trusting` | The source trusted, `team-clock` run at once and `team-ping` allowed. **Stop trusting…** says *"Stop trusting Team plugins? Its plugins become Unverified and ask again before they next run, unless you allowed exactly their code before."*; **Stop trusting** clears `trustedAt`, both rows say **Unverified**, both records are written `unverified`, and both cards ask — `team-clock`, which asks for nothing, included. Trusted again, `team-clock` runs at once; `trustedAt` taken out of `sources.json` by hand, within the minute's tick its row says **Unverified** and its card asks. Trusted once more, **Remove…** of the source then leaves it, recorded `unverified`, and its card asks. |
+| `plugins.source-name-not-official` | `someone/not-official`, whose passport is named *uDeck plugins*, and `someone/zero-width`, whose passport's name is U+200B, U+2060 and U+200E: **Look up** shows each by its address, and so does its block once added; not-official's **Trust…** says *"Trust github.com/someone/not-official (github.com/someone/not-official)? …"*, and trusted, its block and row say *Trusted source: github.com/someone/not-official*. |
 | `plugins.source-remove` | **Remove…** on the source, after its warning: the entry and `catalogue/<id>/` go; `team-clock` stays, and its row says *From github.com/someone/team-plugins — a source no longer added*, with no **Reinstall**, **Back to**, **Update** or **Earlier versions…**; Settings opened again, nothing more is asked of the source. |
 | `plugins.source-refusals` | **Look up** refuses, each with its sentence and no **Add**: `http://`, git's SSH address and the official repository before any request; `github.com/someone/missing` after its description's 404 (*… could not be found, or it is private. If it is private, uDeck needs a token for it: Token…*); `someone/not-plugins`, with no passport at its default branch, after its description, its head and the passport's 404; and someone/team-plugins once it is added, after its description, *Team plugins (github.com/someone/team-plugins) is added already.* |
 | `plugins.link-offers-a-source` | **Install from a link…** on a branch of someone/team-plugins, no fork of the official repository: *github.com/someone/team-plugins is not a fork of github.com/iillyyaa1997/udeck-plugins. To install from it, add it as a source of its own.*, after its description alone, and **Add as a source…**, which opens **Add a source…** with `https://github.com/someone/team-plugins` in its field and adds nothing until **Add** is pressed. Added, the same link is refused before any request: *Installing from a branch or a merge request of a source is not possible yet; add the project and install from its default branch.* |

@@ -232,7 +232,7 @@ RU_REPLACING_A_LINK = "{id} здесь — ссылка на ~/"
 # Updating by themselves (Russian.swift: pluginUpdatedByItself, catalogueUpdatesByThemselvesHelp,
 # catalogueAvailable).
 RU_UPDATED_BY_ITSELF = "Обновился сам "
-RU_UPDATES_BY_THEMSELVES_HELP = "После каждого чтения каталога проверенный плагин"
+RU_UPDATES_BY_THEMSELVES_HELP = "После каждого чтения его каталога проверенный плагин"
 RU_AVAILABLE_1_1_0 = "Доступна 1.1.0"
 # What stage 3 added, in uDeck's Russian (Russian.swift: pluginMarkUnverified, pluginFromPullRequest, linkHead with
 # line(_, capitalised:) and of(_), linkNotAForkAddAsASource, linkUnverifiedNote, catalogueSwitchConfirm with copy(_) and
@@ -3503,6 +3503,27 @@ ISOLATES = ("⁨", "⁩")
 # sourceAlreadyAdded, catalogueNotARepository, sourceNotFound, sourceLinkRefusal, sourceBranchNotYet,
 # catalogueOfficialRepositoryChanged, sourcesTestBuild, pluginFrom).
 NOT_TRUSTED = "Not trusted: nobody vouches for these plugins — each asks again whenever its code changes."
+# Trusting a source (stage 4, R4b; English.swift: pluginMarkTrusted, sourceTrustConfirm, sourceStopTrustingConfirm,
+# permissionsTrustedSource, catalogueUpdatesByThemselves). someone/not-official's passport is named "uDeck plugins", and
+# someone/zero-width's nothing but characters uDeck takes out: each is named by its address (`SourceName`).
+TRUSTED_MARK = "Trusted source: {name}"
+TRUST_CONFIRM = ("Trust {name} ({address})? Plugins from its default branch will be marked Trusted source, keep your "
+                 "permission decision for each version, and update themselves like verified ones when they ask for nothing "
+                 "new. Those that ask for nothing run as soon as they are installed, with no question. uDeck does not read "
+                 "their code: the guarantee is that of whoever can merge into {address}.")
+STOP_TRUSTING_CONFIRM = ("Stop trusting {name}? Its plugins become Unverified and ask again before they next run, unless you "
+                         "allowed exactly their code before.")
+TRUSTED_SOURCE = ("This code comes from the default branch of {address}, a source you trust as {name}. uDeck does not read "
+                  "it: the guarantee is that of whoever can merge into {address}.")
+# The switch's own label is not read: AX hands its checkbox no title. Its help, under it, names trusted sources.
+UPDATES_BY_THEMSELVES_HELP = ("After each read of its catalogue, a verified plugin, or one from the default branch of a "
+                              "source you trust, whose new version asks for exactly what it asks for now is updated")
+SWITCH_TO_THE_TRUSTED_SOURCE = ("{id} is the verified 1.0.0 from github.com/{official}; installing 1.0.0 from "
+                                "github.com/{repository}: trusted source {name} replaces it. Its windows and settings stay. "
+                                "The code that comes is that of a source you trust: it asks before it runs, unless it asks "
+                                "for nothing or you allowed this version from that source before.")
+NOT_OFFICIAL = "someone/not-official"
+ZERO_WIDTH = "someone/zero-width"
 UNTRUSTED_SOURCE = ("Nobody verified this code: it comes from the default branch of github.com/{repository}, a source you "
                     "have not trusted. uDeck asks again whenever it changes.")
 FROM_ELSEWHERE = "Installed here: the verified {version} from github.com/{official}"
@@ -3511,6 +3532,7 @@ SWITCH_TO_THE_SOURCE = ("{id} is the verified {old} from github.com/{official}; 
 SWITCH_FROM_THE_SOURCE = ("{id} is {old} from github.com/{repository}: unverified; installing the verified {new} from "
                           "github.com/{official} replaces it. ")
 INSTALLED_FROM_THE_SOURCE = "Installed here from github.com/{repository}: unverified"
+INSTALLED_FROM_THE_TRUSTED_SOURCE = "Installed here from github.com/{repository}: trusted source {name}"
 FROM_THE_SOURCE = "From github.com/{repository} at {commit}"
 NO_LONGER_ADDED = "From github.com/{repository} — a source no longer added"
 REMOVE_THE_SOURCE = "Remove {name} (github.com/{repository})? uDeck stops reading it and forgets its token."
@@ -4149,9 +4171,10 @@ def _what_was_read_goes(scene, describe):
 
 
 def check_source_downgrade_to_0_7_0(machine, check_dir, lab):
-    """A source's copy under the released 0.7.0: Unverified, and its card asks before it runs; the source's files are left byte for byte; back on this build the source reads again and the copy is its own.
+    """A trusted source's copy under the released 0.7.0: Unverified, and its card asks before it runs; the source's files are left byte for byte; back on this build the source reads again, and the copy is its own and trusted.
 
-    team-clock is installed from the source and placed. uDeck is ended, the
+    The source is trusted, and team-clock — asking for nothing — installed from
+    it, recorded `trusted`, placed, and run at once. uDeck is ended, the
     official catalogue switched off in `settings.json` — so that 0.7.0 asks
     nothing of github.com — and 0.7.0, as GitHub publishes it, installed and
     started (its update feed pointed at one nobody serves). Its Settings say
@@ -4159,11 +4182,13 @@ def check_source_downgrade_to_0_7_0(machine, check_dir, lab):
     ended, `sources.json` and every file of `catalogue/<id>/` are as they were,
     byte for byte, and the record's `source` is still the source's id. This
     build started again: **Check now** on the source reads it, by its number,
-    and the row says the copy is from it.
+    the row says the copy is from it, the copy is *Trusted source: Team
+    plugins* and recorded so, and its card runs without asking.
 
     **Red for**: a stage-4 file 0.7.0 cannot live beside, a copy 0.7.0 runs
-    unasked, and a copy that no longer knows its source when this build is
-    back. If GitHub cannot be asked for 0.7.0, the check could not check.
+    unasked — a trusted one included — and a copy that no longer knows its
+    source, or its trust, when this build is back. If GitHub cannot be asked
+    for 0.7.0, the check could not check.
     """
     scene = _prepare(machine, check_dir, lab, main="c1")
     try:
@@ -4172,8 +4197,11 @@ def check_source_downgrade_to_0_7_0(machine, check_dir, lab):
         sid, _ = _add_the_team(scene, "adding the source")
         number = scene.github.source_id(TEAM)
         t1 = scene.github.source_commit(TEAM, "t1")
+        _trust(scene, sid, "trusting the source")
         _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock 1.0.0")
+        _expect_a_source_record(_status_becomes(machine, TEAM_CLOCK, "trusted"), sid, t1, "1.0.0", TEAM_CLOCK, trusted=True)
         _place(scene, TEAM_CLOCK)
+        _the_card_without_asking(scene, TEAM_CLOCK, "1.0.0", "trusted, before 0.7.0")
         release = _the_release(lab, BEFORE_SOURCES)
         app.quit_app(machine, "ending uDeck before 0.7.0")
         kept = _the_sources_files(machine, sid, "before 0.7.0")
@@ -4211,6 +4239,11 @@ def check_source_downgrade_to_0_7_0(machine, check_dir, lab):
                            lambda said: said == FROM_THE_SOURCE.format(repository=TEAM, commit=t1[:7]), NOTICED_SECONDS)
         expect(said == FROM_THE_SOURCE.format(repository=TEAM, commit=t1[:7]), f"back on this build team-clock's row says {said!r}")
         expect((_record(machine, TEAM_CLOCK) or {}).get("source") == sid, "back on this build the copy is not the source's")
+        mark = TRUSTED_MARK.format(name=TEAM_NAME)
+        marks = _source_marks(machine, sid, lambda marks: marks == {mark}, "back on this build", copies=(TEAM_CLOCK,))
+        expect(marks == {mark}, f"back on this build team-clock and the source are marked {marks}, not {mark!r}")
+        _expect_a_source_record(_status_becomes(machine, TEAM_CLOCK, "trusted"), sid, t1, "1.0.0", TEAM_CLOCK, trusted=True)
+        _the_card_without_asking(scene, TEAM_CLOCK, "1.0.0", "trusted, back on this build")
         _expect_no_credential(scene)
     finally:
         scene.close()
@@ -4254,6 +4287,386 @@ def check_source_remove(machine, check_dir, lab):
         heard = _left_alone(scene, removed)
         asked = [r for r in heard if r.path.startswith((f"/api/repositories/{number}", f"/api/repos/{TEAM}", f"/raw/{TEAM}/"))]
         expect(not asked, f"after Remove, uDeck asked the source {described(asked)}")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_trust(machine, check_dir, lab):
+    """**Trust…** on the source: its words say what trusting means; **Trust** marks the block, its rows and team-clock *Trusted source: Team plugins*, records team-clock trusted by it — and team-clock, which asks for nothing and was waiting on its card, runs with nothing else pressed.
+
+    team-clock 1.0.0 is installed from the source, unverified, and placed: its
+    card asks, though it asks for nothing. **Trust…** opens S4-08's words in
+    the block — whose guarantee it is, and that a plugin asking for nothing
+    runs with no question — and **Trust** writes `trustedAt` in
+    `sources.json`, in whole seconds. From then the block, the rows of the source's catalogue and
+    team-clock's own row say *Trusted source: Team plugins*, none of them
+    Unverified or Verified; `installed.json` says team-clock is `trusted`, by
+    the source's id. uDeck polls with the panel away (`pollWhileCollapsed`),
+    and the panel stays away: team-clock's own count of its runs, which it
+    did not have before, appears at once — run by the trust alone, not an
+    interval later —
+    and then its card runs 1.0.0 without asking, with nothing in its header.
+
+    **Red for**: Trust without its words, a trusted copy marked Verified or
+    still Unverified, a record not written trusted by its source, and a trusted
+    copy asking for nothing that still asks, or waits for something else to
+    happen before it runs.
+    """
+    # Polling with the panel away, so that a run after Trust is the trust's alone: opening the panel starts every loop.
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
+    try:
+        machine.ssh.run(f"mkdir -p {UDECK_HOME}", "making uDeck's home")
+        _write(machine, SETTINGS, {"pollWhileCollapsed": True}, "polling with the panel away")
+        app.launch(machine)
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        t1 = scene.github.source_commit(TEAM, "t1")
+        record, _ = _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock 1.0.0")
+        _expect_a_source_record(record, sid, t1, "1.0.0", TEAM_CLOCK)
+        _place(scene, TEAM_CLOCK)
+        _the_card_asks(scene, TEAM_CLOCK, "untrusted, asking for nothing")
+        _put_the_panel_away(machine, "after team-clock asked")
+        runs = f"{UDECK_HOME}/cache/{TEAM_CLOCK}/runs"
+        expect(_count_of_runs(machine, runs) is None, f"team-clock ran before anybody allowed it or trusted its source: {runs}")
+        ui.plugins_pane(machine, "opening Settings → Plugins to trust the source")
+        trusted_at = _trust(scene, sid, "trusting the source", copies=(TEAM_CLOCK,))
+        expect(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", str(trusted_at)) is not None,
+               f"{SOURCES_FILE} says the source was trusted at {trusted_at!r}: when, in whole seconds")  # fmt: skip
+        ran = _wait_for_disk(machine, lambda: (_count_of_runs(machine, runs) or 0) >= 1, NOTICED_SECONDS)
+        expect(ran, f"{NOTICED_SECONDS}s after Trust, the panel away and polling on, team-clock had not run: the trust did "
+                    "not run what it now allows — its interval is 60 s")  # fmt: skip
+        dump = _keep_the_pane(machine, check_dir, lab, "the-source-trusted.txt")
+        verified = [row.identifier for row in ui.controls(dump)
+                    if row.identifier.startswith(f"source.{sid}.") and row.identifier.endswith(".verified")]  # fmt: skip
+        expect(not verified, f"a trusted source's rows say Verified: {verified}")
+        _expect_a_source_record(_status_becomes(machine, TEAM_CLOCK, "trusted"), sid, t1, "1.0.0", TEAM_CLOCK, trusted=True)
+        _the_card_without_asking(scene, TEAM_CLOCK, "1.0.0", "trusted, asking for nothing")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_trusted_updates_itself(machine, check_dir, lab):
+    """A trusted source's team-ping updates itself to 1.1.0 with **Official catalogue** off, its decision carried for that source; the switch stays shown, named for trusted plugins too.
+
+    The source is trusted, and team-ping 1.0.0 — asking for one command —
+    installed from it, placed and allowed: `grants.json` says the decision was
+    made for the source. **Official catalogue** goes off, and *Update verified
+    and trusted plugins by themselves* is still shown, a source being trusted,
+    its help naming trusted sources.
+    The source's main moves to t2, and **Check now** on its block reads it:
+    team-ping becomes 1.1.0 with nothing else pressed — `automatic: true`,
+    still trusted by the source — its card runs 1.1.0 without asking, and the
+    decision is for 1.1.0, still the source's. From the switch on, nothing
+    reaches the official repository.
+
+    **Red for**: a trusted copy that only ever offers its update, one held back
+    by Official catalogue off, a switch hidden while it still decides, a
+    decision carried without its source or not at all, and a request of the
+    official repository's while it is off.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        t2 = scene.github.source_commit(TEAM, "t2")
+        _trust(scene, sid, "trusting the source")
+        _install_from_the_source(scene, sid, TEAM_PING, "team-ping 1.0.0")
+        _place(scene, TEAM_PING)
+        _allow_and_read_the_card(scene, TEAM_PING, "team-ping 1.0.0 of the trusted source")
+        grant = _expect_the_decision_for(machine, TEAM_PING, "1.0.0", "once allowed")
+        expect(grant.get("decidedForSource") == sid, f"{GRANTS} says team-ping's decision was made for "
+                                                     f"{grant.get('decidedForSource')!r}, not the source {sid}: {grant!r}")  # fmt: skip
+
+        ui.plugins_pane(machine, "opening Settings → Plugins again")
+        off = _count(scene)
+        _the_pane_from_its_top(machine, "before switching the official catalogue off")
+        _switch(machine, "catalogue.enabled", False, "switching the official catalogue off")
+        saved = _wait_for_disk(machine, lambda: (_read_json(machine, SETTINGS) or {}).get("officialCatalogue") is False,
+                               config.SETTINGS_SAVE_SECONDS)  # fmt: skip
+        expect(saved, f"the switch was turned off and {SETTINGS} says {_read_json(machine, SETTINGS)!r}")
+        machine.sleep(config.SETTLE_SECONDS)
+        dump = _keep_the_pane(machine, check_dir, lab, "official-off-a-source-trusted.txt")
+        expect(ui.element(dump, "catalogue.autoUpdate") is not None, "with the official catalogue off and a source trusted, "
+               "Settings hides the switch that decides whether its plugins update themselves")  # fmt: skip
+        help_ = ui.says(ui.element(dump, "catalogue.autoUpdateHelp"))
+        expect(help_.startswith(UPDATES_BY_THEMSELVES_HELP), f"the switch's help says {help_!r}, not {UPDATES_BY_THEMSELVES_HELP!r}…")
+
+        scene.github.tell("moving the source's main to t2", sources={TEAM: {"main": "t2"}})
+        before = _count(scene)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now on the source")
+        updated = _wait_for_disk(machine, lambda: (_record(machine, TEAM_PING) or {}).get("commit") == t2,
+                                 CATALOGUE_SECONDS + OPERATION_SECONDS)  # fmt: skip
+        record = _record(machine, TEAM_PING) or {}
+        expect(updated, f"{CATALOGUE_SECONDS + OPERATION_SECONDS}s after Check now with the source's main at t2, team-ping "
+                        f"is {record.get('version')!r}; uDeck asked {described(_since(scene, before))}")  # fmt: skip
+        expect(record.get("automatic") is True, f"team-ping 1.1.0 was not recorded as updated by itself: {record!r}")
+        _expect_a_source_record(_status_becomes(machine, TEAM_PING, "trusted"), sid, t2, "1.1.0", TEAM_PING, trusted=True)
+        _the_card_without_asking(scene, TEAM_PING, "1.1.0", "after its update by itself")
+        grant = _expect_the_decision_for(machine, TEAM_PING, "1.1.0", "after the update by itself")
+        expect(grant.get("decidedForSource") == sid, f"the decision carried to 1.1.0 is for {grant.get('decidedForSource')!r}, "
+                                                     f"not the source {sid}: {grant!r}")  # fmt: skip
+        official = [r for r in _since(scene, off) if r.path.startswith((f"/api/repos/{config.PLUGINS_REPOSITORY}",
+                                                                        f"/raw/{config.PLUGINS_REPOSITORY}/"))]  # fmt: skip
+        expect(not official, f"with the official catalogue off, uDeck asked the official repository {described(official)}")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_trusted_permissions_change(machine, check_dir, lab):
+    """A trusted source's team-clock 1.2.0 asks for one command more: it waits on its row and never updates itself, and once **Update** puts it in place its card asks.
+
+    The source is trusted, and team-clock 1.0.0 — asking for nothing —
+    installed from it and placed: it runs at once. The source's main moves to
+    t3, where team-clock 1.2.0 asks for one command, and **Check now** reads
+    it: the row says *1.2.0 available, asks for different permissions*, nothing
+    of 1.2.0 but its manifest is fetched, and the record stays t1's. **Update**
+    takes 1.2.0, still trusted by the source, and its card asks before it runs.
+
+    **Red for**: a trusted copy that updates itself into asking for more, and
+    one whose new permissions run unasked.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        t1, t3 = scene.github.source_commit(TEAM, "t1"), scene.github.source_commit(TEAM, "t3")
+        _trust(scene, sid, "trusting the source")
+        _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock 1.0.0")
+        _place(scene, TEAM_CLOCK)
+        _the_card_without_asking(scene, TEAM_CLOCK, "1.0.0", "trusted, asking for nothing")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins again")
+        scene.github.tell("moving the source's main to t3", sources={TEAM: {"main": "t3"}})
+        before = _count(scene)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now on the source")
+        offer = _wait_until(machine, f"plugin.{TEAM_CLOCK}.offer", lambda said: said == AVAILABLE_1_2_0_ASKS, CATALOGUE_SECONDS)
+        heard = _left_alone(scene, before)
+        _keep_the_pane(machine, check_dir, lab, "trusted-asks-for-more-only-offers.txt")
+        expect(offer == AVAILABLE_1_2_0_ASKS, f"with the source's main at t3, team-clock's row says {offer!r}, not "
+                                              f"{AVAILABLE_1_2_0_ASKS!r}; uDeck asked {described(heard)}")  # fmt: skip
+        prefix = f"plugins/{TEAM_CLOCK}/"
+        fetched = [r for r in heard if (r.raw_file(TEAM) or ("", ""))[1].startswith(prefix)
+                   and (r.raw_file(TEAM) or ("", ""))[1] != f"{prefix}manifest.json"]  # fmt: skip
+        expect(not fetched, f"team-clock 1.2.0 asks for more, and uDeck fetched {described(fetched)} after Check now")
+        record = _record(machine, TEAM_CLOCK) or {}
+        expect(record.get("commit") == t1, f"team-clock 1.2.0 asks for more, and its record is {record.get('version')!r} "
+                                           f"after Check now: {record!r}")  # fmt: skip
+
+        updated = _operate(scene, f"plugin.{TEAM_CLOCK}.update", "updating team-clock to 1.2.0",
+                           lambda r: r is not None and r.get("commit") == t3, TEAM_CLOCK)
+        expect(updated is not None, f"Update of team-clock left {_record(machine, TEAM_CLOCK)!r}")
+        _expect_a_source_record(_status_becomes(machine, TEAM_CLOCK, "trusted"), sid, t3, "1.2.0", TEAM_CLOCK, trusted=True)
+        found, _ = _the_card_asks(scene, TEAM_CLOCK, "1.2.0 asking for one command", header=None)
+        source = _strip(ui.says(found.get(f"consent.{TEAM_CLOCK}.source")))
+        wanted = TRUSTED_SOURCE.format(address=TEAM_ADDRESS, name=TEAM_NAME)
+        expect(source == wanted, f"team-clock's card says {source!r} of where its code comes from, not {wanted!r}")
+        _put_the_panel_away(machine, "after the card asked")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_decision_not_carried(machine, check_dir, lab):
+    """The official uptime's decision does not run the trusted source's uptime 1.0.0, which asks for the same — nor the source's decision the official one, back.
+
+    The official uptime 1.0.0 is installed, placed and allowed. The source is
+    trusted, and **Install from here…** of its own uptime 1.0.0 — other files,
+    the same permissions — names both copies, the source's as trusted, and
+    says whose code comes; confirmed, the record is the source's, trusted, the
+    official catalogue's row says *Installed here from
+    github.com/someone/team-plugins: trusted source Team plugins*, and the card
+    asks again, saying whose guarantee the code has: the decision was
+    made for the official copy. **Allow** records the source. **Switch to
+    verified** back puts the official copy in place, and its card asks again:
+    the decision is the source's.
+
+    **Red for**: one source's decision running another source's copy of the
+    same id and version, either way, and a warning that calls a trusted copy
+    code nobody verified.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        _place(scene, UPTIME)
+        _allow_and_read_the_card(scene, UPTIME, "the official copy")
+        grant = _expect_the_decision_for(machine, UPTIME, "1.0.0", "once the official copy was allowed")
+        expect(grant.get("decidedForSource") == "official", f"{GRANTS} says the official uptime's decision was made for "
+                                                            f"{grant.get('decidedForSource')!r}: {grant!r}")  # fmt: skip
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        t1 = scene.github.source_commit(TEAM, "t1")
+        _trust(scene, sid, "trusting the source")
+        row = f"source.{sid}.plugin.{UPTIME}"
+        _wait_until(machine, f"{row}.installFromHere", lambda said: said is not None, NOTICED_SECONDS, present=True)
+        _press(machine, f"{row}.installFromHere", "pressing Install from here…")
+        warning = _wait_until(machine, f"{row}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "install-from-here-a-trusted-source.txt")
+        both = SWITCH_TO_THE_TRUSTED_SOURCE.format(id=UPTIME, official=config.PLUGINS_REPOSITORY, repository=TEAM,
+                                                   name=TEAM_NAME)
+        expect(_strip(warning).startswith(both), f"Install from here… said {warning!r} before replacing the official uptime "
+                                                 f"with the trusted source's, not {both!r}")  # fmt: skip
+        record = _operate(scene, f"{row}.confirm", "confirming Install from here…",
+                          lambda r: r is not None and r.get("source") == sid)
+        expect(record is not None, f"Install from here… left {_record(machine, UPTIME)!r}")
+        _expect_a_source_record(_status_becomes(machine, UPTIME, "trusted"), sid, t1, "1.0.0", UPTIME, trusted=True)
+        here = INSTALLED_FROM_THE_TRUSTED_SOURCE.format(repository=TEAM, name=TEAM_NAME)
+        state = _wait_until(machine, f"catalogue.{UPTIME}.state", lambda said: _strip(said) == here, NOTICED_SECONDS)
+        expect(_strip(state) == here, f"the official uptime row says {state!r} of the trusted source's copy, not {here!r}")
+        found, _ = _the_card_asks(scene, UPTIME, "the trusted source's copy", header=None)
+        source = _strip(ui.says(found.get(f"consent.{UPTIME}.source")))
+        wanted = TRUSTED_SOURCE.format(address=TEAM_ADDRESS, name=TEAM_NAME)
+        expect(source == wanted, f"uptime's card says {source!r} of where its code comes from, not {wanted!r}")
+        machine.click(*found[f"consent.{UPTIME}.allow"].middle, "allowing the trusted source's uptime")
+        _read_the_card(scene, UPTIME, "the trusted source's copy allowed",
+                       lambda card: card.get(RUNS) not in (None, "", "unknown"))  # fmt: skip
+        _put_the_panel_away(machine, "after allowing the trusted source's copy")
+        grant = _expect_the_decision_for(machine, UPTIME, "1.0.0", "once the source's copy was allowed")
+        expect(grant.get("decidedForSource") == sid, f"{GRANTS} says the source's uptime's decision was made for "
+                                                     f"{grant.get('decidedForSource')!r}, not {sid}: {grant!r}")  # fmt: skip
+
+        ui.plugins_pane(machine, "opening Settings → Plugins again")
+        _press(machine, f"catalogue.{UPTIME}.switchToVerified", "pressing Switch to verified")
+        _wait_until(machine, f"catalogue.{UPTIME}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        record = _operate(scene, f"catalogue.{UPTIME}.confirm", "confirming Switch to verified",
+                          lambda r: r is not None and r.get("source") == "official")
+        expect(record is not None, f"Switch to verified left {_record(machine, UPTIME)!r}")
+        _the_card_asks(scene, UPTIME, "the official copy again", header=None)
+        _put_the_panel_away(machine, "after the official copy asked")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_stop_trusting(machine, check_dir, lab):
+    """**Stop trusting…**: at once the source's copies are Unverified and each asks again before it next runs — team-clock, which asks for nothing, included; **Remove…** of a trusted source does the same.
+
+    The source is trusted; team-clock 1.0.0 — asking for nothing — runs at
+    once, and team-ping 1.0.0 is allowed. **Stop trusting…** says S4-08's
+    words; **Stop trusting** clears `trustedAt`, both rows say **Unverified**,
+    both records are written `unverified`, and both cards ask again — the
+    decision was held to the version, and is now held to a tree it does not
+    have. Trusted again, team-clock runs at once again; then `trustedAt` is
+    taken out of `sources.json` by hand, uDeck running, and within the
+    minute's tick team-clock's row says **Unverified** and its card asks.
+    Trusted once more, **Remove…** of the source, confirmed, leaves team-clock
+    in place, and its card asks.
+
+    **Red for**: a source no longer trusted whose copies keep running on its
+    trust, and a removed trusted source whose copies do. That this happens
+    before the folders are hashed again is not what it shows: a hashing here
+    takes milliseconds (`trustChanged`).
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_the_team(scene, "adding the source")
+        _trust(scene, sid, "trusting the source")
+        _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock 1.0.0")
+        _install_from_the_source(scene, sid, TEAM_PING, "team-ping 1.0.0")
+        # One card at a time (`_place` puts the plugin alone on a tab, uDeck started again): team-ping allowed, then
+        # team-clock running unasked, on the screen when the trust is taken away.
+        _place(scene, TEAM_PING)
+        _allow_and_read_the_card(scene, TEAM_PING, "team-ping, trusted")
+        _place(scene, TEAM_CLOCK)
+        _the_card_without_asking(scene, TEAM_CLOCK, "1.0.0", "trusted, asking for nothing")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins again")
+        _stop_trusting(scene, sid, "no longer trusting the source")
+        # The rows' marks — the two copies', the source's catalogue's — read alike, and are read as one set (`_texts_of`);
+        # the block says *Not trusted…*.
+        rows = _the_marks(sid, copies=(TEAM_CLOCK, TEAM_PING))
+        unverified = lambda identifier: rows(identifier) and identifier != f"source.{sid}.mark"  # noqa: E731
+        marks = _texts_of(machine, unverified, lambda said: said == {UNVERIFIED}, "after Stop trusting")
+        expect(marks == {UNVERIFIED}, f"after Stop trusting, team-clock's and team-ping's rows are marked {marks}, not "
+                                      f"{UNVERIFIED!r}")  # fmt: skip
+        for plugin in (TEAM_CLOCK, TEAM_PING):
+            status = (_status_becomes(machine, plugin, "unverified").get("verification") or {}).get("status")
+            expect(status == "unverified", f"after Stop trusting, {plugin}'s record is {status!r}, not unverified")
+        _keep_the_pane(machine, check_dir, lab, "no-longer-trusted.txt")
+        _the_card_asks(scene, TEAM_CLOCK, "no longer trusted, asking for nothing")
+        _put_the_panel_away(machine, "after team-clock asked")
+        _place(scene, TEAM_PING)
+        _the_card_asks(scene, TEAM_PING, "no longer trusted")
+        _put_the_panel_away(machine, "after team-ping asked")
+
+        _place(scene, TEAM_CLOCK)
+        ui.plugins_pane(machine, "opening Settings → Plugins to trust it again")
+        _trust(scene, sid, "trusting the source again", copies=(TEAM_CLOCK, TEAM_PING))
+        _the_card_without_asking(scene, TEAM_CLOCK, "1.0.0", "trusted again")
+
+        # The trust taken away by hand: uDeck reads sources.json again on the minute's tick.
+        listed = _read_json(machine, SOURCES_FILE) or {}
+        for source in listed.get("sources") or []:
+            if source.get("id") == sid:
+                source["trustedAt"] = None
+        _write(machine, SOURCES_FILE, listed, "taking the trust out of sources.json by hand")
+        ui.plugins_pane(machine, "opening Settings → Plugins after the hand edit")
+        marks = _texts_of(machine, unverified, lambda said: said == {UNVERIFIED}, "after the hand edit",
+                          TICK_SECONDS + NOTICED_SECONDS)  # fmt: skip
+        expect(marks == {UNVERIFIED}, f"{TICK_SECONDS + NOTICED_SECONDS}s after the trust was taken out of {SOURCES_FILE} by "
+                                      f"hand, the rows are marked {marks}, not {UNVERIFIED!r}")  # fmt: skip
+        _the_card_asks(scene, TEAM_CLOCK, "its trust taken away by hand")
+        _put_the_panel_away(machine, "after team-clock asked")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins to trust it once more")
+        _trust(scene, sid, "trusting the source once more", copies=(TEAM_CLOCK, TEAM_PING))
+        ui.plugins_pane(machine, "opening Settings → Plugins to remove the source")
+        _press(machine, f"source.{sid}.remove", "pressing Remove… on the trusted source")
+        _wait_until(machine, f"source.{sid}.confirmText", lambda said: bool(said), NOTICED_SECONDS)
+        _press(machine, f"source.{sid}.confirm", "confirming Remove")
+        gone = _wait_for_disk(machine, lambda: _a_source(machine, sid) is None, NOTICED_SECONDS)
+        expect(gone, f"after Remove, {SOURCES_FILE} says {_read_json(machine, SOURCES_FILE)!r}")
+        status = (_status_becomes(machine, TEAM_CLOCK, "unverified").get("verification") or {}).get("status")
+        expect(status == "unverified", f"after the trusted source was removed, team-clock's record is {status!r}")
+        _the_card_asks(scene, TEAM_CLOCK, "its trusted source removed")
+        _put_the_panel_away(machine, "after team-clock asked")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_name_not_official(machine, check_dir, lab):
+    """A passport named *uDeck plugins*, and one of nothing but invisible characters: each source is named by its address — on its block, in Trust's words and in its mark.
+
+    someone/not-official's passport is named *uDeck plugins*, the official
+    passport's name; someone/zero-width's is U+200B, U+2060 and U+200E, which
+    uDeck takes out. Looked up and added, each block is named
+    `github.com/<path>`, and not-official's **Trust…** says *Trust
+    github.com/someone/not-official (github.com/someone/not-official)?…*; trusted,
+    its block and its row say *Trusted source: github.com/someone/not-official*.
+
+    **Red for**: a source that dresses up as the official catalogue by its
+    passport, and a name of nothing shown as one.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        for path in (NOT_OFFICIAL, ZERO_WIDTH):
+            address = f"github.com/{path}"
+            said, _, _ = _look_up_a_source(scene, address, path, results=("sources.add.result", "sources.add.address"))
+            expect(said == address, f"Look up of {address}, whose passport has no name of its own to show, shows {said!r}")
+            sid = _source_id(path, scene.github.source_id(path))
+            _press(machine, "sources.add.confirm", f"pressing Add: {path}")
+            row = _wait_until(machine, f"source.{sid}.plugin.{TEAM_CLOCK}.install", lambda said: said is not None,
+                              CATALOGUE_SECONDS, present=True)  # fmt: skip
+            expect(row is not None, f"{address}'s block lists no team-clock")
+            # Named by its address, beside its address: the two read alike (`_texts_of`).
+            named = _texts_of(machine, (f"source.{sid}.name", f"source.{sid}.address"), lambda said: said == {address},
+                              f"{path}'s block")  # fmt: skip
+            expect(named == {address}, f"{address}'s block says {named}, not its address alone")
+        sid = _source_id(NOT_OFFICIAL, scene.github.source_id(NOT_OFFICIAL))
+        address = f"github.com/{NOT_OFFICIAL}"
+        _trust(scene, sid, "trusting not-official", name=address, address=address)
+        _keep_the_pane(machine, check_dir, lab, "not-official-trusted.txt")
         _expect_no_credential(scene)
     finally:
         scene.close()
@@ -5581,9 +5994,10 @@ def _close_the_source_sheet(scene, label):
     scene.machine.sleep(config.SETTLE_SECONDS)
 
 
-def _look_up_a_source(scene, address, label):
+def _look_up_a_source(scene, address, label, results=("sources.add.result",)):
     """`address` typed into **Add a source…** and looked up: what the sheet says it came to, isolates taken out, uDeck's
-    requests from the press on, and the walk."""
+    requests from the press on, and the walk. `results` are the identifiers that say it, the first found read: a name
+    shown as the address beside it reads alike, and may come back under the address's identifier (`_row_of`)."""
     machine = scene.machine
     _open_the_source_sheet(scene, label)
     ui.click(machine, "sources.add.field", f"putting the cursor in the source field: {label}")
@@ -5596,11 +6010,11 @@ def _look_up_a_source(scene, address, label):
     deadline = machine.clock() + OPERATION_SECONDS
     while True:
         dump = _read_the_screen(machine, f"reading what the address came to: {label}")
-        if ui.element(dump, "sources.add.result") is not None or machine.clock() >= deadline:
+        if any(ui.element(dump, one) is not None for one in results) or machine.clock() >= deadline:
             break
         machine.sleep(1)
     _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-source-sheet-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt")
-    result = ui.element(dump, "sources.add.result")
+    result = next((ui.element(dump, one) for one in results if ui.element(dump, one) is not None), None)
     if result is None:
         raise CheckFailed(f"{address} came to nothing within {OPERATION_SECONDS}s; uDeck asked {described(_since(scene, before))}")
     return _strip(ui.says(result)), _since(scene, before), dump
@@ -5644,13 +6058,92 @@ def _install_from_the_source(scene, sid, plugin, label):
     return record, asked
 
 
-def _expect_a_source_record(record, sid, commit, version, plugin):
-    """A record of a copy of the source's default branch: its id, someone/team-plugins as it was named, nobody's guarantee."""
+def _a_source(machine, sid):
+    """The source `sources.json` lists with this id, or None."""
+    listed = (_read_json(machine, SOURCES_FILE) or {}).get("sources") or []
+    return next((source for source in listed if source.get("id") == sid), None)
+
+
+def _trust(scene, sid, label, name=TEAM_NAME, address=TEAM_ADDRESS, copies=()):
+    """**Trust…** on the source's block, its words read, and **Trust**: `trustedAt` once `sources.json` has it, and the
+    marks of its block, its rows and the rows of `copies` installed from it once they say it is trusted."""
+    machine = scene.machine
+    _press(machine, f"source.{sid}.trust", f"pressing Trust…: {label}")
+    words = _wait_until(machine, f"source.{sid}.trustText", lambda said: bool(said), NOTICED_SECONDS)
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"trust-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt")
+    wanted = TRUST_CONFIRM.format(name=name, address=address)
+    expect(_strip(words) == wanted, f"Trust… said {words!r} before trusting the source, not {wanted!r}")
+    _press(machine, f"source.{sid}.trustConfirm", f"pressing Trust: {label}")
+    written = _wait_for_disk(machine, lambda: bool((_a_source(machine, sid) or {}).get("trustedAt")), NOTICED_SECONDS)
+    expect(written, f"after Trust, {SOURCES_FILE} says {_read_json(machine, SOURCES_FILE)!r}")
+    mark = TRUSTED_MARK.format(name=name)
+    marks = _source_marks(machine, sid, lambda marks: marks == {mark}, f"after Trust: {label}", copies=copies)
+    expect(marks == {mark}, f"after Trust, the source's block and rows are marked {marks}, not {mark!r}")
+    return (_a_source(machine, sid) or {}).get("trustedAt")
+
+
+def _texts_of(machine, identifiers, satisfied, label, seconds=NOTICED_SECONDS):
+    """What the controls on the screen whose identifier is one of `identifiers` — or, a callable, one it keeps — say,
+    isolates taken out, as a set: once `satisfied` with it, or as it is when `seconds` have passed. For texts that read
+    alike, which may come back as one element under any one of their identifiers (`_row_of`): a set of one text says
+    that none of them says another, not that each was read."""
+    keeps = identifiers if callable(identifiers) else (lambda identifier: identifier in identifiers)
+    deadline = machine.clock() + seconds
+    while True:
+        dump = _read_the_screen(machine, f"reading the texts that read alike: {label}")
+        said = {_strip(ui.says(row)) for row in ui.controls(dump) if row.identifier and keeps(row.identifier)}
+        if satisfied(said) or machine.clock() >= deadline:
+            return said
+        machine.sleep(1)
+
+
+def _the_marks(sid, copies=()):
+    """The identifiers of the marks that say the same of a source's copies: its block's, its catalogue's rows', and the
+    rows of `copies` installed from it."""
+    rows = {f"plugin.{plugin}.mark" for plugin in copies}
+    return lambda identifier: identifier in rows or (identifier.startswith(f"source.{sid}.") and identifier.endswith(".mark"))
+
+
+def _source_marks(machine, sid, satisfied, label, seconds=NOTICED_SECONDS, copies=()):
+    """What the marks of the source's block, its rows and `copies`' rows say, as one set (`_texts_of`, `_the_marks`)."""
+    return _texts_of(machine, _the_marks(sid, copies), satisfied, label, seconds)
+
+
+def _stop_trusting(scene, sid, label, name=TEAM_NAME):
+    """**Stop trusting…** on the source's block, its words read, and **Stop trusting**: once `trustedAt` is gone and the
+    block says *Not trusted…* again."""
+    machine = scene.machine
+    _press(machine, f"source.{sid}.trust", f"pressing Stop trusting…: {label}")
+    words = _wait_until(machine, f"source.{sid}.trustText", lambda said: bool(said), NOTICED_SECONDS)
+    wanted = STOP_TRUSTING_CONFIRM.format(name=name)
+    expect(_strip(words) == wanted, f"Stop trusting… said {words!r}, not {wanted!r}")
+    _press(machine, f"source.{sid}.trustConfirm", f"pressing Stop trusting: {label}")
+    cleared = _wait_for_disk(machine, lambda: (_a_source(machine, sid) or {"trustedAt": "?"}).get("trustedAt") is None,
+                             NOTICED_SECONDS)  # fmt: skip
+    expect(cleared, f"after Stop trusting, {SOURCES_FILE} says {_read_json(machine, SOURCES_FILE)!r}")
+    said = _wait_until(machine, f"source.{sid}.mark", lambda said: said == NOT_TRUSTED, NOTICED_SECONDS)
+    expect(said == NOT_TRUSTED, f"after Stop trusting, the source's block says {said!r}, not {NOT_TRUSTED!r}")
+
+
+def _status_becomes(machine, plugin, status, seconds=NOTICED_SECONDS):
+    """`plugin`'s record once its verification says `status` — or as it is when `seconds` have passed."""
+    _wait_for_disk(machine, lambda: ((_record(machine, plugin) or {}).get("verification") or {}).get("status") == status,
+                   seconds)  # fmt: skip
+    return _record(machine, plugin) or {}
+
+
+def _expect_a_source_record(record, sid, commit, version, plugin, trusted=False):
+    """A record of a copy of the source's default branch: its id, someone/team-plugins as it was named, nobody's guarantee
+    — or, `trusted`, the source's."""
     wanted = {"source": sid, "repository": {"provider": "github", "host": "github.com", "path": TEAM},
               "ref": {"kind": "default", "name": "main"}, "commit": commit, "version": version}  # fmt: skip
     wrong = {key: record.get(key, "(missing)") for key, value in wanted.items() if record.get(key, "(missing)") != value}
     expect(not wrong, f"installed.json says {wrong} of {plugin}, where the source's copy has {({k: wanted[k] for k in wrong})}")
     verification = record.get("verification") or {}
+    if trusted:
+        expect(verification.get("status") == "trusted" and verification.get("by") == sid,
+               f"installed.json's verification of {plugin} is {verification!r}: trusted, by {sid}")  # fmt: skip
+        return
     expect(verification.get("status") == "unverified" and "by" in verification and verification.get("by") is None,
            f"installed.json's verification of {plugin} is {verification!r}: unverified, by nobody")  # fmt: skip
 
@@ -6207,8 +6700,11 @@ def _expect_the_row_says(scene, plugin, source, label):
            f"{plugin}'s row offers no link to the page it came from")
 
 
-def _the_card_asks(scene, plugin, label):
+def _the_card_asks(scene, plugin, label, header=UNVERIFIED):
     """The panel opened, and `plugin`'s card read once it asks for consent and stands still: its controls by identifier, and its texts.
+
+    `header` is what the card's header says, None for nothing: a trusted
+    source's copy says nothing there, as a verified one does.
 
     Still, because the checks click **Allow** and **Decline** where this read
     them, and the panel grows from the shortcut on a spring: a card read while
@@ -6234,8 +6730,8 @@ def _the_card_asks(scene, plugin, label):
     _keep(scene.check_dir, f"card-{label.replace(' ', '-')}.txt", "\n".join(texts) + "\n\n" + dump)
     found = {row.identifier: row for row in ui.controls(dump) if row.identifier}
     expect(allow in found, f"{plugin}, {label}, does not ask for consent on its card; the panel says {texts}")
-    header = ui.says(found.get(f"card.{plugin}.unverified"))
-    expect(header == UNVERIFIED, f"{plugin}'s card, {label}, says {header!r} in its header, not {UNVERIFIED!r}")
+    said = ui.says(found.get(f"card.{plugin}.unverified")) or None
+    expect(said == header, f"{plugin}'s card, {label}, says {said!r} in its header, not {header!r}")
     return found, texts
 
 

@@ -10,8 +10,19 @@ for what that promises.
 
 ## [Unreleased]
 
-- **Trust, underneath** (not yet offered on any screen). A source of one's own
-  can be trusted (`trustedAt` in `sources.json`): a copy of its default branch,
+- **Trust… on a source.** A source's block offers **Trust…**, which says in
+  full what trusting it means before **Trust** does it, and **Stop trusting…**.
+  Its default branch's copies are marked **Trusted source: <name>** — on their
+  rows, the source's catalogue rows and its block — keep the permission
+  decision for each version, update themselves under **Update verified and
+  trusted plugins by themselves** (shown while a source is trusted, even with
+  **Official catalogue** off), and the card asking about one says whose
+  guarantee it is. **Stop trusting**, **Remove…** of a trusted source and a
+  `sources.json` that stops trusting it take effect at once, before anything
+  is hashed again: its copies are Unverified, nothing of them updates itself,
+  and each asks again before it next runs.
+- **Trust, underneath.** A source of one's own can be trusted (`trustedAt` in
+  `sources.json`): a copy of its default branch,
   exactly as installed, stands **Trusted source** — never Verified — and is
   recorded `trusted` by it; its permission decision is held to its version, as
   a verified copy's is, and to that source: a decision now records the source

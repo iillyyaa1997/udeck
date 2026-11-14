@@ -238,13 +238,14 @@ public enum CatalogueRowState: Equatable, Sendable {
     /// (`unverified`) — a source of one's own's included, whose
     /// `unverifiedLine` names it — with **Switch to verified**; in a source of
     /// one's own's, anything else is from elsewhere (`fromElsewhere`), `official`
-    /// naming a fork's branch there.
+    /// naming a fork's branch there and `trustedNames` a trusted source's copy.
     public static func of(
         _ entry: CatalogueEntry,
         record: InstalledRecord?,
         folderExists: Bool,
         source: String = InstalledPlugins.officialSource,
-        official: RepositoryAddress? = nil
+        official: RepositoryAddress? = nil,
+        trustedNames: [String: String] = [:]
     ) -> CatalogueRowState {
         if let record {
             let refusal = entry.verdict.refusals.first
@@ -257,7 +258,7 @@ public enum CatalogueRowState: Equatable, Sendable {
                 // **Verified** (R3's review).
                 guard source == InstalledPlugins.officialSource else {
                     return .fromElsewhere(CopyName.of(record.origin, commit: record.commit, version: record.version,
-                                                      official: official),
+                                                      official: official, trustedNames: trustedNames),
                                           version: version, refusal: refusal, folderGone: !folderExists)
                 }
                 return .unverified(version: version, refusal: refusal, folderGone: !folderExists)

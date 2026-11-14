@@ -161,7 +161,10 @@ struct LocalizationTests {
         .catalogueRefused(status: 401, host: "gitlab.example"), .catalogueBadAnswer(reason: "garbled", host: "gitlab.example"),
         .permissionsUntrustedSource(address: "gitlab.example/tools/x", changedHere: false),
         .permissionsUntrustedSource(address: "gitlab.example/tools/x", changedHere: true),
+        .permissionsTrustedSource(name: "Team plugins", address: "gitlab.example/tools/x", changedHere: false),
+        .permissionsTrustedSource(name: "Team plugins", address: "gitlab.example/tools/x", changedHere: true),
         .catalogueInstalledFromSource(address: "gitlab.example/tools/x"),
+        .catalogueInstalledFromTrustedSource(address: "gitlab.example/tools/x", name: "Team plugins"),
         .catalogueInstalledFromElsewhere(.verified(version: "1.0.0", repository: "github.com/o/r")),
         .catalogueInstalledFromElsewhere(.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x")),
         .catalogueInstallFromHere,
@@ -192,8 +195,12 @@ struct LocalizationTests {
         .catalogueSwitchConfirm(id: "uptime", from: .verified(version: "1.0.0", repository: "github.com/o/r"),
                                 to: .sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x"), toTrash: false),
         .windowReinstallBrings(.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x")),
+        .windowReinstallBrings(.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x", trustedName: "Team plugins")),
         .sourcesTitle, .sourcesAdd, .sourcesAddField, .sourcesAddConfirm, .sourcesAsking(host: "github.com"),
-        .sourceNotTrusted, .sourceRemove, .sourcesTestBuild(host: "api.github.com", base: "http://127.0.0.1:8766/api"),
+        .sourceNotTrusted, .sourceRemove, .sourceTrust,
+        .sourceTrustConfirm(name: "Team plugins", address: "gitlab.example/tools/x"), .sourceTrustConfirmButton,
+        .sourceStopTrusting, .sourceStopTrustingConfirm(name: "Team plugins"), .sourceStopTrustingConfirmButton,
+        .sourcesTestBuild(host: "api.github.com", base: "http://127.0.0.1:8766/api"),
         .sourceGitLabLimited(host: "gitlab.com", readAt: "14:02", until: "15:07", anonymousGitLabCom: true),
         .sourceGitLabLimited(host: "gitlab.example", readAt: nil, until: "15:07", anonymousGitLabCom: false),
         .sourceNotGitLab(host: "gitlab.example"), .sourceAlreadyAdded(name: "Team", address: "github.com/o/r"),
@@ -298,7 +305,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 476,
+        #expect(Self.all.count == 486,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

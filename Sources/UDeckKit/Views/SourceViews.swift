@@ -138,19 +138,24 @@ struct AddSourceSheet: View {
     }
 }
 
-/// One source the operator added: its name and address, that nobody vouches
-/// for it (S4-07), when it was read or why it was not, **Check now** and
-/// **Remove…**, and its catalogue's rows.
+/// One source the operator added: its name and address, whether it is
+/// trusted (S4-07), when it was read or why it was not, **Check now**,
+/// **Trust…** or **Stop trusting…** (S4-08) and **Remove…**, and its
+/// catalogue's rows.
 struct SourceBlock: View {
     @Bindable var model: DeckModel
     var source: OwnSource
     @Environment(\.strings) private var strings
     @State private var removing = false
+    /// The confirmation up under **Trust…** or **Stop trusting…**: whether it
+    /// trusts, or stops trusting.
+    @State private var trusting: Bool?
 
     private var sid: String { source.id }
     private var state: CatalogueState { model.catalogueState(of: sid) }
     private var catalogue: Catalogue? { model.sourceCatalogues[sid] }
     private var reading: Bool { model.sourcesRefreshing.contains(sid) }
+    private var trusted: Bool { model.trustedSources.contains(sid) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -161,10 +166,19 @@ struct SourceBlock: View {
                     .textSelection(.enabled)
                     .accessibilityIdentifier("source.\(sid).address")
             }
-            Label(strings(.sourceNotTrusted), systemImage: "exclamationmark.triangle")
-                .font(.caption).foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("source.\(sid).mark")
+            if trusted {
+                // Whose guarantee it is, by a mark of its own and never
+                // Verified's green (S4-07).
+                Label(strings(.pluginMarkTrusted(name: model.sourceName(source))), systemImage: "checkmark.shield")
+                    .font(.caption).foregroundStyle(.teal)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("source.\(sid).mark")
+            } else {
+                Label(strings(.sourceNotTrusted), systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("source.\(sid).mark")
+            }
             HStack(spacing: 10) {
                 Button(strings(.catalogueCheckNow)) { model.checkSourceNow(sid) }
                     .disabled(reading)
@@ -172,7 +186,15 @@ struct SourceBlock: View {
                 Button(strings(.sourceToken)) { model.toggleToken(sid) }
                     .disabled(reading)
                     .accessibilityIdentifier("source.\(sid).token")
-                Button(strings(.sourceRemove), role: .destructive) { removing = true }
+                Button(strings(trusted ? .sourceStopTrusting : .sourceTrust)) {
+                    removing = false
+                    trusting = !trusted
+                }
+                .accessibilityIdentifier("source.\(sid).trust")
+                Button(strings(.sourceRemove), role: .destructive) {
+                    trusting = nil
+                    removing = true
+                }
                     .disabled(reading || model.busyPlugin != nil || model.sourcesForgetting.contains(sid))
                     .accessibilityIdentifier("source.\(sid).remove")
                 if reading {
@@ -194,6 +216,9 @@ struct SourceBlock: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("source.\(sid).notice")
+            }
+            if let trusting {
+                trustConfirmation(trusting)
             }
             if removing {
                 confirmation
@@ -239,6 +264,30 @@ struct SourceBlock: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .accessibilityIdentifier("source.\(sid).state")
         }
+    }
+
+    /// **Trust…** — what trusting it means, said in full, and **Trust** — or
+    /// **Stop trusting…** and **Stop trusting** (S4-08). The confirmation
+    /// names the source by the name and the address it has as it is pressed;
+    /// the press does what it says, whatever happened to the trust meanwhile.
+    private func trustConfirmation(_ trust: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(strings(trust ? .sourceTrustConfirm(name: model.sourceName(source), address: source.address.description)
+                               : .sourceStopTrustingConfirm(name: model.sourceName(source))))
+                .font(.caption).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("source.\(sid).trustText")
+            HStack {
+                Button(strings(trust ? .sourceTrustConfirmButton : .sourceStopTrustingConfirmButton)) {
+                    trusting = nil
+                    if trust { model.trustSource(sid) } else { model.stopTrustingSource(sid) }
+                }
+                .accessibilityIdentifier("source.\(sid).trustConfirm")
+                Button(strings(.actionCancel)) { trusting = nil }
+                    .accessibilityIdentifier("source.\(sid).trustCancel")
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 6).fill(Color.teal.opacity(0.1)))
     }
 
     private var confirmation: some View {

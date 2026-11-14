@@ -182,12 +182,15 @@ public enum ShownPlace {
         /// button asks: what it puts there says the version and the copy
         /// together — and, when it comes from another line of history than
         /// the copy there, both of them (`Switch`), `official` being the
-        /// official repository, by which a fork's branch is told from its own.
+        /// official repository, by which a fork's branch is told from its own,
+        /// and `trustedNames` the names of the trusted sources, by id, by
+        /// which a copy of one's default branch is named (`CopyName`).
         public static func now(_ id: String, in paths: UDeckPaths, record: InstalledRecord?,
                                bringing arrival: Arrival, from origin: PluginOrigin? = nil,
-                               official: RepositoryAddress? = nil) -> Place {
+                               official: RepositoryAddress? = nil, trustedNames: [String: String] = [:]) -> Place {
             var place = now(id, in: paths, record: record, arriving: arrival.version, copy: arrival.copy)
-            place.switching = Switch.of(record: record, fate: place.fate, arrival: arrival, from: origin, official: official)
+            place.switching = Switch.of(record: record, fate: place.fate, arrival: arrival, from: origin, official: official,
+                                        trustedNames: trustedNames)
             return place
         }
 
@@ -237,7 +240,7 @@ public enum ShownPlace {
         /// fork's branch, on either side, is named with its fork, `official`
         /// being the official repository.
         static func of(record: InstalledRecord?, fate: Place.Fate, arrival: Arrival, from origin: PluginOrigin?,
-                       official: RepositoryAddress? = nil) -> Switch? {
+                       official: RepositoryAddress? = nil, trustedNames: [String: String] = [:]) -> Switch? {
             guard let record, let origin, let version = arrival.version,
                   fate == .deleted || fate == .toTrash,
                   !record.origin.followsTheSameLine(as: origin) else { return nil }
@@ -246,8 +249,10 @@ public enum ShownPlace {
             case .atCommit(_, let at): commit = at
             case .atHead, .nothing: commit = ""
             }
-            return Switch(from: CopyName.of(record.origin, commit: record.commit, version: record.version, official: official),
-                          to: CopyName.of(origin, commit: commit, version: version, official: official))
+            return Switch(from: CopyName.of(record.origin, commit: record.commit, version: record.version, official: official,
+                                            trustedNames: trustedNames),
+                          to: CopyName.of(origin, commit: commit, version: version, official: official,
+                                          trustedNames: trustedNames))
         }
     }
 
@@ -358,12 +363,12 @@ public enum ShownPlace {
     /// named in a warning — the catalogue's own address unless given: a source
     /// of one's own's catalogue gives it.
     public static func install(_ id: String, catalogue: Catalogue?, in paths: UDeckPaths, installed: InstalledPlugins,
-                               shown: Place?, official: RepositoryAddress? = nil) -> Step {
+                               shown: Place?, official: RepositoryAddress? = nil, trustedNames: [String: String] = [:]) -> Step {
         guard let catalogue, let entry = catalogue.entry(id) else { return .nothing }
         let version = entry.manifest?.version ?? ""
         let now = Place.now(id, in: paths, record: installed.plugins[id],
                             bringing: .atHead(version: version, tree: entry.listing.tree), from: origin(of: catalogue),
-                            official: official ?? catalogue.address)
+                            official: official ?? catalogue.address, trustedNames: trustedNames)
         if case .ask(let place) = press(.install, shown: shown, now: now) { return .ask(place) }
         let operation: InstallRequest.Operation = installed.plugins[id] != nil
             ? .update : (PluginInstaller.folderIsTaken(id, in: paths) ? .replace : .install)
@@ -375,12 +380,12 @@ public enum ShownPlace {
     /// the plugin at the catalogue's head — the folder's tree there, which a
     /// republish of the same version changes, is the copy its warning names.
     public static func update(_ id: String, catalogue: Catalogue?, in paths: UDeckPaths, installed: InstalledPlugins,
-                              shown: Place?, official: RepositoryAddress? = nil) -> Step {
+                              shown: Place?, official: RepositoryAddress? = nil, trustedNames: [String: String] = [:]) -> Step {
         guard let catalogue, let entry = catalogue.entry(id) else { return .nothing }
         let version = entry.manifest?.version ?? ""
         let now = Place.now(id, in: paths, record: installed.plugins[id],
                             bringing: .atHead(version: version, tree: entry.listing.tree), from: origin(of: catalogue),
-                            official: official ?? catalogue.address)
+                            official: official ?? catalogue.address, trustedNames: trustedNames)
         if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
         return .install(.update, commit: catalogue.commit, folder: entry.listing, version: version,
                         from: origin(of: catalogue))
@@ -426,7 +431,8 @@ public enum ShownPlace {
     /// updating by itself.
     public static func backToPrevious(_ id: String, source: RepositoryAddress, in paths: UDeckPaths,
                                       installed: InstalledPlugins, shown: Place?,
-                                      head: Adoption.DefaultBranch? = nil, sources: [OwnSource] = []) -> Step {
+                                      head: Adoption.DefaultBranch? = nil, sources: [OwnSource] = [],
+                                      trustedNames: [String: String] = [:]) -> Step {
         guard let record = installed.plugins[id], let previous = record.previous,
               case .source(let origin) = previous.source(record: record, official: source, sources: sources),
               origin.source == InstalledPlugins.officialSource || sources.contains(where: { $0.id == origin.source }) else {
@@ -435,7 +441,7 @@ public enum ShownPlace {
         let pinned: Bool? = record.origin.followsTheSameLine(as: origin) ? nil : (previous.pinned ?? false)
         return atCommit(.earlier, id: id, commit: previous.commit, version: previous.version,
                         from: origin, in: paths, installed: installed, shown: shown,
-                        tree: previous.tree, head: head, official: source, pinned: pinned)
+                        tree: previous.tree, head: head, official: source, pinned: pinned, trustedNames: trustedNames)
     }
 
     /// **Update** along the line a copy of code nobody verified came from: the
@@ -479,10 +485,10 @@ public enum ShownPlace {
     /// source of one's own.
     public static func earlier(_ id: String, line: PluginHistory.Line, source: RepositoryAddress, branch: String?,
                                in paths: UDeckPaths, installed: InstalledPlugins, shown: Place?,
-                               sourceID: String = InstalledPlugins.officialSource) -> Step {
+                               sourceID: String = InstalledPlugins.officialSource, trustedNames: [String: String] = [:]) -> Step {
         atCommit(.earlier, id: id, commit: line.commit, version: line.version,
                  from: PluginOrigin(repository: source, ref: .defaultBranch(branch), source: sourceID),
-                 in: paths, installed: installed, shown: shown, official: source)
+                 in: paths, installed: installed, shown: shown, official: source, trustedNames: trustedNames)
     }
 
     /// A copy replaced by `version` at `commit`: the commit its warning names
@@ -492,9 +498,10 @@ public enum ShownPlace {
     static func atCommit(_ operation: InstallRequest.Operation, id: String, commit: String, version: String,
                          from origin: PluginOrigin, in paths: UDeckPaths, installed: InstalledPlugins,
                          shown: Place?, tree: String? = nil, head: Adoption.DefaultBranch? = nil,
-                         official: RepositoryAddress? = nil, pinned: Bool? = nil) -> Step {
+                         official: RepositoryAddress? = nil, pinned: Bool? = nil, trustedNames: [String: String] = [:]) -> Step {
         let now = Place.now(id, in: paths, record: installed.plugins[id], bringing: .atCommit(version: version, commit: commit),
-                            from: recordedAs(origin, tree: tree, id: id, head: head), official: official)
+                            from: recordedAs(origin, tree: tree, id: id, head: head), official: official,
+                            trustedNames: trustedNames)
         if case .ask(let place) = press(.replaceCopy, shown: shown, now: now) { return .ask(place) }
         return .atCommit(operation, commit: commit, version: version, from: origin, pinned: pinned)
     }
@@ -510,12 +517,12 @@ public enum ShownPlace {
     /// a fork's branch is told from its own.
     public static func installFromLink(_ id: String, resolution: RefResolver.Resolution, in paths: UDeckPaths,
                                        installed: InstalledPlugins, shown: Place?,
-                                       source: RepositoryAddress? = nil) -> Step {
+                                       source: RepositoryAddress? = nil, trustedNames: [String: String] = [:]) -> Step {
         guard let entry = resolution.entries.first(where: { same($0.id, id) }) else { return .nothing }
         let version = entry.manifest?.version ?? ""
         let now = Place.now(id, in: paths, record: installed.plugins[id],
                             bringing: .atCommit(version: version, commit: resolution.commit), from: resolution.origin,
-                            official: source)
+                            official: source, trustedNames: trustedNames)
         if case .ask(let place) = press(.install, shown: shown, now: now) { return .ask(place) }
         let operation: InstallRequest.Operation = installed.plugins[id] != nil
             ? .update : (PluginInstaller.folderIsTaken(id, in: paths) ? .replace : .install)

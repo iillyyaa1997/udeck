@@ -143,11 +143,11 @@ public struct InstallRequest: Codable, Equatable, Sendable {
     /// the origin's, never assumed.
     public init(operation: Operation, id: PluginIdentifier, from origin: PluginOrigin, sourceRepository: RepositoryAddress,
                 commit: String, folder: PluginListing, version: String, headCommit: String?, headTree: String? = nil,
-                defaultBranch: String? = nil, automatic: Bool = false, pinned: Bool? = nil) {
+                defaultBranch: String? = nil, automatic: Bool = false, pinned: Bool? = nil, sourceTrusted: Bool = false) {
         self.init(operation: operation, id: id, source: origin.source, sourceRepository: sourceRepository,
                   repository: origin.repository, ref: origin.ref, commit: commit, folder: folder, version: version,
                   headCommit: headCommit, headTree: headTree, defaultBranch: defaultBranch, automatic: automatic,
-                  pinned: pinned)
+                  pinned: pinned, sourceTrusted: sourceTrusted)
     }
 
     /// Where the copy comes from, and the source it is a copy of.

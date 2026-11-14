@@ -403,14 +403,14 @@ extension UnverifiedCodeTests {
         let trees: [String: String?] = ["uptime": Self.tree, "cpu": Self.tree]
         let both = Reverification.of(plugins, installed: installed, trees: trees,
                                      heads: ["official": .read("officialHead"), Self.teamSource.id: .read("teamHead")],
-                                     now: Self.at)
+                                     trusted: [], now: Self.at)
         #expect(both.records?.plugins["uptime"]?.verification.checkedAgainst == "officialHead")
         #expect(both.records?.plugins["cpu"]?.verification
                 == PluginVerification(status: .unverified, by: nil, checkedAgainst: "teamHead", checkedAt: Self.at),
                 "a source's copy, checked against its own source's head, and never verified")
         #expect(both.standings == ["uptime": .verified, "cpu": .unverified])
         let officialOnly = Reverification.of(plugins, installed: installed, trees: trees, heads: ["official": .read("officialHead")],
-                                             now: Self.at)
+                                             trusted: [], now: Self.at)
         #expect(officialOnly.records?.plugins["cpu"]?.verification == team.verification,
                 "a source not read yet: nothing written for its copy")
         #expect(officialOnly.records?.plugins["uptime"]?.verification.checkedAgainst == "officialHead")
@@ -420,7 +420,7 @@ extension UnverifiedCodeTests {
                                   trusted: [Self.teamSource.id], now: Self.at).standings["cpu"] == .trusted,
                 "a trusted source's default branch stands trusted, its source not read yet or read")
         let sourceOnly = Reverification.of(plugins, installed: installed, trees: trees, heads: [Self.teamSource.id: .read(nil)],
-                                           now: Self.at)
+                                           trusted: [], now: Self.at)
         #expect(sourceOnly.records?.plugins["uptime"]?.verification == official.verification, "nor for the official one's")
         #expect(sourceOnly.records?.plugins["cpu"]?.verification.checkedAgainst == Self.commit, "no head: its own commit")
     }

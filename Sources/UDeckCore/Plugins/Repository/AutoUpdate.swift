@@ -9,7 +9,7 @@ import Foundation
 /// A plugin updates itself only when everything below holds; anything else,
 /// and the row offers the update as it always has, for the operator to press:
 ///
-/// * **Update verified plugins by themselves** is on, and the copy's source can
+/// * **Update verified and trusted plugins by themselves** is on, and the copy's source can
 ///   be read — for the official one, **Official catalogue** on (off, uDeck makes
 ///   no request to the official repository) — as `switchedOn` says;
 /// * the head has a newer version, or the same version with other files
@@ -132,7 +132,7 @@ public enum AutoUpdate {
 
     /// Whether copies of `source` — `official`, or a source of one's own by
     /// its id — update themselves now, each copy deciding the rest itself
-    /// (`verdict`): **Update verified plugins by themselves** on, and the
+    /// (`verdict`): **Update verified and trusted plugins by themselves** on, and the
     /// source readable — the official one's under **Official catalogue**
     /// (`AppSettings.verifiedPluginsUpdateThemselves`), and not while its
     /// address answers another repository's number

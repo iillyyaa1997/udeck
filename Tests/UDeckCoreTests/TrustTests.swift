@@ -263,17 +263,249 @@ struct TrustTests {
         let plugins = [DiscoveredPlugin(directory: URL(fileURLWithPath: "/u/plugins/team-ping"), folderName: "team-ping",
                                         manifest: nil, executable: nil, problems: [])]
         let installed = InstalledPlugins(plugins: ["team-ping": Self.record()])
-        let heads: [String: Reverification.Head] = [Self.team: .read(Self.commit)]
+        // The source's head moved on since the copy was installed: what a record is checked against is not its commit.
+        let head = String(repeating: "d", count: 40)
+        let heads: [String: Reverification.Head] = [Self.team: .read(head)]
         let trusted = Reverification.of(plugins, installed: installed, trees: ["team-ping": Self.tree], heads: heads,
                                         trusted: [Self.team], now: Self.at)
         #expect(trusted.standings["team-ping"] == .trusted)
         let written = trusted.records?.plugins["team-ping"]?.verification
-        #expect(written?.status == .trusted && written?.by == Self.team && written?.checkedAgainst == Self.commit)
+        #expect(written?.status == .trusted && written?.by == Self.team && written?.checkedAgainst == head)
         // No longer trusted: unverified at once, and recorded so.
         let after = InstalledPlugins(plugins: ["team-ping": trusted.records?.plugins["team-ping"] ?? Self.record()])
         let untrusted = Reverification.of(plugins, installed: after, trees: ["team-ping": Self.tree], heads: heads,
                                           trusted: [], now: Self.at)
         #expect(untrusted.standings["team-ping"] == .unverified)
         #expect(untrusted.records?.plugins["team-ping"]?.verification.status == .unverified)
+        // Its source removed — no head of it read any more — the record still written trusted is written again, against
+        // what it was last checked against; still trusted and not read, or already unverified, nothing is written.
+        let removed = Reverification.of(plugins, installed: after, trees: ["team-ping": Self.tree], heads: [:], trusted: [],
+                                        now: Self.at)
+        let rewritten = removed.records?.plugins["team-ping"]?.verification
+        #expect(rewritten?.status == .unverified && rewritten?.by == nil && rewritten?.checkedAgainst == head)
+        #expect(Reverification.of(plugins, installed: after, trees: ["team-ping": Self.tree], heads: [:], trusted: [Self.team],
+                                  now: Self.at).records == nil)
+        #expect(Reverification.of(plugins, installed: installed, trees: ["team-ping": Self.tree], heads: [:], trusted: [],
+                                  now: Self.at).records == nil)
+    }
+}
+
+// MARK: - What a trusted source's copy is called (stage 4, R4b)
+
+extension TrustTests {
+    static let names = [team: "Team plugins"]
+
+    @Test("a copy of a trusted source's default branch is named by the source's name; nothing else is")
+    func namedWhenTrusted() {
+        let teams = PluginOrigin(repository: RepositoryAddress(path: "someone/team-plugins"), ref: .defaultBranch("main"),
+                                 source: Self.team)
+        #expect(CopyName.of(teams, commit: Self.commit, version: "1.0.0", trustedNames: Self.names)
+                == .sourceDefault(version: "1.0.0", address: "github.com/someone/team-plugins", trustedName: "Team plugins"))
+        #expect(CopyName.of(teams, commit: Self.commit, version: "1.0.0")
+                == .sourceDefault(version: "1.0.0", address: "github.com/someone/team-plugins"))
+        #expect(CopyName.of(teams, commit: Self.commit, version: "1.0.0", trustedNames: [Self.other: "Other"])
+                == .sourceDefault(version: "1.0.0", address: "github.com/someone/team-plugins"), "another source trusted")
+        let branch = PluginOrigin(repository: RepositoryAddress(path: "someone/team-plugins"), ref: .branch("x"), source: Self.team)
+        #expect(CopyName.of(branch, commit: Self.commit, version: "1.0.0", trustedNames: Self.names)
+                == .branch(name: "x", commit: "ccccccc", version: "1.0.0"), "a trusted source's branch is not trusted")
+        let official = PluginOrigin(repository: .official, ref: .defaultBranch("main"))
+        #expect(CopyName.of(official, commit: Self.commit, version: "1.0.0", trustedNames: [InstalledPlugins.officialSource: "x"])
+                == .verified(version: "1.0.0", repository: "github.com/iillyyaa1997/udeck-plugins"))
+        let trusted = CopyName.sourceDefault(version: "1.0.0", address: "github.com/someone/team-plugins", trustedName: "Team plugins")
+        #expect(Strings(.english)(.catalogueInstalledFromElsewhere(trusted)).contains(": trusted source Team plugins"))
+        #expect(Strings(.russian)(.catalogueInstalledFromElsewhere(trusted)).contains(": доверенный источник Team plugins"))
+    }
+
+    @Test("a request made from where its copy comes carries whether that source is trusted, untrusted as before")
+    func requestCarriesTheTrust() {
+        let origin = PluginOrigin(repository: RepositoryAddress(path: "someone/team-plugins"), ref: .defaultBranch("main"),
+                                  source: Self.team)
+        let folder = PluginListing(tree: Self.tree, entries: [])
+        func request(trusted: Bool?) -> InstallRequest {
+            guard let trusted else {
+                return InstallRequest(operation: .install, id: PluginIdentifier(rawValue: "uptime")!, from: origin,
+                                      sourceRepository: origin.repository, commit: Self.commit, folder: folder,
+                                      version: "1.0.0", headCommit: Self.commit)
+            }
+            return InstallRequest(operation: .install, id: PluginIdentifier(rawValue: "uptime")!, from: origin,
+                                  sourceRepository: origin.repository, commit: Self.commit, folder: folder, version: "1.0.0",
+                                  headCommit: Self.commit, sourceTrusted: trusted)
+        }
+        #expect(request(trusted: true).sourceTrusted)
+        #expect(!request(trusted: false).sourceTrusted)
+        #expect(!request(trusted: nil).sourceTrusted)
+        #expect(request(trusted: true).source == Self.team)
+    }
+
+    @Test("a switch to a trusted source's copy says whose code comes, not that nobody verified it")
+    func switchSaysWhoseCodeComes() {
+        let trusted = CopyName.sourceDefault(version: "1.0.0", address: "github.com/someone/team-plugins", trustedName: "Team plugins")
+        let verified = CopyName.verified(version: "1.0.0", repository: "github.com/iillyyaa1997/udeck-plugins")
+        #expect(Strings(.english)(.catalogueSwitchConfirm(id: "uptime", from: verified, to: trusted, toTrash: false))
+                == "uptime is the verified 1.0.0 from github.com/iillyyaa1997/udeck-plugins; installing 1.0.0 from "
+                + "github.com/someone/team-plugins: trusted source Team plugins replaces it. Its windows and settings stay. "
+                + "The code that comes is that of a source you trust: it asks before it runs, unless it asks for nothing or "
+                + "you allowed this version from that source before.")
+        #expect(Strings(.russian)(.catalogueSwitchConfirm(id: "uptime", from: verified, to: trusted, toTrash: false))
+                .hasSuffix("Код, который встанет, — из источника, которому вы доверяете: плагин спросит разрешения перед "
+                           + "запуском, если только он ничего не просит или вы уже разрешали эту версию из этого источника."))
+        let untrusted = CopyName.sourceDefault(version: "1.0.0", address: "github.com/someone/team-plugins")
+        #expect(Strings(.english)(.catalogueSwitchConfirm(id: "uptime", from: verified, to: untrusted, toTrash: false))
+                .hasSuffix("Nobody verified the code that comes: it asks before it runs, unless you allowed exactly that code before."))
+    }
+
+    @Test("Reinstall of a trusted source's copy says whose it is, not that nobody verified it")
+    func reinstallNamesTheTrustedSource() {
+        let says = Self.record().reinstallSays(headTree: nil, trustedNames: Self.names)
+        #expect(says == .windowReinstallBrings(.sourceDefault(version: "1.0.0", address: "github.com/someone/team-plugins",
+                                                              trustedName: "Team plugins")))
+        #expect(says.map { Strings(.english)($0) }
+                == "Reinstall puts back 1.0.0 from github.com/someone/team-plugins: trusted source Team plugins.")
+        #expect(says.map { Strings(.russian)($0) }
+                == "«Переустановить» вернёт: версия 1.0.0 из github.com/someone/team-plugins, доверенный источник Team plugins.")
+        let untrusted = Self.record().reinstallSays(headTree: nil)
+        #expect(untrusted.map { Strings(.english)($0) }
+                == "Reinstall puts back 1.0.0 from github.com/someone/team-plugins: code nobody verified.")
+    }
+
+    @Test("the card asking about a trusted source's copy says whose guarantee it is; any other copy held to its version says nothing")
+    func consentSaysWhoseGuarantee() {
+        let trusted = ConsentSource.of(Self.record(), basis: .version, recordsReadable: true, changedHere: false,
+                                       trustedNames: Self.names)
+        #expect(trusted == .permissionsTrustedSource(name: "Team plugins", address: "github.com/someone/team-plugins",
+                                                     changedHere: false))
+        #expect(trusted.map { Strings(.english)($0) } == "This code comes from the default branch of github.com/someone/team-plugins, a source you trust as Team plugins. uDeck does not read it: the guarantee is that of whoever can merge into github.com/someone/team-plugins.")
+        #expect(trusted.map { Strings(.russian)($0) } == "Этот код из основной ветки github.com/someone/team-plugins — источника, которому вы доверяете как Team plugins. uDeck его не читает: ручается тот, кто может вливать в github.com/someone/team-plugins.")
+        #expect(ConsentSource.of(Self.record(), basis: .version, recordsReadable: true, changedHere: false, trustedNames: Self.names,
+                                 addresses: [Self.team: "github.com/someone/renamed"])
+                == .permissionsTrustedSource(name: "Team plugins", address: "github.com/someone/renamed", changedHere: false),
+                "renamed since, the source's address now: the old one may be somebody else's")
+        #expect(ConsentSource.of(Self.record(), basis: .version, recordsReadable: true, changedHere: false) == nil)
+        #expect(ConsentSource.of(Self.record(), basis: .version, recordsReadable: true, changedHere: false,
+                                 trustedNames: [Self.other: "Other"]) == nil, "another source trusted")
+        #expect(ConsentSource.of(Self.record(ref: .branch("x")), basis: .version, recordsReadable: true, changedHere: false,
+                                 trustedNames: Self.names) == nil, "a trusted source's branch")
+        #expect(ConsentSource.of(Self.record(source: InstalledPlugins.officialSource), basis: .version, recordsReadable: true,
+                                 changedHere: false, trustedNames: [InstalledPlugins.officialSource: "x"]) == nil)
+        #expect(ConsentSource.of(nil, basis: .version, recordsReadable: true, changedHere: false, trustedNames: Self.names) == nil)
+        #expect(ConsentSource.of(Self.record(), basis: .version, recordsReadable: true, changedHere: false, trustedNames: Self.names,
+                                 linked: true) == nil, "a link, whatever record is left at its id")
+        let changed = ConsentSource.of(Self.record(), basis: .version, recordsReadable: true, changedHere: true,
+                                       trustedNames: Self.names)
+        #expect(changed == .permissionsTrustedSource(name: "Team plugins", address: "github.com/someone/team-plugins",
+                                                     changedHere: true))
+        #expect(changed.map { Strings(.english)($0) }?
+                .hasSuffix(" It was changed on this Mac since it was installed, and nobody vouches for that change.") == true)
+        #expect(changed.map { Strings(.russian)($0) }?
+                .hasSuffix(" После установки он изменён на этом Mac, и за это изменение никто не ручается.") == true)
+        #expect(ConsentSource.of(Self.record(), basis: .tree, recordsReadable: true, changedHere: true, trustedNames: Self.names)
+                == .permissionsUntrustedSource(address: "github.com/someone/team-plugins", changedHere: true),
+                "held to its tree, it is said as it always was")
+    }
+}
+
+extension CatalogueRowTests {
+    @Test("in the official catalogue, a trusted source's copy is said by the source's name, never unverified")
+    func officialRowNamesTheTrustedSource() {
+        let state = CatalogueRowState.unverified(version: "1.0.0", refusal: nil, folderGone: false)
+        #expect(state.unverifiedLine(ref: .defaultBranch("main"), id: "uptime", path: "~", source: "gitlab.example/tools/x",
+                                     trustedName: "Team plugins")
+                == [.catalogueInstalledFromTrustedSource(address: "gitlab.example/tools/x", name: "Team plugins")])
+        #expect(state.unverifiedLine(ref: .defaultBranch("main"), id: "uptime", path: "~", source: "gitlab.example/tools/x")
+                == [.catalogueInstalledFromSource(address: "gitlab.example/tools/x")])
+        #expect(state.unverifiedLine(ref: .branch("x"), id: "uptime", path: "~", source: "gitlab.example/tools/x",
+                                     trustedName: "Team plugins") == [.catalogueInstalledUnverified(ref: .branch("x"), fork: nil)],
+                "a trusted source's branch is not trusted")
+        #expect(Strings(.english)(.catalogueInstalledFromTrustedSource(address: "gitlab.example/tools/x", name: "Team plugins"))
+                == "Installed here from gitlab.example/tools/x: trusted source Team plugins")
+        #expect(Strings(.russian)(.catalogueInstalledFromTrustedSource(address: "gitlab.example/tools/x", name: "Team plugins"))
+                == "Здесь установлен из gitlab.example/tools/x: доверенный источник Team plugins")
+    }
+
+    @Test("in another source's catalogue, a trusted source's copy is named by the source's name")
+    func fromElsewhereNamesTheTrustedSource() {
+        let installed = FakeRepository.withUptime()
+        let head = entry(.withUptime(version: "1.0.0"))
+        let copy = record(installed, source: Self.teamID, address: Self.team, ref: .defaultBranch("main"))
+        let named = [Self.teamID: "Team plugins"]
+        #expect(CatalogueRowState.of(head, record: copy, folderExists: true, source: Self.otherID, official: .official,
+                                     trustedNames: named)
+                == .fromElsewhere(.sourceDefault(version: "1.0.0", address: "gitlab.example/tools/team-plugins",
+                                                 trustedName: "Team plugins"),
+                                  version: "1.0.0", refusal: nil, folderGone: false))
+        #expect(CatalogueRowState.of(head, record: copy, folderExists: true, source: Self.teamID, official: .official,
+                                     trustedNames: named) == .installed(.current), "in its own catalogue, as before")
+    }
+}
+
+extension ForkTests {
+    @Test("a warning names a trusted source's copy by the source's name, whichever button brings what over it")
+    func switchesNameTheTrustedSource() throws {
+        var copy = Self.forkRecord()
+        copy.source = TrustTests.team
+        copy.ref = .defaultBranch("main")
+        copy.commit = InstallFromLinkTests.pullCommit
+        let records = try installed(copy, from: RefResolverTests.pullRequestHead)
+        let trusted = CopyName.sourceDefault(version: "1.0.1", address: "github.com/someone/udeck-plugins",
+                                             trustedName: "Team plugins")
+        let verified = CopyName.verified(version: "1.0.0", repository: "github.com/iillyyaa1997/udeck-plugins")
+        let catalogue = InstallFromLinkTests.catalogue(InstallFromLinkTests.head)
+
+        guard case .ask(let update) = ShownPlace.update("uptime", catalogue: catalogue, in: udeck.paths, installed: records,
+                                                         shown: nil, trustedNames: TrustTests.names) else {
+            Issue.record("the official copy over a trusted source's warns first"); return
+        }
+        #expect(update.switching == ShownPlace.Switch(from: trusted, to: verified))
+        #expect(Strings(.english)(PlaceWarning.of(update, button: .replaceCopy, id: "uptime", path: "~", link: nil))
+                .contains("trusted source Team plugins"))
+        guard case .ask(let untrusted) = ShownPlace.update("uptime", catalogue: catalogue, in: udeck.paths, installed: records,
+                                                            shown: nil) else {
+            Issue.record("the same, nothing trusted"); return
+        }
+        #expect(untrusted.switching?.from == .sourceDefault(version: "1.0.1", address: "github.com/someone/udeck-plugins"))
+        #expect(!ShownPlace.holds(untrusted, now: update), "shown untrusted, it is not what is there once trusted")
+
+        guard case .ask(let install) = ShownPlace.install("uptime", catalogue: catalogue, in: udeck.paths, installed: records,
+                                                           shown: nil, trustedNames: TrustTests.names) else {
+            Issue.record("Install over a trusted source's copy warns first"); return
+        }
+        #expect(install.switching == ShownPlace.Switch(from: trusted, to: verified))
+
+        let line = PluginHistory.Line(version: "1.0.0", commit: InstallFromLinkTests.headCommit, date: nil, manifest: nil)
+        guard case .ask(let earlier) = ShownPlace.earlier("uptime", line: line, source: .official, branch: "main", in: udeck.paths,
+                                                          installed: records, shown: nil, trustedNames: TrustTests.names) else {
+            Issue.record("an earlier version over a trusted source's copy warns first"); return
+        }
+        #expect(earlier.switching?.from == trusted)
+
+        let theirs = InstallFromLinkTests.resolution(Self.forkHead, origin: PluginOrigin(repository: .official, ref: .branch("x")))
+        guard case .ask(let link) = ShownPlace.installFromLink("uptime", resolution: theirs, in: udeck.paths, installed: records,
+                                                               shown: nil, source: .official, trustedNames: TrustTests.names) else {
+            Issue.record("a link's branch over a trusted source's copy warns first"); return
+        }
+        #expect(link.switching?.from == trusted)
+    }
+
+    @Test("Back to a trusted source's copy names it by the source's name")
+    func backToTheTrustedSource() throws {
+        var list = SourceList()
+        guard case .success(let team) = list.add(provider: "github", host: "github.com", path: "someone/udeck-plugins",
+                                                 remoteID: 900_000_102, at: Self.at) else {
+            Issue.record("the source is added"); return
+        }
+        var current = RefFollowerTests.record(ref: .defaultBranch("main"))
+        current.commit = InstallFromLinkTests.headCommit
+        current.version = "1.0.0"
+        current.previous = PreviousCopy(ref: .defaultBranch("main"), commit: Self.forkHead.commit,
+                                        tree: Self.forkHead.plugin("uptime").tree, version: "1.0.1", repository: Self.fork,
+                                        sourceID: team.id)
+        let records = try installed(current, from: InstallFromLinkTests.head)
+        guard case .ask(let warning) = ShownPlace.backToPrevious("uptime", source: .official, in: udeck.paths, installed: records,
+                                                                 shown: nil, sources: [team],
+                                                                 trustedNames: [team.id: "Team plugins"]) else {
+            Issue.record("Back to another source's copy warns first"); return
+        }
+        #expect(warning.switching?.to == .sourceDefault(version: "1.0.1", address: "github.com/someone/udeck-plugins",
+                                                        trustedName: "Team plugins"))
     }
 }

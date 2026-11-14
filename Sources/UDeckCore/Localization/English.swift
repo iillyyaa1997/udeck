@@ -170,6 +170,9 @@ struct English: Vocabulary {
             "Nobody verified this code: it comes from the default branch of \(address), a source you have not trusted"
                 + (changedHere ? ", and it was changed on this Mac since" : "")
                 + ". uDeck asks again whenever it changes."
+        case .permissionsTrustedSource(let name, let address, let changedHere):
+            "This code comes from the default branch of \(address), a source you trust as \(name). uDeck does not read it: the guarantee is that of whoever can merge into \(address)."
+                + (changedHere ? " It was changed on this Mac since it was installed, and nobody vouches for that change." : "")
         case .permissionsSourceUnknown:
             "uDeck cannot read ~/.udeck/installed.json, so nothing says where this code came from: it is asked about by what it is, and again whenever it changes."
         case .permissionsUnsandboxed:
@@ -189,9 +192,9 @@ struct English: Vocabulary {
         case .catalogueEmpty: "The repository offers no plugins yet."
         case .catalogueUpdatesWaiting(let count):
             count == 1 ? "1 update is waiting" : "\(count) updates are waiting"
-        case .catalogueUpdatesByThemselves: "Update verified plugins by themselves"
+        case .catalogueUpdatesByThemselves: "Update verified and trusted plugins by themselves"
         case .catalogueUpdatesByThemselvesHelp:
-            "After each read of the catalogue, a verified plugin whose new version asks for exactly what it asks for now is updated without a press: its window stays, and so does your permission decision. A new version that asks for different permissions, a plugin you changed or put a file of your own into, and one you kept at an earlier version wait here for you to press Update."
+            "After each read of its catalogue, a verified plugin, or one from the default branch of a source you trust, whose new version asks for exactly what it asks for now is updated without a press: its window stays, and so does your permission decision. A new version that asks for different permissions, a plugin you changed or put a file of your own into, and one you kept at an earlier version wait here for you to press Update."
         case .catalogueLimited(let readAt, let until):
             "GitHub allows 60 requests an hour from this network without signing in, and they are used up — by uDeck or by something else on the same connection. "
                 + (readAt.map { "The list below is from \($0); " } ?? "")
@@ -257,6 +260,7 @@ struct English: Vocabulary {
         case .catalogueLinkedHere(let id): "\(id) is linked here, to a folder of your own"
         case .catalogueInstalledUnverified(let ref, let fork): "Installed here from \(Self.line(ref, fork: fork)): unverified"
         case .catalogueInstalledFromSource(let address): "Installed here from \(address): unverified"
+        case .catalogueInstalledFromTrustedSource(let address, let name): "Installed here from \(address): trusted source \(name)"
         case .catalogueInstalledFromElsewhere(let copy): "Installed here: \(Self.copy(copy))"
         case .catalogueInstallFromHere: "Install from here…"
         case .catalogueSwitchToVerified(let version): "Switch to verified \(version)"
@@ -421,6 +425,14 @@ struct English: Vocabulary {
         case .sourceNotTrusted:
             "Not trusted: nobody vouches for these plugins — each asks again whenever its code changes."
         case .sourceRemove: "Remove…"
+        case .sourceTrust: "Trust…"
+        case .sourceTrustConfirm(let name, let address):
+            "Trust \(name) (\(address))? Plugins from its default branch will be marked Trusted source, keep your permission decision for each version, and update themselves like verified ones when they ask for nothing new. Those that ask for nothing run as soon as they are installed, with no question. uDeck does not read their code: the guarantee is that of whoever can merge into \(address)."
+        case .sourceTrustConfirmButton: "Trust"
+        case .sourceStopTrusting: "Stop trusting…"
+        case .sourceStopTrustingConfirm(let name):
+            "Stop trusting \(name)? Its plugins become Unverified and ask again before they next run, unless you allowed exactly their code before."
+        case .sourceStopTrustingConfirmButton: "Stop trusting"
         case .sourcesTestBuild(let host, let base): "Test build: \(host) is read from \(base)."
         case .sourceGitLabLimited(let host, let readAt, let until, let anonymousGitLabCom):
             "\(host) asked uDeck to wait: its limit of requests from this network, or for this token, is used up. "
@@ -498,7 +510,9 @@ struct English: Vocabulary {
         case .windowWillNotRun(let id): "\(id) will not run:"
         case .windowReinstall: "Reinstall"
         // A source's copy says no mark of its own before the sentence's own.
-        case .windowReinstallBrings(.sourceDefault(let version, let address, _)):
+        case .windowReinstallBrings(.sourceDefault(let version, let address, let trustedName?)):
+            "Reinstall puts back \(version) from \(address): trusted source \(trustedName)."
+        case .windowReinstallBrings(.sourceDefault(let version, let address, nil)):
             "Reinstall puts back \(version) from \(address): code nobody verified."
         case .windowReinstallBrings(let copy): "Reinstall puts back \(Self.copy(copy)): code nobody verified."
 
@@ -648,6 +662,10 @@ struct English: Vocabulary {
     /// was allowed before.
     static func staysAfterSwitching(to copy: CopyName) -> String {
         if case .verified = copy { return "Its windows, settings and your permission decision stay." }
+        // A trusted source's copy: whose guarantee it is, and a decision held to that source's version (S4-09).
+        if case .sourceDefault(_, _, _?) = copy {
+            return "Its windows and settings stay. The code that comes is that of a source you trust: it asks before it runs, unless it asks for nothing or you allowed this version from that source before."
+        }
         return "Its windows and settings stay. Nobody verified the code that comes: it asks before it runs, unless you allowed exactly that code before."
     }
 

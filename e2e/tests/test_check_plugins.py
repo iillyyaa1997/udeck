@@ -420,7 +420,10 @@ def test_the_reasons_the_checks_read_in_uDecks_log_are_the_ones_it_writes():
     # The tick the update that waited comes on: the minute's clock, which runs while any source can be read.
     sources = _source("Sources", "UDeckKit", "Plugins", "DeckModel+Sources.swift")
     assert f"Timer(timeInterval: {checks.TICK_SECONDS}, repeats: true)" in sources
-    assert "func tick() {\n        updateVerifiedPlugins()" in sources
+    # On every tick, after sources.json is read again (a trust taken away by hand counts from that minute on).
+    tick = sources.split("func tick() {\n", 1)[1].split("\n    }\n", 1)[0]
+    lines = [line.strip() for line in tick.splitlines() if line.strip() and not line.strip().startswith("//")]
+    assert lines[:2] == ["loadSources()", "updateVerifiedPlugins()"]
 
 
 def test_every_older_check_that_moves_main_starts_with_updates_by_themselves_off():
@@ -959,10 +962,14 @@ def test_a_sources_id_is_the_one_uDeck_derives():
 
 
 def test_the_source_checks_name_the_fixtures_there_are():
-    """team-plugins has t1, t2, t3 and the plugins the checks install; not-plugins and squatter are there; the fake's
-    numbers are the ones the builds and the checks use."""
+    """team-plugins has t1, t2, t3 and the plugins the checks install; not-plugins, squatter, not-official and zero-width
+    are there, the last two with team-clock to list; the fake's numbers are the ones the builds and the checks use."""
     facts = _fake().Fake(str(plugin_repository.FIXTURES), config.PLUGINS_REPOSITORY, "/dev/null")
-    assert sorted(facts.sources) == sorted([checks.TEAM, checks.NOT_PLUGINS, checks.SQUATTER, checks.PRIVATE])
+    assert sorted(facts.sources) == sorted([checks.TEAM, checks.NOT_PLUGINS, checks.SQUATTER, checks.PRIVATE,
+                                            checks.NOT_OFFICIAL, checks.ZERO_WIDTH])
+    for path in (checks.NOT_OFFICIAL, checks.ZERO_WIDTH):
+        only = facts.sources[path].repository
+        assert only.commits[only.names[0]].snapshot.at(f"plugins/{checks.TEAM_CLOCK}") is not None, path
     assert facts.sources[checks.PRIVATE].token == checks.PRIVATE_TOKEN and facts.sources[checks.TEAM].token is None
     assert checks.MISSING not in facts.sources and checks.TEAM_RENAMED not in facts.sources
     team = facts.sources[checks.TEAM].repository

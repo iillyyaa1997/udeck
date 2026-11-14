@@ -153,11 +153,14 @@ extension InstalledRecord {
     /// (`Adoption`). A fork's branch is named with its fork, `official` being
     /// the official repository. Only the official source's copies are
     /// adopted: a copy of a source of one's own comes back as that source's
-    /// whatever the official catalogue's head has, and is said.
-    public func reinstallSays(headTree: String?, official: RepositoryAddress? = nil) -> Phrase? {
+    /// whatever the official catalogue's head has, and is said — by the
+    /// source's name from `trustedNames`, by id, when it is trusted.
+    public func reinstallSays(headTree: String?, official: RepositoryAddress? = nil,
+                              trustedNames: [String: String] = [:]) -> Phrase? {
         guard !isOfficialDefault else { return nil }
         guard source != InstalledPlugins.officialSource || tree != headTree else { return nil }
-        return .windowReinstallBrings(CopyName.of(origin, commit: commit, version: version, official: official))
+        return .windowReinstallBrings(CopyName.of(origin, commit: commit, version: version, official: official,
+                                                  trustedNames: trustedNames))
     }
 }
 
@@ -190,12 +193,18 @@ extension CatalogueRowState {
     /// in, when it is one's (`PluginOrigin.fork`); `source`, the address of
     /// the source of one's own the copy came from, when it did — its default
     /// branch named by it: *Installed here from gitlab.example/tools/x:
-    /// unverified*.
+    /// unverified* — or, the source trusted, by its name, `trustedName`:
+    /// *…: trusted source Team plugins*.
     public func unverifiedLine(ref: PluginRef, fork: String? = nil, id: String, path: String,
-                               lifecycle: PullRequestLifecycle? = nil, source: String? = nil) -> [Phrase]? {
+                               lifecycle: PullRequestLifecycle? = nil, source: String? = nil,
+                               trustedName: String? = nil) -> [Phrase]? {
         guard case .unverified(_, let refusal, let folderGone) = self else { return nil }
-        let installed: Phrase = source.flatMap { ref.isDefault ? .catalogueInstalledFromSource(address: $0) : nil }
-            ?? .catalogueInstalledUnverified(ref: ref, fork: fork)
+        let fromSource: Phrase? = source.flatMap { address in
+            guard ref.isDefault else { return nil }
+            return trustedName.map { .catalogueInstalledFromTrustedSource(address: address, name: $0) }
+                ?? .catalogueInstalledFromSource(address: address)
+        }
+        let installed = fromSource ?? .catalogueInstalledUnverified(ref: ref, fork: fork)
         return [installed]
             + (lifecycle?.cataloguePhrase.map { [$0] } ?? [])
             + (folderGone ? [.catalogueMissing(id: id, path: path)] : [])
@@ -232,8 +241,23 @@ public enum ConsentSource {
     /// `record` is the plugin's, `changedHere` whether its folder no longer is
     /// what was installed, `recordsReadable` whether `installed.json` could be
     /// read — when it cannot, nothing says where any copy came from.
+    ///
+    /// A copy held to its version says nothing, unless it is of a trusted
+    /// source's default branch — `trustedNames`, by id: then whose guarantee
+    /// it is, so that its question never reads as the verified copy's of the
+    /// same id and version (S4-07) — at the source's address now, from
+    /// `addresses`, by id: a renamed or transferred source's old address may
+    /// be somebody else's — and that a change made on this Mac since is
+    /// nobody's. Nothing for a link (`linked`), whatever record is left at
+    /// its id: it is the operator's own working copy.
     public static func of(_ record: InstalledRecord?, basis: ConsentBasis, recordsReadable: Bool,
-                          changedHere: Bool) -> Phrase? {
+                          changedHere: Bool, trustedNames: [String: String] = [:],
+                          addresses: [String: String] = [:], linked: Bool = false) -> Phrase? {
+        if basis == .version, !linked, let record, record.isTrustedDefault(Set(trustedNames.keys)),
+           let name = trustedNames[record.source] {
+            return .permissionsTrustedSource(name: name, address: addresses[record.source] ?? record.repository.description,
+                                             changedHere: changedHere)
+        }
         guard basis == .tree else { return nil }
         guard recordsReadable else { return .permissionsSourceUnknown }
         guard let record, !record.isOfficialDefault else { return nil }

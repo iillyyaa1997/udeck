@@ -24,9 +24,11 @@ struct CatalogueSection: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if model.settings.readsOfficialCatalogue {
-                // Under the catalogue's own switch: off, nothing is read, so
-                // nothing could update itself either.
+            // Under the catalogue's own switch, while it is on or a source
+            // is trusted: off with no source trusted, nothing could update
+            // itself; a trusted source's copies update themselves whatever
+            // Official catalogue says (S4-04, S4-10).
+            if model.settings.readsOfficialCatalogue || !model.trustedSources.isEmpty {
                 Toggle(strings(.catalogueUpdatesByThemselves), isOn: Binding(
                     get: { model.settings.updatesVerifiedByThemselves },
                     set: { model.setAutoUpdateVerified($0) }
@@ -36,6 +38,8 @@ struct CatalogueSection: View {
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("catalogue.autoUpdateHelp")
+            }
+            if model.settings.readsOfficialCatalogue {
                 HStack(spacing: 10) {
                     Button(strings(.catalogueCheckNow)) { model.checkCatalogueNow() }
                         .disabled(model.catalogueRefreshing)
@@ -150,6 +154,12 @@ struct CatalogueRowView: View {
                     Label(strings(.catalogueVerified), systemImage: "checkmark.seal.fill")
                         .font(.caption).foregroundStyle(.green)
                         .accessibilityIdentifier("catalogue.\(id).verified")
+                } else if let trustedName = model.trustedSourceNames[source] {
+                    // A trusted source: whose guarantee it is, never Verified
+                    // (S4-07).
+                    Label(strings(.pluginMarkTrusted(name: trustedName)), systemImage: "checkmark.shield")
+                        .font(.caption).foregroundStyle(.teal)
+                        .accessibilityIdentifier("\(named).mark")
                 } else {
                     // A source nobody vouches for: never Verified (S4-07).
                     Label(strings(.pluginMarkUnverified), systemImage: "exclamationmark.triangle")
@@ -330,7 +340,9 @@ struct CatalogueRowView: View {
                                   fork: model.installed.plugins[id]?.origin.fork(official: model.catalogueAddress), id: id,
                                   path: model.pluginsDirectoryDisplayPath,
                                   lifecycle: model.unverifiedRow(of: id)?.lifecycle,
-                                  source: sourceOfTheCopy) ?? []).map { strings($0) }.joined(separator: " — ")
+                                  source: sourceOfTheCopy,
+                                  trustedName: model.installed.plugins[id].flatMap { model.trustedSourceNames[$0.source] })
+                ?? []).map { strings($0) }.joined(separator: " — ")
         case .fromElsewhere(let copy, _, let refusal, let folderGone):
             ([.catalogueInstalledFromElsewhere(copy)]
                 + (folderGone ? [.catalogueMissing(id: id, path: model.pluginsDirectoryDisplayPath)] : [])

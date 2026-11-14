@@ -39,9 +39,25 @@ extension DeckModel {
         sources.first { $0.id == id }
     }
 
+    /// The sources the operator trusted, by id (`SourceList.trusted`, S4-08):
+    /// none while `sources.json` cannot be read, so that every copy of a
+    /// source of one's own is held to its tree then (S4-09).
+    public var trustedSources: Set<String> { sourcesProblem == nil ? sourceList.trusted : [] }
+
+    /// The names of the trusted sources, by id, as their blocks show them
+    /// (`sourceName`): what a copy of one's default branch is named by
+    /// (`CopyName`).
+    public var trustedSourceNames: [String: String] {
+        let trusted = trustedSources
+        return Dictionary(sources.filter { trusted.contains($0.id) }.map { ($0.id, sourceName($0)) },
+                          uniquingKeysWith: { first, _ in first })
+    }
+
     /// `sources.json` read again, and each source's state with it: a source
     /// gone from it takes its catalogue off the screen.
     func loadSources() {
+        let trustedBefore = trustedSources
+        defer { if trustedSources != trustedBefore { trustChanged() } }
         switch sourceStore.load() {
         case .success(let list):
             if list != sourceList { sourceList = list }
@@ -74,6 +90,54 @@ extension DeckModel {
         for id in sourceTokens.reconcile(with: sources) {
             DeckLog.plugins.info("the token of \(id, privacy: .public) taken back: sources.json no longer reads it with this one")
         }
+    }
+
+    /// What a change of the sources trusted changes at once — **Trust…**,
+    /// **Stop trusting…**, **Remove…** of a trusted source, a `sources.json`
+    /// changed or broken (S4-08): where each copy stands, from the trees last
+    /// hashed, before anything else reads it, so that a copy no longer
+    /// trusted neither updates itself nor carries its decision meanwhile; and
+    /// every poll loop, planned on what each decision is held to (S4-09).
+    /// Its records are written by the hashing after it. Nothing before the
+    /// plugins folder is first read: that reading stands every copy.
+    func trustChanged() {
+        guard !plugins.isEmpty else { return }
+        let found = Reverification.of(plugins, installed: installed, trees: treesOnDisk.trees, heads: [:],
+                                      trusted: trustedSources, now: Date())
+        if found.standings != standings { standings = found.standings }
+        // A copy that waited on its card and may run now — trusted, it asks
+        // for nothing, or for what was allowed for this version — runs at once,
+        // as **Allow** runs it, not an interval later.
+        for id in restartPolling().sorted() {
+            if let identifier = PluginIdentifier(rawValue: id) { refresh(identifier) }
+        }
+        reverify()
+    }
+
+    /// **Trust…** of a source, confirmed (S4-08): its `trustedAt` written,
+    /// and its default branch's copies trusted from now on. Kept on this Mac
+    /// alone; never while `sources.json` cannot be read.
+    public func trustSource(_ id: String) {
+        setTrusted(id, at: Date())
+    }
+
+    /// **Stop trusting…** of a source, confirmed: at once, its copies are
+    /// Unverified, held to their trees, and each asks again before it next
+    /// runs.
+    public func stopTrustingSource(_ id: String) {
+        setTrusted(id, at: nil)
+    }
+
+    private func setTrusted(_ id: String, at date: Date?) {
+        guard sourcesProblem == nil, source(id) != nil else { return }
+        sourceOperationProblems[id] = nil
+        do {
+            try sourceStore.modify { list in _ = list.setTrusted(id, at: date) }
+            DeckLog.plugins.info("\(id, privacy: .public) \(date == nil ? "no longer trusted" : "trusted", privacy: .public)")
+        } catch {
+            sourceOperationProblems[id] = "\(error)"
+        }
+        loadSources()
     }
 
     /// What `sources.json`'s problem line says: why the file cannot be used,
@@ -268,6 +332,9 @@ extension DeckModel {
     /// the official one under its switch, each source of one's own while it is
     /// listed.
     func tick() {
+        // `sources.json` read again first: a trust taken away by hand — or the
+        // file broken — counts from this minute on, before anything updates.
+        loadSources()
         updateVerifiedPlugins()
         let now = Date()
         if settings.readsOfficialCatalogue, !catalogueRefreshing, CatalogueSchedule.nextDue(catalogueState, now: now) <= now,
