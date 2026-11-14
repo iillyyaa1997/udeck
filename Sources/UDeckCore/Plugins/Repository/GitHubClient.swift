@@ -586,8 +586,11 @@ public struct GitHubClient: RepositoryProvider {
         do {
             return try JSONDecoder().decode(GitTree.self, from: data)
         } catch {
-            let quoted = credential == nil ? ": \(error)" : ""
-            throw ProviderError.badAnswer("the listing of \(sha.prefix(7)) could not be read\(quoted)")
+            // Where the answer went wrong, briefly — never the decoder's Swift
+            // description (S4-20), and nothing of an answer to a request that
+            // carried a token (S4-19).
+            let said = credential == nil ? ": \(AnswerTrouble.said(error))" : ""
+            throw ProviderError.badAnswer("the listing of \(sha.prefix(7)) could not be read\(said)")
         }
     }
 
@@ -790,5 +793,28 @@ public struct GitHubClient: RepositoryProvider {
     static func escape(_ segment: String) -> String {
         segment.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/")))
             ?? segment
+    }
+}
+
+/// What went wrong with an answer, said in a few words for a message
+/// (`CatalogueError.badAnswer`): the place in it a decoder stopped at, never
+/// the decoder's — or any error's — Swift description (S4-20).
+public enum AnswerTrouble {
+    public static func said(_ error: any Error) -> String {
+        guard let decoding = error as? DecodingError else { return "the answer was not what uDeck expects" }
+        switch decoding {
+        case .keyNotFound(let key, let context): return "\(path(context.codingPath + [key])) is missing"
+        case .typeMismatch(_, let context), .valueNotFound(_, let context):
+            return context.codingPath.isEmpty ? "the answer was not what uDeck expects"
+                : "\(path(context.codingPath)) is not what uDeck expects"
+        case .dataCorrupted(let context):
+            return context.codingPath.isEmpty ? "the answer is not JSON" : "\(path(context.codingPath)) cannot be read"
+        @unknown default: return "the answer was not what uDeck expects"
+        }
+    }
+
+    static func path(_ keys: [any CodingKey]) -> String {
+        keys.map { $0.intValue.map { "[\($0)]" } ?? $0.stringValue }.joined(separator: ".")
+            .replacingOccurrences(of: ".[", with: "[")
     }
 }

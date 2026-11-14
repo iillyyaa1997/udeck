@@ -415,7 +415,7 @@ public enum Phrase: Sendable, Equatable {
     case linkPullRequestMergedElsewhere(base: String)
     /// **Back to** or **Reinstall** of a commit GitHub no longer has: a
     /// history rewritten, and cleaned up since.
-    case catalogueCommitGone(commit: String)
+    case catalogueCommitGone(commit: String, host: String = "GitHub")
     case linkPullRequestClosed
     /// Nothing there differs from the catalogue's head: every plugin, or —
     /// for a link into one plugin's folder — that plugin.

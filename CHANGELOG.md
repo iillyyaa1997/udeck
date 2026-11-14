@@ -10,6 +10,16 @@ for what that promises.
 
 ## [Unreleased]
 
+- **Going back to 0.7.0.** 0.7.0 shows a copy from a source of one's own as
+  **Unverified**, trusted or not, asks before it runs it, and cannot update or
+  reinstall it. It leaves `sources.json`, `~/.udeck/catalogue/<id>/` and the
+  Keychain item of tokens untouched, for a later uDeck to read again, where the
+  copies are the source's — and trusted — as before.
+- **Every message names what it is about.** A problem with the official
+  catalogue, a link or a history read is said as a sentence naming the
+  repository — never "GitHub could not be found", never an error's Swift
+  description. The consent card's lines of what a plugin asks for are in
+  uDeck's language, Russian included, as the rest of the card is.
 - **Trust… on a source.** A source's block offers **Trust…**, which says in
   full what trusting it means before **Trust** does it, and **Stop trusting…**.
   Its default branch's copies are marked **Trusted source: <name>** — on their

@@ -190,7 +190,8 @@ struct CatalogueRowView: View {
                 confirmation(confirming)
             }
             if let problem = model.operationProblems[id] {
-                ProblemText(problem: problem, source: model.source(source)).accessibilityIdentifier("\(named).problem")
+                ProblemText(problem: problem, source: model.source(source), address: address.description)
+                    .accessibilityIdentifier("\(named).problem")
             }
             if details {
                 ForEach(Array(entry.verdict.refusals.enumerated()), id: \.offset) { _, refusal in
@@ -525,7 +526,8 @@ struct InstalledRepositoryControls: View {
                     .accessibilityIdentifier("plugin.\(id).updateByItselfFailed")
             }
             if let problem = model.operationProblems[id] {
-                ProblemText(problem: problem, source: record.flatMap { model.source($0.source) })
+                ProblemText(problem: problem, source: record.flatMap { model.source($0.source) },
+                            address: record?.repository.description ?? model.catalogueAddress.description)
                     .accessibilityIdentifier("plugin.\(id).problem")
             }
             if showingHistory {
@@ -760,7 +762,11 @@ struct HistoryList: View {
                 }
             case .failed(let problem)?:
                 Text(strings(.historyFailed)).font(.caption).foregroundStyle(.orange)
-                ProblemText(problem: problem)
+                // The history is read from the copy's source — the official one's
+                // for a fork's copy too — and named by it.
+                ProblemText(problem: problem, source: model.installed.plugins[id].flatMap { model.source($0.source) },
+                            address: model.installed.plugins[id].flatMap { model.source($0.source)?.address.description }
+                                ?? model.catalogueAddress.description)
             case .read(let history)?:
                 if history.lines.isEmpty {
                     Text(strings(.historyNone)).font(.caption).foregroundStyle(.secondary)
@@ -957,7 +963,8 @@ struct LinkInstallSheet: View {
                 .accessibilityIdentifier("link.addAsASource")
             }
         case .failed(let problem)?:
-            ProblemText(problem: problem).accessibilityIdentifier("link.refused")
+            ProblemText(problem: problem, address: text.trimmingCharacters(in: .whitespacesAndNewlines))
+                .accessibilityIdentifier("link.refused")
         case .catalogue(let plugin)?:
             Text(strings(.linkIsTheCatalogue(official: model.catalogueAddress.description, plugin: plugin)))
                 .font(.caption).foregroundStyle(.secondary)
@@ -1073,7 +1080,8 @@ struct LinkRowView: View {
                 confirmation(confirming)
             }
             if let problem = model.operationProblems[id] {
-                ProblemText(problem: problem).accessibilityIdentifier("link.\(id).problem")
+                ProblemText(problem: problem, address: resolution.origin.repository.description)
+                    .accessibilityIdentifier("link.\(id).problem")
             }
         }
         .padding(.vertical, 3)
@@ -1154,6 +1162,10 @@ enum OfferText {
 struct ProblemText: View {
     var problem: OperationProblem
     var source: OwnSource? = nil
+    /// The repository the operation was about — the official one, a fork's,
+    /// the link looked up — named by a problem that is not a source's own
+    /// (S4-20): never just "GitHub".
+    var address: String
     @Environment(\.strings) private var strings
 
     var body: some View {
@@ -1169,36 +1181,30 @@ struct ProblemText: View {
         switch problem {
         case .refused(let refusals): refusals.map { strings(.catalogueRefusal($0)) }
         case .recordsBroken(let reason): [strings(.catalogueRecordsBroken(reason: reason))]
-        case .rateLimited(let until) where source?.provider == SourceLink.gitlab:
-            // A GitLab's limit is the GitLab's own (S4-20, item 9), not GitHub's sixty an hour.
-            [strings(CatalogueTrouble.phrase(.rateLimited(until: until), address: source?.address.description ?? "",
+        case .rateLimited(let until) where source != nil:
+            // A source's limit is its own (S4-20, items 8 and 9): a GitLab's, or a token's, not GitHub's sixty an hour.
+            [strings(CatalogueTrouble.phrase(.rateLimited(until: until), address: source?.address.description ?? address,
                                              host: source?.host, readAt: nil, until: { Clock.text($0, strings) },
-                                             provider: SourceLink.gitlab))]
+                                             provider: source?.provider ?? SourceLink.github,
+                                             tokened: (source?.access ?? OwnSource.Access.none) != OwnSource.Access.none))]
         case .rateLimited(let until): [strings(.catalogueLimited(readAt: nil, until: Clock.text(until, strings)))]
         case .rawRateLimited(let until): [strings(.catalogueRawLimited(until: Clock.text(until, strings)))]
         case .unreachable(let path, let reason): [strings(.catalogueFileUnreachable(path: path, reason: reason))]
         case .tookTooLong: [strings(.catalogueTookTooLong)]
         case .cannotWrite(let reason): [strings(.catalogueCannotWrite(reason: reason))]
         case .stillRunning(let id): [strings(.catalogueStillRunning(id: id))]
-        case .commitGone(let commit): [strings(.catalogueCommitGone(commit: commit))]
+        case .commitGone(let commit):
+            [strings(.catalogueCommitGone(commit: commit, host: source?.provider == SourceLink.gitlab ? source?.host ?? "GitHub" : "GitHub"))]
         case .catalogue(let error) where source != nil:
             [strings(CatalogueTrouble.phrase(error, address: source?.address.description ?? "", host: source?.host,
                                              readAt: nil, until: { Clock.text($0, strings) },
                                              provider: source?.provider ?? SourceLink.github,
                                              tokened: (source?.access ?? OwnSource.Access.none) != OwnSource.Access.none))]
         case .catalogue(let error):
-            switch error {
-            case .unreachable(let reason): [strings(.catalogueUnreachable(reason: reason, readAt: nil))]
-            case .notFound: [strings(.catalogueNotFound(source: "GitHub"))]
-            case .refused(let status): [strings(.catalogueRefused(status: status))]
-            case .badAnswer(let reason): [strings(.catalogueBadAnswer(reason: reason))]
-            case .rateLimited(let until): [strings(.catalogueLimited(readAt: nil, until: Clock.text(until, strings)))]
-            case .rawRateLimited(let until): [strings(.catalogueRawLimited(until: Clock.text(until, strings)))]
-            case .arrivedDifferent(let path, let expected, let got):
-                [strings(.catalogueArrivedDifferent(path: path, expected: expected, got: got))]
-            case .officialRepositoryChanged: [strings(.catalogueOfficialRepositoryChanged)]
-            default: ["\(error)"]
-            }
+            // Every error said as a sentence, by `CatalogueTrouble` as a source's
+            // is — never its Swift description (S4-20).
+            [strings(CatalogueTrouble.phrase(error, address: address, host: nil, readAt: nil,
+                                             until: { Clock.text($0, strings) }))]
         }
     }
 }

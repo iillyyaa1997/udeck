@@ -354,8 +354,8 @@ struct Russian: Vocabulary {
         case .linkHead(let ref, let commit, let fork): "\(Self.line(ref, capitalised: true, fork: fork)), коммит \(commit)"
         case .linkPullRequestMerged:
             "Этот запрос на слияние влит. Ниже — его последний коммит в том виде, в каком его предлагали; то, что репозиторий влил, есть в каталоге."
-        case .catalogueCommitGone(let commit):
-            "Коммита \(commit) больше нет на GitHub — возможно, историю, где он был, переписали, — поэтому из него ничего не установить; ничего не изменено."
+        case .catalogueCommitGone(let commit, let host):
+            "Коммита \(commit) больше нет на \(host) — возможно, историю, где он был, переписали, — поэтому из него ничего не установить; ничего не изменено."
         case .linkPullRequestMergedElsewhere(let base):
             "Этот запрос на слияние влит в \(base), а не в основную ветку: ниже — его последний коммит, и ничего из него не проверено."
         case .linkPullRequestClosed: "Этот запрос на слияние закрыт без слияния."

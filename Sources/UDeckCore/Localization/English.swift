@@ -348,8 +348,8 @@ struct English: Vocabulary {
         case .linkHead(let ref, let commit, let fork): "\(Self.line(ref, capitalised: true, fork: fork)) at \(commit)"
         case .linkPullRequestMerged:
             "This pull request was merged. What is listed is its head as it was proposed; what the repository merged is in the catalogue."
-        case .catalogueCommitGone(let commit):
-            "\(commit) is no longer on GitHub — the history it was on may have been rewritten — so nothing can be installed from it; nothing was changed."
+        case .catalogueCommitGone(let commit, let host):
+            "\(commit) is no longer on \(host) — the history it was on may have been rewritten — so nothing can be installed from it; nothing was changed."
         case .linkPullRequestMergedElsewhere(let base):
             "This pull request was merged into \(base), not the default branch: what is listed is its head, and nothing of it is verified."
         case .linkPullRequestClosed: "This pull request was closed without being merged."

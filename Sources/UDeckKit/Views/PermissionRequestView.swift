@@ -35,16 +35,20 @@ struct PermissionRequestView: View {
                 .foregroundStyle(theme.text)
 
             VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(pending.enumerated()), id: \.offset) { _, capability in
+                ForEach(Array(pending.enumerated()), id: \.offset) { index, capability in
                     HStack(alignment: .top, spacing: 7) {
                         Image(systemName: symbol(for: capability))
                             .font(.system(size: 9))
                             .foregroundStyle(theme.warn)
                             .frame(width: 12)
-                        Text(capability.summary)
+                        // In uDeck's language, as the rest of the card: somebody
+                        // agreeing to run a program has to be able to read the
+                        // line saying so (S4-20).
+                        Text(strings(capability.summaryPhrase))
                             .font(theme.chipFont)
                             .foregroundStyle(theme.muted)
                             .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("consent.\(pluginID.rawValue).capability.\(index)")
                     }
                 }
             }

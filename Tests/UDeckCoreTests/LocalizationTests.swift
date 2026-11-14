@@ -134,6 +134,7 @@ struct LocalizationTests {
         .linkHead(ref: .pullRequest(3), commit: "a1b2c3d"), .linkHead(ref: .branch("fix/uptime"), commit: "a1b2c3d"),
         .linkPullRequestMerged, .linkPullRequestMergedElsewhere(base: "next"), .linkPullRequestClosed,
         .catalogueCommitGone(commit: "a1b2c3d"),
+        .catalogueCommitGone(commit: "a1b2c3d", host: "gitlab.example.test"),
         .linkNothingDiffers(ref: .pullRequest(3)), .linkUnverifiedNote,
         .linkNothingDiffers(ref: .branch("fix/uptime"), plugin: "uptime"), .linkPluginNotThere(ref: .branch("fix/uptime"), plugin: "gone"),
 
@@ -305,7 +306,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 486,
+        #expect(Self.all.count == 487,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

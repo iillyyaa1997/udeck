@@ -43,7 +43,20 @@ disk, carries no such mark; one installed from a branch or a pull request of
 the official repository, or from a branch of a fork of it — **Install from a
 link…** — says **Unverified** in
 Settings and on its card until that, and asks before it runs whenever its
-content changes.
+content changes. So does a plugin from a source you added yourself, until you
+trust that source: then its default branch's plugins say **Trusted source:
+<name>** — the guarantee of whoever can merge into it, never uDeck's and never
+Verified — and keep your decision for each version, for that source alone.
+
+**Tokens.** A token you give uDeck for a private source is kept in the
+Keychain, bound to the address it was checked against, and sent only to that
+host — never across a redirect, never to a raw host, never once the source
+points at another repository or another host — and never written to a file or
+a log. The Keychain stops a
+plugin from reading uDeck's tokens directly. It does not stop a plugin, which
+runs as you, from changing uDeck itself: an ad-hoc build runs with library
+validation off (`Scripts/adhoc.entitlements`), so nothing checks what is loaded
+into it. Developer ID signing, in a later stage, turns that check back on.
 
 If you would not run a stranger's shell script, do not install a stranger's
 plugin.
@@ -64,14 +77,22 @@ In scope, and treated as vulnerabilities:
   — or the fork a branch is in — lists at the commit it showed — a file that
   does not match its hash, a folder that does not add up — or marking a plugin
   **Verified** that is not exactly what was merged, a pull request's or a
-  fork's copy included; or reading a repository that is no fork of the official
-  one past its description;
+  fork's copy included; or, for **Install from a link…**, reading a repository
+  that is no fork of the official one past its description (one you add under
+  *Your sources* is read as the source it is);
 - a plugin updating itself when it should only have been offered: a new version
-  asking for different permissions than the installed one, a copy that was not
-  **Verified** — a new head of the branch or the pull request it came from
-  included — one you kept at an earlier version, one holding a file of yours,
-  or with **Update verified plugins by themselves** switched off — or an update
-  carrying your permission decision to a version that asks for more;
+  asking for different permissions than the installed one, a copy that was
+  neither **Verified** nor **Trusted source** — a new head of the branch or the
+  pull request it came from included — one you kept at an earlier version, one holding a file of yours,
+  or with **Update verified and trusted plugins by themselves** switched off —
+  or an update carrying your permission decision to a version that asks for
+  more;
+- a token sent to another host than the one it was checked against, across a
+  redirect, or once its source points at another repository; a token written outside
+  the Keychain, or shown in a log, a diagnostic or a screenshot;
+- a source's plugin marked **Verified**; a permission decision carried from one
+  source's copy to another source's copy; a trusted source followed to a
+  different repository under its old name;
 - a plugin escaping its folder: `run` resolving outside it, a manifest reading
   or writing files uDeck opens on its behalf outside the declared scope;
 - a malformed manifest or card crashing or hanging uDeck, since a hung host
@@ -94,7 +115,7 @@ launch and both with a switch to turn them off:
   after launch when it has not asked in the last day, then once a day; an update
   is downloaded only when you press Install. Off with Settings → About → *Check
   for updates automatically*.
-- **the official plugin catalogue** — `api.github.com` and
+- **the official plugin catalogue**, and each source you add — `api.github.com` and
   `raw.githubusercontent.com`, anonymously, for `iillyyaa1997/udeck-plugins`: a
   few seconds after launch unless it was read in the last 24 hours, once a day
   while uDeck runs, when Settings → Plugins is opened on a list more than an
@@ -111,18 +132,23 @@ launch and both with a switch to turn them off:
   when the plugin changed there — and once it is merged into `main` the listing
   of the commit it was merged as, none of it in a read nobody asked for once
   fewer than ten of the hour's requests are left — and, after a read, the files
-  of a **Verified** plugin whose new version asks for exactly the permissions it
-  asks for now: such a plugin updates itself, keeping your permission decision.
+  of a **Verified** plugin — or a trusted source's — whose new version asks for
+  exactly the permissions it asks for now: such a plugin updates itself, keeping
+  your permission decision.
   Anything else is only offered. Off with Settings → Plugins → *Update verified
-  plugins by themselves*, after which every update waits for a press; all of it
-  off for the official repository with Settings → Plugins → *Official
-  catalogue*, after which uDeck makes no request to it. A GitHub repository or a
-  GitLab project you added yourself under Settings → Plugins → *Your sources* is
-  read the same way, anonymously, until you remove it — a GitLab project from its
-  own host's API, `https://<host>/api/v4`, every file of it included.
+  and trusted plugins by themselves*, after which every update waits for a
+  press; all of it off for the official repository with Settings → Plugins →
+  *Official catalogue*, after which uDeck makes no request to it. A GitHub
+  repository or a GitLab project you added yourself under Settings → Plugins →
+  *Your sources* is read the same way, until you remove it, from its own host —
+  the github.com API and raw host, or a GitLab's `https://<host>/api/v4`, every
+  file of it included, and its `/api/graphql` for the manifests of a plugin's
+  history — anonymously, or with the token you gave for that source only; *Official catalogue* off does not stop it. Sign in, through
+  github.com/login, gitlab.com/oauth or your GitLab's /oauth when it is pressed
+  and when its token is refreshed, comes later.
 
-Neither carries an account, an identifier, a cookie or the list of what you
-have installed. The details are in [README.md](README.md#what-udeck-connects-to-and-when)
+None of it carries an identifier, a cookie or the list of what you have
+installed, and nothing but a private source's own token carries an account. The details are in [README.md](README.md#what-udeck-connects-to-and-when)
 and [docs/plugin-repository.md](docs/plugin-repository.md#what-udeck-fetches-and-when).
 Plugins make whatever connections their authors wrote; see above.
 

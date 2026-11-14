@@ -215,15 +215,20 @@ declaration uDeck shows you before it runs, not a wall around it, and uDeck
 hands plugins no secrets. What that means for plugin trust is spelled out in
 [the permissions section of the plugin API](docs/plugin-api.md#permissions) and
 in [SECURITY.md](SECURITY.md) — please read it before installing a plugin
-somebody else wrote. A plugin marked **Verified** in the catalogue is one a
+somebody else wrote. A plugin also runs as you outside uDeck's gates: this
+ad-hoc signed build runs with library validation off, so nothing stops a
+plugin from changing uDeck itself; the Keychain keeps uDeck's tokens from a
+plugin's direct reads, not from that. A plugin marked **Verified** in the catalogue is one a
 maintainer of the official repository read before merging it; that is not the
 same as safe.
 
 ## What uDeck connects to, and when
 
 uDeck goes on the network by itself for two things, both **on from the first
-launch**, both with a switch that turns them off. Nothing else — and neither
-sends an account, an identifier, a cookie or a list of what you have installed.
+launch**, both with a switch that turns them off — and for each source of
+plugins you add yourself, a third. Nothing else. The first two send no
+account, identifier, cookie or list of what you have installed; a source sends
+only the token you gave for it, to its own host.
 
 **Its own updates**, through [Sparkle](https://sparkle-project.org). uDeck asks
 `https://github.com/iillyyaa1997/udeck/releases/latest/download/appcast.xml`
@@ -286,14 +291,29 @@ is gone. Once exactly that folder is merged into the repository, it
 is **Verified** — nothing downloaded, nothing asked again — and updates as a
 verified plugin does; merged with changes, its row offers the verified version,
 and closed without being merged, its row says so and it keeps running. **Settings →
-Plugins → Update verified plugins by themselves** turns that off, and every
-update waits for a press. **Settings → Plugins → Official catalogue** turns all
+Plugins → Update verified and trusted plugins by themselves** turns that off,
+and every update waits for a press. **Settings → Plugins → Official catalogue** turns all
 of it off for the official repository: uDeck then makes no request to it, the
 plugins you have from it keep running, and uDeck stops knowing about their
-updates. A GitHub repository or a GitLab project you added yourself under
-**Settings → Plugins → Your sources** is read the same way, anonymously, until
-you remove it — a GitLab project from its own host's API, `https://<host>/api/v4`,
-every file of it included.
+updates.
+
+**Your sources.** A GitHub repository or a GitLab project you add yourself under
+**Settings → Plugins → Your sources** is read on the same schedule, until you
+remove it, from its own host: the github.com API and raw host, or a GitLab's
+`https://<host>/api/v4`, every file of it included, and its `/api/graphql` for
+the manifests of a plugin's history. **Official catalogue** off does not stop
+it. It is read anonymously, unless you give it a token under **Token…** — a
+private one needs one — and then with that token, for that source only. Tokens
+are kept in the Keychain, and each is bound to what it was checked against: it
+is sent only to that host, never across a redirect, never to a raw host and
+never once the source points at another repository or host, and it is never
+written to a file or a log. A source's
+plugins are **Unverified** — never Verified — and ask before they run whenever
+their code changes, until you press **Trust…** on the source: then the plugins
+of its default branch are marked **Trusted source: <name>**, keep your
+permission decision for each version, and update themselves like verified
+ones. That is the guarantee of whoever can merge into it, not uDeck's. **Sign
+in** with github.com, gitlab.com or your own GitLab comes later.
 What exactly is read, cached and counted against GitHub's limits is in
 [docs/plugin-repository.md](docs/plugin-repository.md#what-udeck-fetches-and-when).
 

@@ -3523,6 +3523,34 @@ SWITCH_TO_THE_TRUSTED_SOURCE = ("{id} is the verified 1.0.0 from github.com/{off
                                 "The code that comes is that of a source you trust: it asks before it runs, unless it asks "
                                 "for nothing or you allowed this version from that source before.")
 NOT_OFFICIAL = "someone/not-official"
+# The same in uDeck's Russian (Russian.swift: sourceNotTrusted, pluginMarkTrusted, sourceTrustConfirm,
+# sourceStopTrustingConfirm, sourceRemoveConfirm, sourcesTestBuild, sourceNotFound, sourceTokenChooseRepository,
+# sourceTokenCollaborator, permissionsUntrustedSource, permissionsTrustedSource, capabilityExec,
+# catalogueOfficialRepositoryChanged).
+RU_NOT_TRUSTED = "Без доверия: за эти плагины никто не ручается — каждый спрашивает снова, когда меняется его код."
+RU_TRUSTED_MARK = "Доверенный источник: {name}"
+RU_TRUST_CONFIRM = ("Доверять {name} ({address})? Плагины из его основной ветки получат отметку «Доверенный источник», будут "
+                    "сохранять ваше решение о разрешениях для каждой версии и обновляться сами, как проверенные, если не "
+                    "просят нового. Те, что ничего не просят, запускаются сразу после установки, без вопроса. uDeck их код "
+                    "не читает: ручается тот, кто может вливать в {address}.")
+RU_STOP_TRUSTING_CONFIRM = ("Перестать доверять {name}? Его плагины станут непроверенными и спросят снова перед следующим "
+                            "запуском, если только вы уже не разрешали именно этот их код.")
+RU_REMOVE_THE_SOURCE = ("Удалить {name} (github.com/{repository})? uDeck перестанет его читать и забудет его токен. "
+                        "Установленное из него останется и продолжит работать; если вы ему доверяли, эти плагины станут "
+                        "непроверенными и спросят снова перед следующим запуском, а обновить или переустановить их "
+                        "нельзя, пока источник не добавлен снова.")
+RU_TEST_BUILD = "Тестовая сборка: {host} читается с http://127.0.0.1:{port}/{path}."
+RU_NOT_FOUND_OR_PRIVATE = "{address} не найден или закрыт. Если он закрытый, uDeck нужен токен для него: «Токен…»."
+RU_TOKEN_HELP = ("На странице выберите Only select repositories → {repository} и проверьте, что владелец ресурса — {owner}.\n"
+                 "Детальный токен (fine-grained) читает только репозитории вашего аккаунта и организаций, в которых вы "
+                 "состоите. Если в {owner}/{repository} вы лишь соавтор, используйте классический токен — он может и писать.")
+RU_UNTRUSTED_SOURCE = ("Этот код никто не проверял: он из основной ветки github.com/{repository} — источника, которому вы не "
+                       "доверяли. uDeck спросит снова, когда он изменится.")
+RU_TRUSTED_SOURCE = ("Этот код из основной ветки {address} — источника, которому вы доверяете как {name}. uDeck его не "
+                     "читает: ручается тот, кто может вливать в {address}.")
+RU_RUN = "запускать {command}"
+RU_OFFICIAL_CHANGED = ("Адрес официального каталога теперь принадлежит другому репозиторию. uDeck перестал его читать, и "
+                       "ничего не обновляется само; установленные плагины продолжают работать.")
 ZERO_WIDTH = "someone/zero-width"
 UNTRUSTED_SOURCE = ("Nobody verified this code: it comes from the default branch of github.com/{repository}, a source you "
                     "have not trusted. uDeck asks again whenever it changes.")
@@ -4667,6 +4695,110 @@ def check_source_name_not_official(machine, check_dir, lab):
         address = f"github.com/{NOT_OFFICIAL}"
         _trust(scene, sid, "trusting not-official", name=address, address=address)
         _keep_the_pane(machine, check_dir, lab, "not-official-trusted.txt")
+        _expect_no_credential(scene)
+    finally:
+        scene.close()
+
+
+def check_source_screens_in_russian(machine, check_dir, lab):
+    """Every stage-4 screen with uDeck in Russian, word for word with Russian.swift: the Add sheet and its token step, a source's block, Trust, Stop trusting and Remove, the marks, and the consent cards of an untrusted and a trusted copy.
+
+    uDeck is set to Russian before it starts. **Добавить источник…** of
+    github.com/someone/private-plugins without a token says it was not found
+    or is private, and its token step's help names the repository and its
+    owner; the line a test build carries is Russian. someone/team-plugins
+    added, its block says *Без доверия…*, its rows **Не проверен**.
+    team-clock, asking for nothing, asks on its card in Russian, saying where
+    its code comes from. **Доверять…** says S4-08's words, and the block and
+    the rows say *Доверенный источник: Team plugins*; team-ping's card asks
+    for *запускать sysctl* — the capability line in Russian, by its own
+    identifier — and says whose guarantee it is. **Перестать доверять…** and
+    **Удалить…** say their words. Last, the official address given another
+    number: Settings says so in Russian. A screenshot of each, for a person to
+    read.
+
+    **Red for**: a stage-4 screen, a mark, a warning or a card line in English
+    — the consent card's capability lines included — or in other words than
+    Russian.swift's.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False, updates_itself=False)
+    ru = ui.RUSSIAN
+    window = ru.settings_window
+    try:
+        machine.ssh.run(f"mkdir -p {UDECK_HOME}", "making uDeck's folder")
+        _write(machine, SETTINGS, {"language": ru.code, "autoUpdateVerified": False}, "setting uDeck's language to Russian")
+        app.launch(machine)
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins in Russian", language=ru)
+
+        private = f"github.com/{PRIVATE}"
+        said, _, dump = _look_up_a_source(scene, private, "a private repository in Russian", window=window)
+        expect(said == RU_NOT_FOUND_OR_PRIVATE.format(address=private), f"{private} without a token, in Russian, came to {said!r}")
+        owner, repository = PRIVATE.split("/")
+        help_ = _wait_until(machine, "sources.add.tokenHelp", lambda said: bool(said), NOTICED_SECONDS, window=window)
+        wanted = RU_TOKEN_HELP.format(owner=owner, repository=repository)
+        # The accessibility helper writes a line break as ⏎ (`ax.swift`).
+        expect((help_ or "").replace("⏎", "\n") == wanted, f"the token step's help in Russian says {help_!r}, not {wanted!r}")
+        notice = ui.says(ui.element(dump, "sources.testBuild"))
+        for host, path in (("api.github.com", "api"), ("raw.githubusercontent.com", "raw")):
+            line = RU_TEST_BUILD.format(host=host, port=config.PLUGINS_PORT, path=path)
+            expect(line in notice, f"a lab build says {notice!r} under Свои источники, not {line!r}")
+        _close_the_source_sheet(scene, "after the private repository", window=window)
+
+        sid, _ = _add_the_team(scene, "adding the source in Russian", window=window)
+        block = _wait_until(machine, f"source.{sid}.mark", lambda said: said == RU_NOT_TRUSTED, NOTICED_SECONDS, window=window)
+        expect(block == RU_NOT_TRUSTED, f"the source's block says {block!r} in Russian, not {RU_NOT_TRUSTED!r}")
+        rows = _texts_of(machine, lambda identifier: identifier.startswith(f"source.{sid}.plugin.") and identifier.endswith(".mark"),
+                         lambda said: said == {RU_UNVERIFIED}, "the source's rows in Russian", window=window)  # fmt: skip
+        expect(rows == {RU_UNVERIFIED}, f"the source's rows are marked {rows} in Russian, not {RU_UNVERIFIED!r}")
+        _keep_the_pane(machine, check_dir, lab, "ru-the-source-added.txt", window=window)
+        _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock in Russian", window=window)
+        _install_from_the_source(scene, sid, TEAM_PING, "team-ping in Russian", window=window)
+
+        _place(scene, TEAM_CLOCK)
+        found, texts = _the_card_asks(scene, TEAM_CLOCK, "untrusted, in Russian", header=RU_UNVERIFIED)
+        asks = RU_ASKS_NOTHING_UNVERIFIED.format(name="Team clock")
+        expect(asks in texts, f"team-clock's card in Russian says {texts}, not {asks!r}")
+        source = ui.says(found.get(f"consent.{TEAM_CLOCK}.source"))
+        wanted = RU_UNTRUSTED_SOURCE.format(repository=TEAM)
+        expect(source == wanted, f"team-clock's card in Russian says {source!r} of where its code comes from, not {wanted!r}")
+        _put_the_panel_away(machine, "after team-clock asked in Russian")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins in Russian to trust the source", language=ru)
+        _trust(scene, sid, "trusting the source in Russian", copies=(TEAM_CLOCK, TEAM_PING), window=window,
+               words=RU_TRUST_CONFIRM, trusted=RU_TRUSTED_MARK)
+        _keep_the_pane(machine, check_dir, lab, "ru-the-source-trusted.txt", window=window)
+
+        _place(scene, TEAM_PING)
+        found, _ = _the_card_asks(scene, TEAM_PING, "trusted, in Russian", header=None)
+        line = ui.says(found.get(f"consent.{TEAM_PING}.capability.0"))
+        expect(line == RU_RUN.format(command="sysctl"), f"team-ping's card in Russian asks for {line!r}, not "
+                                                        f"{RU_RUN.format(command='sysctl')!r}")  # fmt: skip
+        source = _strip(ui.says(found.get(f"consent.{TEAM_PING}.source")))
+        wanted = RU_TRUSTED_SOURCE.format(address=TEAM_ADDRESS, name=TEAM_NAME)
+        expect(source == wanted, f"team-ping's card in Russian says {source!r} of whose guarantee it is, not {wanted!r}")
+        _put_the_panel_away(machine, "after team-ping asked in Russian")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins in Russian to stop trusting the source", language=ru)
+        _stop_trusting(scene, sid, "no longer trusting the source in Russian", window=window, words=RU_STOP_TRUSTING_CONFIRM,
+                       untrusted=RU_NOT_TRUSTED)  # fmt: skip
+        _press(machine, f"source.{sid}.remove", "pressing Удалить… on the source", window)
+        warning = _wait_until(machine, f"source.{sid}.confirmText", lambda said: bool(said), NOTICED_SECONDS, window=window)
+        _keep_the_pane(machine, check_dir, lab, "ru-the-warning-before-removing-the-source.txt", window=window)
+        words = RU_REMOVE_THE_SOURCE.format(name=TEAM_NAME, repository=TEAM)
+        expect(_strip(warning) == words, f"Удалить… in Russian said {warning!r}, not {words!r}")
+        _press(machine, f"source.{sid}.cancelRemove", "leaving the source as it is", window)
+
+        scene.github.tell("giving the official address another number", official_id=ANOTHER_REPOSITORY)
+        # Its default branch a day old, so that Check now describes the repository first (`CatalogueRefresher`).
+        _age_a_state(machine, CATALOGUE_STATE, AGED_DAYS, "defaultBranchReadAt")
+        _the_pane_from_its_top(machine, "before Check now in Russian", language=ru)
+        _press(machine, "catalogue.checkNow", "pressing Check now in Russian", window)
+        trouble = _wait_until(machine, "catalogue.trouble", lambda said: said == RU_OFFICIAL_CHANGED, OPERATION_SECONDS,
+                              window=window)  # fmt: skip
+        _keep_the_pane(machine, check_dir, lab, "ru-the-official-address-changed.txt", window=window)
+        expect(trouble == RU_OFFICIAL_CHANGED, f"with the official address another repository's, Settings in Russian says "
+                                               f"{trouble!r}")  # fmt: skip
         _expect_no_credential(scene)
     finally:
         scene.close()
@@ -5944,12 +6076,12 @@ def _described_gitlab(requests):
 # --- The sources' helpers ------------------------------------------------------------------
 
 
-def _the_pane_from_its_top(machine, label):
+def _the_pane_from_its_top(machine, label, language=None):
     """Settings → Plugins chosen afresh, from another section, so that its scroll starts at the top: scrolled down to a
     source's block, the official catalogue's switch sat under the window's title bar, where a click at it landed on the
-    title (run 39102938550, plugins.source-official-off)."""
-    _press(machine, "section.general", f"choosing General: {label}")
-    ui.plugins_pane(machine, f"choosing Plugins again: {label}")
+    title (run 39102938550, plugins.source-official-off). `language` is uDeck's when it is not English."""
+    _press(machine, "section.general", f"choosing General: {label}", language.settings_window if language else ui.SETTINGS_WINDOW)
+    ui.plugins_pane(machine, f"choosing Plugins again: {label}", language=language)
 
 
 def _strip(text):
@@ -5979,64 +6111,66 @@ def _the_source(machine):
     return listed[0] if len(listed) == 1 else None
 
 
-def _open_the_source_sheet(scene, label):
+def _open_the_source_sheet(scene, label, window=ui.SETTINGS_WINDOW):
     machine = scene.machine
-    if ui.element(_read_the_screen(machine, f"looking for the source sheet: {label}"), "sources.add.field") is None:
-        _press(machine, "sources.add", f"pressing Add a source…: {label}")
+    if ui.element(_read_the_screen(machine, f"looking for the source sheet: {label}", window), "sources.add.field") is None:
+        _press(machine, "sources.add", f"pressing Add a source…: {label}", window)
     try:
-        ui.wait_for(machine, "sources.add.field", f"waiting for the source field: {label}")
+        ui.wait_for(machine, "sources.add.field", f"waiting for the source field: {label}", window)
     except NotThere as error:
         raise CheckFailed(f"Add a source… offers no field to paste an address into: {error.reason}") from None
 
 
-def _close_the_source_sheet(scene, label):
-    _press(scene.machine, "sources.add.close", f"closing the source sheet: {label}")
+def _close_the_source_sheet(scene, label, window=ui.SETTINGS_WINDOW):
+    _press(scene.machine, "sources.add.close", f"closing the source sheet: {label}", window)
     scene.machine.sleep(config.SETTLE_SECONDS)
 
 
-def _look_up_a_source(scene, address, label, results=("sources.add.result",)):
+def _look_up_a_source(scene, address, label, results=("sources.add.result",), window=ui.SETTINGS_WINDOW):
     """`address` typed into **Add a source…** and looked up: what the sheet says it came to, isolates taken out, uDeck's
     requests from the press on, and the walk. `results` are the identifiers that say it, the first found read: a name
     shown as the address beside it reads alike, and may come back under the address's identifier (`_row_of`)."""
     machine = scene.machine
-    _open_the_source_sheet(scene, label)
-    ui.click(machine, "sources.add.field", f"putting the cursor in the source field: {label}")
+    _open_the_source_sheet(scene, label, window)
+    ui.click(machine, "sources.add.field", f"putting the cursor in the source field: {label}", window)
     ui.type_text(machine, address, f"typing {address}: {label}")
-    typed = _wait_until(machine, "sources.add.field", lambda said: said == address, config.UI_CHANGE_SECONDS)
+    typed = _wait_until(machine, "sources.add.field", lambda said: said == address, config.UI_CHANGE_SECONDS, window=window)
     if typed != address:
         raise LabError(f"typing the address: {label}", f"the field reads {typed!r} after {address!r} was typed into it")
     before = _count(scene)
-    _press(machine, "sources.add.lookUp", f"pressing Look up: {label}")
+    _press(machine, "sources.add.lookUp", f"pressing Look up: {label}", window)
     deadline = machine.clock() + OPERATION_SECONDS
     while True:
-        dump = _read_the_screen(machine, f"reading what the address came to: {label}")
+        dump = _read_the_screen(machine, f"reading what the address came to: {label}", window)
         if any(ui.element(dump, one) is not None for one in results) or machine.clock() >= deadline:
             break
         machine.sleep(1)
-    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-source-sheet-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt")
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-source-sheet-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt",
+                   window=window)
     result = next((ui.element(dump, one) for one in results if ui.element(dump, one) is not None), None)
     if result is None:
         raise CheckFailed(f"{address} came to nothing within {OPERATION_SECONDS}s; uDeck asked {described(_since(scene, before))}")
     return _strip(ui.says(result)), _since(scene, before), dump
 
 
-def _add_the_team(scene, label, head="t1", looked_up=False, since=None):
+def _add_the_team(scene, label, head="t1", looked_up=False, since=None, window=ui.SETTINGS_WINDOW):
     """someone/team-plugins looked up — unless it was — and added: its id, and uDeck's requests from **Add** on, once its
     block is named from its passport and its rows are read."""
     machine = scene.machine
     if not looked_up:
-        said, _, _ = _look_up_a_source(scene, TEAM_ADDRESS, label)
+        said, _, _ = _look_up_a_source(scene, TEAM_ADDRESS, label, window=window)
         expect(said == TEAM_NAME, f"Look up of {TEAM_ADDRESS} shows {said!r}, not {TEAM_NAME!r}")
     sid = _source_id(TEAM, scene.github.source_id(TEAM))
     before = _count(scene)
-    _press(machine, "sources.add.confirm", f"pressing Add: {label}")
-    name = _wait_until(machine, f"source.{sid}.name", lambda said: _strip(said) == TEAM_NAME, CATALOGUE_SECONDS)
+    _press(machine, "sources.add.confirm", f"pressing Add: {label}", window)
+    name = _wait_until(machine, f"source.{sid}.name", lambda said: _strip(said) == TEAM_NAME, CATALOGUE_SECONDS, window=window)
     # The row's button, which is its own: its mark reads alike with every other Unverified and may be handed over as
     # another's (`_row_of`).
     row = _wait_until(machine, f"source.{sid}.plugin.{TEAM_CLOCK}.install", lambda said: said is not None,
-                      CATALOGUE_SECONDS, present=True)
+                      CATALOGUE_SECONDS, window=window, present=True)
     added = _since(scene, before)
-    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-source-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt")
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-source-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt",
+                   window=window)
     expect(_strip(name) == TEAM_NAME, f"the source's block is named {name!r}, not {TEAM_NAME!r}; uDeck asked {described(added)}")
     expect(row is not None, f"the source's block lists no team-clock to install; uDeck asked {described(added)}")
     head_commit = scene.github.source_commit(TEAM, head)
@@ -6045,14 +6179,14 @@ def _add_the_team(scene, label, head="t1", looked_up=False, since=None):
     return sid, added
 
 
-def _install_from_the_source(scene, sid, plugin, label):
+def _install_from_the_source(scene, sid, plugin, label, window=ui.SETTINGS_WINDOW):
     """**Install** on `plugin`'s row in the source's block: the record it left, and uDeck's requests from the click on."""
     before = _count(scene)
     record = _operate(scene, f"source.{sid}.plugin.{plugin}.install", f"installing {plugin}: {label}",
-                      lambda r: r is not None, plugin)
+                      lambda r: r is not None, plugin, window)
     asked = _since(scene, before)
     if record is None:
-        problem = ui.reads(scene.machine, f"source.{sid}.plugin.{plugin}.problem", "reading why it was not installed")
+        problem = ui.reads(scene.machine, f"source.{sid}.plugin.{plugin}.problem", "reading why it was not installed", window)
         raise CheckFailed(f"Install on {plugin} from the source put nothing in installed.json within {OPERATION_SECONDS}s; "
                           f"the row says {problem!r}; uDeck asked {described(asked)}")
     return record, asked
@@ -6064,25 +6198,27 @@ def _a_source(machine, sid):
     return next((source for source in listed if source.get("id") == sid), None)
 
 
-def _trust(scene, sid, label, name=TEAM_NAME, address=TEAM_ADDRESS, copies=()):
+def _trust(scene, sid, label, name=TEAM_NAME, address=TEAM_ADDRESS, copies=(), window=ui.SETTINGS_WINDOW,
+           words=TRUST_CONFIRM, trusted=TRUSTED_MARK):
     """**Trust…** on the source's block, its words read, and **Trust**: `trustedAt` once `sources.json` has it, and the
     marks of its block, its rows and the rows of `copies` installed from it once they say it is trusted."""
     machine = scene.machine
-    _press(machine, f"source.{sid}.trust", f"pressing Trust…: {label}")
-    words = _wait_until(machine, f"source.{sid}.trustText", lambda said: bool(said), NOTICED_SECONDS)
-    _keep_the_pane(machine, scene.check_dir, scene.lab, f"trust-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt")
-    wanted = TRUST_CONFIRM.format(name=name, address=address)
-    expect(_strip(words) == wanted, f"Trust… said {words!r} before trusting the source, not {wanted!r}")
-    _press(machine, f"source.{sid}.trustConfirm", f"pressing Trust: {label}")
+    _press(machine, f"source.{sid}.trust", f"pressing Trust…: {label}", window)
+    said = _wait_until(machine, f"source.{sid}.trustText", lambda said: bool(said), NOTICED_SECONDS, window=window)
+    _keep_the_pane(machine, scene.check_dir, scene.lab, f"trust-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt",
+                   window=window)
+    wanted = words.format(name=name, address=address)
+    expect(_strip(said) == wanted, f"Trust… said {said!r} before trusting the source, not {wanted!r}")
+    _press(machine, f"source.{sid}.trustConfirm", f"pressing Trust: {label}", window)
     written = _wait_for_disk(machine, lambda: bool((_a_source(machine, sid) or {}).get("trustedAt")), NOTICED_SECONDS)
     expect(written, f"after Trust, {SOURCES_FILE} says {_read_json(machine, SOURCES_FILE)!r}")
-    mark = TRUSTED_MARK.format(name=name)
-    marks = _source_marks(machine, sid, lambda marks: marks == {mark}, f"after Trust: {label}", copies=copies)
+    mark = trusted.format(name=name)
+    marks = _source_marks(machine, sid, lambda marks: marks == {mark}, f"after Trust: {label}", copies=copies, window=window)
     expect(marks == {mark}, f"after Trust, the source's block and rows are marked {marks}, not {mark!r}")
     return (_a_source(machine, sid) or {}).get("trustedAt")
 
 
-def _texts_of(machine, identifiers, satisfied, label, seconds=NOTICED_SECONDS):
+def _texts_of(machine, identifiers, satisfied, label, seconds=NOTICED_SECONDS, window=ui.SETTINGS_WINDOW):
     """What the controls on the screen whose identifier is one of `identifiers` — or, a callable, one it keeps — say,
     isolates taken out, as a set: once `satisfied` with it, or as it is when `seconds` have passed. For texts that read
     alike, which may come back as one element under any one of their identifiers (`_row_of`): a set of one text says
@@ -6090,7 +6226,7 @@ def _texts_of(machine, identifiers, satisfied, label, seconds=NOTICED_SECONDS):
     keeps = identifiers if callable(identifiers) else (lambda identifier: identifier in identifiers)
     deadline = machine.clock() + seconds
     while True:
-        dump = _read_the_screen(machine, f"reading the texts that read alike: {label}")
+        dump = _read_the_screen(machine, f"reading the texts that read alike: {label}", window)
         said = {_strip(ui.says(row)) for row in ui.controls(dump) if row.identifier and keeps(row.identifier)}
         if satisfied(said) or machine.clock() >= deadline:
             return said
@@ -6104,25 +6240,26 @@ def _the_marks(sid, copies=()):
     return lambda identifier: identifier in rows or (identifier.startswith(f"source.{sid}.") and identifier.endswith(".mark"))
 
 
-def _source_marks(machine, sid, satisfied, label, seconds=NOTICED_SECONDS, copies=()):
+def _source_marks(machine, sid, satisfied, label, seconds=NOTICED_SECONDS, copies=(), window=ui.SETTINGS_WINDOW):
     """What the marks of the source's block, its rows and `copies`' rows say, as one set (`_texts_of`, `_the_marks`)."""
-    return _texts_of(machine, _the_marks(sid, copies), satisfied, label, seconds)
+    return _texts_of(machine, _the_marks(sid, copies), satisfied, label, seconds, window)
 
 
-def _stop_trusting(scene, sid, label, name=TEAM_NAME):
+def _stop_trusting(scene, sid, label, name=TEAM_NAME, window=ui.SETTINGS_WINDOW, words=STOP_TRUSTING_CONFIRM,
+                   untrusted=NOT_TRUSTED):
     """**Stop trusting…** on the source's block, its words read, and **Stop trusting**: once `trustedAt` is gone and the
     block says *Not trusted…* again."""
     machine = scene.machine
-    _press(machine, f"source.{sid}.trust", f"pressing Stop trusting…: {label}")
-    words = _wait_until(machine, f"source.{sid}.trustText", lambda said: bool(said), NOTICED_SECONDS)
-    wanted = STOP_TRUSTING_CONFIRM.format(name=name)
-    expect(_strip(words) == wanted, f"Stop trusting… said {words!r}, not {wanted!r}")
-    _press(machine, f"source.{sid}.trustConfirm", f"pressing Stop trusting: {label}")
+    _press(machine, f"source.{sid}.trust", f"pressing Stop trusting…: {label}", window)
+    said = _wait_until(machine, f"source.{sid}.trustText", lambda said: bool(said), NOTICED_SECONDS, window=window)
+    wanted = words.format(name=name)
+    expect(_strip(said) == wanted, f"Stop trusting… said {said!r}, not {wanted!r}")
+    _press(machine, f"source.{sid}.trustConfirm", f"pressing Stop trusting: {label}", window)
     cleared = _wait_for_disk(machine, lambda: (_a_source(machine, sid) or {"trustedAt": "?"}).get("trustedAt") is None,
                              NOTICED_SECONDS)  # fmt: skip
     expect(cleared, f"after Stop trusting, {SOURCES_FILE} says {_read_json(machine, SOURCES_FILE)!r}")
-    said = _wait_until(machine, f"source.{sid}.mark", lambda said: said == NOT_TRUSTED, NOTICED_SECONDS)
-    expect(said == NOT_TRUSTED, f"after Stop trusting, the source's block says {said!r}, not {NOT_TRUSTED!r}")
+    said = _wait_until(machine, f"source.{sid}.mark", lambda said: said == untrusted, NOTICED_SECONDS, window=window)
+    expect(said == untrusted, f"after Stop trusting, the source's block says {said!r}, not {untrusted!r}")
 
 
 def _status_becomes(machine, plugin, status, seconds=NOTICED_SECONDS):

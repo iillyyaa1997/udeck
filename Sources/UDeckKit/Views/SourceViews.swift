@@ -305,6 +305,7 @@ struct SourceBlock: View {
                 .disabled(reading || model.busyPlugin != nil || model.sourcesForgetting.contains(sid))
                 .accessibilityIdentifier("source.\(sid).confirm")
                 Button(strings(.actionCancel)) { removing = false }
+                    .accessibilityIdentifier("source.\(sid).cancelRemove")
             }
         }
         .padding(8)

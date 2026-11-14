@@ -19,7 +19,7 @@ the last section.
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, the accessibility helper that reads uDeck's windows, a
 > self-check, the builds a check needs, a fake GitHub for the plugin catalogue,
-> the same lab on a GitHub runner, and a hundred and eight checks of uDeck itself in five groups
+> the same lab on a GitHub runner, and a hundred and nine checks of uDeck itself in five groups
 > (`e2e/run.sh --list`) — and two more against the real GitHub,
 > `smoke.real-pull-request` and `smoke.real-github-token`, which run only when
 > each is named ("Not in the full run"). `updates`: the

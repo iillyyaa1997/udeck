@@ -249,7 +249,7 @@ public struct CatalogueRefresher: Sendable {
             case .tooLarge(let bytes):
                 return .badAnswer("a file of \(bytes) bytes, more than the \(RepositoryRules.maximumFileBytes) a plugin's file may be")
             }
-        default: return .badAnswer("\(error)")
+        default: return .badAnswer(AnswerTrouble.said(error))
         }
     }
 }
