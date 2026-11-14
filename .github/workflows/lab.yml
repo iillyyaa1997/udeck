@@ -48,6 +48,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       secret: ${{ steps.plan.outputs.secret }}
+      secretrun: ${{ steps.plan.outputs.secretrun }}
     steps:
       - id: plan
         env:
@@ -62,9 +63,13 @@ jobs:
           pair_text="${pair[*]:-}"
           secret=false
           rest=()
+          secrets=()
           read -r -a words <<< "$RUN"
           for word in "${words[@]+"${words[@]}"}"; do
-            if [ "$word" = "smoke.real-github-token" ]; then secret=true; else rest+=("$word"); fi
+            case "$word" in
+              smoke.real-github-token|smoke.real-gitlab-source) secret=true; secrets+=("$word") ;;
+              *) rest+=("$word") ;;
+            esac
           done
           asked="${rest[*]:-}"
           if [ -n "$RUN" ] && [ -z "$asked" ]; then
@@ -83,8 +88,9 @@ jobs:
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "secret=$secret" >> "$GITHUB_OUTPUT"
+          echo "secretrun=${secrets[*]:-}" >> "$GITHUB_OUTPUT"
           echo "$matrix" | jq .
-          echo "the smoke with the job's token: $secret"
+          echo "the smokes with a real secret: ${secrets[*]:-none}"
 
   # uDeck compiled once, for every job that runs checks: they assemble, sign and
   # zip the builds a check asks for from these binaries (`--prebuilt`), which
@@ -218,15 +224,18 @@ jobs:
           if-no-files-found: warn
 
   # smoke.real-github-token: uDeck given the job's own token, which reads and
-  # nothing else, for a public repository of github.com (S4-22). The token goes
-  # to a file only this job reads, which the check types from — never an
-  # argument, never the guest's environment — and the check deletes. Nothing of
-  # the run is kept but its report — the job's summary included — and only
-  # after a search of everything the run left, of ~/.udeck and of uDeck's
-  # caches, preferences and Application Support has found the token's value
-  # nowhere.
+  # nothing else, for a public repository of github.com (S4-22); and
+  # smoke.real-gitlab-source: the operator's project token, the repository
+  # secret UDECK_E2E_GITLAB_TOKEN — a project access token of his GitLab's
+  # project 48, Reporter, read_api, expiring within days — for that private
+  # project (S4-24), only when the secret exists. Each token goes to a file only
+  # this job reads, which its check types from — never an argument, never the
+  # guest's environment — and deletes. Nothing of the run is kept but its report
+  # — the job's summary included — and only after a search of everything the
+  # run left, of ~/.udeck and of uDeck's caches, preferences and Application
+  # Support has found neither token's value anywhere.
   secret:
-    name: The smoke with the job's token
+    name: The smokes with a real secret
     needs: [plan, builds]
     if: needs.plan.outputs.secret == 'true'
     runs-on: macos-26
@@ -273,12 +282,29 @@ jobs:
           unset TOKEN
           test -s "$RUNNER_TEMP/secret/github-token"
 
-      - name: Run the smoke with the job's token
+      # The operator's project token, the same way — and no file at all when the
+      # secret does not exist: smoke.real-gitlab-source then could not check.
+      - name: Keep the operator's project token in a file only this job reads
+        shell: bash
         env:
-          UDECK_E2E_TOKEN_FILE: ${{ runner.temp }}/secret/github-token
+          GITLAB_TOKEN: ${{ secrets.UDECK_E2E_GITLAB_TOKEN }}
         run: |
           set -euo pipefail
-          ./e2e/run.sh --target here --prebuilt prebuilt smoke.real-github-token
+          export -n GITLAB_TOKEN
+          umask 077
+          mkdir -p "$RUNNER_TEMP/secret"
+          if [ -n "$GITLAB_TOKEN" ]; then printf '%s' "$GITLAB_TOKEN" > "$RUNNER_TEMP/secret/gitlab-token"; fi
+          unset GITLAB_TOKEN
+
+      - name: Run the smokes with a real secret
+        env:
+          SECRET_RUN: ${{ needs.plan.outputs.secretrun }}
+          UDECK_E2E_TOKEN_FILE: ${{ runner.temp }}/secret/github-token
+          UDECK_E2E_GITLAB_TOKEN_FILE: ${{ runner.temp }}/secret/gitlab-token
+        run: |
+          set -euo pipefail
+          read -r -a checks <<< "$SECRET_RUN"
+          ./e2e/run.sh --target here --prebuilt prebuilt "${checks[@]}"
 
       # The token's value looked for in every file the run left — its checks'
       # walks, screenshots' text, uDeck's log lines, the ledger — and in
@@ -294,15 +320,18 @@ jobs:
         shell: bash
         env:
           TOKEN: ${{ github.token }}
+          GITLAB_TOKEN: ${{ secrets.UDECK_E2E_GITLAB_TOKEN }}
         run: |
           # Actions starts bash with -e: off, so that grep's 1 is read, not obeyed.
           set +e -uo pipefail
-          export -n TOKEN
+          export -n TOKEN GITLAB_TOKEN
           umask 077
           mkdir -p "$RUNNER_TEMP/scan" || exit 1
           pattern="$RUNNER_TEMP/scan/pattern"
-          printf '%s' "$TOKEN" > "$pattern" || exit 1
-          unset TOKEN
+          # One token a line, and never an empty line, which grep would find in every file.
+          printf '%s\n' "$TOKEN" > "$pattern" || exit 1
+          if [ -n "$GITLAB_TOKEN" ]; then printf '%s\n' "$GITLAB_TOKEN" >> "$pattern" || exit 1; fi
+          unset TOKEN GITLAB_TOKEN
           [ -s "$pattern" ] || { echo "::error::the token could not be written down to look for it"; exit 1; }
           verdict=0
           for place in .build/e2e "$HOME/.udeck" "$HOME/Library/HTTPStorages/place.unicorns.udeck" \
@@ -313,16 +342,16 @@ jobs:
             grep -rlF -f "$pattern" "$place"
             said=$?
             if [ "$said" -eq 0 ]; then
-              echo "::error::the job's token is in the files named above, under $place: nothing of this run is kept"
+              echo "::error::a token is in the files named above, under $place: nothing of this run is kept"
               verdict=1
             elif [ "$said" -ne 1 ]; then
-              echo "::error::looking for the job's token under $place failed (grep exited $said): nothing is kept"
+              echo "::error::looking for the tokens under $place failed (grep exited $said): nothing is kept"
               verdict=1
             fi
           done
           rm -rf "$RUNNER_TEMP/scan" "$RUNNER_TEMP/secret"
           [ "$verdict" -eq 0 ] || exit 1
-          echo "the job's token is in no file the run left, nor in ~/.udeck, uDeck's caches or its preferences"
+          echo "neither token is in a file the run left, nor in ~/.udeck, uDeck's caches or its preferences"
 
       # The summary only after the search, and only when it found nothing: a
       # reason in the ledger is text the run wrote.
@@ -332,7 +361,7 @@ jobs:
           set -uo pipefail
           run_dir="$(ls -d .build/e2e/[0-9]*Z 2>/dev/null | tail -1)"
           export UV_PROJECT_ENVIRONMENT="$PWD/.build/e2e/venv"
-          uv run --frozen --project e2e python -m udeck_e2e.report "$run_dir" "the smoke with the job's token" >> "$GITHUB_STEP_SUMMARY" || true
+          uv run --frozen --project e2e python -m udeck_e2e.report "$run_dir" "the smokes with a real secret" >> "$GITHUB_STEP_SUMMARY" || true
 
       - name: Keep the run's report, and nothing else
         if: always() && steps.scan.outcome == 'success'

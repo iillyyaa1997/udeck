@@ -217,19 +217,19 @@ ISOLATES = ("\u2068", "\u2069")
 NO_SUCH_ITEM = 44
 
 
-def _the_token_file():
-    """The file the lab's secret job wrote the job's token to, as `TOKEN_FILE_VARIABLE` names it: a regular file only
-    its owner reads, holding something — or the lab could not check. Its value is never read here: uDeck is given it
-    by `ui.enter_secret`, from the file."""
-    step = "finding the job's token"
-    named = os.environ.get(smoke.TOKEN_FILE_VARIABLE, "")
+def _the_token_file(variable=smoke.TOKEN_FILE_VARIABLE, check=smoke.REAL_GITHUB_TOKEN, what="the job's token"):
+    """The file the lab's secret job wrote a token to, as `variable` names it: a regular file only its owner reads,
+    holding something — or the lab could not check. Its value is never read here: uDeck is given it by
+    `ui.enter_secret`, from the file."""
+    step = f"finding {what}"
+    named = os.environ.get(variable, "")
     if not named:
-        raise LabError(step, f"{smoke.REAL_GITHUB_TOKEN} runs only in the lab workflow's secret job, which names the "
-                             f"file it wrote the job's token to in {smoke.TOKEN_FILE_VARIABLE}")  # fmt: skip
+        raise LabError(step, f"{check} runs only in the lab workflow's secret job, which names the file it wrote "
+                             f"{what} to in {variable}")  # fmt: skip
     try:
         status = os.lstat(named)
     except OSError as error:
-        raise LabError(step, f"{smoke.TOKEN_FILE_VARIABLE} names {named}, which cannot be read: {error}") from None
+        raise LabError(step, f"{variable} names {named}, which cannot be read: {error}") from None
     if not stat.S_ISREG(status.st_mode) or status.st_mode & 0o077 or status.st_uid != os.getuid() or status.st_size == 0:
         raise LabError(step, f"{named} is not a non-empty file of this user's that only its owner reads "
                              f"(mode {stat.filemode(status.st_mode)})")  # fmt: skip
@@ -330,6 +330,167 @@ def check_real_github_token(machine, check_dir, lab):
             os.remove(secret)
         except OSError:
             pass
+
+
+# The operator's GitLab (S4-24): project 48, private, its main holding hello-proof once his merge request !2 is
+# merged; its passport's name, and what hello-proof's card says in English.
+GITLAB_HOST = "gitlab.unicorns.place"
+GITLAB_PROJECT = "tools/udeck-plugins"
+GITLAB_PROJECT_ID = 48
+GITLAB_NAME = "My uDeck plugins"
+HELLO_PROOF = "hello-proof"
+HELLO_PROOF_SAYS = "Hello! This is where the plugin shows what it found."
+GITLAB_NOT_FOUND = "{address} could not be found, or it is private. If it is private, uDeck needs a token for it: Token…"
+TRUST_WORDS = ("Trust {name} ({address})? Plugins from its default branch will be marked Trusted source, keep your "
+               "permission decision for each version, and update themselves like verified ones when they ask for nothing "
+               "new. Those that ask for nothing run as soon as they are installed, with no question. uDeck does not read "
+               "their code: the guarantee is that of whoever can merge into {address}.")
+TRUSTED_MARK = "Trusted source: {name}"
+LAYOUT = f"{UDECK_HOME}/layout.json"
+
+
+@smoke.only_when_named(secret=True)
+def check_real_gitlab_source(machine, check_dir, lab):
+    """The operator's own GitLab as a source, read with his project's token, trusted, and hello-proof from its main running with no card.
+
+    Before anything, a probe: https://gitlab.unicorns.place/api/v4/version answers `401` to a runner that reaches it —
+    anything else, and the lab could not check. A lab build with the real hosts starts with
+    gitlab.unicorns.place/tools/udeck-plugins (project 48, private) listed as a source without a token and the
+    official catalogue off, as **Add** writes them. Read without a token, it is not found, or private. The project's
+    token — the repository secret UDECK_E2E_GITLAB_TOKEN, written by the secret job to a file only it reads — is typed
+    under **Token…** from the file, the focus proven on the secure field: kept, the source is read with it and named
+    *My uDeck plugins*. **Trust…** says its words, and the block says *Trusted source: My uDeck plugins*. **Install**
+    of hello-proof from main: `installed.json` says `source` the source's id, `repository` gitlab,
+    gitlab.unicorns.place, tools/udeck-plugins, and `verification` trusted, by the source; placed, its card runs with
+    no question. **Remove…**: the source goes, and uDeck's Keychain item of tokens with its last token.
+
+    It runs only in the secret job, whose artifact is the report alone and which fails if the token's value is
+    anywhere in the run's directory, and only on a GitHub runner; it takes no picture of the screen. The operator
+    revokes the token after the run.
+
+    **Red for**: a private GitLab project uDeck cannot read with its project's token, a trusted copy not recorded so,
+    a plugin that asks for nothing still asking once its source is trusted, and a token kept after its source is gone.
+    """
+    if lab.target != targets.HERE:
+        raise LabError("asking the operator's GitLab with a token",
+                       "this check gives uDeck a real token, and the lab does that only on a GitHub runner (--target here)")
+    step = f"probing {GITLAB_HOST} from this runner"
+    said = machine.ssh.ask(f"curl -sS -o /dev/null -w '%{{http_code}}' --max-time 20 https://{GITLAB_HOST}/api/v4/version "
+                           "2>&1 || true", step).stdout.strip()  # fmt: skip
+    if said != "401":
+        raise LabError(step, f"https://{GITLAB_HOST}/api/v4/version answered {said!r} to this runner, not the 401 of a "
+                             "GitLab it can reach")  # fmt: skip
+    secret = _the_token_file(smoke.GITLAB_TOKEN_FILE_VARIABLE, smoke.REAL_GITLAB_SOURCE, "the operator's project token")
+
+    feed = updates.Feed(machine, lab.note)
+    build = lab.builder(feed.url, check_dir.name, real_plugins=True).build(*VERSION)
+    app.install(machine, build.zip, lab.note)
+    address = f"{GITLAB_HOST}/{GITLAB_PROJECT}"
+    sid = _source_id(GITLAB_PROJECT, GITLAB_PROJECT_ID, host=GITLAB_HOST, provider="gitlab")
+    listed = {"version": 1, "sources": [{"id": sid, "provider": "gitlab", "host": GITLAB_HOST, "path": GITLAB_PROJECT,
+                                         "remoteID": GITLAB_PROJECT_ID, "access": "none", "trustedAt": None,
+                                         "addedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}]}
+    step = "starting uDeck with the operator's project as a source and the official catalogue off"
+    machine.ssh.run(f"rm -rf {UDECK_HOME} && mkdir -p {UDECK_HOME} && "
+                    f"printf %s {shlex.quote(json.dumps(listed, indent=2))} > {SOURCES} && "
+                    f"printf %s {shlex.quote(json.dumps({'officialCatalogue': False}))} > {SETTINGS}", step)  # fmt: skip
+    log = panel.GestureLog(machine, lab.note)
+    log.keep("asking the guest to keep uDeck's own account")
+    mark = log.mark("marking the start")
+    try:
+        app.launch(machine)
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        state = f"{UDECK_HOME}/catalogue/{sid}/state.json"
+        tried = _wait_for(machine, lambda: (_read_json(machine, state) or {}).get("lastAttempt"))
+        expect(tried is not None, f"uDeck did not read the operator's project at launch: {_read_json(machine, state)!r}")
+        said = _wait_until(machine, f"source.{sid}.state", lambda said: bool(said), OPERATION_SECONDS)
+        wanted = GITLAB_NOT_FOUND.format(address=address)
+        expect(said == wanted, f"read without a token, the private project's block says {said!r}, not {wanted!r}")
+
+        _open_token(machine, sid, "on the operator's project")
+        ui.enter_secret(machine, f"source.{sid}.token.tokenField", secret, "typing the operator's project token under Token…")
+        ui.press_return(machine, "pressing Return in Token…'s field")
+        kept = _wait_for(machine, lambda: (_the_source(machine) or {}).get("access") == "token" or None)
+        dump = _keep_the_walk(machine, check_dir, lab, "the-token-kept.txt")
+        if not kept:
+            said = [ui.says(ui.element(dump, f"source.{sid}.{part}")) for part in ("notice", "problem", "state")]
+            if any("Keychain" in s for s in said if s):
+                raise LabError("keeping the operator's token", f"this runner's Keychain refused uDeck: {said!r}")
+            raise CheckFailed(f"the project token under Token… was not kept: {SOURCES} says {_the_source(machine)!r}; "
+                              f"the block says {[s for s in said if s]!r}")
+        named = _wait_until(machine, f"source.{sid}.name", lambda said: _bare(said) == GITLAB_NAME, OPERATION_SECONDS)
+        expect(_bare(named) == GITLAB_NAME, f"read with its token, the operator's project is named {named!r}, not {GITLAB_NAME!r}")
+
+        _press(machine, f"source.{sid}.trust", "pressing Trust… on the operator's project")
+        words = _wait_until(machine, f"source.{sid}.trustText", lambda said: bool(said), OPERATION_SECONDS)
+        wanted = TRUST_WORDS.format(name=GITLAB_NAME, address=address)
+        expect(_bare(words) == wanted, f"Trust… said {words!r}, not {wanted!r}")
+        _press(machine, f"source.{sid}.trustConfirm", "pressing Trust")
+        trusted = _wait_for(machine, lambda: (_the_source(machine) or {}).get("trustedAt"))
+        expect(trusted, f"after Trust, {SOURCES} says {_the_source(machine)!r}")
+
+        row = f"source.{sid}.plugin.{HELLO_PROOF}.install"
+        offered = _wait_until(machine, row, lambda said: said is not None, OPERATION_SECONDS, present=True)
+        if offered is None:
+            raise LabError("finding hello-proof in the operator's project",
+                           f"its main lists no {HELLO_PROOF}: the operator's merge request !2 is not merged yet")
+        _press(machine, row, "installing hello-proof from the operator's project")
+        record = _wait_for_the_record(machine, HELLO_PROOF, lambda r: r is not None
+                                      and (r.get("verification") or {}).get("status") == "trusted")  # fmt: skip
+        _keep(check_dir, "installed-hello-proof.json", record)
+        expect(record is not None, f"hello-proof was not recorded trusted: {_read_json(machine, INSTALLED)!r}")
+        wanted = {"source": sid, "repository": {"provider": "gitlab", "host": GITLAB_HOST, "path": GITLAB_PROJECT},
+                  "verification": {"status": "trusted", "by": sid}}  # fmt: skip
+        got = {"source": record.get("source"), "repository": record.get("repository"),
+               "verification": {k: (record.get("verification") or {}).get(k) for k in ("status", "by")}}  # fmt: skip
+        expect(got == wanted, f"installed.json says {got!r} of hello-proof, not {wanted!r}")
+        mark_said = _wait_until(machine, f"plugin.{HELLO_PROOF}.mark",
+                                lambda said: _bare(said) == TRUSTED_MARK.format(name=GITLAB_NAME), OPERATION_SECONDS)  # fmt: skip
+        expect(_bare(mark_said) == TRUSTED_MARK.format(name=GITLAB_NAME), f"hello-proof's row says {mark_said!r}")
+
+        app.quit_app(machine, "ending uDeck before placing hello-proof")
+        tab = "5D0C4B7E-0000-4000-8000-00000000A11A"
+        layout = {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Lab", "windows": [
+            {"id": "5D0C4B7E-0000-4000-8000-00000000B11B", "pluginID": HELLO_PROOF, "column": 0, "row": 0, "width": 6,
+             "height": 6}]}]}  # fmt: skip
+        machine.ssh.run(f"printf %s {shlex.quote(json.dumps(layout))} > {LAYOUT}", "placing hello-proof on an empty tab")
+        app.launch(machine)
+        texts, asked = _the_card(machine, HELLO_PROOF, lambda texts: HELLO_PROOF_SAYS in texts)
+        expect(not asked, f"hello-proof, trusted and asking for nothing, asks on its card: {texts}")
+        expect(HELLO_PROOF_SAYS in texts, f"hello-proof's card never said {HELLO_PROOF_SAYS!r}: the panel says {texts}")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins to remove the operator's project")
+        _press(machine, f"source.{sid}.remove", "pressing Remove… on the operator's project")
+        _wait_until(machine, f"source.{sid}.confirmText", lambda said: bool(said), OPERATION_SECONDS)
+        _press(machine, f"source.{sid}.confirm", "confirming Remove")
+        gone = _wait_for(machine, lambda: not ((_read_json(machine, SOURCES) or {}).get("sources") or []) or None)
+        expect(gone, f"after Remove, {SOURCES} says {_read_json(machine, SOURCES)!r}")
+        step = "asking the Keychain for uDeck's item of tokens by its metadata"
+        item = machine.ssh.run(f"security find-generic-password -s {app.BUNDLE_ID}.sources -a tokens >/dev/null", step,
+                               seconds=20, check=False)  # fmt: skip
+        if item.returncode not in (0, NO_SUCH_ITEM):
+            raise LabError(step, f"security exited {item.returncode}: {item.stderr.strip()!r}")
+        expect(item.returncode == NO_SUCH_ITEM, "its source removed, uDeck's Keychain item of tokens is still there")
+    finally:
+        log.collect(check_dir, mark, "collecting uDeck's own account", name="udeck.log")
+        try:
+            os.remove(secret)
+        except OSError:
+            pass
+
+
+def _the_card(machine, plugin, done, seconds=OPERATION_SECONDS):
+    """The panel opened, and its texts once `done` with them — or as they last were — with whether `plugin`'s card asks."""
+    panel.park_in_the_middle(machine)
+    panel.press_the_chord(machine, config.HOTKEY_KEY_CODE, f"opening the panel for {plugin}'s card")
+    deadline = machine.clock() + seconds
+    while True:
+        texts = ui.static_texts(machine, "reading the panel's texts", ui.PANEL)
+        dump = ui.identified(machine, "reading the panel", ui.PANEL, depth=ui.MAX_DEPTH)
+        asked = ui.element(dump, f"consent.{plugin}.allow") is not None
+        if done(texts) or asked or machine.clock() >= deadline:
+            return texts, asked
+        machine.sleep(1)
 
 
 def _open_token(machine, sid, label):

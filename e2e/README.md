@@ -20,9 +20,9 @@ the last section.
 > pointer over VNC, the accessibility helper that reads uDeck's windows, a
 > self-check, the builds a check needs, a fake GitHub for the plugin catalogue,
 > the same lab on a GitHub runner, and a hundred and nine checks of uDeck itself in five groups
-> (`e2e/run.sh --list`) — and two more against the real GitHub,
-> `smoke.real-pull-request` and `smoke.real-github-token`, which run only when
-> each is named ("Not in the full run"). `updates`: the
+> (`e2e/run.sh --list`) — and three more against real hosts,
+> `smoke.real-pull-request`, `smoke.real-github-token` and
+> `smoke.real-gitlab-source`, which run only when each is named ("Not in the full run"). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
 > itself as it ships, and by itself again once an operator who switched that off
 > switches it back on; and a published release updating itself from GitHub, as
@@ -70,6 +70,7 @@ e2e/run.sh plugins --shard 2/3 # the second of three parts of the plugins group
 e2e/run.sh --prebuilt DIR      # assemble the builds from binaries compiled in DIR
 e2e/run.sh smoke.real-pull-request --pull-request LINK   # the real GitHub; a runner only, and only when named
 e2e/run.sh smoke.real-github-token                       # a real token; only in lab.yml's secret job
+e2e/run.sh smoke.real-gitlab-source                      # the operator's GitLab; the same job, and his secret
 e2e/run.sh cleanup --list      # what cleanup would remove, removing nothing
 e2e/run.sh cleanup             # remove kept or left-behind clones
 e2e/run.sh cleanup --golden --guest 26   # …and macOS 26's golden image
@@ -984,6 +985,21 @@ ordinary jobs' matrix:
   `~/.udeck` and in uDeck's caches, and fails the job on a find or on any error
   of the search; only then are the summary written and the run's `ledger.jsonl`
   uploaded, and nothing else of the run.
+
+**The smoke with the operator's GitLab**, `smoke.real-gitlab-source`, runs in the
+same job, dispatched by its name, and is the acceptance of stage 4 (S4-24): the
+operator's private project `gitlab.unicorns.place/tools/udeck-plugins` (project
+48) as a source, read with his project's token, trusted, and `hello-proof` from
+its `main` installed under *Trusted source* and running with no card. The token
+is the repository secret `UDECK_E2E_GITLAB_TOKEN` — a project access token he
+makes (Reporter, `read_api`, expiring within days) and revokes after the run;
+the job writes it to `$RUNNER_TEMP/secret/gitlab-token` the same way, names it in
+`UDECK_E2E_GITLAB_TOKEN_FILE`, writes no file when the secret does not exist —
+the check could not check then — and looks for its value too before keeping
+anything. The check first asks `https://gitlab.unicorns.place/api/v4/version` and
+could not check on anything but `401` (a runner got `401` in 0.7 s, run
+43627249257); it reads the project without a token first (*not found, or
+private*), and ends with **Remove…** and the Keychain item gone.
 
 ### Looking for an update by itself
 

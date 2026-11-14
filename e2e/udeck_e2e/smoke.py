@@ -37,6 +37,10 @@ REAL_PULL_REQUEST = "smoke.real-pull-request"
 # secret job wrote it to (.github/workflows/lab.yml): only that job runs it, and its artifact is the report alone.
 REAL_GITHUB_TOKEN = "smoke.real-github-token"
 TOKEN_FILE_VARIABLE = "UDECK_E2E_TOKEN_FILE"
+# The operator's own GitLab, read with his project's token (stage 4, S4-24): the repository secret
+# UDECK_E2E_GITLAB_TOKEN, written by the secret job to the file this names.
+REAL_GITLAB_SOURCE = "smoke.real-gitlab-source"
+GITLAB_TOKEN_FILE_VARIABLE = "UDECK_E2E_GITLAB_TOKEN_FILE"
 
 # A pull request of a repository on github.com, as a browser shows its link: the scheme and `www.` or not, and any
 # page under it (`…/files`, `…/commits`).

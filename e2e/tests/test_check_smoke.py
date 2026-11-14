@@ -83,7 +83,7 @@ def test_the_smoke_has_its_row_in_the_specifications_table():
     table = _source("docs", "plugin-repository.md").split("### The lab's checks", 1)[1].split("\n### ", 1)[0]
     rows = [line.split("`")[1] for line in table.splitlines() if line.startswith("| `smoke.")]
     defined = sorted("smoke." + name.removeprefix("check_").replace("_", "-") for name in dir(checks) if name.startswith("check_"))
-    assert sorted(rows) == defined == sorted([smoke.REAL_PULL_REQUEST, smoke.REAL_GITHUB_TOKEN])
+    assert sorted(rows) == defined == sorted([smoke.REAL_PULL_REQUEST, smoke.REAL_GITHUB_TOKEN, smoke.REAL_GITLAB_SOURCE])
 
 
 # --- The walk on a runner, against GitHub and a uDeck made of answers ------------------------------------------------
