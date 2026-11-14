@@ -32,6 +32,8 @@
     <true/>
     <key>SUScheduledCheckInterval</key>
     <integer>86400</integer>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
     <key>UDeckPluginsAPIBase</key>
     <string>https://api.github.com</string>
     <key>UDeckPluginsRawBase</key>

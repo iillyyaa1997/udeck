@@ -414,6 +414,25 @@ def switch_automatic_checks_off(machine, step: str) -> None:
 # own builds carry the lab's feed in the guest; a pair whose "to" is anywhere else
 # is reached by writing this into the guest's preferences — never this Mac's.
 FEED_URL = "SUFeedURL"
+# Whether what a check of its own finds is put in place by itself (0.8.1, `SUAutomaticallyUpdate` in the plist).
+INSTALLS_BY_ITSELF = "SUAutomaticallyUpdate"
+
+
+def no_installs_by_itself(machine, step: str) -> None:
+    """Make the uDeck in the guest leave what it finds for **Install**, and read it back.
+
+    For a check that presses for the update it judges: a uDeck as it ships since
+    0.8.1 finds it by itself the moment it starts — it has never looked — and
+    would be in it before anything is pressed. Written as the operator's switch
+    writes it, with uDeck not running and after `forget_preferences`; a release
+    before 0.8.1 reads nothing of it.
+    """
+    machine.ssh.run(f"defaults write {BUNDLE_ID} {INSTALLS_BY_ITSELF} -bool false", step)
+    kept = machine.ssh.ask(f"defaults read {BUNDLE_ID} {INSTALLS_BY_ITSELF}", step)
+    if kept.returncode != 0 or kept.stdout.strip() != "0":
+        said = (kept.stdout or kept.stderr or "").strip().splitlines()
+        raise LabError(step, f"the lab wrote {INSTALLS_BY_ITSELF} = false for {BUNDLE_ID}, and it reads back as "
+                             f"{said[-1] if said else 'nothing at all'}")
 
 
 def point_the_feed_at(machine, url: str, step: str) -> None:

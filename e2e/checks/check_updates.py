@@ -228,6 +228,54 @@ def _expect_the_new_uDeck_stayed(machine, before, after):
     )
 
 
+@pairs.takes(pairs.INSTALLS_BY_ITSELF)
+def check_installs_by_itself(machine, check_dir, lab, pair):
+    """uDeck as it ships puts in place, with nothing pressed, what a check of its own finds — and comes back as it.
+
+    "from" is left as it ships (`_prepare(by_itself=True)`): automatic checks on,
+    and since 0.8.1 what they find put in place (`SUAutomaticallyUpdate`). It has
+    never looked, so it asks its feed the moment it starts; the feed offers "to".
+    Nothing is pressed and nothing of uDeck's is opened — the panel stays away,
+    which is when uDeck restarts into an update. What decides it is what decides
+    `updates.sparkle`: the bundle on the guest's disk carries "to"'s two version
+    keys, and a new process comes and stays, the old one gone.
+
+    **Red for**: a uDeck that only offers what it finds, one that downloads it and
+    waits for a quit a menu-bar app hardly ever makes, and one that restarts into
+    something other than what was offered.
+    """
+    feed = updates.Feed(machine, lab.note)
+    try:
+        # Its processes the moment it started: putting the update in place takes a download, its signature, the
+        # installer and a relaunch — 24 s in all on a runner (run 43637955325) — and none of it has begun by then.
+        launched = []
+        offered = _prepare(machine, check_dir, lab, feed, pair, by_itself=True, launched=launched)
+        before = set(launched)
+        deadline = machine.clock() + LOOKS_SECONDS + INSTALL_SECONDS
+        version = _the_version_once_it_is(machine, offered.keys, deadline)
+        after = _wait_for_the_relaunch(machine, before, deadline)
+        _evidence(machine, check_dir, "after the update by itself", lab)
+        if version != offered.keys:
+            _expect_the_feed_still_answers(feed, "nothing of uDeck's was opened")
+        expect(version == offered.keys, f"{LOOKS_SECONDS + INSTALL_SECONDS}s after a uDeck as it ships started, with "
+                                        f"{offered.version} offered and nothing pressed, the version on disk is "
+                                        f"{version}, not {offered.keys}")  # fmt: skip
+        expect(bool(after - before), f"uDeck did not come back as a new process after the update by itself: it was "
+                                     f"{sorted(before) or 'not running'} before and is {sorted(after) or 'not running'} now")
+        _expect_the_new_uDeck_stayed(machine, before, after)
+        lab.note(f"   with nothing pressed, the guest's disk holds {offered.version} ({offered.build}) and uDeck came "
+                 f"back as {sorted(after - before)}")
+        # The uDeck that came back answers: its settings open, and its Installed says the version it is.
+        _open_the_about_pane(machine, check_dir, shot="the version it restarted into")
+        texts = ui.static_texts(machine, "reading what the pane says")
+        installed = texts[texts.index("Installed") + 1] if "Installed" in texts[:-1] else None
+        expect(installed == offered.version, f"the uDeck that came back says Installed {installed!r} in Settings → About, "
+                                             f"not {offered.version}: {' | '.join(texts)}")  # fmt: skip
+    finally:
+        feed.collect_log(check_dir)
+        feed.stop()
+
+
 @pairs.takes(pairs.THE_WRONG_KEY)
 def check_wrong_key(machine, check_dir, lab, pair):
     """An update signed with a key "from" does not trust is refused — the control for the checks above.
@@ -736,8 +784,14 @@ class Offered:
         return f"from GitHub ({self.asked_at})"
 
 
-def _prepare(machine, check_dir, lab, feed, pair, signed_by=None):
+def _prepare(machine, check_dir, lab, feed, pair, signed_by=None, by_itself=False, launched=None):
     """The pair's "from" installed and running, and its "to" offered to it.
+
+    `by_itself` leaves "from" as it ships, putting in place what a check of its
+    own finds; otherwise it is made to leave it for **Install**
+    (`app.no_installs_by_itself`), since the checks that press for the update
+    judge that press. `launched`, a list, gets the processes of "from" the
+    moment it is started — before anything it found could have replaced it.
 
     "from" is a build of this checkout, made here — with "to"'s public key when
     "to" is a release — or a published release's zip, which the lab has already
@@ -778,6 +832,8 @@ def _prepare(machine, check_dir, lab, feed, pair, signed_by=None):
         # The lab installed it a moment ago: this is the lab, not uDeck.
         raise LabError(step, f"the lab installed {pair.from_.keys}, but the machine has {there}")
     _a_machine_that_remembers_nothing(machine, lab, step)
+    if not by_itself:
+        app.no_installs_by_itself(machine, step)
     if written:
         app.point_the_feed_at(machine, asked_at, step)
         lab.note(f"   uDeck in the guest asks {asked_at} for its updates ({app.FEED_URL} in its preferences)")
@@ -793,6 +849,8 @@ def _prepare(machine, check_dir, lab, feed, pair, signed_by=None):
         lab.note(f"   {said}" + ("" if fine else " — uDeck is asked anyway, and what it does with that is the verdict"))
 
     app.launch(machine)
+    if launched is not None:
+        launched.extend(app.running_pids(machine))
     machine.screenshot(check_dir, "uDeck running")
     return offered
 

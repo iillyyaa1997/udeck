@@ -99,6 +99,8 @@ def a_machine(dumps, running="404", log=SWITCH + OPENED_AT_LOGIN):
         "/bin/date -r": BOOTED,
         "/bin/date '+%Y": "2026-10-12 18:11:40",
         "sysctl -n kern.boottime": "{ sec = 1760292757, usec = 0 } Mon Oct 12 18:12:37 2026",
+        # The switch `_prepare` writes before uDeck starts (`app.no_installs_by_itself`), read back as written.
+        "defaults read place.unicorns.udeck SUAutomaticallyUpdate": "0",
     })  # fmt: skip
 
 

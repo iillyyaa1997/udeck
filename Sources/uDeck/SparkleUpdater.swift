@@ -26,8 +26,15 @@ import UDeckKit
 /// the operator's decision that fewer questions for a new person outweigh a
 /// quiet first minute. The switch in Settings → About turns it off; README and
 /// SECURITY.md say what is asked and when.
+///
+/// **What a check of its own finds is put in place by itself** too
+/// (`SUAutomaticallyUpdate`, 0.8.1): Sparkle downloads it and verifies it, and
+/// instead of waiting for uDeck to quit — a menu-bar app hardly ever does —
+/// uDeck restarts into it as soon as the panel is away (`mayRestartNow`),
+/// looking again every minute until it is. Its own switch turns that off, and
+/// then a found update waits for **Install**, as a pressed check's always does.
 @MainActor
-final class SparkleUpdater: NSObject, UpdateChecking {
+final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     let status: UpdateStatus
     private var updater: SPUUpdater!
     private let driver = InlineUpdateDriver()
@@ -35,6 +42,19 @@ final class SparkleUpdater: NSObject, UpdateChecking {
     /// Held from `showUpdateReleaseNotes`-time until the operator presses the
     /// install button: Sparkle hands over a reply block and waits.
     private var pendingChoice: ((SPUUserUpdateChoice) -> Void)?
+
+    /// Whether uDeck may restart into an update now: set by the application,
+    /// false while the panel is out.
+    var mayRestartNow: () -> Bool = { true }
+
+    /// Held from `willInstallUpdateOnQuit` until uDeck restarts into the update
+    /// Sparkle downloaded by itself.
+    private var pendingRestart: (() -> Void)?
+    private var restartTimer: Timer?
+    /// Whether uDeck asked Sparkle, with nothing pressed, to restart it into
+    /// an update: the termination that follows is checked once more
+    /// (`mayTerminateForAnUpdate`).
+    private(set) var restartingByItself = false
 
     override init() {
         let bundle = Bundle.main
@@ -46,7 +66,7 @@ final class SparkleUpdater: NSObject, UpdateChecking {
 
         driver.owner = self
         updater = SPUUpdater(
-            hostBundle: bundle, applicationBundle: bundle, userDriver: driver, delegate: nil
+            hostBundle: bundle, applicationBundle: bundle, userDriver: driver, delegate: self
         )
         do {
             try updater.start()
@@ -61,18 +81,134 @@ final class SparkleUpdater: NSObject, UpdateChecking {
 
     var checksAutomatically: Bool {
         get { updater.automaticallyChecksForUpdates }
-        set { updater.automaticallyChecksForUpdates = newValue }
+        set {
+            updater.automaticallyChecksForUpdates = newValue
+            if newValue { restartWhenItMay() } else { stopWaitingToRestart() }
+        }
+    }
+
+    var installsAutomatically: Bool {
+        get { updater.automaticallyDownloadsUpdates }
+        set {
+            updater.automaticallyDownloadsUpdates = newValue
+            // Off, an update already downloaded waits for Install; on again,
+            // it waits for its moment once more.
+            if newValue { restartWhenItMay() } else { stopWaitingToRestart() }
+        }
     }
 
     func checkNow() {
+        // An update downloaded by itself holds Sparkle's session: it stays on
+        // the screen, for Install, rather than a check Sparkle would refuse.
+        guard pendingRestart == nil, updater.canCheckForUpdates else { return }
         status.stage = .checking
         updater.checkForUpdates()
     }
 
     func install() {
+        if let restart = pendingRestart {
+            restartingByItself = false
+            restartNow(restart)
+            return
+        }
         guard let choice = pendingChoice else { return }
         pendingChoice = nil
         choice(.install)
+    }
+
+    // MARK: - Put in place by itself
+
+    /// Sparkle has downloaded and verified an update by itself, and would put
+    /// it in place when uDeck quits: uDeck takes that over and restarts into it
+    /// now, or — the panel out — once it is away, asked every minute.
+    func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem,
+                 immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
+        status.latestVersion = item.displayVersionString
+        status.stage = .readyToInstall(version: item.displayVersionString)
+        pendingRestart = immediateInstallHandler
+        restartWhenItMay()
+        return true
+    }
+
+    /// Whether a restart into an update downloaded by itself may happen with
+    /// nothing pressed: both switches still on, and nothing under way.
+    private var restartsByItself: Bool {
+        updater.automaticallyChecksForUpdates && updater.automaticallyDownloadsUpdates
+    }
+
+    private func restartWhenItMay() {
+        guard let restart = pendingRestart, restartsByItself else { return }
+        if mayRestartNow() {
+            restartingByItself = true
+            restartNow(restart)
+            return
+        }
+        guard restartTimer == nil else { return }
+        restartTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.pendingRestart != nil else { return }
+                guard self.restartsByItself else { return self.stopWaitingToRestart() }
+                if self.mayRestartNow() { self.restartWhenItMay() }
+            }
+        }
+    }
+
+    /// The handler is kept: Sparkle installs asynchronously and asks uDeck to
+    /// terminate later, and a termination refused then is retried with it.
+    private func restartNow(_ restart: () -> Void) {
+        stopWaitingToRestart()
+        restart()
+    }
+
+    /// Asked when uDeck is about to terminate: false — and the restart tried
+    /// again later — when that termination is a restart uDeck asked for by
+    /// itself and something started meanwhile (Settings opened, an action, an
+    /// install). Any other quit goes ahead, and Sparkle puts the update in
+    /// place as uDeck quits.
+    func mayTerminateForAnUpdate() -> Bool {
+        guard restartingByItself, pendingRestart != nil else { return true }
+        guard !mayRestartNow() else { return true }
+        restartingByItself = false
+        restartWhenItMay()
+        return false
+    }
+
+    /// No more restarts with nothing pressed; what was downloaded stays for
+    /// Install — and Sparkle still puts it in place when uDeck quits.
+    private func stopWaitingToRestart() {
+        restartTimer?.invalidate()
+        restartTimer = nil
+    }
+
+    // MARK: - What a check of its own came to
+
+    // A check of its own with updates put in place by themselves goes through
+    // Sparkle's automatic driver, which asks the user driver nothing: what it
+    // found, or did not, is written here, as the user driver writes it for a
+    // pressed one.
+
+    func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        status.latestVersion = item.displayVersionString
+    }
+
+    func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        guard pendingRestart == nil else { return }
+        finishedCheck(foundSomething: false)
+    }
+
+    func updater(_ updater: SPUUpdater, didAbortWithError error: any Error) {
+        // Not finding anything is Sparkle's error too: the call above said it.
+        let error = error as NSError
+        guard !(error.domain == SUSparkleErrorDomain && error.code == Int(SUError.noUpdateError.rawValue)) else { return }
+        // Its session is over: nothing left to restart into, and Check now may ask again.
+        pendingRestart = nil
+        restartingByItself = false
+        stopWaitingToRestart()
+        failed(error)
+    }
+
+    func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
+        status.lastCheck = updater.lastUpdateCheckDate ?? status.lastCheck
     }
 
     // MARK: - Called by the driver

@@ -652,6 +652,10 @@ public enum Phrase: Sendable, Equatable {
     case updatesCheckNow
     case updatesAutomatically
     case updatesAutomaticallyHelp
+    /// **Install updates automatically** (0.8.1): what a check of its own finds,
+    /// put in place with nothing pressed, uDeck restarting while the panel is away.
+    case updatesInstallsAutomatically
+    case updatesInstallsAutomaticallyHelp
     case updatesNeverChecked
 
     /// A check that has just finished. `RelativeDateTimeFormatter` rounds the

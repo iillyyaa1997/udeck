@@ -72,6 +72,15 @@ public protocol UpdateChecking: AnyObject {
     /// written down in README and SECURITY.md.
     var checksAutomatically: Bool { get set }
 
+    /// Whether what a check of its own finds is downloaded and put in place
+    /// with nothing pressed, uDeck restarting itself while the panel is away.
+    ///
+    /// On as uDeck ships (`SUAutomaticallyUpdate` in Info.plist), until the
+    /// operator turns it off in Settings → About; it means nothing while
+    /// `checksAutomatically` is off. A check pressed for still offers what it
+    /// finds, for **Install**.
+    var installsAutomatically: Bool { get set }
+
     /// Everything the screen draws.
     var status: UpdateStatus { get }
 
@@ -80,6 +89,6 @@ public protocol UpdateChecking: AnyObject {
     /// interesting thing the check could possibly have found.
     func checkNow()
 
-    /// Install what has been downloaded, restarting to finish.
+    /// Install what has been found or downloaded, restarting to finish.
     func install()
 }

@@ -242,7 +242,20 @@ class OnlyThisCheckout(Rule):
         )
 
 
+@dataclass(frozen=True)
+class InstallsByItself(Rule):
+    """`updates.installs-by-itself`: what this checkout ships puts in place what it finds, so "from" is this checkout's."""
+
+    def refusal(self, pair: Pair) -> str | None:
+        if pair.from_.is_checkout and pair.to.is_checkout:
+            return None
+        return ("this check holds what this checkout ships to putting in place by itself what a check of its own "
+                'finds — nothing is pressed, so "from" has to be this checkout, and the lab signs what it is offered: '
+                "its only pair is checkout → checkout")
+
+
 THE_WHOLE_UPDATE = TheWholeUpdate(BETWEEN_CHECKOUTS)
+INSTALLS_BY_ITSELF = InstallsByItself(BETWEEN_CHECKOUTS, presses_check_now=False)
 A_PUBLISHED_RELEASE = APublishedRelease(THE_RELEASE_BEFORE_LATEST_TO_LATEST)
 THE_WRONG_KEY = TheWrongKey(BETWEEN_CHECKOUTS)
 ONLY_THIS_CHECKOUT = OnlyThisCheckout(BETWEEN_CHECKOUTS, presses_check_now=False, offers=False)

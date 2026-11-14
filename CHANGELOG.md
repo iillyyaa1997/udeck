@@ -8,6 +8,16 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [Unreleased]
+
+- **uDeck installs its updates by itself.** What its daily check finds is
+  downloaded, its signature checked, and put in place with nothing pressed:
+  uDeck restarts into it as soon as the panel is away, your plugins, windows and
+  settings kept. **Settings → About → Install updates automatically**, on as
+  uDeck ships, turns that off; an update then waits there for **Update**, as one
+  **Check now** finds always does. (0.8.0 and older look once a day and wait for
+  the press: from them, this is one press more.)
+
 ## [0.8.0] — 2026-11-14
 
 Plugins come from sources of one's own now — stage 4 of

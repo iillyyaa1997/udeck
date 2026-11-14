@@ -75,7 +75,8 @@ compiler that needs the newer SDK.
 
 uDeck has no Dock icon: push the pointer up to the middle of the top edge and
 the panel drops down. From then on it looks for updates by itself once a day,
-and installs one only when you press Install in Settings → About
+and puts a new version in place by itself, restarting while the panel is away
+— or, with that switched off in Settings → About, when you press Update there
 ([Updates](#updates)). What else it fetches is in
 [What uDeck connects to](#what-udeck-connects-to-and-when).
 
@@ -234,11 +235,15 @@ only the token you gave for it, to its own host.
 `https://github.com/iillyyaa1997/udeck/releases/latest/download/appcast.xml`
 whether there is a newer version: straight after launch when it has not asked
 in the last day — so on the very first launch too — and then once a day while
-it runs. The answer appears in Settings → About. The update itself is
-downloaded only when you press Install there; nothing installs by itself, and
-Sparkle's system profile is not sent. **Settings → About → Check for updates
-automatically** turns the daily question off; **Check now** still asks, when
-you press it.
+it runs. The answer appears in Settings → About. What that daily question
+finds is downloaded, its signature checked, and put in place by itself: uDeck
+restarts into it as soon as the panel is away, your plugins, windows and
+settings kept. **Settings → About → Install updates automatically** turns that
+off, and then an update waits there for you to press Update — or is put in
+place when uDeck quits; **Check for
+updates automatically** turns the daily question off, and **Check now** still
+asks, when you press it, offering what it finds for that press. Sparkle's system
+profile is not sent.
 
 **The official plugin catalogue**, from
 [`github.com/iillyyaa1997/udeck-plugins`](https://github.com/iillyyaa1997/udeck-plugins).

@@ -1484,6 +1484,7 @@ private struct AboutSection: View {
     /// Mirrors the updater's own switch rather than owning the answer: Sparkle
     /// stores it, and a copy here would be a second place it could be true.
     @State private var checksAutomatically = false
+    @State private var installsAutomatically = false
 
     var body: some View {
         SettingsGroup(strings(.aboutTitle)) {
@@ -1497,11 +1498,28 @@ private struct AboutSection: View {
             SettingsGroup(strings(.updatesTitle)) {
                 Toggle(strings(.updatesAutomatically), isOn: Binding(
                     get: { checksAutomatically },
-                    set: { checksAutomatically = $0; updater.checksAutomatically = $0 }
+                    set: {
+                        checksAutomatically = $0
+                        updater.checksAutomatically = $0
+                        // Sparkle ties the second switch to this one: read it again.
+                        installsAutomatically = updater.installsAutomatically
+                    }
                 ))
                 .accessibilityIdentifier("updates.automatic")
                 Text(strings(.updatesAutomaticallyHelp))
                     .font(.caption).foregroundStyle(.secondary)
+                // Only a check of its own installs by itself: off with the one
+                // above, it has nothing to act on.
+                Toggle(strings(.updatesInstallsAutomatically), isOn: Binding(
+                    get: { installsAutomatically },
+                    set: { installsAutomatically = $0; updater.installsAutomatically = $0 }
+                ))
+                .disabled(!checksAutomatically)
+                .accessibilityIdentifier("updates.installAutomatically")
+                Text(strings(.updatesInstallsAutomaticallyHelp))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("updates.installAutomaticallyHelp")
 
                 // Two numbers rather than one sentence. "Up to date" asks to be
                 // believed; "installed 0.1.0, latest 0.1.0" can be checked.
@@ -1543,7 +1561,10 @@ private struct AboutSection: View {
                     updateSentence(updater.status)
                 }
             }
-            .onAppear { checksAutomatically = updater.checksAutomatically }
+            .onAppear {
+                checksAutomatically = updater.checksAutomatically
+                installsAutomatically = updater.installsAutomatically
+            }
         }
 
         SettingsGroup(strings(.aboutThisBuild)) {

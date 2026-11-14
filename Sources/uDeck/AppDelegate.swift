@@ -63,6 +63,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // first time somebody opens the settings screen is an updater that
         // never checks for the operator who never opens it.
         self.updater = SparkleUpdater()
+        // An update put in place by itself restarts uDeck: never while the
+        // panel or Settings is out, a plugin is installed or a card action runs.
+        self.updater.mayRestartNow = { [weak self, weak model] in
+            (model?.mayRestartForAnUpdate ?? false) && !(self?.settings?.isShown ?? false)
+        }
         // Nothing is asked of the system here: the record is read when the settings
         // window appears, and written only when the operator asks. An application that
         // registers at launch silently puts back a login item the operator removed.
@@ -94,6 +99,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         RunLoop.main.add(timer, forMode: .common)
         themeTimer = timer
         installStatusItem()
+    }
+
+    /// A restart into an update uDeck asked for by itself is refused when
+    /// something started in the moment before it (`SparkleUpdater`); any other
+    /// termination goes ahead.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        updater?.mayTerminateForAnUpdate() == false ? .terminateCancel : .terminateNow
     }
 
     func applicationWillTerminate(_ notification: Notification) {

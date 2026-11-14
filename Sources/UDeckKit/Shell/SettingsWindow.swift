@@ -32,6 +32,10 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// from any window, and never from the panel.
     public var isKey: Bool { window?.isKeyWindow == true }
 
+    /// Whether the window is on the screen, somebody perhaps in the middle of
+    /// something in it.
+    public var isShown: Bool { window?.isVisible == true }
+
     public func show() {
         if window == nil {
             let window = NSWindow(

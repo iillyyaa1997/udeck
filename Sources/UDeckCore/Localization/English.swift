@@ -553,6 +553,9 @@ struct English: Vocabulary {
         case .updatesAutomatically: "Check for updates automatically"
         case .updatesAutomaticallyHelp:
             "Once a day, uDeck asks github.com whether there is a newer version. Off, it asks only when you press Check now."
+        case .updatesInstallsAutomatically: "Install updates automatically"
+        case .updatesInstallsAutomaticallyHelp:
+            "When a check of its own finds a newer version, uDeck downloads it, checks its signature and restarts into it as soon as the panel is away; your plugins, windows and settings stay. Off, an update waits here for you to press Update, or is put in place when uDeck quits."
         case .updatesNeverChecked: "Never checked."
         case .updatesJustChecked: "Checked just now."
         case .updatesLastChecked(let when): "Last checked \(when)."

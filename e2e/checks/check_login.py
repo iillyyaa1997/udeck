@@ -412,6 +412,9 @@ def _prepare(machine, check_dir, lab, feed=None):
     there = app.installed_version(machine)
     if there != VERSION:
         raise LabError("preparing the machine", f"the lab installed {VERSION}, but the machine has {there}")
+    # The fourth presses for the update its feed serves later: a uDeck as it ships would put it in place by
+    # itself first (`app.no_installs_by_itself`).
+    app.no_installs_by_itself(machine, "leaving what uDeck finds for Install")
 
     app.launch(machine)
     ui.open_settings_and_wait(machine, "opening uDeck's settings")

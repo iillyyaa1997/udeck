@@ -75,6 +75,12 @@ public final class ActionProcesses: @unchecked Sendable {
         }
     }
 
+    /// Whether any card action of any plugin, or anything it started, is running.
+    public var anyRunning: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return running.values.contains { !$0.isEmpty }
+    }
+
     /// Whether any action of `plugin`, or anything it started, is running.
     public func isRunning(_ plugin: String) -> Bool {
         lock.lock(); defer { lock.unlock() }

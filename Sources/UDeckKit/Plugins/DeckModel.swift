@@ -57,6 +57,13 @@ public final class DeckModel {
     /// another, which is what keeps `installed.json` and the plugins folder
     /// from ever being written by two of them at once.
     public internal(set) var busyPlugin: String?
+
+    /// Whether nothing of uDeck's is under way that a restart into an update
+    /// would cut short: the panel away, no plugin being installed, updated or
+    /// removed, and no card action running.
+    public var mayRestartForAnUpdate: Bool {
+        !panelIsVisible && busyPlugin == nil && !actionProcesses.anyRunning
+    }
     /// What the last operation on a plugin came to, when it did not succeed.
     public internal(set) var operationProblems: [String: OperationProblem] = [:]
     /// Earlier versions, as they were read.

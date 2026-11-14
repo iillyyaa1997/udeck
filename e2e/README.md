@@ -19,14 +19,15 @@ the last section.
 > the machines and the golden image they are cloned from, their screen and
 > pointer over VNC, the accessibility helper that reads uDeck's windows, a
 > self-check, the builds a check needs, a fake GitHub for the plugin catalogue,
-> the same lab on a GitHub runner, and a hundred and nine checks of uDeck itself in five groups
+> the same lab on a GitHub runner, and a hundred and ten checks of uDeck itself in five groups
 > (`e2e/run.sh --list`) — and three more against real hosts,
 > `smoke.real-pull-request`, `smoke.real-github-token` and
 > `smoke.real-gitlab-source`, which run only when each is named ("Not in the full run"). `updates`: the
 > update, with its wrong-key control, and when uDeck looks for one at all — by
 > itself as it ships, and by itself again once an operator who switched that off
-> switches it back on; and a published release updating itself from GitHub, as
-> it does on a person's Mac. Every update check takes a pair, "from → to", so
+> switches it back on; an update found by itself put in place with nothing
+> pressed; and a published release updating itself from GitHub, as it does on a
+> person's Mac. Every update check takes a pair, "from → to", so
 > any version can be tried against any other.
 > `panel`: the hover gesture that opens it, with its pointer-in-the-middle
 > control and the line between its two paths, the ways of putting it away again,
@@ -579,6 +580,7 @@ check's own default:
 | `updates.sparkle` | checkout → checkout | any pair but a release → checkout |
 | `updates.wrong-key` | checkout → checkout | a release → checkout |
 | `updates.it-looks-by-itself`, `updates.switched-on-it-looks-by-itself` | checkout → checkout | nothing else |
+| `updates.installs-by-itself` | checkout → checkout | nothing else: what it holds to is what this checkout ships, and nothing is pressed |
 | `updates.a-published-release` | the release before latest → latest | any pair whose "to" is a release |
 
 So a run without arguments asks the first four what they asked before pairs

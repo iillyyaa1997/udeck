@@ -44,8 +44,9 @@ BETWEEN_CHECKOUTS = pairs.resolve(pairs.THE_WHOLE_UPDATE, pairs.BETWEEN_CHECKOUT
 def machine():
     # The feed answering is the state every check starts from — `serve` proves it
     # before anything else happens — so it is the fake's default, and the test
-    # about a feed that died says so for itself.
-    return Machine({"http_code": "200"})
+    # about a feed that died says so for itself. So is the switch the pressing checks write before uDeck starts
+    # (`app.no_installs_by_itself`), read back as written.
+    return Machine({"http_code": "200", f"defaults read {app.BUNDLE_ID} {app.INSTALLS_BY_ITSELF}": "0"})
 
 
 @pytest.fixture
@@ -1259,6 +1260,7 @@ def test_every_update_check_says_which_pairs_it_takes():
         "check_it_looks_by_itself": pairs.ONLY_THIS_CHECKOUT,
         "check_switched_on_it_looks_by_itself": pairs.ONLY_THIS_CHECKOUT,
         "check_a_published_release": pairs.A_PUBLISHED_RELEASE,
+        "check_installs_by_itself": pairs.INSTALLS_BY_ITSELF,
     }
 
 

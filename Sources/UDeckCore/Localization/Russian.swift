@@ -559,6 +559,9 @@ struct Russian: Vocabulary {
         case .updatesAutomatically: "Проверять обновления автоматически"
         case .updatesAutomaticallyHelp:
             "Раз в сутки uDeck спрашивает github.com, нет ли новой версии. Если выключить — только по кнопке «Проверить сейчас»."
+        case .updatesInstallsAutomatically: "Устанавливать обновления автоматически"
+        case .updatesInstallsAutomaticallyHelp:
+            "Когда проверка сама находит новую версию, uDeck скачивает её, проверяет подпись и перезапускается в неё, как только панель убрана; плагины, окна и настройки остаются. Если выключить — обновление ждёт здесь, пока вы не нажмёте «Обновить», или встаёт при выходе из uDeck."
         case .updatesNeverChecked: "Ещё не проверялось."
         case .updatesJustChecked: "Проверено только что."
         case .updatesLastChecked(let when): "Проверено \(when)."
