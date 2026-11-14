@@ -8,7 +8,10 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.8.1] — 2026-11-14
+
+uDeck puts its own updates in place by itself now. 0.8.1 adds nothing to the
+plugin contract.
 
 - **uDeck installs its updates by itself.** What its daily check finds is
   downloaded, its signature checked, and put in place with nothing pressed:
