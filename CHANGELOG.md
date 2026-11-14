@@ -8,7 +8,23 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.8.0] — 2026-11-14
+
+Plugins come from sources of one's own now — stage 4 of
+[docs/plugin-repository.md](docs/plugin-repository.md#stages), all but **Sign
+in**. Under **Settings → Plugins → Your sources**, a GitHub repository or a
+GitLab project — gitlab.com's or your own GitLab's — is added by its address
+and read from its own host, by the number its host knows it by, so a rename
+follows it and a new repository at the old name is never read in its place. A
+private one is read with a token you paste once, checked against that address
+and kept in the Keychain: sent only to that host, never across a redirect or to
+a raw host, and taken back the moment the source points elsewhere. A source's
+plugins are **Unverified** and ask before they run whenever their code changes,
+until you **Trust…** the source: its default branch's plugins are then marked
+**Trusted source: <name>**, keep your decision for each version — for that
+source alone — and update themselves like verified ones. **Official
+catalogue** off stops none of it. Every screen of it is in English and Russian.
+0.8.0 adds nothing to the plugin contract.
 
 - **Going back to 0.7.0.** 0.7.0 shows a copy from a source of one's own as
   **Unverified**, trusted or not, asks before it runs it, and cannot update or
