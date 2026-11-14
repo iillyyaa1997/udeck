@@ -111,11 +111,15 @@ public struct InstallRequest: Codable, Equatable, Sendable {
     /// Nil is the operation's own: an earlier version is pinned, anything
     /// else is not.
     public var pinned: Bool?
+    /// Whether the source is one the operator trusted when the request was
+    /// made (stage 4, S4-08): a copy of its default branch is recorded
+    /// `trusted` by it. Never the official source's, which is verified.
+    public var sourceTrusted: Bool
 
     public init(operation: Operation, id: PluginIdentifier, source: String = InstalledPlugins.officialSource,
                 sourceRepository: RepositoryAddress, repository: RepositoryAddress, ref: PluginRef, commit: String,
                 folder: PluginListing, version: String, headCommit: String?, headTree: String? = nil,
-                defaultBranch: String? = nil, automatic: Bool = false, pinned: Bool? = nil) {
+                defaultBranch: String? = nil, automatic: Bool = false, pinned: Bool? = nil, sourceTrusted: Bool = false) {
         self.operation = operation
         self.id = id
         self.source = source
@@ -130,6 +134,7 @@ public struct InstallRequest: Codable, Equatable, Sendable {
         self.defaultBranch = defaultBranch
         self.automatic = automatic
         self.pinned = pinned
+        self.sourceTrusted = sourceTrusted
     }
 
     /// A request for the copy a button brings `from` its origin — the
@@ -605,6 +610,10 @@ public struct PluginInstaller: Sendable {
         // merged: then it is recorded as the default branch's (`Adoption`).
         if record.isOfficialDefault {
             record.verification = PluginVerification(status: .verified, by: InstalledPlugins.officialSource,
+                                                     checkedAgainst: request.headCommit ?? request.commit, checkedAt: at)
+        } else if request.sourceTrusted, record.isTrustedDefault([record.source]) {
+            // A trusted source's default branch: trusted by it (S4-08).
+            record.verification = PluginVerification(status: .trusted, by: record.source,
                                                      checkedAgainst: request.headCommit ?? request.commit, checkedAt: at)
         } else if let head = request.headCommit, let headTree = request.headTree {
             // The folder put in place is exactly the listed tree: it was hashed

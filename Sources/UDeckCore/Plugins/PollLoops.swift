@@ -41,7 +41,10 @@ public enum PollLoops {
     /// polling while collapsed off). Allowed as the gate says with the tree
     /// each plugin's decision is held to (`requiredTree`: nil for one held to
     /// its version), so that code nobody verified runs only on a decision for
-    /// exactly what is on disk — asked of every caller, so that none forgets it.
+    /// exactly what is on disk — asked of every caller, so that none forgets it;
+    /// and with the source each decision held to a version must have been
+    /// made for (`requiredSource`: nil for none), so that one source's
+    /// decision never runs another source's copy (S4-09).
     public static func wanted(
         _ plugins: [DiscoveredPlugin],
         placed: Set<PluginIdentifier>,
@@ -49,7 +52,8 @@ public enum PollLoops {
         settings: PluginSettings,
         polling: Bool,
         isQuiet: (String) -> Bool,
-        requiredTree: (PluginIdentifier) -> String?
+        requiredTree: (PluginIdentifier) -> String?,
+        requiredSource: (PluginIdentifier) -> String?
     ) -> [String: PollLoop] {
         guard polling else { return [:] }
         var loops: [String: PollLoop] = [:]
@@ -59,7 +63,8 @@ public enum PollLoops {
                   placed.contains(manifest.id),
                   PermissionGate.launchDecision(for: manifest, grant: grants[manifest.id],
                                                 enabled: settings.isEnabled(manifest.id),
-                                                requiredTree: requiredTree(manifest.id)).isAllowed,
+                                                requiredTree: requiredTree(manifest.id),
+                                                requiredSource: requiredSource(manifest.id)).isAllowed,
                   let interval = manifest.interval, interval > 0
             else { continue }
             loops[manifest.id.rawValue] = PollLoop(plugin: plugin, grant: grants[manifest.id])

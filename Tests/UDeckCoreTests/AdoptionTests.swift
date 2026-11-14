@@ -122,12 +122,12 @@ struct AdoptionTests {
                                 decidedAt: Self.at)
         let before = Self.record()
         #expect(ConsentBasis.of(before, linked: false, recordsReadable: true) == .tree)
-        #expect(PermissionGate.launchDecision(for: manifest, grant: grant, enabled: true, requiredTree: Self.copy) == .allowed)
+        #expect(PermissionGate.launchDecision(for: manifest, grant: grant, enabled: true, requiredTree: Self.copy, requiredSource: nil) == .allowed)
         let after = Adoption.adopted(before, at: Self.head, branch: Self.branch(at: Self.copy), now: Self.later)
         let basis = ConsentBasis.of(after, linked: false, recordsReadable: true)
         #expect(basis == .version)
         #expect(PermissionGate.launchDecision(for: manifest, grant: grant, enabled: true,
-                                              requiredTree: basis.requiredTree(hashed: Self.copy)) == .allowed)
+                                              requiredTree: basis.requiredTree(hashed: Self.copy), requiredSource: nil) == .allowed)
         #expect(ConsentSource.of(after, basis: basis, recordsReadable: true, changedHere: false) == nil,
                 "its card no longer says where code nobody verified comes from")
     }

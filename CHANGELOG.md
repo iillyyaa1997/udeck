@@ -10,6 +10,16 @@ for what that promises.
 
 ## [Unreleased]
 
+- **Trust, underneath** (not yet offered on any screen). A source of one's own
+  can be trusted (`trustedAt` in `sources.json`): a copy of its default branch,
+  exactly as installed, stands **Trusted source** — never Verified — and is
+  recorded `trusted` by it; its permission decision is held to its version, as
+  a verified copy's is, and to that source: a decision now records the source
+  of the copy it was made for (`decidedForSource`), one written before — or by
+  0.7.0 — counts as the official source's, so that the official uptime's
+  decision never runs another source's uptime under the same version. A
+  decision is carried across a swap only between two copies with the same
+  guarantee, and a trusted copy updates itself as a verified one does.
 - **Private repositories as sources, with a token.** When **Look up** cannot
   find a repository, it may be private: the step under it opens the host's page
   for a read-only token with its fields filled in, and a token pasted there is

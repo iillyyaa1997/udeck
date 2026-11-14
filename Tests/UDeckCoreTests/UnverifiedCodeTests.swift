@@ -48,7 +48,7 @@ struct UnverifiedCodeTests {
         }
         let decoder = JSONFileStore<InstalledPlugins>.decoder
         for (status, read) in [("verified", PluginVerification.Status.verified), ("modified", .modified),
-                               ("unverified", .unverified), ("trusted", .modified), ("anything else", .modified)] {
+                               ("unverified", .unverified), ("trusted", .trusted), ("anything else", .modified)] {
             let plugins = try decoder.decode(InstalledPlugins.self, from: file(status: status))
             #expect(plugins.plugins["uptime"]?.verification.status == read, "\(status)")
             #expect(plugins.plugins["cpu"]?.ref == PluginRef(kind: "commit", name: nil), "a ref's kind is read as written")
@@ -110,6 +110,7 @@ struct UnverifiedCodeTests {
         let standing = PluginStanding.of(record: record, folderExists: true, treeOnDisk: onDisk)
         switch wanted {
         case .verified: #expect(standing == .verified)
+        case .trusted: #expect(standing == .trusted)
         case .unverified: #expect(standing == .unverified)
         case .modified: #expect(standing == .modifiedLocally)
         }
@@ -166,10 +167,10 @@ struct UnverifiedCodeTests {
 
     /// A poll plugin `pr`, asking for nothing.
     static func pollPlugin(id: String = "pr", directory: String = "/u/plugins/pr",
-                           linked: Bool = false) throws -> DiscoveredPlugin {
+                           linked: Bool = false, permissions: String = "{}") throws -> DiscoveredPlugin {
         let manifest = try JSONDecoder().decode(PluginManifest.self, from: Data("""
             { "id": "\(id)", "name": "\(id)", "version": "1.0.0", "api": 1, "kind": "poll",
-              "run": ["./run.sh"], "interval": 5, "timeout": 2 }
+              "run": ["./run.sh"], "interval": 5, "timeout": 2, "permissions": \(permissions) }
             """.utf8))
         return DiscoveredPlugin(directory: URL(fileURLWithPath: directory), folderName: id, manifest: manifest,
                                 executable: URL(fileURLWithPath: "\(directory)/run.sh"), problems: [],
@@ -185,13 +186,24 @@ struct UnverifiedCodeTests {
         let id = manifest.id
         func wanted(_ grants: PermissionGrants, tree: String?) -> Set<String> {
             Set(PollLoops.wanted([plugin], placed: [id], grants: grants, settings: PluginSettings(), polling: true,
-                                 isQuiet: { _ in false }, requiredTree: { _ in tree }).keys)
+                                 isQuiet: { _ in false }, requiredTree: { _ in tree }, requiredSource: { _ in nil }).keys)
         }
         #expect(wanted(PermissionGrants(), tree: nil) == ["pr"], "held to its version, it asks for nothing")
         #expect(wanted(PermissionGrants(), tree: Self.tree).isEmpty, "held to its tree, it is asked about first")
         var grants = PermissionGrants()
         grants[id] = PluginGrant(decidedForVersion: "1.0.0", decidedForTree: Self.tree, decidedAt: Self.at)
         #expect(wanted(grants, tree: Self.tree) == ["pr"])
+        // Held to its version and a source (S4-09): a decision for another source's copy starts no loop.
+        let asking = try Self.pollPlugin(permissions: #"{ "exec": ["uname"] }"#)
+        var decided = PermissionGrants()
+        decided[id] = PluginGrant(granted: [.exec("uname")], decidedForVersion: "1.0.0", decidedForSource: "official",
+                                  decidedAt: Self.at)
+        func wantedFrom(_ source: String?) -> Set<String> {
+            Set(PollLoops.wanted([asking], placed: [id], grants: decided, settings: PluginSettings(), polling: true,
+                                 isQuiet: { _ in false }, requiredTree: { _ in nil }, requiredSource: { _ in source }).keys)
+        }
+        #expect(wantedFrom("official") == ["pr"])
+        #expect(wantedFrom("github.com-team-plugins-8e1f0a2c").isEmpty)
         #expect(wanted(grants, tree: String(repeating: "b", count: 40)).isEmpty, "new content")
         #expect(wanted(grants, tree: PermissionGate.treeNotHashedYet).isEmpty, "not hashed yet")
     }
@@ -210,11 +222,11 @@ struct UnverifiedCodeTests {
         grants[id] = PluginGrant(decidedForVersion: "1.0.0", decidedForTree: Self.tree, decidedAt: Self.at)
         func wanted() -> [String: PollLoop] {
             PollLoops.wanted([plugin], placed: [id], grants: grants, settings: PluginSettings(), polling: true,
-                             isQuiet: { _ in false }, requiredTree: { trees.lastHashed($0.rawValue, basis: .tree) })
+                             isQuiet: { _ in false }, requiredTree: { trees.lastHashed($0.rawValue, basis: .tree) }, requiredSource: { _ in nil })
         }
         func allowedNow() -> Bool {
             PermissionGate.launchDecision(for: manifest, grant: grants[id], enabled: true,
-                                          requiredTree: trees.now("pr", basis: .tree)).isAllowed
+                                          requiredTree: trees.now("pr", basis: .tree), requiredSource: nil).isAllowed
         }
         let running = wanted()
         #expect(Set(running.keys) == ["pr"])
@@ -259,12 +271,12 @@ struct UnverifiedCodeTests {
         let basis = ConsentBasis.of(nil, linked: false, recordsReadable: false)
         let trees = HashedTrees(trees: ["own": Self.tree])
         #expect(PermissionGate.launchDecision(for: manifest, grant: nil, enabled: true,
-                                              requiredTree: trees.now("own", basis: basis))
+                                              requiredTree: trees.now("own", basis: basis), requiredSource: nil)
                 == .awaitingDecision(pending: []))
         var grants = PermissionGrants()
         grants[manifest.id] = PluginGrant(decidedForVersion: "1.0.0", decidedAt: Self.at)
         #expect(!PermissionGate.launchDecision(for: manifest, grant: grants[manifest.id], enabled: true,
-                                               requiredTree: trees.now("own", basis: basis)).isAllowed,
+                                               requiredTree: trees.now("own", basis: basis), requiredSource: nil).isAllowed,
                 "a decision for the version alone does not hold")
     }
 
@@ -405,8 +417,8 @@ extension UnverifiedCodeTests {
         #expect(Reverification.of(plugins, installed: installed, trees: trees, head: .read("officialHead"), now: Self.at)
                 == officialOnly, "one head is the official one's alone")
         #expect(Reverification.of(plugins, installed: installed, trees: trees, heads: ["official": .read("officialHead")],
-                                  trusted: [Self.teamSource.id], now: Self.at) == officialOnly,
-                "the trusted set changes nothing until there is a trusted mark")
+                                  trusted: [Self.teamSource.id], now: Self.at).standings["cpu"] == .trusted,
+                "a trusted source's default branch stands trusted, its source not read yet or read")
         let sourceOnly = Reverification.of(plugins, installed: installed, trees: trees, heads: [Self.teamSource.id: .read(nil)],
                                            now: Self.at)
         #expect(sourceOnly.records?.plugins["uptime"]?.verification == official.verification, "nor for the official one's")

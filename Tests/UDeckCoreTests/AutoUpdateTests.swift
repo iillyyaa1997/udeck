@@ -109,8 +109,8 @@ struct AutoUpdateTests {
                     decidedAt: decided)
     }
 
-    static let old = GrantCarry.Copy(version: "1.0.0", asks: asks, verified: true)
-    static let new = GrantCarry.Copy(version: "1.1.0", asks: asks, verified: true)
+    static let old = GrantCarry.Copy(version: "1.0.0", asks: asks, guarantee: .verified)
+    static let new = GrantCarry.Copy(version: "1.1.0", asks: asks, guarantee: .verified)
 
     @Test("a verified copy for a verified copy asking for the same carries the decision, and nothing else changes")
     func carried() throws {
@@ -127,11 +127,19 @@ struct AutoUpdateTests {
     static let kept: [(String, PluginGrant?, GrantCarry.Copy?, GrantCarry.Copy)] = [
         ("never decided", nil, old, new),
         ("the old copy unread", grant(), nil, new),
-        ("the old copy not verified", grant(), GrantCarry.Copy(version: "1.0.0", asks: asks, verified: false), new),
-        ("the new copy not verified", grant(), old, GrantCarry.Copy(version: "1.1.0", asks: asks, verified: false)),
+        ("the old copy not verified", grant(), GrantCarry.Copy(version: "1.0.0", asks: asks, guarantee: nil), new),
+        ("the new copy not verified", grant(), old, GrantCarry.Copy(version: "1.1.0", asks: asks, guarantee: nil)),
         ("decided for another version", grant(for: "0.9.0"), old, new),
-        ("one command more", grant(), old, GrantCarry.Copy(version: "1.1.0", asks: asks + [.exec("uname")], verified: true)),
-        ("one command fewer", grant(), old, GrantCarry.Copy(version: "1.1.0", asks: [.exec("sysctl")], verified: true)),
+        ("one command more", grant(), old, GrantCarry.Copy(version: "1.1.0", asks: asks + [.exec("uname")], guarantee: .verified)),
+        ("one command fewer", grant(), old, GrantCarry.Copy(version: "1.1.0", asks: [.exec("sysctl")], guarantee: .verified)),
+        // Another guarantee: a verified copy for a trusted source's, and the other way, and two trusted sources.
+        ("verified for trusted", grant(), old,
+         GrantCarry.Copy(version: "1.1.0", asks: asks, guarantee: .trusted(source: "github.com-team-plugins-8e1f0a2c"))),
+        ("trusted for verified", grant(),
+         GrantCarry.Copy(version: "1.0.0", asks: asks, guarantee: .trusted(source: "github.com-team-plugins-8e1f0a2c")), new),
+        ("one trusted source for another", grant(),
+         GrantCarry.Copy(version: "1.0.0", asks: asks, guarantee: .trusted(source: "github.com-team-plugins-8e1f0a2c")),
+         GrantCarry.Copy(version: "1.1.0", asks: asks, guarantee: .trusted(source: "gitlab.example.test-team-1b2c3d4e"))),
     ]
 
     @Test("anything else leaves the decision as it was", arguments: 0..<kept.count)
@@ -148,14 +156,14 @@ struct AutoUpdateTests {
         let manifest = try JSONDecoder().decode(PluginManifest.self, from: Data(FakeRepository.manifest(
             version: "1.1.0", permissions: #"{ "exec": ["sysctl", "./hold.sh"] }"#).utf8))
         let carried = GrantCarry.after(Self.grant(), old: Self.old, new: Self.new)
-        #expect(PermissionGate.launchDecision(for: manifest, grant: carried, enabled: true) == .allowed)
-        #expect(PermissionGate.launchDecision(for: manifest, grant: Self.grant(), enabled: true)
+        #expect(PermissionGate.launchDecision(for: manifest, grant: carried, enabled: true, requiredSource: nil) == .allowed)
+        #expect(PermissionGate.launchDecision(for: manifest, grant: Self.grant(), enabled: true, requiredSource: nil)
                 == .awaitingDecision(pending: manifest.permissions.capabilities))
         let more = try JSONDecoder().decode(PluginManifest.self, from: Data(FakeRepository.manifest(
             version: "1.1.0", permissions: #"{ "exec": ["sysctl", "./hold.sh", "uname"] }"#).utf8))
         let notCarried = GrantCarry.after(Self.grant(), old: Self.old, new: GrantCarry.Copy(
-            version: "1.1.0", asks: more.permissions.capabilities, verified: true))
-        #expect(PermissionGate.launchDecision(for: more, grant: notCarried, enabled: true)
+            version: "1.1.0", asks: more.permissions.capabilities, guarantee: .verified))
+        #expect(PermissionGate.launchDecision(for: more, grant: notCarried, enabled: true, requiredSource: nil)
                 == .awaitingDecision(pending: more.permissions.capabilities))
     }
 

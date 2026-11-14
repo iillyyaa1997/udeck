@@ -95,7 +95,8 @@ struct LocalizationTests {
         .catalogueFileUnreachable(path: "plugins/uptime/uptime.sh", reason: "offline"),
         .catalogueTookTooLong, .catalogueCannotWrite(reason: "disk full"),
         .catalogueRecordsBroken(reason: "not JSON"),
-        .pluginMarkVerified, .pluginMarkUnverified, .pluginMarkOwnFolder, .pluginMarkModified, .pluginMarkMissing,
+        .pluginMarkVerified, .pluginMarkUnverified, .pluginMarkTrusted(name: "Team plugins"), .pluginMarkOwnFolder,
+        .pluginMarkModified, .pluginMarkMissing,
         .pluginFrom(source: "github.com/o/r", commit: "5c3e0d2"), .pluginPinned,
         .pluginUpdatedByItself(date: "10 October 2026"), .pluginUpdateByItselfFailed(version: "1.1.0"),
         .historyTitle(name: "uptime"), .historyReading, .historyNone, .historyInstalledMark, .historyInstall,
@@ -297,7 +298,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 475,
+        #expect(Self.all.count == 476,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

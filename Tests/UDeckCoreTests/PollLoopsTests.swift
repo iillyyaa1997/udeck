@@ -31,7 +31,7 @@ struct PollLoopsTests {
                 settings: PluginSettings = PluginSettings(), polling: Bool = true,
                 quiet: Set<String> = []) -> [String: PollLoop] {
         PollLoops.wanted(plugins, placed: placed, grants: grants, settings: settings, polling: polling,
-                         isQuiet: { quiet.contains($0) }, requiredTree: { _ in nil })
+                         isQuiet: { quiet.contains($0) }, requiredTree: { _ in nil }, requiredSource: { _ in nil })
     }
 
     @Test("a loop for every placed, allowed poll plugin with an interval, none while nothing is polled")
@@ -265,7 +265,7 @@ struct VisibilityTests {
     let plugins = [plugin("linked", linkedTo: "/work/linked"), plugin("disk")]
     var loops: [String: PollLoop] {
         PollLoops.wanted(plugins, placed: identifiers("linked", "disk"), grants: PermissionGrants(),
-                         settings: PluginSettings(), polling: true, isQuiet: { _ in false }, requiredTree: { _ in nil })
+                         settings: PluginSettings(), polling: true, isQuiet: { _ in false }, requiredTree: { _ in nil }, requiredSource: { _ in nil })
     }
 
     @Test("shown: every plugin runs now and every loop starts afresh after it")

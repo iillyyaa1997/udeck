@@ -35,7 +35,7 @@ struct PollExecutionTests {
             searchPath: AppSettings().pluginExecutableSearchPath,
             appearance: .dark,
             reason: .interval,
-            language: "en", requiredTree: nil
+            language: "en", requiredTree: nil, requiredSource: nil
         )
     }
 
@@ -105,7 +105,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/leaky")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil, requiredSource: nil
         )
         guard case .failure(let failure) = outcome else { Issue.record("expected a failure"); return }
         #expect(failure.reason == .timedOut(after: 1))
@@ -159,7 +159,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/polite")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil, requiredSource: nil
         )
         let elapsed = Date().timeIntervalSince(started)
 
@@ -210,7 +210,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: plugin, grant: nil, enabled: true, settings: PluginSettings(),
             paths: temp.paths, searchPath: AppSettings().pluginExecutableSearchPath,
-            appearance: .light, reason: .launch, language: "en", requiredTree: nil
+            appearance: .light, reason: .launch, language: "en", requiredTree: nil, requiredSource: nil
         )
         guard case .failure(let failure) = outcome else { Issue.record("expected a failure"); return }
         guard case .notPermitted = failure.reason else {
@@ -224,6 +224,35 @@ struct PollExecutionTests {
     /// `attempt`, every row of these tests stayed green — none passed a tree.
     /// For **Refresh** and the panel's own refresh this check is the one in
     /// UDeckCore between code nobody verified and a run.
+    /// S4-09: a producer held to its version runs only on a decision made for
+    /// the source its copy is of — the official uptime's decision runs no
+    /// trusted source's uptime.
+    @Test("held to its version and a source, a producer runs only on a decision for that source")
+    func heldToItsSource() async {
+        let temp = TemporaryDirectory()
+        temp.writePlugin(folder: "asks-uname", manifest: """
+        { "id": "asks-uname", "name": "Asks uname", "version": "1.0.0", "api": 1, "kind": "poll",
+          "run": ["./run.sh"], "interval": 5, "timeout": 2, "permissions": { "exec": ["uname"] } }
+        """, script: (name: "run.sh", body: "#!/bin/sh\ntouch \"$UDECK_CACHE_DIR/ran\"\necho '{\"rows\": []}'\n", executable: true))
+        let plugin = discovery.load(temp.url.appendingPathComponent("plugins/asks-uname"))
+        let ran = temp.paths.cache(forPlugin: plugin.manifest!.id).appendingPathComponent("ran")
+        let grant = PluginGrant(granted: [.exec("uname")], decidedForVersion: "1.0.0", decidedForSource: "official")
+        func attempt(_ source: String?) async -> PollAttempt {
+            await executor.attempt(plugin: plugin, grant: grant, enabled: true, settings: PluginSettings(), paths: temp.paths,
+                                   searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light,
+                                   reason: .manual, language: "en", requiredTree: nil, requiredSource: source)
+        }
+        let another = await attempt("github.com-team-plugins-8e1f0a2c")
+        guard case .failure(let failure) = another.execution, case .notPermitted(.awaitingDecision) = failure.reason else {
+            Issue.record("the official source's decision ran another source's copy: \(another.execution)")
+            return
+        }
+        #expect(another.run == nil && !FileManager.default.fileExists(atPath: ran.path), "it must not have run at all")
+        let allowed = await attempt("official")
+        guard case .card = allowed.execution else { Issue.record("\(allowed.execution)"); return }
+        #expect(FileManager.default.fileExists(atPath: ran.path))
+    }
+
     @Test("held to its tree, a producer runs only on a decision for that tree; another tree, or none hashed yet, and it does not run")
     func heldToItsTree() async {
         let temp = TemporaryDirectory()
@@ -238,7 +267,7 @@ struct PollExecutionTests {
         func attempt(_ required: String?) async -> PollAttempt {
             await executor.attempt(plugin: plugin, grant: grant, enabled: true, settings: PluginSettings(), paths: temp.paths,
                                    searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light,
-                                   reason: .manual, language: "en", requiredTree: required)
+                                   reason: .manual, language: "en", requiredTree: required, requiredSource: nil)
         }
         for required in [String(repeating: "b", count: 40), PermissionGate.treeNotHashedYet] {
             let outcome = await attempt(required)
@@ -263,7 +292,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/angry")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil, requiredSource: nil
         )
         guard case .failure(let failure) = outcome else { Issue.record("expected a failure"); return }
         #expect(failure.reason == .exited(code: 3))
@@ -292,7 +321,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/quiet")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil, requiredSource: nil
         )
         let spent = Self.hostCPUSeconds() - before
 
@@ -323,7 +352,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/mute")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil, requiredSource: nil
         )
         guard case .failure(let failure) = outcome else { Issue.record("expected a failure"); return }
         #expect(failure.reason == .emptyOutput)
@@ -353,7 +382,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/chatty")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil, requiredSource: nil
         )
         // The claim under test is that large output is delivered rather than
         // deadlocking on a full pipe buffer. What arrives is then cut down to
@@ -382,7 +411,7 @@ struct PollExecutionTests {
         let outcome = await executor.poll(
             plugin: discovery.load(temp.url.appendingPathComponent("plugins/runaway")),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
-            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil
+            searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light, reason: .interval, language: "en", requiredTree: nil, requiredSource: nil
         )
         guard case .failure(let failure) = outcome else { Issue.record("expected a failure"); return }
         guard case .outputLimitExceeded = failure.reason else {
@@ -446,7 +475,7 @@ struct PollExecutionTests {
             plugin: discovery.load(directory),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
             searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light,
-            reason: .interval, language: "en", requiredTree: nil
+            reason: .interval, language: "en", requiredTree: nil, requiredSource: nil
         )
         guard case .card = outcome else { Issue.record("expected a card, got \(outcome)"); return }
 
@@ -484,7 +513,7 @@ struct PollExecutionTests {
             plugin: discovery.load(directory),
             grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
             searchPath: AppSettings().pluginExecutableSearchPath, appearance: .light,
-            reason: .interval, language: "en", requiredTree: nil
+            reason: .interval, language: "en", requiredTree: nil, requiredSource: nil
         )
         guard case .card = outcome else { Issue.record("expected a card, got \(outcome)"); return }
 

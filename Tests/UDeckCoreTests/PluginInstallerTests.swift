@@ -989,6 +989,22 @@ struct PluginInstallerTests {
                               commit: repository.commit, folder: folder, version: version, headCommit: repository.commit)
     }
 
+    @Test("a trusted source's default branch is installed trusted by it; untrusted, or a branch of it, unverified")
+    func trustedInstall() async throws {
+        let repository = FakeRepository.withUptime()
+        for (trusted, ref, status, by) in [(true, PluginRef(name: "main"), PluginVerification.Status.trusted, Self.gitLabSource),
+                                           (false, PluginRef(name: "main"), .unverified, nil),
+                                           (true, PluginRef.branch("fix"), .unverified, nil)] {
+            try? FileManager.default.removeItem(at: live)
+            var request = gitLabRequest(repository)
+            request.sourceTrusted = trusted
+            request.ref = ref
+            let installer = installer(FetchLog(repository))
+            let record = try installer.commit(try await installer.stage(request))
+            #expect(record.verification.status == status && record.verification.by == by, "\(trusted) \(ref)")
+        }
+    }
+
     @Test("a listing without sizes installs: rule 8 waits for the files, and every file is still hashed")
     func noSizesInstalls() async throws {
         let repository = FakeRepository.withUptime()

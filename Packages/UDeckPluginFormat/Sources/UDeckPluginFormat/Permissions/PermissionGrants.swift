@@ -23,6 +23,22 @@ public struct PluginGrant: Codable, Equatable, Sendable {
     /// written before there was such code; read back, those hold for no tree.
     public var decidedForTree: String?
 
+    /// The source whose copy the decision was made for — `official`, or a
+    /// source of one's own by its id — or nil for a folder uDeck has no record
+    /// of. A decision held to the version holds only for that source's copy
+    /// (`PermissionGate`'s `requiredSource`): one made for the official
+    /// uptime 1.0.0 is no decision about a trusted source's uptime 1.0.0, a
+    /// different plugin under the same id and version. Absent from every
+    /// decision written before there were sources of one's own — and from one
+    /// a uDeck from before rewrote, dropping the key — read as the official
+    /// source's (`officialSource`): a trusted copy then asks again, the safe
+    /// way.
+    public var decidedForSource: String?
+
+    /// The official source's id, as `installed.json` names it — what an
+    /// absent `decidedForSource` is read as.
+    public static let officialSource = "official"
+
     /// Truncated to whole seconds.
     ///
     /// The file this is stored in uses ISO-8601 timestamps, which carry no
@@ -36,20 +52,25 @@ public struct PluginGrant: Codable, Equatable, Sendable {
         denied: Set<Capability> = [],
         decidedForVersion: String,
         decidedForTree: String? = nil,
+        decidedForSource: String? = nil,
         decidedAt: Date = Date()
     ) {
         self.granted = granted
         self.denied = denied
         self.decidedForVersion = decidedForVersion
         self.decidedForTree = decidedForTree
+        self.decidedForSource = decidedForSource
         self.decidedAt = Date(timeIntervalSince1970: decidedAt.timeIntervalSince1970.rounded(.down))
     }
 
     /// Whether this decision is the one for `version` — and, when a tree is
-    /// required (`PermissionGate`), for exactly that tree too. An empty tree
-    /// is a folder not hashed yet, and no decision holds for it.
-    public func holds(forVersion version: String, tree requiredTree: String?) -> Bool {
+    /// required (`PermissionGate`), for exactly that tree too; when a source
+    /// is required, for that source's copy (an absent one read as the
+    /// official source's). An empty tree is a folder not hashed yet, and no
+    /// decision holds for it.
+    public func holds(forVersion version: String, tree requiredTree: String?, source requiredSource: String?) -> Bool {
         guard decidedForVersion == version else { return false }
+        if let requiredSource, (decidedForSource ?? Self.officialSource) != requiredSource { return false }
         guard let requiredTree else { return true }
         return !requiredTree.isEmpty && decidedForTree == requiredTree
     }
@@ -116,18 +137,28 @@ public enum PermissionGate {
     /// decision is held to the version, as it always was. A required tree
     /// only ever asks for more: nothing that is allowed without one is
     /// allowed by one that is not.
+    ///
+    /// `requiredSource` is for a copy held to its version that uDeck has a
+    /// record of — the official source's, or a trusted source's (stage 4) —
+    /// and is that record's source: a decision counts only when it was made
+    /// for that source's copy (`PluginGrant.decidedForSource`). Nil for a
+    /// folder of one's own, a link, a copy held to its tree (whose tree names
+    /// the content) and `udeck-plugin run`. Like a tree, it only ever asks for
+    /// more; a plugin that asks for nothing and needs no tree is allowed
+    /// whatever source it is of.
     public static func launchDecision(
         for manifest: PluginManifest,
         grant: PluginGrant?,
         enabled: Bool,
-        requiredTree: String? = nil
+        requiredTree: String? = nil,
+        requiredSource: String?
     ) -> LaunchDecision {
         guard enabled else { return .disabled }
 
         let requested = manifest.permissions.capabilities
         guard !requested.isEmpty || requiredTree != nil else { return .allowed }
 
-        guard let grant, grant.holds(forVersion: manifest.version, tree: requiredTree) else {
+        guard let grant, grant.holds(forVersion: manifest.version, tree: requiredTree, source: requiredSource) else {
             return .awaitingDecision(pending: requested)
         }
 
@@ -165,15 +196,19 @@ public enum PermissionGate {
     /// replaced it asking for nothing, and the permission screen said the
     /// plugin asks for nothing while its buttons still ran `open`. With a
     /// `requiredTree`, as for `launchDecision`, it has to have been decided
-    /// for exactly that tree as well.
+    /// for exactly that tree as well; with a `requiredSource`, for that
+    /// source's copy.
     public static func mayRun(
         _ action: CardAction,
         requestedBy manifest: PluginManifest,
         grant: PluginGrant?,
-        requiredTree: String? = nil
+        requiredTree: String? = nil,
+        requiredSource: String?
     ) -> Bool {
         guard let executable = action.run.first, !executable.isEmpty else { return false }
-        guard let grant, grant.holds(forVersion: manifest.version, tree: requiredTree) else { return false }
+        guard let grant, grant.holds(forVersion: manifest.version, tree: requiredTree, source: requiredSource) else {
+            return false
+        }
         let capability = Capability.exec(executable)
         guard manifest.permissions.capabilities.contains(capability) else { return false }
         return grant.granted.contains(capability)

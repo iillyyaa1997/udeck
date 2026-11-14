@@ -326,6 +326,9 @@ public enum Phrase: Sendable, Equatable {
     /// From a branch or a pull request, exactly as installed: nobody
     /// verified it.
     case pluginMarkUnverified
+    /// From the default branch of a source the operator trusted, exactly as
+    /// installed: `name` is the source's, as `SourceName` shows it.
+    case pluginMarkTrusted(name: String)
     case pluginMarkOwnFolder
     case pluginMarkModified
     case pluginMarkMissing

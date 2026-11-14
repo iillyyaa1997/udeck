@@ -1346,12 +1346,13 @@ private struct PluginRow: View {
                 }
                 HStack {
                     let tree = model.consentTree(for: manifest.id)
+                    let shownSource = model.requiredSource(for: manifest.id)
                     Button(strings(.actionAllow)) {
-                        model.decidePermissions(for: manifest.id, allow: true, shown: [], shownTree: tree)
+                        model.decidePermissions(for: manifest.id, allow: true, shown: [], shownTree: tree, shownSource: shownSource)
                     }
                     .accessibilityIdentifier("plugin.\(manifest.id).allow")
                     Button(strings(.actionDecline)) {
-                        model.decidePermissions(for: manifest.id, allow: false, shown: [], shownTree: tree)
+                        model.decidePermissions(for: manifest.id, allow: false, shown: [], shownTree: tree, shownSource: shownSource)
                     }
                     .accessibilityIdentifier("plugin.\(manifest.id).decline")
                 }
@@ -1383,11 +1384,12 @@ private struct PluginRow: View {
                 HStack {
                     // What the list above shows is what Allow grants (`ShownPlace.allows`).
                     let tree = model.consentTree(for: manifest.id)
+                    let shownSource = model.requiredSource(for: manifest.id)
                     Button(strings(.actionAllow)) {
-                        model.decidePermissions(for: manifest.id, allow: true, shown: requested, shownTree: tree)
+                        model.decidePermissions(for: manifest.id, allow: true, shown: requested, shownTree: tree, shownSource: shownSource)
                     }
                     Button(strings(.actionDecline)) {
-                        model.decidePermissions(for: manifest.id, allow: false, shown: requested, shownTree: tree)
+                        model.decidePermissions(for: manifest.id, allow: false, shown: requested, shownTree: tree, shownSource: shownSource)
                     }
                 }
                 .padding(.top, 2)
@@ -1400,7 +1402,8 @@ private struct PluginRow: View {
     /// card asks again about is not shown as granted.
     private func granted(_ capability: Capability, _ manifest: PluginManifest) -> Bool {
         guard let grant = model.grants[manifest.id],
-              grant.holds(forVersion: manifest.version, tree: model.treeLastHashed(for: manifest.id)) else { return false }
+              grant.holds(forVersion: manifest.version, tree: model.treeLastHashed(for: manifest.id),
+                          source: model.requiredSource(for: manifest.id)) else { return false }
         return grant.granted.contains(capability)
     }
 

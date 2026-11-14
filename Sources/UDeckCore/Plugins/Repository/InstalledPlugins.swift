@@ -75,10 +75,14 @@ public struct PluginVerification: Codable, Equatable, Sendable {
         case verified
         /// The folder no longer hashes to what was installed.
         case modified
-        /// Exactly what was installed, from a branch or a pull request: code
-        /// nobody verified.
+        /// Exactly what was installed, from a branch or a pull request — or
+        /// the default branch of a source nobody trusted: code nobody
+        /// verified.
         case unverified
-        // `trusted` comes with stage 4.
+        /// Installed from the default branch of a source the operator trusted
+        /// (stage 4), and still exactly that: `by` names the source. Its
+        /// guarantee is whoever can merge there, never the official one's.
+        case trusted
 
         /// A status this uDeck does not know — written by a later one — is
         /// read as `modified`: the status is recomputed from the folder anyway
@@ -377,6 +381,15 @@ public struct InstalledRecord: Codable, Equatable, Sendable {
         source == InstalledPlugins.officialSource && ref.isDefault
     }
 
+    /// Whether this copy came from the default branch of a source of one's own
+    /// that the operator trusted — one of `trusted`, by id (stage 4, S4-08):
+    /// it counts as verified there, on the guarantee of whoever can merge
+    /// into it. Never the official source, and never a branch or a pull
+    /// request of a trusted source.
+    public func isTrustedDefault(_ trusted: Set<String>) -> Bool {
+        source != InstalledPlugins.officialSource && ref.isDefault && trusted.contains(source)
+    }
+
     /// What the folder is now, given the tree it hashes to on disk and the
     /// commit of the default branch it is being compared against.
     ///
@@ -384,13 +397,19 @@ public struct InstalledRecord: Codable, Equatable, Sendable {
     /// refresh, and never trusted from the file: the stored value is there so
     /// Settings can show where a plugin stands the moment it opens, not so that
     /// anything is decided on it.
-    public func verification(treeOnDisk: String?, headCommit: String?, now: Date) -> PluginVerification {
+    /// `trusted` is the sources the operator trusted, by id: a copy of one's
+    /// default branch, still exactly as installed, is `trusted` by it.
+    public func verification(treeOnDisk: String?, headCommit: String?, now: Date,
+                             trusted: Set<String> = []) -> PluginVerification {
         guard treeOnDisk == tree else {
             return PluginVerification(status: .modified, by: nil, checkedAgainst: headCommit ?? commit, checkedAt: now)
         }
         if isOfficialDefault {
             return PluginVerification(status: .verified, by: InstalledPlugins.officialSource,
                                       checkedAgainst: headCommit ?? commit, checkedAt: now)
+        }
+        if isTrustedDefault(trusted) {
+            return PluginVerification(status: .trusted, by: source, checkedAgainst: headCommit ?? commit, checkedAt: now)
         }
         return PluginVerification(status: .unverified, by: nil, checkedAgainst: headCommit ?? commit, checkedAt: now)
     }
@@ -435,8 +454,11 @@ public struct InstalledPlugins: Codable, Equatable, Sendable {
 public enum PluginStanding: Equatable, Sendable {
     /// Installed from the official repository and still exactly what was merged.
     case verified
-    /// Installed from a branch or a pull request, and still exactly that:
-    /// nobody verified it.
+    /// Installed from the default branch of a source the operator trusted,
+    /// and still exactly that (stage 4): *Trusted source: <name>*.
+    case trusted
+    /// Installed from a branch or a pull request — or a source nobody
+    /// trusted — and still exactly that: nobody verified it.
     case unverified
     /// Installed from a repository, and changed on disk since.
     case modifiedLocally
@@ -454,12 +476,16 @@ public enum PluginStanding: Equatable, Sendable {
     }
 
     /// Where a folder stands, from its record and what its folder hashes to now
-    /// (nil when there is no folder).
-    public static func of(record: InstalledRecord?, folderExists: Bool, treeOnDisk: String?) -> PluginStanding {
+    /// (nil when there is no folder), `trusted` being the sources the operator
+    /// trusted, by id. Changed on disk overrides every mark, and a gone folder
+    /// is missing, trusted or not.
+    public static func of(record: InstalledRecord?, folderExists: Bool, treeOnDisk: String?,
+                          trusted: Set<String> = []) -> PluginStanding {
         guard let record else { return .folderOfYourOwn }
         guard folderExists else { return .missing }
         guard treeOnDisk == record.tree else { return .modifiedLocally }
-        return record.isOfficialDefault ? .verified : .unverified
+        if record.isOfficialDefault { return .verified }
+        return record.isTrustedDefault(trusted) ? .trusted : .unverified
     }
 }
 
@@ -484,11 +510,28 @@ public enum ConsentBasis: Equatable, Sendable {
     /// cannot, nothing says where any copy came from, and every folder that
     /// is not a link is held to its tree: a broken file only ever asks for
     /// more, never lets a branch's copy run on its version.
-    public static func of(_ record: InstalledRecord?, linked: Bool, recordsReadable: Bool) -> ConsentBasis {
+    ///
+    /// `trusted` is the sources the operator trusted, by id (stage 4): a copy
+    /// of a trusted source's default branch is held to its version, as a
+    /// verified one is (S4-09) — and the decision to that source's copy
+    /// (`requiredSource`). Empty while `sources.json` cannot be read, so that
+    /// every copy of a source of one's own is held to its tree then.
+    public static func of(_ record: InstalledRecord?, linked: Bool, recordsReadable: Bool,
+                          trusted: Set<String> = []) -> ConsentBasis {
         guard !linked else { return .version }
         guard recordsReadable else { return .tree }
-        guard let record, !record.isOfficialDefault else { return .version }
+        guard let record, !record.isOfficialDefault, !record.isTrustedDefault(trusted) else { return .version }
         return .tree
+    }
+
+    /// The source `PermissionGate` requires a decision to have been made for
+    /// (`PluginGrant.decidedForSource`): the record's source for a copy held
+    /// to its version that uDeck installed — the official source's, or a
+    /// trusted source's — and none for a link, a folder of one's own, or a
+    /// copy held to its tree, whose tree names the content.
+    public func requiredSource(_ record: InstalledRecord?, linked: Bool) -> String? {
+        guard self == .version, !linked else { return nil }
+        return record?.source
     }
 
     /// The tree `PermissionGate` requires: none for a decision held to the

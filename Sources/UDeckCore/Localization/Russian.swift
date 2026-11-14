@@ -278,6 +278,7 @@ struct Russian: Vocabulary {
             "~/.udeck/installed.json не читается, поэтому uDeck ничего не устанавливает, не обновляет и не удаляет, пока это не исправлено: \(reason)"
         case .pluginMarkVerified: "Проверен"
         case .pluginMarkUnverified: "Не проверен"
+        case .pluginMarkTrusted(let name): "Доверенный источник: \(name)"
         case .pluginMarkOwnFolder: "Ваша собственная папка"
         case .pluginMarkModified: "Изменён на этом Mac"
         case .pluginMarkMissing: "Папки нет"

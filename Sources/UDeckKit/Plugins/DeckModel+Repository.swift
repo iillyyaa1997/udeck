@@ -1207,22 +1207,27 @@ extension DeckModel {
     }
 
     /// The copy at `plugins/<id>` as the permission decision knows it: its
-    /// version, what it asks for, and whether it stands **Verified**.
+    /// version, what it asks for, and whose guarantee it has — **Verified**,
+    /// or a trusted source's.
     private func copyForTheDecision(_ id: String) -> GrantCarry.Copy? {
         guard let manifest = installedManifest(id) else { return nil }
         return GrantCarry.Copy(version: manifest.version, asks: manifest.permissions.capabilities,
-                               verified: standings[id] == .verified)
+                               guarantee: GrantCarry.Copy.guarantee(of: standings[id], record: installed.plugins[id]))
     }
 
     /// The permission decision after `before` was replaced by `record`'s copy,
     /// which asks for what `manifest` asks: carried to the new version when
-    /// `GrantCarry` says so — a verified copy for a verified copy, asking for
-    /// the same — and left as it was otherwise, so that the card asks.
+    /// `GrantCarry` says so — a copy for one with the same guarantee, asking
+    /// for the same — and left as it was otherwise, so that the card asks.
     private func carryTheDecision(of id: PluginIdentifier, from before: GrantCarry.Copy?, to record: InstalledRecord,
                                   asking manifest: PluginManifest?) {
         guard let manifest else { return }
-        let after = GrantCarry.Copy(version: record.version, asks: manifest.permissions.capabilities,
-                                    verified: record.verification.status == .verified)
+        let guarantee: GrantCarry.Guarantee? = switch record.verification.status {
+        case .verified: .verified
+        case .trusted: .trusted(source: record.source)
+        default: nil
+        }
+        let after = GrantCarry.Copy(version: record.version, asks: manifest.permissions.capabilities, guarantee: guarantee)
         let carried = GrantCarry.after(grants[id], old: before, new: after)
         guard carried != grants[id] else { return }
         grants[id] = carried

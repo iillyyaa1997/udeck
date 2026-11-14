@@ -33,11 +33,12 @@ public struct PollExecutor: Sendable {
         reason: RefreshReason,
         language: String,
         requiredTree: String?,
+        requiredSource: String?,
         now: Date = Date()
     ) async -> PollExecution {
         await attempt(plugin: plugin, grant: grant, enabled: enabled, settings: settings, paths: paths,
                       searchPath: searchPath, appearance: appearance, reason: reason, language: language,
-                      requiredTree: requiredTree, now: now)
+                      requiredTree: requiredTree, requiredSource: requiredSource, now: now)
             .execution
     }
 
@@ -60,6 +61,7 @@ public struct PollExecutor: Sendable {
         reason: RefreshReason,
         language: String,
         requiredTree: String?,
+        requiredSource: String?,
         now: Date = Date()
     ) async -> PollAttempt {
         // `isUsable` rather than "no problems at all": a translation that will
@@ -71,7 +73,7 @@ public struct PollExecutor: Sendable {
         }
 
         let decision = PermissionGate.launchDecision(for: manifest, grant: grant, enabled: enabled,
-                                                     requiredTree: requiredTree)
+                                                     requiredTree: requiredTree, requiredSource: requiredSource)
         guard decision.isAllowed else {
             return PollAttempt(execution: .failure(PluginFailure(reason: .notPermitted(decision), occurredAt: now)),
                                run: nil)

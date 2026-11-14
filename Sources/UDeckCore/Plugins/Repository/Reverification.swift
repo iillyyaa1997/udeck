@@ -96,8 +96,9 @@ public struct Reverification: Equatable, Sendable {
 
     /// The same, each copy checked against the head of its own source —
     /// `heads`, by source id; a source missing from it is not read yet — and
-    /// `trusted` the sources the operator trusted, by id. Until there is a
-    /// trusted mark (stage 4, R4) that set is empty and changes nothing.
+    /// `trusted` the sources the operator trusted, by id: a copy of one's
+    /// default branch, exactly as installed, stands and is recorded trusted
+    /// by it; the moment it is no longer trusted, unverified again.
     public static func of(
         _ plugins: [DiscoveredPlugin],
         installed: InstalledPlugins,
@@ -116,9 +117,9 @@ public struct Reverification: Equatable, Sendable {
                 continue
             }
             let tree = trees[id] ?? nil
-            standings[id] = PluginStanding.of(record: record, folderExists: true, treeOnDisk: tree)
+            standings[id] = PluginStanding.of(record: record, folderExists: true, treeOnDisk: tree, trusted: trusted)
             guard case .read(let headCommit) = heads[record.source] ?? .notReadYet else { continue }
-            let found = record.verification(treeOnDisk: tree, headCommit: headCommit, now: now)
+            let found = record.verification(treeOnDisk: tree, headCommit: headCommit, now: now, trusted: trusted)
             if !found.saysTheSame(as: record.verification) {
                 records.plugins[id]?.verification = found
                 changed = true

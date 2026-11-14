@@ -330,6 +330,24 @@ public struct SourceList: Equatable, Sendable {
         return source
     }
 
+    /// The sources the operator trusted, by id: those with `trustedAt` (S4-08).
+    /// What the standings, the consent basis and the updates by themselves
+    /// take as trusted; a list that could not be read trusts none.
+    public var trusted: Set<String> {
+        Set(sources.filter { $0.trustedAt != nil }.map(\.id))
+    }
+
+    /// **Trust…** (`at` a date) or **Stop trusting…** (nil) of the source with
+    /// this id, written back. Nothing for a source not listed.
+    @discardableResult
+    public mutating func setTrusted(_ id: String, at date: Date?) -> Bool {
+        guard let index = entries.firstIndex(where: { if case .source(let source) = $0 { source.id == id } else { false } }),
+              case .source(var source) = entries[index] else { return false }
+        source.trustedAt = date.map(InstalledPlugins.wholeSeconds)
+        entries[index] = .source(source)
+        return true
+    }
+
     /// What the Keychain is expected to hold for the source — `token` once
     /// one is kept for it, `none` once it is forgotten — written back.
     @discardableResult

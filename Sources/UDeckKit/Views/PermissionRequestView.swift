@@ -21,6 +21,8 @@ struct PermissionRequestView: View {
     /// For code nobody verified, the tree its folder hashed to when this was
     /// drawn: what **Allow** grants for, and nothing else (`ConsentBasis`).
     var tree: String?
+    /// The source the decision is held to, as it was when the card was drawn (`DeckModel.requiredSource`).
+    var source: String? = nil
     @Bindable var shell: ShellState
 
     var body: some View {
@@ -66,7 +68,7 @@ struct PermissionRequestView: View {
             HStack(spacing: 7) {
                 Button(strings(.permissionsAllowAndRun)) {
                     shell.onInteract()
-                    model.decidePermissions(for: pluginID, allow: true, shown: pending, shownTree: tree)
+                    model.decidePermissions(for: pluginID, allow: true, shown: pending, shownTree: tree, shownSource: source)
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
                 // Identifiers, not titles, for whatever drives the panel from
@@ -76,7 +78,7 @@ struct PermissionRequestView: View {
 
                 Button(strings(.actionDecline)) {
                     shell.onInteract()
-                    model.decidePermissions(for: pluginID, allow: false, shown: pending, shownTree: tree)
+                    model.decidePermissions(for: pluginID, allow: false, shown: pending, shownTree: tree, shownSource: source)
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
                 .accessibilityIdentifier("consent.\(pluginID.rawValue).decline")

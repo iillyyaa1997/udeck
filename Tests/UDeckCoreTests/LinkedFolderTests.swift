@@ -417,20 +417,20 @@ struct LinkRaceTests {
         let read = try #require(discovery.scan(udeck.paths).first)
         let manifest = try #require(read.manifest)
         let grant = PluginGrant(granted: Set(manifest.permissions.capabilities), denied: [], decidedForVersion: manifest.version)
-        #expect(PermissionGate.launchDecision(for: manifest, grant: grant, enabled: true).isAllowed)
+        #expect(PermissionGate.launchDecision(for: manifest, grant: grant, enabled: true, requiredSource: nil).isAllowed)
 
         // Pointed elsewhere after the read, before the run.
         try FileManager.default.removeItem(atPath: link.path)
         try FileManager.default.createSymbolicLink(atPath: link.path, withDestinationPath: other.path)
         let run = await PollExecutor().poll(plugin: read, grant: grant, enabled: true, settings: PluginSettings(),
                                             paths: udeck.paths, searchPath: ["/usr/bin", "/bin"], appearance: .dark,
-                                            reason: .interval, language: "en", requiredTree: nil)
+                                            reason: .interval, language: "en", requiredTree: nil, requiredSource: nil)
         guard case .card(let card) = run else { Issue.record("\(run)"); return }
         #expect(card.rows == [.text("the folder that was read")])
 
         let now = try #require(discovery.scan(udeck.paths).first)
         #expect(now.directory.path == FilePaths.real(other.path).path)
-        let asked = PermissionGate.launchDecision(for: try #require(now.manifest), grant: grant, enabled: true)
+        let asked = PermissionGate.launchDecision(for: try #require(now.manifest), grant: grant, enabled: true, requiredSource: nil)
         guard case .awaitingDecision = asked else { Issue.record("a new version is not asked about: \(asked)"); return }
     }
 }
@@ -639,7 +639,7 @@ struct PluginRunTests {
         let attempt = await PollExecutor().attempt(
             plugin: plugin, grant: nil, enabled: true, settings: PluginSettings(), paths: temp.paths,
             searchPath: AppSettings().pluginExecutableSearchPath, appearance: .dark, reason: .launch, language: "en",
-            requiredTree: nil)
+            requiredTree: nil, requiredSource: nil)
         guard case .card = attempt.execution else { Issue.record("\(attempt.execution)"); return }
         let run = attempt.run
         #expect(run?.result == .card)
@@ -654,7 +654,7 @@ struct PluginRunTests {
         let refused = await PollExecutor().attempt(
             plugin: plugin, grant: nil, enabled: false, settings: PluginSettings(), paths: temp.paths,
             searchPath: AppSettings().pluginExecutableSearchPath, appearance: .dark, reason: .interval, language: "en",
-            requiredTree: nil)
+            requiredTree: nil, requiredSource: nil)
         #expect(refused.run == nil)
         snapshot.record(refused, at: Date())
         #expect(snapshot.lastRun == run, "nothing ran: the last run is still the last one that did")

@@ -28,13 +28,13 @@ struct PermissionTests {
 
     @Test("a plugin that asks for nothing needs no decision")
     func noPermissionsNeedsNoDecision() {
-        #expect(PermissionGate.launchDecision(for: manifest(PermissionRequest()), grant: nil, enabled: true) == .allowed)
+        #expect(PermissionGate.launchDecision(for: manifest(PermissionRequest()), grant: nil, enabled: true, requiredSource: nil) == .allowed)
     }
 
     @Test("a plugin that asks for something waits until the operator has decided")
     func waitsForADecision() {
         let m = manifest(PermissionRequest(read: ["/tmp/x-*"]))
-        guard case .awaitingDecision(let pending) = PermissionGate.launchDecision(for: m, grant: nil, enabled: true) else {
+        guard case .awaitingDecision(let pending) = PermissionGate.launchDecision(for: m, grant: nil, enabled: true, requiredSource: nil) else {
             Issue.record("expected to be waiting"); return
         }
         #expect(pending == [.read("/tmp/x-*")])
@@ -47,7 +47,7 @@ struct PermissionTests {
     func refusalStopsTheLaunch() {
         let m = manifest(PermissionRequest(read: ["/tmp/x-*"], exec: ["ps"]))
         let grant = PluginGrant(granted: [.read("/tmp/x-*")], denied: [.exec("ps")], decidedForVersion: "1.0.0")
-        guard case .refused(let denied) = PermissionGate.launchDecision(for: m, grant: grant, enabled: true) else {
+        guard case .refused(let denied) = PermissionGate.launchDecision(for: m, grant: grant, enabled: true, requiredSource: nil) else {
             Issue.record("expected a refusal"); return
         }
         #expect(denied == [.exec("ps")])
@@ -57,7 +57,7 @@ struct PermissionTests {
     func upgradeReopensTheQuestion() {
         let old = PluginGrant(granted: [.read("/tmp/x-*")], decidedForVersion: "1.0.0")
         let updated = manifest(PermissionRequest(read: ["/tmp/x-*"]), version: "1.1.0")
-        guard case .awaitingDecision = PermissionGate.launchDecision(for: updated, grant: old, enabled: true) else {
+        guard case .awaitingDecision = PermissionGate.launchDecision(for: updated, grant: old, enabled: true, requiredSource: nil) else {
             Issue.record("a new version must re-ask"); return
         }
     }
@@ -65,7 +65,7 @@ struct PermissionTests {
     @Test("a switched-off plugin does not run whatever its grants say")
     func disabledWins() {
         let m = manifest(PermissionRequest())
-        #expect(PermissionGate.launchDecision(for: m, grant: nil, enabled: false) == .disabled)
+        #expect(PermissionGate.launchDecision(for: m, grant: nil, enabled: false, requiredSource: nil) == .disabled)
     }
 
     /// The manifest an action is claimed to come from. `mayRun` needs it as
@@ -78,9 +78,9 @@ struct PermissionTests {
     func actionsAreGatedByExec() {
         let m = asking(["kubectl"])
         let grant = PluginGrant(granted: [.exec("kubectl")], decidedForVersion: "1.0.0")
-        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["kubectl", "get", "pods"]), requestedBy: m, grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["rm", "-rf", "/"]), requestedBy: m, grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["kubectl"]), requestedBy: m, grant: nil))
+        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["kubectl", "get", "pods"]), requestedBy: m, grant: grant, requiredSource: nil))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["rm", "-rf", "/"]), requestedBy: m, grant: grant, requiredSource: nil))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["kubectl"]), requestedBy: m, grant: nil, requiredSource: nil))
     }
 
     /// A grant is decided against a version. Keeping it usable after the plugin
@@ -91,14 +91,14 @@ struct PermissionTests {
         let action = CardAction(label: "a", run: ["open", "/Applications"])
         let grant = PluginGrant(granted: [.exec("open")], decidedForVersion: "1.0.0")
 
-        #expect(PermissionGate.mayRun(action, requestedBy: asking(["open"]), grant: grant))
+        #expect(PermissionGate.mayRun(action, requestedBy: asking(["open"]), grant: grant, requiredSource: nil))
         // Same id, new version, asks for nothing: the screen says so, and now
         // the button agrees with the screen.
-        #expect(!PermissionGate.mayRun(action, requestedBy: asking([], version: "2.0.0"), grant: grant))
+        #expect(!PermissionGate.mayRun(action, requestedBy: asking([], version: "2.0.0"), grant: grant, requiredSource: nil))
         // Same version, but this manifest no longer asks for it either.
-        #expect(!PermissionGate.mayRun(action, requestedBy: asking([]), grant: grant))
+        #expect(!PermissionGate.mayRun(action, requestedBy: asking([]), grant: grant, requiredSource: nil))
         // Asks for it, but the grant was decided against a different version.
-        #expect(!PermissionGate.mayRun(action, requestedBy: asking(["open"], version: "2.0.0"), grant: grant))
+        #expect(!PermissionGate.mayRun(action, requestedBy: asking(["open"], version: "2.0.0"), grant: grant, requiredSource: nil))
     }
 
     /// A grant for `ps` is read by the operator as "may run the `ps` on this
@@ -111,20 +111,20 @@ struct PermissionTests {
     func aNameIsNotAPath() {
         let m = asking(["ps"])
         let grant = PluginGrant(granted: [.exec("ps")], decidedForVersion: "1.0.0")
-        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["ps"]), requestedBy: m, grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["/bin/ps"]), requestedBy: m, grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["/tmp/evil/ps"]), requestedBy: m, grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["../../tmp/evil/ps"]), requestedBy: m, grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["./ps"]), requestedBy: m, grant: grant))
+        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["ps"]), requestedBy: m, grant: grant, requiredSource: nil))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["/bin/ps"]), requestedBy: m, grant: grant, requiredSource: nil))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["/tmp/evil/ps"]), requestedBy: m, grant: grant, requiredSource: nil))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["../../tmp/evil/ps"]), requestedBy: m, grant: grant, requiredSource: nil))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["./ps"]), requestedBy: m, grant: grant, requiredSource: nil))
     }
 
     @Test("a plugin that wants to run its own tool has to name the path, and the operator sees it")
     func aPathIsMatchedLiterally() {
         let m = asking(["./tools/refresh"])
         let grant = PluginGrant(granted: [.exec("./tools/refresh")], decidedForVersion: "1.0.0")
-        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["./tools/refresh"]), requestedBy: m, grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["refresh"]), requestedBy: m, grant: grant))
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["./tools/other"]), requestedBy: m, grant: grant))
+        #expect(PermissionGate.mayRun(CardAction(label: "a", run: ["./tools/refresh"]), requestedBy: m, grant: grant, requiredSource: nil))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["refresh"]), requestedBy: m, grant: grant, requiredSource: nil))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: ["./tools/other"]), requestedBy: m, grant: grant, requiredSource: nil))
         // And the operator reads the path they are agreeing to.
         #expect(Capability.exec("./tools/refresh").summary == "run ./tools/refresh")
     }
@@ -132,7 +132,7 @@ struct PermissionTests {
     @Test("an action with no command never runs")
     func emptyActionRefused() {
         let grant = PluginGrant(granted: [.exec("ps")], decidedForVersion: "1.0.0")
-        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: []), requestedBy: asking(["ps"]), grant: grant))
+        #expect(!PermissionGate.mayRun(CardAction(label: "a", run: []), requestedBy: asking(["ps"]), grant: grant, requiredSource: nil))
     }
 
     /// Q120: a plugin may still declare a secret, and is asked about it, but

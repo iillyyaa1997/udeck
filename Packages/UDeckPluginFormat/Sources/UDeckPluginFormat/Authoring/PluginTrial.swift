@@ -109,7 +109,7 @@ public enum PluginTrial {
 
         var notes: [String] = plugin.problems.map { "uDeck notes against the plugin: \($0)" }
         if let searchPathNote { notes.append(searchPathNote) }
-        switch PermissionGate.launchDecision(for: manifest, grant: nil, enabled: true) {
+        switch PermissionGate.launchDecision(for: manifest, grant: nil, enabled: true, requiredSource: nil) {
         case .awaitingDecision(let pending):
             notes.append("uDeck asks before it first runs the plugin, and again for every new version: may it "
                          + pending.map(\.summary).joined(separator: ", ") + "? This run did not ask")

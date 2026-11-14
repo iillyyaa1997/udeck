@@ -235,7 +235,8 @@ struct DeckWindowView: View {
         case .awaitingDecision(let pending):
             PermissionRequestView(
                 model: model, theme: theme, pluginID: window.pluginID,
-                manifest: manifest, pending: pending, tree: model.consentTree(for: window.pluginID), shell: shell
+                manifest: manifest, pending: pending, tree: model.consentTree(for: window.pluginID),
+                source: model.requiredSource(for: window.pluginID), shell: shell
             )
         case .refused(let denied):
             note("Not running: you declined \(denied.map(\.summary).joined(separator: ", "))", tint: theme.warn)

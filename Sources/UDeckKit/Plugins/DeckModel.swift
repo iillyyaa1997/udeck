@@ -480,7 +480,8 @@ public final class DeckModel {
     public func launchDecision(for id: PluginIdentifier) -> LaunchDecision {
         guard let manifest = plugin(withID: id)?.manifest else { return .disabled }
         return PermissionGate.launchDecision(
-            for: manifest, grant: grants[id], enabled: pluginSettings.isEnabled(id), requiredTree: treeLastHashed(for: id)
+            for: manifest, grant: grants[id], enabled: pluginSettings.isEnabled(id), requiredTree: treeLastHashed(for: id),
+            requiredSource: requiredSource(for: id)
         )
     }
 
@@ -501,6 +502,14 @@ public final class DeckModel {
         let basis = consentBasis(of: id)
         guard basis == .tree else { return nil }
         return treesOnDisk.now(id.rawValue, basis: basis)
+    }
+
+    /// The source the gate requires `id`'s decision to have been made for
+    /// (`ConsentBasis.requiredSource`): its record's, for a copy held to its
+    /// version that uDeck installed; none for a link, a folder of one's own or
+    /// a copy held to its tree (S4-09).
+    public func requiredSource(for id: PluginIdentifier) -> String? {
+        consentBasis(of: id).requiredSource(installed.plugins[id.rawValue], linked: plugin(withID: id)?.isLinked ?? false)
     }
 
     /// The same by the tree last hashed: what `id`'s poll loop is planned on
@@ -564,7 +573,8 @@ public final class DeckModel {
         let pluginRuns = self.pluginRuns
         let wanted = PollLoops.wanted(plugins, placed: placedPluginIDs, grants: grants, settings: pluginSettings,
                                       polling: polling, isQuiet: { pluginRuns.isQuiet($0) },
-                                      requiredTree: { treeLastHashed(for: $0) })
+                                      requiredTree: { treeLastHashed(for: $0) },
+                                      requiredSource: { requiredSource(for: $0) })
         let plan = PollLoops.plan(running: pollLoops, wanted: wanted, again: again)
         for id in plan.stop {
             pollTasks[id]?.cancel()
@@ -662,7 +672,8 @@ public final class DeckModel {
             appearance: appearance,
             reason: reason,
             language: strings.language.rawValue,
-            requiredTree: requiredTree(for: id)
+            requiredTree: requiredTree(for: id),
+            requiredSource: requiredSource(for: id)
         )
 
         // Re-read rather than reuse the value from before the await: another
@@ -839,10 +850,15 @@ public final class DeckModel {
     /// is the one on disk, and the decision records it beside the version.
     /// **Decline** of such a plugin that asks for nothing switches it off —
     /// a decision with nothing in it would let it run.
-    public func decidePermissions(for id: PluginIdentifier, allow: Bool, shown: [Capability], shownTree: String? = nil) {
+    public func decidePermissions(for id: PluginIdentifier, allow: Bool, shown: [Capability], shownTree: String? = nil,
+                                  shownSource: String? = nil) {
         guard let manifest = plugin(withID: id)?.manifest else { return }
+        // The record's source, for the copy the decision is about; none for a
+        // folder uDeck has no record of, or a link (S4-09).
+        let source = (plugin(withID: id)?.isLinked ?? false) ? nil : installed.plugins[id.rawValue]?.source
         switch ShownPlace.decide(allow: allow, shown: shown, shownTree: shownTree, manifest: manifest, grant: grants[id],
-                                 requiredTree: requiredTree(for: id)) {
+                                 requiredTree: requiredTree(for: id), requiredSource: requiredSource(for: id),
+                                 source: source, shownSource: shownSource) {
         case .nothing:
             DeckLog.plugins.info("\(id.rawValue, privacy: .public) asks for more than was shown, is not what was shown, or is not hashed yet; asked again, nothing decided")
             return
@@ -864,7 +880,8 @@ public final class DeckModel {
     /// the refusal happens in code the plugin does not control.
     public func run(_ action: CardAction, from id: PluginIdentifier) -> String? {
         guard let manifest = plugin(withID: id)?.manifest,
-              PermissionGate.mayRun(action, requestedBy: manifest, grant: grants[id], requiredTree: requiredTree(for: id)) else {
+              PermissionGate.mayRun(action, requestedBy: manifest, grant: grants[id], requiredTree: requiredTree(for: id),
+                                    requiredSource: requiredSource(for: id)) else {
             return "\(action.run.first ?? "that command") is not one of the commands \(id) was allowed to run"
         }
         guard let executable = resolve(command: action.run[0], for: id) else {

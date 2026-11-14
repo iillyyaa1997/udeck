@@ -539,11 +539,26 @@ struct InstalledRepositoryControls: View {
         }
     }
 
+    /// The name of the trusted source this copy is of, as its block shows it
+    /// (`SourceName`) — its address while its passport has not been read, or
+    /// when it is no longer listed.
+    private var trustedSourceName: String {
+        guard let record = model.installed.plugins[id] else { return id }
+        guard let source = model.source(record.source) else { return record.repository.description }
+        return model.sourceName(source)
+    }
+
     @ViewBuilder private var standingMark: some View {
         switch standing {
         case .verified:
             Label(strings(.pluginMarkVerified), systemImage: "checkmark.seal.fill")
                 .font(.caption).foregroundStyle(.green)
+                .accessibilityIdentifier("plugin.\(id).mark")
+        case .trusted:
+            // Whose guarantee it is, by a mark of its own and never Verified's
+            // green (S4-07).
+            Label(strings(.pluginMarkTrusted(name: trustedSourceName)), systemImage: "checkmark.shield")
+                .font(.caption).foregroundStyle(.teal)
                 .accessibilityIdentifier("plugin.\(id).mark")
         case .unverified:
             Label(strings(.pluginMarkUnverified), systemImage: "exclamationmark.triangle")

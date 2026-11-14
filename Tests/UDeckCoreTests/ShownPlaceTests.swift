@@ -227,19 +227,19 @@ struct ShownPlaceTests {
     @Test("Allow grants nothing the card did not show: what is asked for now is held already, or was shown, byte for byte")
     func allow() {
         let shown: [Capability] = [.exec("sysctl")]
-        #expect(ShownPlace.allows(shown: shown, requested: [.exec("sysctl")], grant: nil, version: "1.0.0"))
-        #expect(!ShownPlace.allows(shown: shown, requested: [.exec("sysctl"), .exec("rm")], grant: nil, version: "1.0.0"),
+        #expect(ShownPlace.allows(shown: shown, requested: [.exec("sysctl")], grant: nil, version: "1.0.0", requiredSource: nil))
+        #expect(!ShownPlace.allows(shown: shown, requested: [.exec("sysctl"), .exec("rm")], grant: nil, version: "1.0.0", requiredSource: nil),
                 "a command more than the card listed")
         let held = PluginGrant(granted: [.exec("rm")], denied: [], decidedForVersion: "1.0.0")
-        #expect(ShownPlace.allows(shown: shown, requested: [.exec("sysctl"), .exec("rm")], grant: held, version: "1.0.0"),
+        #expect(ShownPlace.allows(shown: shown, requested: [.exec("sysctl"), .exec("rm")], grant: held, version: "1.0.0", requiredSource: nil),
                 "the card lists what is undecided; what is granted for this version was shown before")
-        #expect(!ShownPlace.allows(shown: shown, requested: [.exec("sysctl"), .exec("rm")], grant: held, version: "1.1.0"),
+        #expect(!ShownPlace.allows(shown: shown, requested: [.exec("sysctl"), .exec("rm")], grant: held, version: "1.1.0", requiredSource: nil),
                 "a grant for another version holds nothing")
         #expect(!ShownPlace.allows(shown: [.read("~/caf\u{E9}/*")], requested: [.read("~/cafe\u{301}/*")], grant: nil,
-                                   version: "1.0.0"), "another spelling is another path")
-        #expect(!ShownPlace.allows(shown: [.read("~/notes/*")], requested: [.write("~/notes/*")], grant: nil, version: "1.0.0"))
+                                   version: "1.0.0", requiredSource: nil), "another spelling is another path")
+        #expect(!ShownPlace.allows(shown: [.read("~/notes/*")], requested: [.write("~/notes/*")], grant: nil, version: "1.0.0", requiredSource: nil))
         #expect(ShownPlace.allows(shown: [.screen, .network("example.com")], requested: [.network("example.com"), .screen],
-                                  grant: nil, version: "1.0.0"))
+                                  grant: nil, version: "1.0.0", requiredSource: nil))
     }
 
     /// The specification: *"A plugin marked modified is not updated over
@@ -520,31 +520,31 @@ struct ShownPlaceTests {
         let tree = String(repeating: "a", count: 40)
         let other = String(repeating: "b", count: 40)
         let asks: [Capability] = [.exec("sysctl")]
-        #expect(ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0", shownTree: tree, requiredTree: tree))
-        #expect(ShownPlace.allows(shown: [], requested: [], grant: nil, version: "1.0.0", shownTree: tree, requiredTree: tree),
+        #expect(ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0", shownTree: tree, requiredTree: tree, requiredSource: nil))
+        #expect(ShownPlace.allows(shown: [], requested: [], grant: nil, version: "1.0.0", shownTree: tree, requiredTree: tree, requiredSource: nil),
                 "asking for nothing, the tree is what is allowed")
         #expect(!ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0", shownTree: other,
-                                   requiredTree: tree), "content changed while the card was up")
-        #expect(!ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0", shownTree: nil, requiredTree: tree),
+                                   requiredTree: tree, requiredSource: nil), "content changed while the card was up")
+        #expect(!ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0", shownTree: nil, requiredTree: tree, requiredSource: nil),
                 "a card that showed no tree")
         #expect(!ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0",
-                                   shownTree: PermissionGate.treeNotHashedYet, requiredTree: PermissionGate.treeNotHashedYet),
+                                   shownTree: PermissionGate.treeNotHashedYet, requiredTree: PermissionGate.treeNotHashedYet, requiredSource: nil),
                 "a folder not hashed yet")
         #expect(!ShownPlace.allows(shown: asks, requested: asks, grant: nil, version: "1.0.0",
-                                   shownTree: String(repeating: "A", count: 40), requiredTree: tree), "by bytes")
+                                   shownTree: String(repeating: "A", count: 40), requiredTree: tree, requiredSource: nil), "by bytes")
         // What is held already is what was decided for this tree.
         let more: [Capability] = [.exec("sysctl"), .exec("rm")]
         let forTree = PluginGrant(granted: [.exec("rm")], decidedForVersion: "1.0.0", decidedForTree: tree)
         let forOther = PluginGrant(granted: [.exec("rm")], decidedForVersion: "1.0.0", decidedForTree: other)
         let forVersion = PluginGrant(granted: [.exec("rm")], decidedForVersion: "1.0.0")
         #expect(ShownPlace.allows(shown: asks, requested: more, grant: forTree, version: "1.0.0", shownTree: tree,
-                                  requiredTree: tree))
+                                  requiredTree: tree, requiredSource: nil))
         #expect(!ShownPlace.allows(shown: asks, requested: more, grant: forOther, version: "1.0.0", shownTree: tree,
-                                   requiredTree: tree), "decided for another tree")
+                                   requiredTree: tree, requiredSource: nil), "decided for another tree")
         #expect(!ShownPlace.allows(shown: asks, requested: more, grant: forVersion, version: "1.0.0", shownTree: tree,
-                                   requiredTree: tree), "decided for the version alone, before there were trees")
+                                   requiredTree: tree, requiredSource: nil), "decided for the version alone, before there were trees")
         // Held to the version, the tree changes nothing.
-        #expect(ShownPlace.allows(shown: asks, requested: more, grant: forOther, version: "1.0.0"))
+        #expect(ShownPlace.allows(shown: asks, requested: more, grant: forOther, version: "1.0.0", requiredSource: nil))
     }
 
     /// What a press of **Allow** or **Decline** records: the version and the
@@ -566,7 +566,7 @@ struct ShownPlaceTests {
         func decide(_ allow: Bool, _ manifest: PluginManifest, shown: [Capability], shownTree: String?,
                     required: String?) -> ShownPlace.Decision {
             ShownPlace.decide(allow: allow, shown: shown, shownTree: shownTree, manifest: manifest, grant: nil,
-                              requiredTree: required, at: at)
+                              requiredTree: required, requiredSource: nil, source: nil, shownSource: nil, at: at)
         }
         // Held to the version, as always: no tree recorded.
         #expect(decide(true, asking, shown: [.exec("sysctl")], shownTree: nil, required: nil)

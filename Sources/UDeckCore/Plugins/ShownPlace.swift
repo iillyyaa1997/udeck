@@ -548,11 +548,14 @@ public enum ShownPlace {
     /// is asked about again — and never before the folder is hashed. What is
     /// held already is what was decided for that tree.
     public static func allows(shown: [Capability], requested: [Capability], grant: PluginGrant?, version: String,
-                              shownTree: String? = nil, requiredTree: String? = nil) -> Bool {
+                              shownTree: String? = nil, requiredTree: String? = nil,
+                              requiredSource: String?) -> Bool {
         if let requiredTree {
             guard !requiredTree.isEmpty, let shownTree, same(shownTree, requiredTree) else { return false }
         }
-        let held = grant.flatMap { $0.holds(forVersion: version, tree: requiredTree) ? $0.granted : nil } ?? []
+        let held = grant.flatMap {
+            $0.holds(forVersion: version, tree: requiredTree, source: requiredSource) ? $0.granted : nil
+        } ?? []
         return requested.allSatisfy { capability in
             held.contains(capability) || shown.contains { same($0, capability) }
         }
@@ -576,20 +579,29 @@ public enum ShownPlace {
     /// records, given what the card or Settings listed (`shown`) and the tree
     /// it showed (`shownTree`), the decision there was, and the tree the
     /// decision is held to (`requiredTree`, nil for one held to the version;
-    /// `PermissionGate.treeNotHashedYet` while the folder is not hashed). The
-    /// decision covers everything the manifest asks for now, and keeps the
-    /// version and the tree it was made for.
+    /// `PermissionGate.treeNotHashedYet` while the folder is not hashed), and
+    /// the source the decision is held to (`requiredSource`, nil for none).
+    /// The decision covers everything the manifest asks for now, and keeps the
+    /// version and the tree it was made for — and the source of the copy it
+    /// was made for (`source`: the record's, nil for a folder uDeck has no
+    /// record of; S4-09). A decision held to a source is made only for the
+    /// source the card showed (`shownSource`): another source's copy put in
+    /// the place meanwhile — the same id, the same version, asking the same —
+    /// is asked about again, never decided on a card about another copy.
     public static func decide(allow: Bool, shown: [Capability], shownTree: String?, manifest: PluginManifest,
-                              grant: PluginGrant?, requiredTree: String?, at date: Date = Date()) -> Decision {
+                              grant: PluginGrant?, requiredTree: String?, requiredSource: String?, source: String?,
+                              shownSource: String?, at date: Date = Date()) -> Decision {
+        if requiredSource != nil, shownSource != requiredSource { return .nothing }
         let requested = manifest.permissions.capabilities
         if allow, !allows(shown: shown, requested: requested, grant: grant, version: manifest.version,
-                          shownTree: shownTree, requiredTree: requiredTree) {
+                          shownTree: shownTree, requiredTree: requiredTree, requiredSource: requiredSource) {
             return .nothing
         }
         if requiredTree == PermissionGate.treeNotHashedYet { return .nothing }
         if !allow, requiredTree != nil, requested.isEmpty { return .switchOff }
         return .record(PluginGrant(granted: allow ? Set(requested) : [], denied: allow ? [] : Set(requested),
-                                   decidedForVersion: manifest.version, decidedForTree: requiredTree, decidedAt: date))
+                                   decidedForVersion: manifest.version, decidedForTree: requiredTree,
+                                   decidedForSource: source, decidedAt: date))
     }
 
     // MARK: - By bytes

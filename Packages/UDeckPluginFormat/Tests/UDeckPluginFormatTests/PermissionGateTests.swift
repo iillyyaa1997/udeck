@@ -86,7 +86,7 @@ struct PermissionGateTests {
     @Test("what the gate says, held to a version or to a tree", arguments: rows)
     func gate(row: Row) {
         let said = PermissionGate.launchDecision(for: Self.manifest(row.asks), grant: row.grant, enabled: row.enabled,
-                                                 requiredTree: row.requiredTree)
+                                                 requiredTree: row.requiredTree, requiredSource: nil)
         #expect(said == row.wanted)
     }
 
@@ -104,13 +104,13 @@ struct PermissionGateTests {
             for grant in grants {
                 for tree in [Self.tree, Self.other, PermissionGate.treeNotHashedYet] {
                     let manifest = Self.manifest(asks)
-                    if PermissionGate.launchDecision(for: manifest, grant: grant, enabled: true, requiredTree: tree) == .allowed {
-                        #expect(PermissionGate.launchDecision(for: manifest, grant: grant, enabled: true) == .allowed,
+                    if PermissionGate.launchDecision(for: manifest, grant: grant, enabled: true, requiredTree: tree, requiredSource: nil) == .allowed {
+                        #expect(PermissionGate.launchDecision(for: manifest, grant: grant, enabled: true, requiredSource: nil) == .allowed,
                                 "\(asks) \(String(describing: grant)) \(tree)")
                     }
                     for command in asks where PermissionGate.mayRun(CardAction(label: "a", run: [command]),
-                                                                    requestedBy: manifest, grant: grant, requiredTree: tree) {
-                        #expect(PermissionGate.mayRun(CardAction(label: "a", run: [command]), requestedBy: manifest, grant: grant))
+                                                                    requestedBy: manifest, grant: grant, requiredTree: tree, requiredSource: nil) {
+                        #expect(PermissionGate.mayRun(CardAction(label: "a", run: [command]), requestedBy: manifest, grant: grant, requiredSource: nil))
                     }
                     compared += 1
                 }
@@ -124,15 +124,15 @@ struct PermissionGateTests {
         let manifest = Self.manifest(["open"])
         let action = CardAction(label: "Open", run: ["open"])
         #expect(PermissionGate.mayRun(action, requestedBy: manifest, grant: Self.grant(granted: ["open"], tree: Self.tree),
-                                      requiredTree: Self.tree))
+                                      requiredTree: Self.tree, requiredSource: nil))
         #expect(!PermissionGate.mayRun(action, requestedBy: manifest, grant: Self.grant(granted: ["open"], tree: Self.other),
-                                       requiredTree: Self.tree), "another tree")
+                                       requiredTree: Self.tree, requiredSource: nil), "another tree")
         #expect(!PermissionGate.mayRun(action, requestedBy: manifest, grant: Self.grant(granted: ["open"]),
-                                       requiredTree: Self.tree), "a decision from before there were trees")
+                                       requiredTree: Self.tree, requiredSource: nil), "a decision from before there were trees")
         #expect(!PermissionGate.mayRun(action, requestedBy: manifest,
                                        grant: Self.grant(granted: ["open"], tree: PermissionGate.treeNotHashedYet),
-                                       requiredTree: PermissionGate.treeNotHashedYet), "not hashed yet")
-        #expect(PermissionGate.mayRun(action, requestedBy: manifest, grant: Self.grant(granted: ["open"], tree: Self.other)),
+                                       requiredTree: PermissionGate.treeNotHashedYet, requiredSource: nil), "not hashed yet")
+        #expect(PermissionGate.mayRun(action, requestedBy: manifest, grant: Self.grant(granted: ["open"], tree: Self.other), requiredSource: nil),
                 "held to the version, the tree changes nothing")
     }
 
@@ -152,8 +152,8 @@ struct PermissionGateTests {
         let read = try decoder.decode(PermissionGrants.self, from: before)
         #expect(read.byPlugin["p"]?.granted == [.exec("ps")])
         #expect(read.byPlugin["p"]?.decidedForTree == nil && read.byPlugin["p"]?.decidedForVersion == "1.0.0")
-        #expect(read.byPlugin["p"]?.holds(forVersion: "1.0.0", tree: nil) == true)
-        #expect(read.byPlugin["p"]?.holds(forVersion: "1.0.0", tree: Self.tree) == false)
+        #expect(read.byPlugin["p"]?.holds(forVersion: "1.0.0", tree: nil, source: nil) == true)
+        #expect(read.byPlugin["p"]?.holds(forVersion: "1.0.0", tree: Self.tree, source: nil) == false)
 
         let withTree = PermissionGrants(byPlugin: ["p": Self.grant(granted: ["ps"], tree: Self.tree)])
         let data = try encoder.encode(withTree)

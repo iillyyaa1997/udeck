@@ -273,6 +273,7 @@ struct English: Vocabulary {
             "~/.udeck/installed.json cannot be read, so uDeck installs, updates and removes nothing until it can: \(reason)"
         case .pluginMarkVerified: "Verified"
         case .pluginMarkUnverified: "Unverified"
+        case .pluginMarkTrusted(let name): "Trusted source: \(name)"
         case .pluginMarkOwnFolder: "A folder of your own"
         case .pluginMarkModified: "Modified locally"
         case .pluginMarkMissing: "Missing"

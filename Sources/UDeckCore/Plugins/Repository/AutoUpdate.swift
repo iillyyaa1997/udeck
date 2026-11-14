@@ -15,8 +15,10 @@ import Foundation
 /// * the head has a newer version, or the same version with other files
 ///   (`UpdateOffer.isWaiting`) — never an older one, one that cannot run here,
 ///   or none;
-/// * the copy on disk stands **Verified**: installed from the default branch of
-///   the official repository, and still exactly what was merged there;
+/// * the copy on disk stands **Verified** — installed from the default branch
+///   of the official repository, and still exactly what was merged there — or
+///   **Trusted source**: from the default branch of a source the operator
+///   trusted, still exactly as installed (S4-10);
 /// * the operator did not choose this version over the newest (`pinned`);
 /// * the new version asks for exactly what the copy on disk asks for, byte for
 ///   byte (`asksDifferently`) — a change of permissions is the operator's to
@@ -49,8 +51,9 @@ public enum AutoUpdate {
         /// repository went back, the new version cannot run here, the folder
         /// is gone from the repository — or there is no catalogue.
         case nothingWaiting
-        /// The copy on disk is not **Verified**: changed on disk, missing, a
-        /// folder of the operator's own, a linked folder, or not hashed yet.
+        /// The copy on disk is neither **Verified** nor of a trusted source:
+        /// code nobody verified, changed on disk, missing, a folder of the
+        /// operator's own, a linked folder, or not hashed yet.
         case notVerified
         /// The operator chose this version.
         case pinned
@@ -113,7 +116,7 @@ public enum AutoUpdate {
         guard let offer = plugin.offer, offer.isWaiting, let version = offer.waitingVersion else {
             return .not(.nothingWaiting)
         }
-        guard plugin.standing == .verified else { return .not(.notVerified) }
+        guard plugin.standing == .verified || plugin.standing == .trusted else { return .not(.notVerified) }
         guard !plugin.record.pinned else { return .not(.pinned) }
         guard let now = plugin.asksNow, let head = plugin.asksAtHead, !asksDifferently(now, head) else {
             return .not(.asksDifferently)
@@ -330,44 +333,76 @@ extension UpdateOffer {
     }
 }
 
-/// The permission decision across a swap of one verified copy for another.
+/// The permission decision across a swap of one copy for another with the same
+/// guarantee.
 ///
 /// A decision is held to the `version` it was made for (`PermissionGate`), so
 /// that a new version asking for more asks again. A verified plugin that
 /// updates itself every day would then stop every day until somebody agreed
 /// again to exactly what they had agreed to. So when the copy on disk was
-/// **Verified**, the copy that takes its place is too, and the new version
-/// asks for exactly what the old one asked for, byte for byte, the decision —
-/// whatever it was — is carried to the new version, unchanged otherwise. The
-/// same for every such swap, pressed or not: **Update**, **Switch to**, **Back
-/// to** and an earlier version. Anything else, and the decision is left as it
-/// was: the card asks.
+/// **Verified** and the copy that takes its place is too — or both are the
+/// same trusted source's (S4-09) — and the new version asks for exactly what the
+/// old one asked for, byte for byte, the decision — whatever it was — is carried
+/// to the new version, unchanged otherwise: the source it was made for
+/// included. The same for every such swap, pressed or not: **Update**,
+/// **Switch to**, **Back to** and an earlier version. Anything else — another
+/// guarantee, another source, code nobody verified — and the decision is left
+/// as it was: the card asks.
 ///
 /// Carrying never grants anything: what the decision holds is what it held,
-/// and the gate still holds every capability the new manifest asks for against
-/// it.
+/// and the gate still holds every capability the new manifest asks for, and the
+/// source the decision was made for, against it.
 public enum GrantCarry {
+    /// Whose guarantee a copy has.
+    public enum Guarantee: Equatable, Sendable {
+        /// Merged into the official repository: **Verified**.
+        case verified
+        /// The default branch of a source the operator trusted, by its id.
+        case trusted(source: String)
+
+        /// The source a decision has to have been made for to be carried.
+        public var source: String {
+            switch self {
+            case .verified: PluginGrant.officialSource
+            case .trusted(let source): source
+            }
+        }
+    }
+
     /// One copy of a plugin, as far as the decision goes.
     public struct Copy: Equatable, Sendable {
         public var version: String
         public var asks: [Capability]
-        /// Whether it stands **Verified**.
-        public var verified: Bool
+        /// Whose guarantee it has — nil for code nobody verified, a copy
+        /// changed on disk, or one that is not hashed yet.
+        public var guarantee: Guarantee?
 
-        public init(version: String, asks: [Capability], verified: Bool) {
+        public init(version: String, asks: [Capability], guarantee: Guarantee?) {
             self.version = version
             self.asks = asks
-            self.verified = verified
+            self.guarantee = guarantee
+        }
+
+        /// The guarantee a copy standing `standing` has, `record` its record.
+        public static func guarantee(of standing: PluginStanding?, record: InstalledRecord?) -> Guarantee? {
+            switch standing {
+            case .verified?: .verified
+            case .trusted?: record.map { .trusted(source: $0.source) }
+            default: nil
+            }
         }
     }
 
     /// The decision to keep after `old` — read before the swap; nil when it
-    /// could not be read — was replaced by `new`.
+    /// could not be read — was replaced by `new`. Only a decision made for the
+    /// source whose guarantee the copies have is carried: one left from
+    /// another source's copy of the same id is not that copy's to advance.
     public static func after(_ grant: PluginGrant?, old: Copy?, new: Copy) -> PluginGrant? {
-        guard let grant, let old, old.verified, new.verified,
+        guard let grant, let old, let guarantee = old.guarantee, guarantee == new.guarantee,
+              (grant.decidedForSource ?? PluginGrant.officialSource) == guarantee.source,
               grant.decidedForVersion == old.version,
               !AutoUpdate.asksDifferently(old.asks, new.asks) else { return grant }
         return PluginGrant(granted: grant.granted, denied: grant.denied, decidedForVersion: new.version,
-                           decidedAt: grant.decidedAt)
+                           decidedForSource: grant.decidedForSource, decidedAt: grant.decidedAt)
     }
 }
