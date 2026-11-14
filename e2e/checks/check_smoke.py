@@ -458,6 +458,11 @@ def check_real_gitlab_source(machine, check_dir, lab):
         texts, asked = _the_card(machine, HELLO_PROOF, lambda texts: HELLO_PROOF_SAYS in texts)
         expect(not asked, f"hello-proof, trusted and asking for nothing, asks on its card: {texts}")
         expect(HELLO_PROOF_SAYS in texts, f"hello-proof's card never said {HELLO_PROOF_SAYS!r}: the panel says {texts}")
+        # The panel put away by the shortcut that opened it: left open, it lies over the settings window's sidebar,
+        # and the click on Plugins lands on it (run 43630984708).
+        panel.park_in_the_middle(machine)
+        panel.press_the_chord(machine, config.HOTKEY_KEY_CODE, "putting the panel away")
+        machine.sleep(config.SETTLE_SECONDS)
 
         ui.plugins_pane(machine, "opening Settings → Plugins to remove the operator's project")
         _press(machine, f"source.{sid}.remove", "pressing Remove… on the operator's project")
