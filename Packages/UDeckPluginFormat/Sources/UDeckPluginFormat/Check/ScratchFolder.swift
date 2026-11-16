@@ -47,11 +47,45 @@ enum ScratchFolder {
         TemporaryFolder.url.appendingPathComponent("udeck-plugin-\(getuid())", isDirectory: true)
     }
 
-    /// A new folder in `parent`, its name starting with `prefix`.
+    /// A folder the command will not use, and why: on a shared temporary
+    /// folder anybody can make `udeck-plugin-<uid>` first, and then swap what
+    /// the command writes in it (audit F06).
+    struct Unsafe: Error, CustomStringConvertible {
+        let path: String
+        let why: String
+        var description: String {
+            "\(path) \(why), so udeck-plugin does not use it: remove it, or give the command another TMPDIR"
+        }
+    }
+
+    /// A new folder in `parent`, its name starting with `prefix`: `parent`
+    /// made 0700 when it is not there, and used only while it is a folder —
+    /// not a link — of this user's that nobody else may write in; the new
+    /// folder 0700 too.
     static func make(_ prefix: String = prefix, in parent: URL = home) throws -> URL {
+        try own(parent)
         let folder = parent.appendingPathComponent("\(prefix)\(getpid())-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        guard mkdir(folder.path, 0o700) == 0 else {
+            throw Unsafe(path: folder.path, why: "could not be made (\(String(cString: strerror(errno))))")
+        }
         return folder
+    }
+
+    /// `parent` made, 0700, when it is not there — and refused unless it is
+    /// a folder, not a link, of this user's, that no group or other user may
+    /// write in.
+    static func own(_ parent: URL) throws {
+        let path = parent.path
+        if mkdir(path, 0o700) != 0, errno != EEXIST {
+            throw Unsafe(path: path, why: "could not be made (\(String(cString: strerror(errno))))")
+        }
+        var status = stat()
+        guard lstat(path, &status) == 0 else {
+            throw Unsafe(path: path, why: "could not be read (\(String(cString: strerror(errno))))")
+        }
+        guard status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR) else { throw Unsafe(path: path, why: "is not a folder, or is a link") }
+        guard status.st_uid == getuid() else { throw Unsafe(path: path, why: "belongs to another user") }
+        guard status.st_mode & 0o022 == 0 else { throw Unsafe(path: path, why: "can be written by other users") }
     }
 
     /// Takes away the folders in `parent` that stopped runs of the check left,

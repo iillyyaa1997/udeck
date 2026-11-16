@@ -419,7 +419,9 @@ def group_into_disks(volumes, words, hide_system=True):
     ``used`` is summed: every volume's own usage is genuinely its own.
     ``avail`` is the *minimum* across the group, because every volume in an
     APFS container reports the container's whole free pool and taking any other
-    figure would mean claiming free space that is not there twice over.
+    figure would mean claiming free space that is not there twice over. Only
+    volumes that report the same size and free space pool: a partition of the
+    same disk that reports its own is a disk of its own.
 
     A container holding nothing *but* system volumes is dropped when they are
     hidden.  A Mac with a T2 or Apple silicon has a second, half-gigabyte
@@ -432,8 +434,16 @@ def group_into_disks(volumes, words, hide_system=True):
     """
     order = []
     groups = {}
+    signatures = {}
     for volume in volumes:
         key = volume.container
+        # Only an APFS container's volumes share a pool, and each says so the
+        # same way: the container's size and its free space. A disk carved
+        # into partitions — HFS+, exFAT — names them disk4s1, disk4s2 alike,
+        # but each has a size and free space of its own: a row of its own.
+        signature = (volume.blocks, volume.avail)
+        if signatures.setdefault(key, signature) != signature:
+            key = volume.device
         if key not in groups:
             groups[key] = []
             order.append(key)

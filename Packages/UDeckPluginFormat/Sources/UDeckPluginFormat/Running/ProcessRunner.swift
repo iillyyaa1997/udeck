@@ -174,6 +174,10 @@ public struct ProcessRunner: Sendable {
 
         await collector.finish(after: drainGrace, pollEvery: Self.drainPollInterval,
                                stopWithin: max(timeout, 0) + Self.stopMargin)
+        // The watcher looks every few milliseconds; a producer that ran past
+        // the limit and exited between two looks ran past it all the same
+        // (audit F10): what the collector saw decides, not what was looked at.
+        if let overflow = collector.overflowBytes { outcome.recordOverflow(bytes: overflow) }
 
         let dropped = collector.dropped
         return ProcessRunResult(

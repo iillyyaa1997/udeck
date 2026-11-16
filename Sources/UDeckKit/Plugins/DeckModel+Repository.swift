@@ -578,7 +578,11 @@ extension DeckModel {
                 treesOnDisk = hashed
                 if moved { restartPolling() }
             }
-            if installedProblem == nil, let written = found.records ?? (adopted.isEmpty ? nil : records) {
+            // Never while an install, update, removal or link runs: its
+            // records are being written, and these were read before it — the
+            // hashing after it writes them (audit F03).
+            if installedProblem == nil, busyPlugin == nil,
+               let written = found.records ?? (adopted.isEmpty ? nil : records) {
                 installed = written
                 save(JSONFileStore<InstalledPlugins>(url: paths.installedFile), installed, named: "installed plugins")
             }
@@ -1053,7 +1057,7 @@ extension DeckModel {
         // whichever button was pressed, and whatever screen it was on.
         let origin = takenNow(origin)
         guard canRead(origin.source), busyPlugin == nil else { return }
-        busyPlugin = id
+        beginOperation(id)
         operationProblems[id] = nil
         Task {
             // A source read with a token: its token first (`readyToken`).
@@ -1129,7 +1133,7 @@ extension DeckModel {
             operationProblems[id] = .catalogue(.notFound)
             return
         }
-        busyPlugin = id
+        beginOperation(id)
         operationProblems[id] = nil
         autoUpdates.began(id)
         // The copy's own source's head, which it is verified — or recorded —
@@ -1271,7 +1275,7 @@ extension DeckModel {
             operationProblems[id] = .recordsBroken(installedProblem ?? "")
             return .goAhead
         }
-        busyPlugin = id
+        beginOperation(id)
         operationProblems[id] = nil
         autoUpdates.began(id)
         let installer = self.installer
@@ -1416,7 +1420,7 @@ extension DeckModel {
             break
         }
         guard installedProblem == nil else { return .refused(.recordsBroken(installedProblem ?? "")) }
-        busyPlugin = id
+        beginOperation(id)
         operationProblems[id] = nil
         autoUpdates.began(id)
         defer { busyPlugin = nil }
@@ -1435,6 +1439,15 @@ extension DeckModel {
         reloadInstalled()
         discoverPlugins()
         return .linked(id: id, target: candidate.target)
+    }
+
+    /// An install, update, removal or link of `id` begins: the hashing under
+    /// way read the records before it, and is not let write them over the
+    /// operation's (audit F03) — `reloadInstalled` asks again after.
+    func beginOperation(_ id: String) {
+        busyPlugin = id
+        reverifications += 1
+        reverifyTask?.cancel()
     }
 
     func reloadInstalled() {

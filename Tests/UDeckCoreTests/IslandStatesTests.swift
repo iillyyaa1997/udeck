@@ -142,12 +142,42 @@ struct IslandStatesTests {
         #expect(states.light[gone] == nil)
     }
 
-    @Test("a state uDeck no longer has costs that state, not the file")
+    @Test("an unknown state costs that state, not the link, the theme or the file (audit F12)")
     func unknownStateIsNotFatal() throws {
         let json = Data(#"{ "links": [ { "id": "5A2F4C4E-0000-0000-0000-000000000001", "states": ["collapsed.ordinary", "sideways.ordinary"] } ] }"#.utf8)
-        #expect(throws: (any Error).self) {
-            _ = try JSONDecoder().decode(IslandStates.self, from: json)
-        }
+        let states = try JSONDecoder().decode(IslandStates.self, from: json)
+        #expect(states.links.count == 1 && states.links[0].states == [IslandState(phase: .collapsed)])
+        #expect(states.links[0].id.uuidString == "5A2F4C4E-0000-0000-0000-000000000001")
+        // A whole settings file: the misspelt state costs that state alone.
+        let settings = Data(#"""
+            { "theme": { "source": "manual", "light": {},
+                         "states": { "links": [ { "id": "5A2F4C4E-0000-0000-0000-000000000001",
+                                                  "states": ["collapsed.ordinary", "colapsed.fullscreen"] } ] },
+                         "saved": [ { "id": "not-a-uuid", "name": "Mine", "look": {} } ] },
+              "hotkey": { "enabled": true, "key": "U", "modifiers": ["control", "alt"] } }
+            """#.utf8)
+        let read = try JSONDecoder().decode(AppSettings.self, from: settings)
+        #expect(read.theme.source == .manual)
+        #expect(read.theme.states.links.first?.states == [IslandState(phase: .collapsed)])
+        #expect(read.theme.saved.map(\.name) == ["Mine"], "a preset whose id is no UUID keeps its name and look")
+        #expect(read.hotkey.key == "U" && read.hotkey.modifiers == [.control], "an unknown modifier costs that modifier")
+    }
+
+    @Test("a shared value written with a link selected moves that value alone in the theme's look (audit F16)")
+    func sharedWriteMovesOneValue() {
+        let link = IslandLink(states: [IslandState(phase: .collapsed)])
+        let rest = IslandLink(states: IslandState.allCases.filter { $0.phase != .collapsed })
+        var theme = ThemeSettings()
+        theme.light = quiet
+        theme.states = IslandStates(links: [link, rest], shared: [.inkColour], light: [link.id: loud])
+        let edited = theme.states.look(for: IslandState(phase: .collapsed), isDark: false, base: theme.light)
+        theme.write(\.inkColor, InkColor(red: 0.1, green: 0.2, blue: 0.3), edited: edited, link: link, shared: true, dark: false)
+        var wanted = quiet
+        wanted.inkColor = InkColor(red: 0.1, green: 0.2, blue: 0.3)
+        #expect(theme.light == wanted, "only the shared value moved; the rest of the theme's look stayed")
+        #expect(theme.states.light[link.id] == loud, "the link's own copy is left as it was")
+        theme.write(\.inkBrightness, 0.4, edited: edited, link: link, shared: false, dark: false)
+        #expect(theme.states.light[link.id]?.inkBrightness == 0.4 && theme.light == wanted)
     }
 
     @Test("what is written is what comes back")

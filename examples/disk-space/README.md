@@ -160,6 +160,10 @@ tests build is checked against.
   gets its own `diskN` and therefore its own row, which is correct in the sense
   that its free space is genuinely separate, and wrong in the sense that the
   space it occupies is on some other disk and gets counted twice.
+- **Volumes that report the same size and the same free space pool.** That is
+  what tells an APFS container's volumes apart from a disk's partitions, which
+  each report their own (audit F23); two partitions of exactly the same size
+  with exactly the same free space would still be read as one container.
 - **The disk's name is its mount point's basename**, not the volume label.
   They are usually the same and `df` does not carry the label; reading it would
   mean another external call on every poll.

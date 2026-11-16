@@ -388,6 +388,20 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(["disk3", "disk1"],
                          [d.key for d in self.disks(hide_system=False)])
 
+    def test_partitions_of_one_disk_without_apfs_are_rows_of_their_own(self):
+        # Audit F23: an HFS+ or exFAT disk carved into two partitions lists them
+        # as disk4s1 and disk4s2 like an APFS container's volumes — but each
+        # has its own size and its own free space, and pooling them would
+        # understate what is free.
+        text = APPLE_SILICON + "\n".join([
+            "/dev/disk4s1     488245288 448245288  40000000    92%    /Volumes/Photos",
+            "/dev/disk4s2     488245288  88245288 400000000    19%    /Volumes/Backup",
+        ]) + "\n"
+        disks = self.disks(text)
+        self.assertEqual(["disk3", "disk4", "/dev/disk4s2"], [d.key for d in disks])
+        self.assertEqual([40000000, 400000000], [d.avail for d in disks[1:]])
+        self.assertEqual([448245288, 88245288], [d.used for d in disks[1:]])
+
     def test_an_external_disk_is_its_own_row(self):
         disks = self.disks(WITH_EXTERNAL)
         self.assertEqual(["disk3", "disk4"], [d.key for d in disks])

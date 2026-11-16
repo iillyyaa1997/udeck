@@ -420,6 +420,32 @@ struct PollExecutionTests {
         #expect(Date().timeIntervalSince(started) < 10, "the limit should bite well before the timeout")
     }
 
+    @Test("a producer past the limit that exits at once is said to have run past it, every time (audit F10)")
+    func overflowThenExitIsNotACleanExit() async {
+        let temp = TemporaryDirectory()
+        temp.writePlugin(folder: "burst", manifest: """
+        { "id": "burst", "name": "Burst", "version": "1.0.0", "api": 1, "kind": "poll",
+          "run": ["./run.sh"], "interval": 30, "timeout": 20 }
+        """, script: (name: "run.sh",
+                      // Past the limit in one go, then gone — before the
+                      // limit's watcher has had a look.
+                      body: "#!/bin/sh\nhead -c 300000 /dev/zero | tr '\\0' x\nexit 0\n", executable: true))
+        var runner = ProcessRunner()
+        runner.maximumOutputBytes = 200_000
+        for attempt in 1 ... 10 {
+            let result = await runner.run(
+                executable: temp.url.appendingPathComponent("plugins/burst/run.sh"), arguments: [],
+                workingDirectory: temp.url.appendingPathComponent("plugins/burst"),
+                environment: ["PATH": "/usr/bin:/bin"], timeout: 20
+            )
+            guard case .outputLimitExceeded(let bytes) = result.termination else {
+                Issue.record("attempt \(attempt): \(result.termination), \(result.standardOutputDropped) bytes dropped")
+                return
+            }
+            #expect(bytes > 200_000)
+        }
+    }
+
     @Test("a runaway producer cannot make uDeck hold more than the limit")
     func runawayOutputIsNotRetained() async {
         let temp = TemporaryDirectory()
