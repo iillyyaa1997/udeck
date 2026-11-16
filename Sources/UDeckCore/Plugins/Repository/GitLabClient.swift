@@ -295,7 +295,8 @@ public struct GitLabClient: RepositoryProvider {
                 // With a token, what GraphQL says of it is the read's answer:
                 // the token refused, the scope it lacks, a move — never asked
                 // again of the files API, which would send it once more.
-                case .unauthorized, .forbidden, .moved, .credentialUnbound, .tokenWithdrawn:
+                case .unauthorized, .forbidden, .moved, .credentialUnbound, .tokenWithdrawn, .signedOut,
+                     .keychainUnavailable:
                     if credential != nil { throw error }
                     rest += commits[start...]
                     start = commits.count
@@ -576,19 +577,24 @@ public struct GitLabClient: RepositoryProvider {
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
-        try carry(&request)
         return request
     }
 
-    /// `request` given the project's token, when it has one — only to the
-    /// origin the token was checked with (S4-19).
-    private func carry(_ request: inout URLRequest) throws {
-        guard let credential else { return }
+    /// `attempt` with `request` given the project's token, when it has one —
+    /// only to the origin the token was checked with (S4-19) — as it stands
+    /// now: Sign in's renewed when due, and once after a `401` (S4-23); a
+    /// token refused is refused for good, its lease ended by `sending`.
+    private func carrying<T>(_ request: URLRequest, _ attempt: (URLRequest) async throws -> T) async throws -> T {
+        guard let credential else { return try await attempt(request) }
         // Taken back since it was handed out: not sent, not even once more.
         try credential.stillHeld()
         guard let url = request.url, credential.mayGo(to: url) else { throw ProviderError.credentialUnbound }
-        let header = credential.header
-        request.setValue(header.value, forHTTPHeaderField: header.name)
+        return try await credential.sending(now: now()) { token in
+            var carried = request
+            let header = credential.header(for: token)
+            carried.setValue(header.value, forHTTPHeaderField: header.name)
+            return try await attempt(carried)
+        }
     }
 
     private func api(
@@ -599,7 +605,14 @@ public struct GitLabClient: RepositoryProvider {
         notFoundOn400: (Data) -> Bool = { _ in false },
         lookingUp: Bool = false
     ) async throws -> (Data, HTTPURLResponse) {
-        let request = try request(path, query: query, headers: headers)
+        try await carrying(try request(path, query: query, headers: headers)) { request in
+            try await apiOnce(request, allowNotModified: allowNotModified, notFoundOn400: notFoundOn400,
+                              lookingUp: lookingUp)
+        }
+    }
+
+    private func apiOnce(_ request: URLRequest, allowNotModified: Bool, notFoundOn400: (Data) -> Bool,
+                         lookingUp: Bool) async throws -> (Data, HTTPURLResponse) {
         let (data, response): (Data, HTTPURLResponse)
         do {
             let (got, answer) = credential != nil
@@ -631,7 +644,10 @@ public struct GitLabClient: RepositoryProvider {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
-        try carry(&request)
+        return try await carrying(request) { request in try await postOnce(request, url: url, most: most) }
+    }
+
+    private func postOnce(_ request: URLRequest, url: URL, most: Int) async throws -> Data {
         let stream: URLSession.AsyncBytes
         let response: HTTPURLResponse
         do {
@@ -646,10 +662,9 @@ public struct GitLabClient: RepositoryProvider {
             throw ProviderError.unreachable(error.localizedDescription)
         }
         // Refused the moment its headers arrive, whatever its body does
-        // after: no client holding the token sends it again (S4-19).
-        if response.statusCode == 401, let credential {
+        // after; `carrying` decides whether it is sent again (S4-19, S4-23).
+        if response.statusCode == 401, credential != nil {
             stream.task.cancel()
-            credential.lease?.end(.rejected)
             throw ProviderError.unauthorized
         }
         // An answer from anywhere but where it was asked — a redirect followed
@@ -680,7 +695,12 @@ public struct GitLabClient: RepositoryProvider {
 
     /// One file, read as it arrives, no further than one byte past `most`.
     private func bytes(_ path: String, query: [URLQueryItem], most: Int) async throws -> Data {
-        let request = try request(path, query: query, headers: [:])
+        try await carrying(try request(path, query: query, headers: [:])) { request in
+            try await bytesOnce(request, most: most)
+        }
+    }
+
+    private func bytesOnce(_ request: URLRequest, most: Int) async throws -> Data {
         let stream: URLSession.AsyncBytes
         let response: HTTPURLResponse
         do {
@@ -695,10 +715,9 @@ public struct GitLabClient: RepositoryProvider {
             throw ProviderError.unreachable(error.localizedDescription)
         }
         // Refused the moment its headers arrive, whatever its body does
-        // after: no client holding the token sends it again (S4-19).
-        if response.statusCode == 401, let credential {
+        // after; `carrying` decides whether it is sent again (S4-19, S4-23).
+        if response.statusCode == 401, credential != nil {
             stream.task.cancel()
-            credential.lease?.end(.rejected)
             throw ProviderError.unauthorized
         }
         guard (200 ..< 300).contains(response.statusCode) else {
@@ -768,10 +787,9 @@ public struct GitLabClient: RepositoryProvider {
         case (304, _) where allowNotModified: return
         case (404, _): throw ProviderError.notFound
         case (400, _) where notFoundOn400(body): throw ProviderError.notFound
-        case (401, _):
-            // Refused: no client holding it sends it again (S4-19).
-            credential?.lease?.end(.rejected)
-            throw ProviderError.unauthorized
+        // A token's lease is ended by `carrying`, once Sign in's has had its
+        // one renewal: no client holding it sends it again (S4-19).
+        case (401, _): throw ProviderError.unauthorized
         case (300 ..< 400, _): throw ProviderError.moved(status: status)
         default: throw ProviderError.refused(status: status)
         }

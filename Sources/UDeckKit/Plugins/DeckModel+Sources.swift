@@ -207,7 +207,8 @@ extension DeckModel {
         guard let origin = sourceClients.apiOrigin(of: source) else { return nil }
         let ticket = sourceTokens.ticket(source.id)
         let vault = credentialVault
-        let found = await vault.credential(for: source, apiOrigin: origin, requested: requested)
+        let found = await vault.credential(for: source, apiOrigin: origin, oauthOrigin: sourceClients.oauth(of: source)?.origin,
+                                           requested: requested)
         // Forgotten, replaced or removed while the vault was asked — in uDeck
         // or in `sources.json` by hand, read again now: what it said is not
         // held. Nor is a token the host refused meanwhile, unless pressed.
@@ -221,7 +222,9 @@ extension DeckModel {
             return sourceTokens.wasRejected(source.id) ? .unauthorized : .tokenWithdrawn
         }
         switch found {
-        case .credential(let credential):
+        case .credential(var credential):
+            // Sign in's token renewed for every client holding it (S4-23).
+            credential.renewal = renewal(for: source.id, credential)
             guard sourceTokens.hold(credential, for: ticket, renewingRejected: pressed) != nil else {
                 return sourceTokens.wasRejected(source.id) ? .unauthorized : .tokenWithdrawn
             }
@@ -276,6 +279,7 @@ extension DeckModel {
         loadSources()
         guard let source = source(id), source.access != OwnSource.Access.none else { return nil }
         if sourceStates[id]?.lastError == .unauthorized || sourceTokens.wasRejected(id) { return .unauthorized }
+        if sourceStates[id]?.lastError == .signedOut { return .signedOut }
         if sourceTokens.credential(of: id) != nil { return nil }
         if let problem = await lookUpCredential(of: source, requested: true) { return problem }
         return sourceTokens.credential(of: id) == nil ? .tokenMissing : nil
@@ -417,7 +421,7 @@ extension DeckModel {
             // source, with it or without it, until Check now or Token…
             // (S4-19) — a read nobody pressed for leaves it alone.
             if !pressed, source.access != OwnSource.Access.none,
-               sourceStates[id]?.lastError == .unauthorized || sourceTokens.wasRejected(id) {
+               [.unauthorized, .signedOut].contains(sourceStates[id]?.lastError) || sourceTokens.wasRejected(id) {
                 return
             }
             if let problem = await lookUpCredential(of: source, requested: pressed || !unrequested, pressed: pressed) {
@@ -427,7 +431,7 @@ extension DeckModel {
                     // A token the host refused stays refused, whatever the
                     // Keychain said to a press since: nothing reads the source
                     // by itself until a token is read with again (S4-19).
-                    if state.lastError == .unauthorized, problem != .tokenWithdrawn { return }
+                    if state.lastError == .unauthorized || state.lastError == .signedOut, problem != .tokenWithdrawn { return }
                     state.lastError = problem
                 }
                 return
@@ -513,6 +517,7 @@ extension DeckModel {
     /// The sheet closed: what it said goes, and an answer still on its way
     /// is not shown.
     public func closeAddSource() {
+        cancelSignIn("")
         sourceLookups += 1
         sourceSheetOpen = false
         sourceField = ""
@@ -529,6 +534,7 @@ extension DeckModel {
     /// token pasted there, sent only to the address the step is for, and
     /// only while the field still names it (S4-17).
     public func lookUpSource(withToken: Bool = false) {
+        cancelSignIn("")
         let draft = withToken ? addSourceDraft : nil
         let pasted = draft?.token.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let token: Secret? = pasted.isEmpty ? nil : Secret(pasted)
@@ -630,13 +636,25 @@ extension DeckModel {
             }
             // Its turn lost meanwhile, or the entry not written: its own write
             // taken back — that write alone, never a token kept after it.
+            // Sign in's token is the source's *signIn*, a GitLab of one's
+            // own's application id kept with it (S4-23).
+            let signedIn = credential.kind == .oauth
+            let applicationID = signedIn && asksForAnApplicationID(provider: found.provider, host: found.host)
+                ? credential.clientID : nil
             guard sourceTokens.isCurrent(ticket), source(id) == nil,
-                  add(found, access: OwnSource.Access.token),
-                  sourceTokens.hold(credential, for: ticket, renewingRejected: true) != nil else {
+                  add(found, access: signedIn ? OwnSource.Access.signIn : OwnSource.Access.token,
+                      signInClientID: applicationID) else {
                 await takeBack(id, written: revision, address: found.address.description)
                 return
             }
-            sourceNotices[id] = tokenNotices(pasted: credential.token, writeScope: found.writeScope)
+            var held = credential
+            held.renewal = renewal(for: id, held)
+            guard sourceTokens.hold(held, for: ticket, renewingRejected: true) != nil else {
+                await takeBack(id, written: revision, address: found.address.description)
+                return
+            }
+            sourceNotices[id] = signedIn ? [.sourceSignedIn(host: found.host)]
+                : tokenNotices(pasted: credential.token, writeScope: found.writeScope)
         }
     }
 
@@ -655,10 +673,11 @@ extension DeckModel {
     }
 
     /// What a change of the vault failed with, as a sentence says it.
-    static func said(_ error: CredentialVault.ChangeError) -> String {
+    nonisolated static func said(_ error: CredentialVault.ChangeError) -> String {
         switch error {
         case .unavailable(let reason), .notWritten(let reason): reason
         case .unreadable: "the item is not one this uDeck reads"
+        case .changed: "the token was changed meanwhile"
         }
     }
 
@@ -680,12 +699,12 @@ extension DeckModel {
 
     /// The entry written, and the source read: whether it was added.
     @discardableResult
-    private func add(_ found: SourceLookUp.Found, access: String) -> Bool {
+    private func add(_ found: SourceLookUp.Found, access: String, signInClientID: String? = nil) -> Bool {
         let added: Result<OwnSource, SourceList.AddRefusal>
         do {
             added = try sourceStore.modify { list in
                 list.add(provider: found.provider, host: found.host, path: found.path, remoteID: found.remoteID,
-                         access: access, at: Date(), official: catalogueAddress)
+                         access: access, at: Date(), official: catalogueAddress, signInClientID: signInClientID)
             }
         } catch {
             sourceOperationProblems[""] = "\(error)"
@@ -725,7 +744,9 @@ extension DeckModel {
     /// was pasted under it gone either way.
     public func toggleToken(_ id: String) {
         sourceTokenDraft = ""
+        if let open = sourceTokenOpen { cancelSignIn(open) }
         sourceTokenOpen = sourceTokenOpen == id ? nil : id
+        sourceApplicationDraft = sourceTokenOpen.flatMap { source($0)?.signInClientID } ?? ""
     }
 
     /// **Look up with the token** under **Token…**: the pasted token checked
@@ -775,7 +796,7 @@ extension DeckModel {
             // A replacement leaves `sources.json` as it is — it already says
             // the source has a token — so a failed write never costs the token
             // it replaced; a first token writes `access`, or is taken back.
-            let replacing = now.access != OwnSource.Access.none
+            let replacing = now.access == OwnSource.Access.token
             let revision: Int
             do throws(CredentialVault.ChangeError) {
                 revision = try await vault.keep(credential, for: id)
@@ -836,6 +857,8 @@ extension DeckModel {
     public func forgetToken(of id: String) {
         guard source(id) != nil, sourcesProblem == nil, !sourcesForgetting.contains(id) else { return }
         sourceTokens.withdraw(id)
+        cancelSignIn(id)
+        tokenRenewals[id] = nil
         sourceTokenChecks[id]?.cancel()
         sourceTokenChecks[id] = nil
         sourcesForgetting.insert(id)
@@ -880,6 +903,8 @@ extension DeckModel {
             || sourcesKeeping[id] != nil
         sourceOperationProblems[id] = nil
         sourceTokens.withdraw(id)
+        cancelSignIn(id)
+        tokenRenewals[id] = nil
         sourceTokenChecks[id]?.cancel()
         sourceTokenChecks[id] = nil
         if sourceTokenOpen == id {
@@ -935,4 +960,7 @@ extension DeckModel {
 public struct TokenDraft: Equatable, Sendable {
     public let link: SourceLink
     public var token: String
+    /// A GitLab of one's own's application id for **Sign in**, pasted under
+    /// the step (S4-23).
+    public var applicationID: String = ""
 }

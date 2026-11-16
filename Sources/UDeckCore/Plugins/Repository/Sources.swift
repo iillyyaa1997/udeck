@@ -124,9 +124,14 @@ public struct OwnSource: Equatable, Sendable {
     public var trustedAt: Date?
     /// When it was added.
     public var addedAt: Date?
+    /// A GitLab of one's own's application **Sign in** asks as (S4-23) — its
+    /// Application ID, pasted under *Application ID on <host>*: an id, never
+    /// a secret. Nil for none, and for github.com and gitlab.com, whose
+    /// applications uDeck carries.
+    public var signInClientID: String?
 
     public init(id: String, provider: String, host: String, path: String, remoteID: Int, access: String = Access.none,
-                trustedAt: Date? = nil, addedAt: Date?) {
+                trustedAt: Date? = nil, addedAt: Date?, signInClientID: String? = nil) {
         self.id = id
         self.provider = provider
         self.host = host
@@ -135,6 +140,7 @@ public struct OwnSource: Equatable, Sendable {
         self.access = access
         self.trustedAt = trustedAt.map(InstalledPlugins.wholeSeconds)
         self.addedAt = addedAt.map(InstalledPlugins.wholeSeconds)
+        self.signInClientID = SignInApps.cleaned(signInClientID)
     }
 
     public var identity: SourceIdentity { SourceIdentity(provider: provider, host: host, remoteID: remoteID) }
@@ -306,10 +312,12 @@ public struct SourceList: Equatable, Sendable {
     @discardableResult
     public mutating func add(provider: String, host: String, path: String, remoteID: Int,
                              access: String = OwnSource.Access.none, at: Date,
-                             official: RepositoryAddress = .official) -> Result<OwnSource, AddRefusal> {
+                             official: RepositoryAddress = .official,
+                             signInClientID: String? = nil) -> Result<OwnSource, AddRefusal> {
         let identity = SourceIdentity(provider: provider, host: host, remoteID: remoteID)
         let source = OwnSource(id: SourceID.derive(identity, path: path), provider: provider, host: identity.host,
-                               path: path, remoteID: remoteID, access: access, addedAt: at)
+                               path: path, remoteID: remoteID, access: access, addedAt: at,
+                               signInClientID: signInClientID)
         if let refusal = SourceLink.refusal(of: source.address, official: official) { return .failure(.address(refusal)) }
         if let listed = self.source(identity: identity) { return .failure(.alreadyAdded(listed)) }
         if let taken = sources.first(where: { $0.id == source.id }) { return .failure(.idTaken(by: taken)) }
@@ -355,6 +363,17 @@ public struct SourceList: Equatable, Sendable {
         guard let index = entries.firstIndex(where: { if case .source(let source) = $0 { source.id == id } else { false } }),
               case .source(var source) = entries[index] else { return false }
         source.access = access
+        entries[index] = .source(source)
+        return true
+    }
+
+    /// A GitLab of one's own's application id for **Sign in**, written back —
+    /// nil, or an id that is no id, leaves none (S4-23).
+    @discardableResult
+    public mutating func setSignInClientID(_ id: String, _ clientID: String?) -> Bool {
+        guard let index = entries.firstIndex(where: { if case .source(let source) = $0 { source.id == id } else { false } }),
+              case .source(var source) = entries[index] else { return false }
+        source.signInClientID = SignInApps.cleaned(clientID)
         entries[index] = .source(source)
         return true
     }
@@ -415,7 +434,8 @@ public struct SourceList: Equatable, Sendable {
         return .source(OwnSource(
             id: fields["id"]?.string ?? "", provider: provider, host: host, path: path, remoteID: remoteID,
             access: fields["access"]?.string ?? OwnSource.Access.none,
-            trustedAt: fields["trustedAt"]?.string.flatMap(Self.date), addedAt: fields["addedAt"]?.string.flatMap(Self.date)
+            trustedAt: fields["trustedAt"]?.string.flatMap(Self.date), addedAt: fields["addedAt"]?.string.flatMap(Self.date),
+            signInClientID: fields["signInClientID"]?.string
         ))
     }
 
@@ -491,7 +511,7 @@ public struct SourceList: Equatable, Sendable {
 extension SourceList: Codable {
     private enum CodingKeys: String, CodingKey, CaseIterable { case version, sources }
     private enum SourceKeys: String, CodingKey, CaseIterable {
-        case id, provider, host, path, remoteID, access, trustedAt, addedAt
+        case id, provider, host, path, remoteID, access, trustedAt, addedAt, signInClientID
     }
 
     /// Any key: those this uDeck does not know, written back beside its own.
@@ -558,6 +578,8 @@ extension SourceList: Codable {
                 // Written as null rather than left out, like the records' own.
                 try fields.encode(source.trustedAt, forKey: key(.trustedAt))
                 try fields.encode(source.addedAt, forKey: key(.addedAt))
+                // Only where one was pasted: a file without it reads as before.
+                try fields.encodeIfPresent(source.signInClientID, forKey: key(.signInClientID))
             }
         }
     }

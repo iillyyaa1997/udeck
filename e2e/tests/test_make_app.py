@@ -100,11 +100,15 @@ def test_a_lab_build_reads_each_gitlab_the_fake_answers_as_on_its_own_port(check
     plist = plist_in(checkout / "lab-builds" / "uDeck-9.9.9.zip")
     assert plist["UDeckPluginsAPIBase"] == "http://127.0.0.1:8766/api"
     assert plist["UDeckPluginsHostMap"] == builds.host_map("http://127.0.0.1:8766") == {
-        host: f"http://127.0.0.1:{port}" for host, port in config.GITLAB_PORTS.items()}
+        host: f"http://127.0.0.1:{port}" for host, port in config.HOST_MAP_PORTS.items()}
+    # Sign in (stage 4, R6): the lab's applications over the shipped ones.
+    assert {key: plist.get(key) for key in config.LAB_SIGN_IN} == config.LAB_SIGN_IN
     shutil.rmtree(checkout / "lab-builds")
     done = make_app(checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99", "--zip")
     assert done.returncode == 0, done.stdout + done.stderr
-    assert "UDeckPluginsHostMap" not in plist_in(checkout / "lab-builds" / "uDeck-9.9.9.zip")
+    shipped = plist_in(checkout / "lab-builds" / "uDeck-9.9.9.zip")
+    assert "UDeckPluginsHostMap" not in shipped
+    assert {key: shipped.get(key) for key in config.SHIPPED_SIGN_IN} == config.SHIPPED_SIGN_IN
 
 
 def test_the_command_travels_inside_the_bundle_signed_with_it(checkout):

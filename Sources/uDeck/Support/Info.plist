@@ -42,6 +42,12 @@
     <string>iillyyaa1997/udeck-plugins</string>
     <key>UDeckPluginsRepositoryID</key>
     <integer>1393324153</integer>
+    <key>UDeckGitHubAppClientID</key>
+    <string>Iv23li5DCUHkd8JfjXwC</string>
+    <key>UDeckGitHubAppSlug</key>
+    <string>udeck-plugins</string>
+    <key>UDeckGitLabComClientID</key>
+    <string>4af709fcbb73fc93dc15a7c5f588b0c3102bb6a21864d7b63e41320e07812b3c</string>
     <key>NSHumanReadableCopyright</key>
     <string>Copyright 2026 Ilya Volkov. Licensed under the Apache License, Version 2.0.</string>
     <key>NSSupportsAutomaticTermination</key>

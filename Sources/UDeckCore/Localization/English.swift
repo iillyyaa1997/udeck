@@ -400,8 +400,10 @@ struct English: Vocabulary {
         case .sourceTokenClipboardCleared: "The token was removed from the clipboard."
         case .sourceTokenWriteScope:
             "This classic token has the repo scope: it can also write to every repository you can reach. uDeck only reads; a fine-grained token with Contents read-only is safer."
-        case .sourceTokenCollaborator(let owner, let repository):
-            "A fine-grained token reads only repositories of your own account and of organisations you belong to. If you are only a collaborator on \(owner)/\(repository), use a classic token, which can also write."
+        case .sourceTokenCollaborator(let owner, let repository, let signIn):
+            "A fine-grained token reads only repositories of your own account and of organisations you belong to. If you are only a collaborator on \(owner)/\(repository), "
+                + (signIn ? "use Sign in with GitHub once \(owner) installs the uDeck app, or a classic token, which can also write."
+                    : "use a classic token, which can also write.")
         case .sourceTokenChooseRepository(let owner, let repository):
             "On the page, choose Only select repositories → \(repository), and check that the resource owner is \(owner)."
         case .sourceTokenGitLabScopeHelp:
@@ -411,6 +413,27 @@ struct English: Vocabulary {
         case .sourceLookUpWithToken: "Look up with the token"
         case .sourceTokenField: "Paste the token"
         case .sourceForgetToken: "Forget the token"
+        case .sourceSignIn(let provider): provider == SourceLink.gitlab ? "Sign in with GitLab" : "Sign in with GitHub"
+        case .sourceSignInEnterCode(let host): "Enter this code on \(host). uDeck checks by itself and goes on once you have."
+        case .sourceSignInCopyAndOpen(let page): "Copy the code and open \(page)"
+        case .sourceSignInExpired: "The code expired; start again."
+        case .sourceSignInDeclined: "Sign-in was declined."
+        case .sourceSignedOut(let host): "Signed out of \(host): sign in again."
+        case .sourceSignInAppNotInstalled(let owner, let repository):
+            "Signed in, but the uDeck app is not installed for \(owner), so it cannot read \(repository). Install it on \(owner), choosing \(repository)."
+        case .sourceSignInInstallApp(let owner): "Install the uDeck app on \(owner)…"
+        case .sourceSignInApplicationField(let host): "Application ID on \(host)"
+        case .sourceSignInApplicationHelp(let host):
+            "To sign in to \(host), uDeck needs an application registered there: not confidential, with the read_api scope, by you (User settings → Applications) or by its admin. Paste its Application ID here."
+        case .sourceSignInRefused(let host, let status, let code):
+            "\(host) refused the sign-in (HTTP \(status)\(code.map { ", \($0)" } ?? ""))."
+        case .sourceSignInRedirected(let host, let status):
+            "\(host) answered the sign-in with a redirect (HTTP \(status)); uDeck never follows one with a secret."
+        case .sourceSignInBadAnswer(let host, let status, let field):
+            "\(host) answered the sign-in with something uDeck could not read (HTTP \(status), no \(field))."
+        case .sourceSignInLookUpAgain: "Look up again"
+        case .sourceSignOut: "Sign out"
+        case .sourceSignedIn(let host): "Signed in to \(host)."
         case .sourceNoLongerAdded(let address): "From \(address) — a source no longer added"
         case .sourceRemoveConfirm(let name, let address):
             "Remove \(name) (\(address))? uDeck stops reading it and forgets its token. What was installed from it stays and keeps running; if you trusted it, those plugins become Unverified and ask again before they next run, and nothing updates or reinstalls them until you add it again."

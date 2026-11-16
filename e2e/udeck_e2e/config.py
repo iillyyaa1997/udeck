@@ -654,6 +654,22 @@ PLUGINS_PORT = 8766
 # limiters (`fake-github.py`).
 GITLAB_PORTS = {"gitlab.example.test": 8768, "gitlab.com": 8769}
 
+# github.com's own web (stage 4, R6: S4-21d), where Sign in asks — `login/device/code` and `login/oauth/access_token` —
+# on a port of its own, as a GitLab is: every lab build's host map sends github.com there too, and the fake answers its
+# device flow. Every host a lab build's map names, with its port: the GitLabs and github.com's web.
+GITHUB_WEB_PORT = 8770
+HOST_MAP_PORTS = {**GITLAB_PORTS, "github.com": GITHUB_WEB_PORT}
+
+# The applications a lab build signs in as (S4-23), written by `Scripts/make-app.sh --test-plugins` over the shipped
+# ones and held to these by `builds.Builder._verify`: made-up ids the fake knows (`fake-github.py`'s OAUTH_CLIENTS),
+# never the real GitHub App's or gitlab.com application's. A GitLab of one's own's is pasted into its source.
+LAB_SIGN_IN = {"UDeckGitHubAppClientID": "Iv1.lab-udeck-github", "UDeckGitHubAppSlug": "udeck-lab",
+               "UDeckGitLabComClientID": "lab-udeck-gitlab-com"}
+# What a shipped build signs in as: the uDeck Plugins GitHub App and the gitlab.com application, registered 2026-11-16
+# (ids only: neither has a secret uDeck uses).
+SHIPPED_SIGN_IN = {"UDeckGitHubAppClientID": "Iv23li5DCUHkd8JfjXwC", "UDeckGitHubAppSlug": "udeck-plugins",
+                   "UDeckGitLabComClientID": "4af709fcbb73fc93dc15a7c5f588b0c3102bb6a21864d7b63e41320e07812b3c"}
+
 # The repository the fake answers for: the official one's own name, which is what
 # a lab build carries in `UDeckPluginsRepository` as it ships.
 PLUGINS_REPOSITORY = "iillyyaa1997/udeck-plugins"

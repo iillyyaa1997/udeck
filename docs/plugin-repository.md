@@ -22,9 +22,9 @@ own (see [Stages](#stages)). **Everything in this document without a mark is
 built** — stages 1, 2 and 3, which [Stages](#stages) lists, all but one step of
 stage 2 marked in [The official repository](#the-official-repository): its
 script deleted once `udeck-plugin check-repo` has agreed with it long enough —
-and stage 4 but **Sign in**: a GitHub repository or a GitLab project —
-gitlab.com's or one's own GitLab's — added as a source of its own, public or
-private and read with a token, and trusted ([Sources of one's own](#sources-of-ones-own)).
+and stage 4: a GitHub repository or a GitLab project — gitlab.com's or one's
+own GitLab's — added as a source of its own, public or private and read with a
+token pasted or got by **Sign in**, and trusted ([Sources of one's own](#sources-of-ones-own)).
 Anything that belongs to a later stage and is not built yet is marked where it
 appears:
 
@@ -1118,9 +1118,8 @@ installed or updated: that needs raw files only.
 
 The official catalogue is always read anonymously. A source of one's own read
 with a token has the token's own limit — GitHub's 5 000 an hour for it — and
-says so when it is used up ([Tokens](#tokens)).
-
-> **Later — stage 4.** A token from **Sign in with GitHub**.
+says so when it is used up ([Tokens](#tokens)), whether it was pasted or got by
+**Sign in** ([Sign in](#sign-in)).
 
 ### A catalogue row
 
@@ -1380,6 +1379,63 @@ only once it has read the repository, and clear the clipboard of it. The lab
 checks the runner's Keychain end to end, and reads a real token over real HTTPS
 (`smoke.real-github-token`, run only when named).
 
+### Sign in
+
+Instead of pasting a token, a private source can be signed in to (S4-23), by
+the OAuth device flow: uDeck asks the host for a code, shows it — large — with
+**Copy the code and open <page>**, and asks the host, at the interval it gave
+and five seconds more after each `slow_down`, whether the person entered it.
+uDeck never opens the browser by itself. **Sign in** comes before the token's
+field, in the token step of **Add a source…** and under **Token…** — and only
+where uDeck has an application to sign in as; otherwise there is no button at
+all:
+
+* **github.com**: the uDeck Plugins GitHub App (`github.com/apps/udeck-plugins`,
+  Contents read-only, nothing else), whose client id and slug Info.plist
+  carries (`UDeckGitHubAppClientID`, `UDeckGitHubAppSlug`). A GitHub App's
+  token reads only where the app is installed: a `404` right after signing in
+  says *Signed in, but the uDeck app is not installed for <owner>, so it cannot
+  read <repo>. Install it on <owner>, choosing <repo>.*, with a button to
+  `https://github.com/apps/udeck-plugins/installations/new`, and **Look up
+  again** reads with the same token once it is — no new code.
+* **gitlab.com**: uDeck's OAuth application, not confidential, with `read_api`
+  and the device authorization grant (`UDeckGitLabComClientID`).
+* **A GitLab of one's own**: an application registered there — by the person
+  under User settings → Applications, or by its admin — not confidential, with
+  `read_api`. Its Application ID is pasted under *Application ID on <host>*
+  and kept in `sources.json` as `signInClientID`; with none there is no
+  button.
+
+The requests (S4-19): `POST https://github.com/login/device/code` with the
+client id, or `POST https://<host>/oauth/authorize_device` with the client id
+and `scope=read_api`; then `POST https://github.com/login/oauth/access_token`
+or `https://<host>/oauth/token` with
+`grant_type=urn:ietf:params:oauth:grant-type:device_code`, the device code and
+the client id — and no secret: the applications have none uDeck uses. Every
+one is form-encoded, asks for JSON (`Accept: application/json` — GitHub
+answers form-encoded otherwise), goes only to the host's own OAuth origin over
+HTTPS, and refuses every redirect. No error of one quotes the answer: it says
+the status and an OAuth error code uDeck knows, nothing else. *The code
+expired; start again.* and *Sign-in was declined.* say the two ends without a
+token.
+
+What Sign in gets is kept as the source's token, of kind `oauth` — the token,
+its refresh token, when it ends, and the application — bound to the API
+origin it read the repository at and to the OAuth origin it was signed in at
+(S4-18); `sources.json` says `access: signIn`. It goes in `Authorization:
+Bearer`, on GitHub and on GitLab. It is renewed a minute before it ends, or
+once after the host answers it `401`: `grant_type=refresh_token` to the same
+token endpoint, one renewal in flight per source, every request that needs it
+waiting for it. The Keychain is read first — when it cannot be, the host is
+not asked, and the refresh token stays good — and the new pair is written to
+the Keychain, read, changed and written, before the new token is sent
+anywhere: the old refresh token dies on use. A renewal the host refuses signs
+the source out — *Signed out of <host>: sign in again.* — and nothing more is
+sent for it, with a token or without, until Sign in again; one that got no
+answer is tried again at the next request. A crash between the renewal and the
+Keychain write signs the source out the same way. **Sign out** under
+**Token…** forgets the token as **Forget the token** does a pasted one.
+
 ---
 
 ## Sources of one's own
@@ -1392,10 +1448,10 @@ plugins are **Unverified**, and ask before they run, whenever their code
 changes ([Consent for unverified code](#consent-for-unverified-code)) — until
 the operator trusts it ([Trusting a source](#trusting-a-source)).
 
-> **Later — stage 4.** **Sign in**. Today a source is a repository on
-> github.com, or a project on a GitLab — gitlab.com, or one's own at
-> `https://<host>/api/v4` — public, or private and read with a token kept in
-> the Keychain.
+A source is a repository on github.com, or a project on a GitLab —
+gitlab.com, or one's own at `https://<host>/api/v4` — public, or private and
+read with a token kept in the Keychain: pasted, or got by **Sign in**
+([Sign in](#sign-in)).
 
 ### `sources.json`
 
@@ -3009,7 +3065,7 @@ guest's `~/.udeck` over SSH.
 | `plugins.source-decision-not-carried` | The official `uptime` 1.0.0 allowed, the decision the official source's. The source trusted, and **Install from here…** of its own `uptime` 1.0.0 — the same permissions — names the official copy and *1.0.0 from github.com/someone/team-plugins: trusted source Team plugins*, and says whose code comes; confirmed, the copy is the source's, `trusted`, the official catalogue's row says *Installed here from github.com/someone/team-plugins: trusted source Team plugins*, and its card asks. **Allow** records the source. **Switch to verified** back, the official copy's card asks again. |
 | `plugins.source-stop-trusting` | The source trusted, `team-clock` run at once and `team-ping` allowed. **Stop trusting…** says *"Stop trusting Team plugins? Its plugins become Unverified and ask again before they next run, unless you allowed exactly their code before."*; **Stop trusting** clears `trustedAt`, both rows say **Unverified**, both records are written `unverified`, and both cards ask — `team-clock`, which asks for nothing, included. Trusted again, `team-clock` runs at once; `trustedAt` taken out of `sources.json` by hand, within the minute's tick its row says **Unverified** and its card asks. Trusted once more, **Remove…** of the source then leaves it, recorded `unverified`, and its card asks. |
 | `plugins.source-name-not-official` | `someone/not-official`, whose passport is named *uDeck plugins*, and `someone/zero-width`, whose passport's name is U+200B, U+2060 and U+200E: **Look up** shows each by its address, and so does its block once added; not-official's **Trust…** says *"Trust github.com/someone/not-official (github.com/someone/not-official)? …"*, and trusted, its block and row say *Trusted source: github.com/someone/not-official*. |
-| `plugins.source-screens-in-russian` | uDeck in Russian: **Добавить источник…** of `github.com/someone/private-plugins` without a token says *… не найден или закрыт. Если он закрытый, uDeck нужен токен для него: «Токен…».*, its token step's help names `private-plugins` and `someone`, and the test build's line is Russian; someone/team-plugins added, its block says *Без доверия: …*, its rows **Не проверен**; `team-clock`'s card asks in Russian, saying where its code comes from; **Доверять…** says S4-08's words in Russian, and the block and rows say *Доверенный источник: Team plugins*; `team-ping`'s card asks for *запускать sysctl* by its capability line's own identifier, and says whose guarantee it is; **Перестать доверять…** and **Удалить…** say their words; the official address given another number, Settings says so in Russian — each word for word with Russian.swift. |
+| `plugins.source-screens-in-russian` | uDeck in Russian: **Добавить источник…** of `github.com/someone/private-plugins` without a token says *… не найден или закрыт. Если он закрытый, uDeck нужен токен для него: «Токен…».*, its token step's help names `private-plugins` and `someone`, and the test build's line is Russian; someone/team-plugins added, its block says *Без доверия: …*, its rows **Не проверен**; `team-clock`'s card asks in Russian, saying where its code comes from; **Доверять…** says S4-08's words in Russian, and the block and rows say *Доверенный источник: Team plugins*; `team-ping`'s card asks for *запускать sysctl* by its capability line's own identifier, and says whose guarantee it is; **Перестать доверять…** and **Удалить…** say their words; the official address given another number, Settings says so in Russian — each word for word with Russian.swift. Sign in on its token step, the code declined in the fake: *Вход отклонён.* |
 | `plugins.source-remove` | **Remove…** on the source, after its warning: the entry and `catalogue/<id>/` go; `team-clock` stays, and its row says *From github.com/someone/team-plugins — a source no longer added*, with no **Reinstall**, **Back to**, **Update** or **Earlier versions…**; Settings opened again, nothing more is asked of the source. |
 | `plugins.source-refusals` | **Look up** refuses, each with its sentence and no **Add**: `http://`, git's SSH address and the official repository before any request; `github.com/someone/missing` after its description's 404 (*… could not be found, or it is private. If it is private, uDeck needs a token for it: Token…*); `someone/not-plugins`, with no passport at its default branch, after its description, its head and the passport's 404; and someone/team-plugins once it is added, after its description, *Team plugins (github.com/someone/team-plugins) is added already.* |
 | `plugins.link-offers-a-source` | **Install from a link…** on a branch of someone/team-plugins, no fork of the official repository: *github.com/someone/team-plugins is not a fork of github.com/iillyyaa1997/udeck-plugins. To install from it, add it as a source of its own.*, after its description alone, and **Add as a source…**, which opens **Add a source…** with `https://github.com/someone/team-plugins` in its field and adds nothing until **Add** is pressed. Added, the same link is refused before any request: *Installing from a branch or a merge request of a source is not possible yet; add the project and install from its default branch.* |
@@ -3027,6 +3083,11 @@ guest's `~/.udeck` over SSH.
 | `plugins.source-token-clipboard` | tools/udeck-private's token put on the pasteboard from a file and pasted with ⌘V into the token step, where the focus was proven — the pasteboard holding it then —, looked up and added: the pasteboard no longer holds it (compared in the guest, never read out), and the block says *The token was removed from the clipboard.* |
 | `plugins.source-token-not-across-redirect` | someone/private-plugins added with its token; the fake then answers every request of it 301 to the same route of another number. **Check now**: one 301, nothing asked at the new address, and the block says *github.com/someone/private-plugins says it has moved. uDeck does not take a token to another address: …* |
 | `plugins.source-token-kept` | tools/udeck-private added with its token; uDeck quit and relaunched; **Check now** reads it with the token, every request carrying it taken. uDeck's Keychain item of tokens is there, asked by its metadata alone; the token is in no file under `~/.udeck` and in no line uDeck logged. |
+| `plugins.source-sign-in-github` | someone/private-plugins looked up without a token; its token step offers **Sign in with GitHub** before the token's field; pressed, the code shows with **Copy the code and open https://github.com/login/device**, and the lab approves it in the fake after one `slow_down`. The sheet names *Team plugins*; **Add** keeps the token — `access: signIn` — and the source is read with it. The fake's tokens last 75 s: a minute later **Check now** renews first — one `refresh_token` POST to `login/oauth/access_token`, taken — then reads with the new token; **Check now** again sends it as it is. No refresh token is ever sent twice; every request carrying a refresh token or a device code went to github.com's token endpoint on its own port, and every one carrying a token to the repository's own API routes. |
+| `plugins.source-sign-in-app-not-installed` | Signed in with GitHub, and the uDeck app installed nowhere in the fake, so the private repository answers its token `404`: the step says *Signed in, but the uDeck app is not installed for someone, so it cannot read private-plugins. Install it on someone, choosing private-plugins.*, and its button goes to the lab app's install page. The fake then says it is installed; **Look up again** shows *Team plugins*, and no new code is asked for. |
+| `plugins.source-sign-in-gitlab-com` | someone/gl-plugins on gitlab.com added without a token; **Token…** → **Sign in with GitLab**: the device code asked of gitlab.com's port with `read_api`, **Copy the code and open** carrying gitlab.com's page with the code in it; approved, `access: signIn`, the project read with the token in `Authorization: Bearer`, every request taken; a minute later **Check now** renews it at `/oauth/token` first. No refresh token or device code went anywhere else. |
+| `plugins.source-sign-in-self-hosted` | tools/udeck-private on gitlab.example.test looked up without a token: its token step has *Application ID on gitlab.example.test* and no **Sign in** at all. The lab's application id typed in, **Sign in with GitLab** appears; approved, the sheet names the project, **Add** keeps the token — `access: signIn`, `signInClientID` the id typed. |
+| `plugins.source-sign-in-refused` | someone/private-plugins' token step, three times: the lab denies the code — *Sign-in was declined.*; the fake's codes expire in 4 s — *The code expired; start again.*; the fake answers the token endpoint 307 to `/elsewhere` — *github.com answered the sign-in with a redirect (HTTP 307); uDeck never follows one with a secret.*, nothing asks `/elsewhere`, and no answer is quoted. No source is added, and uDeck's Keychain item of tokens is not there. |
 | `plugins.source-token-after-the-limit` | someone/private-plugins listed without a token and the address's hour used up in the fake: the read at launch is refused for the limit, and the state keeps the block. **Token…** with its token: kept, and the source read with it at once — every request carrying it taken, on the token's own hour (the fake counts a token's requests apart, 5,000 an hour, as GitHub does), the read ending with no error and the state saying more is left than an address's sixty. |
 | `plugins.source-gitlab-empty` | `tools/empty`, a passport and no `plugins/`: its block says *The repository offers no plugins yet.*; the read after **Add** made one tree request, the root's, with no `path=plugins`, and **Check now** asks none either. |
 | `plugins.source-gitlab-com-limit` | `someone/gl-plugins` on the fake's gitlab.com, added: its `state.json` keeps both of gitlab.com's limiters by name. The fake says the hour was spent elsewhere; **Check now** gets one `429` naming the hour, and the block says *gitlab.com asked uDeck to wait: … Without a token gitlab.com allows only a few requests an hour from one network; a token raises the limit.*, the hour's remaining 0 and the minute's in the hundreds. **Check now** again, **Install** of `gl-com` — whose row says the same — and twenty seconds: nothing reaches gitlab.com's port; the official catalogue's **Check now** reads it, with no trouble said. |

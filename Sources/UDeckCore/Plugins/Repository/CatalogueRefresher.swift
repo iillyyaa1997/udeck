@@ -246,6 +246,8 @@ public struct CatalogueRefresher: Sendable {
             case .credentialUnbound: return .credentialUnbound(origin: nil)
             case .tokenWithdrawn(.rejected): return .unauthorized
             case .tokenWithdrawn(.withdrawn): return .tokenWithdrawn
+            case .tokenWithdrawn(.signedOut), .signedOut: return .signedOut
+            case .keychainUnavailable(let reason): return .keychainUnavailable(reason: reason)
             case .tooLarge(let bytes):
                 return .badAnswer("a file of \(bytes) bytes, more than the \(RepositoryRules.maximumFileBytes) a plugin's file may be")
             }

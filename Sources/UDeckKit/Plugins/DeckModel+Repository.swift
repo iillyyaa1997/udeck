@@ -41,10 +41,10 @@ public enum OperationProblem: Equatable, Sendable {
             case .refused(let status): self = .catalogue(.refused(status: status))
             case .unreachable(let reason): self = .catalogue(.unreachable(reason))
             case .badAnswer(let reason): self = .catalogue(.badAnswer(reason))
-            // Said as a read of the catalogue says them (`CatalogueRefresher.reason`).
             // Said as a read of the catalogue says them (`CatalogueRefresher.reason`):
             // with the token the operation carried, its token's (S4-20).
-            case .unauthorized, .forbidden, .moved, .tooLarge, .credentialUnbound, .tokenWithdrawn:
+            case .unauthorized, .forbidden, .moved, .tooLarge, .credentialUnbound, .tokenWithdrawn, .signedOut,
+                 .keychainUnavailable:
                 self = .catalogue(CatalogueRefresher.reason(error, branch: nil, tokened: tokened))
             }
         case let error as CatalogueError:
