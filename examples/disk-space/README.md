@@ -146,7 +146,7 @@ exactly right for numbers that stopped being refreshed.
 python3 -m unittest discover -s examples/disk-space -p 'test_*.py'
 ```
 
-115 tests, no network, no dependencies, and nothing that reads the real
+116 tests, no network, no dependencies, and nothing that reads the real
 machine's disks — every case runs against canned `df` output, including the
 end-to-end tests, which put a fake `df` first on `PATH`. The suite therefore
 says the same thing on a Mac with three disks and on a build runner with none.

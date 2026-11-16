@@ -8,6 +8,31 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.8.3] — 2026-11-16
+
+What an audit of 0.8.2 found, fixed. 0.8.3 adds nothing to the plugin contract.
+
+- **One word uDeck does not know no longer costs the settings file.** An
+  island state, a hot-key modifier or a preset id that this uDeck has no name
+  for — one a later uDeck wrote — is dropped on its own; before, the whole file
+  was refused and every setting went back to its default.
+- **A plugin that writes past the output limit and exits at once is said to
+  have run past it.** Before, a producer quick enough to exit before the limit's
+  watcher looked was taken for a clean run.
+- **Installing a plugin while uDeck checks the installed ones keeps what the
+  install wrote.** An install, update, removal or link stops the check under
+  way, and the check writes only while none runs; it starts again after each.
+- **The theme editor moves one shared value alone.** With a link selected, a
+  value marked the same everywhere moves into the theme's look by itself,
+  never the link's whole look with it.
+- **udeck-plugin uses its folder in the temporary folder only while it is its
+  own.** A folder, not a link, of this user's, that nobody else may write in,
+  made `0700` with its scratch folders: on a shared Linux `/tmp` nobody can make
+  it first and swap what `pin`, `check` or `run` write there.
+- **The disk-space example pools only volumes that share a pool.** Partitions of
+  one disk that is not APFS are rows of their own; two partitions of exactly
+  one size and exactly the same free space still pool, as its README says.
+
 ## [0.8.2] — 2026-11-16
 
 **Sign in** for sources of one's own — the last of stage 4 of

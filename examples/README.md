@@ -7,7 +7,7 @@ CI.
 | | What it is for | Read it when |
 |---|---|---|
 | [`hello-card`](hello-card) | Every row type, no permissions, twenty lines of `sh` | You want to see what a producer has to do |
-| [`disk-space`](disk-space) | A real plugin: four setting types, permissions, two languages, its own 115 tests | You are writing one properly |
+| [`disk-space`](disk-space) | A real plugin: four setting types, permissions, two languages, its own 116 tests | You are writing one properly |
 | [`slow-plugin`](slow-plugin) | Hangs on purpose and ignores `SIGTERM` | You want to see what a deadline looks like from the operator's side |
 | [`broken-card`](broken-card) | Prints something that is not a card | Same, for a mistake in the output |
 
