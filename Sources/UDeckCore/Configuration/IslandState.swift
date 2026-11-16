@@ -87,6 +87,23 @@ public struct IslandLink: Identifiable, Equatable, Codable, Sendable {
         self.id = id
         self.states = states
     }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case states
+    }
+
+    /// Tolerant, as the rest of the file is (audit F12): a state uDeck does
+    /// not have costs that state — `IslandStates.validated` says so — never
+    /// the link, the theme or the file; an id that is no UUID costs the
+    /// link's looks, which are kept by it, and nothing else.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let text: String? = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? nil
+        id = text.flatMap(UUID.init(uuidString:)) ?? UUID()
+        let names = (try? c.decodeIfPresent([String].self, forKey: .states)) ?? nil
+        states = (names ?? []).compactMap(IslandState.init(id:))
+    }
 }
 
 /// A single value in a look.

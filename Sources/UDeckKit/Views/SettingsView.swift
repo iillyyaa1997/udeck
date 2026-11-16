@@ -577,21 +577,13 @@ private struct LookSettings: View {
                 // how a settings screen loses the operator's trust.
                 guard !selectionIsMixed else { return }
                 var settings = model.settings
-                var look = editedLook
-                look[keyPath: keyPath] = newValue
                 let isShared = field.map { settings.theme.states.shared.contains($0) } ?? false
-                if let link = editedLink, !isShared {
-                    // A link of its own keeps its own copy. The theme's look
-                    // stays where it was, so unlinking the states later lands
-                    // them back on something sensible.
-                    if edited {
-                        settings.theme.states.dark[link.id] = look
-                    } else {
-                        settings.theme.states.light[link.id] = look
-                    }
-                } else {
-                    settings.theme.setLook(look, forDark: edited)
-                }
+                // A link of its own keeps its own copy, and the theme's look
+                // stays where it was, so unlinking the states later lands them
+                // back on something sensible; a shared value moves alone
+                // (`ThemeSettings.write`).
+                settings.theme.write(keyPath, newValue, edited: editedLook, link: editedLink, shared: isShared,
+                                     dark: edited)
                 model.update(settings: settings)
             }
         )
