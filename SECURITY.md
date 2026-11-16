@@ -48,11 +48,14 @@ trust that source: then its default branch's plugins say **Trusted source:
 <name>** — the guarantee of whoever can merge into it, never uDeck's and never
 Verified — and keep your decision for each version, for that source alone.
 
-**Tokens.** A token you give uDeck for a private source is kept in the
-Keychain, bound to the address it was checked against, and sent only to that
-host — never across a redirect, never to a raw host, never once the source
-points at another repository or another host — and never written to a file or
-a log. The Keychain stops a
+**Tokens.** A token you give uDeck for a private source — pasted, or got by
+**Sign in** — is kept in the Keychain, bound to the address it was checked
+against, and sent only to that host — never across a redirect, never to a raw
+host, never once the source points at another repository or another host — and
+never written to a file or a log. A refresh token from Sign in goes only to the
+token endpoint of the host it was signed in at, and the renewed pair is written
+to the Keychain before the new token is used. Sign in's GitHub App reads only
+the repositories you install it on, and only their contents. The Keychain stops a
 plugin from reading uDeck's tokens directly. It does not stop a plugin, which
 runs as you, from changing uDeck itself: an ad-hoc build runs with library
 validation off (`Scripts/adhoc.entitlements`), so nothing checks what is loaded
@@ -145,9 +148,11 @@ launch and both with a switch to turn them off:
   *Your sources* is read the same way, until you remove it, from its own host —
   the github.com API and raw host, or a GitLab's `https://<host>/api/v4`, every
   file of it included, and its `/api/graphql` for the manifests of a plugin's
-  history — anonymously, or with the token you gave for that source only; *Official catalogue* off does not stop it. Sign in, through
-  github.com/login, gitlab.com/oauth or your GitLab's /oauth when it is pressed
-  and when its token is refreshed, comes later.
+  history — anonymously, or with the token you gave for that source only; *Official catalogue* off does not stop it. **Sign
+  in** asks github.com/login, gitlab.com/oauth or your GitLab's /oauth — when it
+  is pressed, and when its token is renewed, a minute before it ends — with the
+  application's id and nothing of yours but the code you entered and, later, the
+  refresh token the host gave.
 
 None of it carries an identifier, a cookie or the list of what you have
 installed, and nothing but a private source's own token carries an account. The details are in [README.md](README.md#what-udeck-connects-to-and-when)

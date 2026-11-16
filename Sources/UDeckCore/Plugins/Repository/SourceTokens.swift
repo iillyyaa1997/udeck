@@ -90,6 +90,19 @@ public struct SourceTokenBook: Sendable {
         return current
     }
 
+    /// Sign in's pair renewed from `old` (S4-23): the credential held for
+    /// `source` made what the Keychain now holds, under the same lease — every
+    /// copy asks its renewal and sends the new token already, and a lookup
+    /// that reads the new pair from the Keychain keeps that lease rather than
+    /// ending it. Nothing for a held token that is not the one renewed.
+    public mutating func renewed(_ source: String, from old: Secret, to tokens: OAuthTokens) {
+        guard var current = held[source], current.kind == .oauth, current.refresh == old else { return }
+        current.token = tokens.access
+        current.refresh = tokens.refresh
+        current.expiresAt = tokens.expiresAt.map(InstalledPlugins.wholeSeconds)
+        held[source] = current
+    }
+
     /// Whether the host refused the token `source` holds (`401`): nothing is
     /// sent until Check now or Token… hands out a token again.
     public func wasRejected(_ source: String) -> Bool {

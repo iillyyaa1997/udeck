@@ -1658,3 +1658,127 @@ def test_a_private_gitlab_project_answers_its_token_in_private_token(gitlab):
     assert ask({"PRIVATE-TOKEN": "glpat-wrong"})[0] == 401
     status, answer = ask({"PRIVATE-TOKEN": token})
     assert status == 200 and answer["data"]["project"]["id"] == "gid://gitlab/Project/11"
+
+
+# --- Sign in (stage 4, R6: S4-21d, S4-23) ------------------------------------------------------
+
+
+def test_the_fake_signs_in_by_the_device_flow_renews_once_and_keeps_every_secret_out_of_its_log(tmp_path):
+    """github.com's web and a GitLab's /oauth, each on its own port: a code for the site's own client id — and GitLab's
+    read_api — pending until the lab approves its user code, slow_down once when told, denied or expired as told; the
+    pair it gives reads a private repository only where the uDeck app is installed on GitHub, and any project of its
+    GitLab; a refresh token renews once and is refused after, the token it renewed no good from then on; a redirect
+    told answers the token endpoint 307; and the log says which secret a request carried, never its value."""
+    moment = [1_000_000.0]
+    served = Served(tmp_path, clock=lambda: moment[0])
+    fake = served.fake
+
+    def later(seconds):
+        moment[0] += seconds
+
+    servers = {site: fake_github.Server(("127.0.0.1", 0), fake_github.handler_for(fake, site))
+               for site in ("github.com", "gitlab.example.test")}
+    for server in servers.values():
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = {site: f"http://127.0.0.1:{server.server_address[1]}" for site, server in servers.items()}
+
+    def post(site, path, form, accept="application/json"):
+        request = urllib.request.Request(base[site] + path, data=urllib.parse.urlencode(form).encode(), method="POST",
+                                         headers={"Accept": accept,
+                                                  "Content-Type": "application/x-www-form-urlencoded"})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as answer:
+                body = answer.read()
+                return answer.status, (json.loads(body) if accept == "application/json"
+                                       else dict(urllib.parse.parse_qsl(body.decode())))
+        except urllib.error.HTTPError as error:
+            body = error.read()
+            return error.code, (json.loads(body) if error.code != 307 else {"location": error.headers.get("Location")})
+
+    github, gitlab = fake_github.OAUTH_CLIENTS["github.com"], "lab-udeck-self-hosted"
+    try:
+        served.state(oauth={"gitlab.example.test": {"client_id": gitlab}, "github.com": {"slow_down": True}})
+        assert post("github.com", "/login/device/code", {"client_id": "Iv1.someone-else"}) \
+            == (200, {"error": "incorrect_client_credentials"})
+        status, code = post("github.com", "/login/device/code", {"client_id": github})
+        assert status == 200 and code["user_code"].startswith("LAB-") and code["interval"] == 1
+        assert code["verification_uri"] == "https://github.com/login/device" and "verification_uri_complete" not in code
+        poll = {"client_id": github, "device_code": code["device_code"], "grant_type": fake_github.DEVICE_GRANT}
+        later(1)
+        assert post("github.com", "/login/oauth/access_token", poll) == (200, {"error": "slow_down"})
+        later(1)
+        assert post("github.com", "/login/oauth/access_token", poll) == (200, {"error": "slow_down"}), \
+            "a poll before its interval — now six seconds — is told to slow down again"
+        later(11)
+        assert post("github.com", "/login/oauth/access_token", poll, accept="*/*") \
+            == (200, {"error": "authorization_pending"}), "without Accept: application/json, GitHub answers a form"
+        later(11)
+        served.state(oauth={"github.com": {"decisions": {code["user_code"]: "approved"}}})
+        status, pair = post("github.com", "/login/oauth/access_token", poll)
+        assert status == 200 and pair["access_token"].startswith("ghu_") and pair["refresh_token"].startswith("ghr_")
+        assert post("github.com", "/login/oauth/access_token", poll) == (200, {"error": "incorrect_device_code"}), \
+            "a code exchanged once is gone"
+        bearer = {"Authorization": f"Bearer {pair['access_token']}"}
+        assert served.get("/api/repos/someone/private-plugins", bearer)[0] == 404, "the app is not installed there"
+        served.state(oauth={"github.com": {"installed": ["someone/private-plugins"]}})
+        assert served.get("/api/repos/someone/private-plugins", bearer)[0] == 200
+        assert served.get("/api/repos/someone/team-plugins", bearer)[0] == 200, "a public repository reads anyway"
+        status, renewed = post("github.com", "/login/oauth/access_token",
+                               {"client_id": github, "grant_type": "refresh_token", "refresh_token": pair["refresh_token"]})
+        assert status == 200 and renewed["access_token"] != pair["access_token"]
+        assert served.get("/api/repos/someone/private-plugins", bearer)[0] == 401, "the token renewed is no good"
+        assert served.get("/api/repos/someone/private-plugins",
+                          {"Authorization": f"Bearer {renewed['access_token']}"})[0] == 200
+        assert post("github.com", "/login/oauth/access_token",
+                    {"client_id": github, "grant_type": "refresh_token", "refresh_token": pair["refresh_token"]}) \
+            == (200, {"error": "bad_refresh_token"}), "a refresh token renews once"
+
+        served.state(oauth={"gitlab.example.test": {"client_id": gitlab, "token_expires_in": 70}})
+        assert post("gitlab.example.test", "/oauth/authorize_device", {"client_id": gitlab}) == (400, {"error": "invalid_scope"})
+        status, code = post("gitlab.example.test", "/oauth/authorize_device", {"client_id": gitlab, "scope": "read_api"})
+        assert status == 200 and code["verification_uri_complete"].endswith(f"?user_code={code['user_code']}")
+        poll = {"client_id": gitlab, "device_code": code["device_code"], "grant_type": fake_github.DEVICE_GRANT}
+        later(1)
+        assert post("gitlab.example.test", "/oauth/token", poll) == (400, {"error": "authorization_pending"})
+        later(1)
+        served.state(oauth={"gitlab.example.test": {"client_id": gitlab, "decisions": {code["user_code"]: "denied"}}})
+        assert post("gitlab.example.test", "/oauth/token", poll) == (400, {"error": "access_denied"})
+        status, code = post("gitlab.example.test", "/oauth/authorize_device", {"client_id": gitlab, "scope": "read_api"})
+        served.state(oauth={"gitlab.example.test": {"client_id": gitlab, "token_expires_in": 70,
+                                                     "decisions": {code["user_code"]: "approved"}}})
+        later(1)
+        status, pair = post("gitlab.example.test", "/oauth/token",
+                            {**poll, "device_code": code["device_code"]})
+        assert status == 200 and pair["expires_in"] == 70 and pair["scope"] == "read_api"
+        answer = fake.gitlab("gitlab.example.test", "GET", "/api/v4/projects/11",
+                             {"authorization": f"Bearer {pair['access_token']}"})
+        assert answer[0] == 200, answer
+        assert fake.gitlab("gitlab.example.test", "GET", "/api/v4/projects/11",
+                           {"private-token": pair["access_token"]})[0] == 401, "Sign in's token goes in Bearer alone"
+        graphql = json.dumps({"query": "query($path: ID!) { project(fullPath: $path) { id } }",
+                              "variables": {"path": "tools/udeck-private", "paths": ["udeck-plugins.json"]}}).encode()
+        assert fake.gitlab("gitlab.example.test", "POST", "/api/graphql",
+                           {"authorization": f"Bearer {pair['access_token']}"}, graphql)[0] == 200, "GraphQL takes it too"
+        served.state(oauth={"gitlab.example.test": {"client_id": gitlab, "code_expires_in": 1}})
+        status, code = post("gitlab.example.test", "/oauth/authorize_device", {"client_id": gitlab, "scope": "read_api"})
+        later(1.2)
+        assert post("gitlab.example.test", "/oauth/token", {**poll, "device_code": code["device_code"]}) \
+            == (400, {"error": "expired_token"})
+        served.state(oauth={"github.com": {"redirect": True}})
+        assert post("github.com", "/login/oauth/access_token", poll) == (307, {"location": "/elsewhere"})
+
+        log = served.log.read_text()
+        for secret in (pair["access_token"], pair["refresh_token"], renewed["refresh_token"], code["device_code"]):
+            assert secret not in log
+        lines = [json.loads(line) for line in log.splitlines()]
+        carried = {line["oauth_secret"] for line in lines if line["path"] in ("/login/oauth/access_token", "/oauth/token")}
+        assert carried == {"device_code", "refresh_token"}
+        assert {line["oauth_error"] for line in lines} >= {"slow_down", "authorization_pending", "bad_refresh_token",
+                                                           "access_denied", "expired_token"}
+        assert all(line["oauth_secret"] == "none" for line in lines if line["path"].endswith(("device/code", "authorize_device")))
+    finally:
+        for server in servers.values():
+            server.shutdown()
+            server.server_close()
+        served.server.shutdown()
+        served.server.server_close()

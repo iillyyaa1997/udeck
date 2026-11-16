@@ -221,8 +221,21 @@ struct LocalizationTests {
         .sourceTokenWrongProvider(host: "gitlab.example", looksLikeGitHub: true),
         .sourceTokenWrongProvider(host: "GitHub", looksLikeGitHub: false),
         .sourceTokenClipboardCleared, .sourceTokenWriteScope, .sourceTokenCollaborator(owner: "o", repository: "r"),
+        .sourceTokenCollaborator(owner: "o", repository: "r", signIn: true),
         .sourceTokenChooseRepository(owner: "o", repository: "r"), .sourceTokenGitLabScopeHelp, .sourceToken,
         .sourceMakeToken(host: "gitlab.example"), .sourceLookUpWithToken, .sourceTokenField, .sourceForgetToken,
+
+        // Sign in (stage 4, R6: S4-23).
+        .sourceSignIn(provider: "github"), .sourceSignIn(provider: "gitlab"), .sourceSignInEnterCode(host: "github.com"),
+        .sourceSignInCopyAndOpen(page: "https://github.com/login/device"), .sourceSignInExpired, .sourceSignInDeclined,
+        .sourceSignedOut(host: "gitlab.com"), .sourceSignInAppNotInstalled(owner: "o", repository: "r"),
+        .sourceSignInInstallApp(owner: "o"), .sourceSignInApplicationField(host: "gitlab.example"),
+        .sourceSignInApplicationHelp(host: "gitlab.example"),
+        .sourceSignInRefused(host: "gitlab.example", status: 400, code: "invalid_client"),
+        .sourceSignInRefused(host: "github.com", status: 502, code: nil),
+        .sourceSignInRedirected(host: "github.com", status: 307),
+        .sourceSignInBadAnswer(host: "github.com", status: 200, field: "JSON"), .sourceSignInLookUpAgain, .sourceSignOut,
+        .sourceSignedIn(host: "github.com"),
 
         .pluginLastRun(at: "21:04:05", reason: .interval, duration: 0.21, result: .card),
         .pluginLastRun(at: "21:04:05", reason: .launch, duration: 0.21, result: .failure(.exited(code: 3))),
@@ -306,7 +319,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 487,
+        #expect(Self.all.count == 506,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

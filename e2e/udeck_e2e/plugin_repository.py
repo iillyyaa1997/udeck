@@ -93,6 +93,10 @@ class Request:
     # A GraphQL request's commits — how many files at how many commits it asked a GitLab for (stage 4, R2b) — 0 for
     # any other request, and for every line of a fake from before GraphQL.
     graphql_commits: int = 0
+    # A Sign in request's form: which secret it carried — `refresh_token`, `device_code` or `none`, never its value —
+    # and the OAuth error the fake answered, "" for none (stage 4, R6).
+    oauth_secret: str = "none"
+    oauth_error: str = ""
 
     @property
     def is_graphql(self) -> bool:
@@ -159,6 +163,8 @@ def parse_log(text: str) -> list[Request]:
                     site=str(entry.get("site", "")),
                     raw_path=str(entry.get("raw_path", entry["path"])),
                     graphql_commits=int(entry.get("graphql_commits", 0)),
+                    oauth_secret=str(entry.get("oauth_secret", "none")),
+                    oauth_error=str(entry.get("oauth_error", "")),
                 )
             )
         except (ValueError, KeyError, TypeError) as error:
@@ -218,7 +224,7 @@ class FakeGitHub:
         self.state_file = f"{self.root}/state.json"
         self.serving = False
         self._facts: dict | None = None
-        self.gitlab_ports = dict(gitlab_ports if gitlab_ports is not None else config.GITLAB_PORTS)
+        self.gitlab_ports = dict(gitlab_ports if gitlab_ports is not None else config.HOST_MAP_PORTS)
 
     @property
     def base_url(self) -> str:
