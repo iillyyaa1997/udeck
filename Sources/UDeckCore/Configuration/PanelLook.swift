@@ -239,7 +239,8 @@ public struct PanelPreset: Codable, Equatable, Sendable, Identifiable {
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
-            id: try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID(),
+            // An id that is no UUID costs the id, not the preset (audit F12).
+            id: ((try? c.decodeIfPresent(String.self, forKey: .id)) ?? nil).flatMap(UUID.init(uuidString:)) ?? UUID(),
             name: try c.decodeIfPresent(String.self, forKey: .name) ?? "Saved look",
             look: try c.decodeIfPresent(PanelLook.self, forKey: .look) ?? PanelLook()
         )
@@ -443,6 +444,25 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
     /// showing: the operator has to be able to set up the dark half in daylight.
     public func look(forDark isDark: Bool) -> PanelLook {
         isDark ? dark : light
+    }
+
+    /// One value the look editor writes (`keyPath` set to `value`), where it
+    /// points: with a link selected, into the link's own copy — `edited`, the
+    /// look the editor shows for it — unless the value is shared, which the
+    /// theme's own look keeps for every state — and then that one value
+    /// moves there, never the rest of the link's look over the theme's (audit
+    /// F16). Pure, so it is tested; the editor's bindings only call it.
+    public mutating func write<Value>(_ keyPath: WritableKeyPath<PanelLook, Value>, _ value: Value,
+                                      edited: PanelLook, link: IslandLink?, shared: Bool, dark: Bool) {
+        if let link, !shared {
+            var look = edited
+            look[keyPath: keyPath] = value
+            if dark { states.dark[link.id] = look } else { states.light[link.id] = look }
+        } else {
+            var look = link == nil ? edited : self.look(forDark: dark)
+            look[keyPath: keyPath] = value
+            setLook(look, forDark: dark)
+        }
     }
 
     public mutating func setLook(_ look: PanelLook, forDark isDark: Bool) {

@@ -578,7 +578,11 @@ extension DeckModel {
                 treesOnDisk = hashed
                 if moved { restartPolling() }
             }
-            if installedProblem == nil, let written = found.records ?? (adopted.isEmpty ? nil : records) {
+            // Never while an install, update, removal or link runs: its
+            // records are being written, and these were read before it — the
+            // hashing after it writes them (audit F03).
+            if installedProblem == nil, busyPlugin == nil,
+               let written = found.records ?? (adopted.isEmpty ? nil : records) {
                 installed = written
                 save(JSONFileStore<InstalledPlugins>(url: paths.installedFile), installed, named: "installed plugins")
             }
@@ -1053,18 +1057,18 @@ extension DeckModel {
         // whichever button was pressed, and whatever screen it was on.
         let origin = takenNow(origin)
         guard canRead(origin.source), busyPlugin == nil else { return }
-        busyPlugin = id
+        beginOperation(id)
         operationProblems[id] = nil
         Task {
             // A source read with a token: its token first (`readyToken`).
             if let problem = await readyToken(for: origin.source) {
                 operationProblems[id] = .catalogue(problem)
-                busyPlugin = nil
+                endOperation()
                 return
             }
             guard let provider = client(for: origin) else {
                 operationProblems[id] = .catalogue(.notFound)
-                busyPlugin = nil
+                endOperation()
                 return
             }
             let tokened = isTokened(origin.source)
@@ -1075,17 +1079,17 @@ extension DeckModel {
                 guard let folder = listing.plugins[id] else {
                     throw InstallError.refused([.noManifest(path: "plugins/\(id)/manifest.json")])
                 }
-                busyPlugin = nil
+                endOperation()
                 run(operation, id: id, commit: commit, folder: folder, version: version, from: origin, pinned: pinned)
             } catch ProviderError.notFound {
                 // uDeck keeps no copy of what a rewritten history took away:
                 // the commit is gone, and that is what is said.
                 operationProblems[id] = .commitGone(String(commit.prefix(7)))
-                busyPlugin = nil
+                endOperation()
             } catch {
                 noteTokenRefusal(origin.source)
                 operationProblems[id] = OperationProblem(error, tokened: tokened)
-                busyPlugin = nil
+                endOperation()
             }
             catalogueState.rateLimit = limits.current
             persistRateLimit()
@@ -1129,7 +1133,7 @@ extension DeckModel {
             operationProblems[id] = .catalogue(.notFound)
             return
         }
-        busyPlugin = id
+        beginOperation(id)
         operationProblems[id] = nil
         autoUpdates.began(id)
         // The copy's own source's head, which it is verified — or recorded —
@@ -1160,7 +1164,7 @@ extension DeckModel {
         let before = copyForTheDecision(id)
         Task {
             defer {
-                busyPlugin = nil
+                endOperation()
                 catalogueState.rateLimit = limits.current
                 persistRateLimit()
                 // An update by itself that waited on this one goes now.
@@ -1271,13 +1275,13 @@ extension DeckModel {
             operationProblems[id] = .recordsBroken(installedProblem ?? "")
             return .goAhead
         }
-        busyPlugin = id
+        beginOperation(id)
         operationProblems[id] = nil
         autoUpdates.began(id)
         let installer = self.installer
         Task {
             defer {
-                busyPlugin = nil
+                endOperation()
                 updateVerifiedPlugins()
             }
             defer { resume(identifier) }
@@ -1416,10 +1420,10 @@ extension DeckModel {
             break
         }
         guard installedProblem == nil else { return .refused(.recordsBroken(installedProblem ?? "")) }
-        busyPlugin = id
+        beginOperation(id)
         operationProblems[id] = nil
         autoUpdates.began(id)
-        defer { busyPlugin = nil }
+        defer { endOperation() }
         let installer = self.installer
         do {
             defer { resume(candidate.id) }
@@ -1435,6 +1439,23 @@ extension DeckModel {
         reloadInstalled()
         discoverPlugins()
         return .linked(id: id, target: candidate.target)
+    }
+
+    /// An install, update, removal or link of `id` begins: the hashing under
+    /// way read the records before it, and is not let write them over the
+    /// operation's (audit F03) — `reloadInstalled` asks again after.
+    func beginOperation(_ id: String) {
+        busyPlugin = id
+        reverifications += 1
+        reverifyTask?.cancel()
+    }
+
+    /// The operation ended — done, refused or failed: the hashing it
+    /// cancelled is asked again, so no copy stays in question because an
+    /// operation stopped before it put anything in place.
+    func endOperation() {
+        busyPlugin = nil
+        reverify()
     }
 
     func reloadInstalled() {

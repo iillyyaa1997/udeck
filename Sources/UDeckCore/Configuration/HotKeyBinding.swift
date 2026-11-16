@@ -81,7 +81,10 @@ public struct HotKeyBinding: Codable, Equatable, Sendable {
         self.init(
             enabled: try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled,
             key: try c.decodeIfPresent(String.self, forKey: .key) ?? d.key,
-            modifiers: try c.decodeIfPresent(Set<HotKeyModifier>.self, forKey: .modifiers) ?? d.modifiers
+            // A modifier this uDeck has no name for costs that modifier, not
+            // the shortcut (audit F12); none left is a shortcut `isValid` refuses.
+            modifiers: (try c.decodeIfPresent([String].self, forKey: .modifiers))
+                .map { Set($0.compactMap(HotKeyModifier.init(rawValue:))) } ?? d.modifiers
         )
     }
 

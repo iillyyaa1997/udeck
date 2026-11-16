@@ -39,3 +39,63 @@ struct TemporaryFolderTests {
                 "\(temp.url.path) is not in \(TemporaryFolder.path)")
     }
 }
+
+/// The command's own folder in the temporary folder (`ScratchFolder.home`),
+/// which on Linux is shared: used only when it is this user's, a folder and
+/// no link, writable by nobody else (audit F06).
+@Suite("The command's own folder in a shared temporary folder")
+struct ScratchFolderTests {
+    static func place() -> URL {
+        let base = TemporaryFolder.url.appendingPathComponent("udeck-scratch-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base
+    }
+
+    @Test("made anew: this user's, a folder, 0700 — and its scratch folders in it")
+    func madeAnew() throws {
+        let base = Self.place()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let home = base.appendingPathComponent("udeck-plugin-\(getuid())", isDirectory: true)
+        let folder = try ScratchFolder.make(ScratchFolder.pinPrefix, in: home)
+        var status = stat()
+        #expect(lstat(home.path, &status) == 0 && status.st_mode & mode_t(S_IFMT) == mode_t(S_IFDIR))
+        #expect(status.st_uid == getuid() && status.st_mode & 0o777 == 0o700)
+        #expect(folder.deletingLastPathComponent().path == home.path)
+    }
+
+    @Test("one somebody else could write in, or a link, is refused — nothing is made in it")
+    func refused() throws {
+        let base = Self.place()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let open = base.appendingPathComponent("open", isDirectory: true)
+        try FileManager.default.createDirectory(at: open, withIntermediateDirectories: true)
+        chmod(open.path, 0o777)
+        #expect(throws: ScratchFolder.Unsafe.self) { _ = try ScratchFolder.make(in: open) }
+        #expect((try? FileManager.default.contentsOfDirectory(atPath: open.path))?.isEmpty == true)
+        let elsewhere = base.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        chmod(elsewhere.path, 0o700)
+        let link = base.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: elsewhere)
+        #expect(throws: ScratchFolder.Unsafe.self) { _ = try ScratchFolder.make(in: link) }
+        #expect((try? FileManager.default.contentsOfDirectory(atPath: elsewhere.path))?.isEmpty == true)
+    }
+
+    @Test("the sweep reads nothing through a link, and takes nothing from where it points")
+    func sweepRefusesALink() throws {
+        let base = Self.place()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let elsewhere = base.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: elsewhere, withIntermediateDirectories: true)
+        chmod(elsewhere.path, 0o700)
+        let left = elsewhere.appendingPathComponent("\(ScratchFolder.pinPrefix)\(Int32.max - 1)-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: left, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -7200)], ofItemAtPath: left.path)
+        let link = base.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: elsewhere)
+        ScratchFolder.sweep(link)
+        #expect(FileManager.default.fileExists(atPath: left.path), "swept through a link")
+        ScratchFolder.sweep(elsewhere)
+        #expect(!FileManager.default.fileExists(atPath: left.path), "its own folder's leftovers are swept")
+    }
+}
