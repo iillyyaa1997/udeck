@@ -52,6 +52,10 @@ public enum CatalogueError: Codable, Equatable, Sendable {
     /// The token was taken back while the read used it — forgotten,
     /// replaced, its source removed or changed: nothing more was sent.
     case tokenWithdrawn
+    /// A token from **Sign in** could not be renewed — its refresh token
+    /// refused, or the new pair not kept (S4-23): nothing more is sent,
+    /// with it or without it, until Sign in again.
+    case signedOut
 }
 
 /// What one source's catalogue remembers between refreshes and launches.

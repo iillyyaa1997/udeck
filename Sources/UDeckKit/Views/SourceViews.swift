@@ -65,9 +65,15 @@ struct AddSourceSheet: View {
             }
             result
             if let draft = model.addSourceDraft {
+                // Where Sign in is offered, it comes before the token (S4-23).
+                SignInStep(model: model, key: "", link: draft.link, identifier: "sources.add",
+                           applicationID: Binding(get: { model.addSourceDraft?.applicationID ?? "" },
+                                                  set: { model.addSourceDraft?.applicationID = $0 }))
                 TokenStep(link: draft.link, token: Binding(get: { model.addSourceDraft?.token ?? "" },
                                                            set: { model.addSourceDraft?.token = $0 }),
-                          identifier: "sources.add") { model.lookUpSource(withToken: true) }
+                          identifier: "sources.add",
+                          signIn: model.signInClientID(provider: draft.link.provider, host: draft.link.host,
+                                                       pasted: nil) != nil) { model.lookUpSource(withToken: true) }
             }
             if let problem = model.sourceOperationProblems[""] {
                 Text(problem).font(.caption).foregroundStyle(.orange)
@@ -204,11 +210,17 @@ struct SourceBlock: View {
             }
             statusLine
             if model.sourceTokenOpen == sid {
-                TokenStep(link: SourceLink(provider: source.provider, host: source.host, path: source.path),
-                          token: $model.sourceTokenDraft, identifier: "source.\(sid).token") { model.keepToken(for: sid) }
+                let link = SourceLink(provider: source.provider, host: source.host, path: source.path)
+                SignInStep(model: model, key: sid, link: link, identifier: "source.\(sid)",
+                           applicationID: $model.sourceApplicationDraft)
+                TokenStep(link: link, token: $model.sourceTokenDraft, identifier: "source.\(sid).token",
+                          signIn: model.signInClientID(provider: source.provider, host: source.host,
+                                                       pasted: nil) != nil) { model.keepToken(for: sid) }
                 if source.access != OwnSource.Access.none {
-                    Button(strings(.sourceForgetToken)) { model.forgetToken(of: sid) }
-                        .accessibilityIdentifier("source.\(sid).token.forget")
+                    Button(strings(source.access == OwnSource.Access.signIn ? .sourceSignOut : .sourceForgetToken)) {
+                        model.forgetToken(of: sid)
+                    }
+                    .accessibilityIdentifier("source.\(sid).token.forget")
                 }
             }
             if let notices = model.sourceNotices[sid], !notices.isEmpty {
@@ -323,6 +335,9 @@ struct TokenStep: View {
     let link: SourceLink
     @Binding var token: String
     let identifier: String
+    /// Whether **Sign in with GitHub** is offered above: the collaborator's
+    /// line then says so (S4-20, item 22).
+    var signIn = false
     let lookUp: () -> Void
     @Environment(\.strings) private var strings
     /// The token's field takes the focus when the step appears: what is
@@ -340,7 +355,7 @@ struct TokenStep: View {
         let parts = link.path.split(separator: "/", maxSplits: 1).map(String.init)
         let owner = parts.first ?? "", repository = parts.count > 1 ? parts[1] : ""
         return [.sourceTokenChooseRepository(owner: owner, repository: repository),
-                .sourceTokenCollaborator(owner: owner, repository: repository)]
+                .sourceTokenCollaborator(owner: owner, repository: repository, signIn: signIn)]
     }
 
     var body: some View {
@@ -365,6 +380,100 @@ struct TokenStep: View {
                     .disabled(token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("\(identifier).lookUpWithToken")
             }
+        }
+    }
+}
+
+/// **Sign in** (S4-23), above the token step under **Add a source…** and a
+/// source's **Token…**: for a GitLab of one's own, the field its application's
+/// id is pasted in and what that is; **Sign in with GitHub** or **with
+/// GitLab** — only where this build, or the pasted id, has an application for
+/// the host; no button at all otherwise — then the code, large, and **Copy
+/// the code and open…**, which opens the page only when pressed; and what it
+/// came to. The lab reads the code as `<identifier>.signIn.code`.
+struct SignInStep: View {
+    @Bindable var model: DeckModel
+    /// The source's id, or `""` for the Add sheet.
+    let key: String
+    let link: SourceLink
+    let identifier: String
+    @Binding var applicationID: String
+    @Environment(\.strings) private var strings
+
+    private var asksForAnID: Bool { model.asksForAnApplicationID(provider: link.provider, host: link.host) }
+    private var offered: Bool {
+        let pasted = asksForAnID ? (applicationID.isEmpty ? nil : applicationID) : nil
+        return model.signInClientID(provider: link.provider, host: link.host,
+                                    pasted: pasted ?? (key.isEmpty ? nil : model.source(key)?.signInClientID)) != nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if asksForAnID {
+                TextField(strings(.sourceSignInApplicationField(host: link.host)), text: $applicationID)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 460)
+                    .accessibilityIdentifier("\(identifier).signIn.application")
+                Text(strings(.sourceSignInApplicationHelp(host: link.host)))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("\(identifier).signIn.applicationHelp")
+            }
+            if offered {
+                Button(strings(.sourceSignIn(provider: link.provider))) { model.signIn(key) }
+                    .disabled(model.signIns[key]?.isUnderWay == true)
+                    .accessibilityIdentifier("\(identifier).signIn")
+            }
+            state
+        }
+    }
+
+    @ViewBuilder private var state: some View {
+        switch model.signIns[key] {
+        case nil:
+            EmptyView()
+        case .asking(let host)?, .checking(let host)?:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(strings(.sourcesAsking(host: host))).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("\(identifier).signIn.state")
+            }
+        case .code(let userCode, let page, let shown, let host)?:
+            Text(userCode)
+                .font(.system(size: 28, weight: .semibold, design: .monospaced))
+                .textSelection(.enabled)
+                .accessibilityIdentifier("\(identifier).signIn.code")
+                .accessibilityValue(userCode)
+            Text(strings(.sourceSignInEnterCode(host: host)))
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("\(identifier).signIn.state")
+            HStack(spacing: 8) {
+                Button(strings(.sourceSignInCopyAndOpen(page: shown))) { model.copyCodeAndOpen(key) }
+                    .accessibilityIdentifier("\(identifier).signIn.copyAndOpen")
+                    .accessibilityValue(page.absoluteString)
+                Button(strings(.actionCancel)) { model.cancelSignIn(key) }
+                    .accessibilityIdentifier("\(identifier).signIn.cancel")
+            }
+        case .notInstalled(let phrase, let install)?:
+            Text(strings(phrase))
+                .font(.caption).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("\(identifier).signIn.state")
+            HStack(spacing: 8) {
+                if let install, case .sourceSignInAppNotInstalled(let owner, _) = phrase {
+                    Link(strings(.sourceSignInInstallApp(owner: owner)), destination: install)
+                        .accessibilityIdentifier("\(identifier).signIn.install")
+                        .accessibilityValue(install.absoluteString)
+                }
+                Button(strings(.sourceSignInLookUpAgain)) { model.lookUpAgain(key) }
+                    .accessibilityIdentifier("\(identifier).signIn.lookUpAgain")
+            }
+        case .failed(let phrase)?:
+            Text(strings(phrase))
+                .font(.caption).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("\(identifier).signIn.state")
         }
     }
 }

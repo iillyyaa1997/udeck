@@ -298,8 +298,25 @@ func walk(_ root: AXUIElement, maxDepth: Int) -> [[String: Any]] {
         }
         for child in children(element) { visit(child, depth + 1, inner) }
     }
-    visit(root, 0, displayBounds())
+    visit(root, 0, reachable())
     return out
+}
+
+/// The part of the display a click can reach: all of it but the Dock and a
+/// margin above it — a control there is not shown, so the lab scrolls it into
+/// the middle of its pane rather than clicking the Dock (R6, labx/s4r6-1 and
+/// -2: **Look up again** with its middle at y 998, five points above the
+/// Dock's visible frame, and the click opened Messages: the Dock takes the
+/// pointer above its icons). The whole display where the login session
+/// cannot be asked, as over SSH.
+let dockMargin: CGFloat = 48
+
+func reachable() -> CGRect {
+    let bounds = displayBounds()
+    guard let screen = NSScreen.screens.first else { return bounds }
+    let bottom = CGFloat(screen.frame.maxY - screen.visibleFrame.minY)
+    guard bottom > 0, bottom < bounds.height else { return bounds }
+    return CGRect(x: bounds.minX, y: bounds.minY, width: bounds.width, height: max(0, bottom - dockMargin))
 }
 
 // MARK: - Windows and menus

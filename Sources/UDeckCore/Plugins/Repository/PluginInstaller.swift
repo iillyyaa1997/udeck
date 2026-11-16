@@ -1113,7 +1113,9 @@ public struct PluginInstaller: Sendable {
         case .moved(let status): "HTTP \(status)"
         case .tooLarge(let bytes): "\(bytes) bytes"
         case .credentialUnbound: "the token is not for this address"
+        case .tokenWithdrawn(.signedOut), .signedOut: "signed out: sign in again"
         case .tokenWithdrawn: "the token was taken back"
+        case .keychainUnavailable(let reason): "the Keychain could not be read: \(reason)"
         }
     }
 }

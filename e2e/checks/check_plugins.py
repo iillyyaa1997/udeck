@@ -3543,7 +3543,10 @@ RU_TEST_BUILD = "Тестовая сборка: {host} читается с http:
 RU_NOT_FOUND_OR_PRIVATE = "{address} не найден или закрыт. Если он закрытый, uDeck нужен токен для него: «Токен…»."
 RU_TOKEN_HELP = ("На странице выберите Only select repositories → {repository} и проверьте, что владелец ресурса — {owner}.\n"
                  "Детальный токен (fine-grained) читает только репозитории вашего аккаунта и организаций, в которых вы "
-                 "состоите. Если в {owner}/{repository} вы лишь соавтор, используйте классический токен — он может и писать.")
+                 "состоите. Если в {owner}/{repository} вы лишь соавтор, войдите через GitHub, когда {owner} установит "
+                 "приложение uDeck, или используйте классический токен — он может и писать.")
+# Sign in in Russian (stage 4, R6): what the step says once the code is declined.
+RU_DECLINED = "Вход отклонён."
 RU_UNTRUSTED_SOURCE = ("Этот код никто не проверял: он из основной ветки github.com/{repository} — источника, которому вы не "
                        "доверяли. uDeck спросит снова, когда он изменится.")
 RU_TRUSTED_SOURCE = ("Этот код из основной ветки {address} — источника, которому вы доверяете как {name}. uDeck его не "
@@ -4739,6 +4742,15 @@ def check_source_screens_in_russian(machine, check_dir, lab):
         wanted = RU_TOKEN_HELP.format(owner=owner, repository=repository)
         # The accessibility helper writes a line break as ⏎ (`ax.swift`).
         expect((help_ or "").replace("⏎", "\n") == wanted, f"the token step's help in Russian says {help_!r}, not {wanted!r}")
+        # Sign in, in Russian: SwiftUI gives a button no title the lab can read (R4b), so its words are read where they
+        # show — the step's line once the code is declined.
+        _oauth(scene, {"github.com": {}}, "github.com, every code pending")
+        code, _ = _sign_in(scene, "sources.add", "in Russian", window=window)
+        _oauth(scene, {"github.com": {"decisions": {code: "denied"}}}, f"denying {code}")
+        declined = _wait_until(machine, "sources.add.signIn.state", lambda said: said == RU_DECLINED, SIGN_IN_SECONDS,
+                               window=window)  # fmt: skip
+        _keep_the_pane(machine, check_dir, lab, "ru-sign-in-declined.txt", window=window)
+        expect(declined == RU_DECLINED, f"a declined sign-in, in Russian, says {declined!r}")
         notice = ui.says(ui.element(dump, "sources.testBuild"))
         for host, path in (("api.github.com", "api"), ("raw.githubusercontent.com", "raw")):
             line = RU_TEST_BUILD.format(host=host, port=config.PLUGINS_PORT, path=path)
@@ -5831,6 +5843,399 @@ def check_source_token_after_the_limit(machine, check_dir, lab):
         left = (state.get("rateLimit") or {}).get("remaining")
         expect(isinstance(left, int) and left > LIMIT_WITHOUT_A_TOKEN,
                f"read with the token, the source's state says {left!r} left of the hour — the address's, not the token's")
+    finally:
+        scene.close()
+
+
+# --- Sign in (stage 4, R6: S4-23) ------------------------------------------------------------------------------------
+
+# The lab's own applications (config.LAB_SIGN_IN) and a GitLab of one's own's, pasted into its source.
+GH_SLUG = config.LAB_SIGN_IN["UDeckGitHubAppSlug"]
+GH_INSTALL_PAGE = f"https://github.com/apps/{GH_SLUG}/installations/new"
+SELF_HOSTED_APPLICATION = "lab-udeck-self-hosted"
+# Where a token from Sign in is renewed, and a device code exchanged, on each site — nowhere else (S4-19).
+TOKEN_ENDPOINTS = {"github.com": "/login/oauth/access_token", GL_HOST: "/oauth/token", GL_COM: "/oauth/token"}
+SIGN_IN_SECONDS = 60
+SIGNED_OUT = "Signed out of {host}: sign in again."
+CODE_EXPIRED = "The code expired; start again."
+DECLINED = "Sign-in was declined."
+APP_NOT_INSTALLED = ("Signed in, but the uDeck app is not installed for someone, so it cannot read private-plugins. "
+                     "Install it on someone, choosing private-plugins.")
+
+
+def _sign_in(scene, prefix, label, window=ui.SETTINGS_WINDOW):
+    """**Sign in** under `prefix` (`sources.add` or `source.<sid>`) pressed, and the code uDeck shows read off the
+    screen — `<prefix>.signIn.code` — once it shows one: the code, and what **Copy the code and open…** would open."""
+    machine = scene.machine
+    _press(machine, f"{prefix}.signIn", f"pressing Sign in: {label}", window)
+    code = _wait_until(machine, f"{prefix}.signIn.code", lambda said: bool(said) and said.startswith("LAB-"),
+                       SIGN_IN_SECONDS, window=window)  # fmt: skip
+    expect(code is not None and code.startswith("LAB-"),
+           f"Sign in showed no code: {label}; it says "
+           f"{ui.reads(machine, f'{prefix}.signIn.state', f'reading what Sign in says: {label}', window)!r}")
+    page = ui.reads(machine, f"{prefix}.signIn.copyAndOpen", f"reading where Copy the code and open goes: {label}",
+                    window)
+    return code, page
+
+
+def _oauth(scene, sites, label):
+    """The fake told how each site's Sign in goes — `sites` whole, as `oauth` in its state."""
+    scene.github.tell(f"telling the fake how Sign in goes: {label}", oauth=sites)
+
+
+def _expect_secrets_only_at_token_endpoints(heard, what, site):
+    """Every request that carried a refresh token or a device code — in its form or its address — went to the token
+    endpoint of `site`, the one it was signed in at, on that site's own port: never another host's, never the API, the
+    raw host or anywhere else (S4-19)."""
+    carried = [r for r in heard if r.oauth_secret != "none"]
+    astray = [r for r in carried if r.site != site or r.raw_path != TOKEN_ENDPOINTS[site] or r.method != "POST"]
+    expect(not astray, f"{what}: a refresh token or a device code went where it may not: {_described_gitlab(astray)}")
+    return carried
+
+
+def _the_access(machine, sid):
+    return ((_read_json(machine, SOURCES_FILE) or {}).get("sources") or [{}])[0].get("access") \
+        if (_the_source(machine) or {}).get("id") == sid else None
+
+
+def check_source_sign_in_github(machine, check_dir, lab):
+    """Sign in with GitHub on a private repository: the code shown, approved through the fake, the token kept and the
+    repository read with it — then renewed before it ends, the pair rotated, the old refresh token never sent again.
+
+    someone/private-plugins, private, looked up without a token: its token step offers **Sign in with GitHub** before
+    the token's field. Pressed, it shows the fake's code, large, and **Copy the code and open
+    https://github.com/login/device**; the lab approves the code in the fake's state, after one `slow_down`. The
+    sheet then names the repository *Team plugins*; **Add** keeps the token — `sources.json` says `access: signIn` —
+    and the source is read with it. The fake's tokens last 75 s, so a minute later **Check now** renews the token
+    first: one `refresh_token` POST to `login/oauth/access_token`, taken, then the read with the new token, taken.
+    **Check now** again sends the new token as it is. The fake refuses a refresh token used once; no request ever sent
+    one twice. Every request that carried a refresh token or a device code went to github.com's token endpoint on its
+    own port; every one that carried a token, to the repository's own API routes.
+
+    **Red for**: no Sign in where the build has the GitHub App, a code not shown, a token kept before it read the
+    repository, a token not renewed before it ends, a refresh token sent twice or anywhere but its token endpoint, and
+    a token sent anywhere but its source's API.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", tokens=True)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _oauth(scene, {"github.com": {"slow_down": True, "token_expires_in": 75, "installed": [PRIVATE]}},
+               "github.com, slowed down once, its tokens lasting 75 s")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        number = scene.github.source_id(PRIVATE)
+        sid = _source_id(PRIVATE, number)
+        start = _count(scene)
+        said, _, _ = _look_up_a_source(scene, f"https://github.com/{PRIVATE}", "the private repository, without a token")
+        expect(said == NOT_FOUND_OR_PRIVATE.format(address=f"github.com/{PRIVATE}"),
+               f"github.com/{PRIVATE} without a token came to {said!r}")
+        code, page = _sign_in(scene, "sources.add", "the private repository")
+        expect(page == "https://github.com/login/device", f"Copy the code and open goes to {page!r}")
+        _oauth(scene, {"github.com": {"slow_down": True, "token_expires_in": 75, "installed": [PRIVATE],
+                                      "decisions": {code: "approved"}}}, f"approving {code}")
+        shown = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == TEAM_NAME, SIGN_IN_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "signed-in-looked-up.txt")
+        expect(_strip(shown) == TEAM_NAME, f"signed in, the sheet shows {shown!r}, not {TEAM_NAME!r}")
+        _press(machine, "sources.add.confirm", "pressing Add on what Sign in read")
+        kept = _wait_for_disk(machine, lambda: _the_access(machine, sid) == "signIn", CATALOGUE_SECONDS)
+        expect(kept, f"after Add, {SOURCES_FILE} says {_the_source(machine)!r}")
+        state_file = f"{UDECK_HOME}/catalogue/{sid}/state.json"
+        read = _wait_for_disk(machine, lambda: (_read_json(machine, state_file) or {}).get("lastSuccess") is not None,
+                              CATALOGUE_SECONDS)  # fmt: skip
+        expect(read, f"signed in, the source was not read: {_read_json(machine, state_file)!r}")
+        expect(_the_token_item_is_there(machine, "asking the Keychain for uDeck's item of tokens"),
+               "signed in, and uDeck's Keychain item of tokens is not there")
+        heard = _since(scene, start)
+        polls = [r for r in heard if r.raw_path == TOKEN_ENDPOINTS["github.com"]]
+        slowed = [index for index, r in enumerate(polls) if r.oauth_error == "slow_down"]
+        # One slow_down, the lab's: the fake says it to any poll before its interval is up, too.
+        expect(len(slowed) == 1 and polls[-1].oauth_error == "" and slowed[0] + 1 < len(polls)
+               and polls[slowed[0] + 1].at - polls[slowed[0]].at >= 5.5,
+               f"the polls did not slow down by five seconds once told: "
+               f"{[(round(r.at, 1), r.oauth_error) for r in polls]}")
+        routes = [f"/api/repos/{PRIVATE}", f"/api/repositories/{number}"]
+        _expect_the_token_only_at(heard, routes, "signing in and adding the private repository")
+
+        # Renewed a minute before it ends: the fake's tokens last 75 s.
+        machine.sleep(20)
+        renewing = _count(scene)
+        succeeded = (_read_json(machine, state_file) or {}).get("lastSuccess")
+        machine.sleep(1.1)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now once the token is due a renewal")
+        read = _wait_for_disk(machine, lambda: (_read_json(machine, state_file) or {}).get("lastSuccess") != succeeded,
+                              CATALOGUE_SECONDS)  # fmt: skip
+        renewed = _since(scene, renewing)
+        refreshes = [r for r in renewed if r.oauth_secret == "refresh_token"]
+        api = [r for r in renewed if r.raw_path.startswith(f"/api/repositories/{number}")]
+        expect(read and len(refreshes) == 1 and refreshes[0].oauth_error == "" and refreshes[0].status == 200,
+               f"Check now on a token due a renewal: {[(r.raw_path, r.status, r.oauth_error) for r in renewed]}")
+        expect(api and refreshes[0].at <= api[0].at and all(r.credential == "accepted" for r in api),
+               f"the read did not come after the renewal with the new token: {_described_gitlab(renewed)}")
+        again = _count(scene)
+        succeeded = (_read_json(machine, state_file) or {}).get("lastSuccess")
+        machine.sleep(1.1)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now with the renewed token")
+        reread = _wait_for_disk(machine, lambda: (_read_json(machine, state_file) or {}).get("lastSuccess") != succeeded,
+                                CATALOGUE_SECONDS)  # fmt: skip
+        after = _since(scene, again)
+        sent = [r for r in after if r.raw_path.startswith(f"/api/repositories/{number}")]
+        expect(reread and sent and all(r.credential == "accepted" for r in sent)
+               and not [r for r in after if r.oauth_secret != "none"],
+               f"Check now with the renewed token: read {reread}, {_described_gitlab(after)}")
+        whole = _since(scene, start)
+        expect(not [r for r in whole if r.oauth_error == "bad_refresh_token"],
+               f"a refresh token was sent again after it was used: {_described_gitlab(whole)}")
+        _expect_secrets_only_at_token_endpoints(whole, "signing in, renewing and reading", "github.com")
+        _expect_the_token_only_at(whole, routes, "signing in, renewing and reading")
+        _keep_the_pane(machine, check_dir, lab, "signed-in-renewed.txt")
+    finally:
+        scene.close()
+
+
+def check_source_sign_in_app_not_installed(machine, check_dir, lab):
+    """Signed in with GitHub, and the uDeck app not installed where the repository is: the install sentence, and the
+    button's page; installed, **Look up again** reads it with the same token — no new code.
+
+    someone/private-plugins looked up without a token, **Sign in with GitHub**, the code approved — and the fake says
+    the app is installed nowhere, so the repository answers its token 404, as GitHub does. The step says *Signed in,
+    but the uDeck app is not installed for someone, so it cannot read private-plugins. Install it on someone, choosing
+    private-plugins.*, and its button opens the lab app's install page. The fake then says it is installed; **Look up
+    again** shows *Team plugins*, and no device code was asked for again.
+
+    **Red for**: a 404 after Sign in said as anything else, the install button missing or pointing elsewhere, and a
+    second code wanted after the app was installed.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", tokens=True)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _oauth(scene, {"github.com": {}}, "github.com, its app installed nowhere")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        said, _, _ = _look_up_a_source(scene, f"https://github.com/{PRIVATE}", "the private repository, without a token")
+        expect(said == NOT_FOUND_OR_PRIVATE.format(address=f"github.com/{PRIVATE}"), f"without a token: {said!r}")
+        code, _ = _sign_in(scene, "sources.add", "the app installed nowhere")
+        _oauth(scene, {"github.com": {"decisions": {code: "approved"}}}, f"approving {code}")
+        said = _wait_until(machine, "sources.add.signIn.state", lambda said: said == APP_NOT_INSTALLED, SIGN_IN_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "signed-in-app-not-installed.txt")
+        expect(said == APP_NOT_INSTALLED, f"signed in where the app is not installed, the step says {said!r}")
+        install = ui.reads(machine, "sources.add.signIn.install", "reading where the install button goes")
+        expect(install == GH_INSTALL_PAGE, f"the install button goes to {install!r}, not {GH_INSTALL_PAGE!r}")
+        _oauth(scene, {"github.com": {"decisions": {code: "approved"}, "installed": [PRIVATE]}}, "the app installed")
+        before = _count(scene)
+        _press(machine, "sources.add.signIn.lookUpAgain", "pressing Look up again")
+        shown = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == TEAM_NAME, SIGN_IN_SECONDS)
+        again = _since(scene, before)
+        expect(_strip(shown) == TEAM_NAME, f"with the app installed, Look up again shows {shown!r}")
+        expect(not [r for r in again if r.raw_path == "/login/device/code"], "Look up again asked for another code")
+    finally:
+        scene.close()
+
+
+def check_source_sign_in_gitlab_com(machine, check_dir, lab):
+    """Sign in with GitLab under **Token…** of a gitlab.com source: the device grant with read_api, the token kept,
+    the project read with it in Authorization: Bearer — and renewed before it ends.
+
+    someone/gl-plugins on gitlab.com added without a token; **Token…** offers **Sign in with GitLab** before the
+    token's field; pressed, the code shows, and **Copy the code and open** carries gitlab.com's page with the code in
+    it. Approved, `sources.json` says `access: signIn` and the project is read with the token, every request carrying
+    it taken. The fake's tokens last 75 s: a minute later **Check now** renews it at `/oauth/token` on gitlab.com's
+    port first, then reads with the new one. No refresh token or device code went anywhere else.
+
+    **Red for**: no Sign in for gitlab.com where the build has its application, a device code asked without read_api,
+    a token not kept, and a refresh token sent anywhere but gitlab.com's token endpoint.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", tokens=True)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _oauth(scene, {GL_COM: {"token_expires_in": 75}}, "gitlab.com, its tokens lasting 75 s")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        sid, _ = _add_a_gitlab(scene, GL_ON_COM, GL_ON_COM_NAME, "adding someone/gl-plugins on gitlab.com",
+                               plugin=GL_COM_PLUGIN)
+        start = _count(scene)
+        _open_token(machine, sid, "to sign in with GitLab")
+        code, page = _sign_in(scene, f"source.{sid}", "gitlab.com")
+        expect(page == f"https://{GL_COM}/oauth/device?user_code={code}", f"Copy the code and open goes to {page!r}")
+        _oauth(scene, {GL_COM: {"token_expires_in": 75, "decisions": {code: "approved"}}}, f"approving {code}")
+        kept = _wait_for_disk(machine, lambda: _the_access(machine, sid) == "signIn", SIGN_IN_SECONDS)
+        expect(kept, f"signed in, {SOURCES_FILE} says {_the_source(machine)!r}")
+        state_file = f"{UDECK_HOME}/catalogue/{sid}/state.json"
+        machine.sleep(20)
+        renewing = _count(scene)
+        succeeded = (_read_json(machine, state_file) or {}).get("lastSuccess")
+        machine.sleep(1.1)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now once the token is due a renewal")
+        read = _wait_for_disk(machine, lambda: (_read_json(machine, state_file) or {}).get("lastSuccess") != succeeded,
+                              CATALOGUE_SECONDS)  # fmt: skip
+        renewed = _since(scene, renewing)
+        refreshes = [r for r in renewed if r.oauth_secret == "refresh_token"]
+        expect(read and len(refreshes) == 1 and refreshes[0].status == 200,
+               f"Check now on a token due a renewal: {[(r.raw_path, r.status, r.oauth_error) for r in renewed]}")
+        whole = _since(scene, start)
+        devices = [r for r in whole if r.raw_path == "/oauth/authorize_device"]
+        expect(devices and all(r.site == GL_COM and r.status == 200 for r in devices),
+               f"the device code was not asked of gitlab.com with read_api: {_described_gitlab(devices)}")
+        reads = [r for r in whole if r.site == GL_COM and r.raw_path.startswith("/api/")]
+        expect(reads and all(r.credential == "accepted" for r in reads),
+               f"signed in, gitlab.com was read without the token or refused it: {_described_gitlab(reads)}")
+        _expect_secrets_only_at_token_endpoints(whole, "signing in at gitlab.com and renewing", GL_COM)
+        _keep_the_pane(machine, check_dir, lab, "signed-in-gitlab-com.txt")
+    finally:
+        scene.close()
+
+
+def check_source_sign_in_self_hosted(machine, check_dir, lab):
+    """A GitLab of one's own: no Sign in until its application id is pasted — then Sign in with GitLab, and the id kept.
+
+    tools/udeck-private on gitlab.example.test, private, looked up without a token: its token step has the field
+    *Application ID on gitlab.example.test* and no **Sign in** at all — the build has no application there. The lab's
+    id pasted, **Sign in with GitLab** appears; pressed and approved, the sheet names the project, **Add** keeps the
+    token — `access: signIn`, `signInClientID` the id pasted — and the project is read with it.
+
+    **Red for**: a Sign in button without an application to sign in as, none once the id is there, and the id not
+    kept with the source.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", tokens=True)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _oauth(scene, {GL_HOST: {"client_id": SELF_HOSTED_APPLICATION, "token_expires_in": 75}},
+               "the self-hosted GitLab's application, its tokens lasting 75 s")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        number = scene.github.project_id(GL_PRIVATE)
+        sid = _source_id("tools/udeck-private", number, host=GL_HOST, provider="gitlab")
+        said, _, _ = _look_up_a_source(scene, f"https://{GL_PRIVATE}", "the private project, without a token")
+        expect(said == NOT_FOUND_OR_PRIVATE.format(address=GL_PRIVATE), f"without a token: {said!r}")
+        _wait_until(machine, "sources.add.signIn.application", lambda said: said is not None, NOTICED_SECONDS, present=True)
+        dump = _read_the_screen(machine, "looking for Sign in before an application id is pasted")
+        expect(ui.element(dump, "sources.add.signIn.application") is not None,
+               "the token step of a GitLab of one's own has no field for its application id")
+        expect(ui.element(dump, "sources.add.signIn") is None,
+               "Sign in is offered on a GitLab of one's own with no application to sign in as")
+        ui.click(machine, "sources.add.signIn.application", "putting the cursor in the application id's field")
+        ui.type_text(machine, SELF_HOSTED_APPLICATION, "typing the self-hosted GitLab's application id")
+        _wait_until(machine, "sources.add.signIn", lambda said: said is not None, NOTICED_SECONDS, present=True)
+        code, page = _sign_in(scene, "sources.add", "the self-hosted GitLab")
+        expect(page == f"https://{GL_HOST}/oauth/device?user_code={code}", f"Copy the code and open goes to {page!r}")
+        _oauth(scene, {GL_HOST: {"client_id": SELF_HOSTED_APPLICATION, "token_expires_in": 75,
+                                 "decisions": {code: "approved"}}}, f"approving {code}")
+        shown = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == GL_NAME, SIGN_IN_SECONDS)
+        expect(_strip(shown) == GL_NAME, f"signed in, the sheet shows {shown!r}, not {GL_NAME!r}")
+        _press(machine, "sources.add.confirm", "pressing Add on what Sign in read")
+        kept = _wait_for_disk(machine, lambda: _the_access(machine, sid) == "signIn", CATALOGUE_SECONDS)
+        source = _the_source(machine) or {}
+        expect(kept and source.get("signInClientID") == SELF_HOSTED_APPLICATION,
+               f"after Add, {SOURCES_FILE} says {source!r}")
+        state_file = f"{UDECK_HOME}/catalogue/{sid}/state.json"
+        read = _wait_for_disk(machine, lambda: (_read_json(machine, state_file) or {}).get("lastSuccess") is not None,
+                              CATALOGUE_SECONDS)  # fmt: skip
+        expect(read, f"signed in, the private project was not read: {_read_json(machine, state_file)!r}")
+        machine.sleep(20)
+        renewing = _count(scene)
+        succeeded = (_read_json(machine, state_file) or {}).get("lastSuccess")
+        machine.sleep(1.1)
+        _press(machine, f"source.{sid}.checkNow", "pressing Check now once the token is due a renewal")
+        reread = _wait_for_disk(machine, lambda: (_read_json(machine, state_file) or {}).get("lastSuccess") != succeeded,
+                                CATALOGUE_SECONDS)  # fmt: skip
+        renewed = _since(scene, renewing)
+        refreshes = [r for r in renewed if r.oauth_secret == "refresh_token"]
+        reads = [r for r in renewed if r.site == GL_HOST and r.raw_path.startswith(("/api/v4/", "/api/graphql"))]
+        expect(reread and len(refreshes) == 1 and refreshes[0].status == 200 and reads
+               and all(r.credential == "accepted" for r in reads) and refreshes[0].at <= reads[0].at,
+               f"Check now on a token due a renewal: {[(r.raw_path, r.status, r.credential) for r in renewed]}")
+        whole = _since(scene, 0)
+        _expect_secrets_only_at_token_endpoints(whole, "signing in at a GitLab of one's own and renewing", GL_HOST)
+        _keep_the_pane(machine, check_dir, lab, "signed-in-self-hosted.txt")
+    finally:
+        scene.close()
+
+
+def check_source_sign_in_hidden(machine, check_dir, lab):
+    """A build without the applications' ids offers no Sign in at all — not a disabled button: neither in the token
+    step of a private GitHub repository nor under **Token…** of a gitlab.com source.
+
+    The lab build installed, its Info.plist stripped of `UDeckGitHubAppClientID`, `UDeckGitHubAppSlug` and
+    `UDeckGitLabComClientID` and the bundle signed again, ad hoc, as make-app.sh signs it. someone/private-plugins
+    looked up without a token: its token step has the token's field and no `sources.add.signIn`, and its
+    collaborator's line does not mention Sign in. someone/gl-plugins on gitlab.com added; **Token…** has the
+    token's field and no `source.<sid>.signIn`.
+
+    **Red for**: a Sign in button where there is no application to sign in as.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
+    try:
+        bundle = f"{app.GUEST_APPLICATIONS}/{app.APP}"
+        plist = f"{bundle}/Contents/Info.plist"
+        step = "taking the Sign in applications out of the installed build"
+        for key in config.LAB_SIGN_IN:
+            machine.ssh.run(f"/usr/libexec/PlistBuddy -c {shlex.quote(f'Delete :{key}')} {shlex.quote(plist)}", step)
+        machine.ssh.run(f"codesign --force --sign - --preserve-metadata=entitlements,requirements,flags,runtime "
+                        f"{shlex.quote(bundle)}", "signing the build again, ad hoc")  # fmt: skip
+        left = machine.ssh.run(f"/usr/libexec/PlistBuddy -c Print {shlex.quote(plist)}", step).stdout
+        if any(key in left for key in config.LAB_SIGN_IN):
+            raise LabError(step, "the build still names a Sign in application")
+        app.launch(machine)
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        said, _, _ = _look_up_a_source(scene, f"https://github.com/{PRIVATE}", "the private repository, without a token")
+        expect(said == NOT_FOUND_OR_PRIVATE.format(address=f"github.com/{PRIVATE}"), f"without a token: {said!r}")
+        _wait_until(machine, "sources.add.tokenField", lambda said: said is not None, NOTICED_SECONDS, present=True)
+        dump = _read_the_screen(machine, "looking for Sign in in the token step of a build without applications")
+        expect(ui.element(dump, "sources.add.tokenField") is not None, "the token step has no token field")
+        expect(ui.element(dump, "sources.add.signIn") is None, "a build without the GitHub App offers Sign in with GitHub")
+        help_ = ui.says(ui.element(dump, "sources.add.tokenHelp")) or ""
+        expect("Sign in" not in help_, f"the token step's help mentions Sign in: {help_!r}")
+        _close_the_source_sheet(scene, "after the private repository")
+        sid, _ = _add_a_gitlab(scene, GL_ON_COM, GL_ON_COM_NAME, "adding someone/gl-plugins on gitlab.com",
+                               plugin=GL_COM_PLUGIN)
+        _open_token(machine, sid, "to look for Sign in with GitLab")
+        dump = _read_the_screen(machine, "looking for Sign in under Token… of a build without applications")
+        _keep_the_pane(machine, check_dir, lab, "sign-in-hidden.txt")
+        expect(ui.element(dump, f"source.{sid}.token.tokenField") is not None, "Token… has no token field")
+        expect(ui.element(dump, f"source.{sid}.signIn") is None,
+               "a build without the gitlab.com application offers Sign in with GitLab")
+    finally:
+        scene.close()
+
+
+def check_source_sign_in_refused(machine, check_dir, lab):
+    """Sign in that comes to nothing: declined, expired, and a token endpoint that redirects — each said in its own
+    words, nothing kept, and no secret replayed.
+
+    someone/private-plugins' token step, three times. (1) The lab denies the code: *Sign-in was declined.* (2) The
+    fake's codes expire in 4 s: *The code expired; start again.* (3) The fake answers the token endpoint with a 307 to
+    `/elsewhere`: the step says the host answered with a redirect, which uDeck does not follow, quoting nothing of the
+    answer — and nothing asks `/elsewhere`. After all three, no source is added and uDeck's Keychain item of tokens is
+    not there.
+
+    **Red for**: a decline or an expiry said as anything else, a redirect followed with a secret, an answer's body
+    quoted, and anything kept from a sign-in that got no token.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", tokens=True)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _oauth(scene, {"github.com": {}}, "github.com, every code pending")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        start = _count(scene)
+        said, _, _ = _look_up_a_source(scene, f"https://github.com/{PRIVATE}", "the private repository, without a token")
+        expect(said == NOT_FOUND_OR_PRIVATE.format(address=f"github.com/{PRIVATE}"), f"without a token: {said!r}")
+        code, _ = _sign_in(scene, "sources.add", "to be declined")
+        _oauth(scene, {"github.com": {"decisions": {code: "denied"}}}, f"denying {code}")
+        said = _wait_until(machine, "sources.add.signIn.state", lambda said: said == DECLINED, SIGN_IN_SECONDS)
+        expect(said == DECLINED, f"a declined sign-in says {said!r}")
+        _oauth(scene, {"github.com": {"code_expires_in": 4}}, "github.com, its codes expiring in 4 s")
+        _sign_in(scene, "sources.add", "to expire")
+        said = _wait_until(machine, "sources.add.signIn.state", lambda said: said == CODE_EXPIRED, SIGN_IN_SECONDS)
+        expect(said == CODE_EXPIRED, f"an expired code says {said!r}")
+        _oauth(scene, {"github.com": {"redirect": True}}, "github.com's token endpoint redirecting")
+        _sign_in(scene, "sources.add", "to be redirected")
+        said = _wait_until(machine, "sources.add.signIn.state", lambda said: bool(said) and "redirect" in said,
+                           SIGN_IN_SECONDS)  # fmt: skip
+        _keep_the_pane(machine, check_dir, lab, "sign-in-refused.txt")
+        expect(said == "github.com answered the sign-in with a redirect (HTTP 307); uDeck never follows one with a secret.",
+               f"a redirected sign-in says {said!r}")
+        heard = _since(scene, start)
+        expect(not [r for r in heard if r.raw_path == "/elsewhere"], "the redirect was followed")
+        _expect_secrets_only_at_token_endpoints(heard, "three sign-ins that came to nothing", "github.com")
+        expect(_the_source(machine) is None, f"a sign-in that got no token added {_the_source(machine)!r}")
+        expect(not _the_token_item_is_there(machine, "asking the Keychain for uDeck's item of tokens"),
+               "a sign-in that got no token left uDeck's Keychain item of tokens")
     finally:
         scene.close()
 

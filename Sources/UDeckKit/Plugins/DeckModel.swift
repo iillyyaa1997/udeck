@@ -131,6 +131,34 @@ public final class DeckModel {
     public internal(set) var sourceOperationProblems: [String: String] = [:]
     /// The lines a test build carries under **Your sources** (`TestBuild`).
     public let testBuild: [Phrase]
+    /// **Sign in** (S4-23): the applications this build signs in as — none,
+    /// and so no button, where Info.plist names none (`SignInApps`).
+    public let signInApps: SignInApps
+    /// What each **Sign in** is doing or came to, by the source's id — `""`
+    /// for the token step of **Add a source…**.
+    public internal(set) var signIns: [String: SignIn] = [:]
+    /// Under a GitLab of one's own's **Token…**: the application id being
+    /// pasted, written to `sources.json` when **Sign in** is pressed.
+    public var sourceApplicationDraft = ""
+    /// Each Sign in under way, by the same key: cancelled when its step
+    /// closes, another starts, or the source goes.
+    @ObservationIgnored var signInTasks: [String: Task<Void, Never>] = [:]
+    /// The token a Sign in got and the check has not kept — in memory only —
+    /// by the same key: what **Look up again** checks once the uDeck app is
+    /// installed, with no new code to enter.
+    @ObservationIgnored var signedInTokens: [String: SourceCredential] = [:]
+    /// Each source's renewal of its token from Sign in (`TokenRenewal`), by
+    /// its id: one per refresh token, shared by every client holding it.
+    @ObservationIgnored var tokenRenewals: [String: (refresh: Secret?, renewal: TokenRenewal)] = [:]
+    /// The turn each Sign in of a source took when it was pressed: a token
+    /// pasted, forgotten or removed after takes it from the Sign in, and
+    /// the Sign in's token is then not kept (`SourceTokenBook`).
+    @ObservationIgnored var signInTickets: [String: SourceTokenBook.Ticket] = [:]
+    /// Each source's refresh tokens renewed away while uDeck runs: a lookup
+    /// of the Keychain begun before a renewal, and back after it, brings the
+    /// pair before — which the host no longer takes — and is not held over
+    /// the renewed one.
+    @ObservationIgnored var retiredRefreshTokens: [String: [Secret]] = [:]
     /// Which **Look up** of a source is the latest: an answer to an earlier
     /// one, or to a sheet closed since, is not shown over it.
     @ObservationIgnored var sourceLookups = 0
@@ -314,7 +342,8 @@ public final class DeckModel {
         endpoints: GitHubEndpoints = .from(infoDictionary: Bundle.main.infoDictionary),
         trash: any PluginTrash = SystemTrash(),
         testBuild: [Phrase] = TestBuild.notices(infoDictionary: Bundle.main.infoDictionary),
-        hostMap: [String: URL] = HostMap.from(infoDictionary: Bundle.main.infoDictionary)
+        hostMap: [String: URL] = HostMap.from(infoDictionary: Bundle.main.infoDictionary),
+        signInApps: SignInApps = .from(infoDictionary: Bundle.main.infoDictionary)
     ) {
         self.paths = paths
         self.executor = executor
@@ -324,6 +353,7 @@ public final class DeckModel {
         self.trash = trash
         self.testBuild = testBuild
         self.hostMap = hostMap
+        self.signInApps = signInApps
 
         // Before the plugins folder is first read: an install, update or
         // removal a crash interrupted is finished or undone, so nothing below
