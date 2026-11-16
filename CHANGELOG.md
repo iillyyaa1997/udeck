@@ -8,11 +8,11 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.8.2] — 2026-11-16
 
 **Sign in** for sources of one's own — the last of stage 4 of
-[docs/plugin-repository.md](docs/plugin-repository.md#sign-in). Nothing is added
-to the plugin contract.
+[docs/plugin-repository.md](docs/plugin-repository.md#sign-in). 0.8.2 adds
+nothing to the plugin contract.
 
 - **Sign in with GitHub, or with GitLab.** A private source's token step, and
   **Token…** on a source, offer Sign in before the token's field: uDeck shows a
