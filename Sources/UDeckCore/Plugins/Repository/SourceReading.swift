@@ -339,6 +339,19 @@ public struct SourceClients: Sendable {
         }
     }
 
+    /// Where **Sign in** asks for `provider`'s repository on `host`, and its
+    /// token is renewed, in this build: the host's own OAuth origin, or the
+    /// base the host map gives it (S4-21) — nil for GitHub anywhere but
+    /// github.com.
+    public func oauth(provider: String, host: String) -> OAuthEndpoints? {
+        OAuthEndpoints.of(provider: provider, host: host, hostMap: hostMap)
+    }
+
+    /// `source`'s OAuth endpoints (`oauth(provider:host:)`).
+    public func oauth(of source: OwnSource) -> OAuthEndpoints? {
+        oauth(provider: source.provider, host: source.host)
+    }
+
     /// The limit a source is counted against: GitHub's anonymous one, which
     /// the official source has, a GitHub source's own while it is read with
     /// its token (`tokened`), or a GitLab source's own.
@@ -452,14 +465,22 @@ public enum SourceLookUp {
     /// is refused before any request (item 23); a `404` with it says the
     /// token may not cover the repository (item 2), a `401` that the host
     /// refused it (item 3), a `403` naming a scope that scope (item 4).
+    /// `signedIn`: a token **Sign in** just got for this address (S4-23), its
+    /// binding's API and OAuth origins filled in and its number not yet — the
+    /// check reads that. A GitHub App's token reads only where the app is
+    /// installed, so a `404` with one says to install it (S4-23).
     public static func lookUp(_ link: SourceLink, list: SourceList, official: RepositoryAddress, officialID: Int?,
-                              clients: SourceClients, token: Secret? = nil,
+                              clients: SourceClients, token: Secret? = nil, signedIn: SourceCredential? = nil,
                               now: @escaping @Sendable () -> Date = { Date() }) async -> Outcome {
         let address = link.address.description
         let gitLab = link.provider == SourceLink.gitlab
         let hostName = gitLab ? link.host : "GitHub"
+        let tokened = token != nil || signedIn != nil
+        let parts = link.path.split(separator: "/", maxSplits: 1).map(String.init)
+        let notInstalled = Phrase.sourceSignInAppNotInstalled(owner: parts.first ?? link.path,
+                                                              repository: parts.count > 1 ? parts[1] : link.path)
         func failed(_ error: any Error, branch: String?, at address: String) -> Outcome {
-            if token != nil {
+            if tokened {
                 switch error {
                 case ProviderError.notFound: return .refused(.sourceTokenNotFound(address: address))
                 case ProviderError.unauthorized: return .refused(.sourceTokenRejected(host: hostName, address: address))
@@ -468,11 +489,11 @@ public enum SourceLookUp {
                 default: break
                 }
             }
-            return .failed(CatalogueRefresher.reason(error, branch: branch, tokened: token != nil), host: link.host,
+            return .failed(CatalogueRefresher.reason(error, branch: branch, tokened: tokened), host: link.host,
                            address: address, provider: link.provider)
         }
-        var credential: SourceCredential?
-        if let token {
+        var credential: SourceCredential? = signedIn
+        if let token, signedIn == nil {
             if TokenPrefix.isTheOtherProviders(token.revealed, source: link.provider) {
                 return .refused(.sourceTokenWrongProvider(host: link.host, looksLikeGitHub: gitLab))
             }
@@ -499,7 +520,7 @@ public enum SourceLookUp {
                                                      now: now, credential: credential) {
                 case .found(let found): description = found
                 case .notFound:
-                    return .refused(token == nil ? .sourceNotFound(address: address) : .sourceTokenNotFound(address: address))
+                    return .refused(tokened ? .sourceTokenNotFound(address: address) : .sourceNotFound(address: address))
                 case .notGitLab: return .refused(.sourceNotGitLab(host: link.host))
                 }
             } catch {
@@ -510,8 +531,13 @@ public enum SourceLookUp {
                 let checked = try await clients.byPath(link.path, credential: credential).describeWithScopes()
                 description = checked.description
                 writeScope = credential != nil && checked.scopes.contains("repo")
-            } catch ProviderError.notFound where token == nil {
+            } catch ProviderError.notFound where !tokened {
                 return .refused(.sourceNotFound(address: address))
+            } catch ProviderError.notFound where signedIn != nil {
+                // The repository itself unseen by a GitHub App's token: the
+                // app is not installed there (S4-23) — a later 404, of a
+                // branch or a file, is the token step's own.
+                return .refused(notInstalled)
             } catch {
                 return failed(error, branch: nil, at: address)
             }
@@ -797,6 +823,7 @@ public enum CatalogueTrouble {
         case .keychainUnavailable(let reason): return .sourceKeychainUnavailable(address: address, reason: reason)
         case .tokenMissing: return .sourceTokenMissing(address: address)
         case .tokenWithdrawn: return .sourceTokenWithdrawn(address: address)
+        case .signedOut: return .sourceSignedOut(host: host)
         case .rawRateLimited(let date): return .catalogueRawLimited(until: until(date))
         case .unreachable(let reason): return .catalogueUnreachable(reason: reason, readAt: readAt, host: host)
         case .notFound: return host == "GitHub" ? .catalogueNotFound(source: address) : .sourceNotFound(address: address)
@@ -808,6 +835,25 @@ public enum CatalogueTrouble {
         case .arrivedDifferent(let path, let expected, let got):
             return .catalogueArrivedDifferent(path: path, expected: expected, got: got)
         case .officialRepositoryChanged: return .catalogueOfficialRepositoryChanged
+        }
+    }
+}
+
+// MARK: - Sign in's trouble
+
+/// What a **Sign in** that got no token says (S4-23): the code expired, the
+/// sign-in declined, the host unreachable, refusing, redirecting or answering
+/// what uDeck could not read — each naming the host, none quoting its answer.
+public enum SignInTrouble {
+    public static func phrase(_ error: SignInError, host: String) -> Phrase {
+        switch error {
+        case .expired: .sourceSignInExpired
+        case .denied: .sourceSignInDeclined
+        case .unreachable(let reason): .catalogueUnreachable(reason: reason, readAt: nil, host: host)
+        case .refused(let status, let code): .sourceSignInRefused(host: host, status: status, code: code)
+        case .redirected(let status): .sourceSignInRedirected(host: host, status: status)
+        case .badAnswer(let status, let field): .sourceSignInBadAnswer(host: host, status: status, field: field)
+        case .wrongOrigin: .sourceTokenUnbound(address: host, origin: nil)
         }
     }
 }

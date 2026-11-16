@@ -198,14 +198,14 @@ struct CredentialTests {
         let entry = try #require((json["tokens"] as? [String: Any])?[source.id] as? [String: Any])
         #expect(entry["kind"] as? String == "pat" && entry["token"] as? String == "glpat-kept")
         #expect((entry["binding"] as? [String: Any])?["remoteID"] as? Int == 48)
-        #expect(await vault.credential(for: source, apiOrigin: Self.origin, requested: false) == .credential(credential))
+        #expect(await vault.credential(for: source, apiOrigin: Self.origin, oauthOrigin: nil, requested: false) == .credential(credential))
         // A new vault — a relaunch — reads the item once, the first time a source with a token needs it.
         let relaunched = CredentialVault(store: store)
-        #expect(await relaunched.credential(for: Self.source(access: OwnSource.Access.none), apiOrigin: Self.origin,
+        #expect(await relaunched.credential(for: Self.source(access: OwnSource.Access.none), apiOrigin: Self.origin, oauthOrigin: nil,
                                             requested: false) == .none)
         #expect(store.calls == ["read", "add"], "a source with no token never reads the Keychain")
-        #expect(await relaunched.credential(for: source, apiOrigin: Self.origin, requested: false) == .credential(credential))
-        #expect(await relaunched.credential(for: source, apiOrigin: Self.origin, requested: false) == .credential(credential))
+        #expect(await relaunched.credential(for: source, apiOrigin: Self.origin, oauthOrigin: nil, requested: false) == .credential(credential))
+        #expect(await relaunched.credential(for: source, apiOrigin: Self.origin, oauthOrigin: nil, requested: false) == .credential(credential))
         #expect(store.calls == ["read", "add", "read"], "read once")
     }
 
@@ -216,19 +216,19 @@ struct CredentialTests {
         let source = Self.source()
         try await vault.keep(SourceCredential(token: Secret("glpat-x"), binding: Self.gitlab), for: source.id)
         // sources.json rewritten — by a plugin, say — to point the same id elsewhere.
-        #expect(await vault.credential(for: Self.source(provider: "github", host: "github.com"), apiOrigin: Self.origin,
+        #expect(await vault.credential(for: Self.source(provider: "github", host: "github.com"), apiOrigin: Self.origin, oauthOrigin: nil,
                                        requested: false) == .unbound(Self.origin))
-        #expect(await vault.credential(for: Self.source(remoteID: 49), apiOrigin: Self.origin, requested: false)
+        #expect(await vault.credential(for: Self.source(remoteID: 49), apiOrigin: Self.origin, oauthOrigin: nil, requested: false)
                 == .unbound(Self.origin))
         // A host map added after the check: the same source, its requests going to another origin.
-        #expect(await vault.credential(for: source, apiOrigin: Origin("http://127.0.0.1:9999")!, requested: false)
+        #expect(await vault.credential(for: source, apiOrigin: Origin("http://127.0.0.1:9999")!, oauthOrigin: nil, requested: false)
                 == .unbound(Self.origin))
-        #expect(await vault.credential(for: source, apiOrigin: Origin("https://gitlab.com")!, requested: false)
+        #expect(await vault.credential(for: source, apiOrigin: Origin("https://gitlab.com")!, oauthOrigin: nil, requested: false)
                 == .unbound(Self.origin))
         let plain = Self.source("plain")
         try await vault.keep(SourceCredential(token: Secret("t"), binding: CredentialBinding(
             provider: "gitlab", remoteID: 48, apiOrigin: Origin("http://gitlab.unicorns.place")!)), for: plain.id)
-        #expect(await vault.credential(for: plain, apiOrigin: Origin("http://gitlab.unicorns.place")!, requested: false)
+        #expect(await vault.credential(for: plain, apiOrigin: Origin("http://gitlab.unicorns.place")!, oauthOrigin: nil, requested: false)
                 == .unbound(Origin("http://gitlab.unicorns.place")!))
     }
 
@@ -238,22 +238,22 @@ struct CredentialTests {
         let vault = CredentialVault(store: store)
         let source = Self.source()
         store.fail(CredentialStoreError("User interaction is not allowed. (-25308)"))
-        #expect(await vault.credential(for: source, apiOrigin: Self.origin, requested: false)
+        #expect(await vault.credential(for: source, apiOrigin: Self.origin, oauthOrigin: nil, requested: false)
                 == .unavailable("User interaction is not allowed. (-25308)"))
-        #expect(await vault.credential(for: Self.source("another"), apiOrigin: Self.origin, requested: false)
+        #expect(await vault.credential(for: Self.source("another"), apiOrigin: Self.origin, oauthOrigin: nil, requested: false)
                 == .unavailable("User interaction is not allowed. (-25308)"), "one status shared by every source with a token")
         #expect(store.calls == ["read"], "unrequested reads after the failure leave the Keychain alone")
         #expect(await vault.lastFailure == "User interaction is not allowed. (-25308)")
-        _ = await vault.credential(for: source, apiOrigin: Self.origin, requested: true)
+        _ = await vault.credential(for: source, apiOrigin: Self.origin, oauthOrigin: nil, requested: true)
         #expect(store.calls == ["read", "read"], "a press tries once more")
         store.fail(nil)
-        #expect(await vault.credential(for: source, apiOrigin: Self.origin, requested: true) == .missing,
+        #expect(await vault.credential(for: source, apiOrigin: Self.origin, oauthOrigin: nil, requested: true) == .missing,
                 "read with a token, and the item holds none for it")
         #expect(await vault.lastFailure == nil)
         // Check now, Token…: asked again whatever was remembered.
         store.fail(CredentialStoreError("denied"))
         await vault.tryAgain()
-        #expect(await vault.credential(for: source, apiOrigin: Self.origin, requested: false) == .unavailable("denied"))
+        #expect(await vault.credential(for: source, apiOrigin: Self.origin, oauthOrigin: nil, requested: false) == .unavailable("denied"))
     }
 
     @Test("every change reads the item afresh, changes what it read, and writes nothing after a failed read")
@@ -269,7 +269,7 @@ struct CredentialTests {
         #expect(store.calls.suffix(2) == ["read", "update"], "an item there is updated, in one write")
         let fresh = CredentialVault(store: store)
         for (id, token) in [("first", "one"), ("second", "two"), ("third", "three")] {
-            #expect(await fresh.credential(for: Self.source(id), apiOrigin: Self.origin, requested: false)
+            #expect(await fresh.credential(for: Self.source(id), apiOrigin: Self.origin, oauthOrigin: nil, requested: false)
                     == .credential(SourceCredential(token: Secret(token), binding: Self.gitlab)), "\(id)")
         }
 
@@ -279,14 +279,14 @@ struct CredentialTests {
         store.fail(CredentialStoreError("denied"))
         #expect(await Self.changeError { () async throws(CredentialVault.ChangeError) in try await vault.forget(first.id) } == .unavailable("denied"))
         #expect(store.data == before && store.calls.filter { $0 != "read" }.count == writes)
-        #expect(await vault.credential(for: first, apiOrigin: Self.origin, requested: false) == .unavailable("denied"))
+        #expect(await vault.credential(for: first, apiOrigin: Self.origin, oauthOrigin: nil, requested: false) == .unavailable("denied"))
         store.fail(nil)
 
         // A write that fails says so, and what was remembered is read again rather than believed.
         store.failWrites(CredentialStoreError("disk full"))
         #expect(await Self.changeError { () async throws(CredentialVault.ChangeError) in try await vault.forget(first.id) } == .notWritten("disk full"))
         store.failWrites(nil)
-        #expect(await vault.credential(for: first, apiOrigin: Self.origin, requested: true)
+        #expect(await vault.credential(for: first, apiOrigin: Self.origin, oauthOrigin: nil, requested: true)
                 == .credential(SourceCredential(token: Secret("one"), binding: Self.gitlab)))
     }
 
@@ -309,7 +309,7 @@ struct CredentialTests {
         let reader = CredentialVault(store: kept)
         #expect(await Self.changeError { () async throws(CredentialVault.ChangeError) in try await reader.keep(SourceCredential(token: Secret("t"), binding: Self.gitlab), for: "c") } == .unreadable)
         #expect(kept.data == later && !kept.calls.contains("update") && !kept.calls.contains("add"))
-        #expect(await reader.credential(for: Self.source("a"), apiOrigin: Self.origin, requested: false)
+        #expect(await reader.credential(for: Self.source("a"), apiOrigin: Self.origin, oauthOrigin: nil, requested: false)
                 == .unavailable("the item is not one this uDeck reads"))
         // Version 1, and an entry that is not whole — no token, or a kind this uDeck does not know: not written over.
         for entry in [#"{"kind": "pat", "binding": {"provider": "gitlab", "remoteID": 48, "apiOrigin": "https://gitlab.unicorns.place"}}"#,
@@ -334,12 +334,12 @@ struct CredentialTests {
         let source = Self.source()
         let credential = SourceCredential(token: Secret("glpat-a"), binding: Self.gitlab)
         try await vault.keep(credential, for: source.id)
-        #expect(await vault.credential(for: source, apiOrigin: Self.origin, requested: false) == .credential(credential))
+        #expect(await vault.credential(for: source, apiOrigin: Self.origin, oauthOrigin: nil, requested: false) == .credential(credential))
         store.data = Data("damaged since".utf8)
         #expect(await Self.changeError { () async throws(CredentialVault.ChangeError) in
             try await vault.keep(SourceCredential(token: Secret("b"), binding: Self.gitlab), for: "another")
         } == .unreadable)
-        #expect(await vault.credential(for: source, apiOrigin: Self.origin, requested: false)
+        #expect(await vault.credential(for: source, apiOrigin: Self.origin, oauthOrigin: nil, requested: false)
                 == .unavailable("the item is not one this uDeck reads"), "not the token remembered from before")
         #expect(store.data == Data("damaged since".utf8))
     }
@@ -355,7 +355,7 @@ struct CredentialTests {
         let payload = try #require(CredentialPayload.read(item), "the item it wrote is one it reads")
         #expect(payload.tokens["signed"]?.access == "gloas-access" && payload.tokens["signed"]?.token == nil)
         #expect(payload.tokens["pasted"]?.token == "glpat-pasted" && payload.tokens["pasted"]?.access == nil)
-        #expect(await CredentialVault(store: store).credential(for: Self.source("signed"), apiOrigin: Self.origin,
+        #expect(await CredentialVault(store: store).credential(for: Self.source("signed"), apiOrigin: Self.origin, oauthOrigin: nil,
                                                                requested: false) == .credential(signedIn))
         #expect(await Self.changeError { () async throws(CredentialVault.ChangeError) in
             try await vault.keep(SourceCredential(token: Secret(""), binding: Self.gitlab), for: "empty")

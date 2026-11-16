@@ -475,7 +475,7 @@ public enum Phrase: Sendable, Equatable {
     case sourceTokenWrongProvider(host: String, looksLikeGitHub: Bool)
     case sourceTokenClipboardCleared
     case sourceTokenWriteScope
-    case sourceTokenCollaborator(owner: String, repository: String)
+    case sourceTokenCollaborator(owner: String, repository: String, signIn: Bool = false)
     case sourceTokenChooseRepository(owner: String, repository: String)
     case sourceTokenGitLabScopeHelp
     case sourceToken
@@ -483,6 +483,29 @@ public enum Phrase: Sendable, Equatable {
     case sourceLookUpWithToken
     case sourceTokenField
     case sourceForgetToken
+    /// **Sign in** (S4-23): the button, GitHub's or GitLab's; the code, and
+    /// where to enter it; **Copy the code and open…**; the code expired; the
+    /// sign-in declined; signed out once a renewal was refused; a GitHub
+    /// repository the uDeck app is not installed for, and the button that
+    /// installs it; a GitLab of one's own's application id, and what it is;
+    /// the host's refusal, a redirect not followed, an answer not read;
+    /// **Look up again** after installing the app; **Sign out**; signed in.
+    case sourceSignIn(provider: String)
+    case sourceSignInEnterCode(host: String)
+    case sourceSignInCopyAndOpen(page: String)
+    case sourceSignInExpired
+    case sourceSignInDeclined
+    case sourceSignedOut(host: String)
+    case sourceSignInAppNotInstalled(owner: String, repository: String)
+    case sourceSignInInstallApp(owner: String)
+    case sourceSignInApplicationField(host: String)
+    case sourceSignInApplicationHelp(host: String)
+    case sourceSignInRefused(host: String, status: Int, code: String?)
+    case sourceSignInRedirected(host: String, status: Int)
+    case sourceSignInBadAnswer(host: String, status: Int, field: String)
+    case sourceSignInLookUpAgain
+    case sourceSignOut
+    case sourceSignedIn(host: String)
     /// A copy of a source that is no longer added: its row, after its mark.
     case sourceNoLongerAdded(address: String)
     /// **Remove…** of a source: what it does.

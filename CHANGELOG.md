@@ -8,6 +8,27 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [Unreleased]
+
+**Sign in** for sources of one's own — the last of stage 4 of
+[docs/plugin-repository.md](docs/plugin-repository.md#sign-in). Nothing is added
+to the plugin contract.
+
+- **Sign in with GitHub, or with GitLab.** A private source's token step, and
+  **Token…** on a source, offer Sign in before the token's field: uDeck shows a
+  code, you enter it on the host's page — **Copy the code and open…** opens it
+  when you press it, never by itself — and the source is read with what the host
+  gives, kept in the Keychain like a pasted token. GitHub signs in through the
+  uDeck Plugins app, which reads only the repositories you install it on
+  (contents, read-only); a `404` right after says to install it, with the page
+  that does. gitlab.com through uDeck's own application; a GitLab of your own
+  through an application registered there, whose id you paste under
+  *Application ID on <host>*. Without an application there is no button.
+- **GitLab tokens from Sign in renew themselves**, a minute before they end, the
+  new pair written to the Keychain before it is used; one the host refuses says
+  *Signed out of <host>: sign in again.* GitHub's do not expire: GitHub renews a
+  token only with the app's secret, which uDeck does not keep.
+
 ## [0.8.1] — 2026-11-14
 
 uDeck puts its own updates in place by itself now. 0.8.1 adds nothing to the

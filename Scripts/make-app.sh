@@ -247,11 +247,20 @@ fi
 # hold this to — not GitHub's own, so that a lab build that kept the shipped
 # number would stop its catalogue at its first describe.
 TEST_PLUGINS_REPOSITORY_ID=900000001
-# The GitLabs the fake answers as, each host on its own port of BASE_URL's host,
-# as e2e/udeck_e2e/config.py's GITLAB_PORTS names them — which the lab's tests
+# The GitLabs the fake answers as, and github.com's web where Sign in asks
+# (stage 4, R6), each host on its own port of BASE_URL's host, as
+# e2e/udeck_e2e/config.py's HOST_MAP_PORTS names them — which the lab's tests
 # hold this to: "host=port", one a line.
+#
+# And the applications a lab build signs in as: made-up ids only the fake knows
+# (config.py's LAB_SIGN_IN), over the shipped ones — a lab build never asks
+# github.com or gitlab.com to sign anybody in.
+TEST_SIGN_IN="UDeckGitHubAppClientID=Iv1.lab-udeck-github
+UDeckGitHubAppSlug=udeck-lab
+UDeckGitLabComClientID=lab-udeck-gitlab-com"
 TEST_GITLAB_PORTS="gitlab.example.test=8768
-gitlab.com=8769"
+gitlab.com=8769
+github.com=8770"
 BASE="${TEST_PLUGINS%/}"
 if [ -n "$TEST_PLUGINS" ]; then
     /usr/libexec/PlistBuddy -c "Set :UDeckPluginsAPIBase $BASE/api" "$APP/Contents/Info.plist"
@@ -267,6 +276,10 @@ if [ -n "$TEST_PLUGINS" ]; then
     for entry in $TEST_GITLAB_PORTS; do
         /usr/libexec/PlistBuddy -c "Add :UDeckPluginsHostMap:${entry%%=*} string $SCHEME://$HOSTNAME_ONLY:${entry#*=}" \
             "$APP/Contents/Info.plist"
+    done
+    for entry in $TEST_SIGN_IN; do
+        /usr/libexec/PlistBuddy -c "Delete :${entry%%=*}" "$APP/Contents/Info.plist" >/dev/null 2>&1 || true
+        /usr/libexec/PlistBuddy -c "Add :${entry%%=*} string ${entry#*=}" "$APP/Contents/Info.plist"
     done
 fi
 
