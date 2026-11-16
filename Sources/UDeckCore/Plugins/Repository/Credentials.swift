@@ -115,8 +115,15 @@ public struct SourceCredential: Equatable, Sendable {
     }
 
     public var kind: Kind
+    /// A pasted token, or Sign in's access token as it was handed out.
     public var token: Secret
     public var binding: CredentialBinding
+    /// Sign in's refresh token, when the host gave one.
+    public var refresh: Secret?
+    /// When Sign in's token ends, when the host said.
+    public var expiresAt: Date?
+    /// The application Sign in asked as: what a renewal asks as again.
+    public var clientID: String?
     /// The lease it was handed out under for reads (`SourceTokenBook`): every
     /// request asks it first, so Forget, Remove, a changed source or the
     /// host's `401` take the token back from every client holding a copy —
@@ -124,16 +131,35 @@ public struct SourceCredential: Equatable, Sendable {
     /// their next request. Nil for a token being checked, which no other
     /// client holds. Not part of what the credential is.
     public var lease: CredentialLease?
+    /// What keeps a token from Sign in fresh for every client holding a copy
+    /// (`TokenRenewal`): what a request sends is its token as it stands now.
+    /// Nil for a pasted token, and one being checked. Not part of what the
+    /// credential is.
+    public var renewal: TokenRenewal?
 
-    public init(kind: Kind = .pat, token: Secret, binding: CredentialBinding, lease: CredentialLease? = nil) {
+    public init(kind: Kind = .pat, token: Secret, binding: CredentialBinding, refresh: Secret? = nil,
+                expiresAt: Date? = nil, clientID: String? = nil, lease: CredentialLease? = nil) {
         self.kind = kind
         self.token = token
         self.binding = binding
+        self.refresh = refresh
+        self.expiresAt = expiresAt.map(InstalledPlugins.wholeSeconds)
+        self.clientID = clientID
         self.lease = lease
     }
 
+    /// Sign in's pair, as a credential: `oauth`, bound as `binding` says.
+    public init(_ tokens: OAuthTokens, clientID: String, binding: CredentialBinding) {
+        self.init(kind: .oauth, token: tokens.access, binding: binding, refresh: tokens.refresh,
+                  expiresAt: tokens.expiresAt, clientID: clientID)
+    }
+
+    /// Sign in's pair as it was handed out.
+    public var tokens: OAuthTokens { OAuthTokens(access: token, refresh: refresh, expiresAt: expiresAt) }
+
     public static func == (lhs: SourceCredential, rhs: SourceCredential) -> Bool {
-        lhs.kind == rhs.kind && lhs.token == rhs.token && lhs.binding == rhs.binding
+        lhs.kind == rhs.kind && lhs.token == rhs.token && lhs.binding == rhs.binding && lhs.refresh == rhs.refresh
+            && lhs.expiresAt == rhs.expiresAt && lhs.clientID == rhs.clientID
     }
 
     /// Whether it may still be sent: its lease not ended. Throws what a
@@ -143,7 +169,11 @@ public struct SourceCredential: Equatable, Sendable {
     }
 
     /// The header a request carries it in, and its value.
-    public var header: (name: String, value: String) {
+    public var header: (name: String, value: String) { header(for: token) }
+
+    /// The header a request carries `token` — this credential's, or what its
+    /// renewal made of it — in, and its value.
+    public func header(for token: Secret) -> (name: String, value: String) {
         if binding.provider == SourceLink.gitlab, kind == .pat { return ("PRIVATE-TOKEN", token.revealed) }
         return ("Authorization", "Bearer \(token.revealed)")
     }
@@ -153,6 +183,51 @@ public struct SourceCredential: Equatable, Sendable {
     public func mayGo(to url: URL) -> Bool {
         guard let origin = Origin(url) else { return false }
         return origin == binding.apiOrigin && origin.mayCarryASecret
+    }
+
+    /// `attempt` with the token as a request carries it now — renewed first
+    /// when it is Sign in's and ends within a minute — and, when the host
+    /// answered it `401`, once more with a renewed one (S4-23). A pasted
+    /// token refused, or Sign in's refused again, is refused for good: its
+    /// lease ends, and no client holding it sends it again (S4-19). A renewal
+    /// the host refused signs the source out, the same way.
+    public func sending<T>(now: Date, _ attempt: (Secret) async throws -> T) async throws -> T {
+        try stillHeld()
+        let sent: Secret
+        do throws(ProviderError) {
+            sent = try await renewal?.token(now: now, for: lease) ?? token
+        } catch {
+            if error == .signedOut { lease?.end(.signedOut) }
+            throw error
+        }
+        // Taken back while it was renewed — Forget, Remove, another token —
+        // and the new token is not sent either (S4-19).
+        try stillHeld()
+        do {
+            return try await attempt(sent)
+        } catch ProviderError.unauthorized {
+            // Taken back meanwhile: nothing renewed for a token nobody holds.
+            try stillHeld()
+            let fresh: Secret?
+            do throws(ProviderError) {
+                fresh = try await renewal?.renewed(after: sent, for: lease)
+            } catch {
+                if error == .signedOut { lease?.end(.signedOut) }
+                throw error
+            }
+            guard let fresh else {
+                lease?.end(.rejected)
+                throw ProviderError.unauthorized
+            }
+            // Taken back while it was renewed: not sent, not even once more.
+            try stillHeld()
+            do {
+                return try await attempt(fresh)
+            } catch ProviderError.unauthorized {
+                lease?.end(.rejected)
+                throw ProviderError.unauthorized
+            }
+        }
     }
 }
 
@@ -169,6 +244,9 @@ public final class CredentialLease: @unchecked Sendable {
         /// The host answered `401` to it (S4-19): nothing more is sent until
         /// Check now or Token….
         case rejected
+        /// Sign in's token could not be renewed (S4-23): nothing more is
+        /// sent until Sign in again.
+        case signedOut
     }
 
     private let lock = NSLock()
@@ -320,6 +398,17 @@ struct CredentialPayload: Codable, Equatable {
     }
 }
 
+/// What the Keychain says before a renewal (`CredentialVault.mayRenew`).
+public enum RenewalCheck: Equatable, Sendable {
+    /// Read, and holding the refresh token about to be spent.
+    case fine
+    /// Not read, for this reason (S4-20, item 14).
+    case unavailable(String)
+    /// Read, and holding another token for the source, or none: forgotten,
+    /// or signed in anew meanwhile.
+    case changed
+}
+
 /// Every source's token, kept in one Keychain item and handed out only where
 /// it may go (S4-18).
 ///
@@ -365,6 +454,10 @@ public actor CredentialVault {
         case unreadable
         /// The write itself failed.
         case notWritten(String)
+        /// A rotation found the item holding something else for the source
+        /// than the pair it renewed — forgotten, signed in again, or another
+        /// uDeck's rotation: nothing was written over it.
+        case changed
     }
 
     private let store: any CredentialStore
@@ -382,10 +475,13 @@ public actor CredentialVault {
     }
 
     /// The token of `source` for requests to `apiOrigin` — the origin its
-    /// client's requests go to now. `requested` is a press — **Check now**,
-    /// **Token…**, a read the person started — which tries the Keychain once
-    /// more after a failure.
-    public func credential(for source: OwnSource, apiOrigin: Origin, requested: Bool) -> Lookup {
+    /// client's requests go to now — and, for one from **Sign in**, renewed at
+    /// `oauthOrigin`, its host's OAuth origin in this build: a token signed in
+    /// at another is not handed out (S4-18, S4-19). `requested` is a press —
+    /// **Check now**, **Token…**, a read the person started — which tries the
+    /// Keychain once more after a failure.
+    public func credential(for source: OwnSource, apiOrigin: Origin, oauthOrigin: Origin?,
+                           requested: Bool) -> Lookup {
         guard source.access != OwnSource.Access.none else { return .none }
         if let failure, !requested { return .unavailable(failure) }
         if failure != nil || known == nil {
@@ -404,27 +500,84 @@ public actor CredentialVault {
         }
         guard let kind = SourceCredential.Kind(rawValue: entry.kind),
               let token = kind == .pat ? entry.token : entry.access else { return .missing }
-        return .credential(SourceCredential(kind: kind, token: Secret(token), binding: binding))
+        if kind == .oauth, let signedInAt = binding.oauthOrigin,
+           signedInAt != oauthOrigin || !signedInAt.mayCarryASecret {
+            return .unbound(signedInAt)
+        }
+        return .credential(SourceCredential(kind: kind, token: Secret(token), binding: binding,
+                                            refresh: entry.refresh.map(Secret.init), expiresAt: entry.expiresAt,
+                                            clientID: entry.clientID))
     }
 
     /// `credential` kept for `sourceID` — over any it had.
     /// A pasted token is kept as `token`, Sign in's access token as
-    /// `access`: each where a later read looks for it. An empty one is not
-    /// kept.
+    /// `access`, with its refresh token, when it ends and the application it
+    /// was signed in as: each where a later read looks for it. An empty one is
+    /// not kept.
     /// Its revision comes back: what a rollback of this one write names
     /// (`forget(_:written:)`).
     @discardableResult
     public func keep(_ credential: SourceCredential, for sourceID: String) throws(ChangeError) -> Int {
         guard !credential.token.isEmpty else { throw .notWritten("an empty token is not kept") }
-        let secret = credential.token.revealed
-        let entry = credential.kind == .pat
-            ? CredentialPayload.Entry(kind: credential.kind.rawValue, token: secret, binding: credential.binding)
-            : CredentialPayload.Entry(kind: credential.kind.rawValue, access: secret, binding: credential.binding)
-        try change { tokens in tokens[sourceID] = entry }
+        let entry = Self.entry(credential)
+        try change { tokens throws(ChangeError) in tokens[sourceID] = entry }
         revisions += 1
         written[sourceID] = (revisions, ProcessInfo.processInfo.systemUptime)
         return revisions
     }
+
+    /// Whether Sign in's token of `sourceID` may be renewed with `refresh`
+    /// now: the item read afresh, and still holding that refresh token — or
+    /// why not, and the host is not asked, so the refresh token stays good
+    /// for later (S4-18, S4-23).
+    public func mayRenew(_ sourceID: String, with refresh: Secret) -> RenewalCheck {
+        // A denial is remembered for the process: no renewal nobody asked for
+        // touches the Keychain again until Check now, Token… or a relaunch.
+        if let failure { return .unavailable(failure) }
+        let fresh: Data?
+        do throws(CredentialStoreError) {
+            fresh = try store.read()
+        } catch {
+            failure = error.reason
+            return .unavailable(error.reason)
+        }
+        guard let fresh else { return .changed }
+        guard let payload = CredentialPayload.read(fresh) else { return .unavailable(Self.unreadable) }
+        guard payload.tokens[sourceID]?.refresh == refresh.revealed else { return .changed }
+        return .fine
+    }
+
+    /// Sign in's renewed pair written over the one renewed with `old` — read
+    /// afresh, changed and written as every change is, before the new token
+    /// is sent anywhere: the old refresh token dies on use (S4-23). Nothing is
+    /// written when the item no longer holds `old` for the source.
+    public func rotate(_ sourceID: String, from old: Secret, to tokens: OAuthTokens) throws(ChangeError) {
+        try change { entries throws(ChangeError) in
+            guard var entry = entries[sourceID], entry.kind == SourceCredential.Kind.oauth.rawValue,
+                  entry.refresh == old.revealed else { throw .changed }
+            entry.access = tokens.access.revealed
+            entry.refresh = tokens.refresh?.revealed
+            entry.expiresAt = tokens.expiresAt.map(InstalledPlugins.wholeSeconds)
+            entries[sourceID] = entry
+        }
+        revisions += 1
+        written[sourceID] = (revisions, ProcessInfo.processInfo.systemUptime)
+    }
+
+    /// The item's entry for `credential`.
+    static func entry(_ credential: SourceCredential) -> CredentialPayload.Entry {
+        let secret = credential.token.revealed
+        switch credential.kind {
+        case .pat:
+            return CredentialPayload.Entry(kind: credential.kind.rawValue, token: secret, binding: credential.binding)
+        case .oauth:
+            return CredentialPayload.Entry(kind: credential.kind.rawValue, access: secret,
+                                           refresh: credential.refresh?.revealed,
+                                           expiresAt: credential.expiresAt.map(InstalledPlugins.wholeSeconds),
+                                           clientID: credential.clientID, binding: credential.binding)
+        }
+    }
+
 
     /// The token of `sourceID` forgotten; the item deleted with the last.
     /// With `written`, forgotten only while the entry is still the one that
@@ -480,7 +633,8 @@ public actor CredentialVault {
         return .success(payload.tokens)
     }
 
-    private func change(_ apply: (inout [String: CredentialPayload.Entry]) -> Void) throws(ChangeError) {
+    private func change(_ apply: (inout [String: CredentialPayload.Entry]) throws(ChangeError) -> Void)
+        throws(ChangeError) {
         let fresh: Data?
         do throws(CredentialStoreError) {
             fresh = try store.read()
@@ -498,7 +652,7 @@ public actor CredentialVault {
             }
             payload = read
         }
-        apply(&payload.tokens)
+        try apply(&payload.tokens)
         do throws(CredentialStoreError) {
             if payload.tokens.isEmpty {
                 if fresh != nil { try store.delete() }

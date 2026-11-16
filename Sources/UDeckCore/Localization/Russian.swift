@@ -407,8 +407,10 @@ struct Russian: Vocabulary {
         case .sourceTokenClipboardCleared: "Токен убран из буфера обмена."
         case .sourceTokenWriteScope:
             "У этого классического токена есть право repo: он может и писать во все доступные вам репозитории. uDeck только читает; безопаснее детальный токен (fine-grained) с правом Contents только на чтение."
-        case .sourceTokenCollaborator(let owner, let repository):
-            "Детальный токен (fine-grained) читает только репозитории вашего аккаунта и организаций, в которых вы состоите. Если в \(owner)/\(repository) вы лишь соавтор, используйте классический токен — он может и писать."
+        case .sourceTokenCollaborator(let owner, let repository, let signIn):
+            "Детальный токен (fine-grained) читает только репозитории вашего аккаунта и организаций, в которых вы состоите. Если в \(owner)/\(repository) вы лишь соавтор, "
+                + (signIn ? "войдите через GitHub, когда \(owner) установит приложение uDeck, или используйте классический токен — он может и писать."
+                    : "используйте классический токен — он может и писать.")
         case .sourceTokenChooseRepository(let owner, let repository):
             "На странице выберите Only select repositories → \(repository) и проверьте, что владелец ресурса — \(owner)."
         case .sourceTokenGitLabScopeHelp:
@@ -418,6 +420,27 @@ struct Russian: Vocabulary {
         case .sourceLookUpWithToken: "Проверить с токеном"
         case .sourceTokenField: "Вставьте токен"
         case .sourceForgetToken: "Забыть токен"
+        case .sourceSignIn(let provider): provider == SourceLink.gitlab ? "Войти через GitLab" : "Войти через GitHub"
+        case .sourceSignInEnterCode(let host): "Введите этот код на \(host). uDeck проверит сам и продолжит, как только вы это сделаете."
+        case .sourceSignInCopyAndOpen(let page): "Скопировать код и открыть \(page)"
+        case .sourceSignInExpired: "Код истёк; начните заново."
+        case .sourceSignInDeclined: "Вход отклонён."
+        case .sourceSignedOut(let host): "Вход в \(host) завершён: войдите снова."
+        case .sourceSignInAppNotInstalled(let owner, let repository):
+            "Вход выполнен, но приложение uDeck не установлено у \(owner), поэтому \(repository) ему недоступен. Установите его у \(owner), выбрав \(repository)."
+        case .sourceSignInInstallApp(let owner): "Установить приложение uDeck у \(owner)…"
+        case .sourceSignInApplicationField(let host): "ID приложения на \(host)"
+        case .sourceSignInApplicationHelp(let host):
+            "Чтобы войти в \(host), uDeck нужно приложение, зарегистрированное там: не конфиденциальное, с правом read_api — вами (User settings → Applications) или администратором. Вставьте сюда его Application ID."
+        case .sourceSignInRefused(let host, let status, let code):
+            "\(host) отказал во входе (HTTP \(status)\(code.map { ", \($0)" } ?? ""))."
+        case .sourceSignInRedirected(let host, let status):
+            "\(host) ответил на вход перенаправлением (HTTP \(status)); с секретом uDeck по перенаправлениям не ходит."
+        case .sourceSignInBadAnswer(let host, let status, let field):
+            "\(host) ответил на вход так, что uDeck не понял ответа (HTTP \(status), нет \(field))."
+        case .sourceSignInLookUpAgain: "Проверить снова"
+        case .sourceSignOut: "Выйти"
+        case .sourceSignedIn(let host): "Вход в \(host) выполнен."
         case .sourceNoLongerAdded(let address): "Из \(address) — источник больше не добавлен"
         case .sourceRemoveConfirm(let name, let address):
             "Удалить \(name) (\(address))? uDeck перестанет его читать и забудет его токен. Установленное из него останется и продолжит работать; если вы ему доверяли, эти плагины станут непроверенными и спросят снова перед следующим запуском, а обновить или переустановить их нельзя, пока источник не добавлен снова."

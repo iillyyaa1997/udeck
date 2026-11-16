@@ -43,13 +43,22 @@ public enum ProviderError: Error, Equatable, Sendable {
     /// The token's lease had ended before the request (`CredentialLease`):
     /// taken back, or refused by the host earlier — not sent.
     case tokenWithdrawn(CredentialLease.Ending)
+    /// A token from **Sign in** could not be renewed: the host refused its
+    /// refresh token, or the new pair could not be kept (S4-23) — *"Signed
+    /// out of <host>: sign in again."* Nothing more is sent.
+    case signedOut
+    /// A token from **Sign in** was due a renewal, and the Keychain could
+    /// not be read first, for this reason: nothing was asked of the host, so
+    /// the refresh token is still good (S4-18).
+    case keychainUnavailable(String)
 
     /// Whether it is the token's answer — refused, short of a scope, sent
-    /// elsewhere by a move, not for this address, taken back: asked again,
-    /// the token would only be sent again, so nothing retries it (S4-19).
+    /// elsewhere by a move, not for this address, taken back, signed out:
+    /// asked again, the token would only be sent again, so nothing retries
+    /// it (S4-19).
     public var isTheTokens: Bool {
         switch self {
-        case .unauthorized, .forbidden, .moved, .credentialUnbound, .tokenWithdrawn: true
+        case .unauthorized, .forbidden, .moved, .credentialUnbound, .tokenWithdrawn, .signedOut, .keychainUnavailable: true
         default: false
         }
     }
@@ -737,15 +746,25 @@ public struct GitHubClient: RepositoryProvider {
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
-        if let credential {
-            // Taken back since it was handed out: not sent, not even once more.
-            try credential.stillHeld()
-            guard credential.mayGo(to: url) else { throw ProviderError.credentialUnbound }
-            let header = credential.header
-            request.setValue(header.value, forHTTPHeaderField: header.name)
+        guard let credential else { return try await answer(request, allowNotModified: allowNotModified) }
+        // Taken back since it was handed out: not sent, not even once more.
+        try credential.stillHeld()
+        guard credential.mayGo(to: url) else { throw ProviderError.credentialUnbound }
+        // The token as it stands — Sign in's renewed when due, and once
+        // after a `401` (S4-23); a refused one is refused for good (S4-19).
+        return try await credential.sending(now: now()) { token in
+            var carrying = request
+            let header = credential.header(for: token)
+            carrying.setValue(header.value, forHTTPHeaderField: header.name)
+            return try await answer(carrying, allowNotModified: allowNotModified, refusingRedirects: true)
         }
+    }
 
-        let (data, response) = try await send(request, refusingRedirects: credential != nil)
+    /// `request` sent, and its answer judged: a success, a `304` only where
+    /// it is asked for, the limit, a `404`, a `401`, a move, a refusal.
+    private func answer(_ request: URLRequest, allowNotModified: Bool,
+                        refusingRedirects: Bool = false) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await send(request, refusingRedirects: refusingRedirects)
         var fields: [String: String] = [:]
         for (key, value) in response.allHeaderFields {
             if let key = key as? String, let value = value as? String { fields[key] = value }
@@ -756,10 +775,9 @@ public struct GitHubClient: RepositoryProvider {
         case (200 ..< 300, _): return (data, response)
         case (304, _) where allowNotModified: return (data, response)
         case (404, _), (422, _): throw ProviderError.notFound
-        case (401, _):
-            // Refused: no client holding it sends it again (S4-19).
-            credential?.lease?.end(.rejected)
-            throw ProviderError.unauthorized
+        // A token's lease is ended by `sending`, once Sign in's has had its
+        // one renewal: no client holding it sends it again (S4-19).
+        case (401, _): throw ProviderError.unauthorized
         case (300 ..< 400, _): throw ProviderError.moved(status: response.statusCode)
         default: throw ProviderError.refused(status: response.statusCode)
         }

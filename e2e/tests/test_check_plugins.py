@@ -1165,11 +1165,14 @@ def test_the_gitlab_ports_are_the_ones_every_lab_build_reads_them_at():
     from udeck_e2e import builds
 
     said = _source("Scripts", "make-app.sh").split('TEST_GITLAB_PORTS="', 1)[1].split('"', 1)[0].split()
-    assert dict(item.split("=") for item in said) == {host: str(port) for host, port in config.GITLAB_PORTS.items()}
-    assert set(config.GITLAB_PORTS.values()).isdisjoint({config.FEED_PORT, config.PLUGINS_PORT})
+    assert dict(item.split("=") for item in said) == {host: str(port) for host, port in config.HOST_MAP_PORTS.items()}
+    signs_in = _source("Scripts", "make-app.sh").split('TEST_SIGN_IN="', 1)[1].split('"', 1)[0].split()
+    assert dict(item.split("=") for item in signs_in) == config.LAB_SIGN_IN
+    assert set(config.HOST_MAP_PORTS.values()).isdisjoint({config.FEED_PORT, config.PLUGINS_PORT, 8767})
+    assert len(set(config.HOST_MAP_PORTS.values())) == len(config.HOST_MAP_PORTS)
     assert builds.host_map(plugin_repository.base_url()) == {
-        host: f"http://127.0.0.1:{port}" for host, port in config.GITLAB_PORTS.items()}
-    assert plugin_repository.FakeGitHub(object(), note=lambda text: None).gitlab_ports == config.GITLAB_PORTS
+        host: f"http://127.0.0.1:{port}" for host, port in config.HOST_MAP_PORTS.items()}
+    assert plugin_repository.FakeGitHub(object(), note=lambda text: None).gitlab_ports == config.HOST_MAP_PORTS
     shipped = plistlib.loads(_source("Sources", "uDeck", "Support", "Info.plist").encode())
     assert builds.HOST_MAP not in shipped
     assert sorted(config.GITLAB_PORTS) == sorted([checks.GL_HOST, checks.GL_COM])

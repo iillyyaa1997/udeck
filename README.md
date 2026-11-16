@@ -308,7 +308,12 @@ remove it, from its own host: the github.com API and raw host, or a GitLab's
 `https://<host>/api/v4`, every file of it included, and its `/api/graphql` for
 the manifests of a plugin's history. **Official catalogue** off does not stop
 it. It is read anonymously, unless you give it a token under **Token…** — a
-private one needs one — and then with that token, for that source only. Tokens
+private one needs one — and then with that token, for that source only. A token
+is pasted, or got by **Sign in with GitHub** or **with GitLab**: uDeck shows a
+code, you enter it on `github.com/login/device` or your GitLab's
+`/oauth/device`, and uDeck asks `github.com/login`, `gitlab.com/oauth` or your
+GitLab's `/oauth` — when Sign in is pressed, and when a GitLab token is renewed
+a minute before it ends; GitHub's do not expire — and nothing else there. Tokens
 are kept in the Keychain, and each is bound to what it was checked against: it
 is sent only to that host, never across a redirect, never to a raw host and
 never once the source points at another repository or host, and it is never

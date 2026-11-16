@@ -207,10 +207,10 @@ struct TokenLifecycleTests {
         let second = try await vault.keep(token, for: "s")
         #expect(first != second)
         try await vault.forget("s", written: first)
-        #expect(await vault.credential(for: Self.source(), apiOrigin: Self.origin, requested: true) == .credential(token),
+        #expect(await vault.credential(for: Self.source(), apiOrigin: Self.origin, oauthOrigin: nil, requested: true) == .credential(token),
                 "the second write of the same token stays")
         try await vault.forget("s", written: second)
-        #expect(await vault.credential(for: Self.source(), apiOrigin: Self.origin, requested: true) == .missing)
+        #expect(await vault.credential(for: Self.source(), apiOrigin: Self.origin, oauthOrigin: nil, requested: true) == .missing)
         #expect(store.data == nil, "the item deleted with the last token")
         // A token another uDeck wrote — none of this one's writes — is never taken back as one.
         try await CredentialVault(store: store).keep(token, for: "s")
@@ -227,18 +227,18 @@ struct TokenLifecycleTests {
         let calls = store.calls.count
         try await vault.prune(keeping: ["a"], writtenBefore: .infinity)
         #expect(store.calls.count == calls, "not read yet: the Keychain left alone, nothing pruned")
-        _ = await vault.credential(for: Self.source("a"), apiOrigin: Self.origin, requested: false)
+        _ = await vault.credential(for: Self.source("a"), apiOrigin: Self.origin, oauthOrigin: nil, requested: false)
         let read = store.calls.count
         try await vault.prune(keeping: ["a", "b"], writtenBefore: .infinity)
         #expect(store.calls.count == read, "nothing to go: nothing read or written")
         let cutoff = ProcessInfo.processInfo.systemUptime
         try await vault.keep(Self.credential("glpat-c"), for: "c")
         try await vault.prune(keeping: ["a"], writtenBefore: cutoff)
-        #expect(await vault.credential(for: Self.source("b"), apiOrigin: Self.origin, requested: true) == .missing,
+        #expect(await vault.credential(for: Self.source("b"), apiOrigin: Self.origin, oauthOrigin: nil, requested: true) == .missing,
                 "another uDeck's leftover goes")
-        #expect(await vault.credential(for: Self.source("c"), apiOrigin: Self.origin, requested: true)
+        #expect(await vault.credential(for: Self.source("c"), apiOrigin: Self.origin, oauthOrigin: nil, requested: true)
                 == .credential(Self.credential("glpat-c")), "written after the cutoff: being added, kept")
-        #expect(await vault.credential(for: Self.source("a"), apiOrigin: Self.origin, requested: true)
+        #expect(await vault.credential(for: Self.source("a"), apiOrigin: Self.origin, oauthOrigin: nil, requested: true)
                 == .credential(Self.credential("glpat-a")))
     }
 

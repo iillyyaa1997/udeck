@@ -237,6 +237,16 @@ GENERATED = ".generated"
 
 # The headers a credential travels in, GitHub's and GitLab's.
 CREDENTIAL_HEADERS = ("authorization", "private-token")
+
+# Sign in by the device flow (stage 4, R6: S4-23). github.com's web — `login/*` — is a site of its own, on its own port,
+# as a GitLab is: a lab build's host map sends github.com there. The applications a lab build signs in as, by site: a
+# GitLab of one's own's is the lab's to say (`oauth.<site>.client_id`). Each token, refresh token and device code the
+# fake makes is a made-up fixture string, kept in memory alone, and never written to the log.
+GITHUB_WEB = "github.com"
+OAUTH_CLIENTS = {GITHUB_WEB: "Iv1.lab-udeck-github", GITLAB_COM: "lab-udeck-gitlab-com"}
+DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
+# What a form POST to an OAuth endpoint carried, by its field: the log says which secret, never its value.
+OAUTH_SECRETS = ("refresh_token", "device_code")
 # A classic GitHub token's prefix, and the scopes GitHub says such a token carries with every answer.
 CLASSIC_PREFIX = "ghp_"
 CLASSIC_SCOPES = "repo"
@@ -757,6 +767,12 @@ class Fake:
         # Each token's own hour, by the token — the value is the key in memory and never written anywhere.
         self.token_limits: dict[str, Limit] = {}
         self.gitlab_limits = GitLabLimits()
+        # Sign in: the device codes asked for, the tokens and refresh tokens given — by their made-up values, in memory.
+        self.oauth_lock = threading.Lock()
+        self.oauth_made = 0
+        self.devices: dict[str, dict] = {}
+        self.oauth_access: dict[str, dict] = {}
+        self.oauth_refresh: dict[str, dict] = {}
         self.log_lock = threading.Lock()
         self.log_path = log_path
 
@@ -808,6 +824,11 @@ class Fake:
             return headers["private-token"].strip()
         return None
 
+    @staticmethod
+    def bearer(headers: dict) -> bool:
+        """Whether a request carried its token in Authorization: Bearer, and nothing in PRIVATE-TOKEN."""
+        return headers.get("authorization", "").lower().startswith("bearer ") and "private-token" not in headers
+
     def token_of(self, key: str, fixture: str | None, state: dict) -> str | None:
         """A private repository's token now: its fixture's, unless the lab rotated it (`tokens`)."""
         given = (state.get("tokens") or {}).get(key)
@@ -835,6 +856,14 @@ class Fake:
         the right one is answered, a classic GitHub token's answer saying its scopes."""
         token = self.token_of(key, fixture, state)
         given = self.carried(headers, gitlab)
+        signed_in = self.oauth_reads(given, key, gitlab, state, private=token is not None) if given is not None else None
+        if signed_in is not None:
+            # A token from Sign in goes in Authorization: Bearer on GitLab too, never in PRIVATE-TOKEN (S4-17).
+            if not signed_in or not self.bearer(headers):
+                return self.json(401, {"message": "401 Unauthorized" if gitlab else "Bad credentials"})
+            if signed_in == "not-installed":
+                return self.json(404, {"message": "404 Project Not Found" if gitlab else "Not Found"})
+            token = given
         narrow = (state.get("read_repository_tokens") or {}).get(key)
         if gitlab and given is not None and isinstance(narrow, str) and narrow and given == narrow:
             return self.insufficient_scope()
@@ -1237,11 +1266,13 @@ class Fake:
         """An answer of the GitLab `site`, on its own port: GitLab's API, v4, and its GraphQL — or, told `plain`, a web
         server's 404, which no GitLab answers. gitlab.com counts by its two limiters; a self-hosted GitLab sends no
         limit."""
+        parsed = urllib.parse.urlsplit(target)
+        if site == GITHUB_WEB or parsed.path.startswith("/oauth/"):
+            return self.oauth(site, method, parsed.path, body, headers)
         state = self.state()
         mine = self.gitlab_state(site, state)
         if mine.get("plain"):
             return 404, {"Content-Type": "text/plain; charset=utf-8"}, b"404 page not found\n"
-        parsed = urllib.parse.urlsplit(target)
         graphql = parsed.path == "/api/graphql"
         if (method == "POST") != graphql or method not in ("GET", "HEAD", "POST"):
             return self.json(405, {"message": "405 Method Not Allowed"})
@@ -1260,6 +1291,144 @@ class Fake:
             status, extra, answered = self.gitlab_answer(site, parsed.path, urllib.parse.parse_qs(parsed.query), headers,
                                                          state)
         return status, {**extra, **limits}, answered
+
+    # --- Sign in (stage 4, R6) ----------------------------------------------------------------
+
+    def oauth_reads(self, given: str, key: str, gitlab: bool, state: dict, private: bool):
+        """What a token the fake gave at Sign in may read of the repository `key` — None for a token it did not give,
+        False for one renewed since, expired, or another site's, "not-installed" for a private GitHub repository the
+        uDeck app is not installed for (`oauth.github.com.installed`, by its `owner/repo`), True otherwise: a GitHub
+        App's token reads public repositories wherever it is installed."""
+        with self.oauth_lock:
+            made = self.oauth_access.get(given)
+        if made is None:
+            return None
+        if made["renewed"] or self.clock() > made["expires"]:
+            return False
+        if gitlab:
+            return key.startswith(made["site"] + "/")
+        if made["site"] != GITHUB_WEB:
+            return False
+        installed = (((state.get("oauth") or {}).get(GITHUB_WEB) or {}).get("installed")) or []
+        return True if key in installed or not private else "not-installed"
+
+    def oauth(self, site: str, method: str, path: str, body: bytes, headers: dict) -> tuple[int, dict, bytes]:
+        """`oauth_answer`, as each host says it: GitLab in JSON; GitHub in JSON only when asked for it with
+        `Accept: application/json`, and form-encoded otherwise — as github.com does."""
+        status, extra, answer = self.oauth_answer(site, method, path, body)
+        if site != GITHUB_WEB or "application/json" in headers.get("accept", "") or \
+                extra.get("Content-Type", "").split(";")[0] != "application/json":
+            return status, extra, answer
+        form = urllib.parse.urlencode({key: str(value) for key, value in json.loads(answer).items()}).encode()
+        return status, {**extra, "Content-Type": "application/x-www-form-urlencoded; charset=utf-8"}, form
+
+    def oauth_answer(self, site: str, method: str, path: str, body: bytes) -> tuple[int, dict, bytes]:
+        """github.com's `login/device/code` and `login/oauth/access_token`, or a GitLab's `/oauth/authorize_device` and
+        `/oauth/token`, as `oauth.<site>` in state.json says (RFC 8628): a code asked for with the site's client id — and
+        GitLab's read_api; polled, it is pending until the lab writes `decisions.<user code>` approved or denied, says
+        slow_down once when told — and to any poll before its interval is up, five seconds more each time — and expires after
+        `code_expires_in`; approved, a pair whose token lasts
+        `token_expires_in`; a refresh token renews the pair once, and is refused after — the token it renewed is no
+        good from then on. `redirect` answers the token endpoint with a 307 to `/elsewhere` on the same port. GitHub
+        says its errors with a 200, GitLab with a 400."""
+        github = site == GITHUB_WEB
+        mine = ((self.state().get("oauth") or {}).get(site)) or {}
+        if method != "POST":
+            return self.json(405, {"error": "method_not_allowed"})
+        form = {name: values[0] for name, values in urllib.parse.parse_qs(body.decode("utf-8", "replace")).items()}
+
+        def error(code: str) -> tuple[int, dict, bytes]:
+            return self.json(200 if github else 400, {"error": code})
+
+        client = mine.get("client_id") or OAUTH_CLIENTS.get(site)
+        now = self.clock()
+        if path == ("/login/device/code" if github else "/oauth/authorize_device"):
+            if not client or form.get("client_id") != client:
+                return error("incorrect_client_credentials" if github else "invalid_client")
+            if not github and form.get("scope") != "read_api":
+                return error("invalid_scope")
+            with self.oauth_lock:
+                self.oauth_made += 1
+                device = f"lab-device-code-{self.oauth_made:04d}"
+                user = f"LAB-{self.oauth_made:04d}"
+                expires = int(mine.get("code_expires_in") or 900)
+                interval = int(mine.get("interval") or 1)
+                self.devices[device] = {"site": site, "user": user, "expires": now + expires, "slowed": False,
+                                        "interval": interval, "next": now + interval}
+            page = f"https://{site}/login/device" if github else f"https://{site}/oauth/device"
+            answer = {"device_code": device, "user_code": user, "verification_uri": page, "expires_in": expires,
+                      "interval": interval}
+            if not github:
+                answer["verification_uri_complete"] = f"{page}?user_code={user}"
+            return self.json(200, answer)
+        if path != ("/login/oauth/access_token" if github else "/oauth/token"):
+            return self.json(404, {"error": "not_found"})
+        if mine.get("redirect"):
+            return 307, {"Location": "/elsewhere", "Content-Type": "text/plain"}, b"refresh_token=lab-never-quoted"
+        if not client or form.get("client_id") != client:
+            return error("incorrect_client_credentials" if github else "invalid_client")
+        if form.get("grant_type") == DEVICE_GRANT:
+            with self.oauth_lock:
+                device = self.devices.get(form.get("device_code", ""))
+            if device is None or device["site"] != site:
+                return error("incorrect_device_code" if github else "invalid_grant")
+            if now > device["expires"]:
+                return error("expired_token")
+            # A poll before its interval is up — or the one slow_down the lab asks for — is told to slow down, and
+            # the interval grows by five seconds (RFC 8628, §3.5); one in time sets when the next may come.
+            early = now + 0.05 < device["next"]
+            if early or (mine.get("slow_down") and not device["slowed"]):
+                device["slowed"] = True
+                device["interval"] += 5
+                device["next"] = now + device["interval"]
+                return error("slow_down")
+            device["next"] = now + device["interval"]
+            decision = (mine.get("decisions") or {}).get(device["user"], "pending")
+            if decision == "denied":
+                return error("access_denied")
+            if decision != "approved":
+                return error("authorization_pending")
+            with self.oauth_lock:
+                self.devices.pop(form.get("device_code", ""), None)
+            return self.json(200, self.oauth_pair(site, mine, now))
+        if form.get("grant_type") == "refresh_token":
+            # GitHub renews a token only with the application's client secret (measured 2026-11-16: no secret, and a
+            # wrong one, both `incorrect_client_credentials`, where the device grant without one goes on to the code).
+            if github and not form.get("client_secret"):
+                return error("incorrect_client_credentials")
+            with self.oauth_lock:
+                renewed = self.oauth_refresh.get(form.get("refresh_token", ""))
+                if renewed is None or renewed["used"] or renewed["site"] != site:
+                    renewed = None
+                else:
+                    renewed["used"] = True
+                    if renewed["access"] in self.oauth_access:
+                        self.oauth_access[renewed["access"]]["renewed"] = True
+            if renewed is None:
+                return error("bad_refresh_token" if github else "invalid_grant")
+            return self.json(200, self.oauth_pair(site, mine, now))
+        return error("unsupported_grant_type")
+
+    def oauth_pair(self, site: str, mine: dict, now: float) -> dict:
+        """A new token and refresh token for `site`, made up and remembered — on github.com a token alone, which never
+        ends, as the uDeck Plugins app gives with *Expire user authorization tokens* off (2026-11-16): GitHub would renew
+        one only with the app's client secret, which uDeck does not have."""
+        if site == GITHUB_WEB:
+            with self.oauth_lock:
+                self.oauth_made += 1
+                access = f"ghu_lab-oauth-access-{self.oauth_made:04d}"
+                self.oauth_access[access] = {"site": site, "expires": float("inf"), "renewed": False}
+            return {"access_token": access, "token_type": "bearer", "scope": ""}
+        lasts = int(mine.get("token_expires_in") or 7200)
+        with self.oauth_lock:
+            self.oauth_made += 1
+            prefix = "ghu_" if site == GITHUB_WEB else "lab-gloas-"
+            access = f"{prefix}lab-oauth-access-{self.oauth_made:04d}"
+            refresh = f"{'ghr_' if site == GITHUB_WEB else 'lab-glort-'}lab-oauth-refresh-{self.oauth_made:04d}"
+            self.oauth_access[access] = {"site": site, "expires": now + lasts, "renewed": False}
+            self.oauth_refresh[refresh] = {"site": site, "access": access, "used": False}
+        return {"access_token": access, "token_type": "bearer", "expires_in": lasts, "refresh_token": refresh,
+                "scope": "read_api" if site != GITHUB_WEB else ""}
 
     def gitlab_graphql(self, site: str, body: bytes, state: dict, headers: dict | None = None) -> tuple[int, dict, bytes]:
         """`POST /api/graphql`, as gitlab.com answers uDeck's one query (measured): the project at `$path` — any case,
@@ -1293,6 +1462,11 @@ class Fake:
         headers = headers or {}
         carried = self.carried(headers, True)
         token = self.token_of(project.key, project.token, state)
+        signed_in = self.oauth_reads(carried, project.key, True, state, private=token is not None) if carried else None
+        if signed_in is not None:
+            if signed_in is not True or not self.bearer(headers):
+                return self.json(401, {"message": "401 Unauthorized"})
+            token = carried
         if any(name in headers for name in CREDENTIAL_HEADERS) and carried != token:
             return self.json(401, {"message": "401 Unauthorized"})
         if token is not None and carried is None:
@@ -1499,6 +1673,18 @@ def handler_for(fake: Fake, site: str = ""):
             parsed = urllib.parse.urlsplit(self.path)
             # A GraphQL request's commits, by the fields it asked — never its variables' values.
             graphql_commits = len(GRAPHQL_FIELD.findall(body.decode("utf-8", "replace"))) if method == "POST" else 0
+            # What a Sign in request carried and came to (stage 4, R6): which secret was in its form, and the OAuth
+            # error answered — never a value.
+            form = urllib.parse.parse_qs(body.decode("utf-8", "replace")) if method == "POST" and not graphql_commits else {}
+            oauth_secret = next((name for name in OAUTH_SECRETS if name in form), "none")
+            # A secret in the address is a secret sent where it may never go — wherever that is: said apart, and its
+            # value kept out of the log's query.
+            asked = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, keep_blank_values=True)
+            query_secret = next((name for name in OAUTH_SECRETS if name in asked), "none")
+            try:
+                oauth_error = json.loads(answer).get("error", "") if oauth_secret != "none" or "client_id" in form else ""
+            except (ValueError, AttributeError):
+                oauth_error = ""
             fake.log(
                 {
                     "at": round(fake.clock(), 3),
@@ -1507,7 +1693,8 @@ def handler_for(fake: Fake, site: str = ""):
                     "path": urllib.parse.unquote(parsed.path),
                     "raw_path": parsed.path,
                     "site": site,
-                    "query": parsed.query,
+                    "query": parsed.query if query_secret == "none" else
+                    "&".join(f"{name}=<redacted>" if name in OAUTH_SECRETS else f"{name}=…" for name in asked),
                     "status": status,
                     "lab": LAB_HEADER.lower() in headers,
                     "user_agent": headers.get("user-agent", ""),
@@ -1516,6 +1703,9 @@ def handler_for(fake: Fake, site: str = ""):
                     "port": self.server.server_address[1],
                     "credential": credential,
                     "graphql_commits": graphql_commits,
+                    "oauth_secret": oauth_secret,
+                    "query_secret": query_secret,
+                    "oauth_error": oauth_error if isinstance(oauth_error, str) else "",
                 }
             )
             self.send_response(status)

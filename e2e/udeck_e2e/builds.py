@@ -86,11 +86,12 @@ HOST_MAP = "UDeckPluginsHostMap"
 
 
 def host_map(plugins_url: str) -> dict[str, str]:
-    """The host map a lab build pointed at the fake at `plugins_url` carries: each GitLab the fake answers as, on its own
-    port of the same host (`config.GITLAB_PORTS`, `Scripts/make-app.sh`'s TEST_GITLAB_PORTS)."""
+    """The host map a lab build pointed at the fake at `plugins_url` carries: each GitLab the fake answers as, and
+    github.com's web for Sign in, on its own port of the same host (`config.HOST_MAP_PORTS`, `Scripts/make-app.sh`'s
+    TEST_GITLAB_PORTS)."""
     scheme, _, rest = plugins_url.rstrip("/").partition("://")
     host = rest.split("/", 1)[0].rsplit(":", 1)[0]
-    return {name: f"{scheme}://{host}:{port}" for name, port in config.GITLAB_PORTS.items()}
+    return {name: f"{scheme}://{host}:{port}" for name, port in config.HOST_MAP_PORTS.items()}
 
 # What a directory of binaries compiled elsewhere has to hold (`--prebuilt`):
 # the two products `make-app.sh` puts in the bundle, and the commit they were
@@ -333,6 +334,9 @@ class Builder:
             "UDeckPluginsRepository": config.PLUGINS_REPOSITORY,
             "UDeckPluginsRepositoryID": (self._shipped_repository_id(step) if self.plugins_url is None
                                          else config.PLUGINS_REPOSITORY_ID),
+            # The applications Sign in asks as (S4-23): the lab's made-up ones, which only the fake knows — or, in the
+            # smoke's build, the shipped ones, the checkout's own.
+            **(self._shipped_sign_in(step) if self.plugins_url is None else config.LAB_SIGN_IN),
         }
         wrong = [f"{key} is {plist.get(key)!r}, not {value!r}" for key, value in wanted.items() if plist.get(key) != value]
         # Where a lab build reads each GitLab: the fake's ports (`config.GITLAB_PORTS`), on the fake's host. A build as
@@ -372,6 +376,17 @@ class Builder:
         if addresses != {"UDeckPluginsAPIBase": config.GITHUB_API, "UDeckPluginsRawBase": GITHUB_RAW}:
             raise LabError(step, f"{SHIPPED_PLIST} does not ship GitHub's own addresses: {addresses}")
         return addresses
+
+    def _shipped_sign_in(self, step: str) -> dict[str, str]:
+        """The applications Sign in asks as, as this checkout ships them (`SHIPPED_PLIST`): uDeck's own."""
+        try:
+            shipped = plistlib.loads((self.repo_root / SHIPPED_PLIST).read_bytes())
+        except (OSError, ValueError) as error:
+            raise LabError(step, f"could not read {SHIPPED_PLIST}: {error}") from None
+        ids = {key: shipped.get(key) for key in config.SHIPPED_SIGN_IN}
+        if ids != config.SHIPPED_SIGN_IN:
+            raise LabError(step, f"{SHIPPED_PLIST} ships the Sign in applications {ids}, not {config.SHIPPED_SIGN_IN}")
+        return ids
 
     def _shipped_host_map(self, step: str) -> None:
         """The checkout ships no host map (`SHIPPED_PLIST`): a lab build's own is written by make-app.sh alone."""
