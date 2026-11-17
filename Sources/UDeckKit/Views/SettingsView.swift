@@ -19,11 +19,10 @@ public struct SettingsView: View {
     /// development binary has no bundle to register, and a card whose switch cannot do
     /// anything is worse than no card.
     var loginItem: (any LoginItemControlling)?
-    /// Opens on the first pane rather than on the one that was most useful to
-    /// me while building it. Somebody who has landed in a language they cannot
-    /// read needs the language control before anything else, and it is here.
-    @State private var section: Section = .general
-    @State private var selectedPlugin: String?
+    /// Which pane, and which plugin in it: the window's controller keeps it,
+    /// so that a restart into an update can say where the window was and the
+    /// next launch open it there (`SettingsPlace`).
+    @Bindable var navigation: SettingsNavigation
 
     enum Section: String, CaseIterable, Identifiable {
         case general
@@ -58,11 +57,13 @@ public struct SettingsView: View {
     public init(
         model: DeckModel,
         updater: (any UpdateChecking)? = nil,
-        loginItem: (any LoginItemControlling)? = nil
+        loginItem: (any LoginItemControlling)? = nil,
+        navigation: SettingsNavigation = SettingsNavigation()
     ) {
         self.model = model
         self.updater = updater
         self.loginItem = loginItem
+        self.navigation = navigation
     }
 
     public var body: some View {
@@ -76,7 +77,7 @@ public struct SettingsView: View {
         // back to them — so it is removed rather than fixed, and the column
         // visibility is stated rather than left to be remembered.
         NavigationSplitView(columnVisibility: .constant(.all)) {
-            List(Section.allCases, selection: $section) { item in
+            List(Section.allCases, selection: $navigation.section) { item in
                 Label(model.strings(item.title), systemImage: item.symbol)
                     // How many plugin updates are waiting, where the operator
                     // looks for the Plugins pane.
@@ -103,11 +104,11 @@ public struct SettingsView: View {
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    switch section {
+                    switch navigation.section {
                     case .general: GeneralSettings(model: model, loginItem: loginItem)
                     case .opening: OpeningSettings(model: model)
                     case .look: LookSettings(model: model)
-                    case .plugins: PluginSettingsSection(model: model, selected: $selectedPlugin)
+                    case .plugins: PluginSettingsSection(model: model, selected: $navigation.selectedPlugin)
                     case .about: AboutSection(model: model, updater: updater)
                     }
                 }

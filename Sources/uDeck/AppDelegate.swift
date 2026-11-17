@@ -64,9 +64,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // never checks for the operator who never opens it.
         self.updater = SparkleUpdater()
         // An update put in place by itself restarts uDeck: never while the
-        // panel or Settings is out, a plugin is installed or a card action runs.
-        self.updater.mayRestartNow = { [weak self, weak model] in
-            (model?.mayRestartForAnUpdate ?? false) && !(self?.settings?.isShown ?? false)
+        // panel is out, Settings is in use — open and forgotten is not in use —
+        // a Sign in, a plugin's install, update, removal or link, or a card
+        // action is under way. The model is held, not watched: it does not hold
+        // the updater. Settings, which does, is watched, and no window is no use.
+        self.updater.restartHold = { [weak self, model] in
+            model.restartHold(settingsInUse: self?.settings?.inUseForAnUpdate() ?? false)
         }
         // Nothing is asked of the system here: the record is read when the settings
         // window appears, and written only when the operator asks. An application that
@@ -80,6 +83,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.shell.onOpenSettings = { [weak self] in
             self?.controller.close()
             self?.settings.show()
+        }
+
+        // uDeck restarted into an update with Settings open: it opens again
+        // where it was. Taken whatever it holds, so that it is for one launch.
+        if let place = model.takeSettingsPlace() {
+            settings.reopen(at: place)
         }
 
         model.discoverPlugins()
@@ -104,8 +113,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// A restart into an update uDeck asked for by itself is refused when
     /// something started in the moment before it (`SparkleUpdater`); any other
     /// termination goes ahead.
+    ///
+    /// A termination into an update with Settings on the screen leaves where it
+    /// is for the launch after (`SettingsPlace`): open, or forgotten open, it
+    /// opens there again.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        updater?.mayTerminateForAnUpdate() == false ? .terminateCancel : .terminateNow
+        guard updater?.mayTerminateForAnUpdate() != false else { return .terminateCancel }
+        if updater?.restartingIntoAnUpdate == true, !Self.theSessionIsEnding, let place = settings?.place() {
+            model?.leaveSettingsPlace(place)
+        }
+        return .terminateNow
+    }
+
+    /// Whether this termination is the session ending — a log out, a restart
+    /// or a shut down, which the quit event's reason says — rather than
+    /// Sparkle's: nothing relaunches into the update then, and the next login
+    /// opens uDeck as it always opens.
+    private static var theSessionIsEnding: Bool {
+        guard let event = NSAppleEventManager.shared().currentAppleEvent,
+              event.eventClass == AEEventClass(kCoreEventClass), event.eventID == AEEventID(kAEQuitApplication),
+              let reason = event.attributeDescriptor(forKeyword: AEKeyword(kAEQuitReason))?.enumCodeValue
+        else { return false }
+        let ending = [kAELogOut, kAEReallyLogOut, kAEShowRestartDialog, kAERestart, kAEShowShutdownDialog, kAEShutDown]
+        return ending.map { OSType($0) }.contains(reason)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

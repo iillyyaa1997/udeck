@@ -8,6 +8,25 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [Unreleased]
+
+- **A settings window left open no longer holds an update.** Settings holds
+  uDeck's restart into an update only while it is in use: touched in the last
+  three minutes — thirty with a form open in it, a source being added or a
+  token pasted — or in front of you while you are at the Mac, for ten minutes
+  of stillness and thirty from your last click. Before, it held it
+  for as long as the window was on the screen — on 2026-11-17 a 0.8.1 downloaded
+  0.8.3 at 04:01 and restarted into it at 07:39, a minute after a window left
+  open behind others was closed. A restart with Settings open opens it again
+  where it was: its pane and its place on the screen, in front only if it was
+  in front, in the Dock if it was minimized. A log out or a shut down while an
+  update is going in opens nothing at the next login.
+- **A Sign in under way holds the restart too**, as the panel, a plugin's
+  install and a card action do; the code expires by itself, so it never holds
+  for long.
+- **uDeck's log says what holds the restart**, each time that changes:
+  `log show --predicate 'subsystem == "place.unicorns.udeck" AND category == "updates"'`.
+
 ## [0.8.3] — 2026-11-16
 
 What an audit of 0.8.2 found, fixed. 0.8.3 adds nothing to the plugin contract.
