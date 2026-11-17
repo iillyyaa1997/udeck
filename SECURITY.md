@@ -115,7 +115,8 @@ launch and both with a switch to turn them off:
 
 - **its own updates** — Sparkle asks
   `https://github.com/iillyyaa1997/udeck/releases/latest/download/appcast.xml`
-  after launch when it has not asked in the last day, then once a day, and what
+  after launch when it has not asked in the last hour, then about once an hour
+  while no update it found is waiting, and what
   that finds is downloaded, its EdDSA signature checked against the key uDeck
   ships with, and put in place by itself, uDeck restarting while the panel is
   away. Off with Settings → About → *Install updates automatically* (an update

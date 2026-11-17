@@ -471,19 +471,35 @@ def first_check_after(machine, seconds: int, step: str) -> None:
     """Make the uDeck in the guest look by itself `seconds` after it starts, not the moment it does.
 
     For a check that needs something open before uDeck finds its update: a uDeck as it ships has never looked, and
-    asks its feed one to three seconds after it starts (`check_it_looks_by_itself`). Written as Sparkle writes it, a
-    last check one interval minus `seconds` ago by the guest's own clock — the interval read from the bundle installed
-    there, not assumed — with uDeck not running and after `forget_preferences`, and read back.
+    asks its feed one to three seconds after it starts (`check_it_looks_by_itself`). A last check one interval minus
+    `seconds` ago by the guest's own clock (`last_checked`) — the interval read from the bundle installed there, not
+    assumed.
     """
     plist = f"{GUEST_APPLICATIONS}/{APP}/Contents/Info"
     interval = machine.ssh.ask(f"defaults read {shlex.quote(plist)} {CHECK_INTERVAL}", step)
     if interval.returncode != 0 or not interval.stdout.strip().isdigit():
         said = (interval.stdout or interval.stderr or "").strip().splitlines()
         raise LabError(step, f"the bundle in the guest gives no {CHECK_INTERVAL}: {said[-1] if said else 'nothing'}")
+    last_checked(machine, int(interval.stdout.strip()) - seconds, step)
+
+
+def guest_epoch(machine, step: str) -> int:
+    """The guest's clock now, in whole seconds since the epoch."""
     now = machine.ssh.run("/bin/date +%s", step).stdout.strip()
     if not now.isdigit():
         raise LabError(step, f"the guest's clock said {now!r}")
-    last = int(now) - int(interval.stdout.strip()) + seconds
+    return int(now)
+
+
+def last_checked(machine, seconds_ago: int, step: str) -> int:
+    """Make Sparkle in the guest remember its last look as `seconds_ago` seconds before the guest's clock now.
+
+    Written as Sparkle writes it, `SULastCheckTime` as a date in uDeck's preferences, with uDeck not running and after
+    `forget_preferences`, and read back. Sparkle counts its interval from this date, so a uDeck started after it looks by
+    itself one interval after it — the lab moves the date back rather than waiting the interval out. Returns that date,
+    in seconds since the epoch on the guest's clock: whole seconds, as the date is written.
+    """
+    last = guest_epoch(machine, step) - seconds_ago
     stamp = machine.ssh.run(f"/bin/date -u -r {last} '+%Y-%m-%d %H:%M:%S +0000'", step).stdout.strip()
     machine.ssh.run(f"defaults write {BUNDLE_ID} {LAST_CHECK} -date {shlex.quote(stamp)}", step)
     kept = machine.ssh.ask(f"defaults read {BUNDLE_ID} {LAST_CHECK}", step)
@@ -491,3 +507,4 @@ def first_check_after(machine, seconds: int, step: str) -> None:
         said = (kept.stdout or kept.stderr or "").strip().splitlines()
         raise LabError(step, f"the lab wrote {LAST_CHECK} = {stamp} for {BUNDLE_ID}, and it reads back as "
                              f"{said[-1] if said else 'nothing at all'}")
+    return last

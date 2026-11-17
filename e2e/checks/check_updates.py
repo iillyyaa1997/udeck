@@ -3,18 +3,19 @@
 Two checks, and the second is what makes the first worth trusting: an update
 signed with the run's key installs, and one signed with another key does not.
 
-And two more about the question that comes before any of that, which is when
+And three more about the question that comes before any of that, which is when
 uDeck asks its feed at all. **uDeck ships with automatic checks on**
 (`SUEnableAutomaticChecks` is true in Sources/uDeck/Support/Info.plist, the
 operator's decision in docs/plugin-repository.md, "What uDeck fetches, and
-when"): once a day it asks its feed whether there is a newer version, the
-first time straight after its first launch. One check holds uDeck to that, and
-the other holds the switch in the About pane to what it says — an operator who
-turned automatic checks off and turns them back on gets a uDeck that looks by
-itself again. Both are judged on the guest's own access log, which is the
-traffic and not a sentence uDeck writes about itself.
+when"): once an hour it asks its feed whether there is a newer version, the
+first time straight after its first launch. One check holds uDeck to that first
+look, one to the next an hour later, and the third holds the switch in the
+About pane to what it says — an operator who turned automatic checks off and
+turns them back on gets a uDeck that looks by itself again. All three are
+judged on the guest's own access log, which is the traffic and not a sentence
+uDeck writes about itself.
 
-And a fifth that none of those can stand in for: a *published* release updating
+And a sixth that none of those can stand in for: a *published* release updating
 itself from GitHub (`check_a_published_release`) — the release key, the real
 feed and its latest redirect, GitHub's asset host — driven exactly like the
 first. Every check here takes a pair, "from → to" (`pairs`): which two copies of
@@ -100,6 +101,35 @@ SWITCH_OFF = "0"
 # uDeck that does not look at all, and it says so as a failure: the promise is a
 # look straight after launch.
 LOOKS_SECONDS = 20
+
+# How often uDeck as it ships looks by itself: once an hour (`SUScheduledCheckInterval`
+# in Sources/uDeck/Support/Info.plist), the least Sparkle allows a release build
+# (`-[SPUUpdaterSettings minimumUpdateCheckInterval]`). What README promises, and
+# what `updates.it-looks-every-hour` holds uDeck to without reading the plist.
+HOUR = 3600
+# How long before that hour is up `updates.it-looks-every-hour` starts uDeck: its
+# last look is written as an hour less this ago, so that the hour runs out while it
+# runs. Writing it and `open -a` take a few seconds, and what is left has to be more
+# than a look at launch takes (`LOOKS_SECONDS`, room for one to three seconds measured)
+# and `EARLY_SECONDS`, or the two could not be told apart; short enough to wait out.
+HOUR_LEFT_SECONDS = 40
+# How much before its hour a look may be heard and still be the hour's. Both seconds
+# are the guest's — the date the lab wrote by `date +%s`, the feed's stamp on the
+# request (`updates.heard_at`) — and Sparkle's timer fires at the hour or after it,
+# never before (a leeway only delays it), so an honest look is heard at the hour or
+# later. Five seconds is room for the guest's clock being stepped between the two;
+# a look at launch is heard at least `LOOKS_SECONDS` plus this before the hour, or
+# the check could not check.
+EARLY_SECONDS = 5
+# Sparkle's leeway on its timer (`-[SPUUpdaterSettings leewayUpdateCheckInterval]`):
+# it may fire this much after the hour.
+LEEWAY_SECONDS = 15
+# How long after its hour a look may still be heard: the leeway, and `LOOKS_SECONDS`
+# of room for a busy guest on top.
+LATE_SECONDS = LEEWAY_SECONDS + LOOKS_SECONDS
+# How long past the latest honest second the feed is still listened to: a line
+# written in that second, and one more read of the log.
+HEARD_SLACK_SECONDS = 2
 
 # From the click on the switch to the feed hearing uDeck. Sparkle resets its cycle
 # one second after the setting changes (`resetUpdateCycleAfterDelay`, SPUUpdaterCycle.m),
@@ -593,7 +623,7 @@ def check_it_looks_by_itself(machine, check_dir, lab):
     Sparkle reads whether to look, and when it last did, out of the preferences
     before it reads the plist. A neighbouring check that pressed "Check now" on a
     shared machine leaves a last-check date a minute old, and a uDeck started
-    after it would rightly wait a day; one that left the switch off would make
+    after it would rightly wait an hour; one that left the switch off would make
     this a check of that switch. Either would be about the machine, not about
     what uDeck ships.
 
@@ -634,6 +664,99 @@ def check_it_looks_by_itself(machine, check_dir, lab):
 
 
 @pairs.takes(pairs.ONLY_THIS_CHECKOUT)
+def check_it_looks_every_hour(machine, check_dir, lab):
+    """uDeck as it ships asks its feed again an hour after it last did, with nothing pressed.
+
+    README says uDeck looks once an hour while it runs. On 2026-11-17 0.8.4 was
+    published at 11:06 UTC, and the operator's 0.8.3, whose last look was at 03:01
+    UTC, would have looked again only at 03:01 the next day — the operator pressed
+    Check now instead. uDeck looked once a day until 0.8.5.
+
+    **The hour is the lab's, not read from the plist.** `HOUR` is what README
+    says; a check that read `SUScheduledCheckInterval` out of the bundle would
+    hold uDeck to whatever it ships, a day included.
+
+    **The date is moved back rather than the hour waited out.** Sparkle counts
+    its interval from `SULastCheckTime` when it starts, so the lab writes a last
+    look an hour less `HOUR_LEFT_SECONDS` ago by the guest's clock
+    (`app.last_checked`), on a machine that remembered nothing else
+    (`_a_uDeck_that_never_looked`), and starts uDeck. Its feed must hear it when
+    that hour is up: at most `EARLY_SECONDS` before, and at most `LATE_SECONDS`
+    after — Sparkle's timer leeway and a busy guest. The oracle is the feed's own
+    log, as for `updates.it-looks-by-itself`, and nothing is pressed or opened.
+
+    **Judged on the guest's clock.** The hour is up at the second the lab wrote
+    plus `HOUR`, and the request is when the feed stamped it (`updates.heard_at`),
+    both read off the guest's clock: how long the lab took to write the date, to
+    start uDeck or to read the log counts for nothing. And a uDeck that took so
+    long to start that a look at launch would land near the hour is the lab
+    unable to tell the two apart, not a failure.
+
+    **What it does not reach** is the look after a look. Sparkle schedules it an
+    interval after each look ends (`scheduleNextUpdateCheckFiringImmediately:NO
+    usingCurrentDate:NO`, SPUUpdater.m at the revision in Package.resolved) — read
+    there, not measured, because a running timer's start cannot be moved back.
+    Nor, by design, a look while an update uDeck found is waiting, for Install or
+    for its restart: Sparkle's session is still open, and it looks again once it
+    ends.
+
+    **What it is red for**: a uDeck that waits longer than an hour between looks —
+    the plist as 0.8.4 shipped it, 86400, measured silent for the whole wait (lab
+    run 44082800224) — or does not look by itself at all; and one that looks at
+    every launch, heard a second after it started (44082806321). A silence is
+    uDeck's only when the feed still answers.
+    """
+    feed = updates.Feed(machine, lab.note)
+    try:
+        _a_uDeck_that_never_looked(machine, check_dir, lab, feed)
+        up = app.last_checked(machine, HOUR - HOUR_LEFT_SECONDS, "making uDeck's last look an hour ago, less a little") + HOUR
+        app.launch(machine)
+        step = "reading the guest's clock once uDeck has started"
+        started = app.guest_epoch(machine, step)
+        # A look at launch is stamped at most LOOKS_SECONDS after the second uDeck was
+        # running by: at that bound and `EARLY_SECONDS` before the hour, it would pass.
+        if up - started <= LOOKS_SECONDS + EARLY_SECONDS:
+            raise LabError(
+                step,
+                f"uDeck was running only {up - started}s before the hour since its last look was up, and a look at "
+                f"launch may take {LOOKS_SECONDS}s: the two could not be told apart",
+            )
+        asked = _uDeck_asks(machine, feed, [], up + LATE_SECONDS - started + HEARD_SLACK_SECONDS,
+                            "listening to the feed while the hour since uDeck's last look runs out")
+        _evidence(machine, check_dir, "uDeck running", lab)
+        if not asked:
+            _expect_the_feed_still_answers(feed, "nothing of uDeck's was opened")
+        expect(
+            bool(asked),
+            f"uDeck started {up - started}s before an hour had passed since its last look, and its feed heard nothing "
+            f"from it until {LATE_SECONDS}s after the hour was up: it does not look again within an hour — it waits "
+            f"longer between looks (`SUScheduledCheckInterval` in what it ships) or does not look by itself",
+        )
+        step = "reading when the feed heard uDeck"
+        heard = updates.heard_at(asked[0])
+        if heard is None:
+            raise LabError(step, f"the feed's line carries no time the lab can read: {asked[0].strip()}")
+        late = heard - up
+        expect(
+            late >= -EARLY_SECONDS,
+            f"uDeck asked its feed {heard - started}s after it started, {-late}s before an hour had passed since its "
+            f"last look: it looks at launch whatever its last look, not once an hour",
+        )
+        expect(
+            late <= LATE_SECONDS,
+            f"uDeck asked its feed {late}s after the hour since its last look was up, more than Sparkle's "
+            f"{LEEWAY_SECONDS}s leeway and a busy guest's {LOOKS_SECONDS}s: it waits longer than an hour between looks",
+        )
+        lab.note(
+            f"   uDeck asked its feed by itself {late:+d}s from the hour after its last look ({heard - started}s after "
+            f"it started), with nothing pressed: {asked[0].strip()}"
+        )
+    finally:
+        feed.collect_log(check_dir)
+        feed.stop()
+
+
+@pairs.takes(pairs.ONLY_THIS_CHECKOUT)
 def check_switched_on_it_looks_by_itself(machine, check_dir, lab):
     """Once the operator turns automatic checks back on, uDeck asks its feed without being asked again.
 
@@ -641,7 +764,7 @@ def check_switched_on_it_looks_by_itself(machine, check_dir, lab):
     automatic checks on (`updates.it-looks-by-itself`), so a switch to turn on
     has to have been turned off first — and turning it off in the window would
     cost a check the last-check date that stops the switch from causing another
-    for a day (see "Why it answers in seconds" below). So the lab writes what that
+    for an hour (see "Why it answers in seconds" below). So the lab writes what that
     operator's click writes, `SUEnableAutomaticChecks` false in uDeck's
     preferences, into a machine that remembers nothing else, and reads it back
     before uDeck starts (`app.switch_automatic_checks_off`). It is the one
@@ -669,9 +792,9 @@ def check_switched_on_it_looks_by_itself(machine, check_dir, lab):
     a switch still reading off is a click that did not land, which is the lab's;
     a switch reading on is uDeck's.
 
-    **Why it answers in seconds and not in a day.** Sparkle looks by itself when
-    `SUScheduledCheckInterval` (86400 in the plist; never less than an hour, which
-    is Sparkle's own floor) has passed since `SULastCheckTime` — and a uDeck that
+    **Why it answers in seconds and not in an hour.** Sparkle looks by itself when
+    `SUScheduledCheckInterval` (3600 in the plist, which is Sparkle's own floor;
+    86400 until 0.8.5) has passed since `SULastCheckTime` — and a uDeck that
     has never looked has no such date, so the moment it may look it is overdue,
     and Sparkle looks at once (`scheduleNextUpdateCheckFiringImmediately:` with no
     last check falls back to `distantPast`). Turning the switch on is that moment:
@@ -699,9 +822,9 @@ def check_switched_on_it_looks_by_itself(machine, check_dir, lab):
     was green (-141823Z, kept). On the build as it shipped then, with automatic
     checks off in its plist, the same read says `1` at once, and a restart then asks the feed nothing for 30 s,
     because the last check is a second old (-132223Z, probe.switch-then-restart,
-    kept). What it does not reach is the next check a day later; that is
-    Sparkle's own timer and not something a lab can wait for (README, "Looking for
-    an update by itself").
+    kept). What it does not reach is the next check an hour later; that is
+    `updates.it-looks-every-hour`'s, which moves the last look back rather than
+    waiting for Sparkle's timer.
 
     **A request before the switch is touched** is uDeck looking with automatic
     checks off, and fails the check with the line — it also set the last-check
@@ -879,13 +1002,19 @@ def _uDeck_asks(machine, feed, before, seconds, step):
     can say when the silence broke, and the one that expects a request stops
     waiting when it comes. The log only grows, so what is new is what follows the
     requests already seen.
+
+    Silence is said only after a read that *started* once the time was up: a read
+    that began before and came back after it carries the log as it was when it
+    began, and a request written since would be missing from it.
     """
     deadline = machine.clock() + seconds
     while True:
+        reading = machine.clock()
         asked = updates.asked_for_the_appcast(feed.read_log(step))[len(before):]
-        if asked or machine.clock() >= deadline:
+        if asked or reading >= deadline:
             return asked
-        machine.sleep(LISTEN_EVERY_SECONDS)
+        if machine.clock() < deadline:
+            machine.sleep(LISTEN_EVERY_SECONDS)
 
 
 def _the_switch_as_the_operator_left_it(machine, check_dir, lab):
@@ -954,7 +1083,7 @@ def _what_sparkle_keeps_once_on(machine):
     probe.switch-then-restart, kept in .build/e2e/kept/).
 
     Read rather than proved by a restart. After the request Sparkle has a last-check
-    date a second old, and the next check it would make by itself is a day away:
+    date a second old, and the next check it would make by itself is an hour away:
     measured in the same run, uDeck quit and started again asked the feed nothing
     in 30 s, with the setting still `1`. A restart proves nothing unless the lab
     moves that date back, which is writing into Sparkle's memory to get the answer
