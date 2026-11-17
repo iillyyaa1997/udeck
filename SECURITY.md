@@ -116,11 +116,13 @@ launch and both with a switch to turn them off:
 - **its own updates** — Sparkle asks
   `https://github.com/iillyyaa1997/udeck/releases/latest/download/appcast.xml`
   after launch when it has not asked in the last hour, then about once an hour
-  while no update it found is waiting, and what
-  that finds is downloaded, its EdDSA signature checked against the key uDeck
-  ships with, and put in place by itself, uDeck restarting while the panel is
-  away. Off with Settings → About → *Install updates automatically* (an update
-  then waits for you to press Update) and *Check for updates automatically*.
+  while no update it downloaded is waiting, and what that finds is, as Settings
+  → About → *When a new version is out* says, downloaded, its EdDSA signature
+  checked against the key uDeck ships with, and put in place by itself, uDeck
+  restarting while the panel is away (as uDeck ships); downloaded and checked
+  and left for Update; or only said. Off with *Check for updates automatically*.
+  A notification about a new version is macOS's own and goes nowhere but the
+  screen.
 - **the official plugin catalogue**, and each source you add — `api.github.com` and
   `raw.githubusercontent.com`, anonymously, for `iillyyaa1997/udeck-plugins`: a
   few seconds after launch unless it was read in the last 24 hours, once a day

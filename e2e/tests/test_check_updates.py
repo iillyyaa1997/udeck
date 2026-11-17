@@ -873,6 +873,111 @@ def test_a_silence_from_a_feed_that_died_is_not_uDeck_s(machine, lab, check_dir,
     assert not isinstance(raised.value, CheckFailed)
 
 
+# The notification about an update (0.8.6).
+
+from udeck_e2e import ax  # noqa: E402
+
+ALLOW = ax.Walked(3, "AXButton", "", "", "Allow", "", "", (1100.0, 60.0, 80.0, 24.0), True)
+QUESTION = ("Notification Center", [ax.Walked(0, "AXWindow", "", "", "Notification Center", "", "", None, True),
+                                    ax.Walked(2, "AXStaticText", "", "", "", "“uDeck” Notifications", "", None, True), ALLOW])
+BANNER = ("Notification Center", [ax.Walked(0, "AXWindow", "", "", "Notification Center", "", "", None, True),
+                                  ax.Walked(2, "AXStaticText", "", "", "", "uDeck 0.4.2 is out", "", None, True)])
+
+
+class Notices:
+    """uDeck's log and NotificationCenter, moved on by the fake clock and by the lab's click on Allow."""
+
+    def __init__(self, monkeypatch, machine, found_at=1, asks=True, sends=True, refuses=False, shows=True):
+        self.machine = machine
+        self.found_at, self.asks, self.sends, self.refuses, self.shows = found_at, asks, sends, refuses, shows
+        self.allowed_at = None
+        monkeypatch.setattr(checks, "_what_held_it", lambda machine, check_dir, since: self.log())
+        monkeypatch.setattr(ui, "notification_center", lambda machine, step, depth=ui.MAX_DEPTH: self.shown())
+        clicks = machine.click
+
+        def click(x, y, step):
+            clicks(x, y, step)
+            if (x, y) == (1140, 72):
+                self.allowed_at = self.machine.now
+
+        machine.click = click
+
+    def found(self):
+        return self.found_at is not None and self.machine.now >= self.found_at
+
+    def log(self):
+        said = []
+        if self.found():
+            said.append("found 0.4.2 by itself; it waits for Update")
+        if self.refuses and self.found():
+            said.append("notice found 0.4.2: macOS does not allow uDeck's notifications")
+        elif self.sends and self.found() and (self.allowed_at is not None or not self.asks):
+            said.append("notice found 0.4.2: sent")
+        return said
+
+    def shown(self):
+        if not self.found():
+            return []
+        if self.asks and self.allowed_at is None:
+            return [QUESTION]
+        return [BANNER] if self.shows and self.sends else []
+
+
+def notice(machine, check_dir, lab):
+    return checks._the_notice(machine, check_dir, lab, "2026-11-17 18:00:00", "found 0.4.2 by itself",
+                              "notice found 0.4.2", checks._titles("found", "0.4.2"), checks.NOTICE_SECONDS)
+
+
+def test_the_question_answered_allow_then_the_notice_sent_and_its_banner_shown(machine, lab, check_dir, monkeypatch):
+    scene = Notices(monkeypatch, machine)
+    said = notice(machine, check_dir, lab)
+    assert scene.allowed_at is not None, "Allow pressed, at the button's middle"
+    assert said == "uDeck said 'uDeck 0.4.2 is out' in a notification after Allow"
+    assert (check_dir / "notification-center-1.txt").exists(), "every walk is kept"
+    assert machine.now < checks.NOTICE_SECONDS, "it stops once all three are seen"
+
+
+def test_a_notice_sent_without_a_question_is_still_judged_on_its_banner(machine, lab, check_dir, monkeypatch):
+    Notices(monkeypatch, machine, asks=False)
+    assert notice(machine, check_dir, lab) == "uDeck said 'uDeck 0.4.2 is out' in a notification"
+
+
+def test_macos_saying_no_fails(machine, lab, check_dir, monkeypatch):
+    Notices(monkeypatch, machine, asks=False, refuses=True)
+    with pytest.raises(CheckFailed, match="macOS said no"):
+        notice(machine, check_dir, lab)
+
+
+def test_a_notice_never_sent_fails_and_says_whether_the_question_was_seen(machine, lab, check_dir, monkeypatch):
+    Notices(monkeypatch, machine, sends=False)
+    with pytest.raises(CheckFailed, match="was answered 'Allow'"):
+        notice(machine, check_dir, lab)
+    assert machine.now >= checks.NOTICE_SECONDS, "judged only after the whole wait"
+
+
+def test_a_notice_sent_with_no_banner_fails(machine, lab, check_dir, monkeypatch):
+    Notices(monkeypatch, machine, shows=False)
+    with pytest.raises(CheckFailed, match="no banner saying 'uDeck 0.4.2 is out'"):
+        notice(machine, check_dir, lab)
+
+
+def test_a_banner_about_another_version_or_kind_is_not_this_notice(machine, lab, check_dir, monkeypatch):
+    """Codex, 2026-11-17: "uDeck 0.4.20 is out" and the notice of another kind passed a substring match."""
+    for text in ("uDeck 0.4.20 is out", "uDeck updated to 0.4.2", "uDeck 0.4.2 is downloaded"):
+        scene = Notices(monkeypatch, machine, asks=False)
+        other = (BANNER[0], [BANNER[1][0], ax.Walked(2, "AXStaticText", "", "", "", text, "", None, True)])
+        monkeypatch.setattr(ui, "notification_center", lambda machine, step, depth=ui.MAX_DEPTH, other=other: [other])
+        with pytest.raises(CheckFailed, match="no banner saying"):
+            notice(machine, check_dir, lab)
+        assert scene is not None
+
+
+def test_nothing_found_fails_first(machine, lab, check_dir, monkeypatch):
+    Notices(monkeypatch, machine, found_at=None)
+    with pytest.raises(CheckFailed, match="never said 'found 0.4.2 by itself'"):
+        notice(machine, check_dir, lab)
+
+
 # The switch.
 
 
@@ -1426,6 +1531,9 @@ def test_every_update_check_says_which_pairs_it_takes():
         "check_a_published_release": pairs.A_PUBLISHED_RELEASE,
         "check_installs_by_itself": pairs.INSTALLS_BY_ITSELF,
         "check_settings_left_open": pairs.INSTALLS_BY_ITSELF,
+        "check_tells_when_found": pairs.INSTALLS_BY_ITSELF,
+        "check_downloads_ahead": pairs.INSTALLS_BY_ITSELF,
+        "check_notice_shows": pairs.INSTALLS_BY_ITSELF,
     }
 
 

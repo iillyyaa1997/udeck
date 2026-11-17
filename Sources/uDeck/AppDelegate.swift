@@ -84,6 +84,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller.close()
             self?.settings.show()
         }
+        // A notification about an update speaks uDeck's language, and a click
+        // on it opens the updates in Settings → About.
+        updater.notifier.strings = { [model] in model.strings }
+        updater.notifier.onOpen = { [weak self] in
+            self?.controller.close()
+            self?.settings.showUpdates()
+        }
+        // Noted once the notification can be sent: a restart into a newer
+        // version put in by itself is said now.
+        updater.noteLaunch()
+        // A notice clicked while uDeck was not running is what launched it.
+        updater.notifier.launched(with: notification.userInfo)
 
         // uDeck restarted into an update with Settings open: it opens again
         // where it was. Taken whatever it holds, so that it is for one launch.

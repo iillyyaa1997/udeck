@@ -20,35 +20,76 @@ import UDeckKit
 /// this is a custom `SPUUserDriver` that writes what happened into
 /// `UpdateStatus` and shows nothing. The settings screen reads it — installed
 /// version, latest version, one sentence — which is where somebody who cares
-/// about the answer already is.
+/// about the answer already is; a notification says a new version (below).
 ///
 /// **Automatic checks start on** (`SUEnableAutomaticChecks` in Info.plist): once
 /// an hour (`SUScheduledCheckInterval`, the least Sparkle allows; once a day
 /// until 0.8.5, which left a new version a day away) uDeck asks its feed whether
-/// there is a newer version — not while an update it found waits, for Install
-/// or for its restart: Sparkle's session stays open until then — as it reads
-/// the official plugin catalogue once a day — both on from the first launch, by the operator's decision that fewer
-/// questions for a new person outweigh a quiet first minute. The switch in Settings → About turns it off; README and
-/// SECURITY.md say what is asked and when.
+/// there is a newer version, as it reads the official plugin catalogue once a
+/// day — both on from the first launch, by the operator's decision that fewer
+/// questions for a new person outweigh a quiet first minute. The switch in
+/// Settings → About turns it off; README and SECURITY.md say what is asked and
+/// when.
 ///
-/// **What a check of its own finds is put in place by itself** too
-/// (`SUAutomaticallyUpdate`, 0.8.1): Sparkle downloads it and verifies it, and
-/// instead of waiting for uDeck to quit — a menu-bar app hardly ever does —
-/// uDeck restarts into it as soon as nothing holds it (`restartHold`): the
-/// panel away, Settings not in use, no Sign in, plugin operation or card
-/// action under way. It looks again every minute until then, and its log says
-/// what holds it each time that changes (`DeckLog.updates`). Its own switch
-/// turns that off, and then a found update waits for **Install**, as a pressed
-/// check's always does.
+/// **What a check of its own does with a new version is the operator's choice**
+/// (`UpdateMode`, 0.8.6):
+/// - *Only tell me*: it is said — on the pane, in a notification — and nothing
+///   is downloaded. Sparkle's session ends there (the found version is
+///   dismissed, not skipped), so the next hour's look still happens and finds a
+///   newer one; **Update** asks Sparkle again and puts in what it finds. Until
+///   0.8.6 a found version held the session until **Install**, and no look
+///   happened meanwhile: on 2026-11-17 a pressed check found 0.8.4 at 12:07,
+///   and 0.8.5, out at 14:32, could not be found until **Install**.
+/// - *Download it ahead*: Sparkle downloads and verifies it, and it waits for
+///   **Update**, which only restarts. Sparkle's session stays open while it
+///   waits, so no look happens meanwhile: a newer one is found after **Update**
+///   — or after uDeck quits, when Sparkle puts the download in.
+/// - *Install it by itself* (as uDeck ships, and as it has since 0.8.1):
+///   downloaded, and instead of waiting for uDeck to quit — a menu-bar app
+///   hardly ever does — uDeck restarts into it as soon as nothing holds it
+///   (`restartHold`): the panel away, Settings not in use, no Sign in, plugin
+///   operation or card action under way. It looks again every minute until
+///   then, and its log says what holds it each time that changes
+///   (`DeckLog.updates`).
+///
+/// A pressed **Check now** follows the mode for downloading — in the two that
+/// download, what it finds is downloaded at once — and never restarts by
+/// itself: that is **Update**'s.
 @MainActor
 final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     let status: UpdateStatus
+    /// The notification about an update (`UpdateNotice`).
+    let notifier = UpdateNotifier()
     private var updater: SPUUpdater!
     private let driver = InlineUpdateDriver()
+    private let defaults = UserDefaults.standard
 
-    /// Held from `showUpdateReleaseNotes`-time until the operator presses the
-    /// install button: Sparkle hands over a reply block and waits.
+    /// Where uDeck keeps what Sparkle does not: the mode, the notification
+    /// switch, the version the last notice sent was about, and the version
+    /// uDeck last restarted into by itself.
+    private static let modeKey = "UDeckUpdateMode"
+    private static let notifiesKey = "UDeckUpdateNotifies"
+    private static let notifiedKey = "UDeckUpdateNotifiedVersions"
+    private static let restartedIntoKey = "UDeckUpdateRestartedInto"
+    /// Sparkle's own name for "download what a check of its own finds".
+    private static let sparkleDownloadsKey = "SUAutomaticallyUpdate"
+
+    /// A found version Sparkle resumed already downloaded, held until
+    /// **Update**: Sparkle hands over a reply block and waits.
     private var pendingChoice: ((SPUUserUpdateChoice) -> Void)?
+    /// A version a pressed check downloaded, held at Sparkle's "ready to
+    /// install" until **Update**.
+    private var pendingReady: ((SPUUserUpdateChoice) -> Void)?
+    /// **Update** pressed on a version found and let go: the check it started
+    /// puts in what it finds.
+    private var installRequested = false
+    /// **Update** pressed: what reaches "ready to install" goes in at once.
+    private var installWhenReady = false
+    /// Versions whose notice is on its way to macOS: not sent twice meanwhile.
+    private var noticesUnderWay: Set<String> = []
+    /// A notice macOS refused or failed to take, sent again once it allows
+    /// notifications (`refreshNotificationPermission`).
+    private var unsentNotice: UpdateNotice?
 
     /// What holds a restart into an update now, or nil: set by the
     /// application (`DeckModel.restartHold`).
@@ -79,11 +120,28 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
         super.init()
 
         driver.owner = self
+        notifier.onUpdate = { [weak self] in self?.install() }
+        notifier.start()
         updater = SPUUpdater(
             hostBundle: bundle, applicationBundle: bundle, userDriver: driver, delegate: self
         )
+        // The first launch after 0.8.5 keeps what its one switch meant, read
+        // from what it stored (`SUAutomaticallyUpdate`), the plist's when it
+        // stored nothing.
+        if defaults.string(forKey: Self.modeKey) == nil {
+            let downloads = defaults.object(forKey: Self.sparkleDownloadsKey) as? Bool
+                ?? bundle.object(forInfoDictionaryKey: Self.sparkleDownloadsKey) as? Bool ?? false
+            let mode = UpdateMode.kept(nil, automaticallyDownloads: downloads)
+            defaults.set(mode.rawValue, forKey: Self.modeKey)
+            DeckLog.updates.notice("update mode: \(mode.rawValue, privacy: .public), from 0.8.5's switch")
+        }
         do {
             try updater.start()
+            // Sparkle downloads exactly when the mode says so, whatever it kept.
+            let mode = updateMode
+            if updater.automaticallyDownloadsUpdates != mode.downloadsAhead {
+                updater.automaticallyDownloadsUpdates = mode.downloadsAhead
+            }
         } catch {
             // A build with no feed configured, or a bundle Sparkle will not
             // update — a bare `swift build` binary is both. Not a reason to
@@ -101,59 +159,123 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
         }
     }
 
-    var installsAutomatically: Bool {
-        get { updater.automaticallyDownloadsUpdates }
+    var updateMode: UpdateMode {
+        get { UpdateMode.kept(defaults.string(forKey: Self.modeKey), automaticallyDownloads: updater.automaticallyDownloadsUpdates) }
         set {
-            updater.automaticallyDownloadsUpdates = newValue
-            // Off, an update already downloaded waits for Install; on again,
-            // it waits for its moment once more.
-            if newValue { restartWhenItMay() } else { stopWaitingToRestart() }
+            defaults.set(newValue.rawValue, forKey: Self.modeKey)
+            updater.automaticallyDownloadsUpdates = newValue.downloadsAhead
+            DeckLog.updates.notice("update mode: \(newValue.rawValue, privacy: .public)")
+            // Off, an update already downloaded waits for Update; by itself
+            // again, it waits for its moment once more.
+            if newValue.restartsByItself { restartWhenItMay() } else { stopWaitingToRestart() }
         }
     }
 
+    var notifiesAboutUpdates: Bool {
+        get { defaults.object(forKey: Self.notifiesKey) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Self.notifiesKey) }
+    }
+
+    func refreshNotificationPermission() {
+        notifier.permission { [weak self] refused in
+            guard let self else { return }
+            self.status.notificationsRefused = refused
+            // Allowed since a notice was refused: it goes now.
+            if refused == false, let notice = self.unsentNotice {
+                self.unsentNotice = nil
+                self.post(notice)
+            }
+        }
+    }
+
+    /// A launch into the version uDeck restarted into by itself is said in a
+    /// notification; the note of that restart is taken either way, so that it
+    /// is for one launch.
+    func noteLaunch() {
+        let restartedInto = defaults.string(forKey: Self.restartedIntoKey)
+        defaults.removeObject(forKey: Self.restartedIntoKey)
+        // What the last run offered is not on offer now.
+        notifier.withdrawOffers()
+        tell(.launched(running: status.installedVersion, restartedInto: restartedInto))
+    }
+
     func checkNow() {
-        // An update downloaded by itself holds Sparkle's session: it stays on
-        // the screen, for Install, rather than a check Sparkle would refuse.
-        guard pendingRestart == nil, updater.canCheckForUpdates else { return }
+        // A downloaded update holds Sparkle's session: it stays on the screen,
+        // for Update, rather than a check Sparkle would refuse.
+        guard pendingRestart == nil, pendingReady == nil, updater.canCheckForUpdates else { return }
         status.stage = .checking
         updater.checkForUpdates()
     }
 
     func install() {
+        installWhenReady = true
+        // Pressed: whatever uDeck restarts into now, it did not by itself.
+        defaults.removeObject(forKey: Self.restartedIntoKey)
+        notifier.withdrawOffers()
         if let restart = pendingRestart {
             restartingByItself = false
             restartNow(restart)
             return
         }
-        guard let choice = pendingChoice else { return }
-        pendingChoice = nil
-        choice(.install)
+        if let ready = pendingReady {
+            pendingReady = nil
+            readyToInstall()
+            ready(.install)
+            return
+        }
+        if let choice = pendingChoice {
+            pendingChoice = nil
+            // Installing already, Sparkle goes straight to the restart: no
+            // "ready" comes back to say so.
+            readyToInstall()
+            choice(.install)
+            return
+        }
+        // Found and let go — or a notification's Update after a relaunch, with
+        // nothing on the pane: ask again, and put in what is found. A check
+        // already under way puts it in when it finds it.
+        installRequested = true
+        guard updater.canCheckForUpdates else { return }
+        status.stage = .checking
+        updater.checkForUpdates()
     }
 
     // MARK: - Put in place by itself
 
     /// Sparkle has downloaded and verified an update by itself, and would put
-    /// it in place when uDeck quits: uDeck takes that over and restarts into it
-    /// now, or — the panel out — once it is away, asked every minute.
+    /// it in place when uDeck quits: in `installByItself` uDeck takes that
+    /// over and restarts into it now, or — something holding it — once nothing
+    /// does, asked every minute; in `downloadAhead` it waits for **Update**.
     func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem,
                  immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
         status.latestVersion = item.displayVersionString
         status.stage = .readyToInstall(version: item.displayVersionString)
         pendingRestart = immediateInstallHandler
+        if installWhenReady {
+            // Update was pressed while Sparkle downloaded by itself: in now, as pressed.
+            installRequested = false
+            installWhenReady = false
+            restartingByItself = false
+            restartNow(immediateInstallHandler)
+            return true
+        }
+        tell(.downloaded(version: item.displayVersionString))
         restartWhenItMay()
         return true
     }
 
     /// Whether a restart into an update downloaded by itself may happen with
-    /// nothing pressed: both switches still on, and nothing under way.
+    /// nothing pressed: automatic checks on, and the mode is to install by itself.
     private var restartsByItself: Bool {
-        updater.automaticallyChecksForUpdates && updater.automaticallyDownloadsUpdates
+        updater.automaticallyChecksForUpdates && updateMode.restartsByItself
     }
 
     private func restartWhenItMay() {
         guard let restart = pendingRestart, restartsByItself else { return }
         if holdNow() == nil {
             restartingByItself = true
+            // Noted for the launch after it: "uDeck updated" is said then.
+            defaults.set(status.latestVersion, forKey: Self.restartedIntoKey)
             restartNow(restart)
             return
         }
@@ -200,26 +322,68 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
         guard holdNow() != nil else { return true }
         restartingByItself = false
         restartingIntoAnUpdate = false
+        defaults.removeObject(forKey: Self.restartedIntoKey)
         restartWhenItMay()
         return false
     }
 
     /// No more restarts with nothing pressed; what was downloaded stays for
-    /// Install — and Sparkle still puts it in place when uDeck quits.
+    /// Update — and Sparkle still puts it in place when uDeck quits.
     private func stopWaitingToRestart() {
         restartTimer?.invalidate()
         restartTimer = nil
     }
 
+    // MARK: - Notices
+
+    /// The notification `event` is worth, if any, sent — and remembered once
+    /// macOS took it. Through the current API a refusal or a failure is known,
+    /// and the notice goes again once notifications are allowed. Through the
+    /// older one, all an application signed ad hoc has, macOS says nothing of a
+    /// refusal: a "Don't Allow" there costs that version's notice.
+    private func tell(_ event: UpdateEvent) {
+        guard let notice = UpdateNotice.after(
+            event, mode: updateMode, notifies: notifiesAboutUpdates,
+            notified: notifiedVersions.union(noticesUnderWay)
+        ) else { return }
+        post(notice)
+    }
+
+    private func post(_ notice: UpdateNotice) {
+        noticesUnderWay.insert(notice.version)
+        notifier.post(notice) { [weak self] delivery in
+            guard let self else { return }
+            self.noticesUnderWay.remove(notice.version)
+            self.status.notificationsRefused = delivery == .refused
+            if delivery == .sent {
+                // The last few are kept: a version withdrawn from the feed and
+                // found again is still not news.
+                self.defaults.set(Array((self.notifiedVersions.union([notice.version])).sorted().suffix(20)),
+                                  forKey: Self.notifiedKey)
+            } else {
+                self.unsentNotice = notice
+            }
+        }
+    }
+
+    /// The versions a notice was sent about.
+    private var notifiedVersions: Set<String> {
+        Set(defaults.stringArray(forKey: Self.notifiedKey) ?? [])
+    }
+
     // MARK: - What a check of its own came to
 
-    // A check of its own with updates put in place by themselves goes through
-    // Sparkle's automatic driver, which asks the user driver nothing: what it
-    // found, or did not, is written here, as the user driver writes it for a
-    // pressed one.
+    // A check of its own that downloads goes through Sparkle's automatic
+    // driver, which asks the user driver nothing: what it found, or did not, is
+    // written here, as the user driver writes it for the others.
 
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
         status.latestVersion = item.displayVersionString
+        // A mode that downloads is downloading it now, by itself: the pane says
+        // so rather than an Update that would only wait for it. (What Sparkle
+        // will not download by itself comes back through `found`, which says
+        // otherwise.)
+        if updateMode.downloadsAhead { status.stage = .downloading(fraction: nil) }
     }
 
     func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
@@ -233,8 +397,13 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
         guard !(error.domain == SUSparkleErrorDomain && error.code == Int(SUError.noUpdateError.rawValue)) else { return }
         // Its session is over: nothing left to restart into, and Check now may ask again.
         pendingRestart = nil
+        pendingReady = nil
+        pendingChoice = nil
         restartingByItself = false
         restartingIntoAnUpdate = false
+        installRequested = false
+        installWhenReady = false
+        defaults.removeObject(forKey: Self.restartedIntoKey)
         saidHold = nil
         stopWaitingToRestart()
         failed(error)
@@ -242,24 +411,69 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
 
     func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
         status.lastCheck = updater.lastUpdateCheckDate ?? status.lastCheck
+        // Update's own check is over, whatever it came to.
+        installRequested = false
+        if pendingChoice == nil, pendingReady == nil, pendingRestart == nil { installWhenReady = false }
     }
 
     // MARK: - Called by the driver
 
-    fileprivate func found(version: String, choice: @escaping (SPUUserUpdateChoice) -> Void) {
-        pendingChoice = choice
+    /// Sparkle found `item`. Whether it is put in, held, or said and let go
+    /// depends on who asked and on the mode.
+    fileprivate func found(_ item: SUAppcastItem, state: SPUUserUpdateState,
+                           reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        let version = item.displayVersionString
+        finishedCheck(foundSomething: true)
         status.latestVersion = version
+        if item.isInformationOnlyUpdate {
+            // Nothing to download — uDeck's feed has none of these — so said and let go, whatever was pressed.
+            installRequested = false
+            status.stage = .available(version: version)
+            tell(.foundByItself(version: version))
+            reply(.dismiss)
+            return
+        }
+        if state.stage != .notDownloaded {
+            // Already downloaded, or installing: Sparkle resumed it. It waits for Update.
+            pendingChoice = reply
+            status.stage = .readyToInstall(version: version)
+            if installWhenReady {
+                install()
+            } else if !state.userInitiated {
+                DeckLog.updates.notice("\(version, privacy: .public) resumed downloaded; it waits for Update")
+                tell(.downloaded(version: version))
+            }
+            return
+        }
+        if installRequested {
+            // Update was pressed on it: download and put it in.
+            installRequested = false
+            status.stage = .downloading(fraction: nil)
+            reply(.install)
+            return
+        }
+        if state.userInitiated, updateMode.downloadsAhead {
+            // Check now, in a mode that downloads: downloaded at once, and it
+            // waits at "ready to install" for Update.
+            status.stage = .downloading(fraction: nil)
+            reply(.install)
+            return
+        }
+        // Said, and let go: Sparkle's session ends, and the next look happens.
         status.stage = .available(version: version)
+        tell(.foundByItself(version: version))
+        DeckLog.updates.notice("found \(version, privacy: .public)\(state.userInitiated ? " by Check now" : " by itself", privacy: .public); it waits for Update")
+        reply(.dismiss)
     }
 
-    /// Sparkle's answer to "Check now" while an update found by a check of its
-    /// own is still waiting for the operator: it does not check again, it asks
-    /// for that update to be brought forward. `checkNow` has already said
-    /// "checking", so the update is put back on the screen — otherwise the
-    /// pane would say "checking" forever over an Install button it never draws.
+    /// Sparkle's answer to "Check now" while an update is held for the
+    /// operator: it does not check again, it asks for that update to be
+    /// brought forward. `checkNow` has already said "checking", so the update
+    /// is put back on the screen — otherwise the pane would say "checking"
+    /// forever over an Update button it never draws.
     fileprivate func updateBroughtForward() {
-        guard pendingChoice != nil, let version = status.latestVersion else { return }
-        status.stage = .available(version: version)
+        guard pendingChoice != nil || pendingReady != nil, let version = status.latestVersion else { return }
+        status.stage = .readyToInstall(version: version)
     }
 
     fileprivate func finishedCheck(foundSomething: Bool) {
@@ -271,6 +485,7 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     }
 
     fileprivate func failed(_ error: any Error) {
+        installRequested = false
         status.stage = .failed(reason: error.localizedDescription)
     }
 
@@ -278,10 +493,24 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
         status.stage = .downloading(fraction: fraction)
     }
 
-    /// Downloaded, and installed now: what follows is the termination into it
-    /// — not at **Install**, which a download and a quit can still come
-    /// between.
-    fileprivate func readyToInstall() {
+    /// Downloaded and verified at Sparkle's "ready to install": in at once when
+    /// Update was pressed, else held for it.
+    fileprivate func ready(reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        guard installWhenReady else {
+            pendingReady = reply
+            let version = status.latestVersion ?? "—"
+            status.stage = .readyToInstall(version: version)
+            DeckLog.updates.notice("\(version, privacy: .public) downloaded by Check now; it waits for Update")
+            tell(.downloaded(version: version))
+            return
+        }
+        readyToInstall()
+        reply(.install)
+    }
+
+    /// Installed now: what follows is the termination into it — not at
+    /// **Update**, which a download and a quit can still come between.
+    private func readyToInstall() {
         status.stage = .readyToInstall(version: status.latestVersion ?? "—")
         restartingIntoAnUpdate = true
     }
@@ -291,8 +520,8 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
 ///
 /// Every method either records something or acknowledges immediately. Nothing
 /// here opens a window, and nothing here blocks Sparkle waiting for a person —
-/// except the one place where waiting is the point: an update has been found
-/// and nobody has said whether to install it.
+/// except where waiting is the point: a version downloaded or resumed that the
+/// operator has not said to put in.
 @MainActor
 private final class InlineUpdateDriver: NSObject, SPUUserDriver {
     weak var owner: SparkleUpdater?
@@ -324,8 +553,8 @@ private final class InlineUpdateDriver: NSObject, SPUUserDriver {
         state: SPUUserUpdateState,
         reply: @escaping (SPUUserUpdateChoice) -> Void
     ) {
-        owner?.finishedCheck(foundSomething: true)
-        owner?.found(version: appcastItem.displayVersionString, choice: reply)
+        guard let owner else { return reply(.dismiss) }
+        owner.found(appcastItem, state: state, reply: reply)
     }
 
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
@@ -365,10 +594,8 @@ private final class InlineUpdateDriver: NSObject, SPUUserDriver {
     func showExtractionReceivedProgress(_ progress: Double) {}
 
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
-        owner?.readyToInstall()
-        // Nothing to ask: the operator pressed install, and this is the same
-        // answer arriving a second time further down Sparkle's own pipeline.
-        reply(.install)
+        guard let owner else { return reply(.dismiss) }
+        owner.ready(reply: reply)
     }
 
     func showInstallingUpdate(

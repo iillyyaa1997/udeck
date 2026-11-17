@@ -1477,7 +1477,8 @@ private struct AboutSection: View {
     /// Mirrors the updater's own switch rather than owning the answer: Sparkle
     /// stores it, and a copy here would be a second place it could be true.
     @State private var checksAutomatically = false
-    @State private var installsAutomatically = false
+    @State private var updateMode: UpdateMode = .shipped
+    @State private var notifies = true
 
     var body: some View {
         SettingsGroup(strings(.aboutTitle)) {
@@ -1494,25 +1495,44 @@ private struct AboutSection: View {
                     set: {
                         checksAutomatically = $0
                         updater.checksAutomatically = $0
-                        // Sparkle ties the second switch to this one: read it again.
-                        installsAutomatically = updater.installsAutomatically
                     }
                 ))
                 .accessibilityIdentifier("updates.automatic")
                 Text(strings(.updatesAutomaticallyHelp))
                     .font(.caption).foregroundStyle(.secondary)
-                // Only a check of its own installs by itself: off with the one
-                // above, it has nothing to act on.
-                Toggle(strings(.updatesInstallsAutomatically), isOn: Binding(
-                    get: { installsAutomatically },
-                    set: { installsAutomatically = $0; updater.installsAutomatically = $0 }
-                ))
-                .disabled(!checksAutomatically)
-                .accessibilityIdentifier("updates.installAutomatically")
-                Text(strings(.updatesInstallsAutomaticallyHelp))
+                // The mode governs Check now too — in the modes that download,
+                // what it finds is downloaded at once — so it stays live with
+                // automatic checks off.
+                Picker(strings(.updatesWhenNew), selection: Binding(
+                    get: { updateMode },
+                    set: { updateMode = $0; updater.updateMode = $0 }
+                )) {
+                    Text(strings(.updatesModeTell)).tag(UpdateMode.tell)
+                    Text(strings(.updatesModeDownloadAhead)).tag(UpdateMode.downloadAhead)
+                    Text(strings(.updatesModeInstallByItself)).tag(UpdateMode.installByItself)
+                }
+                .pickerStyle(.radioGroup)
+                .accessibilityIdentifier("updates.mode")
+                Text(strings(modeHelp(updateMode)))
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("updates.installAutomaticallyHelp")
+                    .accessibilityIdentifier("updates.modeHelp")
+                Toggle(strings(.updatesNotify), isOn: Binding(
+                    get: { notifies },
+                    set: { notifies = $0; updater.notifiesAboutUpdates = $0 }
+                ))
+                .accessibilityIdentifier("updates.notify")
+                Text(strings(.updatesNotifyHelp))
+                    .font(.caption).foregroundStyle(.secondary)
+                if notifies, updater.status.notificationsRefused == true {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bell.slash").foregroundStyle(.orange)
+                        Text(strings(.updatesNotifyDenied))
+                        Link(strings(.updatesOpenNotificationSettings), destination: Self.notificationSettings)
+                    }
+                    .font(.caption)
+                    .accessibilityIdentifier("updates.notifyDenied")
+                }
 
                 // Two numbers rather than one sentence. "Up to date" asks to be
                 // believed; "installed 0.1.0, latest 0.1.0" can be checked.
@@ -1538,25 +1558,43 @@ private struct AboutSection: View {
                 // the control without depending on the translated title, and it
                 // is what a screen reader's scripting hooks look for.
                 HStack(spacing: 10) {
+                    // Nothing to check while a download waits for Update: the
+                    // session it holds is Sparkle's until then.
                     Button(strings(.updatesCheckNow)) { updater.checkNow() }
-                        .disabled(updater.status.stage == .checking)
+                        .disabled(updater.status.stage == .checking || {
+                            if case .readyToInstall = updater.status.stage { return true }
+                            return false
+                        }())
                         .accessibilityIdentifier("updates.checkNow")
-                    if case .available(let version) = updater.status.stage {
-                        Button(strings(.updatesInstallNow(version))) { updater.install() }
+                    // **Update** whichever it is: found, or downloaded and ready.
+                    if case .available = updater.status.stage {
+                        Button(strings(.updatesUpdate)) { updater.install() }
                             .buttonStyle(.borderedProminent)
                             .accessibilityIdentifier("updates.install")
                     }
                     if case .readyToInstall = updater.status.stage {
-                        Button(strings(.updatesRestartToInstall)) { updater.install() }
+                        Button(strings(.updatesUpdate)) { updater.install() }
                             .buttonStyle(.borderedProminent)
                             .accessibilityIdentifier("updates.restartAndInstall")
                     }
                     updateSentence(updater.status)
                 }
+                let notesVersion = updater.status.latestVersion ?? updater.status.installedVersion
+                if let notes = ReleaseNotes.page(for: notesVersion) {
+                    Link(strings(.updatesWhatsNew(notesVersion)), destination: notes)
+                        .font(.caption)
+                        .accessibilityIdentifier("updates.whatsNew")
+                }
             }
             .onAppear {
                 checksAutomatically = updater.checksAutomatically
-                installsAutomatically = updater.installsAutomatically
+                updateMode = updater.updateMode
+                notifies = updater.notifiesAboutUpdates
+                updater.refreshNotificationPermission()
+            }
+            // Back from macOS's notification settings, the refusal is read again.
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                updater.refreshNotificationPermission()
             }
         }
 
@@ -1583,6 +1621,19 @@ private struct AboutSection: View {
 }
 
 private extension AboutSection {
+    /// macOS's notification settings, at uDeck's own row where it goes there.
+    static let notificationSettings = URL(
+        string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=place.unicorns.udeck"
+    )!
+
+    func modeHelp(_ mode: UpdateMode) -> Phrase {
+        switch mode {
+        case .tell: .updatesModeTellHelp
+        case .downloadAhead: .updatesModeDownloadAheadHelp
+        case .installByItself: .updatesModeInstallByItselfHelp
+        }
+    }
+
     /// One line, in the state's own colour, saying what happened.
     @ViewBuilder
     func updateSentence(_ status: UpdateStatus) -> some View {
