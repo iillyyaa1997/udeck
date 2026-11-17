@@ -582,9 +582,20 @@ struct Russian: Vocabulary {
         case .updatesAutomatically: "Проверять обновления автоматически"
         case .updatesAutomaticallyHelp:
             "Раз в час uDeck спрашивает github.com, нет ли новой версии. Если выключить — только по кнопке «Проверить сейчас»."
-        case .updatesInstallsAutomatically: "Устанавливать обновления автоматически"
-        case .updatesInstallsAutomaticallyHelp:
-            "Когда проверка сама находит новую версию, uDeck скачивает её, проверяет подпись и перезапускается в неё, как только панель убрана; плагины, окна и настройки остаются. Если выключить — обновление ждёт здесь, пока вы не нажмёте «Обновить», или встаёт при выходе из uDeck."
+        case .updatesWhenNew: "Когда выходит новая версия"
+        case .updatesModeTell: "Только сообщить"
+        case .updatesModeTellHelp: "Ничего не скачивается, пока вы не нажмёте «Обновить»."
+        case .updatesModeDownloadAhead: "Скачать заранее и ждать «Обновить»"
+        case .updatesModeDownloadAheadHelp:
+            "Версия сразу скачивается и проверяется подписью; «Обновить» потом только перезапускает uDeck."
+        case .updatesModeInstallByItself: "Скачать и установить самой"
+        case .updatesModeInstallByItselfHelp:
+            "uDeck перезапускается в новую версию, когда панель убрана и ничего не идёт; плагины, окна и настройки остаются."
+        case .updatesNotify: "Присылать уведомление о новой версии"
+        case .updatesNotifyHelp: "Одно на версию. Нажатие открывает этот раздел."
+        case .updatesNotifyDenied: "Уведомления для uDeck выключены в macOS."
+        case .updatesOpenNotificationSettings: "Открыть настройки уведомлений"
+        case .updatesWhatsNew(let version): "Что нового в \(version)"
         case .updatesNeverChecked: "Ещё не проверялось."
         case .updatesJustChecked: "Проверено только что."
         case .updatesLastChecked(let when): "Проверено \(when)."
@@ -594,11 +605,18 @@ struct Russian: Vocabulary {
         case .updatesChecking: "Проверяем…"
         case .updatesUpToDate: "Установлена последняя версия."
         case .updatesAvailable(let version): "Доступна версия \(version)."
-        case .updatesInstallNow(let version): "Обновить до \(version)"
+        case .updatesUpdate: "Обновить"
         case .updatesDownloading: "Скачиваем…"
         case .updatesReady: "Скачано и готово."
-        case .updatesRestartToInstall: "Перезапустить и установить"
         case .updatesFailed(let reason): "Проверка не завершилась: \(reason)"
+
+        case .noticeFoundTitle(let version): "Вышла uDeck \(version)"
+        case .noticeFoundBody: "Обновить сейчас? Скачается и перезапустится"
+        case .noticeDownloadedTitle(let version): "uDeck \(version) скачана"
+        case .noticeDownloadedBody: "Обновить сейчас? uDeck перезапустится за пару секунд"
+        case .noticeUpdatedTitle(let version): "uDeck обновилась до \(version)"
+        case .noticeUpdatedBody: "Нажмите, чтобы посмотреть, что нового"
+        case .noticeLater: "Позже"
 
         case .menuBrokenPlugins(let count):
             {

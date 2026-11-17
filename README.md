@@ -75,8 +75,9 @@ compiler that needs the newer SDK.
 
 uDeck has no Dock icon: push the pointer up to the middle of the top edge and
 the panel drops down. From then on it looks for updates by itself once an hour,
-and puts a new version in place by itself, restarting while the panel is away
-— or, with that switched off in Settings → About, when you press Update there
+and puts a new version in place by itself, restarting while the panel is away —
+or, as you choose in Settings → About, downloads it ahead or only tells you, and
+waits for you to press Update; a notification says a new version
 ([Updates](#updates)). What else it fetches is in
 [What uDeck connects to](#what-udeck-connects-to-and-when).
 
@@ -235,21 +236,35 @@ only the token you gave for it, to its own host.
 `https://github.com/iillyyaa1997/udeck/releases/latest/download/appcast.xml`
 whether there is a newer version: straight after launch when it has not asked
 in the last hour — so on the very first launch too — and then about once an hour
-while it runs, except while an update it already found is waiting, for Update or
-for its restart. The answer appears in
-Settings → About. What that question finds is downloaded, its signature
-checked, and put in place by itself: uDeck restarts into it as soon as
-nothing of its own is under way — the panel away, Settings not in use, no Sign
-in, plugin install or card action running — your plugins, windows and settings
-kept. Settings left open counts as in use for three
-minutes after it was last touched — thirty with a form open in it — and while it
-is in front of you; a window forgotten open does not hold the update, and opens
-again where it was after the restart. **Settings → About → Install updates automatically** turns that
-off, and then an update waits there for you to press Update — or is put in
-place when uDeck quits; **Check for
-updates automatically** turns the hourly question off, and **Check now** still
-asks, when you press it, offering what it finds for that press. Sparkle's system
-profile is not sent.
+while it runs, except while an update it downloaded waits for Update or for its
+restart. The answer appears in Settings → About. What that question
+finds depends on **When a new version is out** there:
+
+- **Download and install it by itself** (as uDeck ships): downloaded, its
+  signature checked, and put in place by itself — uDeck restarts into it as soon
+  as nothing of its own is under way: the panel away, Settings not in use, no
+  Sign in, plugin install or card action running; your plugins, windows and
+  settings kept. Settings left open counts as in use for three minutes after it
+  was last touched — thirty with a form open in it — and while it is in front of
+  you; a window forgotten open does not hold the update, and opens again where
+  it was after the restart.
+- **Download it ahead and wait for Update**: downloaded and checked at once, and
+  **Update** only restarts. A newer version than the one downloaded is found
+  after Update, or after uDeck quits, when the download is put in place.
+- **Only tell me**: nothing is downloaded until you press **Update**, and the
+  hourly question goes on — a newer version is found at the next one.
+
+**Send a notification about a new version** (on as uDeck ships) says it in
+macOS's own notification, once for each version: found, with **Update** and
+**Later**; downloaded, the same; or, after a restart into it by itself, that
+uDeck updated. macOS asks whether uDeck may send notifications the first time it
+has one to send; clicking one opens Settings → About, where **What's new**
+opens the release's page. Until uDeck is signed with a Developer ID, macOS lets
+it use only its older notification API, through which it does not tell uDeck
+whether you said no: System Settings → Notifications → uDeck is where that is. **Check for updates automatically** turns the hourly
+question off, and **Check now** still asks when you press it — and, when the
+choice above downloads, downloads what it finds at once and waits for Update.
+Sparkle's system profile is not sent.
 
 **The official plugin catalogue**, from
 [`github.com/iillyyaa1997/udeck-plugins`](https://github.com/iillyyaa1997/udeck-plugins).
