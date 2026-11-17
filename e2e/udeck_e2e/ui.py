@@ -204,6 +204,29 @@ def windows(machine: Any, step: str) -> list[str]:
     return [title.strip() for title in ax.window_titles(machine, PROCESS, step) if title.strip()]
 
 
+# macOS's own process for notifications: their banners, and the question whether an
+# application may send them, are its windows, not the application's.
+NOTIFICATION_CENTER = "NotificationCenter"
+
+
+def notification_center(machine: Any, step: str, depth: int = MAX_DEPTH) -> list[tuple[str, list[ax.Walked]]]:
+    """Every window NotificationCenter shows now, walked: (its title, its elements), the front one first.
+
+    A window that goes while it is walked — a banner times out in seconds — is left
+    out rather than failing the walk: what is on the screen is the answer, and it
+    moves.
+    """
+    found = []
+    for title in ax.window_titles(machine, NOTIFICATION_CENTER, step):
+        try:
+            answer = ax.ask(machine, ["walk", NOTIFICATION_CENTER, f"title={title}", str(depth)], step)
+            elements, _ = ax.parse_walk(answer)
+        except (LabError, ValueError):
+            continue
+        found.append((title, elements))
+    return found
+
+
 def identifiers(machine: Any, step: str, window: str = SETTINGS_WINDOW) -> list[str]:
     """Every control in `window` that carries an identifier — for a report, or a reason."""
     return ax.identifiers(walk(machine, step, window))

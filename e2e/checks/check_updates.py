@@ -45,7 +45,7 @@ import re
 import shlex
 from dataclasses import dataclass
 
-from udeck_e2e import app, builds, config, login, pairs, panel, probes, releases, ui, updates
+from udeck_e2e import app, ax, builds, config, login, pairs, panel, probes, releases, ui, updates
 from udeck_e2e.errors import LabError, NotThere, expect
 
 # The two builds of this checkout an update between checkouts is made of — every
@@ -202,6 +202,17 @@ HELD_BY_SETTINGS = "waits: Settings is in use"
 NOTHING_HOLDS = "nothing holds it"
 UPDATES_LOG = 'subsystem == "place.unicorns.udeck" AND category == "updates"'
 
+# How long the notification about an update is waited for once uDeck has something
+# to say: macOS asks whether uDeck may send notifications, the lab answers Allow, and
+# the banner shows. Room for a busy guest; measured values go here once there are any.
+NOTICE_SECONDS = 60
+# The question's button, in the guest's language.
+ALLOW_TITLES = ("Allow", "Разрешить")
+# How long a downloaded update is watched for a restart that must not come, in
+# "Download it ahead": past the minute uDeck asks again in "install by itself"
+# (`RESTART_ASKED_EVERY_SECONDS`), with room.
+STAYS_SECONDS = RESTART_ASKED_EVERY_SECONDS + 30
+
 
 @pairs.takes(pairs.THE_WHOLE_UPDATE)
 def check_sparkle(machine, check_dir, lab, pair):
@@ -325,12 +336,19 @@ def check_installs_by_itself(machine, check_dir, lab, pair):
     try:
         # Its processes the moment it started: putting the update in place takes a download, its signature, the
         # installer and a relaunch — 24 s in all on a runner (run 43637955325) — and none of it has begun by then.
+        _a_banner_shows_here(machine, check_dir, lab)
+        since = login.clock(machine)
         launched = []
         offered = _prepare(machine, check_dir, lab, feed, pair, by_itself=True, launched=launched)
         before = set(launched)
         deadline = machine.clock() + LOOKS_SECONDS + INSTALL_SECONDS
         version = _the_version_once_it_is(machine, offered.keys, deadline)
         after = _wait_for_the_relaunch(machine, before, deadline)
+        # The uDeck that came back says so at once (0.8.6): watched straight away, while its banner is on the screen.
+        said = None
+        if after - before:
+            said = _the_notice(machine, check_dir, lab, since, f"restart into {offered.version}",
+                               f"notice updated {offered.version}", _titles("updated", offered.version), NOTICE_SECONDS)
         _evidence(machine, check_dir, "after the update by itself", lab)
         if version != offered.keys:
             _expect_the_feed_still_answers(feed, "nothing of uDeck's was opened")
@@ -348,6 +366,7 @@ def check_installs_by_itself(machine, check_dir, lab, pair):
         installed = texts[texts.index("Installed") + 1] if "Installed" in texts[:-1] else None
         expect(installed == offered.version, f"the uDeck that came back says Installed {installed!r} in Settings → About, "
                                              f"not {offered.version}: {' | '.join(texts)}")  # fmt: skip
+        lab.note(f"   {said}")
     finally:
         feed.collect_log(check_dir)
         feed.stop()
@@ -539,6 +558,203 @@ def _judge_the_restart(touched, fetched, restarted):
         return (f"uDeck went into the update {restarted - touched:.0f}s after the last click in Settings, with the "
                 f"window open: a window touched less than {SETTINGS_QUIET_SECONDS}s before did not hold it")
     return None
+
+
+@pairs.takes(pairs.INSTALLS_BY_ITSELF)
+def check_tells_when_found(machine, check_dir, lab, pair):
+    """In "Only tell me", what a check of its own finds is said in a notification, nothing is downloaded, and uDeck keeps looking.
+
+    "from" starts with the mode written as the choice in Settings → About writes
+    it (`_prepare(mode=…)`), has never looked, and finds "to" the moment it
+    starts. Then three things, each on its own witness:
+
+    * **the notification** — uDeck's log says it found the version by itself and
+      sent the notice, after the lab answered macOS's question with Allow, and
+      NotificationCenter shows a banner naming the version (`_the_notice`);
+    * **nothing downloaded** — the feed's log has no request for the archive;
+    * **the next look still happens** — Check now, pressed afterwards, reaches
+      the feed again. Until 0.8.6 a found version held Sparkle's session until
+      Install, and Check now asked nothing: on 2026-11-17 the operator's 0.8.3
+      had found 0.8.4 at 12:07 and could not find 0.8.5, out at 14:32.
+
+    **Red for**: a uDeck that downloads in this mode, one that says nothing, and
+    one whose found version still holds the session.
+    """
+    feed = updates.Feed(machine, lab.note)
+    try:
+        _a_banner_shows_here(machine, check_dir, lab)
+        since = login.clock(machine)
+        offered = _prepare(machine, check_dir, lab, feed, pair, by_itself=True, mode=app.MODE_TELL)
+        found = _the_notice(machine, check_dir, lab, since, f"found {offered.version} by itself", f"notice found {offered.version}",
+                            _titles("found", offered.version), LOOKS_SECONDS + NOTICE_SECONDS)
+        _evidence(machine, check_dir, "after the notice", lab)
+        log = feed.read_log("reading whether uDeck downloaded anything")
+        expect(offered.archive not in log, f"in Only tell me uDeck downloaded {offered.archive}: the feed's log says "
+                                           f"{[line for line in log.splitlines() if offered.archive in line][:2]}")
+        lab.note(f"   {found}; nothing was downloaded")
+        before = updates.asked_for_the_appcast(log)
+        _open_the_about_pane(machine, check_dir, shot="the found version on the pane")
+        ui.wait_for(machine, "updates.install", "waiting for the pane to offer the found version", seconds=OFFER_SECONDS)
+        ui.click(machine, "updates.checkNow", "pressing Check now after the find")
+        asked = _uDeck_asks(machine, feed, before, SWITCHED_ON_SECONDS, "listening for Check now after the find")
+        if not asked:
+            _expect_the_feed_still_answers(feed, _what_the_pane_says_or_why_not(machine))
+        expect(bool(asked), f"after it found {offered.version} and said so, Check now asked the feed nothing in "
+                            f"{SWITCHED_ON_SECONDS}s: the found version still holds Sparkle's session, so no look happens "
+                            f"until Update")
+        lab.note(f"   Check now after the find reached the feed again: {asked[0].strip()}")
+    finally:
+        feed.collect_log(check_dir)
+        feed.stop()
+
+
+@pairs.takes(pairs.INSTALLS_BY_ITSELF)
+def check_downloads_ahead(machine, check_dir, lab, pair):
+    """In "Download it ahead", what a check of its own finds is downloaded and waits for Update, which then only restarts.
+
+    "from" starts in that mode and finds "to" the moment it starts. The feed's log
+    must show the archive downloaded; uDeck must say so in a notification
+    (`_the_notice`) and must *not* restart into it for `STAYS_SECONDS` with
+    nothing holding it — the panel away, Settings never opened — where "install
+    by itself" would have; and then Update, on the About pane, must put it in:
+    the old process gone and "to" on the disk within `INSTALL_SECONDS`.
+
+    **Red for**: a uDeck that does not download ahead, one that restarts by
+    itself in this mode, and an Update that does not put the download in.
+    """
+    feed = updates.Feed(machine, lab.note)
+    try:
+        _a_banner_shows_here(machine, check_dir, lab)
+        since = login.clock(machine)
+        launched = []
+        offered = _prepare(machine, check_dir, lab, feed, pair, by_itself=True, mode=app.MODE_DOWNLOAD_AHEAD,
+                           launched=launched)
+        before = set(launched)
+        said = _the_notice(machine, check_dir, lab, since, f"update mode: {app.MODE_DOWNLOAD_AHEAD}",
+                           f"notice downloaded {offered.version}", _titles("downloaded", offered.version),
+                           LOOKS_SECONDS + INSTALL_SECONDS + NOTICE_SECONDS)
+        log = feed.read_log("reading whether uDeck downloaded the update")
+        expect(offered.archive in log, f"in Download it ahead uDeck did not download {offered.archive}, and yet said "
+                                       f"it had: {said}")
+        lab.note(f"   {said}; {offered.archive} downloaded")
+        deadline = machine.clock() + STAYS_SECONDS
+        while machine.clock() < deadline:
+            now = app.running_pids(machine, "watching that uDeck does not restart by itself")
+            expect(now == before, f"in Download it ahead uDeck restarted by itself: it was {sorted(before)}, and is "
+                                  f"{sorted(now) or 'not running'}, with nothing pressed")
+            machine.sleep(5)
+        expect(app.installed_version(machine) == pair.from_.keys,
+               f"in Download it ahead the disk holds {app.installed_version(machine)} with nothing pressed, not "
+               f"{pair.from_.keys}")
+        lab.note(f"   {STAYS_SECONDS}s later uDeck was still {sorted(before)}, on {pair.from_.keys[0]}")
+        _open_the_about_pane(machine, check_dir, shot="the downloaded version on the pane")
+        # The feed goes before Update is pressed: what Update puts in has to be what was downloaded ahead, not a
+        # download it starts now.
+        feed.collect_log(check_dir)
+        feed.stop()
+        ui.click(machine, "updates.restartAndInstall", "pressing Update on the downloaded version, with the feed gone")
+        update_deadline = machine.clock() + INSTALL_SECONDS
+        version = _the_version_once_it_is(machine, offered.keys, update_deadline)
+        after = _wait_for_the_relaunch(machine, before, update_deadline)
+        _evidence(machine, check_dir, "after Update", lab)
+        expect(version == offered.keys, f"Update on the downloaded {offered.version}, with the feed gone, left {version} "
+                                        f"on the disk {INSTALL_SECONDS}s later")
+        expect(bool(after - before), f"uDeck did not come back as a new process after Update: it was "
+                                     f"{sorted(before)} and is {sorted(after) or 'not running'}")
+        _expect_the_new_uDeck_stayed(machine, before, after)
+        lab.note(f"   Update, with the feed gone, put {offered.version} in, and uDeck came back as {sorted(after - before)}")
+    finally:
+        feed.collect_log(check_dir)
+        feed.stop()
+
+
+def _the_notice(machine, check_dir, lab, since, found_words, notice_words, titles, seconds):
+    """uDeck's log saying `found_words`, then the notice `notice_words` sent — macOS's question answered Allow on the
+    way — and a banner whose text is exactly one of `titles` in NotificationCenter: one sentence for the report, or a
+    failure. `titles` are the notice's title in each of uDeck's languages (`_titles`): "uDeck 0.4.2 is out" is not
+    "uDeck 0.4.20 is out", nor the notice of another kind about the same version.
+
+    Watched together until `seconds` from now, because they come in that order and quickly: the question appears the
+    moment uDeck asks to send its first notification, and a banner goes again after a few seconds. Every walk of
+    NotificationCenter is kept (`notification-center-<n>.txt`).
+    """
+    deadline = machine.clock() + seconds
+    found = sent = refused = False
+    allowed = banner = None
+    walks = 0
+    while machine.clock() < deadline:
+        said = _what_held_it(machine, check_dir, since)
+        found = found or any(found_words in line for line in said)
+        sent = sent or any(f"{notice_words}: sent" in line for line in said)
+        refused = refused or any(f"{notice_words}: macOS does not allow" in line for line in said)
+        shown = ui.notification_center(machine, "reading what NotificationCenter shows")
+        if shown:
+            walks += 1
+            try:
+                (check_dir / f"notification-center-{walks}.txt").write_text(
+                    "\n\n".join(f"== {title}\n" + ax.dump(elements) for title, elements in shown))
+            except OSError:
+                pass
+        for _, elements in shown:
+            if allowed is None:
+                button = next((e for e in elements if e.role == "AXButton"
+                               and (e.title in ALLOW_TITLES or e.description in ALLOW_TITLES)), None)
+                if button is not None and button.frame is not None:
+                    x, y, width, height = button.frame
+                    machine.click(int(x + width / 2), int(y + height / 2), "answering macOS's question with Allow")
+                    allowed = button.title or button.description
+            words = [w.strip() for e in elements for w in (e.title, e.value, e.description) if w]
+            if banner is None and any(w in titles for w in words):
+                banner = next(w for w in words if w in titles)
+        if found and sent and banner:
+            break
+        machine.sleep(2)
+    machine.screenshot(check_dir, "NotificationCenter")
+    expect(found, f"uDeck's log never said {found_words!r} in {seconds}s (kept as updates-log.txt)")
+    expect(not refused, f"uDeck asked to send its notice and macOS said no{'' if allowed else ', and the lab saw no question to answer'}")
+    expect(sent, f"uDeck found the version and never sent {notice_words!r} in {seconds}s; macOS's question "
+                 f"{'was answered ' + repr(allowed) if allowed else 'was never seen'} (walks kept as notification-center-*.txt)")
+    expect(banner is not None, f"uDeck sent {notice_words!r}, and no banner saying {' or '.join(map(repr, titles))} showed "
+                               f"in NotificationCenter in {seconds}s (walks kept as notification-center-*.txt)")
+    return f"uDeck said {banner!r} in a notification{' after Allow' if allowed else ''}"
+
+
+def _a_banner_shows_here(machine, check_dir, lab):
+    """The control for every notice check: a banner macOS's own `osascript` posts shows in NotificationCenter.
+
+    Without it, "no banner of uDeck's" could be a runner that shows no banners at all. A run-specific text, so that
+    nothing left from before can stand in for it; its walks are kept as control-*.txt.
+    """
+    step = "showing a notification of macOS's own, as the control"
+    lab.note(f"   {app.notification_center_up(machine, step)}")
+    text = f"uDeck lab control {machine.clock():.0f}"
+    machine.ssh.run(f"/usr/bin/osascript -e {shlex.quote(f'display notification {chr(34)}{text}{chr(34)} with title {chr(34)}Lab{chr(34)}')}", step)
+    deadline = machine.clock() + 20
+    walks = 0
+    while machine.clock() < deadline:
+        shown = ui.notification_center(machine, step)
+        walks += 1
+        try:
+            (check_dir / f"control-{walks}.txt").write_text(
+                "\n\n".join(f"== {title}\n" + ax.dump(elements) for title, elements in shown))
+        except OSError:
+            pass
+        if any(text in w for _, elements in shown for e in elements for w in (e.title, e.value, e.description) if w):
+            lab.note(f"   the control's banner showed: {text!r}")
+            return
+        machine.sleep(2)
+    machine.screenshot(check_dir, "the control")
+    raise LabError(step, f"osascript's own banner {text!r} never showed in NotificationCenter in 20s: this machine shows "
+                         f"no banners, so whether uDeck's shows cannot be told here (walks kept as control-*.txt)")
+
+
+def _titles(kind, version):
+    """A notice's title in English and in Russian, as Sources/UDeckCore/Localization says them."""
+    return {
+        "found": (f"uDeck {version} is out", f"Вышла uDeck {version}"),
+        "downloaded": (f"uDeck {version} is downloaded", f"uDeck {version} скачана"),
+        "updated": (f"uDeck updated to {version}", f"uDeck обновилась до {version}"),
+    }[kind]
 
 
 @pairs.takes(pairs.THE_WRONG_KEY)
@@ -1148,7 +1364,8 @@ class Offered:
         return f"from GitHub ({self.asked_at})"
 
 
-def _prepare(machine, check_dir, lab, feed, pair, signed_by=None, by_itself=False, launched=None, first_look=None):
+def _prepare(machine, check_dir, lab, feed, pair, signed_by=None, by_itself=False, launched=None, first_look=None,
+             mode=None):
     """The pair's "from" installed and running, and its "to" offered to it.
 
     `by_itself` leaves "from" as it ships, putting in place what a check of its
@@ -1157,7 +1374,9 @@ def _prepare(machine, check_dir, lab, feed, pair, signed_by=None, by_itself=Fals
     judge that press. `launched`, a list, gets the processes of "from" the
     moment it is started — before anything it found could have replaced it.
     `first_look`, seconds, makes it look by itself that long after it starts
-    rather than the moment it does (`app.first_check_after`).
+    rather than the moment it does (`app.first_check_after`). `mode` is what it
+    does with what it finds (`app.choose_update_mode`, 0.8.6), written as the
+    choice in Settings → About writes it.
 
     "from" is a build of this checkout, made here — with "to"'s public key when
     "to" is a release — or a published release's zip, which the lab has already
@@ -1200,6 +1419,9 @@ def _prepare(machine, check_dir, lab, feed, pair, signed_by=None, by_itself=Fals
     _a_machine_that_remembers_nothing(machine, lab, step)
     if not by_itself:
         app.no_installs_by_itself(machine, step)
+    if mode is not None:
+        app.choose_update_mode(machine, mode, step)
+        lab.note(f"   uDeck starts with {app.UPDATE_MODE} = {mode}")
     if written:
         app.point_the_feed_at(machine, asked_at, step)
         lab.note(f"   uDeck in the guest asks {asked_at} for its updates ({app.FEED_URL} in its preferences)")
