@@ -71,6 +71,12 @@ struct LocalizationTests {
 
         .pluginsOfficialCatalogue, .pluginsOfficialCatalogueHelp(source: "github.com/o/r"),
         .catalogueCheckNow, .catalogueChecked(source: "github.com/o/r", at: "14:02"),
+        .updatesWhenNew, .updatesModeTell, .updatesModeTellHelp, .updatesModeDownloadAhead,
+        .updatesModeDownloadAheadHelp, .updatesModeInstallByItself, .updatesModeInstallByItselfHelp,
+        .updatesNotify, .updatesNotifyHelp, .updatesNotifyDenied, .updatesOpenNotificationSettings,
+        .updatesWhatsNew("0.8.6"), .updatesUpdate,
+        .noticeFoundTitle("0.8.6"), .noticeFoundBody, .noticeDownloadedTitle("0.8.6"), .noticeDownloadedBody,
+        .noticeUpdatedTitle("0.8.6"), .noticeUpdatedBody, .noticeLater,
         .catalogueNeverRead(source: "github.com/o/r"), .catalogueReading, .catalogueOff, .catalogueEmpty,
         .catalogueUpdatesWaiting(2), .catalogueUpdatesByThemselves, .catalogueUpdatesByThemselvesHelp,
         .catalogueLimited(readAt: "14:02", until: "15:07"), .catalogueRawLimited(until: "15:07"),
@@ -319,7 +325,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 506,
+        #expect(Self.all.count == 526,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
