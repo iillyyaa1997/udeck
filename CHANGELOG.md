@@ -8,7 +8,11 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.8.4] — 2026-11-17
+
+A settings window left open no longer holds an update. 0.8.4 adds nothing to
+the plugin contract. The update *to* 0.8.4 still goes by 0.8.3's rule — the
+uDeck running decides when to restart — so a window left open holds that one.
 
 - **A settings window left open no longer holds an update.** Settings holds
   uDeck's restart into an update only while it is in use: touched in the last
