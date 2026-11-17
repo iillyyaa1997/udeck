@@ -58,11 +58,39 @@ public final class DeckModel {
     /// from ever being written by two of them at once.
     public internal(set) var busyPlugin: String?
 
-    /// Whether nothing of uDeck's is under way that a restart into an update
-    /// would cut short: the panel away, no plugin being installed, updated or
-    /// removed, and no card action running.
-    public var mayRestartForAnUpdate: Bool {
-        !panelIsVisible && busyPlugin == nil && !actionProcesses.anyRunning
+    /// What of uDeck's is under way that a restart into an update would cut
+    /// short, the first of them — the panel out, Settings in use (which the
+    /// application knows and says), a Sign in, a plugin being installed,
+    /// updated, removed or linked, a card action — or nil: it may restart.
+    public func restartHold(settingsInUse: Bool) -> RestartHold? {
+        RestartHold.first(
+            panelOut: panelIsVisible, settingsInUse: settingsInUse,
+            signIn: signIns.values.contains(where: \.isUnderWay),
+            pluginOperation: busyPlugin != nil, cardAction: actionProcesses.anyRunning
+        )
+    }
+
+    /// Whether a form is open in Settings — **Add a source…**, a source's
+    /// **Token…**, a link looked up under **Install from a link…** — which
+    /// a restart would lose (`SettingsUse.formQuiet`).
+    public var settingsFormOpen: Bool {
+        sourceSheetOpen || sourceTokenOpen != nil || linkLookup != nil
+    }
+
+    /// Leaves the settings window's place for the launch after a restart
+    /// into an update (`SettingsPlace`), in uDeck's folder.
+    public func leaveSettingsPlace(_ place: SettingsPlace) {
+        do {
+            try JSONFileStore<SettingsPlace>(url: paths.settingsToReopenFile).save(place)
+        } catch {
+            DeckLog.updates.error("Settings' place was not left for the restart: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// The place a restart into an update left, if it is fresh — and the
+    /// file gone whatever it held (`SettingsPlace.take`).
+    public func takeSettingsPlace() -> SettingsPlace? {
+        SettingsPlace.take(from: JSONFileStore(url: paths.settingsToReopenFile))
     }
     /// What the last operation on a plugin came to, when it did not succeed.
     public internal(set) var operationProblems: [String: OperationProblem] = [:]

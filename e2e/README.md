@@ -581,6 +581,7 @@ check's own default:
 | `updates.wrong-key` | checkout → checkout | a release → checkout |
 | `updates.it-looks-by-itself`, `updates.switched-on-it-looks-by-itself` | checkout → checkout | nothing else |
 | `updates.installs-by-itself` | checkout → checkout | nothing else: what it holds to is what this checkout ships, and nothing is pressed |
+| `updates.settings-left-open` | checkout → checkout | nothing else: the same, with Settings opened before uDeck looks and touched no more |
 | `updates.a-published-release` | the release before latest → latest | any pair whose "to" is a release |
 
 So a run without arguments asks the first four what they asked before pairs
