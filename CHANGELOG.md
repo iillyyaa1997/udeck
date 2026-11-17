@@ -8,7 +8,12 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.8.5] — 2026-11-17
+
+uDeck looks for an update once an hour instead of once a day. 0.8.5 adds
+nothing to the plugin contract. The update *to* 0.8.5 still goes by 0.8.4's
+rule — the uDeck running decides when to look — so a 0.8.4 finds it at its
+daily look, or when you press Check now.
 
 - **uDeck looks for an update about once an hour while it runs**, not once a
   day, and what it finds goes in by itself as before. An hour is the least
