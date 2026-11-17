@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
+import OSLog
 import Sparkle
+import UDeckCore
 import UDeckKit
 
 /// uDeck's updater: Sparkle for the parts that are hard, and none of its
@@ -30,9 +32,12 @@ import UDeckKit
 /// **What a check of its own finds is put in place by itself** too
 /// (`SUAutomaticallyUpdate`, 0.8.1): Sparkle downloads it and verifies it, and
 /// instead of waiting for uDeck to quit — a menu-bar app hardly ever does —
-/// uDeck restarts into it as soon as the panel is away (`mayRestartNow`),
-/// looking again every minute until it is. Its own switch turns that off, and
-/// then a found update waits for **Install**, as a pressed check's always does.
+/// uDeck restarts into it as soon as nothing holds it (`restartHold`): the
+/// panel away, Settings not in use, no Sign in, plugin operation or card
+/// action under way. It looks again every minute until then, and its log says
+/// what holds it each time that changes (`DeckLog.updates`). Its own switch
+/// turns that off, and then a found update waits for **Install**, as a pressed
+/// check's always does.
 @MainActor
 final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     let status: UpdateStatus
@@ -43,9 +48,12 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     /// install button: Sparkle hands over a reply block and waits.
     private var pendingChoice: ((SPUUserUpdateChoice) -> Void)?
 
-    /// Whether uDeck may restart into an update now: set by the application,
-    /// false while the panel is out.
-    var mayRestartNow: () -> Bool = { true }
+    /// What holds a restart into an update now, or nil: set by the
+    /// application (`DeckModel.restartHold`).
+    var restartHold: () -> RestartHold? = { nil }
+    /// The last answer `restartHold` gave while an update waited, so that the
+    /// log says each change once rather than every minute.
+    private var saidHold: RestartHold??
 
     /// Held from `willInstallUpdateOnQuit` until uDeck restarts into the update
     /// Sparkle downloaded by itself.
@@ -55,6 +63,10 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     /// an update: the termination that follows is checked once more
     /// (`mayTerminateForAnUpdate`).
     private(set) var restartingByItself = false
+    /// Whether the termination ahead is uDeck going into an update — by
+    /// itself or pressed for: what makes the application leave Settings'
+    /// place for the launch after it (`SettingsPlace`).
+    private(set) var restartingIntoAnUpdate = false
 
     override init() {
         let bundle = Bundle.main
@@ -138,7 +150,7 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
 
     private func restartWhenItMay() {
         guard let restart = pendingRestart, restartsByItself else { return }
-        if mayRestartNow() {
+        if holdNow() == nil {
             restartingByItself = true
             restartNow(restart)
             return
@@ -148,15 +160,31 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
             MainActor.assumeIsolated {
                 guard let self, self.pendingRestart != nil else { return }
                 guard self.restartsByItself else { return self.stopWaitingToRestart() }
-                if self.mayRestartNow() { self.restartWhenItMay() }
+                if self.holdNow() == nil { self.restartWhenItMay() }
             }
         }
+    }
+
+    /// What holds the restart now, said in the log when that changed.
+    private func holdNow() -> RestartHold? {
+        let hold = restartHold()
+        if saidHold != .some(hold) {
+            saidHold = .some(hold)
+            let version = status.latestVersion ?? "the update"
+            if let hold {
+                DeckLog.updates.notice("restart into \(version, privacy: .public) waits: \(hold.reason, privacy: .public)")
+            } else {
+                DeckLog.updates.notice("restart into \(version, privacy: .public): nothing holds it")
+            }
+        }
+        return hold
     }
 
     /// The handler is kept: Sparkle installs asynchronously and asks uDeck to
     /// terminate later, and a termination refused then is retried with it.
     private func restartNow(_ restart: () -> Void) {
         stopWaitingToRestart()
+        restartingIntoAnUpdate = true
         restart()
     }
 
@@ -167,8 +195,9 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     /// place as uDeck quits.
     func mayTerminateForAnUpdate() -> Bool {
         guard restartingByItself, pendingRestart != nil else { return true }
-        guard !mayRestartNow() else { return true }
+        guard holdNow() != nil else { return true }
         restartingByItself = false
+        restartingIntoAnUpdate = false
         restartWhenItMay()
         return false
     }
@@ -203,6 +232,8 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
         // Its session is over: nothing left to restart into, and Check now may ask again.
         pendingRestart = nil
         restartingByItself = false
+        restartingIntoAnUpdate = false
+        saidHold = nil
         stopWaitingToRestart()
         failed(error)
     }
@@ -245,8 +276,12 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
         status.stage = .downloading(fraction: fraction)
     }
 
+    /// Downloaded, and installed now: what follows is the termination into it
+    /// — not at **Install**, which a download and a quit can still come
+    /// between.
     fileprivate func readyToInstall() {
         status.stage = .readyToInstall(version: status.latestVersion ?? "—")
+        restartingIntoAnUpdate = true
     }
 }
 

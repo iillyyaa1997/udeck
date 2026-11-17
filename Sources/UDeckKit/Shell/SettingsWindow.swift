@@ -1,6 +1,25 @@
 import AppKit
+import CoreGraphics
+import Observation
 import SwiftUI
 import UDeckCore
+
+/// Which pane the settings window shows, and which plugin in it.
+///
+/// Kept by the window's controller rather than inside the view, so that a
+/// restart into an update can say where the window was and the next launch
+/// open it there (`SettingsPlace`).
+@MainActor
+@Observable
+public final class SettingsNavigation {
+    /// The first pane rather than the one that was most useful to me while
+    /// building it: somebody who has landed in a language they cannot read
+    /// needs the language control before anything else, and it is there.
+    var section: SettingsView.Section = .general
+    var selectedPlugin: String?
+
+    public init() {}
+}
 
 /// Holds the settings window.
 ///
@@ -15,6 +34,12 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let model: DeckModel
     private let updater: (any UpdateChecking)?
     private let loginItem: (any LoginItemControlling)?
+    private let navigation = SettingsNavigation()
+    /// When the window was last opened, or anything of uDeck's clicked, typed
+    /// in or scrolled while it was on the screen: what says it is in use
+    /// (`SettingsUse`).
+    private var lastTouched: Date?
+    private var touchMonitor: Any?
 
     public init(
         model: DeckModel,
@@ -32,28 +57,109 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
     /// from any window, and never from the panel.
     public var isKey: Bool { window?.isKeyWindow == true }
 
-    /// Whether the window is on the screen, somebody perhaps in the middle of
-    /// something in it.
+    /// Whether the window is on the screen — which is not the same as somebody
+    /// being in it: a window can stay open behind other windows, or on another
+    /// desktop, for days (`inUseForAnUpdate`).
     public var isShown: Bool { window?.isVisible == true }
 
-    public func show() {
-        if window == nil {
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 980, height: 620),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = model.strings(.settingsWindowTitle)
-            window.isReleasedWhenClosed = false
-            window.center()
-            window.contentView = NSHostingView(
-                rootView: SettingsView(model: model, updater: updater, loginItem: loginItem)
-            )
-            window.delegate = self
-            self.window = window
-        }
+    /// Whether uDeck is the active application while the window is on the
+    /// screen: the window, or the colour panel or a popover opened from it,
+    /// takes the keyboard — Settings is uDeck's one window that does, and
+    /// the panel, which may be key too, holds a restart of its own.
+    private var isInFront: Bool { NSApp.isActive }
 
+    /// Whether the window holds a restart into an update: on the screen, and
+    /// touched in the last three minutes — thirty with a form open in it — or
+    /// in front of somebody at the Mac (`SettingsUse`). One left open and
+    /// forgotten does not: the restart opens it again where it was (`place`,
+    /// `reopen(at:)`).
+    public func inUseForAnUpdate(now: Date = Date()) -> Bool {
+        // Any input event on this Mac, the keyboard's and the pointer's alike
+        // (kCGAnyInputEventType): how long somebody has been away from it.
+        let away = CGEventSource.secondsSinceLastEventType(
+            .combinedSessionState, eventType: CGEventType(rawValue: ~0)!
+        )
+        return SettingsUse.inUse(
+            shown: isShown, inFront: isInFront,
+            sinceTouched: lastTouched.map { now.timeIntervalSince($0) },
+            sinceAnyInput: away.isFinite && away >= 0 ? away : nil,
+            formOpen: model.settingsFormOpen
+        )
+    }
+
+    /// Where the window is, while it is on the screen or in the Dock: what a
+    /// restart into an update leaves for the next launch.
+    public func place(now: Date = Date()) -> SettingsPlace? {
+        guard let window, isShown || window.isMiniaturized else { return nil }
+        return SettingsPlace(
+            section: navigation.section.rawValue, frame: .init(window.frame),
+            inFront: isShown && isInFront, minimized: window.isMiniaturized, savedAt: now
+        )
+    }
+
+    /// Opens the window where a restart into an update found it: its pane,
+    /// its frame if a screen still has room for it — in front if it was in
+    /// front, in the Dock if it was there, and otherwise behind, without
+    /// taking the keyboard from whatever somebody is typing in. Not a touch:
+    /// left alone, it holds nothing.
+    public func reopen(at place: SettingsPlace) {
+        navigation.section = SettingsView.Section(rawValue: place.section) ?? .general
+        makeWindow()
+        if let frame = place.frame, frame.isOnScreen(NSScreen.screens.map(\.visibleFrame)) {
+            window?.setFrame(frame.rect, display: false)
+        }
+        if place.inFront {
+            present()
+            return
+        }
+        applyAppearance()
+        NSApp.setActivationPolicy(.regular)
+        if place.minimized {
+            window?.miniaturize(nil)
+        } else {
+            window?.orderBack(nil)
+        }
+    }
+
+    private func makeWindow() {
+        guard window == nil else { return }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 980, height: 620),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = model.strings(.settingsWindowTitle)
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.contentView = NSHostingView(
+            rootView: SettingsView(model: model, updater: updater, loginItem: loginItem, navigation: navigation)
+        )
+        window.delegate = self
+        self.window = window
+        // A click, a drag, a key or a scroll anywhere in uDeck while the
+        // window is on the screen: in it, or in the colour panel, a popover
+        // or a sheet opened from it, each a window of its own. Seen, never
+        // taken: the event goes on.
+        touchMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .leftMouseDragged, .keyDown, .scrollWheel]
+        ) { [weak self] event in
+            MainActor.assumeIsolated {
+                if let self, self.isShown { self.lastTouched = Date() }
+            }
+            return event
+        }
+    }
+
+    /// Opens the window from uDeck's menu or the panel: somebody asked for it,
+    /// and that is a touch.
+    public func show() {
+        makeWindow()
+        lastTouched = Date()
+        present()
+    }
+
+    private func present() {
         applyAppearance()
 
         // uDeck is an accessory application: no Dock icon, and — the part that
