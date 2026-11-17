@@ -159,6 +159,13 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         present()
     }
 
+    /// Opens the window on About's updates — what a notification about an
+    /// update opens when it is clicked (`UpdateNotice`).
+    public func showUpdates() {
+        navigation.section = .about
+        show()
+    }
+
     private func present() {
         applyAppearance()
 

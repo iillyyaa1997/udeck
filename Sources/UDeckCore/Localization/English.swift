@@ -576,9 +576,20 @@ struct English: Vocabulary {
         case .updatesAutomatically: "Check for updates automatically"
         case .updatesAutomaticallyHelp:
             "Once an hour, uDeck asks github.com whether there is a newer version. Off, it asks only when you press Check now."
-        case .updatesInstallsAutomatically: "Install updates automatically"
-        case .updatesInstallsAutomaticallyHelp:
-            "When a check of its own finds a newer version, uDeck downloads it, checks its signature and restarts into it as soon as the panel is away; your plugins, windows and settings stay. Off, an update waits here for you to press Update, or is put in place when uDeck quits."
+        case .updatesWhenNew: "When a new version is out"
+        case .updatesModeTell: "Only tell me"
+        case .updatesModeTellHelp: "Nothing is downloaded until you press Update."
+        case .updatesModeDownloadAhead: "Download it ahead and wait for Update"
+        case .updatesModeDownloadAheadHelp:
+            "It is downloaded and its signature checked at once; Update then only restarts uDeck."
+        case .updatesModeInstallByItself: "Download and install it by itself"
+        case .updatesModeInstallByItselfHelp:
+            "uDeck restarts into the new version when the panel is away and nothing is under way; your plugins, windows and settings stay."
+        case .updatesNotify: "Send a notification about a new version"
+        case .updatesNotifyHelp: "One for each version. Clicking it opens this section."
+        case .updatesNotifyDenied: "Notifications for uDeck are off in macOS."
+        case .updatesOpenNotificationSettings: "Open notification settings"
+        case .updatesWhatsNew(let version): "What's new in \(version)"
         case .updatesNeverChecked: "Never checked."
         case .updatesJustChecked: "Checked just now."
         case .updatesLastChecked(let when): "Last checked \(when)."
@@ -588,11 +599,18 @@ struct English: Vocabulary {
         case .updatesChecking: "Checking…"
         case .updatesUpToDate: "uDeck is up to date."
         case .updatesAvailable(let version): "Version \(version) is available."
-        case .updatesInstallNow(let version): "Update to \(version)"
+        case .updatesUpdate: "Update"
         case .updatesDownloading: "Downloading…"
         case .updatesReady: "Downloaded and ready."
-        case .updatesRestartToInstall: "Restart and install"
         case .updatesFailed(let reason): "The check did not finish: \(reason)"
+
+        case .noticeFoundTitle(let version): "uDeck \(version) is out"
+        case .noticeFoundBody: "Update now? It downloads and restarts."
+        case .noticeDownloadedTitle(let version): "uDeck \(version) is downloaded"
+        case .noticeDownloadedBody: "Update now? uDeck restarts in a couple of seconds."
+        case .noticeUpdatedTitle(let version): "uDeck updated to \(version)"
+        case .noticeUpdatedBody: "Click to see what's new."
+        case .noticeLater: "Later"
 
         case .menuBrokenPlugins(let count):
             count == 1 ? "1 plugin will not run" : "\(count) plugins will not run"

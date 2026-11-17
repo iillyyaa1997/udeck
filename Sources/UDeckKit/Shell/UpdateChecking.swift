@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UDeckCore
 
 /// Where an update check has got to.
 ///
@@ -47,6 +48,10 @@ public final class UpdateStatus {
     /// 0.1.0, latest 0.1.0" is a more convincing answer than "up to date".
     public var latestVersion: String?
 
+    /// Whether macOS refuses uDeck's notifications: asked when Settings → About
+    /// appears and after uDeck asks to send one. Nil until known.
+    public var notificationsRefused: Bool?
+
     public init(installedVersion: String, lastCheck: Date? = nil) {
         self.installedVersion = installedVersion
         self.lastCheck = lastCheck
@@ -72,14 +77,21 @@ public protocol UpdateChecking: AnyObject {
     /// written down in README and SECURITY.md.
     var checksAutomatically: Bool { get set }
 
-    /// Whether what a check of its own finds is downloaded and put in place
-    /// with nothing pressed, uDeck restarting itself while the panel is away.
-    ///
-    /// On as uDeck ships (`SUAutomaticallyUpdate` in Info.plist), until the
-    /// operator turns it off in Settings → About; it means nothing while
-    /// `checksAutomatically` is off. A check pressed for still offers what it
-    /// finds, for **Install**.
-    var installsAutomatically: Bool { get set }
+    /// What a check of its own does with a new version (`UpdateMode`, 0.8.6):
+    /// only say so, download it ahead and wait for **Update**, or put it in by
+    /// itself, uDeck restarting while nothing holds it. `installByItself` as
+    /// uDeck ships. It governs Check now too — in the modes that download, what
+    /// that finds is downloaded at once; only the restart by itself waits on
+    /// `checksAutomatically`.
+    var updateMode: UpdateMode { get set }
+
+    /// Whether a new version is said in a notification (`UpdateNotice`): on as
+    /// uDeck ships; macOS asks the first time there is one to send.
+    var notifiesAboutUpdates: Bool { get set }
+
+    /// Ask macOS again whether it lets uDeck send notifications, into
+    /// `status.notificationsRefused`.
+    func refreshNotificationPermission()
 
     /// Everything the screen draws.
     var status: UpdateStatus { get }
@@ -89,6 +101,7 @@ public protocol UpdateChecking: AnyObject {
     /// interesting thing the check could possibly have found.
     func checkNow()
 
-    /// Install what has been found or downloaded, restarting to finish.
+    /// Install what has been found or downloaded, restarting to finish:
+    /// **Update**, in Settings or in the notification.
     func install()
 }
