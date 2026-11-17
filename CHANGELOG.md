@@ -8,6 +8,21 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [Unreleased]
+
+- **uDeck looks for an update about once an hour while it runs**, not once a
+  day, and what it finds goes in by itself as before. An hour is the least
+  Sparkle allows. On 2026-11-17 0.8.4 was
+  published at 11:06 UTC, and a 0.8.3 that had last looked at 03:01 would have
+  looked again only at 03:01 the next day. Each look is one request for the
+  appcast on github.com, as before, and none is made while an update it found is
+  waiting for Update or for its restart. Settings → About, README and
+  `SECURITY.md` say an hour.
+- **Lab**: `updates.it-looks-every-hour` writes uDeck's last look as an hour
+  less 40 s ago by the guest's clock, starts it, presses nothing, and the feed
+  must hear it when the hour is up, judged on the feed's own stamp — red for the
+  plist as 0.8.4 shipped it, and for a uDeck that looks at every launch.
+
 ## [0.8.4] — 2026-11-17
 
 A settings window left open no longer holds an update. 0.8.4 adds nothing to
