@@ -74,7 +74,7 @@ compiler that needs the newer SDK.
    This is asked once; later launches open straight away.
 
 uDeck has no Dock icon: push the pointer up to the middle of the top edge and
-the panel drops down. From then on it looks for updates by itself once a day,
+the panel drops down. From then on it looks for updates by itself once an hour,
 and puts a new version in place by itself, restarting while the panel is away
 — or, with that switched off in Settings → About, when you press Update there
 ([Updates](#updates)). What else it fetches is in
@@ -234,18 +234,20 @@ only the token you gave for it, to its own host.
 **Its own updates**, through [Sparkle](https://sparkle-project.org). uDeck asks
 `https://github.com/iillyyaa1997/udeck/releases/latest/download/appcast.xml`
 whether there is a newer version: straight after launch when it has not asked
-in the last day — so on the very first launch too — and then once a day while
-it runs. The answer appears in Settings → About. What that daily question
-finds is downloaded, its signature checked, and put in place by itself: uDeck
-restarts into it as soon as nothing of its own is under way — the panel away,
-Settings not in use, no Sign in, plugin install or card action running — your
-plugins, windows and settings kept. Settings left open counts as in use for three
+in the last hour — so on the very first launch too — and then about once an hour
+while it runs, except while an update it already found is waiting, for Update or
+for its restart. The answer appears in
+Settings → About. What that question finds is downloaded, its signature
+checked, and put in place by itself: uDeck restarts into it as soon as
+nothing of its own is under way — the panel away, Settings not in use, no Sign
+in, plugin install or card action running — your plugins, windows and settings
+kept. Settings left open counts as in use for three
 minutes after it was last touched — thirty with a form open in it — and while it
 is in front of you; a window forgotten open does not hold the update, and opens
 again where it was after the restart. **Settings → About → Install updates automatically** turns that
 off, and then an update waits there for you to press Update — or is put in
 place when uDeck quits; **Check for
-updates automatically** turns the daily question off, and **Check now** still
+updates automatically** turns the hourly question off, and **Check now** still
 asks, when you press it, offering what it finds for that press. Sparkle's system
 profile is not sent.
 

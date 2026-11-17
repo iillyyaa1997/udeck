@@ -24,6 +24,7 @@ the developer tools, so `python3 -m http.server` is enough to serve the feed.
 
 from __future__ import annotations
 
+import calendar
 import re
 import shlex
 import subprocess
@@ -65,6 +66,28 @@ LAB_PROBE = "asked-by=the-lab"
 # parameters of its own, and what is being asked is whether the appcast was asked
 # for and by whom — never how.
 _APPCAST_REQUEST = re.compile(rf'"[A-Z]+ /{re.escape(APPCAST)}(?:\?(?P<query>[^" ]*))? HTTP/[^"]*"')
+
+# When the line was written: `http.server` stamps it with local time to the second
+# (`BaseHTTPRequestHandler.log_date_time_string`, `time.localtime`) — UTC, because the
+# lab starts it with TZ=UTC0 (`Feed.serve`) — and the month by its English
+# abbreviation whatever the locale (`monthname`).
+_LOGGED_AT = re.compile(r"\[(\d{2})/([A-Z][a-z]{2})/(\d{4}) (\d{2}):(\d{2}):(\d{2})\]")
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def heard_at(line: str) -> int | None:
+    """The second, on the guest's clock (seconds since the epoch), a line of the feed's log was written — or None.
+
+    On the guest's own clock, so that a time judged against a date the lab wrote there by `date +%s` needs no second
+    clock, and how long the lab took to read the log does not count. The stamp is UTC (`Feed.serve`): a zone's offset
+    read at another moment could be off by an hour across a change to or from summer time.
+    """
+    match = _LOGGED_AT.search(line)
+    if not match or match[2] not in _MONTHS:
+        return None
+    day, month, year, hour, minute, second = (int(match[1]), _MONTHS.index(match[2]) + 1, int(match[3]),
+                                              int(match[4]), int(match[5]), int(match[6]))
+    return calendar.timegm((year, month, day, hour, minute, second, 0, 0, 0))
 
 
 def find_sign_update(repo_root: Path) -> Path:
@@ -331,8 +354,10 @@ class Feed:
         self.machine.ssh.run(
             f"cd {shlex.quote(GUEST_FEED_DIR)} && "
             # --bind, or it would listen on every address the guest has: the
-            # machine's own network is reachable from this Mac (measured).
-            f"(/usr/bin/python3 -m http.server {self.port} --bind 127.0.0.1 >server.log 2>&1 & echo $! >server.pid)",
+            # machine's own network is reachable from this Mac (measured). TZ=UTC0,
+            # so that the log's stamps are UTC whatever the guest's zone and its
+            # summer time (`heard_at`).
+            f"(TZ=UTC0 /usr/bin/python3 -m http.server {self.port} --bind 127.0.0.1 >server.log 2>&1 & echo $! >server.pid)",
             step,
         )
         self.serving = True

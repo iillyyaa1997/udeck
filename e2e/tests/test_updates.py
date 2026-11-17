@@ -114,6 +114,8 @@ def test_the_feed_is_served_from_inside_the_guest_on_its_own_loopback(tmp_path):
     assert served and f"http.server {config.FEED_PORT}" in served[0]
     # Not every address the guest has: its own network is reachable from this Mac.
     assert "--bind 127.0.0.1" in served[0]
+    # Its stamps in UTC, whatever the guest's zone and its summer time: `heard_at` reads them so.
+    assert "TZ=UTC0 /usr/bin/python3 -m http.server" in served[0]
     assert "127.0.0.1" in [c for c in machine.ssh.commands if "curl" in c][0]
 
     feed.stop()
@@ -207,6 +209,18 @@ def test_uDeck_asking_with_parameters_of_its_own_is_still_uDeck_asking():
     """Sparkle may add a query to the feed's address; what is asked is who asked, not how."""
     with_query = '127.0.0.1 - - [26/Sep/2026 20:45:31] "GET /appcast.xml?appVersion=6 HTTP/1.0" 404 -'
     assert updates.asked_for_the_appcast(with_query) == [with_query]
+
+
+def test_a_line_is_heard_at_the_second_its_utc_stamp_says():
+    """The feed runs in UTC (`Feed.serve`): 12:34:36 on 17 November 2026 is 1794918876."""
+    line = '127.0.0.1 - - [17/Nov/2026 12:34:36] "GET /appcast.xml HTTP/1.1" 200 -'
+    assert updates.heard_at(line) == 1794918876
+    assert updates.heard_at(line.replace("17/Nov", "01/Jan")) == 1794918876 - (320 * 86400)
+
+
+def test_a_line_without_a_stamp_is_heard_at_no_time():
+    assert updates.heard_at('127.0.0.1 - - "GET /appcast.xml HTTP/1.1" 200 -') is None
+    assert updates.heard_at('127.0.0.1 - - [17/Noe/2026 12:34:36] "GET /appcast.xml HTTP/1.1" 200 -') is None
 
 
 def test_a_log_that_is_the_oracle_is_never_read_as_empty_when_it_could_not_be_read(tmp_path):

@@ -14,6 +14,7 @@ the first about the second is how a lab loses the right to be believed.
 import importlib.util
 import re
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -568,6 +569,7 @@ class Scene:
         self.asks_when_the_window_opens = asks_when_the_window_opens
         self.switch_turns_it_on = switch_turns_it_on
         self.kept = None
+        self.last_looks = []
         self.launched_at = None
         self.window_opened_at = None
         self.check_now_at = None
@@ -576,6 +578,7 @@ class Scene:
         # a read can come either side of a click, and only the order tells which.
         self.events = []
         monkeypatch.setattr(checks, "_a_uDeck_that_never_looked", lambda *a, **k: None)
+        monkeypatch.setattr(app, "last_checked", lambda machine, seconds_ago, step: self.last_looks.append(seconds_ago))
         monkeypatch.setattr(checks, "_open_the_about_pane", self.open_the_about_pane)
         monkeypatch.setattr(app, "launch", self.launch)
         monkeypatch.setattr(app, "automatic_checks", lambda machine, step: self.kept)
@@ -708,6 +711,166 @@ def test_it_starts_uDeck_on_a_machine_that_remembers_nothing(machine, lab, check
     checks.check_it_looks_by_itself(machine, check_dir, lab)
     assert prepared == [{}], "never switched off: what it ships, and nothing the lab wrote"
     assert scene.launched_at is not None
+    assert scene.last_looks == [], "a uDeck that never looked: no last look written"
+
+
+# Looking again an hour later.
+
+# The guest's clock in the scenes below: 2026-11-17 12:00:00 UTC when the fake clock reads 0.
+GUEST_EPOCH = 1794916800
+
+
+class HourScene(Scene):
+    """The feed stamping uDeck's request with the guest's own time, as `http.server` does in UTC, to the second.
+
+    `asks_by_itself_after` counts from launch, as in `Scene`; `asks_at_the_hour_plus` is the request at that many
+    seconds from the hour the lab's written last look puts it at. `launch_takes` and `reading_takes` move the fake
+    clock while uDeck starts and before the first read takes its snapshot of the log — the lab's own latency, which
+    must count for nothing; `answer_takes` moves it after the first snapshot, before the read comes back with it.
+    """
+
+    def __init__(self, monkeypatch, machine, asks_at_the_hour_plus=None, launch_takes=0, reading_takes=0,
+                 answer_takes=0, **kwargs):
+        super().__init__(monkeypatch, machine, **kwargs)
+        self.asks_at_the_hour_plus = asks_at_the_hour_plus
+        self.launch_takes = launch_takes
+        self.reading_takes = reading_takes
+        self.answer_takes = answer_takes
+        self.up = None
+        self.reads = 0
+        monkeypatch.setattr(app, "last_checked", self.last_checked)
+        monkeypatch.setattr(app, "guest_epoch", lambda machine, step: self.guest_now())
+
+    def guest_now(self):
+        return GUEST_EPOCH + int(self.machine.now)
+
+    def last_checked(self, machine, seconds_ago, step):
+        self.last_looks.append(seconds_ago)
+        last = self.guest_now() - seconds_ago
+        self.up = last + checks.HOUR
+        return last
+
+    def launch(self, machine, step="starting uDeck"):
+        machine.now += self.launch_takes
+        return super().launch(machine, step)
+
+    def stamped(self, guest_second):
+        utc = time.gmtime(guest_second)
+        return f'127.0.0.1 - - [{time.strftime("%d/%b/%Y %H:%M:%S", utc)}] "GET /appcast.xml HTTP/1.1" 200 -'
+
+    def read_log(self, step):
+        self.reads += 1
+        if self.reads == 1:
+            self.machine.now += self.reading_takes
+        asked_at = None
+        if self.asks_by_itself_after is not None and self.launched_at is not None:
+            asked_at = GUEST_EPOCH + int(self.launched_at) + self.asks_by_itself_after
+        if self.asks_at_the_hour_plus is not None and self.up is not None:
+            asked_at = self.up + self.asks_at_the_hour_plus
+        line = self.stamped(asked_at) if asked_at is not None else None
+        if line and self.guest_now() >= asked_at and line not in self.log:
+            self.log.append(line)
+        snapshot = "\n".join(self.log)
+        if self.reads == 1:
+            self.machine.now += self.answer_takes
+        return snapshot
+
+
+def test_a_uDeck_that_looks_again_when_the_hour_is_up_passes(machine, lab, check_dir, monkeypatch):
+    scene = HourScene(monkeypatch, machine, asks_at_the_hour_plus=8)
+    checks.check_it_looks_every_hour(machine, check_dir, lab)
+    assert scene.last_looks == [checks.HOUR - checks.HOUR_LEFT_SECONDS], "an hour less a little, by the lab's hour"
+    assert scene.clicked == [] and scene.switched == [] and scene.window_opened_at is None
+    assert machine.now - scene.launched_at < checks.HOUR_LEFT_SECONDS + checks.LATE_SECONDS, "it stops when heard"
+    assert any("+8s from the hour after its last look (48s after it started)" in note for note in lab.notes), lab.notes
+
+
+def test_a_uDeck_that_waits_a_day_between_looks_fails(machine, lab, check_dir, monkeypatch):
+    """What 0.8.4 shipped, 86400 in the plist: nothing heard, for the whole hour's end and its leeway."""
+    scene = HourScene(monkeypatch, machine)
+    with pytest.raises(CheckFailed, match="does not look again within an hour") as raised:
+        checks.check_it_looks_every_hour(machine, check_dir, lab)
+    assert "SUScheduledCheckInterval" in str(raised.value)
+    assert scene.guest_now() >= scene.up + checks.LATE_SECONDS, "silence is judged only once the leeway is over too"
+    assert scene.clicked == [] and scene.window_opened_at is None, "never broken by pressing Check now"
+
+
+def test_a_uDeck_that_looks_at_every_launch_fails(machine, lab, check_dir, monkeypatch):
+    """Heard a second after it starts, with its last look less than an hour old: not the hour's look."""
+    HourScene(monkeypatch, machine, asks_by_itself_after=1)
+    with pytest.raises(CheckFailed, match="looks at launch whatever its last look"):
+        checks.check_it_looks_every_hour(machine, check_dir, lab)
+
+
+def test_a_look_at_launch_read_late_is_still_a_look_at_launch(machine, lab, check_dir, monkeypatch):
+    """The request's own stamp is judged, not when the lab got round to reading it: a read that stalled 38 s
+    would otherwise put a look at launch on the hour."""
+    HourScene(monkeypatch, machine, asks_by_itself_after=2, reading_takes=38)
+    with pytest.raises(CheckFailed, match="looks at launch whatever its last look"):
+        checks.check_it_looks_every_hour(machine, check_dir, lab)
+
+
+def test_a_look_after_the_leeway_fails_even_when_a_stalled_read_finds_it(machine, lab, check_dir, monkeypatch):
+    """A first read that stalls past the hour's leeway finds a request stamped too late, and says so."""
+    HourScene(monkeypatch, machine, asks_at_the_hour_plus=checks.LATE_SECONDS + 5, reading_takes=80)
+    with pytest.raises(CheckFailed, match="waits longer than an hour between looks"):
+        checks.check_it_looks_every_hour(machine, check_dir, lab)
+
+
+def test_a_read_that_began_before_the_time_was_up_is_not_the_last_word(machine, lab, check_dir, monkeypatch):
+    """The first read takes its snapshot at once and comes back 80 s later, past the whole wait: the request written
+    meanwhile, at the hour plus 8, is not in it — one more read, begun after the time was up, finds it."""
+    scene = HourScene(monkeypatch, machine, asks_at_the_hour_plus=8, answer_takes=80)
+    checks.check_it_looks_every_hour(machine, check_dir, lab)
+    assert scene.reads == 2
+    assert any("+8s from the hour after its last look" in note for note in lab.notes), lab.notes
+
+
+def test_a_look_a_little_early_is_still_the_hour_s(machine, lab, check_dir, monkeypatch):
+    HourScene(monkeypatch, machine, asks_at_the_hour_plus=-checks.EARLY_SECONDS)
+    checks.check_it_looks_every_hour(machine, check_dir, lab)
+
+
+def test_the_lab_s_own_latency_counts_for_nothing(machine, lab, check_dir, monkeypatch):
+    """Writing the date and starting uDeck took 12 s: the hour is still the one the written date puts it at."""
+    scene = HourScene(monkeypatch, machine, asks_at_the_hour_plus=0, launch_takes=12)
+    checks.check_it_looks_every_hour(machine, check_dir, lab)
+    assert any("+0s from the hour after its last look (28s after it started)" in note for note in lab.notes), lab.notes
+    assert scene.up is not None
+
+
+@pytest.mark.parametrize("left", [checks.LOOKS_SECONDS, checks.LOOKS_SECONDS + checks.EARLY_SECONDS])
+def test_a_uDeck_that_starts_too_near_its_hour_could_not_be_checked(machine, lab, check_dir, monkeypatch, left):
+    """With no more than a look at launch's time and `EARLY_SECONDS` left before the hour, the two cannot be told
+    apart — at the bound, a look at launch `LOOKS_SECONDS` after would be stamped `EARLY_SECONDS` before the hour and
+    pass: the lab's, not uDeck's."""
+    HourScene(monkeypatch, machine, asks_by_itself_after=checks.LOOKS_SECONDS, launch_takes=checks.HOUR_LEFT_SECONDS - left)
+    with pytest.raises(LabError, match="could not be told apart") as raised:
+        checks.check_it_looks_every_hour(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_second_more_left_is_enough_to_tell_a_look_at_launch(machine, lab, check_dir, monkeypatch):
+    left = checks.LOOKS_SECONDS + checks.EARLY_SECONDS + 1
+    HourScene(monkeypatch, machine, asks_by_itself_after=checks.LOOKS_SECONDS, launch_takes=checks.HOUR_LEFT_SECONDS - left)
+    with pytest.raises(CheckFailed, match="looks at launch whatever its last look"):
+        checks.check_it_looks_every_hour(machine, check_dir, lab)
+
+
+def test_a_feed_line_without_a_time_is_the_lab_unable_to_judge_it(machine, lab, check_dir, monkeypatch):
+    scene = HourScene(monkeypatch, machine)
+    scene.log.append('127.0.0.1 - - "GET /appcast.xml HTTP/1.1" 200 -')
+    with pytest.raises(LabError, match="carries no time the lab can read") as raised:
+        checks.check_it_looks_every_hour(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
+
+
+def test_a_silence_from_a_feed_that_died_is_not_uDeck_s(machine, lab, check_dir, monkeypatch):
+    HourScene(monkeypatch, machine)
+    machine.ssh.answers["http_code"] = "000"
+    with pytest.raises(LabError, match="stopped answering") as raised:
+        checks.check_it_looks_every_hour(machine, check_dir, lab)
+    assert not isinstance(raised.value, CheckFailed)
 
 
 # The switch.
@@ -1258,6 +1421,7 @@ def test_every_update_check_says_which_pairs_it_takes():
         "check_sparkle": pairs.THE_WHOLE_UPDATE,
         "check_wrong_key": pairs.THE_WRONG_KEY,
         "check_it_looks_by_itself": pairs.ONLY_THIS_CHECKOUT,
+        "check_it_looks_every_hour": pairs.ONLY_THIS_CHECKOUT,
         "check_switched_on_it_looks_by_itself": pairs.ONLY_THIS_CHECKOUT,
         "check_a_published_release": pairs.A_PUBLISHED_RELEASE,
         "check_installs_by_itself": pairs.INSTALLS_BY_ITSELF,
@@ -1278,6 +1442,13 @@ def test_the_feed_and_the_repository_are_the_ones_udeck_ships_with():
     plist = plistlib.loads((Path(__file__).resolve().parents[2] / "Sources" / "uDeck" / "Support" / "Info.plist").read_bytes())
     assert plist["SUFeedURL"] == config.LATEST_FEED
     assert f"github.com/{config.RELEASES_REPOSITORY}/" in plist["SUFeedURL"]
+
+
+def test_the_hour_is_the_lab_s_and_the_one_uDeck_ships():
+    """Held to README's hour, not read out of the plist; and the plist as it ships says the same."""
+    assert checks.HOUR == 3600
+    plist = plistlib.loads((Path(__file__).resolve().parents[2] / "Sources" / "uDeck" / "Support" / "Info.plist").read_bytes())
+    assert plist["SUScheduledCheckInterval"] == checks.HOUR
 
 
 def test_the_identifiers_read_from_a_releases_source_are_the_ones_the_checks_press():
