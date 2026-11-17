@@ -579,7 +579,7 @@ check's own default:
 |---|---|---|
 | `updates.sparkle` | checkout → checkout | any pair but a release → checkout |
 | `updates.wrong-key` | checkout → checkout | a release → checkout |
-| `updates.it-looks-by-itself`, `updates.switched-on-it-looks-by-itself` | checkout → checkout | nothing else |
+| `updates.it-looks-by-itself`, `updates.it-looks-every-hour`, `updates.switched-on-it-looks-by-itself` | checkout → checkout | nothing else |
 | `updates.installs-by-itself` | checkout → checkout | nothing else: what it holds to is what this checkout ships, and nothing is pressed |
 | `updates.settings-left-open` | checkout → checkout | nothing else: the same, with Settings opened before uDeck looks and touched no more |
 | `updates.a-published-release` | the release before latest → latest | any pair whose "to" is a release |
@@ -1009,7 +1009,7 @@ private*), and ends with **Remove…** and the Keychain item gone.
 uDeck ships with automatic checks **on** — `SUEnableAutomaticChecks` is true
 in `Sources/uDeck/Support/Info.plist`, the operator's decision recorded in
 `docs/plugin-repository.md` ("What uDeck fetches, and when") and said in the
-README: once a day uDeck asks its feed for a newer version, the first time
+README: once an hour uDeck asks its feed for a newer version, the first time
 straight after its first launch. Until the plugin catalogue came it shipped with
 them off, and the first of these checks held it to the opposite.
 
@@ -1125,9 +1125,9 @@ and it does leave that date behind: with `--vm per-group`, both checks found
 with an empty dictionary rather than "not found", and the lab reads both as
 nothing kept.
 
-**What cannot be checked in a lab run is the next check a day later.** It is
-`SUScheduledCheckInterval` — 86400 s in the plist — after the last one, and
-Sparkle will not go below an hour: `minimumUpdateCheckInterval` returns 3600 in
+**The next check an hour later is checked by moving the last one back, not by
+waiting.** It is `SUScheduledCheckInterval` — 3600 s in the plist since 0.8.5,
+86400 before — after the last one, and Sparkle will not go below an hour: `minimumUpdateCheckInterval` returns 3600 in
 a release build (the one-minute interval exists only in Sparkle's own debug
 builds, behind `_SUEnableDebugUpdateCheckIntervals`). Measured, not only read:
 with `SUScheduledCheckInterval` set to 60 in the guest's preferences, a uDeck
@@ -1136,12 +1136,31 @@ one whose last check was at 19:53:58 asked at 20:53:59 — an hour, not a minute
 So a scheduled check cannot be had in less than an hour of waiting, and the lab
 does not wait an hour.
 
-The honest way to check it would be to move `SULastCheckTime` back rather than
-wait: Sparkle counts from that date, and its own timer does the rest. Measured
-the same way, a last check written as 2026-09-25 20:54:09 and uDeck started at
-20:54:01 the next day made the feed hear it at 20:54:09 — exactly the plist's
-day after, 8 s after launch. It changes a date and not a setting, but it does
-write into Sparkle's memory, and no check does it today.
+It moves `SULastCheckTime` back instead: Sparkle counts from that date, and its
+own timer does the rest. Measured the same way, a last check written as
+2026-09-25 20:54:09 and uDeck started at 20:54:01 the next day made the feed
+hear it at 20:54:09 — exactly the plist's day after, 8 s after launch. It
+changes a date and not a setting, but it does write into Sparkle's memory.
+`updates.it-looks-every-hour` writes a last look an hour less 40 s ago by the
+guest's clock (`app.last_checked`), on a machine that remembered nothing else
+(`_a_uDeck_that_never_looked`), starts uDeck, presses nothing, and listens: the
+feed must hear uDeck when the hour is up — at most 35 s after, Sparkle's 15 s
+timer leeway and the 20 s a busy guest is given, and at most 5 s before, room
+for the guest's clock being stepped, since Sparkle's timer never fires early.
+Both ends are the guest's seconds: the date the lab wrote, and the feed's own
+stamp on the request (`updates.heard_at`), so the lab's time to write the date,
+start uDeck or read the log counts for nothing. A look at launch is heard more
+than 25 s before the hour, and a uDeck that started too late for that to show is
+"could not check". The hour is the lab's (`HOUR`), not read from the plist:
+README says it, and a check that read the interval would hold uDeck to whatever
+it ships. What it does not reach is the look after a look, which Sparkle
+schedules an interval after each one ends — read in SPUUpdater.m, not measured.
+Measured on 2026-11-17: green on the change, uDeck heard 8 s after its hour
+(lab run 44082793031, the first version of the check); red with the plist's
+86400, silent for the whole wait (44082800224); red with a look at every launch
+added, heard a second after start (44082806321). Before 0.8.5 the plist said a day, and the operator's uDeck
+that had last looked at 03:01 UTC on 2026-11-17 would have found 0.8.4,
+published at 11:06, only the next morning.
 
 ### The panel
 
