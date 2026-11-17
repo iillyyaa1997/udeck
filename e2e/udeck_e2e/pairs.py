@@ -230,7 +230,7 @@ class TheWrongKey(Rule):
 
 @dataclass(frozen=True)
 class OnlyThisCheckout(Rule):
-    """The two checks about uDeck looking by itself: they end at a request, so only checkout → checkout."""
+    """The three checks about uDeck looking by itself: they end at a request, so only checkout → checkout."""
 
     def refusal(self, pair: Pair) -> str | None:
         if pair.from_.is_checkout and pair.to.is_checkout:

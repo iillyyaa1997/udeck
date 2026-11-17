@@ -300,6 +300,51 @@ def test_a_machine_that_keeps_them_after_the_delete_is_the_lab_unable_to_start_c
     assert "SULastCheckTime" in raised.value.reason
 
 
+NOW = "1794916800"
+NOW_LESS_3560 = "1794913240"
+STAMP = "2026-11-17 11:00:40 +0000"
+
+
+def test_a_last_look_is_written_that_many_seconds_before_the_guests_clock_and_read_back():
+    """What `updates.it-looks-every-hour` stands on: the date Sparkle counts its hour from, as Sparkle writes it."""
+    machine = FakeMachine({
+        "/bin/date +%s": NOW,
+        f"/bin/date -u -r {NOW_LESS_3560} ": STAMP,
+        f"defaults read {app.BUNDLE_ID} {app.LAST_CHECK}": STAMP,
+    })  # fmt: skip
+    assert app.last_checked(machine, 3560, "writing") == int(NOW_LESS_3560), "the date written, on the guest's clock"
+    assert f"defaults write {app.BUNDLE_ID} {app.LAST_CHECK} -date '{STAMP}'" in machine.ssh.commands
+
+
+def test_a_last_look_that_reads_back_otherwise_is_the_lab_unable_to_write_it():
+    machine = FakeMachine({
+        "/bin/date +%s": NOW,
+        f"/bin/date -u -r {NOW_LESS_3560} ": STAMP,
+        f"defaults read {app.BUNDLE_ID} {app.LAST_CHECK}": "2026-11-17 03:01:24 +0000",
+    })  # fmt: skip
+    with pytest.raises(LabError, match="reads back as 2026-11-17 03:01:24"):
+        app.last_checked(machine, 3560, "writing")
+
+
+def test_a_guest_clock_that_is_not_a_number_writes_nothing():
+    machine = FakeMachine({"/bin/date +%s": "date: illegal option"})
+    with pytest.raises(LabError, match="the guest's clock said"):
+        app.last_checked(machine, 3560, "writing")
+    assert not any("defaults write" in c for c in machine.ssh.commands)
+
+
+def test_a_first_look_after_some_seconds_counts_from_the_interval_the_bundle_ships():
+    """`first_check_after` reads the interval out of the installed bundle: an hour less 40 s, with 3600 there."""
+    machine = FakeMachine({
+        app.CHECK_INTERVAL: "3600",
+        "/bin/date +%s": NOW,
+        f"/bin/date -u -r {NOW_LESS_3560} ": STAMP,
+        f"defaults read {app.BUNDLE_ID} {app.LAST_CHECK}": STAMP,
+    })  # fmt: skip
+    app.first_check_after(machine, 40, "writing")
+    assert any(c.startswith(f"/bin/date -u -r {NOW_LESS_3560} ") for c in machine.ssh.commands)
+
+
 # --- Whether Sparkle looks by itself ----------------------------------------------------
 
 SETTING = f"defaults read {app.BUNDLE_ID} {app.AUTOMATIC_CHECKS}"
