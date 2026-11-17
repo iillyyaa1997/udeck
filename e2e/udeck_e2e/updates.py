@@ -24,6 +24,7 @@ the developer tools, so `python3 -m http.server` is enough to serve the feed.
 
 from __future__ import annotations
 
+import calendar
 import re
 import shlex
 import subprocess
@@ -65,6 +66,27 @@ LAB_PROBE = "asked-by=the-lab"
 # parameters of its own, and what is being asked is whether the appcast was asked
 # for and by whom — never how.
 _APPCAST_REQUEST = re.compile(rf'"[A-Z]+ /{re.escape(APPCAST)}(?:\?(?P<query>[^" ]*))? HTTP/[^"]*"')
+
+# When the line was written: `http.server` stamps it with the guest's local time to
+# the second (`BaseHTTPRequestHandler.log_date_time_string`, `time.localtime`), the
+# month by its English abbreviation whatever the locale (`monthname`).
+_LOGGED_AT = re.compile(r"\[(\d{2})/([A-Z][a-z]{2})/(\d{4}) (\d{2}):(\d{2}):(\d{2})\]")
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def heard_at(line: str, utc_offset: int) -> int | None:
+    """The second, on the guest's clock (seconds since the epoch), a line of its access log was written — or None.
+
+    `utc_offset` is the guest's, in seconds east of UTC (`app.guest_utc_offset`): the line says local time. On the
+    guest's own clock, so that a time judged against a date the lab wrote there by `date +%s` needs no second clock,
+    and how long the lab took to read the log does not count.
+    """
+    match = _LOGGED_AT.search(line)
+    if not match or match[2] not in _MONTHS:
+        return None
+    day, month, year, hour, minute, second = (int(match[1]), _MONTHS.index(match[2]) + 1, int(match[3]),
+                                              int(match[4]), int(match[5]), int(match[6]))
+    return calendar.timegm((year, month, day, hour, minute, second, 0, 0, 0)) - utc_offset
 
 
 def find_sign_update(repo_root: Path) -> Path:

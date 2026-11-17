@@ -209,6 +209,19 @@ def test_uDeck_asking_with_parameters_of_its_own_is_still_uDeck_asking():
     assert updates.asked_for_the_appcast(with_query) == [with_query]
 
 
+def test_a_line_is_heard_at_the_guest_second_its_local_stamp_says():
+    """`http.server`'s stamp is local time: 13:34:36 an hour east of UTC is 12:34:36 UTC, 1794918876."""
+    line = '127.0.0.1 - - [17/Nov/2026 13:34:36] "GET /appcast.xml HTTP/1.1" 200 -'
+    assert updates.heard_at(line, 3600) == 1794918876
+    assert updates.heard_at(line.replace("13:34:36", "12:34:36"), 0) == 1794918876
+    assert updates.heard_at(line.replace("13:34:36", "07:04:36"), -19800) == 1794918876
+
+
+def test_a_line_without_a_stamp_is_heard_at_no_time():
+    assert updates.heard_at('127.0.0.1 - - "GET /appcast.xml HTTP/1.1" 200 -', 0) is None
+    assert updates.heard_at('127.0.0.1 - - [17/Noe/2026 13:34:36] "GET /appcast.xml HTTP/1.1" 200 -', 0) is None
+
+
 def test_a_log_that_is_the_oracle_is_never_read_as_empty_when_it_could_not_be_read(tmp_path):
     """"Nobody asked" out of a log nobody could read would be a verdict made of a dropped connection."""
     with pytest.raises(LabError, match="SSH"):
