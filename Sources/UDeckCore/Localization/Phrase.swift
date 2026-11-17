@@ -675,10 +675,24 @@ public enum Phrase: Sendable, Equatable {
     case updatesCheckNow
     case updatesAutomatically
     case updatesAutomaticallyHelp
-    /// **Install updates automatically** (0.8.1): what a check of its own finds,
-    /// put in place with nothing pressed, uDeck restarting while the panel is away.
-    case updatesInstallsAutomatically
-    case updatesInstallsAutomaticallyHelp
+    /// "When a new version is out" (0.8.6, `UpdateMode`): only say so, download
+    /// it ahead and wait for Update, or put it in by itself — before 0.8.6 one
+    /// switch, **Install updates automatically**, had only the first and last.
+    case updatesWhenNew
+    case updatesModeTell
+    case updatesModeTellHelp
+    case updatesModeDownloadAhead
+    case updatesModeDownloadAheadHelp
+    case updatesModeInstallByItself
+    case updatesModeInstallByItselfHelp
+    /// A notification about a new version (0.8.6, `UpdateNotice`), on from the
+    /// first launch; macOS asks the first time there is one to send.
+    case updatesNotify
+    case updatesNotifyHelp
+    case updatesNotifyDenied
+    case updatesOpenNotificationSettings
+    /// The release's page on GitHub.
+    case updatesWhatsNew(String)
     case updatesNeverChecked
 
     /// A check that has just finished. `RelativeDateTimeFormatter` rounds the
@@ -696,11 +710,21 @@ public enum Phrase: Sendable, Equatable {
     case updatesChecking
     case updatesUpToDate
     case updatesAvailable(String)
-    case updatesInstallNow(String)
+    /// The one button that puts a found or downloaded version in: **Update**
+    /// whichever it is (0.8.6; it said "Update to …" and "Restart and install").
+    case updatesUpdate
     case updatesDownloading
     case updatesReady
-    case updatesRestartToInstall
     case updatesFailed(String)
+
+    /// The notification's own words (`UpdateNotice`).
+    case noticeFoundTitle(String)
+    case noticeFoundBody
+    case noticeDownloadedTitle(String)
+    case noticeDownloadedBody
+    case noticeUpdatedTitle(String)
+    case noticeUpdatedBody
+    case noticeLater
 
     // MARK: - Plugins that will not run
 
