@@ -8,7 +8,11 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [Unreleased]
+## [0.8.6] — 2026-11-17
+
+What uDeck does with a new version is your choice, and it can tell you about
+one in a notification. 0.8.6 adds nothing to the plugin contract. The update
+*to* 0.8.6 goes by 0.8.5's rule: found within the hour and put in by itself.
 
 - **When a new version is out — your choice in Settings → About.** *Only tell
   me* downloads nothing until you press Update; *Download it ahead and wait for
