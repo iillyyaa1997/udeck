@@ -582,6 +582,7 @@ check's own default:
 | `updates.it-looks-by-itself`, `updates.it-looks-every-hour`, `updates.switched-on-it-looks-by-itself` | checkout → checkout | nothing else |
 | `updates.installs-by-itself` | checkout → checkout | nothing else: what it holds to is what this checkout ships, and nothing is pressed |
 | `updates.settings-left-open` | checkout → checkout | nothing else: the same, with Settings opened before uDeck looks and touched no more |
+| `updates.tells-when-found`, `updates.downloads-ahead`, `updates.notice-shows` | checkout → checkout | nothing else: each starts this checkout's uDeck in a mode of its own (`app.choose_update_mode`) |
 | `updates.a-published-release` | the release before latest → latest | any pair whose "to" is a release |
 
 So a run without arguments asks the first four what they asked before pairs
@@ -1162,6 +1163,38 @@ Measured on 2026-11-17: green on the change, uDeck heard 8 s after its hour
 added, heard a second after start (44082806321). Before 0.8.5 the plist said a day, and the operator's uDeck
 that had last looked at 03:01 UTC on 2026-11-17 would have found 0.8.4,
 published at 11:06, only the next morning.
+
+### Update modes and notices (0.8.6)
+
+What a check of its own does with a new version is the operator's choice in
+Settings → About (`UpdateMode`): only tell, download it ahead and wait for
+Update, or install it by itself. The lab starts uDeck in a mode by writing
+`UDeckUpdateMode` into its preferences (`app.choose_update_mode`), as the choice
+writes it.
+
+`updates.tells-when-found`: in *Only tell me*, uDeck's log says it found the
+version by itself and sent its notice, the feed's log has no request for the
+archive, and **Check now**, pressed afterwards, reaches the feed again — the
+found version no longer holds Sparkle's session (until 0.8.6 it did, and no
+check happened until Install). `updates.downloads-ahead`: in *Download it
+ahead*, the archive is downloaded and the notice sent, uDeck does not restart
+for 90 s with nothing holding it, and **Update**, pressed with the feed gone,
+puts the download in. `updates.installs-by-itself` also waits for the notice
+the uDeck that came back sends.
+
+The notice is held to uDeck's log, `notice <kind> <version>: sent`, and not to
+the screen: a GitHub runner shows no banner at all — not even one of macOS's own
+`osascript` (run 44160964272) — and macOS refuses the current notification API
+to an application signed ad hoc before asking anybody ("Notifications are not
+allowed for this application"), so uDeck sends through the older
+`NSUserNotificationCenter`; measured on the operator's Mac with a one-off test
+application signed the same way: macOS asked, Allow, the banner showed.
+`updates.notice-shows` holds the banner itself, after `osascript`'s as the
+control, answering macOS's question with Allow on the way; on a runner it
+cannot check. Measured on 2026-11-17, red for: a uDeck that downloads in
+*Only tell me* (44170928497), one whose found version holds the session, one
+that restarts by itself in *Download it ahead*, and one that sends no notice
+after a restart into the update by itself.
 
 ### The panel
 

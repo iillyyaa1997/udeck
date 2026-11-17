@@ -8,6 +8,42 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [Unreleased]
+
+- **When a new version is out — your choice in Settings → About.** *Only tell
+  me* downloads nothing until you press Update; *Download it ahead and wait for
+  Update* downloads it and checks its signature at once, so Update is only a
+  restart; *Download and install it by itself* is how uDeck has updated since
+  0.8.1, and stays the default. The first launch after 0.8.5 keeps what its one
+  switch, *Install updates automatically*, meant: on, install by itself; off,
+  only tell. The button is **Update** whichever it is, and **What's new** opens
+  the release's page.
+- **A notification about a new version**, on as uDeck ships, once for each
+  version: found, with **Update** and **Later**; downloaded, the same; or, after
+  a restart into it by itself, that uDeck updated. macOS asks whether uDeck may
+  send notifications the first time it has one to send. Clicking one opens
+  Settings → About. An application signed ad hoc, as uDeck is until it has a
+  Developer ID, is refused macOS's current notification API before anybody is
+  asked ("Notifications are not allowed for this application"), so uDeck uses
+  the older one — measured on a real Mac: macOS asked, Allow, and the banner
+  showed — through which macOS does not say whether you refused, so "Don't
+  Allow" at its question costs that version's notice; with a Developer ID,
+  About will say so and open macOS's notification settings.
+- **A version found and not put in no longer stops the hourly check.** Until
+  now a found version held Sparkle's session until Install, and no check
+  happened meanwhile: on 2026-11-17 a Check now found 0.8.4 at 12:07 UTC, and
+  0.8.5, out at 14:32, could not be found until Install. In *Only tell me* the
+  next hour's check happens, and Check now asks again. A version *downloaded*
+  ahead still waits for Update, and no check happens meanwhile: Sparkle's
+  session is held until Update, or until uDeck quits and the download goes in.
+- **Lab**: `updates.tells-when-found` (the notice sent, nothing downloaded,
+  Check now reaching the feed again) and `updates.downloads-ahead` (downloaded,
+  the notice sent, no restart by itself, Update with the feed gone puts the
+  download in); `updates.installs-by-itself` now also waits for the notice that
+  uDeck updated; `updates.notice-shows` holds the banner itself, after a banner
+  of macOS's own as the control — a GitHub runner shows none, so there it
+  cannot check.
+
 ## [0.8.5] — 2026-11-17
 
 uDeck looks for an update once an hour instead of once a day. 0.8.5 adds

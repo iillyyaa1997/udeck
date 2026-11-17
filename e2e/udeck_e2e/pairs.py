@@ -244,7 +244,7 @@ class OnlyThisCheckout(Rule):
 
 @dataclass(frozen=True)
 class InstallsByItself(Rule):
-    """`updates.installs-by-itself` and `updates.settings-left-open`: what this checkout ships puts in place what it finds, so "from" is this checkout's."""
+    """`updates.installs-by-itself`, `updates.settings-left-open` and the checks of the update modes: what this checkout ships does by itself what it does with what it finds, so "from" is this checkout's."""
 
     def refusal(self, pair: Pair) -> str | None:
         if pair.from_.is_checkout and pair.to.is_checkout:

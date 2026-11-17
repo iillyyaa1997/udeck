@@ -416,6 +416,61 @@ def switch_automatic_checks_off(machine, step: str) -> None:
 FEED_URL = "SUFeedURL"
 # Whether what a check of its own finds is put in place by itself (0.8.1, `SUAutomaticallyUpdate` in the plist).
 INSTALLS_BY_ITSELF = "SUAutomaticallyUpdate"
+# What a check of its own does with a new version (0.8.6, `UpdateMode` in Sources/UDeckCore/Updates/UpdateMode.swift):
+# only say so, download it ahead and wait for Update, or put it in by itself. uDeck writes it on its first launch
+# from `SUAutomaticallyUpdate` when nothing is kept.
+UPDATE_MODE = "UDeckUpdateMode"
+MODE_TELL = "tell"
+MODE_DOWNLOAD_AHEAD = "downloadAhead"
+MODE_INSTALL_BY_ITSELF = "installByItself"
+
+
+# macOS's own process for notifications (`ui.NOTIFICATION_CENTER`) and the launchd job that runs it in the login session.
+NOTIFICATION_CENTER = "NotificationCenter"
+NOTIFICATION_CENTER_JOB = "com.apple.notificationcenterui.agent"
+
+
+def notification_center_up(machine, step: str) -> str:
+    """NotificationCenter running in the guest's login session, started when it is not: what was done, in words.
+
+    A GitHub runner's session ran none (run 44138977236: "no process called NotificationCenter is running"), and
+    uDeck's notice then failed with "Notifications are not allowed for this application" before macOS asked anything.
+    Started with `launchctl kickstart` of its own job, then `open -g -a`, and read back with `pgrep -x`; a guest where
+    neither starts it is the lab unable to show a notification, said with what launchd says of the job.
+    """
+    def running() -> bool:
+        return machine.ssh.ask(f"/usr/bin/pgrep -x {NOTIFICATION_CENTER}", step).returncode == 0
+
+    if running():
+        return "NotificationCenter was running"
+    tried = []
+    for how, command in (
+        ("launchctl kickstart", f"/bin/launchctl kickstart gui/$(id -u)/{NOTIFICATION_CENTER_JOB}"),
+        ("open -g -a", f"/usr/bin/open -g -a {NOTIFICATION_CENTER}"),
+    ):
+        done = machine.ssh.ask(command, step)
+        said = (done.stderr or done.stdout or "").strip().splitlines()
+        tried.append(f"{how}: exit {done.returncode}{' — ' + said[-1] if said else ''}")
+        for _ in range(10):
+            if running():
+                return f"NotificationCenter was not running; started it with {how}"
+            machine.sleep(1)
+    disabled = machine.ssh.ask(f"/bin/launchctl print-disabled gui/$(id -u) | /usr/bin/grep -i notification", step)
+    raise LabError(step, f"NotificationCenter is not running in the guest's session and could not be started "
+                         f"({'; '.join(tried)}); launchd's disabled jobs say: {disabled.stdout.strip() or 'nothing about it'}")
+
+
+def choose_update_mode(machine, mode: str, step: str) -> None:
+    """Make the uDeck in the guest start in `mode`, as its choice in Settings → About writes it, and read it back.
+
+    With uDeck not running and after `forget_preferences`, like the other preferences the lab writes.
+    """
+    machine.ssh.run(f"defaults write {BUNDLE_ID} {UPDATE_MODE} -string {shlex.quote(mode)}", step)
+    kept = machine.ssh.ask(f"defaults read {BUNDLE_ID} {UPDATE_MODE}", step)
+    if kept.returncode != 0 or kept.stdout.strip() != mode:
+        said = (kept.stdout or kept.stderr or "").strip().splitlines()
+        raise LabError(step, f"the lab wrote {UPDATE_MODE} = {mode} for {BUNDLE_ID}, and it reads back as "
+                             f"{said[-1] if said else 'nothing at all'}")
 
 
 def no_installs_by_itself(machine, step: str) -> None:
