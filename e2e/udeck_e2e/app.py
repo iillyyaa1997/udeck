@@ -457,3 +457,37 @@ def point_the_feed_at(machine, url: str, step: str) -> None:
             f"the lab wrote {FEED_URL} = {url} for {BUNDLE_ID}, and it reads back as "
             f"{said[-1] if said else 'nothing at all'}",
         )
+
+
+# When Sparkle last looked, by its own name: it waits its interval from this before it looks by itself, and
+# looks straight away when nothing is kept (`-[SPUUpdater scheduleNextUpdateCheckFiringImmediately:usingCurrentDate:]`
+# in Sparkle 2.9.6), within a leeway of 15 seconds (`-[SPUUpdaterSettings leewayUpdateCheckInterval]`).
+LAST_CHECK = "SULastCheckTime"
+# How often it looks by itself, from the bundle's Info.plist.
+CHECK_INTERVAL = "SUScheduledCheckInterval"
+
+
+def first_check_after(machine, seconds: int, step: str) -> None:
+    """Make the uDeck in the guest look by itself `seconds` after it starts, not the moment it does.
+
+    For a check that needs something open before uDeck finds its update: a uDeck as it ships has never looked, and
+    asks its feed one to three seconds after it starts (`check_it_looks_by_itself`). Written as Sparkle writes it, a
+    last check one interval minus `seconds` ago by the guest's own clock — the interval read from the bundle installed
+    there, not assumed — with uDeck not running and after `forget_preferences`, and read back.
+    """
+    plist = f"{GUEST_APPLICATIONS}/{APP}/Contents/Info"
+    interval = machine.ssh.ask(f"defaults read {shlex.quote(plist)} {CHECK_INTERVAL}", step)
+    if interval.returncode != 0 or not interval.stdout.strip().isdigit():
+        said = (interval.stdout or interval.stderr or "").strip().splitlines()
+        raise LabError(step, f"the bundle in the guest gives no {CHECK_INTERVAL}: {said[-1] if said else 'nothing'}")
+    now = machine.ssh.run("/bin/date +%s", step).stdout.strip()
+    if not now.isdigit():
+        raise LabError(step, f"the guest's clock said {now!r}")
+    last = int(now) - int(interval.stdout.strip()) + seconds
+    stamp = machine.ssh.run(f"/bin/date -u -r {last} '+%Y-%m-%d %H:%M:%S +0000'", step).stdout.strip()
+    machine.ssh.run(f"defaults write {BUNDLE_ID} {LAST_CHECK} -date {shlex.quote(stamp)}", step)
+    kept = machine.ssh.ask(f"defaults read {BUNDLE_ID} {LAST_CHECK}", step)
+    if kept.returncode != 0 or kept.stdout.strip() != stamp:
+        said = (kept.stdout or kept.stderr or "").strip().splitlines()
+        raise LabError(step, f"the lab wrote {LAST_CHECK} = {stamp} for {BUNDLE_ID}, and it reads back as "
+                             f"{said[-1] if said else 'nothing at all'}")

@@ -839,7 +839,7 @@ def test_the_sections_the_lab_clicks_carry_their_tag_on_the_outside():
     (`_open_the_about_pane` waits for `updates.checkNow`, which only About has), and every
     `plugins.*` check that opens Settings → Plugins (`ui.plugins_pane`)."""
     view = (Path(__file__).resolve().parents[2] / "Sources" / "UDeckKit" / "Views" / "SettingsView.swift").read_text()
-    row = view[view.index("List(Section.allCases, selection: $section)"):]
+    row = view[view.index("List(Section.allCases, selection: $navigation.section)"):]
     row = row[:row.index(".accessibilityIdentifier(\"section.")]
     assert ".badge(" in row and row.rindex(".tag(item)") > row.rindex(".badge(")
 
@@ -1261,6 +1261,7 @@ def test_every_update_check_says_which_pairs_it_takes():
         "check_switched_on_it_looks_by_itself": pairs.ONLY_THIS_CHECKOUT,
         "check_a_published_release": pairs.A_PUBLISHED_RELEASE,
         "check_installs_by_itself": pairs.INSTALLS_BY_ITSELF,
+        "check_settings_left_open": pairs.INSTALLS_BY_ITSELF,
     }
 
 
@@ -1303,3 +1304,78 @@ def test_the_two_builds_between_checkouts_were_never_released():
     assert "## [0.6.1]" in changelog and "## [0.4.0]" in changelog, "the headings the test reads are still there"
     for version, _ in (pairs.CHECKOUT_FROM, pairs.CHECKOUT_TO):
         assert f"## [{version}]" not in changelog
+
+
+# --- Settings left open: when uDeck went into the update ---------------------------------------
+#
+# On the lab's clock, in seconds: the last click at 4.
+
+QUIET = checks.SETTINGS_QUIET_SECONDS
+
+
+def test_going_after_the_quiet_with_the_update_waiting_passes():
+    assert checks._judge_the_restart(4, 70, 4 + QUIET + 40) is None
+
+
+def test_going_with_the_window_just_touched_is_red():
+    """No hold at all: the restart follows the download."""
+    said = checks._judge_the_restart(4, 70, 80)
+    assert said is not None and "did not hold it" in said
+
+
+def test_going_before_the_quiet_from_the_last_click_is_red():
+    """Measured from the last click, not from the window opening: a click at 40 holds until 40 + the quiet."""
+    said = checks._judge_the_restart(40, 60, QUIET)
+    assert said is not None and "did not hold it" in said
+
+
+def test_never_going_with_the_window_open_is_red():
+    """0.8.1's hold: a window on the screen holds it for as long as it is there."""
+    said = checks._judge_the_restart(4, 70, None)
+    assert said is not None and "a window left open still holds the restart" in said
+
+
+def test_an_update_never_downloaded_is_red():
+    said = checks._judge_the_restart(4, None, None)
+    assert said is not None and "never downloaded" in said
+
+
+def test_an_update_downloaded_after_the_window_went_quiet_asks_nothing():
+    """Nothing could have held it by then, so a restart right after proves nothing either way."""
+    with pytest.raises(LabError, match="cannot be seen"):
+        checks._judge_the_restart(4, 4 + QUIET + 10, 4 + QUIET + 20)
+
+
+def test_going_with_no_download_in_the_log_is_the_labs():
+    with pytest.raises(LabError, match="without the archive"):
+        checks._judge_the_restart(4, None, 4 + QUIET + 40)
+
+
+def test_the_quiet_the_minute_and_the_panes_are_the_ones_udeck_has():
+    """What the check waits for is held to the source, not to a copy of it."""
+    root = Path(__file__).resolve().parents[2]
+    restart = (root / "Sources" / "UDeckCore" / "Updates" / "UpdateRestart.swift").read_text()
+    assert f"public static let quiet: TimeInterval = {QUIET}\n" in restart
+    updater = (root / "Sources" / "uDeck" / "SparkleUpdater.swift").read_text()
+    assert f"Timer.scheduledTimer(withTimeInterval: {checks.RESTART_ASKED_EVERY_SECONDS}, repeats: true)" in updater
+    views = "".join(p.read_text() for p in (root / "Sources" / "UDeckKit" / "Views").glob("*.swift"))
+    for identifier in (checks.PLUGINS_PANE, checks.GENERAL_PANE):
+        assert f'.accessibilityIdentifier("{identifier}")' in views, identifier
+    # What the check reads in uDeck's log is what uDeck writes there.
+    assert '"Settings is in use"' in restart and checks.HELD_BY_SETTINGS.endswith("Settings is in use")
+    assert f"waits: \\(hold.reason" in updater and f": {checks.NOTHING_HOLDS}\")" in updater
+    assert 'Logger(subsystem: subsystem, category: "updates")' in (root / "Sources" / "UDeckKit" / "Shell" / "DeckLog.swift").read_text()
+    # section.plugins: the sidebar's rows are `section.<case>`.
+    assert '.accessibilityIdentifier("section.\\(item)")' in views and "case plugins\n" in views
+
+
+def test_the_log_must_say_settings_held_it_and_then_nothing():
+    held = ["restart into 0.4.2 waits: Settings is in use", "restart into 0.4.2: nothing holds it"]
+    assert checks._held_by_settings_then_nothing(held)
+    assert not checks._held_by_settings_then_nothing(held[1:]), "nothing said about Settings"
+    assert not checks._held_by_settings_then_nothing(held[:1]), "held, and never let go"
+    assert not checks._held_by_settings_then_nothing(list(reversed(held))), "let go before it held"
+    assert not checks._held_by_settings_then_nothing(["restart into 0.4.2 waits: the panel is out", held[1]]), \
+        "held, but by the panel"
+    assert not checks._held_by_settings_then_nothing([])
+
