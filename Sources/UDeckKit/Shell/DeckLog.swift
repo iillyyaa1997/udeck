@@ -18,4 +18,8 @@ public enum DeckLog {
     public static let panel = Logger(subsystem: subsystem, category: "panel")
     public static let gesture = Logger(subsystem: subsystem, category: "gesture")
     public static let plugins = Logger(subsystem: subsystem, category: "plugins")
+    /// What holds a restart into an update, each time that changes — at
+    /// `notice`, which the system keeps, so that it can be read after the
+    /// fact with `log show --predicate 'subsystem == "place.unicorns.udeck"'`.
+    public static let updates = Logger(subsystem: subsystem, category: "updates")
 }

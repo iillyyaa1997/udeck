@@ -41,9 +41,10 @@ Two rules run through the whole file, both learned from this check:
 """
 
 import re
+import shlex
 from dataclasses import dataclass
 
-from udeck_e2e import app, builds, config, pairs, releases, ui, updates
+from udeck_e2e import app, builds, config, login, pairs, panel, probes, releases, ui, updates
 from udeck_e2e.errors import LabError, NotThere, expect
 
 # The two builds of this checkout an update between checkouts is made of — every
@@ -124,6 +125,52 @@ KEPT_OFF = "0"
 # How often the feed's log is read while listening: the log's own clock counts
 # in whole seconds, so reading it more often than that would learn nothing more.
 LISTEN_EVERY_SECONDS = 1
+
+# How long a settings window touched last holds a restart into an update: three
+# minutes, `SettingsUse.quiet` in Sources/UDeckCore/Updates/UpdateRestart.swift,
+# held to that file by the lab's own tests. The release's own, not a shorter one
+# baked into a lab build: the check waits it out.
+SETTINGS_QUIET_SECONDS = 180
+
+# How long after it starts the uDeck of `updates.settings-left-open` looks by
+# itself (`app.first_check_after`, written the moment before it starts): time
+# for the lab to open Settings first, which takes a few seconds — up to
+# `config.UI_APPEAR_SECONDS` when the status item is late — and short beside the
+# quiet above, so that the update is downloaded and waiting long before the
+# window stops holding it. Sparkle may look up to 15 seconds later than asked.
+FIRST_LOOK_SECONDS = 60
+
+# uDeck asks whether it may restart once a minute while an update waits
+# (`restartWhenItMay` in Sources/uDeck/SparkleUpdater.swift).
+RESTART_ASKED_EVERY_SECONDS = 60
+
+# How much earlier than the quiet allows uDeck may be seen to go: the pids are
+# read every two seconds, over SSH.
+RESTART_SLACK_SECONDS = 5
+
+# From uDeck's yes to the uDeck that was running gone: Sparkle's installer asks it
+# to quit. Under a second on the operator's Mac on 2026-11-17 — the minute's ask
+# at 07:39:28.5 in uDeck's log, the new uDeck started at 07:39:28 — and twenty
+# here, for a runner's guest.
+GOING_SECONDS = 20
+
+# The Plugins pane, by a control only it has, and the General pane, which a
+# settings window opens on when nothing says otherwise — by one only it has.
+PLUGINS_PANE = "catalogue.enabled"
+GENERAL_PANE = "general.openAtLogin"
+
+# The application put in front of Settings, as another was on the night of
+# 2026-11-17: brought forward with `open -a`, which moves no pointer and presses
+# no key, so it neither touches Settings nor tells uDeck somebody is at the Mac.
+IN_FRONT_OF_SETTINGS = "Finder"
+
+# What uDeck's log says about the restart (`RestartHold.reason` in
+# Sources/UDeckCore/Updates/UpdateRestart.swift, `holdNow` in
+# Sources/uDeck/SparkleUpdater.swift), read in the guest at the default level,
+# which macOS keeps on disk.
+HELD_BY_SETTINGS = "waits: Settings is in use"
+NOTHING_HOLDS = "nothing holds it"
+UPDATES_LOG = 'subsystem == "place.unicorns.udeck" AND category == "updates"'
 
 
 @pairs.takes(pairs.THE_WHOLE_UPDATE)
@@ -274,6 +321,194 @@ def check_installs_by_itself(machine, check_dir, lab, pair):
     finally:
         feed.collect_log(check_dir)
         feed.stop()
+
+
+@pairs.takes(pairs.INSTALLS_BY_ITSELF)
+def check_settings_left_open(machine, check_dir, lab, pair):
+    """Settings left open holds a restart into an update only while it is in use — and opens again where it was.
+
+    What happened on 2026-11-17: a 0.8.1 downloaded 0.8.3 at 04:01 and restarted
+    into it at 07:39, a minute after a settings window left open since the day
+    before was closed — it held the restart for as long as it was on the screen.
+    Now it holds it only while it is in use (`SettingsUse`): touched in the last
+    three minutes, or in front of somebody at the Mac.
+
+    "from" is left as it ships, looking by itself `FIRST_LOOK_SECONDS` after it
+    starts (`_prepare(first_look=…)`), so that the lab opens Settings first — on
+    the Plugins pane, from uDeck's own menu, with the machine's pointer — and then
+    touches nothing, and puts the Finder in front of it: the window open, behind,
+    uDeck not the active application. The update is downloaded while the window is still in use,
+    and uDeck has to wait for it: the uDeck that was running may not go before
+    three minutes from the last click — the pointer's, which the window sees —
+    and has to have gone a minute after that, when it asks again. The uDeck that
+    comes back, within the install's own time after, has to carry "to"'s version
+    keys, stay, and show its settings window again, on the Plugins pane — behind,
+    the Finder still in front. And uDeck's own log has to say that Settings held
+    the restart, and then that nothing did.
+
+    **Red for**: a uDeck that restarts with the window just touched (no hold), one
+    that never restarts with it open (0.8.1's hold), one that comes back without
+    the window, with it on another pane, or with it taking the Finder's place in
+    front, and one whose log does not say what held it.
+    """
+    feed = updates.Feed(machine, lab.note)
+    try:
+        launched = []
+        offered = _prepare(machine, check_dir, lab, feed, pair, by_itself=True, launched=launched,
+                           first_look=FIRST_LOOK_SECONDS)
+        before = set(launched)
+        started = machine.clock()
+        since = login.clock(machine, "reading the guest's clock, for uDeck's log after")
+
+        ui.open_settings_and_wait(machine, "opening uDeck's settings")
+        ui.wait_for(machine, "section.plugins", "waiting for the settings window")
+        # Before the click, so that the window's own record of it is no earlier than this; and after, for the
+        # deadline, which the click's own time must not eat into.
+        touched = machine.clock()
+        ui.click(machine, "section.plugins", "choosing Plugins, the last thing touched")
+        clicked = machine.clock()
+        ui.wait_for(machine, PLUGINS_PANE, "waiting for the Plugins pane")
+        panel.bring_forward(machine, IN_FRONT_OF_SETTINGS, f"putting the {IN_FRONT_OF_SETTINGS} in front of Settings")
+        machine.screenshot(check_dir, "Settings left open on Plugins, behind the Finder")
+        if not _still_the_same(machine, before, "reading uDeck's pids once Settings is open"):
+            raise LabError("opening Settings before uDeck looks", f"uDeck restarted {machine.clock() - started:.0f}s after "
+                           f"it started, before Settings was open — its look came early, and the window held nothing")
+
+        latest = clicked + SETTINGS_QUIET_SECONDS + RESTART_ASKED_EVERY_SECONDS + GOING_SECONDS
+        fetched, left = _watch_it_go(machine, feed, offered, before, latest)
+        _evidence(machine, check_dir, "after the restart with Settings left open", lab)
+        if fetched is None and not updates.asked_for_the_appcast(feed.read_log("reading whether uDeck looked at all")):
+            # The look is the lab's to set up (`app.first_check_after`): one that never came asks nothing of the window.
+            raise LabError("watching uDeck with Settings open", f"uDeck never asked the feed for its update, "
+                           f"{FIRST_LOOK_SECONDS}s after it started as the lab had it look, and by the deadline")
+        verdict = _judge_the_restart(touched, fetched, left)
+        expect(verdict is None, verdict or "")
+        after = _wait_for_the_relaunch(machine, before, left + INSTALL_SECONDS)
+        expect(bool(after - before), f"uDeck went {left - touched:.0f}s after the last click in Settings, for the update, "
+                                     f"and did not come back as a new process in {INSTALL_SECONDS}s: it is "
+                                     f"{sorted(after) or 'not running'} now")  # fmt: skip
+
+        version = app.installed_version(machine)
+        expect(version == offered.keys, f"uDeck restarted with Settings left open, and the version on disk is "
+                                        f"{version}, not {offered.keys}")  # fmt: skip
+        _expect_the_new_uDeck_stayed(machine, before, after)
+        lab.note(f"   the update waited {left - touched:.0f}s after the last click in Settings "
+                 f"(downloaded {fetched - touched:.0f}s after it), and uDeck came back as {sorted(after - before)}, "
+                 f"{offered.version} on disk")
+
+        step = "waiting for Settings to open again after the restart"
+        # The window first, by its title among uDeck's: asked for a control in a window that is not there, the
+        # accessibility helper refuses, and that refusal would read as the lab's.
+        windows = _settings_window_once_it_is(machine, step, machine.clock() + config.UI_APPEAR_SECONDS)
+        if ui.SETTINGS_WINDOW not in windows:
+            _evidence(machine, check_dir, "no Settings after the restart", lab)
+            expect(False, f"uDeck came back after restarting with Settings open on Plugins, and has no settings window "
+                          f"{config.UI_APPEAR_SECONDS:.0f}s later: its windows {windows or 'none'}")
+        try:
+            ui.wait_for(machine, PLUGINS_PANE, step, seconds=config.UI_APPEAR_SECONDS)
+        except NotThere:
+            _evidence(machine, check_dir, "no Plugins pane after the restart", lab)
+            expect(False, f"uDeck came back after restarting with Settings open on Plugins, and its settings window "
+                          f"shows no Plugins pane in {config.UI_APPEAR_SECONDS:.0f}s")
+        machine.screenshot(check_dir, "Settings open again after the restart")
+        expect(GENERAL_PANE not in ui.identifiers(machine, "reading which pane is open"),
+               "Settings opened again after the restart shows the General pane beside Plugins")
+        in_front = probes.frontmost(machine, "asking which application is in front of Settings opened again")
+        expect(in_front == IN_FRONT_OF_SETTINGS, f"Settings, left behind the {IN_FRONT_OF_SETTINGS}, opened again after "
+                                                 f"the restart with {in_front} in front: it took the keyboard")  # fmt: skip
+        said = _what_held_it(machine, check_dir, since)
+        expect(_held_by_settings_then_nothing(said), "uDeck's log does not say that Settings held the restart and then "
+                                                     f"that nothing did; it says: {' | '.join(said) or 'nothing'}")
+    finally:
+        feed.collect_log(check_dir)
+        feed.stop()
+
+
+def _what_held_it(machine, check_dir, since):
+    """What uDeck's log in the guest says about its restart into the update, since `since` — kept as evidence."""
+    step = "reading what uDeck's log says held the restart"
+    done = machine.ssh.run(
+        f"/usr/bin/log show --start {shlex.quote(since)} --style compact --predicate {shlex.quote(UPDATES_LOG)}",
+        step, seconds=180, check=False,
+    )
+    if done.returncode != 0:
+        said = (done.stderr or done.stdout or "").strip().splitlines()
+        raise LabError(step, f"the guest's log could not be read: {said[-1] if said else f'exit {done.returncode}'}")
+    try:
+        (check_dir / "updates-log.txt").write_text(done.stdout)
+    except OSError:
+        pass
+    return [line.said for line in login.log_lines(done.stdout)]
+
+
+def _held_by_settings_then_nothing(said):
+    """Settings said as the hold, and after it, nothing holding it."""
+    held = [i for i, line in enumerate(said) if HELD_BY_SETTINGS in line]
+    return bool(held) and any(NOTHING_HOLDS in line for line in said[held[0] + 1:])
+
+
+def _settings_window_once_it_is(machine, step, deadline):
+    """uDeck's window titles once the settings window is among them, or as they are at the deadline."""
+    while True:
+        windows = ui.windows(machine, step)
+        if ui.SETTINGS_WINDOW in windows or machine.clock() >= deadline:
+            return windows
+        machine.sleep(1)
+
+
+def _still_the_same(machine, before, step):
+    return app.running_pids(machine, step) == before
+
+
+def _watch_it_go(machine, feed, offered, before, latest):
+    """When the archive was fetched, and when the uDeck that was running went — watched together, until `latest`.
+
+    The archive is what Sparkle downloads once it has found the update: from then
+    on, an update is waiting, and only something of uDeck's holds it. Read off
+    the guest's access log as it grows, against the lab's clock, so that both
+    moments are on one clock. And the moment that matters is the old uDeck going,
+    which is the restart cutting short whatever it would: the new one appears
+    after the install, which takes its own time. Either is None if it did not
+    come by `latest`.
+    """
+    fetched = left = None
+    while machine.clock() < latest:
+        if fetched is None and offered.archive in feed.read_log("reading whether uDeck downloaded the update"):
+            fetched = machine.clock()
+        now = app.running_pids(machine, "watching for uDeck to go into the update")
+        if before - now:
+            left = machine.clock()
+            if fetched is None and offered.archive in feed.read_log("reading whether uDeck downloaded the update"):
+                fetched = left
+            break
+        machine.sleep(2)
+    return fetched, left
+
+
+def _judge_the_restart(touched, fetched, restarted):
+    """None when uDeck went into the update after the window's quiet, and no later than it asks again — else the sentence.
+
+    Raises LabError when the question was not asked: an update downloaded so late
+    that the window had already gone quiet holds nothing a restart could show.
+    """
+    if fetched is None:
+        if restarted is not None:
+            raise LabError("watching uDeck with Settings open", "uDeck restarted without the archive in the feed's log, "
+                                                                "so nothing says when it found the update")
+        return (f"uDeck never downloaded the update offered to it: {SETTINGS_QUIET_SECONDS + RESTART_ASKED_EVERY_SECONDS}s "
+                f"after the last click in Settings, the archive is not in the feed's log")
+    if fetched > touched + SETTINGS_QUIET_SECONDS - RESTART_SLACK_SECONDS:
+        raise LabError("watching uDeck with Settings open",
+                       f"uDeck downloaded the update {fetched - touched:.0f}s after the last click in Settings, when the "
+                       f"window was no longer in use, so whether it held the restart cannot be seen")
+    if restarted is None:
+        return (f"Settings was left open and untouched, and uDeck had not gone into the update "
+                f"{SETTINGS_QUIET_SECONDS + RESTART_ASKED_EVERY_SECONDS}s after the last click "
+                f"(downloaded {fetched - touched:.0f}s after it): a window left open still holds the restart")
+    if restarted < touched + SETTINGS_QUIET_SECONDS - RESTART_SLACK_SECONDS:
+        return (f"uDeck went into the update {restarted - touched:.0f}s after the last click in Settings, with the "
+                f"window open: a window touched less than {SETTINGS_QUIET_SECONDS}s before did not hold it")
+    return None
 
 
 @pairs.takes(pairs.THE_WRONG_KEY)
@@ -784,7 +1019,7 @@ class Offered:
         return f"from GitHub ({self.asked_at})"
 
 
-def _prepare(machine, check_dir, lab, feed, pair, signed_by=None, by_itself=False, launched=None):
+def _prepare(machine, check_dir, lab, feed, pair, signed_by=None, by_itself=False, launched=None, first_look=None):
     """The pair's "from" installed and running, and its "to" offered to it.
 
     `by_itself` leaves "from" as it ships, putting in place what a check of its
@@ -792,6 +1027,8 @@ def _prepare(machine, check_dir, lab, feed, pair, signed_by=None, by_itself=Fals
     (`app.no_installs_by_itself`), since the checks that press for the update
     judge that press. `launched`, a list, gets the processes of "from" the
     moment it is started — before anything it found could have replaced it.
+    `first_look`, seconds, makes it look by itself that long after it starts
+    rather than the moment it does (`app.first_check_after`).
 
     "from" is a build of this checkout, made here — with "to"'s public key when
     "to" is a release — or a published release's zip, which the lab has already
@@ -848,6 +1085,10 @@ def _prepare(machine, check_dir, lab, feed, pair, signed_by=None, by_itself=Fals
         fine, said = updates.github_answers(machine, offered.release, asked_at, "asking GitHub from inside the guest")
         lab.note(f"   {said}" + ("" if fine else " — uDeck is asked anyway, and what it does with that is the verdict"))
 
+    # The moment before it starts: Sparkle counts from the date written, not from the launch, so the signing, copying
+    # and serving above would otherwise come out of the delay.
+    if first_look is not None:
+        app.first_check_after(machine, first_look, step)
     app.launch(machine)
     if launched is not None:
         launched.extend(app.running_pids(machine))
