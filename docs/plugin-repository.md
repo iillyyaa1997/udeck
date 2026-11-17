@@ -2859,7 +2859,7 @@ above.
 Alongside this work, and not part of it: uDeck's own update checks are also on
 by default from now on — Sparkle asks
 `github.com/iillyyaa1997/udeck/releases/latest/download/appcast.xml` once a day
-— and the rewritten README lists both.
+(once an hour since 0.8.5) — and the rewritten README lists both.
 
 ---
 
