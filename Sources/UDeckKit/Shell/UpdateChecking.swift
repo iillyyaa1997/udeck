@@ -65,7 +65,7 @@ public final class UpdateStatus {
 /// is what `swift build && .build/debug/uDeck` is.
 @MainActor
 public protocol UpdateChecking: AnyObject {
-    /// Whether uDeck looks for a new version on its own, once a day.
+    /// Whether uDeck looks for a new version on its own, once an hour.
     ///
     /// On as uDeck ships (`SUEnableAutomaticChecks` in Info.plist), until the
     /// operator turns it off in Settings → About. What it asks, and of whom, is

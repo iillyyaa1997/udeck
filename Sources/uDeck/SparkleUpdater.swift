@@ -23,10 +23,12 @@ import UDeckKit
 /// about the answer already is.
 ///
 /// **Automatic checks start on** (`SUEnableAutomaticChecks` in Info.plist): once
-/// a day uDeck asks its feed whether there is a newer version, the way it reads
-/// the official plugin catalogue once a day — both on from the first launch, by
-/// the operator's decision that fewer questions for a new person outweigh a
-/// quiet first minute. The switch in Settings → About turns it off; README and
+/// an hour (`SUScheduledCheckInterval`, the least Sparkle allows; once a day
+/// until 0.8.5, which left a new version a day away) uDeck asks its feed whether
+/// there is a newer version — not while an update it found waits, for Install
+/// or for its restart: Sparkle's session stays open until then — as it reads
+/// the official plugin catalogue once a day — both on from the first launch, by the operator's decision that fewer
+/// questions for a new person outweigh a quiet first minute. The switch in Settings → About turns it off; README and
 /// SECURITY.md say what is asked and when.
 ///
 /// **What a check of its own finds is put in place by itself** too
