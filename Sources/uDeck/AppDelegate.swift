@@ -80,15 +80,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         // The panel sits above ordinary windows, so leaving it open would put
         // it on top of the settings it was asked to show.
+        // And it closes for Settings, not like an Escape: an Escape brings back
+        // the application from before, which then came forward over Settings.
         controller.shell.onOpenSettings = { [weak self] in
-            self?.controller.close()
+            self?.controller.closeForAWindowOfUDeck()
             self?.settings.show()
         }
         // A notification about an update speaks uDeck's language, and a click
         // on it opens the updates in Settings → About.
         updater.notifier.strings = { [model] in model.strings }
         updater.notifier.onOpen = { [weak self] in
-            self?.controller.close()
+            self?.controller.closeForAWindowOfUDeck()
             self?.settings.showUpdates()
         }
         // Noted once the notification can be sent: a restart into a newer

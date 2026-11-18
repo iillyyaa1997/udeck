@@ -183,6 +183,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         // Settings are the one part of uDeck the operator works in with the
         // keyboard, so this is the one place activation is unambiguously right.
         NSApp.activate(ignoringOtherApps: true)
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
         window?.makeKeyAndOrderFront(nil)
     }
 
