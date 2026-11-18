@@ -118,7 +118,10 @@ def _ask_system_events(machine: Machine, command: str, step: str) -> str:
 def frontmost(machine: Machine, step: str) -> str:
     """The name of the application in front, as System Events inside the guest sees it.
 
-    The one a click or `open -a` last brought forward — and never uDeck. With
+    The one a click or `open -a` last brought forward — and the one whose menus
+    are in the menu bar. Not uDeck while it is an accessory holding the panel;
+    uDeck while its settings window is open and in front
+    (`settings.opened-from-the-panel-in-front`). With
     the panel held open and uDeck holding the keyboard, System Events still named
     the application from before it, TextEdit, while uDeck's own log named uDeck
     as the workspace's frontmost (2026-09-21, .build/e2e/20260921-212357Z). That

@@ -154,6 +154,9 @@ public final class PanelController {
     /// application comes forward first, and not while something the click opened
     /// is still on screen (`KeyboardHandback.afterTheClick`).
     private var pendingHandback: PendingHandback?
+    /// What `releaseKeyboard` found when the panel closed for a window of
+    /// uDeck's own: read once by `closeForAWindowOfUDeck`.
+    private var handover: SettingsHandover?
 
     /// The windows on screen when uDeck last took the keyboard, by number: what
     /// was there before any click that closes the panel
@@ -407,6 +410,27 @@ public final class PanelController {
 
     public func close() {
         apply(.closeRequested)
+    }
+
+    /// Closes the panel for a window of uDeck's own that opens in its place —
+    /// Settings: uDeck keeps the front and the keyboard for it, and the
+    /// application from before is not brought back over it
+    /// (`KeyboardHandback.Closing.forAWindowOfUDeck`). What it says is for
+    /// that window: whether uDeck held the front, and where the keyboard was.
+    ///
+    /// A click past the panel may have closed it a moment ago — on the status
+    /// item, or on a notification — and left the application from before
+    /// waiting to come back once the click has answered: it would come back
+    /// over Settings, so it waits no more, and Settings is where it is
+    /// remembered instead.
+    @discardableResult
+    public func closeForAWindowOfUDeck() -> SettingsHandover {
+        let waiting = pendingHandback?.application
+        cancelPendingHandback()
+        handover = nil
+        apply(.closeRequested, closing: .forAWindowOfUDeck)
+        defer { handover = nil }
+        return handover ?? SettingsHandover(heldTheFront: false, cameFrom: waiting)
     }
 
     /// Called by the content when the operator interacts with it, which is what
@@ -1108,7 +1132,8 @@ public final class PanelController {
 
     /// Gives the keyboard back, and the previous application with it — but
     /// only when uDeck took either away, and only when the operator did not
-    /// just choose somewhere else to be.
+    /// just choose somewhere else to be. Closing for a window of uDeck's own
+    /// gives back neither: that window takes both (`closeForAWindowOfUDeck`).
     ///
     /// The second condition matters. Collapsing because another application was
     /// activated means the operator picked that application; pulling the one
@@ -1138,6 +1163,7 @@ public final class PanelController {
         case .atThePanel: ""
         case .byAClickHeard: " by a click past the panel"
         case .byAClickThatBroughtAnotherForward: " by a click past the panel that brought another application forward"
+        case .forAWindowOfUDeck: " for a window of uDeck's own"
         }
         let wait = Self.milliseconds(KeyboardHandback.answerSeconds)
         let then = switch handback {
@@ -1174,6 +1200,14 @@ public final class PanelController {
         // reached either of them. Giving up the responder and deactivating is
         // what actually releases it.
         panel.makeFirstResponder(nil)
+        // A window of uDeck's own is opening in the panel's place and needs the
+        // front: deactivating here would hand it to whatever application the
+        // system picks next, and that one would race the window for it. What
+        // the window needs to know goes with it instead.
+        if closing == .forAWindowOfUDeck {
+            handover = SettingsHandover(heldTheFront: uDeckIsInFront, cameFrom: previous)
+            return
+        }
         NSApp.deactivate()
 
         guard let previous else { return }

@@ -73,8 +73,9 @@ compiler that needs the newer SDK.
 
    This is asked once; later launches open straight away.
 
-uDeck has no Dock icon: push the pointer up to the middle of the top edge and
-the panel drops down. From then on it looks for updates by itself once an hour,
+uDeck has no Dock icon — only while its Settings window is open, so that ⌘-Tab
+reaches it: push the pointer up to the middle of the top edge and the panel
+drops down. From then on it looks for updates by itself once an hour,
 and puts a new version in place by itself, restarting while the panel is away —
 or, as you choose in Settings → About, downloads it ahead or only tells you, and
 waits for you to press Update; a notification says a new version
