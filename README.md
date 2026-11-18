@@ -77,7 +77,7 @@ uDeck has no Dock icon — only while its Settings window is open, so that ⌘-T
 reaches it: push the pointer up to the middle of the top edge and the panel
 drops down. From then on it looks for updates by itself once an hour,
 and puts a new version in place by itself, restarting while the panel is away —
-or, as you choose in Settings → About, downloads it ahead or only tells you, and
+or, as you choose in Settings → General, downloads it ahead or only tells you, and
 waits for you to press Update; a notification says a new version
 ([Updates](#updates)). What else it fetches is in
 [What uDeck connects to](#what-udeck-connects-to-and-when).
@@ -238,7 +238,7 @@ only the token you gave for it, to its own host.
 whether there is a newer version: straight after launch when it has not asked
 in the last hour — so on the very first launch too — and then about once an hour
 while it runs, except while an update it downloaded waits for Update or for its
-restart. The answer appears in Settings → About. What that question
+restart. The answer appears in Settings → General. What that question
 finds depends on **When a new version is out** there:
 
 - **Download and install it by itself** (as uDeck ships): downloaded, its
@@ -259,7 +259,7 @@ finds depends on **When a new version is out** there:
 macOS's own notification, once for each version: found, with **Update** and
 **Later**; downloaded, the same; or, after a restart into it by itself, that
 uDeck updated. macOS asks whether uDeck may send notifications the first time it
-has one to send; clicking one opens Settings → About, where **What's new**
+has one to send; clicking one opens Settings → General, where **What's new**
 opens the release's page. Until uDeck is signed with a Developer ID, macOS lets
 it use only its older notification API, through which it does not tell uDeck
 whether you said no: System Settings → Notifications → uDeck is where that is. **Check for updates automatically** turns the hourly

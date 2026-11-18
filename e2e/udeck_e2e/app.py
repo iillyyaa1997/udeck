@@ -461,7 +461,7 @@ def notification_center_up(machine, step: str) -> str:
 
 
 def choose_update_mode(machine, mode: str, step: str) -> None:
-    """Make the uDeck in the guest start in `mode`, as its choice in Settings → About writes it, and read it back.
+    """Make the uDeck in the guest start in `mode`, as its choice in Settings writes it, and read it back.
 
     With uDeck not running and after `forget_preferences`, like the other preferences the lab writes.
     """

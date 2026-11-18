@@ -556,6 +556,8 @@ struct Russian: Vocabulary {
         // О программе
         case .aboutTitle: "uDeck"
         case .aboutTagline: "Панель у верхнего края экрана. Всё в ней — плагины."
+        case .aboutVersion(let version): "Версия \(version)"
+        case .aboutCheckForUpdates: "Проверить обновления"
         case .aboutThisBuild: "Эта сборка"
         case .aboutNotSigned: "Не подписана Developer ID и не заверена у Apple."
         case .aboutAdHoc:
@@ -919,7 +921,7 @@ extension Russian {
         case .apiNotSpoken(let name, let version, let api):
             "\(name) \(version) написан для контракта плагинов api \(api); этот uDeck знает api \(PluginAPI.current). Обновите uDeck, чтобы его установить."
         case .needsNewerUDeck(let name, let version, let required, let running):
-            "\(name) \(version) нужен uDeck \(required) или новее; это uDeck \(running). Обновите uDeck (Настройки → О программе), чтобы его установить."
+            "\(name) \(version) нужен uDeck \(required) или новее; это uDeck \(running). Обновите uDeck (Настройки → Общие), чтобы его установить."
         case .versionNotComparable(let name, let version):
             "Версия \(name) «\(version)» — не MAJOR.MINOR.PATCH, uDeck не может отличить её от другой; из репозитория её не установить."
         case .minUDeckNotComparable(let name, let text):

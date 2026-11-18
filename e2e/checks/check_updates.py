@@ -9,8 +9,8 @@ uDeck asks its feed at all. **uDeck ships with automatic checks on**
 operator's decision in docs/plugin-repository.md, "What uDeck fetches, and
 when"): once an hour it asks its feed whether there is a newer version, the
 first time straight after its first launch. One check holds uDeck to that first
-look, one to the next an hour later, and the third holds the switch in the
-About pane to what it says — an operator who turned automatic checks off and
+look, one to the next an hour later, and the third holds the switch in
+Settings' updates to what it says — an operator who turned automatic checks off and
 turns them back on gets a uDeck that looks by itself again. All three are
 judged on the guest's own access log, which is the traffic and not a sentence
 uDeck writes about itself.
@@ -75,14 +75,14 @@ REFUSAL_SECONDS = 90
 # GitHub, through the latest redirect, rather than from the guest's own loopback.
 OFFER_FROM_GITHUB_SECONDS = 60
 
-# What uDeck says on the About pane once it has an answer of its own. The guest
+# What uDeck says about its updates once it has an answer of its own. The guest
 # runs in English (Q43), and these are its words: `updatesUpToDate` and
 # `updatesFailed` in Sources/UDeckCore/Localization/English.swift.
 UP_TO_DATE = "is up to date"
 DID_NOT_FINISH = "The check did not finish"
 
-# The About pane's switch for automatic checks, by the identifier `AboutSection`
-# gives it (Sources/UDeckKit/Views/SettingsView.swift, held against that file by
+# The switch for automatic checks, by the identifier `UpdatesSection` (General;
+# `AboutSection` before the redesign) gives it (Sources/UDeckKit/Views/SettingsView.swift, held against that file by
 # the lab's own tests), and what it reads off: the accessibility API gives a
 # checkbox's value as "0" or "1" — measured on this switch on 2026-09-26, an
 # `AXCheckBox` reading "0" on a machine nobody had configured.
@@ -362,8 +362,11 @@ def check_installs_by_itself(machine, check_dir, lab, pair):
         # The uDeck that came back answers: its settings open, and its Installed says the version it is.
         _open_the_about_pane(machine, check_dir, shot="the version it restarted into")
         texts = ui.static_texts(machine, "reading what the pane says")
-        installed = texts[texts.index("Installed") + 1] if "Installed" in texts[:-1] else None
-        expect(installed == offered.version, f"the uDeck that came back says Installed {installed!r} in Settings → About, "
+        # By its identifier since the redesign; by the word before it in a release before that.
+        installed = ui.reads(machine, "updates.installedVersion", "reading the installed version")
+        if installed is None:
+            installed = texts[texts.index("Installed") + 1] if "Installed" in texts[:-1] else None
+        expect(installed == offered.version, f"the uDeck that came back says Installed {installed!r} in Settings, "
                                              f"not {offered.version}: {' | '.join(texts)}")  # fmt: skip
         lab.note(f"   the uDeck that came back, in its log: {said}")
     finally:
@@ -563,7 +566,7 @@ def _judge_the_restart(touched, fetched, restarted):
 def check_tells_when_found(machine, check_dir, lab, pair):
     """In "Only tell me", what a check of its own finds is said in a notification, nothing is downloaded, and uDeck keeps looking.
 
-    "from" starts with the mode written as the choice in Settings → About writes
+    "from" starts with the mode written as the choice in Settings writes
     it (`_prepare(mode=…)`), has never looked, and finds "to" the moment it
     starts. Then three things, each on its own witness:
 
@@ -614,7 +617,7 @@ def check_downloads_ahead(machine, check_dir, lab, pair):
     must show the archive downloaded; uDeck must send its notice
     (`_the_notice_sent`) and must *not* restart into it for `STAYS_SECONDS` with
     nothing holding it — the panel away, Settings never opened — where "install
-    by itself" would have; and then Update, on the About pane, must put it in:
+    by itself" would have; and then Update, in Settings, must put it in:
     the old process gone and "to" on the disk within `INSTALL_SECONDS`.
 
     **Red for**: a uDeck that does not download ahead, one that restarts by
@@ -1047,7 +1050,7 @@ def check_switched_on_it_looks_by_itself(machine, check_dir, lab):
     switched off — a failure, and this check's own now, where it used to belong
     to the check that uDeck as it ships stays quiet.
 
-    The switch is the one on the About pane (`AUTOMATIC`), turned on with the
+    The switch is the one in Settings' updates (`AUTOMATIC`; General since the redesign, About before it), turned on with the
     machine's pointer, and nothing else is pressed afterwards: "Check now" is
     exactly what this check must not touch, because a request it caused would be
     indistinguishable in the log.
@@ -1087,7 +1090,7 @@ def check_switched_on_it_looks_by_itself(machine, check_dir, lab):
     switch reading on and the feed silent for the whole wait
     (.build/e2e/20260926-211106Z and 20260926-210840Z, kept in
     .build/e2e/kept/). And a switch whose setter asks for one check instead —
-    `updater.checkNow()` in the About pane's binding — red on 2026-09-27: the feed
+    `updater.checkNow()` in the updates' binding — red on 2026-09-27: the feed
     heard uDeck within the second, and Sparkle kept no `SUEnableAutomaticChecks`
     at all (.build/e2e/20260927-135358Z, kept), where this check as it was before
     was green (-141823Z, kept). On the build as it shipped then, with automatic
@@ -1163,7 +1166,7 @@ def check_a_published_release(machine, check_dir, lab, pair):
     accepts, the real feed and its latest redirect, and the download from GitHub's
     asset host, the install and the relaunch. Driven exactly like
     `updates.sparkle`: the release's zip, fetched and checked on this Mac
-    (`releases`), unpacked in the guest; started; Settings → About → "Check now"
+    (`releases`), unpacked in the guest; started; Settings → its updates → "Check now"
     pressed with the machine's pointer, because a release before 0.6.0 does not
     look by itself; the offer installed. The verdict is the bundle on the guest's
     disk — the two version keys "to"'s own zip carries — and a new process that
@@ -1289,31 +1292,31 @@ def _uDeck_asks(machine, feed, before, seconds, step):
 
 
 def _the_switch_as_the_operator_left_it(machine, check_dir, lab):
-    """The About pane's switch for automatic checks, reading off — or why not.
+    """The switch for automatic checks in Settings' updates, reading off — or why not.
 
     Found by its identifier in a walk of the window, because `ui.find` answers
     where a control is and not what it reads, and what it reads is the precondition:
     a switch already on would be turned *off* by the press.
 
     Sparkle keeps automatic checks off on this machine — the lab wrote it and read
-    it back before uDeck started — so a switch reading on is the About pane not
+    it back before uDeck started — so a switch reading on is the pane not
     showing what uDeck does, and a failure. A pane without the switch, or with two,
     is the lab unable to find it.
     """
     step = "finding the switch for automatic checks"
     dump = ui.tree(machine, step)
     try:
-        (check_dir / "about-before-the-switch.txt").write_text(dump)
+        (check_dir / "updates-before-the-switch.txt").write_text(dump)
     except OSError as error:
-        lab.note(f"   the About pane's walk could not be kept: {error}")
+        lab.note(f"   the updates pane's walk could not be kept: {error}")
     found = [control for control in ui.controls(dump, step) if control.identifier == AUTOMATIC]
     if len(found) != 1:
-        raise LabError(step, f"{len(found)} controls on the About pane carry '{AUTOMATIC}', where there is one")
+        raise LabError(step, f"{len(found)} controls in Settings' updates carry '{AUTOMATIC}', where there is one")
     switch = found[0]
     expect(
         switch.value == SWITCH_OFF,
         f"the switch for automatic checks reads {switch.value!r}, where Sparkle keeps them off "
-        f"({app.AUTOMATIC_CHECKS} = {KEPT_OFF}) and an unchecked box reads {SWITCH_OFF!r}: the About pane does "
+        f"({app.AUTOMATIC_CHECKS} = {KEPT_OFF}) and an unchecked box reads {SWITCH_OFF!r}: the pane does "
         f"not show what uDeck does, and pressing it would turn automatic checks off, not on",
     )
     return switch
@@ -1431,7 +1434,7 @@ def _prepare(machine, check_dir, lab, feed, pair, signed_by=None, by_itself=Fals
     `first_look`, seconds, makes it look by itself that long after it starts
     rather than the moment it does (`app.first_check_after`). `mode` is what it
     does with what it finds (`app.choose_update_mode`, 0.8.6), written as the
-    choice in Settings → About writes it.
+    choice in Settings writes it.
 
     "from" is a build of this checkout, made here — with "to"'s public key when
     "to" is a release — or a published release's zip, which the lab has already
@@ -1528,17 +1531,18 @@ def _the_feed_from_asks(pair, feed):
     return pair.to.own_appcast, True
 
 
-def _open_the_about_pane(machine, check_dir, shot="the About section"):
+def _open_the_about_pane(machine, check_dir, shot="the updates in Settings"):
+    """Settings open on uDeck's own updates: General since the redesign, About before it (`ui.open_updates_pane`)."""
     ui.open_settings_and_wait(machine, "opening uDeck's settings")
+    # About is in every release's sidebar; General is not.
     ui.wait_for(machine, "section.about", "waiting for the settings window")
-    ui.click(machine, "section.about", "choosing the About section")
-    element = ui.wait_for(machine, "updates.checkNow", "waiting for the About section")
+    element = ui.open_updates_pane(machine, "choosing uDeck's updates")
     machine.screenshot(check_dir, shot)
     return element
 
 
 def _the_installed_version_on_screen(machine, check_dir, lab):
-    """The uDeck that came back, its About pane open — a picture of the version installed, for a person.
+    """The uDeck that came back, its updates open in Settings — a picture of the version installed, for a person.
 
     After the verdict, and evidence only: the verdict is the disk. A window that
     cannot be opened is said and changes nothing.

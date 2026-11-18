@@ -743,3 +743,71 @@ def test_return_is_pressed_in_the_focused_field_by_its_key_code():
     machine = FakeMachine(typed="pressed")
     ui.press_return(machine, "ending the token")
     assert "key code 36" in machine.ssh.scripts[0] and 'tell process "uDeck"' in machine.ssh.scripts[0]
+
+
+# --- Which section holds uDeck's updates (`ui.open_updates_pane`) ----------------------------
+
+SECTIONS_HEAD = "0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;"
+GENERAL_ROW = "8|AXStaticText||section.general||General||808;330;|59;17;"
+ABOUT_ROW = "8|AXStaticText||section.about||About||808;355;|59;17;"
+LOGIN_SWITCH = "5|AXCheckBox||general.openAtLogin||0||955;300;|83;20;"
+CHECK_NOW = "5|AXButton||updates.checkNow||||955;455;|83;20;"
+
+
+class SectionsGuest(FakeGuest):
+    """A settings window whose pane follows the sidebar clicked — `stale` walks late after each click."""
+
+    def __init__(self, panes, showing, stale=0, general=True):
+        super().__init__()
+        self.panes, self.showing, self.stale, self.general = panes, showing, stale, general
+        self.wanted, self.late = showing, 0
+
+    def _helper(self, args):
+        if args[0] != "walk":
+            return super()._helper(args)
+        if self.late > 0:
+            self.late -= 1
+        else:
+            self.showing = self.wanted
+        rows = [SECTIONS_HEAD, *([GENERAL_ROW] if self.general else []), ABOUT_ROW, *self.panes[self.showing]]
+        return done([], 0, ax_walk("\n".join(rows), window=args[2].removeprefix("title=")))
+
+
+class SectionsMachine(FakeMachine):
+    def __init__(self, panes, showing="general", stale=0, general=True):
+        super().__init__()
+        self.ssh = SectionsGuest(panes, showing, stale, general)
+        self.sections = []
+
+    def click(self, x, y, step):
+        super().click(x, y, step)
+        section = "general" if y < 343 else "about"
+        self.sections.append(section)
+        self.ssh.wanted, self.ssh.late = section, self.ssh.stale
+
+
+def test_a_uDeck_since_the_redesign_has_its_updates_in_General():
+    machine = SectionsMachine({"general": [LOGIN_SWITCH, CHECK_NOW], "about": []})
+    assert ui.open_updates_pane(machine, "choosing the updates").identifier == "updates.checkNow"
+    assert machine.sections == ["general"]
+
+
+def test_a_release_before_it_has_them_in_About():
+    machine = SectionsMachine({"general": [LOGIN_SWITCH], "about": [CHECK_NOW]})
+    assert ui.open_updates_pane(machine, "choosing the updates").identifier == "updates.checkNow"
+    assert machine.sections == ["general", "about"]
+    assert machine.ssh.showing == "about"
+
+
+def test_a_walk_taken_before_General_showed_is_not_read_as_General():
+    """Codex, 2026-11-18: About still on screen right after General was clicked holds About's Check now."""
+    machine = SectionsMachine({"general": [LOGIN_SWITCH], "about": [CHECK_NOW]}, showing="about", stale=3)
+    ui.open_updates_pane(machine, "choosing the updates")
+    assert machine.sections == ["general", "about"]
+
+
+def test_a_release_from_before_General_goes_straight_to_About():
+    """Fable, 2026-11-18: a release whose sidebar has no General is not refused by a click on it."""
+    machine = SectionsMachine({"general": [], "about": [CHECK_NOW]}, showing="about", general=False)
+    assert ui.open_updates_pane(machine, "choosing the updates").identifier == "updates.checkNow"
+    assert machine.sections == ["about"]

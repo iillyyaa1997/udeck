@@ -3,7 +3,8 @@ import UDeckCore
 
 /// uDeck's own settings.
 ///
-/// Four groups, in the order they matter: how the panel opens, how it looks,
+/// Five sections, in the order they matter: what is general to uDeck (its
+/// start, its language, its own updates), how the panel opens, how it looks,
 /// what is installed, and what this build is. The plugin section is the largest
 /// on purpose — in an application whose every feature is a plugin, "what is
 /// installed and what is it allowed to do" *is* the settings screen.
@@ -52,6 +53,18 @@ public struct SettingsView: View {
             case .about: "info.circle"
             }
         }
+
+        /// The colour of the square the symbol sits on, as System Settings
+        /// draws its sidebar (the redesign, 2026-11-18).
+        var tint: Color {
+            switch self {
+            case .general: Color(red: 0.56, green: 0.56, blue: 0.58)
+            case .opening: Color(red: 0.04, green: 0.52, blue: 1.0)
+            case .look: Color(red: 0.69, green: 0.32, blue: 0.87)
+            case .plugins: Color(red: 1.0, green: 0.58, blue: 0.0)
+            case .about: Color(red: 0.39, green: 0.39, blue: 0.40)
+            }
+        }
     }
 
     public init(
@@ -78,14 +91,16 @@ public struct SettingsView: View {
         // visibility is stated rather than left to be remembered.
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(Section.allCases, selection: $navigation.section) { item in
-                Label(model.strings(item.title), systemImage: item.symbol)
-                    // How many plugin updates are waiting, where the operator
-                    // looks for the Plugins pane.
-                    .badge(item == .plugins ? model.updatesWaiting : 0)
-                    // After the badge, not before it: a tag under `.badge` is
-                    // not the row's, and a List that finds no tag on its rows
+                // How many plugin updates are waiting, where the operator
+                // looks for the Plugins pane.
+                SidebarRow(
+                    title: model.strings(item.title), symbol: item.symbol, tint: item.tint,
+                    updates: item == .plugins ? model.updatesWaiting : 0
+                )
+                    // On the row itself: a List that finds no tag on its rows
                     // selects nothing — measured in the lab on 2026-09-28, no
-                    // click on any section changed the pane.
+                    // click on any section changed the pane, with the tag
+                    // under a `.badge`.
                     .tag(item)
                     // Identifiers, not titles: every title here is translated,
                     // and the language is a setting inside this same window, so
@@ -102,14 +117,17 @@ public struct SettingsView: View {
             // constant it cannot change.
             .toolbar(removing: .sidebarToggle)
         } detail: {
-            ScrollView {
+            switch navigation.section {
+            // Grouped forms, as System Settings draws its panes: each scrolls
+            // by itself (the redesign, 2026-11-18).
+            case .general: GeneralSettings(model: model, loginItem: loginItem, updater: updater)
+            case .about: AboutSection(model: model, updater: updater)
+            case .opening, .look, .plugins: ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     switch navigation.section {
-                    case .general: GeneralSettings(model: model, loginItem: loginItem)
                     case .opening: OpeningSettings(model: model)
                     case .look: LookSettings(model: model)
-                    case .plugins: PluginSettingsSection(model: model, selected: $navigation.selectedPlugin)
-                    case .about: AboutSection(model: model, updater: updater)
+                    default: PluginSettingsSection(model: model, selected: $navigation.selectedPlugin)
                     }
                 }
                 .padding(20)
@@ -120,6 +138,7 @@ public struct SettingsView: View {
                 // whose last setting cannot be reached is a broken pane.
                 .padding(.bottom, 28)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            }
             }
         }
         .frame(minWidth: 900, minHeight: 520)
@@ -138,33 +157,36 @@ public struct SettingsView: View {
 
 // MARK: - General
 
-/// Settings that belong to the application rather than to the panel.
+/// What is general to uDeck: starting with the Mac, its language, and its own
+/// updates.
+///
+/// A grouped form, as System Settings draws one — rows on white groups, the
+/// control at the right, what it does under it (the operator chose it on the
+/// redesign canvas, 2026-11-18). Updates moved here from About, which became a
+/// card: how uDeck updates itself is a setting like the others, and About is
+/// what uDeck is.
 ///
 /// The language lived on the Look pane, next to the tint and the ink, which is
 /// where it did not belong: Look is about how the panel is dressed, and what
-/// language it speaks is not that. One row for now, and the pane exists so the
-/// next application-wide setting has somewhere obvious to go instead of being
-/// filed under whichever pane has room.
+/// language it speaks is not that.
 private struct GeneralSettings: View {
     @Bindable var model: DeckModel
     var loginItem: (any LoginItemControlling)?
+    var updater: (any UpdateChecking)?
     @Environment(\.strings) private var strings
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            if let loginItem { LoginCard(loginItem: loginItem) }
-            languageRow
+        VStack(alignment: .leading, spacing: 0) {
+            PaneTitle(strings(.sectionGeneral))
+            form
         }
-        .frame(maxWidth: 560, alignment: .leading)
     }
 
-    private var languageRow: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
-            GridRow {
-                Text(strings(.lookLanguage))
-                    .gridColumnAlignment(.trailing)
-                    .foregroundStyle(.secondary)
-                Picker("", selection: Binding(
+    private var form: some View {
+        Form {
+            Section {
+                if let loginItem { LoginRow(loginItem: loginItem) }
+                Picker(strings(.lookLanguage), selection: Binding(
                     get: { model.settings.language },
                     set: { newValue in
                         var settings = model.settings
@@ -176,75 +198,68 @@ private struct GeneralSettings: View {
                     // than a language of its own, so it is `nil` here and
                     // nothing at all in the settings file.
                     Text(strings(.languageSystem)).tag(Language?.none)
+                    // Each language names itself. Somebody who landed in a
+                    // language they cannot read is looking for the word
+                    // they *can* — "English", not "Английский".
                     ForEach(Language.allCases) { language in
-                        // Each language names itself. Somebody who landed in a
-                        // language they cannot read is looking for the word
-                        // they *can* — "English", not "Английский".
                         Text(language.endonym).tag(Language?.some(language))
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 260)
             }
+            if let updater { UpdatesSection(updater: updater) }
         }
+        .formStyle(.grouped)
     }
 }
 
 /// Opening at login, as one statement rather than a switch on its own.
 ///
-/// The card says three things and only three: whether uDeck opens at login, *which copy*
+/// The row says three things and only three: whether uDeck opens at login, *which copy*
 /// would open, and — only when there is something to say — what the system says instead.
-/// The middle one is the reason the group is drawn at all: the failure this setting
-/// actually suffers is a second copy of uDeck taking the record, and on the day that
-/// happens the operator needs to know which copy they are looking at.
+/// The middle one is the reason the row says more than its switch: the failure this
+/// setting actually suffers is a second copy of uDeck taking the record, and on the day
+/// that happens the operator needs to know which copy they are looking at.
 ///
 /// The switch is read from the system each time the window appears and each time uDeck is
 /// activated again, because `ServiceManagement` publishes no notification and the operator
 /// may have been in System Settings in between.
-private struct LoginCard: View {
+private struct LoginRow: View {
     let loginItem: any LoginItemControlling
     @Environment(\.strings) private var strings
 
-    /// Whether the copy drawing this card is one the system could open at all.
+    /// Whether the copy drawing this row is one the system could open at all.
     private var installed: Bool { isAnInstalledCopy(loginItem.thisCopy) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(strings(.generalStartup))
-                .font(.callout.weight(.semibold))
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(strings(.generalOpenAtLogin), isOn: Binding(
+                get: { loginItem.status.opensAtLogin },
+                set: { loginItem.set(opensAtLogin: $0) }
+            ))
+            .accessibilityIdentifier("general.openAtLogin")
+            .disabled(!installed)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Toggle(strings(.generalOpenAtLogin), isOn: Binding(
-                    get: { loginItem.status.opensAtLogin },
-                    set: { loginItem.set(opensAtLogin: $0) }
-                ))
-                .accessibilityIdentifier("general.openAtLogin")
-                .disabled(!installed)
-
-                // One statement about the path, whichever state this copy is in. Said
-                // before the click rather than after it: whether this copy can be
-                // registered at all is knowable by looking at it, and a switch that
-                // answers only once it has been pressed is a worse way to say so.
-                if installed {
-                    Text(strings(.generalOpensWhich(shown(loginItem.thisCopy),
-                                                   opens: loginItem.status.opensAtLogin)))
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("general.opensWhich")
-                } else {
-                    Text(strings(.generalNotInstalled(shown(loginItem.thisCopy))))
-                        .font(.caption).foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("general.notInstalled")
-                }
-
-                if let message = loginItem.status.message {
-                    trouble(message)
-                }
+            // One statement about the path, whichever state this copy is in. Said
+            // before the click rather than after it: whether this copy can be
+            // registered at all is knowable by looking at it, and a switch that
+            // answers only once it has been pressed is a worse way to say so.
+            if installed {
+                Text(strings(.generalOpensWhich(shown(loginItem.thisCopy),
+                                               opens: loginItem.status.opensAtLogin)))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("general.opensWhich")
+            } else {
+                Text(strings(.generalNotInstalled(shown(loginItem.thisCopy))))
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("general.notInstalled")
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator))
+
+            if let message = loginItem.status.message {
+                trouble(message)
+            }
         }
         // Three moments, and there is no fourth to be had: `ServiceManagement` publishes
         // no notification when a login record changes, so asking is the only way to know.
@@ -313,6 +328,148 @@ private struct LoginCard: View {
     /// The home directory as a person writes it.
     private func shown(_ url: URL) -> String {
         (url.path as NSString).abbreviatingWithTildeInPath
+    }
+}
+
+/// uDeck's own updates, in General: what is installed and what was found,
+/// **Check now** and **Update**, and what uDeck does by itself.
+private struct UpdatesSection: View {
+    var updater: any UpdateChecking
+    @Environment(\.strings) private var strings
+
+    /// Mirrors the updater's own switch rather than owning the answer: Sparkle
+    /// stores it, and a copy here would be a second place it could be true.
+    @State private var checksAutomatically = false
+    @State private var updateMode: UpdateMode = .shipped
+    @State private var notifies = true
+
+    var body: some View {
+        Section(strings(.updatesTitle)) {
+            UpdateStatusRow(updater: updater)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(strings(.updatesAutomatically), isOn: Binding(
+                    get: { checksAutomatically },
+                    set: {
+                        checksAutomatically = $0
+                        updater.checksAutomatically = $0
+                    }
+                ))
+                .accessibilityIdentifier("updates.automatic")
+                Text(strings(.updatesAutomaticallyHelp))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // The mode governs Check now too — in the modes that download,
+            // what it finds is downloaded at once — so it stays live with
+            // automatic checks off.
+            VStack(alignment: .leading, spacing: 4) {
+                Picker(strings(.updatesWhenNew), selection: Binding(
+                    get: { updateMode },
+                    set: { updateMode = $0; updater.updateMode = $0 }
+                )) {
+                    Text(strings(.updatesModeTell)).tag(UpdateMode.tell)
+                    Text(strings(.updatesModeDownloadAhead)).tag(UpdateMode.downloadAhead)
+                    Text(strings(.updatesModeInstallByItself)).tag(UpdateMode.installByItself)
+                }
+                .pickerStyle(.menu)
+                .accessibilityIdentifier("updates.mode")
+                Text(strings(UpdateWords.modeHelp(updateMode)))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("updates.modeHelp")
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle(strings(.updatesNotify), isOn: Binding(
+                    get: { notifies },
+                    set: { notifies = $0; updater.notifiesAboutUpdates = $0 }
+                ))
+                .accessibilityIdentifier("updates.notify")
+                Text(strings(.updatesNotifyHelp))
+                    .font(.caption).foregroundStyle(.secondary)
+                if notifies, updater.status.notificationsRefused == true {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bell.slash").foregroundStyle(.orange)
+                        Text(strings(.updatesNotifyDenied))
+                        Link(strings(.updatesOpenNotificationSettings), destination: UpdateWords.notificationSettings)
+                    }
+                    .font(.caption)
+                    .accessibilityIdentifier("updates.notifyDenied")
+                }
+            }
+        }
+        .onAppear {
+            checksAutomatically = updater.checksAutomatically
+            updateMode = updater.updateMode
+            notifies = updater.notifiesAboutUpdates
+            updater.refreshNotificationPermission()
+        }
+        // Back from macOS's notification settings, the refusal is read again.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            updater.refreshNotificationPermission()
+        }
+    }
+}
+
+/// What is installed, what was found, and the buttons that act on it.
+private struct UpdateStatusRow: View {
+    var updater: any UpdateChecking
+    @Environment(\.strings) private var strings
+
+    var body: some View {
+        let status = updater.status
+        HStack(alignment: .center, spacing: 10) {
+            UpdateWords.symbol(status.stage)
+                .frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                // Two numbers rather than one sentence. "Up to date" asks to be
+                // believed; "installed 0.1.0, latest 0.1.0" can be checked.
+                HStack(spacing: 5) {
+                    Text(strings(.updatesInstalled)).foregroundStyle(.secondary)
+                    Text(status.installedVersion).monospacedDigit()
+                        .accessibilityIdentifier("updates.installedVersion")
+                    if let latest = status.latestVersion {
+                        Text("·").foregroundStyle(.secondary)
+                        Text(strings(.updatesLatest)).foregroundStyle(.secondary)
+                        Text(latest).monospacedDigit()
+                    }
+                }
+                UpdateWords.sentence(status, strings: strings)
+                let notesVersion = status.latestVersion ?? status.installedVersion
+                if let notes = ReleaseNotes.page(for: notesVersion) {
+                    Link(strings(.updatesWhatsNew(notesVersion)), destination: notes)
+                        .font(.caption)
+                        .accessibilityIdentifier("updates.whatsNew")
+                }
+            }
+            Spacer(minLength: 8)
+            // These buttons reached accessibility with no name of their own:
+            // System Events read `name` as missing value and the description as
+            // just "button", so the only way to press one from outside was by its
+            // position on screen. An identifier addresses the control without
+            // depending on the translated title, and it is what a screen reader's
+            // scripting hooks look for.
+            //
+            // Nothing to check while a download waits for Update: the session it
+            // holds is Sparkle's until then.
+            Button(strings(.updatesCheckNow)) { updater.checkNow() }
+                .disabled(!UpdateWords.canCheck(status.stage))
+                .accessibilityIdentifier("updates.checkNow")
+            // **Update** whichever it is: found, or downloaded and ready.
+            if case .available = status.stage {
+                Button(strings(.updatesUpdate)) { updater.install() }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("updates.install")
+            }
+            if case .readyToInstall = status.stage {
+                Button(strings(.updatesUpdate)) { updater.install() }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("updates.restartAndInstall")
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -1469,164 +1626,111 @@ private struct PluginRow: View {
 
 // MARK: - About
 
+/// What uDeck is: a card, as macOS draws an application's About — its icon, its
+/// name and version, what it is in one line, a way to check for a newer one, and
+/// where it comes from. The settings for updates are in General (the redesign,
+/// 2026-11-18); what is wrong with this build stays here, under the card.
 private struct AboutSection: View {
     @Bindable var model: DeckModel
     var updater: (any UpdateChecking)?
     @Environment(\.strings) private var strings
 
-    /// Mirrors the updater's own switch rather than owning the answer: Sparkle
-    /// stores it, and a copy here would be a second place it could be true.
-    @State private var checksAutomatically = false
-    @State private var updateMode: UpdateMode = .shipped
-    @State private var notifies = true
+    private var version: String? {
+        updater?.status.installedVersion
+            ?? (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String)
+    }
 
     var body: some View {
-        SettingsGroup(strings(.aboutTitle)) {
-            Text(strings(.aboutTagline))
-            Text("Apache-2.0 · Copyright 2026 Ilya Volkov")
-                .font(.caption).foregroundStyle(.secondary)
-            Link("github.com/iillyyaa1997/udeck", destination: URL(string: "https://github.com/iillyyaa1997/udeck")!)
-        }
-
-        if let updater {
-            SettingsGroup(strings(.updatesTitle)) {
-                Toggle(strings(.updatesAutomatically), isOn: Binding(
-                    get: { checksAutomatically },
-                    set: {
-                        checksAutomatically = $0
-                        updater.checksAutomatically = $0
+        Form {
+            Section {
+                VStack(spacing: 8) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .frame(width: 84, height: 84)
+                        .accessibilityHidden(true)
+                    Text(strings(.aboutTitle))
+                        .font(.title.bold())
+                    if let version {
+                        Text(strings(.aboutVersion(version)))
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("about.version")
                     }
-                ))
-                .accessibilityIdentifier("updates.automatic")
-                Text(strings(.updatesAutomaticallyHelp))
-                    .font(.caption).foregroundStyle(.secondary)
-                // The mode governs Check now too — in the modes that download,
-                // what it finds is downloaded at once — so it stays live with
-                // automatic checks off.
-                Picker(strings(.updatesWhenNew), selection: Binding(
-                    get: { updateMode },
-                    set: { updateMode = $0; updater.updateMode = $0 }
-                )) {
-                    Text(strings(.updatesModeTell)).tag(UpdateMode.tell)
-                    Text(strings(.updatesModeDownloadAhead)).tag(UpdateMode.downloadAhead)
-                    Text(strings(.updatesModeInstallByItself)).tag(UpdateMode.installByItself)
-                }
-                .pickerStyle(.radioGroup)
-                .accessibilityIdentifier("updates.mode")
-                Text(strings(modeHelp(updateMode)))
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("updates.modeHelp")
-                Toggle(strings(.updatesNotify), isOn: Binding(
-                    get: { notifies },
-                    set: { notifies = $0; updater.notifiesAboutUpdates = $0 }
-                ))
-                .accessibilityIdentifier("updates.notify")
-                Text(strings(.updatesNotifyHelp))
-                    .font(.caption).foregroundStyle(.secondary)
-                if notifies, updater.status.notificationsRefused == true {
-                    HStack(spacing: 6) {
-                        Image(systemName: "bell.slash").foregroundStyle(.orange)
-                        Text(strings(.updatesNotifyDenied))
-                        Link(strings(.updatesOpenNotificationSettings), destination: Self.notificationSettings)
+                    Text(strings(.aboutTagline))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    if let updater {
+                        HStack(spacing: 10) {
+                            UpdateWords.symbol(updater.status.stage)
+                            Button(strings(.aboutCheckForUpdates)) { updater.checkNow() }
+                                .disabled(!UpdateWords.canCheck(updater.status.stage))
+                                .accessibilityIdentifier("about.checkForUpdates")
+                            // What the check found can be put in from here too:
+                            // a card that says a version is ready and offers no
+                            // way to it is a dead end (Codex, 2026-11-18).
+                            if UpdateWords.canInstall(updater.status.stage) {
+                                Button(strings(.updatesUpdate)) { updater.install() }
+                                    .buttonStyle(.borderedProminent)
+                                    .accessibilityIdentifier("about.install")
+                            }
+                            UpdateWords.sentence(updater.status, strings: strings)
+                        }
+                        .padding(.top, 6)
+                    }
+                    HStack(spacing: 16) {
+                        // The found version's page once there is one, as in General.
+                        let notesVersion = updater?.status.latestVersion ?? version
+                        if let notesVersion, let notes = ReleaseNotes.page(for: notesVersion) {
+                            Link(strings(.updatesWhatsNew(notesVersion)), destination: notes)
+                        }
+                        Link("github.com/iillyyaa1997/udeck", destination: URL(string: "https://github.com/iillyyaa1997/udeck")!)
+                        Text("Apache-2.0 · Copyright 2026 Ilya Volkov").foregroundStyle(.secondary)
                     }
                     .font(.caption)
-                    .accessibilityIdentifier("updates.notifyDenied")
+                    .padding(.top, 2)
                 }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+            }
 
-                // Two numbers rather than one sentence. "Up to date" asks to be
-                // believed; "installed 0.1.0, latest 0.1.0" can be checked.
-                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 14, verticalSpacing: 3) {
-                    GridRow {
-                        Text(strings(.updatesInstalled)).foregroundStyle(.secondary)
-                        Text(updater.status.installedVersion).monospacedDigit()
-                    }
-                    if let latest = updater.status.latestVersion {
-                        GridRow {
-                            Text(strings(.updatesLatest)).foregroundStyle(.secondary)
-                            Text(latest).monospacedDigit()
-                        }
-                    }
+            Section(strings(.aboutThisBuild)) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label(strings(.aboutNotSigned), systemImage: "exclamationmark.shield")
+                    Text(strings(.aboutAdHoc))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.callout)
-                .padding(.top, 2)
-
-                // These buttons reached accessibility with no name of their own:
-                // System Events read `name` as missing value and the description
-                // as just "button", so the only way to press one from outside was
-                // by its position on screen. An identifier fixes both halves of that: it addresses
-                // the control without depending on the translated title, and it
-                // is what a screen reader's scripting hooks look for.
-                HStack(spacing: 10) {
-                    // Nothing to check while a download waits for Update: the
-                    // session it holds is Sparkle's until then.
-                    Button(strings(.updatesCheckNow)) { updater.checkNow() }
-                        .disabled(updater.status.stage == .checking || {
-                            if case .readyToInstall = updater.status.stage { return true }
-                            return false
-                        }())
-                        .accessibilityIdentifier("updates.checkNow")
-                    // **Update** whichever it is: found, or downloaded and ready.
-                    if case .available = updater.status.stage {
-                        Button(strings(.updatesUpdate)) { updater.install() }
-                            .buttonStyle(.borderedProminent)
-                            .accessibilityIdentifier("updates.install")
-                    }
-                    if case .readyToInstall = updater.status.stage {
-                        Button(strings(.updatesUpdate)) { updater.install() }
-                            .buttonStyle(.borderedProminent)
-                            .accessibilityIdentifier("updates.restartAndInstall")
-                    }
-                    updateSentence(updater.status)
-                }
-                let notesVersion = updater.status.latestVersion ?? updater.status.installedVersion
-                if let notes = ReleaseNotes.page(for: notesVersion) {
-                    Link(strings(.updatesWhatsNew(notesVersion)), destination: notes)
-                        .font(.caption)
-                        .accessibilityIdentifier("updates.whatsNew")
+                VStack(alignment: .leading, spacing: 3) {
+                    Label(strings(.aboutNotSandboxed), systemImage: "shield.slash")
+                    Text(strings(.aboutReadPermissions))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .onAppear {
-                checksAutomatically = updater.checksAutomatically
-                updateMode = updater.updateMode
-                notifies = updater.notifiesAboutUpdates
-                updater.refreshNotificationPermission()
-            }
-            // Back from macOS's notification settings, the refusal is read again.
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                updater.refreshNotificationPermission()
+
+            if !model.problems.isEmpty {
+                Section(strings(.aboutProblems)) {
+                    ForEach(Array(model.problems.enumerated()), id: \.offset) { _, problem in
+                        Text(problem)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    Button(strings(.actionClear)) { model.clearProblems() }
+                }
             }
         }
-
-        SettingsGroup(strings(.aboutThisBuild)) {
-            Label(strings(.aboutNotSigned), systemImage: "exclamationmark.shield")
-            Text(strings(.aboutAdHoc))
-                .font(.caption).foregroundStyle(.secondary)
-            Label(strings(.aboutNotSandboxed), systemImage: "shield.slash")
-            Text(strings(.aboutReadPermissions))
-                .font(.caption).foregroundStyle(.secondary)
-        }
-
-        if !model.problems.isEmpty {
-            SettingsGroup(strings(.aboutProblems)) {
-                ForEach(Array(model.problems.enumerated()), id: \.offset) { _, problem in
-                    Text(problem)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-                Button(strings(.actionClear)) { model.clearProblems() }
-            }
-        }
+        .formStyle(.grouped)
     }
 }
 
-private extension AboutSection {
+/// What General's updates and the About card both say about an update.
+@MainActor
+private enum UpdateWords {
     /// macOS's notification settings, at uDeck's own row where it goes there.
     static let notificationSettings = URL(
         string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=place.unicorns.udeck"
     )!
 
-    func modeHelp(_ mode: UpdateMode) -> Phrase {
+    static func modeHelp(_ mode: UpdateMode) -> Phrase {
         switch mode {
         case .tell: .updatesModeTellHelp
         case .downloadAhead: .updatesModeDownloadAheadHelp
@@ -1634,32 +1738,57 @@ private extension AboutSection {
         }
     }
 
+    /// Nothing to check while one is under way, or while a download waits for
+    /// Update: the session it holds is Sparkle's until then.
+    static func canCheck(_ stage: UpdateStage) -> Bool {
+        switch stage {
+        case .checking, .readyToInstall: false
+        default: true
+        }
+    }
+
+    /// Whether there is a found or a downloaded version for **Update** to put in.
+    static func canInstall(_ stage: UpdateStage) -> Bool {
+        switch stage {
+        case .available, .readyToInstall: true
+        default: false
+        }
+    }
+
+    /// The state at a glance, beside the numbers.
+    @ViewBuilder
+    static func symbol(_ stage: UpdateStage) -> some View {
+        switch stage {
+        case .checking, .downloading:
+            ProgressView().controlSize(.small)
+        case .upToDate:
+            Image(systemName: "checkmark.circle.fill").font(.title2).foregroundStyle(.green)
+        case .available, .readyToInstall:
+            Image(systemName: "arrow.down.circle.fill").font(.title2).foregroundStyle(.blue)
+        case .failed:
+            Image(systemName: "exclamationmark.triangle.fill").font(.title2).foregroundStyle(.orange)
+        case .idle:
+            Image(systemName: "arrow.triangle.2.circlepath").font(.title3).foregroundStyle(.secondary)
+        }
+    }
+
     /// One line, in the state's own colour, saying what happened.
     @ViewBuilder
-    func updateSentence(_ status: UpdateStatus) -> some View {
+    static func sentence(_ status: UpdateStatus, strings: Strings) -> some View {
         switch status.stage {
         case .idle:
-            Text(lastChecked(status.lastCheck)).font(.caption).foregroundStyle(.secondary)
+            Text(lastChecked(status.lastCheck, strings: strings)).font(.caption).foregroundStyle(.secondary)
         case .checking:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text(strings(.updatesChecking))
-            }
-            .font(.caption).foregroundStyle(.secondary)
+            Text(strings(.updatesChecking)).font(.caption).foregroundStyle(.secondary)
         case .upToDate:
-            HStack(spacing: 5) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                Text(strings(.updatesUpToDate) + " " + lastChecked(status.lastCheck))
-            }
-            .font(.caption).foregroundStyle(.secondary)
+            Text(strings(.updatesUpToDate) + " " + lastChecked(status.lastCheck, strings: strings))
+                .font(.caption).foregroundStyle(.secondary)
         case .available(let version):
             Text(strings(.updatesAvailable(version))).font(.caption).foregroundStyle(.secondary)
         case .downloading(let fraction):
             HStack(spacing: 6) {
                 if let fraction {
                     ProgressView(value: fraction).controlSize(.small).frame(width: 80)
-                } else {
-                    ProgressView().controlSize(.small)
                 }
                 Text(strings(.updatesDownloading))
             }
@@ -1667,15 +1796,12 @@ private extension AboutSection {
         case .readyToInstall:
             Text(strings(.updatesReady)).font(.caption).foregroundStyle(.secondary)
         case .failed(let reason):
-            HStack(spacing: 5) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                Text(strings(.updatesFailed(reason)))
-            }
-            .font(.caption).foregroundStyle(.secondary)
+            Text(strings(.updatesFailed(reason))).font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    func lastChecked(_ date: Date?) -> String {
+    static func lastChecked(_ date: Date?, strings: Strings) -> String {
         guard let date else { return strings(.updatesNeverChecked) }
         // Under a minute the formatter rounds to zero and then picks the
         // future tense for it: "checked in 0 seconds", about something that has
@@ -1688,6 +1814,57 @@ private extension AboutSection {
         // one thing worse than being in the wrong language entirely.
         formatter.locale = Locale(identifier: strings.language.rawValue)
         return strings(.updatesLastChecked(formatter.localizedString(for: date, relativeTo: Date())))
+    }
+}
+
+/// A pane's name over its grouped form, as the redesign draws it (2026-11-18):
+/// the window's own title stays "uDeck Settings".
+private struct PaneTitle: View {
+    var text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .font(.title2.bold())
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A section in the sidebar: its symbol white on a rounded square of its own
+/// colour, as System Settings draws its sidebar, and — for Plugins — how many
+/// plugin updates wait: an arrow and a number, the operator's choice on the
+/// redesign canvas (2026-11-18), white on the selected row and the accent colour
+/// elsewhere.
+private struct SidebarRow: View {
+    var title: String
+    var symbol: String
+    var tint: Color
+    var updates: Int
+    @Environment(\.backgroundProminence) private var prominence
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: symbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(tint))
+            }
+            Spacer(minLength: 4)
+            if updates > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "arrow.up").accessibilityHidden(true)
+                    Text("\(updates)")
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(prominence == .increased ? Color.white : Color.accentColor)
+            }
+        }
     }
 }
 

@@ -2,7 +2,7 @@ import Foundation
 import UDeckPluginFormat
 
 /// What uDeck does when a check of its own finds a new version — the choice in
-/// Settings → About, "When a new version is out" (0.8.6).
+/// Settings → General, "When a new version is out" (0.8.6; in About until the redesign).
 ///
 /// Before 0.8.6 there was one switch, **Install updates automatically**
 /// (Sparkle's `SUAutomaticallyUpdate`), and nothing between "only say so" and

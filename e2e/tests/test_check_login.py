@@ -116,6 +116,8 @@ def nothing_real(monkeypatch):
     monkeypatch.setattr(app, "the_system_reopened_it", lambda machine, step=None: False)
     monkeypatch.setattr(ui, "open_settings_and_wait", lambda *a, **k: None)
     monkeypatch.setattr(ui, "wait_for", lambda machine, identifier, step, **k: ui.Element(identifier, 1, 2, 3, 4))
+    # Which section holds the updates is `ui.open_updates_pane`'s question, tested in test_ui.py.
+    monkeypatch.setattr(ui, "open_updates_pane", lambda machine, step: ui.Element("updates.checkNow", 1, 2, 3, 4))
 
     # A card whose sentence follows the switch, because the application's does: the tense
     # is what the checks below read, so a fake that always said the same thing would let

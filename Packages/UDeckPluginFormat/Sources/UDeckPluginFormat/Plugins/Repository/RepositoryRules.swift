@@ -92,7 +92,7 @@ extension RepositoryRefusal {
         case .apiNotSpoken(let name, let version, let api):
             "\(name) \(version) is written for plugin contract api \(api); this uDeck speaks api \(PluginAPI.current). Update uDeck to install it."
         case .needsNewerUDeck(let name, let version, let required, let running):
-            "\(name) \(version) needs uDeck \(required) or later; this is uDeck \(running). Update uDeck (Settings → About) to install it."
+            "\(name) \(version) needs uDeck \(required) or later; this is uDeck \(running). Update uDeck (Settings → General) to install it."
         case .versionNotComparable(let name, let version):
             "\(name)'s version \"\(version)\" is not MAJOR.MINOR.PATCH, so uDeck cannot tell it from another version; it cannot be installed from a repository."
         case .minUDeckNotComparable(let name, let text):
