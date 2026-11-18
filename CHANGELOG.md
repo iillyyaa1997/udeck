@@ -8,6 +8,27 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.8.7] — 2026-11-18
+
+A plugin can be put on a tab that has cards already, and a source is added at
+once after Sign in. 0.8.7 adds nothing to the plugin contract. The update to it
+goes by 0.8.6's rule.
+
+- **+ Plugin at the top of the panel, and Add plugin on a right-click.** A
+  plugin could be put only on an empty tab; on a tab with cards there was no
+  way to add another (2026-11-18: "I don't understand how to add another
+  plugin to the tab"). **+ Plugin** opens the installed plugins in the panel
+  and puts the one chosen on the tab showing, in its first gap; a right-click
+  on a free cell, **Add plugin** ▸ a plugin, puts it in that column.
+- **A source found after Sign in, or with a token, is added at once.** Until
+  now it waited for a second **Add**: on 2026-11-18 the operator signed in to a
+  private repository, did not see that Add was still wanted, and started over.
+  A source looked up without a token still shows what it is before **Add**.
+- **Lab**: `plugins.add-to-a-tab`; the Sign in and token steps no longer press
+  Add. A SwiftUI `Menu` in the panel, and a transparent layer under its grid,
+  each made the lab's accessibility walk of the panel end in an exception: the
+  list is drawn in the panel, and the right-click is the grid's own.
+
 ## [0.8.6] — 2026-11-17
 
 What uDeck does with a new version is your choice, and it can tell you about
