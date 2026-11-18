@@ -297,7 +297,7 @@ struct LocalizationTests {
         .capabilityExec(command: "git"), .capabilityNetwork(host: "example.com"),
         .capabilityScreen, .capabilitySecret(name: "token"),
 
-        .aboutTitle, .aboutTagline, .aboutThisBuild, .aboutNotSigned, .aboutAdHoc,
+        .aboutTitle, .aboutTagline, .aboutVersion("0.8.9"), .aboutCheckForUpdates, .aboutThisBuild, .aboutNotSigned, .aboutAdHoc,
         .aboutNotSandboxed, .aboutReadPermissions, .aboutProblems,
 
         .deckNothingPlaced, .deckNothingOwn, .deckClickToWork, .cardRefreshNow,
@@ -325,7 +325,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 529,
+        #expect(Self.all.count == 531,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
@@ -371,6 +371,7 @@ struct LocalizationTests {
         let strings = Strings(language)
 
         #expect(strings(.lookLightFromHour(7)).contains("7"))
+        #expect(strings(.aboutVersion("0.8.9")).contains("0.8.9"))
         #expect(strings(.lookDarkFromHour(19)).contains("19"))
         #expect(strings(.lookTintCoversMaterial(percent: 58)).contains("58"))
         #expect(strings(.pluginEverySeconds(30)).contains("30"))
@@ -552,7 +553,7 @@ struct LocalizationTests {
         #expect(say(.apiNotSpoken(name: "uptime", version: "2.0.0", api: 2))
                 == "uptime 2.0.0 is written for plugin contract api 2; this uDeck speaks api 1. Update uDeck to install it.")
         #expect(say(.needsNewerUDeck(name: "uptime", version: "1.4.0", required: "0.8.0", running: "0.6.0"))
-                == "uptime 1.4.0 needs uDeck 0.8.0 or later; this is uDeck 0.6.0. Update uDeck (Settings → About) to install it.")
+                == "uptime 1.4.0 needs uDeck 0.8.0 or later; this is uDeck 0.6.0. Update uDeck (Settings → General) to install it.")
         #expect(say(.versionNotComparable(name: "uptime", version: "1.2"))
                 == "uptime's version \"1.2\" is not MAJOR.MINOR.PATCH, so uDeck cannot tell it from another version; it cannot be installed from a repository.")
         #expect(say(.linkOrSubmodule(path: "plugins/uptime/lib", isLink: true))

@@ -917,7 +917,7 @@ new setting type, a new environment variable — and it moves with features.
 
 | Where | What happens when `minUDeck` is newer than this uDeck |
 |---|---|
-| A catalogue row | **Install** unavailable: *"uptime 1.4.0 needs uDeck 0.8.0 or later; this is uDeck 0.6.0. Update uDeck (Settings → About) to install it."* |
+| A catalogue row | **Install** unavailable: *"uptime 1.4.0 needs uDeck 0.8.0 or later; this is uDeck 0.6.0. Update uDeck (Settings → General) to install it."* |
 | An update | Not offered; the row says so, and the installed version keeps running. |
 | A folder on disk | Refused, like an unknown `api`: *"needs uDeck 0.8.0 or later; this is 0.6.0"*. A folder copied in by hand is held to what its author said. |
 
@@ -2871,7 +2871,7 @@ shown in the row, in English and Russian like the rest of Settings.
 | What happened | What the operator sees |
 |---|---|
 | `api` not spoken here | *uptime 2.0.0 is written for plugin contract api 2; this uDeck speaks api 1. Update uDeck to install it.* |
-| `minUDeck` newer than this uDeck | *uptime 1.4.0 needs uDeck 0.8.0 or later; this is uDeck 0.6.0. Update uDeck (Settings → About) to install it.* |
+| `minUDeck` newer than this uDeck | *uptime 1.4.0 needs uDeck 0.8.0 or later; this is uDeck 0.6.0. Update uDeck (Settings → General) to install it.* |
 | `version` does not parse | *uptime's version "1.2" is not MAJOR.MINOR.PATCH, so uDeck cannot tell it from another version; it cannot be installed from a repository.* |
 | No passport | *github.com/owner/repo is not a uDeck plugin repository: there is no udeck-plugins.json at the top of main.* |
 | Passport from the future | *This repository is in format 2; this uDeck reads format 1. Update uDeck.* |

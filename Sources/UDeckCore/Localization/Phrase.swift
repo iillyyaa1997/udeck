@@ -616,6 +616,10 @@ public enum Phrase: Sendable, Equatable {
 
     case aboutTitle
     case aboutTagline
+    /// The version under the name on the About card.
+    case aboutVersion(String)
+    /// The About card's button, which checks as **Check now** does.
+    case aboutCheckForUpdates
     case aboutThisBuild
     case aboutNotSigned
     case aboutAdHoc
