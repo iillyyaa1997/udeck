@@ -386,6 +386,28 @@ def open_settings(machine: Any, step: str, item: str = "Settings…") -> None:
     ax.ask(machine, ["press-menu-item", PROCESS, item], step)
 
 
+# How long the General section is given to show uDeck's updates before the lab
+# looks for them in About, where releases before the redesign keep them.
+UPDATES_IN_GENERAL_SECONDS = 5
+
+
+def open_updates_pane(machine: Any, step: str) -> Element:
+    """The section that holds uDeck's own updates chosen in an open settings window, and its **Check now**.
+
+    General since the redesign (2026-11-18); About in every release before it, so
+    a check that drives an older release as "from" finds it there. Which one is
+    told by the window itself — `updates.checkNow` showing in General or not —
+    and never by a version number.
+    """
+    click(machine, "section.general", f"{step}: choosing General")
+    try:
+        return wait_for(machine, "updates.checkNow", f"{step}: General", seconds=UPDATES_IN_GENERAL_SECONDS)
+    except NotThere:
+        pass
+    click(machine, "section.about", f"{step}: choosing About, where an older uDeck keeps its updates")
+    return wait_for(machine, "updates.checkNow", f"{step}: About")
+
+
 def menu_items(machine: Any, step: str) -> str:
     """The titles in uDeck's own menu, for a reason — never for a verdict.
 

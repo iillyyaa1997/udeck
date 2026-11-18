@@ -556,6 +556,8 @@ struct Russian: Vocabulary {
         // О программе
         case .aboutTitle: "uDeck"
         case .aboutTagline: "Панель у верхнего края экрана. Всё в ней — плагины."
+        case .aboutVersion(let version): "Версия \(version)"
+        case .aboutCheckForUpdates: "Проверить обновления"
         case .aboutThisBuild: "Эта сборка"
         case .aboutNotSigned: "Не подписана Developer ID и не заверена у Apple."
         case .aboutAdHoc:

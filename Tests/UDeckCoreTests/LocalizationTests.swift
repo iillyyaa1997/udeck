@@ -297,7 +297,7 @@ struct LocalizationTests {
         .capabilityExec(command: "git"), .capabilityNetwork(host: "example.com"),
         .capabilityScreen, .capabilitySecret(name: "token"),
 
-        .aboutTitle, .aboutTagline, .aboutThisBuild, .aboutNotSigned, .aboutAdHoc,
+        .aboutTitle, .aboutTagline, .aboutVersion("0.8.9"), .aboutCheckForUpdates, .aboutThisBuild, .aboutNotSigned, .aboutAdHoc,
         .aboutNotSandboxed, .aboutReadPermissions, .aboutProblems,
 
         .deckNothingPlaced, .deckNothingOwn, .deckClickToWork, .cardRefreshNow,
@@ -325,7 +325,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 529,
+        #expect(Self.all.count == 531,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
@@ -371,6 +371,7 @@ struct LocalizationTests {
         let strings = Strings(language)
 
         #expect(strings(.lookLightFromHour(7)).contains("7"))
+        #expect(strings(.aboutVersion("0.8.9")).contains("0.8.9"))
         #expect(strings(.lookDarkFromHour(19)).contains("19"))
         #expect(strings(.lookTintCoversMaterial(percent: 58)).contains("58"))
         #expect(strings(.pluginEverySeconds(30)).contains("30"))

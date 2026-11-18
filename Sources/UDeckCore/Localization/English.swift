@@ -550,6 +550,8 @@ struct English: Vocabulary {
         // About
         case .aboutTitle: "uDeck"
         case .aboutTagline: "A panel at the top edge of the screen. Everything in it is a plugin."
+        case .aboutVersion(let version): "Version \(version)"
+        case .aboutCheckForUpdates: "Check for Updates"
         case .aboutThisBuild: "This build"
         case .aboutNotSigned: "Not signed with a Developer ID and not notarised."
         case .aboutAdHoc:
