@@ -668,6 +668,9 @@ struct Russian: Vocabulary {
         case .tabShowThis: "Показать эту вкладку"
         case .controlRefresh: "Обновить всё сейчас"
         case .controlSettings: "Настройки"
+        case .controlAddPlugin: "+ Плагин"
+        case .controlAddPluginHelp: "Добавить плагин на эту вкладку"
+        case .controlAddPluginHere: "Добавить плагин"
         case .controlSendAway: "Убрать панель"
 
         // Действия

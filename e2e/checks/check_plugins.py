@@ -189,8 +189,9 @@ LAST_RUN_FAILED = "Last run failed at "
 EXITED_3 = "the producer exited with status 3"
 VALUES_FROM = "showing values from "
 # The panel's own buttons (WorkspaceView.swift: controls) — and no density
-# button among them since 2026-10-05: density is set in Settings → Look.
-PANEL_BUTTONS = ("panel.fullscreen", "panel.refresh", "panel.sendAway", "panel.settings")
+# button among them since 2026-10-05: density is set in Settings → Look; **+ Plugin**
+# among them since 0.8.7.
+PANEL_BUTTONS = ("panel.addPlugin", "panel.fullscreen", "panel.refresh", "panel.sendAway", "panel.settings")
 
 # Install command (plugins.install-command): where the link goes in the guest,
 # what it leads to, and what the command says.
@@ -515,6 +516,64 @@ def check_card_reaches_the_panel(machine, check_dir, lab):
         card = _allow_and_read_the_card(scene, UPTIME, "placed on an empty tab")
         expect(card.get(RUNS) == "1", f"{UPTIME}'s card says it has run {card.get(RUNS)!r} times, not once: {card}")
         expect(card.get(VERSION_ROW) == "1.0.0", f"{UPTIME}'s card is not 1.0.0's: {card}")
+    finally:
+        scene.close()
+
+
+def check_add_to_a_tab(machine, check_dir, lab):
+    """On a tab with a card already, **+ Plugin** puts another on it, and a right-click on a free cell puts one there.
+
+    Until 0.8.7 only an empty tab offered a plugin, and the operator could not find how to add a second (2026-11-18).
+    `uptime` installed and placed on a tab of its own (`_place`) — the one plugin of the fixture that runs, so each
+    add is another window of it. The panel opened; **+ Plugin** pressed with the pointer, and Uptime in the list it
+    opens in the panel: `layout.json` then holds two of its windows on the tab. Then a right-click on the free cells at the right end of the cards' row, **Add plugin** ▸ Uptime by keys
+    (down, right, `u`, Return): a third window, in the column clicked — the last a 4-wide window fits in, 8 — settled
+    where it fits, as every window settles; + Plugin's first gap would have been column 6.
+
+    **Red for**: a tab with cards that offers no way to add one, a menu that adds nothing or adds elsewhere than the
+    tab showing, and a right-click that puts the plugin anywhere but where it was clicked.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        _place(scene, UPTIME)
+        tab = (_the_window(machine, UPTIME, "reading the tab uptime is on") or {}).get("tab")
+        _open_the_panel(machine, "opening the panel with uptime on its tab")
+        button = ui.wait_for(machine, "panel.addPlugin", "waiting for + Plugin on a tab with a card", ui.PANEL)
+        machine.screenshot(check_dir, "a tab with a card and + Plugin")
+        machine.click(*button.middle, "pressing + Plugin")
+        item = ui.wait_for(machine, f"panel.addPlugin.{UPTIME}", "waiting for Uptime in + Plugin's list", ui.PANEL)
+        machine.click(*item.middle, "choosing Uptime in + Plugin's list")
+        two = _wait_for_disk(machine, lambda: len(_windows_of(_read_json(machine, LAYOUT), UPTIME)) == 2, NOTICED_SECONDS)
+        windows = _windows_of(_read_json(machine, LAYOUT, "reading the tab after + Plugin"), UPTIME)
+        expect(two and all(w["tab"] == tab for w in windows),
+               f"after + Plugin ▸ Uptime, layout.json has {windows}: not two windows of uptime on its tab")
+        machine.screenshot(check_dir, "two windows after + Plugin")
+        # The free cells right of the two cards, on their row: the panel's right end, at the height of uptime's consent.
+        dump = _read_the_screen(machine, "reading the panel after + Plugin", ui.PANEL)
+        allow = ui.element(dump, f"consent.{UPTIME}.allow")
+        corner = ui.element(dump, "panel.fullscreen")
+        if allow is None or corner is None:
+            raise LabError("finding a free cell", f"the panel shows no {'consent' if allow is None else 'fullscreen button'} "
+                                                  f"to find the cards' row and its right end by: {dump[:300]!r}")
+        # The rightmost button ends where the grid does: a little inside it is the last column.
+        machine.right_click(corner.x + corner.width - 20, allow.y + allow.height // 2,
+                            "right-clicking a free cell at the right end of the cards' row")
+        machine.sleep(1)
+        for key, what in (("down", "Add plugin"), ("right", "its list"), ("u", "Uptime"), ("return", "taking it")):
+            machine.key(key, f"in the right-click's menu: {what}")
+            machine.sleep(0.5)
+        three = _wait_for_disk(machine, lambda: len(_windows_of(_read_json(machine, LAYOUT), UPTIME)) == 3, NOTICED_SECONDS)
+        windows = _windows_of(_read_json(machine, LAYOUT, "reading the tab after the right-click"), UPTIME)
+        machine.screenshot(check_dir, "three windows after the right-click")
+        expect(three, f"after a right-click ▸ Add plugin ▸ Uptime, layout.json has {len(windows)} windows of uptime, not 3")
+        placed = [(w.get("column"), w.get("row")) for w in windows]
+        # The right end of the row has two free columns, and the window is four wide: it takes the last column it fits
+        # in, 8, and settles where it fits — run 44264870082 measured (8, 3) — where + Plugin's first gap is column 6.
+        expect(sum(1 for column, _ in placed if column == 8) == 1,
+               f"the window added by the right-click is not in the column clicked, 8 for a 4-wide window: {placed}")
+        lab.note(f"   + Plugin and a right-click put uptime on its tab again: windows at {sorted(placed)}")
     finally:
         scene.close()
 
@@ -5307,33 +5366,43 @@ def _the_token_step(scene, address, page, secret, name, label, paste=False):
     expect(link == page, f"Make a token on its host opens {link!r}, not {page!r}")
     put = ui.paste_secret if paste else ui.enter_secret
     put(machine, "sources.add.tokenField", secret, f"{'pasting' if paste else 'typing'} the lab's fixture token: {label}")
+    if paste:
+        # The pasteboard held the token when it was pasted — read before Return, which adds the source at once (0.8.7):
+        # what Add does to it is uDeck's, not a copy that failed.
+        expect(ui.pasteboard_holds(machine, secret, f"reading the pasteboard after the paste: {label}"),
+               "the lab pasted the token, and the pasteboard did not hold it: the paste proves nothing")
     before = _count(scene)
-    # Return in the token's field — its own action, Look up with the token — where the focus was proven.
+    # Return in the token's field — its own action, Look up with the token — where the focus was proven. What it finds
+    # is added at once (0.8.7): the token was pasted to add it.
     ui.press_return(machine, f"pressing Return in the token field: {label}")
-    shown = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == name, OPERATION_SECONDS)
+    deadline = machine.clock() + OPERATION_SECONDS + CATALOGUE_SECONDS
+    said = None
+    while machine.clock() < deadline:
+        if (_the_source(machine) or {}).get("access") == "token":
+            break
+        problem = ui.reads(machine, "sources.add.problem", f"reading what the token step said: {label}")
+        if problem and "Keychain" in problem:
+            raise LabError(f"keeping the token: {label}", f"this machine's Keychain refused uDeck: {problem!r}")
+        said = ui.reads(machine, "sources.add.result", f"reading what the token step found: {label}") or said
+        machine.sleep(2)
     asked = _since(scene, before)
     _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-token-step-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt")
-    expect(_strip(shown) == name, f"looked up with its token, {address} shows {shown!r}, not {name!r}; uDeck asked "
-                                  f"{_described_gitlab(asked)}")  # fmt: skip
+    source = _the_source(machine) or {}
+    expect(source.get("access") == "token", f"looked up with its token, {address} was not added with it — the sheet "
+                                            f"said {said!r}; uDeck asked {_described_gitlab(asked)}")  # fmt: skip
+    shown = _wait_until(machine, f"source.{source['id']}.name", lambda said: _strip(said) == name, CATALOGUE_SECONDS)
+    expect(_strip(shown) == name, f"added with its token, {address}'s block is named {shown!r}, not {name!r}")
     return asked
 
 
 def _add_with_its_token(scene, sid, label):
-    """**Add** on what the token step found: the source's block named, its entry `access: token` — or, the runner's
-    Keychain refusing uDeck, a lab problem: could not check (S4-22)."""
+    """What the token step added at once (0.8.7; until then, **Add** pressed on what it found): the source's block
+    named, its entry `access: token` under `sid` — the runner's Keychain refusing uDeck is the token step's lab problem —
+    and its first read with the token to its end."""
     machine = scene.machine
     before = _count(scene)
-    _press(machine, "sources.add.confirm", f"pressing Add: {label}")
-    deadline = machine.clock() + CATALOGUE_SECONDS
-    while machine.clock() < deadline:
-        if (_the_source(machine) or {}).get("access") == "token":
-            break
-        problem = ui.reads(machine, "sources.add.problem", f"reading what Add said: {label}")
-        if problem and "Keychain" in problem:
-            raise LabError(f"keeping the token: {label}", f"this machine's Keychain refused uDeck: {problem!r}")
-        machine.sleep(2)
     source = _the_source(machine) or {}
-    expect(source.get("id") == sid and source.get("access") == "token", f"after Add, {SOURCES_FILE} says {source!r}")
+    expect(source.get("id") == sid and source.get("access") == "token", f"added with its token, {SOURCES_FILE} says {source!r}")
     _wait_until(machine, f"source.{sid}.name", lambda said: bool(said), CATALOGUE_SECONDS)
     # The read Add starts, to its end: while it runs the block's Check now and Token… are not offered, and a change
     # of the fake's would land in it rather than in what the check presses next.
@@ -5551,10 +5620,6 @@ def _the_private_project_added(scene, label, paste=False):
     start = _count(scene)
     secret = _secret(scene, "gitlab-private", GL_PRIVATE_TOKEN)
     _the_token_step(scene, GL_PRIVATE, GITLAB_TOKEN_PAGE, secret, GL_NAME, label, paste=paste)
-    if paste:
-        # The pasteboard held the token when it was pasted: what Add does to it is uDeck's, not a copy that failed.
-        expect(ui.pasteboard_holds(machine, secret, f"reading the pasteboard after the paste: {label}"),
-               "the lab pasted the token, and the pasteboard did not hold it: the paste proves nothing")
     _add_with_its_token(scene, sid, label)
     routes = ["/api/v4/projects/tools%2Fudeck-private", f"/api/v4/projects/{number}", "/api/graphql"]
     _expect_the_token_only_at(_since(scene, start), routes, label)
@@ -5930,12 +5995,13 @@ def check_source_sign_in_github(machine, check_dir, lab):
         expect(page == "https://github.com/login/device", f"Copy the code and open goes to {page!r}")
         _oauth(scene, {"github.com": {"slow_down": True, "installed": [PRIVATE], "decisions": {code: "approved"}}},
                f"approving {code}")
-        shown = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == TEAM_NAME, SIGN_IN_SECONDS)
-        _keep_the_pane(machine, check_dir, lab, "signed-in-looked-up.txt")
-        expect(_strip(shown) == TEAM_NAME, f"signed in, the sheet shows {shown!r}, not {TEAM_NAME!r}")
-        _press(machine, "sources.add.confirm", "pressing Add on what Sign in read")
-        kept = _wait_for_disk(machine, lambda: _the_access(machine, sid) == "signIn", CATALOGUE_SECONDS)
-        expect(kept, f"after Add, {SOURCES_FILE} says {_the_source(machine)!r}")
+        # What Sign in read is added at once (0.8.7): nothing more is pressed.
+        kept = _wait_for_disk(machine, lambda: _the_access(machine, sid) == "signIn", SIGN_IN_SECONDS + CATALOGUE_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "signed-in-added.txt")
+        expect(kept, f"signed in, the source was not added with nothing more pressed: {SOURCES_FILE} says "
+                     f"{_the_source(machine)!r}, the sheet {ui.reads(machine, 'sources.add.result', 'reading the sheet')!r}")
+        shown = _wait_until(machine, f"source.{sid}.name", lambda said: _strip(said) == TEAM_NAME, CATALOGUE_SECONDS)
+        expect(_strip(shown) == TEAM_NAME, f"signed in and added, the source's block is named {shown!r}, not {TEAM_NAME!r}")
         state_file = f"{UDECK_HOME}/catalogue/{sid}/state.json"
         read = _wait_for_disk(machine, lambda: (_read_json(machine, state_file) or {}).get("lastSuccess") is not None,
                               CATALOGUE_SECONDS)  # fmt: skip
@@ -6006,9 +6072,14 @@ def check_source_sign_in_app_not_installed(machine, check_dir, lab):
         _oauth(scene, {"github.com": {"decisions": {code: "approved"}, "installed": [PRIVATE]}}, "the app installed")
         before = _count(scene)
         _press(machine, "sources.add.signIn.lookUpAgain", "pressing Look up again")
-        shown = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == TEAM_NAME, SIGN_IN_SECONDS)
+        # What it then reads is added at once (0.8.7), as after any Sign in.
+        added = _wait_for_disk(machine, lambda: (_the_source(machine) or {}).get("access") == "signIn",
+                               SIGN_IN_SECONDS + CATALOGUE_SECONDS)
         again = _since(scene, before)
-        expect(_strip(shown) == TEAM_NAME, f"with the app installed, Look up again shows {shown!r}")
+        source = _the_source(machine) or {}
+        expect(added, f"with the app installed, Look up again added nothing: {SOURCES_FILE} says {source!r}")
+        shown = _wait_until(machine, f"source.{source['id']}.name", lambda said: _strip(said) == TEAM_NAME, CATALOGUE_SECONDS)
+        expect(_strip(shown) == TEAM_NAME, f"with the app installed, Look up again added a source named {shown!r}")
         expect(not [r for r in again if r.raw_path == "/login/device/code"], "Look up again asked for another code")
     finally:
         scene.close()
@@ -6100,13 +6171,13 @@ def check_source_sign_in_self_hosted(machine, check_dir, lab):
         expect(page == f"https://{GL_HOST}/oauth/device?user_code={code}", f"Copy the code and open goes to {page!r}")
         _oauth(scene, {GL_HOST: {"client_id": SELF_HOSTED_APPLICATION, "token_expires_in": 75,
                                  "decisions": {code: "approved"}}}, f"approving {code}")
-        shown = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == GL_NAME, SIGN_IN_SECONDS)
-        expect(_strip(shown) == GL_NAME, f"signed in, the sheet shows {shown!r}, not {GL_NAME!r}")
-        _press(machine, "sources.add.confirm", "pressing Add on what Sign in read")
-        kept = _wait_for_disk(machine, lambda: _the_access(machine, sid) == "signIn", CATALOGUE_SECONDS)
+        # What Sign in read is added at once (0.8.7): nothing more is pressed.
+        kept = _wait_for_disk(machine, lambda: _the_access(machine, sid) == "signIn", SIGN_IN_SECONDS + CATALOGUE_SECONDS)
         source = _the_source(machine) or {}
         expect(kept and source.get("signInClientID") == SELF_HOSTED_APPLICATION,
-               f"after Add, {SOURCES_FILE} says {source!r}")
+               f"signed in, with nothing more pressed, {SOURCES_FILE} says {source!r}")
+        shown = _wait_until(machine, f"source.{sid}.name", lambda said: _strip(said) == GL_NAME, CATALOGUE_SECONDS)
+        expect(_strip(shown) == GL_NAME, f"signed in and added, the source's block is named {shown!r}, not {GL_NAME!r}")
         state_file = f"{UDECK_HOME}/catalogue/{sid}/state.json"
         read = _wait_for_disk(machine, lambda: (_read_json(machine, state_file) or {}).get("lastSuccess") is not None,
                               CATALOGUE_SECONDS)  # fmt: skip

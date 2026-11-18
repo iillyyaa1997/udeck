@@ -107,6 +107,52 @@ struct GridTests {
         #expect(result.map(\.id) == input.map(\.id))
     }
 
+    // MARK: - Adding a plugin where it was asked for (0.8.7)
+
+    @Test("added at a free cell right-clicked: in that column, settled upward")
+    func addedAtACell() {
+        let tab = DeckTab(name: "Main", windows: [window("01", column: 0, row: 0, width: 4, height: 3)])
+        var layout = DeckLayout(tabs: [tab])
+        let id = layout.addWindow(pluginID: PluginIdentifier(rawValue: "q")!, to: tab.id,
+                                  hints: WindowHints(defaultWidth: 4, defaultHeight: 3), at: GridCell(column: 8, row: 0))
+        let added = layout.tabs[0].windows.first { $0.id == id }
+        #expect(added?.column == 8 && added?.row == 0)
+        #expect(layout.tabs[0].windows.count == 2)
+    }
+
+    @Test("a cell near the right edge keeps the window inside the grid")
+    func addedAtTheEdge() {
+        let tab = DeckTab(name: "Main", windows: [])
+        var layout = DeckLayout(tabs: [tab])
+        let id = layout.addWindow(pluginID: PluginIdentifier(rawValue: "q")!, to: tab.id,
+                                  hints: WindowHints(defaultWidth: 4, defaultHeight: 3), at: GridCell(column: 11, row: 0))
+        #expect(layout.tabs[0].windows.first { $0.id == id }?.column == 8, "12 columns, 4 wide: column 8 at most")
+    }
+
+    @Test("without a cell it lands where the plus button puts it: the first gap")
+    func addedWithoutACell() {
+        let tab = DeckTab(name: "Main", windows: [window("01", column: 0, row: 0, width: 4, height: 3)])
+        var layout = DeckLayout(tabs: [tab])
+        let id = layout.addWindow(pluginID: PluginIdentifier(rawValue: "q")!, to: tab.id,
+                                  hints: WindowHints(defaultWidth: 4, defaultHeight: 3), at: nil)
+        let added = layout.tabs[0].windows.first { $0.id == id }
+        #expect(added?.column == 4 && added?.row == 0)
+    }
+
+    @Test("the cell under a point: the gap belongs to the cell before it, outside is none")
+    func cellUnderAPoint() {
+        // 12 columns of 50 with 8 between, rows of 40 with 8 between.
+        func at(_ x: Double, _ y: Double) -> GridCell? {
+            GridCell.at(x: x, y: y, columnWidth: 50, rowHeight: 40, spacing: 8, columns: 12)
+        }
+        #expect(at(0, 0) == GridCell(column: 0, row: 0))
+        #expect(at(57, 47) == GridCell(column: 0, row: 0), "in the gap after the first cell")
+        #expect(at(58, 48) == GridCell(column: 1, row: 1))
+        #expect(at(11 * 58 + 49, 5 * 48) == GridCell(column: 11, row: 5))
+        #expect(at(12 * 58, 0) == nil, "past the last column")
+        #expect(at(-1, 0) == nil && at(0, -1) == nil)
+    }
+
     @Test("a new window lands in the first gap, not at the bottom")
     func firstFreeSlotFillsGaps() {
         let existing = [
