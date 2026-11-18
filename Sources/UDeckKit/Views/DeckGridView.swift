@@ -21,6 +21,10 @@ struct DeckGridView: View {
     /// locally so the grid can preview the move without writing a layout file
     /// on every frame.
     @State private var draft: Draft?
+    /// Where the pointer last was over the grid's free space: the cell a
+    /// right-click's **Add plugin** puts the plugin at.
+    @State private var pointer: CGPoint?
+    @Environment(\.strings) private var strings
 
     private struct Draft: Equatable {
         var id: UUID
@@ -72,9 +76,20 @@ struct DeckGridView: View {
                 }
                 .frame(
                     maxWidth: .infinity,
-                    minHeight: metrics.height(cells: max(1, totalRows)),
+                    minHeight: max(geometry.size.height, metrics.height(cells: max(1, totalRows))),
                     alignment: .topLeading
                 )
+                // The free space between and below the windows: right-clicked,
+                // **Add plugin** puts a plugin at the cell under the pointer
+                // (0.8.7); a window's own right-click is its own menu. On the
+                // grid itself — a transparent layer of its own under the
+                // windows made the lab's accessibility walk of the panel end in
+                // an exception (run 44263870523; without it, 44263874858, none).
+                .contentShape(Rectangle())
+                .onContinuousHover(coordinateSpace: .named(DeckGridView.dragSpace)) { phase in
+                    if case .active(let point) = phase { pointer = point }
+                }
+                .contextMenu { addHere(metrics) }
                 // The space a drag is measured in, and the reason it is named.
                 //
                 // A `DragGesture` with no coordinate space reports translation
@@ -89,6 +104,26 @@ struct DeckGridView: View {
                 .animation(.easeOut(duration: 0.12), value: draft)
             }
             .scrollIndicators(.never)
+        }
+    }
+
+    @ViewBuilder
+    private func addHere(_ metrics: GridMetrics) -> some View {
+        let usable = model.plugins.filter { $0.isUsable && $0.manifest != nil }
+        if !usable.isEmpty {
+            Menu(strings(.controlAddPluginHere)) {
+                ForEach(usable, id: \.id) { plugin in
+                    Button(model.displayManifest(for: plugin)?.name ?? plugin.folderName) {
+                        shell.onInteract()
+                        guard let id = plugin.manifest?.id else { return }
+                        let cell = pointer.flatMap {
+                            GridCell.at(x: $0.x, y: $0.y, columnWidth: metrics.columnWidth, rowHeight: metrics.rowHeight,
+                                        spacing: metrics.spacing, columns: metrics.columns)
+                        }
+                        model.addWindow(pluginID: id, to: tab.id, at: cell)
+                    }
+                }
+            }
         }
     }
 

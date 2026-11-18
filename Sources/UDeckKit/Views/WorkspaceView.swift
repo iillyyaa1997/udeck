@@ -13,12 +13,15 @@ struct WorkspaceView: View {
     /// a second time, and the second click is easy to mistake for the first not
     /// having worked.
     @FocusState private var renameFieldFocused: Bool
+    /// **+ Plugin**'s list, open under it.
+    @State private var addPluginOpen = false
 
     var body: some View {
         VStack(spacing: theme.rowSpacing) {
             tabBar
             content
         }
+        .overlay(alignment: .topTrailing) { addPluginList }
         .padding(theme.panelPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -119,6 +122,7 @@ struct WorkspaceView: View {
     /// so the lab reads which are there.
     private var controls: some View {
         HStack(spacing: 5) {
+            addPlugin
             iconButton("arrow.clockwise", help: strings(.controlRefresh), identifier: "panel.refresh") {
                 model.refreshAll(reason: .manual)
             }
@@ -156,6 +160,67 @@ struct WorkspaceView: View {
         .buttonStyle(.plain)
         .help(help)
         .accessibilityIdentifier(identifier)
+    }
+
+    /// **+ Plugin** (0.8.7): the installed plugins that can run, as the empty
+    /// tab lists them, and the one chosen put on the tab showing, in its first
+    /// gap. Until 0.8.7 a plugin could be put only on an empty tab: the
+    /// operator could not find how to add a second (2026-11-18). A list drawn
+    /// in the panel rather than a menu: a SwiftUI `Menu` there made the lab's
+    /// accessibility walk of the panel end in an exception (run 44262899356).
+    private var usablePlugins: [DiscoveredPlugin] {
+        model.plugins.filter { $0.isUsable && $0.manifest != nil }
+    }
+
+    @ViewBuilder
+    private var addPlugin: some View {
+        if model.layout.selectedTab != nil, !usablePlugins.isEmpty {
+            Button {
+                shell.onInteract()
+                addPluginOpen.toggle()
+            } label: {
+                Text(strings(.controlAddPlugin)).font(theme.chipFont)
+                    .foregroundStyle(addPluginOpen ? theme.text : theme.muted)
+                    .padding(.horizontal, 8)
+                    .frame(height: 22)
+                    .background(RoundedRectangle(cornerRadius: 7).fill(addPluginOpen ? theme.selection : theme.subtleFill))
+                    .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(theme.line))
+            }
+            .buttonStyle(.plain)
+            .help(strings(.controlAddPluginHelp))
+            .accessibilityIdentifier("panel.addPlugin")
+        }
+    }
+
+    @ViewBuilder
+    private var addPluginList: some View {
+        if addPluginOpen, let tabID = model.layout.selectedTab?.id {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(usablePlugins, id: \.id) { plugin in
+                    Button {
+                        shell.onInteract()
+                        addPluginOpen = false
+                        if let id = plugin.manifest?.id { model.addWindow(pluginID: id, to: tabID) }
+                    } label: {
+                        Text(model.displayManifest(for: plugin)?.name ?? plugin.folderName)
+                            .font(theme.bodyFont).foregroundStyle(theme.text)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 9).padding(.vertical, 5)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("panel.addPlugin.\(plugin.manifest?.id.rawValue ?? plugin.folderName)")
+                }
+            }
+            .padding(5)
+            .frame(width: 220)
+            .background(RoundedRectangle(cornerRadius: 10).fill(theme.windowFill))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(theme.line))
+            .shadow(radius: 8)
+            .padding(.top, 30)
+            .padding(.trailing, 120)
+            .onExitCommand { addPluginOpen = false }
+        }
     }
 
     // MARK: - Content

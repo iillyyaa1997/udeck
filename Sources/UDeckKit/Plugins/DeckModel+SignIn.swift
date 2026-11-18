@@ -174,8 +174,11 @@ extension DeckModel {
     // MARK: - The token Sign in got
 
     /// The token Sign in got under `key`, read with: for **Add a source…**,
-    /// the look-up of the address, by its path (`SourceLookUp`) — **Add**
-    /// keeps it; for a source's **Token…**, its repository by its number,
+    /// the look-up of the address, by its path (`SourceLookUp`) — and what it
+    /// found added at once (0.8.7): the person signed in to add it, and a
+    /// second **Add** after that was not seen as asked for (2026-11-18, the
+    /// operator started over and signed in twice); for a source's **Token…**,
+    /// its repository by its number,
     /// and the token kept once it read it, the source read with it from then
     /// on (`access` *signIn*). A GitHub repository's `404` says to install the
     /// uDeck app, and **Look up again** reads with the same token after.
@@ -205,7 +208,10 @@ extension DeckModel {
             signIns[key] = nil
             sourceAddingTokened = true
             sourceAdding = .came(came)
-            if case .found = came { addSourceDraft = nil }
+            if case .found = came {
+                addSourceDraft = nil
+                addSource()
+            }
             return
         }
         guard let source = source(key), sourcesProblem == nil, !sourcesForgetting.contains(key) else { return }
