@@ -90,7 +90,7 @@ cannot be reached, or a window on the log that never started, is the lab's and
 says so.
 """
 
-from udeck_e2e import app, config, panel, ui, updates
+from udeck_e2e import app, ax, config, panel, probes, ui, updates
 from udeck_e2e.errors import CheckFailed, LabError, expect
 
 VERSION = ("0.4.1", "6")
@@ -584,3 +584,53 @@ def _keep(check_dir, name, text, lab):
         (check_dir / name).write_text(text)
     except OSError as error:
         lab.note(f"   {name} could not be written to {check_dir}: {error}")
+
+
+def check_opened_from_the_panel_in_front(machine, check_dir, lab):
+    """The panel's gear opens Settings in front: uDeck the active application, and Settings its focused window.
+
+    The operator, 2026-11-18, on 0.8.7: «Когда я нажимаю на настройки, то настройки не становятся активным окном».
+    The Finder is brought forward first (`panel.bring_forward`), so that there is an application to take the front
+    from; the panel is opened with the hotkey and its gear pressed with the pointer; then the accessibility helper's
+    own answer about uDeck — frontmost, and its focused window the settings window — is read for up to five seconds,
+    since activation is not instant.
+
+    **Red for**: Settings opening behind the application in front, or in front without the keyboard.
+    """
+    step = "opening Settings from the panel's gear"
+    log = _prepare(machine, check_dir, lab)
+    story = panel.Story(machine, log, check_dir, lab.note)
+    try:
+        panel.bring_forward(machine, config.THE_DESKTOP, f"putting the {config.THE_DESKTOP} in front")
+        panel.park_in_the_middle(machine)
+        panel.press_the_chord(machine, config.HOTKEY_KEY_CODE, "opening the panel")
+        gear = ui.wait_for(machine, "panel.settings", "waiting for the panel's gear", ui.PANEL)
+        story.take("opening the panel")
+        machine.click(*gear.middle, "pressing the panel's gear")
+        deadline = machine.clock() + 5
+        said = {}
+        while machine.clock() < deadline:
+            if ui.SETTINGS_WINDOW in ui.windows(machine, step):
+                said = ax.ask(machine, ["focused", ui.PROCESS], step)
+                if said.get("frontmost") == "true" and said.get("focused") == ui.SETTINGS_WINDOW:
+                    break
+            machine.sleep(0.5)
+        # Two more seconds and asked again: an application the panel handed the
+        # keyboard back to can come forward after Settings did.
+        machine.sleep(2)
+        if ui.SETTINGS_WINDOW in ui.windows(machine, step):
+            said = ax.ask(machine, ["focused", ui.PROCESS], step)
+        system = probes.frontmost(machine, step)
+        story.take("pressing the panel's gear")
+        machine.screenshot(check_dir, "Settings opened from the gear")
+        lab.note(f"   uDeck says frontmost {said.get('frontmost')!r}, focused {said.get('focused')!r}; "
+                 f"System Events names {system!r} in front")
+        expect(ui.SETTINGS_WINDOW in ui.windows(machine, step),
+               f"the gear opened no settings window: {ui.windows(machine, step)}")
+        expect(said.get("frontmost") == "true" and said.get("focused") == ui.SETTINGS_WINDOW,
+               f"Settings opened from the panel's gear is not in front with the keyboard: uDeck says frontmost "
+               f"{said.get('frontmost')!r}, its focused window {said.get('focused')!r}, main {said.get('main')!r}; "
+               f"System Events names {system!r} in front")
+        lab.note(f"   Settings opened from the gear in front, focused, with the {config.THE_DESKTOP} in front before")
+    finally:
+        story.keep()
