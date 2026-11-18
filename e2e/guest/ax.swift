@@ -45,6 +45,7 @@
 //   text PROCESS                     the value of text area 1 of scroll area 1 of window 1
 //   focused PROCESS                  the titles of its focused and main windows
 //   screen                           the main display, in points and pixels
+//   stack                            the ordinary windows on screen, front to back: owner, pid, frame
 //   set-mode WIDTH HEIGHT            the main display switched, for the login session, to a mode that size
 //   pointer                          where the pointer is
 //   move X Y | click X Y | right-click X Y | key NAME | scroll X Y DY
@@ -601,6 +602,28 @@ case "focused":
 
 case "screen":
     emit(mainDisplay())
+
+case "stack":
+    // The window server's own order, which no accessibility attribute gives:
+    // whose window is on top among the applications' ordinary ones (layer 0),
+    // leaving out the invisible ones some applications keep on screen — no
+    // alpha, or a point in size. Owners, process ids and frames only — a
+    // window's title would need the screen recording permission.
+    guard let listed = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+        as? [[String: Any]] else { refuse("the window server listed no windows") }
+    let ordinary = listed.compactMap { window -> [String: Any]? in
+        guard (window[kCGWindowLayer as String] as? Int) == 0,
+              ((window[kCGWindowAlpha as String] as? Double) ?? 1) > 0,
+              let bounds = window[kCGWindowBounds as String] as? NSDictionary,
+              let frame = CGRect(dictionaryRepresentation: bounds),
+              frame.width > 1, frame.height > 1 else { return nil }
+        return [
+            "owner": window[kCGWindowOwnerName as String] as? String ?? "",
+            "pid": window[kCGWindowOwnerPID as String] as? Int ?? 0,
+            "frame": json(frame),
+        ]
+    }
+    emit(["windows": ordinary, "seconds": took()])
 
 case "set-mode":
     let width = Int(number(argument(0, "a width in pixels"), "the width"))
