@@ -5308,32 +5308,37 @@ def _the_token_step(scene, address, page, secret, name, label, paste=False):
     put = ui.paste_secret if paste else ui.enter_secret
     put(machine, "sources.add.tokenField", secret, f"{'pasting' if paste else 'typing'} the lab's fixture token: {label}")
     before = _count(scene)
-    # Return in the token's field — its own action, Look up with the token — where the focus was proven.
+    # Return in the token's field — its own action, Look up with the token — where the focus was proven. What it finds
+    # is added at once (0.8.7): the token was pasted to add it.
     ui.press_return(machine, f"pressing Return in the token field: {label}")
-    shown = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == name, OPERATION_SECONDS)
+    deadline = machine.clock() + OPERATION_SECONDS + CATALOGUE_SECONDS
+    said = None
+    while machine.clock() < deadline:
+        if (_the_source(machine) or {}).get("access") == "token":
+            break
+        problem = ui.reads(machine, "sources.add.problem", f"reading what the token step said: {label}")
+        if problem and "Keychain" in problem:
+            raise LabError(f"keeping the token: {label}", f"this machine's Keychain refused uDeck: {problem!r}")
+        said = ui.reads(machine, "sources.add.result", f"reading what the token step found: {label}") or said
+        machine.sleep(2)
     asked = _since(scene, before)
     _keep_the_pane(machine, scene.check_dir, scene.lab, f"the-token-step-{re.sub(r'[^a-z0-9]+', '-', label.lower())}.txt")
-    expect(_strip(shown) == name, f"looked up with its token, {address} shows {shown!r}, not {name!r}; uDeck asked "
-                                  f"{_described_gitlab(asked)}")  # fmt: skip
+    source = _the_source(machine) or {}
+    expect(source.get("access") == "token", f"looked up with its token, {address} was not added with it — the sheet "
+                                            f"said {said!r}; uDeck asked {_described_gitlab(asked)}")  # fmt: skip
+    shown = _wait_until(machine, f"source.{source['id']}.name", lambda said: _strip(said) == name, CATALOGUE_SECONDS)
+    expect(_strip(shown) == name, f"added with its token, {address}'s block is named {shown!r}, not {name!r}")
     return asked
 
 
 def _add_with_its_token(scene, sid, label):
-    """**Add** on what the token step found: the source's block named, its entry `access: token` — or, the runner's
-    Keychain refusing uDeck, a lab problem: could not check (S4-22)."""
+    """What the token step added at once (0.8.7; until then, **Add** pressed on what it found): the source's block
+    named, its entry `access: token` under `sid` — the runner's Keychain refusing uDeck is the token step's lab problem —
+    and its first read with the token to its end."""
     machine = scene.machine
     before = _count(scene)
-    _press(machine, "sources.add.confirm", f"pressing Add: {label}")
-    deadline = machine.clock() + CATALOGUE_SECONDS
-    while machine.clock() < deadline:
-        if (_the_source(machine) or {}).get("access") == "token":
-            break
-        problem = ui.reads(machine, "sources.add.problem", f"reading what Add said: {label}")
-        if problem and "Keychain" in problem:
-            raise LabError(f"keeping the token: {label}", f"this machine's Keychain refused uDeck: {problem!r}")
-        machine.sleep(2)
     source = _the_source(machine) or {}
-    expect(source.get("id") == sid and source.get("access") == "token", f"after Add, {SOURCES_FILE} says {source!r}")
+    expect(source.get("id") == sid and source.get("access") == "token", f"added with its token, {SOURCES_FILE} says {source!r}")
     _wait_until(machine, f"source.{sid}.name", lambda said: bool(said), CATALOGUE_SECONDS)
     # The read Add starts, to its end: while it runs the block's Check now and Token… are not offered, and a change
     # of the fake's would land in it rather than in what the check presses next.
@@ -5930,12 +5935,13 @@ def check_source_sign_in_github(machine, check_dir, lab):
         expect(page == "https://github.com/login/device", f"Copy the code and open goes to {page!r}")
         _oauth(scene, {"github.com": {"slow_down": True, "installed": [PRIVATE], "decisions": {code: "approved"}}},
                f"approving {code}")
-        shown = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == TEAM_NAME, SIGN_IN_SECONDS)
-        _keep_the_pane(machine, check_dir, lab, "signed-in-looked-up.txt")
-        expect(_strip(shown) == TEAM_NAME, f"signed in, the sheet shows {shown!r}, not {TEAM_NAME!r}")
-        _press(machine, "sources.add.confirm", "pressing Add on what Sign in read")
-        kept = _wait_for_disk(machine, lambda: _the_access(machine, sid) == "signIn", CATALOGUE_SECONDS)
-        expect(kept, f"after Add, {SOURCES_FILE} says {_the_source(machine)!r}")
+        # What Sign in read is added at once (0.8.7): nothing more is pressed.
+        kept = _wait_for_disk(machine, lambda: _the_access(machine, sid) == "signIn", SIGN_IN_SECONDS + CATALOGUE_SECONDS)
+        _keep_the_pane(machine, check_dir, lab, "signed-in-added.txt")
+        expect(kept, f"signed in, the source was not added with nothing more pressed: {SOURCES_FILE} says "
+                     f"{_the_source(machine)!r}, the sheet {ui.reads(machine, 'sources.add.result', 'reading the sheet')!r}")
+        shown = _wait_until(machine, f"source.{sid}.name", lambda said: _strip(said) == TEAM_NAME, CATALOGUE_SECONDS)
+        expect(_strip(shown) == TEAM_NAME, f"signed in and added, the source's block is named {shown!r}, not {TEAM_NAME!r}")
         state_file = f"{UDECK_HOME}/catalogue/{sid}/state.json"
         read = _wait_for_disk(machine, lambda: (_read_json(machine, state_file) or {}).get("lastSuccess") is not None,
                               CATALOGUE_SECONDS)  # fmt: skip
@@ -6100,13 +6106,13 @@ def check_source_sign_in_self_hosted(machine, check_dir, lab):
         expect(page == f"https://{GL_HOST}/oauth/device?user_code={code}", f"Copy the code and open goes to {page!r}")
         _oauth(scene, {GL_HOST: {"client_id": SELF_HOSTED_APPLICATION, "token_expires_in": 75,
                                  "decisions": {code: "approved"}}}, f"approving {code}")
-        shown = _wait_until(machine, "sources.add.result", lambda said: _strip(said) == GL_NAME, SIGN_IN_SECONDS)
-        expect(_strip(shown) == GL_NAME, f"signed in, the sheet shows {shown!r}, not {GL_NAME!r}")
-        _press(machine, "sources.add.confirm", "pressing Add on what Sign in read")
-        kept = _wait_for_disk(machine, lambda: _the_access(machine, sid) == "signIn", CATALOGUE_SECONDS)
+        # What Sign in read is added at once (0.8.7): nothing more is pressed.
+        kept = _wait_for_disk(machine, lambda: _the_access(machine, sid) == "signIn", SIGN_IN_SECONDS + CATALOGUE_SECONDS)
         source = _the_source(machine) or {}
         expect(kept and source.get("signInClientID") == SELF_HOSTED_APPLICATION,
-               f"after Add, {SOURCES_FILE} says {source!r}")
+               f"signed in, with nothing more pressed, {SOURCES_FILE} says {source!r}")
+        shown = _wait_until(machine, f"source.{sid}.name", lambda said: _strip(said) == GL_NAME, CATALOGUE_SECONDS)
+        expect(_strip(shown) == GL_NAME, f"signed in and added, the source's block is named {shown!r}, not {GL_NAME!r}")
         state_file = f"{UDECK_HOME}/catalogue/{sid}/state.json"
         read = _wait_for_disk(machine, lambda: (_read_json(machine, state_file) or {}).get("lastSuccess") is not None,
                               CATALOGUE_SECONDS)  # fmt: skip
