@@ -409,6 +409,14 @@ public final class PanelController {
         apply(.closeRequested)
     }
 
+    /// Closes the panel for a window of uDeck's own that opens in its place —
+    /// Settings: uDeck keeps the front and the keyboard for it, and the
+    /// application from before is not brought back over it
+    /// (`KeyboardHandback.Closing.forAWindowOfUDeck`).
+    public func closeForAWindowOfUDeck() {
+        apply(.closeRequested, closing: .forAWindowOfUDeck)
+    }
+
     /// Called by the content when the operator interacts with it, which is what
     /// turns a glance into a working panel.
     public func noteInteraction() {
@@ -1138,6 +1146,7 @@ public final class PanelController {
         case .atThePanel: ""
         case .byAClickHeard: " by a click past the panel"
         case .byAClickThatBroughtAnotherForward: " by a click past the panel that brought another application forward"
+        case .forAWindowOfUDeck: " for a window of uDeck's own"
         }
         let wait = Self.milliseconds(KeyboardHandback.answerSeconds)
         let then = switch handback {
@@ -1174,6 +1183,9 @@ public final class PanelController {
         // reached either of them. Giving up the responder and deactivating is
         // what actually releases it.
         panel.makeFirstResponder(nil)
+        // A window of uDeck's own is opening in the panel's place and needs the
+        // front: deactivating here would hand it to whatever application the
+        // system picks next, and that one would race the window for it.
         NSApp.deactivate()
 
         guard let previous else { return }
