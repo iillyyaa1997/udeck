@@ -7953,3 +7953,45 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+def check_gallery(machine, check_dir, lab):
+    """Pictures of every section of Settings, scrolled through, for the redesign — a lab tree's only, never committed."""
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        frame = ui.place_settings(machine, "placing Settings for the gallery")
+        lab.note(f"   Settings at {frame.x},{frame.y} {frame.width}x{frame.height}")
+        scroll = getattr(machine, "scroll", None)
+        for section in ("general", "opening", "look", "plugins", "about"):
+            ui.click(machine, f"section.{section}", f"opening {section}")
+            machine.sleep(2)
+            for page in range(1, 7):
+                machine.screenshot(check_dir, f"gallery {section} {page}")
+                if page == 1:
+                    (check_dir / f"gallery-{section}.txt").write_text(ui.tree(machine, f"reading {section}"))
+                if scroll is None:
+                    break
+                scroll(frame.x + frame.width * 2 // 3, frame.y + frame.height // 2, -500, f"scrolling {section}")
+                machine.sleep(1)
+            if scroll is not None:
+                for _ in range(8):
+                    scroll(frame.x + frame.width * 2 // 3, frame.y + frame.height // 2, 800, f"back to the top of {section}")
+        ui.click(machine, "section.plugins", "opening plugins again")
+        machine.sleep(1)
+        more = ui.find(machine, f"plugin.{UPTIME}.more", "finding uptime's row")
+        lab.note(f"   uptime's more: {more}")
+        if more is not None:
+            machine.click(*more.middle, "opening uptime's row")
+            machine.sleep(2)
+            for page in range(1, 5):
+                machine.screenshot(check_dir, f"gallery plugins-uptime {page}")
+                if page == 1:
+                    (check_dir / "gallery-plugins-uptime.txt").write_text(ui.tree(machine, "reading uptime"))
+                if scroll is None:
+                    break
+                scroll(frame.x + frame.width * 2 // 3, frame.y + frame.height // 2, -500, "scrolling uptime")
+                machine.sleep(1)
+    finally:
+        scene.close()
