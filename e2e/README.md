@@ -2274,6 +2274,16 @@ launch — and quitting uDeck and starting it again is exactly that question at 
 tenth of the cost. A machine restarting is the login checks' subject, where it
 is the system's own memory of uDeck that has to come through a boot.
 
+`settings.opened-from-the-panel-in-front` puts the Finder in front, opens the
+panel with the hotkey and presses its gear with the pointer, and then asks the
+accessibility helper about uDeck — frontmost, and its focused window "uDeck
+Settings" — and asks again two seconds later, since an application handed the
+keyboard back can come forward after Settings did. It is red for Settings
+opening behind the application from before: the gear used to close the panel as
+an Escape does, which brings that application back (`KeyboardHandback`), and it
+came forward over Settings (the operator, 2026-11-18). The note beside the
+verdict also says which application System Events names in front.
+
 **Nothing on the Opening screen has a name.** Not one control there carries an
 `AXIdentifier`, an `AXTitle` or an `AXDescription` — SwiftUI gives a `Toggle` no
 accessible name and the label beside it in the `Grid` is a separate element — so
