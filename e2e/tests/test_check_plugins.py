@@ -341,7 +341,8 @@ def test_each_card_of_the_pull_requests_copies_asks_in_russian():
 def test_the_panel_buttons_the_check_expects_are_the_panels_own():
     """plugins.failed-run-on-a-fresh-card reads the panel's buttons by the identifiers WorkspaceView gives them."""
     workspace = _source("Sources", "UDeckKit", "Views", "WorkspaceView.swift")
-    assert sorted(re.findall(r'identifier: "(panel\.[A-Za-z]+)"', workspace)) == list(checks.PANEL_BUTTONS)
+    found = re.findall(r'identifier: "(panel\.[A-Za-z]+)"', workspace) + re.findall(r'accessibilityIdentifier\("(panel\.[A-Za-z]+)"\)', workspace)
+    assert sorted(found) == list(checks.PANEL_BUTTONS)
     assert "rectangle.compress.vertical" not in workspace and "controlDensity" not in workspace
 
 

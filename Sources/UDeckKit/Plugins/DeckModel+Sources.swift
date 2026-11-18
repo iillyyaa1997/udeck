@@ -594,6 +594,14 @@ extension DeckModel {
             persistRateLimit()
             guard asked == sourceLookups else { return }
             sourceAdding = .came(came)
+            // Found with a token pasted to add it: added at once (0.8.7), as
+            // after Sign in. Found anonymously, it waits for Add: what it is
+            // is read before it is added.
+            if token != nil, case .found = came {
+                addSourceDraft = nil
+                addSource()
+                return
+            }
             // The token step, for this address alone: after a `404` without
             // a token — it may be private — and after anything said of a
             // token tried, so another can be pasted; the one tried is not

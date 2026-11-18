@@ -771,6 +771,12 @@ public enum Phrase: Sendable, Equatable {
     case tabShowThis
     case controlRefresh
     case controlSettings
+    /// **+ Plugin** at the top of the panel (0.8.7): a plugin put on the tab
+    /// showing, wherever it has cards already — until then only an empty tab
+    /// offered one. **Add plugin** is the same, right-clicked on a free cell.
+    case controlAddPlugin
+    case controlAddPluginHelp
+    case controlAddPluginHere
     case controlSendAway
 
     // MARK: - Verbs

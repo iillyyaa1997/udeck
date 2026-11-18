@@ -803,9 +803,11 @@ public final class DeckModel {
         saveLayout()
     }
 
-    public func addWindow(pluginID: PluginIdentifier, to tabID: UUID) {
+    /// `pluginID`'s window on the tab — in the first gap, or at `cell`, the
+    /// free cell right-clicked (0.8.7).
+    public func addWindow(pluginID: PluginIdentifier, to tabID: UUID, at cell: GridCell? = nil) {
         let hints = plugin(withID: pluginID)?.manifest?.window ?? WindowHints()
-        layout.addWindow(pluginID: pluginID, to: tabID, hints: hints)
+        layout.addWindow(pluginID: pluginID, to: tabID, hints: hints, at: cell)
         saveLayout()
         restartPolling()
         refresh(pluginID)
