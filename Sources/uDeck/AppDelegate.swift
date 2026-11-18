@@ -80,6 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         // The panel sits above ordinary windows, so leaving it open would put
         // it on top of the settings it was asked to show.
+        // And it closes for Settings, not like an Escape: an Escape brings back
+        // the application from before, which then came forward over Settings.
         controller.shell.onOpenSettings = { [weak self] in
             self?.controller.close()
             self?.settings.show()

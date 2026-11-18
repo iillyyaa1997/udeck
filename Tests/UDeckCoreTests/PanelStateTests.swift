@@ -567,7 +567,7 @@ struct KeyboardHandbackTests {
     /// `panel.the-key-after-escape`, run 38321541276).
     @Test("a dismissal with another application in front brings nothing back over it")
     func aDismissalWithAnotherApplicationInFrontDoesNotRestore() {
-        for closing in [KeyboardHandback.Closing.atThePanel, .byAClickHeard, .byAClickThatBroughtAnotherForward] {
+        for closing in KeyboardHandback.Closing.allCases {
             #expect(KeyboardHandback.handback(after: .dismissed, closing: closing, uDeckIsInFront: false) == .leave)
         }
     }
@@ -581,6 +581,19 @@ struct KeyboardHandbackTests {
         for inFront in [true, false] {
             #expect(KeyboardHandback.handback(
                 after: .dismissed, closing: .byAClickThatBroughtAnotherForward, uDeckIsInFront: inFront
+            ) == .leave)
+        }
+    }
+
+    /// Settings opened from the panel's gear, with uDeck in front: the panel
+    /// handed the front back to the Finder from before, and the operator found
+    /// Settings behind it (2026-11-18, «настройки не становятся активным окном»;
+    /// lab check `settings.opened-from-the-panel-in-front`).
+    @Test("a window of uDeck's own opening in the panel's place brings nothing back over it")
+    func aWindowOfUDecksOwnIsNotOverruled() {
+        for inFront in [true, false] {
+            #expect(KeyboardHandback.handback(
+                after: .dismissed, closing: .forAWindowOfUDeck, uDeckIsInFront: inFront
             ) == .leave)
         }
     }
@@ -737,7 +750,7 @@ struct KeyboardHandbackTests {
     @Test("an interruption never brings anything back, in front or not, however it closed")
     func anInterruptionNeverRestores() {
         for inFront in [true, false] {
-            for closing in [KeyboardHandback.Closing.atThePanel, .byAClickHeard, .byAClickThatBroughtAnotherForward] {
+            for closing in KeyboardHandback.Closing.allCases {
                 #expect(KeyboardHandback.handback(
                     after: .interrupted, closing: closing, uDeckIsInFront: inFront
                 ) == .leave)
