@@ -21,6 +21,10 @@ struct DeckGridView: View {
     /// locally so the grid can preview the move without writing a layout file
     /// on every frame.
     @State private var draft: Draft?
+    /// Where the pointer last was over the grid's free space: the cell a
+    /// right-click's **Add plugin** puts the plugin at.
+    @State private var pointer: CGPoint?
+    @Environment(\.strings) private var strings
 
     private struct Draft: Equatable {
         var id: UUID
@@ -42,6 +46,16 @@ struct DeckGridView: View {
 
             ScrollView(.vertical) {
                 ZStack(alignment: .topLeading) {
+                    // The free space, under the windows: right-clicked, **Add
+                    // plugin** puts a plugin at the cell under the pointer
+                    // (0.8.7). A window's own right-click is its own menu.
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .frame(width: geometry.size.width,
+                               height: max(geometry.size.height, metrics.height(cells: max(1, totalRows + 3))))
+                        .onContinuousHover(coordinateSpace: .named(DeckGridView.dragSpace)) { phase in
+                            if case .active(let point) = phase { pointer = point }
+                        }
                     ForEach(windows) { window in
                         let placed = draftApplied(to: window)
                         DeckWindowView(
@@ -89,6 +103,26 @@ struct DeckGridView: View {
                 .animation(.easeOut(duration: 0.12), value: draft)
             }
             .scrollIndicators(.never)
+        }
+    }
+
+    @ViewBuilder
+    private func addHere(_ metrics: GridMetrics) -> some View {
+        let usable = model.plugins.filter { $0.isUsable && $0.manifest != nil }
+        if !usable.isEmpty {
+            Menu(strings(.controlAddPluginHere)) {
+                ForEach(usable, id: \.id) { plugin in
+                    Button(model.displayManifest(for: plugin)?.name ?? plugin.folderName) {
+                        shell.onInteract()
+                        guard let id = plugin.manifest?.id else { return }
+                        let cell = pointer.flatMap {
+                            GridCell.at(x: $0.x, y: $0.y, columnWidth: metrics.columnWidth, rowHeight: metrics.rowHeight,
+                                        spacing: metrics.spacing, columns: metrics.columns)
+                        }
+                        model.addWindow(pluginID: id, to: tab.id, at: cell)
+                    }
+                }
+            }
         }
     }
 

@@ -308,7 +308,7 @@ struct LocalizationTests {
         .islandNothingPlaced, .islandWorstState("warn"),
 
         .tabName, .tabAdd, .tabRename, .tabClose, .tabClickAgainToRename, .tabShowThis,
-        .controlRefresh, .controlSettings, .controlSendAway,
+        .controlRefresh, .controlSettings, .controlAddPlugin, .controlAddPluginHelp, .controlAddPluginHere, .controlSendAway,
 
         .actionSave, .actionUse, .actionDelete, .actionAllow, .actionDecline,
         .actionRun, .actionCancel, .actionClear,
@@ -325,7 +325,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 526,
+        #expect(Self.all.count == 529,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

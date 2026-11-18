@@ -652,6 +652,9 @@ struct English: Vocabulary {
         case .tabShowThis: "Show this tab"
         case .controlRefresh: "Refresh everything now"
         case .controlSettings: "Settings"
+        case .controlAddPlugin: "+ Plugin"
+        case .controlAddPluginHelp: "Add a plugin to this tab"
+        case .controlAddPluginHere: "Add plugin"
         case .controlSendAway: "Send the panel away"
 
         // Verbs

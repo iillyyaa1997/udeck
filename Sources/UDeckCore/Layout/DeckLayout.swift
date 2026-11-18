@@ -133,6 +133,25 @@ public struct DeckLayout: Codable, Equatable, Sendable {
         return window.id
     }
 
+    /// `addWindow`, put where the operator asked — the cell they right-clicked
+    /// (0.8.7): its column as given, kept inside the grid for the window's
+    /// width, and its row as given, the window then settling upward as every
+    /// window does (`place`).
+    @discardableResult
+    public mutating func addWindow(
+        pluginID: PluginIdentifier,
+        to tabID: UUID,
+        hints: WindowHints = WindowHints(),
+        at cell: GridCell?
+    ) -> UUID? {
+        guard let id = addWindow(pluginID: pluginID, to: tabID, hints: hints) else { return nil }
+        if let cell {
+            let width = min(max(1, hints.defaultWidth), columns)
+            place(windowID: id, in: tabID, column: min(max(0, cell.column), columns - width), row: max(0, cell.row))
+        }
+        return id
+    }
+
     public mutating func removeWindow(_ windowID: UUID, from tabID: UUID) {
         guard let index = index(ofTab: tabID) else { return }
         tabs[index].windows.removeAll { $0.id == windowID }
@@ -255,5 +274,30 @@ public enum WindowRule {
         case .pluginRemovedThroughUDeck(let id):
             return Set(layout.tabs.flatMap { $0.windows.filter { $0.pluginID == id }.map(\.id) })
         }
+    }
+}
+
+
+/// A cell of the grid: where a click lands, in columns and rows.
+public struct GridCell: Equatable, Sendable {
+    public var column: Int
+    public var row: Int
+
+    public init(column: Int, row: Int) {
+        self.column = column
+        self.row = row
+    }
+
+    /// The cell under a point of the grid — `x`, `y` in points from its
+    /// top-left — for columns `columnWidth` wide and rows `rowHeight` high with
+    /// `spacing` between them; a point in the gap belongs to the cell before it.
+    /// Nil for a point outside the grid's columns or above it.
+    public static func at(
+        x: Double, y: Double, columnWidth: Double, rowHeight: Double, spacing: Double, columns: Int
+    ) -> GridCell? {
+        guard x >= 0, y >= 0, columnWidth > 0, rowHeight > 0 else { return nil }
+        let column = Int(x / (columnWidth + spacing))
+        guard column < columns else { return nil }
+        return GridCell(column: column, row: Int(y / (rowHeight + spacing)))
     }
 }
