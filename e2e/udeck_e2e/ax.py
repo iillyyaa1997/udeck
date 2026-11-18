@@ -175,6 +175,22 @@ def window_titles(machine: Any, process: str, step: str) -> list[str]:
     return [w["title"] for w in found]
 
 
+def stack(machine: Any, step: str) -> list[dict[str, Any]]:
+    """The ordinary windows on screen, the top one first, as the window server orders them: owner, pid, frame.
+
+    The one question about windows no accessibility attribute answers: an
+    application can be frontmost with its window focused and still have another
+    application's window over it (run 44291798885 — the Finder's, over Settings).
+    """
+    answer = ask(machine, ["stack"], step)
+    found = answer.get("windows")
+    if not isinstance(found, list) or not all(
+        isinstance(w, dict) and isinstance(w.get("owner"), str) and isinstance(w.get("frame"), list) for w in found
+    ):
+        raise LabError(step, f"the accessibility helper's window stack could not be read: {answer!r}")
+    return found
+
+
 def window_spec(window: str, panel: str) -> str:
     """How the helper names a window: the panel by its subrole, any other by its title."""
     return "panel" if window == panel else f"title={window}"
