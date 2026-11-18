@@ -184,6 +184,26 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         // keyboard, so this is the one place activation is unambiguously right.
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        tellWhoIsInFront("presented")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            NSApp.activate(ignoringOtherApps: true)
+            self?.window?.makeKeyAndOrderFront(nil)
+            self?.tellWhoIsInFront("activated again")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.tellWhoIsInFront("half a second after it was presented")
+        }
+    }
+
+    /// Who the system says is in front, in uDeck's log: the menu bar's owner is
+    /// the application the operator sees as active, and it is not always the
+    /// one the workspace calls frontmost — an accessory that is already active
+    /// does not take the menu bar by becoming regular (the lab, 2026-11-18).
+    private func tellWhoIsInFront(_ when: String) {
+        let workspace = NSWorkspace.shared
+        DeckLog.panel.debug(
+            "Settings \(when, privacy: .public): menu bar \(workspace.menuBarOwningApplication?.localizedName ?? "nobody", privacy: .public), frontmost \(workspace.frontmostApplication?.localizedName ?? "nobody", privacy: .public), active \(NSApp.isActive, privacy: .public), key window \(NSApp.keyWindow?.title ?? "none", privacy: .public)"
+        )
     }
 
     public func windowWillClose(_ notification: Notification) {
