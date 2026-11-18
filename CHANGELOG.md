@@ -8,6 +8,23 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.8.8] — 2026-11-18
+
+Settings opened from the panel comes up in front. 0.8.8 adds nothing to the
+plugin contract. The update to it goes by 0.8.7's rule.
+
+- **Settings opened from the panel's gear is the active window.** It came up
+  behind the application you were in before the panel (2026-11-18: "when I
+  press the settings, they do not become the active window"): the panel gave
+  the keyboard back to that application as it closed, and its window came
+  forward over Settings. Now the panel keeps the keyboard for Settings, which
+  comes up on top with uDeck's menus in the menu bar; closing Settings gives
+  the keyboard back to the application from before. The same goes for
+  **Settings…** in uDeck's menu and for a notification about an update.
+- **Lab**: `settings.opened-from-the-panel-in-front`, and a command of the
+  accessibility helper's own that reads the window server's order of windows —
+  which window is over which, something no accessibility attribute says.
+
 ## [0.8.7] — 2026-11-18
 
 A plugin can be put on a tab that has cards already, and a source is added at
