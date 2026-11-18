@@ -88,9 +88,14 @@ every stretch of quiet in this lab rests on: **a uDeck that was running and is
 gone is uDeck failing** (`panel.expect_it_was_still_there`). A machine that
 cannot be reached, or a window on the log that never started, is the lab's and
 says so.
+
+**A third check asks about the window itself, not a setting in it.**
+`settings.opened-from-the-panel-in-front` opens Settings the way the operator
+does most — the panel's gear — with another application in front before, and
+asks whether Settings is then where the keyboard is.
 """
 
-from udeck_e2e import app, config, panel, ui, updates
+from udeck_e2e import app, ax, config, panel, probes, ui, updates
 from udeck_e2e.errors import CheckFailed, LabError, expect
 
 VERSION = ("0.4.1", "6")
@@ -584,3 +589,119 @@ def _keep(check_dir, name, text, lab):
         (check_dir / name).write_text(text)
     except OSError as error:
         lab.note(f"   {name} could not be written to {check_dir}: {error}")
+
+
+def check_opened_from_the_panel_in_front(machine, check_dir, lab):
+    """The panel's gear opens Settings in front: uDeck the active application, its window on top and focused.
+
+    The operator, 2026-11-18, on 0.8.7: «Когда я нажимаю на настройки, то настройки не становятся активным окном».
+    The Finder is brought forward first (`panel.bring_forward`), so that there is an application to take the front
+    from; the panel is opened with the hotkey and its gear pressed with the pointer. Then three answers, which have
+    to agree within five seconds, since activation is not instant, and still agree two seconds later, since an
+    application handed the keyboard back can come forward after Settings did:
+
+    * System Events names uDeck in front — the application whose menus are in the menu bar;
+    * the window server's top ordinary window is uDeck's, and has the settings window's frame (`ax.stack`);
+    * the accessibility helper's uDeck is frontmost, with "uDeck Settings" its focused window.
+
+    Any one alone was measured green on a uDeck the operator would call wrong (2026-11-18, a runner): with the gear
+    closing the panel as an Escape does, uDeck was frontmost, focused and in the menu bar while the Finder's window
+    lay over Settings (runs 44288279351, 44291798885); with the panel letting go of nothing, Settings was on top and
+    focused while the menu bar was the Finder's (runs 44288772109, 44291812357).
+
+    Then Settings is closed with its close button, and the Finder — where the keyboard was before the panel — has to
+    be named in front within three seconds: uDeck hands the front to the Dock for a moment to take the menu bar, and
+    the next in the system's own order could otherwise be the Dock, with the keyboard reaching nobody.
+
+    **Red for**: Settings opened behind another application's window, or in front of it without uDeck becoming the
+    active application; the panel left open over it; and the keyboard not back with the Finder once it closes.
+    Not asked: whether a key typed reaches Settings — nothing in the General pane takes typing.
+    """
+    step = "opening Settings from the panel's gear"
+    log = _prepare(machine, check_dir, lab)
+    story = panel.Story(machine, log, check_dir, lab.note)
+    try:
+        panel.bring_forward(machine, config.THE_DESKTOP, f"putting the {config.THE_DESKTOP} in front")
+        panel.park_in_the_middle(machine)
+        panel.press_the_chord(machine, config.HOTKEY_KEY_CODE, "opening the panel")
+        gear = ui.wait_for(machine, "panel.settings", "waiting for the panel's gear", ui.PANEL)
+        story.take("opening the panel")
+        pid = sorted(app.running_pids(machine, "asking for uDeck's pid"))
+        machine.click(*gear.middle, "pressing the panel's gear")
+        deadline = machine.clock() + 5
+        seen = _in_front(machine, pid, step)
+        while not _all_in_front(seen) and machine.clock() < deadline:
+            machine.sleep(0.5)
+            seen = _in_front(machine, pid, step)
+        first = seen
+        machine.sleep(2)
+        later = _in_front(machine, pid, step)
+        gear_story = story.take("pressing the panel's gear")
+        machine.screenshot(check_dir, "Settings opened from the gear")
+        lab.note(f"   within five seconds {_said(first)}; two seconds later {_said(later)}")
+        expect("-> collapsed on closeRequested" in gear_story,
+               f"the panel did not close when its gear was pressed: {panel.short(gear_story)}")
+        expect(first["settings"] is not None, f"the gear opened no settings window: {_said(first)}")
+        expect(_all_in_front(first), f"Settings opened from the panel's gear is not in front within five seconds: "
+                                     f"{_said(first)}")
+        expect(_all_in_front(later), f"Settings opened from the panel's gear was in front and is not two seconds "
+                                     f"later: {_said(later)}")
+
+        close = next((w for w in ui.walk(machine, "finding Settings' close button", depth=1)
+                      if w.subrole == "AXCloseButton" and w.frame), None)
+        expect(close is not None, "Settings has no close button to press")
+        x, y, width, height = close.frame
+        machine.click(int(x + width / 2), int(y + height / 2), "closing Settings with its close button")
+        deadline = machine.clock() + 3
+        front = probes.frontmost(machine, "asking who is in front once Settings closed")
+        while front != config.THE_DESKTOP and machine.clock() < deadline:
+            machine.sleep(0.5)
+            front = probes.frontmost(machine, "asking who is in front once Settings closed")
+        story.take("closing Settings")
+        machine.screenshot(check_dir, "Settings closed")
+        expect(front == config.THE_DESKTOP,
+               f"Settings closed and System Events names {front!r} in front, not the {config.THE_DESKTOP} the panel "
+               "took the keyboard from")
+        lab.note(f"   Settings opened from the gear in front, and closed back to the {config.THE_DESKTOP}")
+    finally:
+        story.keep()
+
+
+def _in_front(machine, pid, step):
+    """The three answers about who is in front, and the settings window's frame if it is open."""
+    windows = ax.ask(machine, ["windows", ui.PROCESS], step).get("windows") or []
+    settings = next((w.get("frame") for w in windows if w.get("title") == ui.SETTINGS_WINDOW), None)
+    focused = ax.ask(machine, ["focused", ui.PROCESS], step) if settings is not None else {}
+    return {
+        "settings": settings,
+        "pid": pid,
+        "system": probes.frontmost(machine, step),
+        "stack": ax.stack(machine, step)[:4],
+        "frontmost": focused.get("frontmost"),
+        "focused": focused.get("focused"),
+    }
+
+
+def _all_in_front(seen):
+    top = seen["stack"][0] if seen["stack"] else {}
+    return (
+        seen["settings"] is not None
+        and seen["system"] == ui.PROCESS
+        and [str(top.get("pid"))] == seen["pid"]
+        and _same_frame(top.get("frame"), seen["settings"])
+        and seen["frontmost"] == "true"
+        and seen["focused"] == ui.SETTINGS_WINDOW
+    )
+
+
+def _same_frame(one, other, slack=2):
+    return (isinstance(one, list) and isinstance(other, list) and len(one) == len(other) == 4
+            and all(abs(a - b) <= slack for a, b in zip(one, other)))
+
+
+def _said(seen):
+    stack = [f"{w.get('owner')} {w.get('frame')}" for w in seen["stack"]]
+    return (
+        f"System Events names {seen['system']!r} in front, the window stack from the top is {stack}, "
+        f"Settings at {seen['settings']}, uDeck says frontmost {seen['frontmost']!r} with {seen['focused']!r} focused"
+    )

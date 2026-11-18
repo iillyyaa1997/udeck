@@ -2274,6 +2274,29 @@ launch — and quitting uDeck and starting it again is exactly that question at 
 tenth of the cost. A machine restarting is the login checks' subject, where it
 is the system's own memory of uDeck that has to come through a boot.
 
+`settings.opened-from-the-panel-in-front` puts the Finder in front, opens the
+panel with the hotkey and presses its gear with the pointer, and then asks three
+things that have to agree, for up to five seconds and once more two seconds
+later: System Events names uDeck in front (the application whose menus are in the
+menu bar), the window server's top ordinary window is uDeck's (`ax.stack`, a
+command of the accessibility helper's own, since no accessibility attribute says
+which window is over which), and the helper's uDeck is frontmost with "uDeck
+Settings" focused. Each one alone was green on a uDeck the operator would call
+wrong (2026-11-18). With the gear closing the panel as an Escape does, the panel
+brought the Finder back and the Finder's window came up over Settings, while
+uDeck was frontmost, focused and in the menu bar (run 44291798885). With the
+panel letting go of nothing, Settings was on top and focused under the Finder's
+menus: an accessory that is active already does not take the menu bar by
+becoming regular, and activating again did not change that (runs 44291812357,
+44291841616, 44291873291). The top window has to be uDeck's by its pid and the
+settings window's by its frame, the three have to agree within five seconds and
+again two seconds later, and the panel has to have closed. Then Settings is
+closed with its close button and the Finder has to be named in front again
+within three seconds: uDeck hands the front to the Dock for a moment to take the
+menu bar, and the next in the system's own order could be the Dock. Not asked:
+whether a key typed reaches Settings, since nothing in the General pane takes
+typing.
+
 **Nothing on the Opening screen has a name.** Not one control there carries an
 `AXIdentifier`, an `AXTitle` or an `AXDescription` — SwiftUI gives a `Toggle` no
 accessible name and the label beside it in the `Grid` is a separate element — so

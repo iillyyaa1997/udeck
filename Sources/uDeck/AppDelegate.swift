@@ -80,16 +80,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         // The panel sits above ordinary windows, so leaving it open would put
         // it on top of the settings it was asked to show.
+        // And it closes for Settings, not like an Escape: an Escape brings back
+        // the application from before, which then came forward over Settings.
         controller.shell.onOpenSettings = { [weak self] in
-            self?.controller.close()
-            self?.settings.show()
+            guard let self else { return }
+            settings.show(after: controller.closeForAWindowOfUDeck())
         }
         // A notification about an update speaks uDeck's language, and a click
         // on it opens the updates in Settings → About.
         updater.notifier.strings = { [model] in model.strings }
         updater.notifier.onOpen = { [weak self] in
-            self?.controller.close()
-            self?.settings.showUpdates()
+            guard let self else { return }
+            settings.showUpdates(after: controller.closeForAWindowOfUDeck())
         }
         // Noted once the notification can be sent: a restart into a newer
         // version put in by itself is said now.
@@ -255,7 +257,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showPanel() { controller.reveal() }
     @objc private func refreshAll() { model.refreshAll(reason: .manual) }
     @objc private func openPlugins() { model.revealPluginsDirectory() }
-    @objc private func openSettings() { settings.show() }
+    /// The status item's Settings…, through the panel as the gear goes: a click
+    /// on the status item can have closed a held panel and left the application
+    /// from before waiting to come back over Settings.
+    @objc private func openSettings() { settings.show(after: controller.closeForAWindowOfUDeck()) }
 
     /// The state of the window machinery, in one paste-able block.
     ///

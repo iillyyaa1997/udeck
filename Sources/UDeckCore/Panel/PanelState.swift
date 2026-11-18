@@ -448,7 +448,7 @@ public enum ApplicationSwitch {
 /// of 14 (the same runs).
 public enum KeyboardHandback {
     /// Who closed the panel, as far as the keyboard is concerned.
-    public enum Closing: String, Sendable {
+    public enum Closing: String, Sendable, CaseIterable {
         /// Anything but a click past the panel: Escape, ⌘W, the shortcut.
         case atThePanel
         /// A click past the panel, heard by uDeck's own click monitor: what it
@@ -457,6 +457,13 @@ public enum KeyboardHandback {
         /// A click past the panel, known by the workspace's news that another
         /// application came forward on it.
         case byAClickThatBroughtAnotherForward
+        /// A window of uDeck's own opening in the panel's place — Settings, from
+        /// the panel's gear, the status item or a notice about an update. It
+        /// takes the front, so nothing comes back over it: brought back as an
+        /// Escape brings it back, the Finder's window came up over Settings
+        /// opened from the gear (the operator, 2026-11-18: «настройки не
+        /// становятся активным окном»; the lab, run 44291798885).
+        case forAWindowOfUDeck
     }
 
     /// What becomes of the application from before.
@@ -491,7 +498,7 @@ public enum KeyboardHandback {
         switch closing {
         case .atThePanel: return .restore
         case .byAClickHeard: return .restoreUnlessAnotherComesForward
-        case .byAClickThatBroughtAnotherForward: return .leave
+        case .byAClickThatBroughtAnotherForward, .forAWindowOfUDeck: return .leave
         }
     }
 
