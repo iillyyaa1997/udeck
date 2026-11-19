@@ -57,6 +57,16 @@ public final class DeckModel {
     /// another, which is what keeps `installed.json` and the plugins folder
     /// from ever being written by two of them at once.
     public internal(set) var busyPlugin: String?
+    /// **Update all** going through the copies an update waits for, one after
+    /// another (`updateAll`), and the plugins it left to their rows because
+    /// each warns first.
+    public internal(set) var updatingAll = false
+    public internal(set) var updateAllLeft: [String] = []
+    /// Settings → Plugins: whose earlier versions each plugin's card lists, by
+    /// the source the list was opened for (`InstalledRepositoryControls`) —
+    /// kept here rather than on the card, which goes with a look at another
+    /// tab or another plugin; emptied when the pane goes.
+    public var earlierVersionsOpen: [String: String] = [:]
 
     /// What of uDeck's is under way that a restart into an update would cut
     /// short, the first of them — the panel out, Settings in use (which the
@@ -66,7 +76,9 @@ public final class DeckModel {
         RestartHold.first(
             panelOut: panelIsVisible, settingsInUse: settingsInUse,
             signIn: signIns.values.contains(where: \.isUnderWay),
-            pluginOperation: busyPlugin != nil, cardAction: actionProcesses.anyRunning
+            // Between two of **Update all**'s copies nothing runs, and the
+            // next is about to.
+            pluginOperation: busyPlugin != nil || updatingAll, cardAction: actionProcesses.anyRunning
         )
     }
 
@@ -1030,6 +1042,12 @@ public final class DeckModel {
     public func revealPluginsDirectory() {
         try? FileManager.default.createDirectory(at: paths.plugins, withIntermediateDirectories: true)
         NSWorkspace.shared.activateFileViewerSelecting([paths.plugins])
+    }
+
+    /// **Show in Finder** on a plugin's card: its folder, selected — for a
+    /// linked one, the folder the link leads to, where its files are.
+    public func revealPlugin(_ plugin: DiscoveredPlugin) {
+        NSWorkspace.shared.activateFileViewerSelecting([plugin.directory])
     }
 
     /// A path as the operator writes it: the home folder as `~`.
