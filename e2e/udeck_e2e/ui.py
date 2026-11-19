@@ -37,21 +37,16 @@ System Events is still what *types*: a keystroke is not something the
 accessibility API can make (`choose_folder`, `type_text`, and the chords in
 `probes`).
 
-**And some of uDeck's controls have no name at all.** On the Opening screen not
-one control carries an `AXIdentifier`, an `AXTitle` or an `AXDescription`
-(measured 2026-09-25: every row of the walk with all three empty) — SwiftUI
-gives a `Toggle` no accessible name of its own, and the label beside it in the
-`Grid` is a separate element. The identifiers on that screen belong to the
-sidebar and to nothing else. So those controls are found by *where they sit*
-among their own kind, in the order `OpeningSettings` draws them, and the order
-itself is held against that file by the lab's own tests rather than observed
-here. What *is* observed before anything is clicked is that the row is at rest:
-it has to read what uDeck's shipped defaults read, or the lab refuses to click.
-That catches a pane still being built, a pane that is not this one and a machine
-an earlier check left changed — all of them the lab failing to find the control,
-never a verdict about uDeck. It does not catch a row laid out in another order,
-and it cannot: four switches that all read on read the same however they are
-arranged (`config.OPENING_SWITCHES_AT_REST` says so in its own words).
+**The Opening screen names its controls.** Until the redesign (stage 2,
+2026-11-19) not one control there carried an `AXIdentifier`, an `AXTitle` or an
+`AXDescription`, and the lab found them by where they sat among their own kind,
+holding their order against the source. Now each switch carries `opening.<the
+setting it writes>` and the shortcut field `opening.shortcut`, so they are found
+by name in either language. What is still observed before anything is clicked
+is that they are at rest: they have to read what uDeck's shipped defaults read,
+or the lab refuses to click. That catches a pane still being built, a pane that
+is not this one and a machine an earlier check left changed — all of them the
+lab failing to find the control, never a verdict about uDeck.
 
 **A click at coordinates can miss, so it is read back.** Everything above
 answers *where* a control is at the moment it was asked; the click lands a
@@ -575,81 +570,63 @@ def controls(dump: str, step: str = "reading uDeck's settings window") -> list[E
     return found
 
 
-def modifier_buttons(dump: str, step: str = "reading the shortcut's modifiers") -> list[Element]:
-    """The shortcut's four modifier buttons, left to right.
-
-    They are the only `AXCheckBox` with the `AXToggle` subrole anywhere on the
-    Opening screen — `.toggleStyle(.button)` in `OpeningSettings`, and nothing
-    else on that screen is drawn that way — so the role pair finds the row and
-    `x` puts them in the order `HotKeyModifier.allCases.sorted()` laid them out.
-    """
-    buttons = [row for row in controls(dump, step) if row.role == "AXCheckBox" and row.subrole == "AXToggle"]
-    return sorted(buttons, key=lambda row: row.x)
-
-
-def opening_switches(dump: str, step: str = "reading the Opening screen's switches") -> list[Element]:
-    """The Opening screen's four plain checkboxes, top to bottom.
-
-    Plain: an `AXCheckBox` with no subrole and no identifier, which on this
-    screen is exactly the four `Toggle`s that are not the modifier buttons. `y`
-    puts them in the order `OpeningSettings` lays them out.
-    """
-    found = [
-        row for row in controls(dump, step)
-        if row.role == "AXCheckBox" and not row.subrole and not row.identifier
-    ]  # fmt: skip
-    return sorted(found, key=lambda row: row.y)
-
-
 @dataclass(frozen=True)
 class OpeningScreen:
-    """uDeck's Opening settings screen, with its unnamed controls placed.
+    """uDeck's Opening settings screen, with the controls a check can reach.
 
-    The two rows a check can reach: the shortcut's modifier buttons and the
-    plain switches. Each is named by the setting it writes rather than by the
-    sentence beside it, because the sentences are translated and the settings
-    are not — `config.HOTKEY_MODIFIER_ROW` and `config.OPENING_SWITCHES` hold
-    the two orders, against `OpeningSettings` in SettingsView.swift.
-
-    `dump` is the walk that found them, for the check to keep as evidence.
+    The switches, each named by the setting it writes rather than by the sentence
+    beside it — the sentences are translated and the settings are not — and the
+    shortcut field. `dump` is the walk that found them, for the check to keep as
+    evidence.
     """
 
     dump: str
-    modifiers: tuple[Element, ...]
     switches: tuple[Element, ...]
-
-    def modifier(self, name: str) -> Element:
-        """One of ⌃⌥⇧⌘, by the name uDeck's settings file spells it with."""
-        return self.modifiers[config.HOTKEY_MODIFIER_ROW.index(name)]
+    shortcut: Element
 
     def switch(self, name: str) -> Element:
-        """One of the four plain switches, by the setting it writes."""
+        """One of the switches, by the setting it writes (`config.OPENING_SWITCHES`)."""
         return self.switches[config.OPENING_SWITCHES.index(name)]
+
+
+def opening_controls(dump: str, step: str = "reading the Opening screen") -> tuple[list[Element | None], Element | None]:
+    """The Opening screen's switches in `config.OPENING_SWITCHES`' order, and its
+    shortcut field — each `None` where the walk has no such control.
+
+    By identifier and role together: a switch is the `AXCheckBox` carrying
+    `opening.<setting>`, the field the `AXButton` carrying `opening.shortcut`. A
+    name found twice is the lab's error rather than a guess at which one is the
+    control, because a click on the other would be a click somewhere else.
+    """
+    named: dict[str, list[Element]] = {}
+    for row in controls(dump, step):
+        if row.identifier.startswith("opening."):
+            named.setdefault(row.identifier, []).append(row)
+    for identifier, rows in named.items():
+        if len(rows) > 1:
+            raise LabError(step, f"{len(rows)} controls carry '{identifier}', where there is one: {[str(r) for r in rows]}")
+
+    def one(identifier: str, role: str) -> Element | None:
+        rows = named.get(identifier, [])
+        return rows[0] if rows and rows[0].role == role else None
+
+    switches = [one(f"opening.{name}", "AXCheckBox") for name in config.OPENING_SWITCHES]
+    return switches, one(config.OPENING_SHORTCUT, "AXButton")
 
 
 def opening(machine: Any, step: str, at_rest: bool = True,
             seconds: float = config.UI_APPEAR_SECONDS) -> OpeningScreen:
-    """The settings window, open on Opening, walked, with its unnamed controls found.
+    """The settings window, open on Opening, walked, with its controls found.
 
     The wait is for the screen itself and not for a fixed number of seconds:
     choosing a section in the sidebar is a click, and what follows it is SwiftUI
-    building the pane. So the walk is repeated until both rows are there, which
-    on a machine that is answering is the first walk.
+    building the pane. So the walk is repeated until every switch and the field
+    are there, which on a machine that is answering is the first walk.
 
     `at_rest` is the caller saying it expects uDeck's shipped defaults: the
-    modifier row reads on, on, off, off for the default `{control, option}`
-    binding, and all four switches read on. A caller that has already changed
-    one of them passes False, because the row no longer reads what a default one
-    does — and then the shape alone is what names it.
-
-    **What that reading proves, exactly.** That these eight controls are uDeck's
-    own and that nothing has moved them yet: a pane still being built, a
-    different pane, or a machine a neighbouring check left changed all read
-    something else, and then nothing here is clicked. It does *not* prove the
-    order within either row, and cannot — all four switches read alike, and the
-    modifier row survives swapping its two ons — so `switch` and `modifier`
-    below take the order from `config`, which holds it against the source that
-    draws the row (`test_the_plain_switches_are_in_the_order_uDeck_lays_them_out`).
+    switches read `config.OPENING_SWITCHES_AT_REST` and the field reads
+    `config.THE_HOTKEY`. A caller that has already changed one of them passes
+    False, and then their presence alone is what names the screen.
 
     Anything that goes wrong here is the lab's: a screen it could not find the
     controls on is a screen it must not click on, and a check that clicked
@@ -661,32 +638,34 @@ def opening(machine: Any, step: str, at_rest: bool = True,
     deadline = machine.clock() + seconds
     while True:
         dump = tree(machine, step)
-        modifiers = modifier_buttons(dump, step)
-        switches = opening_switches(dump, step)
-        if len(modifiers) == len(config.HOTKEY_MODIFIER_ROW) and len(switches) == len(config.OPENING_SWITCHES):
+        switches, shortcut = opening_controls(dump, step)
+        missing = [
+            f"opening.{name}" for name, found in zip(config.OPENING_SWITCHES, switches) if found is None
+        ] + ([config.OPENING_SHORTCUT] if shortcut is None else [])
+        if not missing:
             break
         if machine.clock() >= deadline:
             raise LabError(
                 step,
-                f"the Opening screen did not appear within {seconds:.0f}s: {len(modifiers)} modifier buttons "
-                f"and {len(switches)} switches, where it has {len(config.HOTKEY_MODIFIER_ROW)} and "
-                f"{len(config.OPENING_SWITCHES)}",
+                f"the Opening screen did not appear within {seconds:.0f}s: no {', '.join(missing)} on it",
             )
         machine.sleep(1)
 
     if at_rest:
-        for found, wanted, what in (
-            (modifiers, config.HOTKEY_MODIFIER_ROW_AT_REST, "modifier buttons"),
-            (switches, config.OPENING_SWITCHES_AT_REST, "switches"),
-        ):
-            reads = tuple(row.value for row in found)
-            if reads != wanted:
-                raise LabError(
-                    step,
-                    f"the Opening screen's {what} read {reads}, and a machine at rest reads {wanted} — "
-                    f"this is not the row, or the machine is not at rest: {[str(row) for row in found]}",
-                )
-    return OpeningScreen(dump, tuple(modifiers), tuple(switches))
+        reads = tuple(row.value for row in switches)
+        if reads != config.OPENING_SWITCHES_AT_REST:
+            raise LabError(
+                step,
+                f"the Opening screen's switches read {reads}, and a machine at rest reads "
+                f"{config.OPENING_SWITCHES_AT_REST} — the machine is not at rest: {[str(row) for row in switches]}",
+            )
+        if shortcut.value != config.THE_HOTKEY:
+            raise LabError(
+                step,
+                f"the shortcut field reads {shortcut.value!r}, and on a machine at rest it reads "
+                f"{config.THE_HOTKEY!r} — the machine is not at rest: {shortcut}",
+            )
+    return OpeningScreen(dump, tuple(switches), shortcut)
 
 
 def where_it_was(dump: str, control: Element, step: str) -> Element | None:

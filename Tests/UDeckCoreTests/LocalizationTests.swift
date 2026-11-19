@@ -32,10 +32,12 @@ struct LocalizationTests {
         .settingsWindowTitle, .sectionGeneral, .sectionOpening, .sectionLook, .sectionPlugins,
         .sectionAbout,
 
-        .openingGesture, .openingGestureToggle, .openingPauseFirst, .openingPushPast,
-        .openingStayQuiet, .openingShortcut, .openingShortcutToggle, .openingKeys,
-        .openingNeedsModifier, .openingAlso, .openingRetract, .openingFullscreen,
-        .openingKeepPolling, .openingPermissions,
+        .openingEdgeGroup, .openingGestureToggle, .openingWhereItFires, .openingPauseFirst,
+        .openingPauseHelp, .openingPushPast, .openingStayQuiet, .openingShortcutGroup,
+        .openingShortcutToggle, .openingShortcutHint, .openingShortcutRecordingHint,
+        .openingShortcutPrompt, .openingShortcutField("⌃⌥U"), .openingNeedsModifier,
+        .openingNotBindable, .openingShortcutTaken("⌃⌥U"), .openingBehaviour, .openingRetract,
+        .openingFullscreen, .openingKeepPolling, .openingPermissions,
 
         .generalStartup, .generalOpenAtLogin,
         .generalOpensWhich("/Applications/uDeck.app", opens: true),
@@ -325,7 +327,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 531,
+        #expect(Self.all.count == 538,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

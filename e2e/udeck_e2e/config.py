@@ -700,45 +700,37 @@ VM_LIMIT_RETRY_WAIT_SECONDS = 15
 # --- The settings window ----------------------------------------------------------
 #
 # What the operator changes, changed the way he changes it. Nothing here is a
-# coordinate: the controls on the Opening screen carry no accessibility
-# identifier, no title and no description (measured 2026-09-25,
-# .build/e2e/20260925-005230Z), so the lab finds them by where they sit among
-# their own kind — which is what the two orders below are for — and reads the
-# row back before it clicks anything (`ui.opening`).
+# coordinate. Since the redesign (stage 2, 2026-11-19) every control on the
+# Opening screen carries an identifier — each switch `opening.<the setting it
+# writes>`, the shortcut field `opening.shortcut` (`OpeningSettings` in
+# SettingsView.swift) — so the lab finds them by name, in either language, where
+# it used to count unnamed checkboxes down the screen and hold their order
+# against the source.
 #
-# The two readings beside them are a *guard*, and it is worth being exact about
-# what they can catch. They say that the row found is a row of uDeck's own
-# controls on a machine nobody has touched: a screen still being built, a pane
-# that is not this one, or a machine some earlier check left changed all read
-# something else and the lab refuses to click. They cannot say which control in
-# the row is which — four switches that all read on read the same in any order,
-# and on, on, off, off survives swapping the two ons — so the order itself is
-# not observed here at all. It comes from the source that draws the row
-# (`OpeningSettings` in SettingsView.swift), and what holds it is the lab's own
-# tests reading that file back: `test_the_plain_switches_are_in_the_order_uDeck_lays_them_out`
-# and `test_the_modifier_row_is_in_the_order_uDeck_lays_it_out`.
+# The readings beside them are a *guard*: they say the controls found are uDeck's
+# own on a machine nobody has touched. A screen still being built, a pane that is
+# not this one, or a machine some earlier check left changed all read something
+# else, and then the lab refuses to click (`ui.opening`).
 
-# The shortcut's four modifier buttons, left to right, by the names uDeck's
-# settings file spells them with. The order is `HotKeyModifier.allCases.sorted()`
-# — `HotKeyModifier.order`, which is macOS's own order for the symbols ⌃⌥⇧⌘ —
-# laid out by `ForEach` in `OpeningSettings` (SettingsView.swift).
-HOTKEY_MODIFIER_ROW = ("control", "option", "shift", "command")
-# What that row reads on a machine nothing has changed: uDeck's default binding
-# is {control, option} (`HotKeyBinding.init`), so the row reads on, on, off,
-# off. It is a guard against a screen that is not at rest and not a way of
-# telling the four apart — the same four values in the other order read the
-# same.
-HOTKEY_MODIFIER_ROW_AT_REST = ("1", "1", "0", "0")
+# The Opening screen's switches, by the setting each one writes: the gesture, the
+# shortcut, and the Behaviour group — retract when you switch applications, open
+# over fullscreen ones, keep running plugins while the panel is away (moved there
+# from Plugins with the redesign).
+OPENING_SWITCHES = (
+    "gesture.enabled", "hotkey.enabled", "collapseOnAppSwitch", "gesture.enabledInFullscreen", "pollWhileCollapsed",
+)
+# What they read on a machine at rest: uDeck's defaults (`AppSettings.init`,
+# `GestureTuning.init`, `HotKeyBinding.init`) — the first four on, keeping
+# plugins running off.
+OPENING_SWITCHES_AT_REST = ("1", "1", "1", "1", "0")
+# The shortcut field, which reads the shortcut (`HotKeyBinding.displayName`) and,
+# while it records, what is pressed so far or a prompt.
+OPENING_SHORTCUT = "opening.shortcut"
 
-# The Opening screen's four plain checkboxes, top to bottom, by the setting each
-# one writes: the gesture, the shortcut, "retract when you switch applications"
-# and "while another application is full screen" (`OpeningSettings`).
-OPENING_SWITCHES = ("gesture.enabled", "hotkey.enabled", "collapseOnAppSwitch", "gesture.enabledInFullscreen")
-# And what they read on a machine at rest: every one of the four is true by
-# default (`AppSettings.init`, `GestureTuning.init`). All four alike, so this
-# reading says the row is untouched and says nothing whatever about which of
-# them is which.
-OPENING_SWITCHES_AT_REST = ("1", "1", "1", "1")
+# The modifiers in macOS's order for the symbols ⌃⌥⇧⌘ (`HotKeyModifier.order`),
+# by the names uDeck's settings file spells them with: how the lab spells a
+# shortcut read out of that file the way uDeck spells it.
+HOTKEY_MODIFIER_ORDER = ("control", "option", "shift", "command")
 
 # The switch a check changes when it asks whether a setting survives uDeck being
 # restarted, and the key it writes in the settings file.
@@ -754,7 +746,8 @@ OPENING_SWITCHES_AT_REST = ("1", "1", "1", "1")
 # (measured 2026-09-25, .build/e2e/20260925-004441Z).
 THE_SWITCH = "collapseOnAppSwitch"
 
-# The modifier a check adds to the shortcut, and what the shortcut becomes.
+# The modifier a check adds to the shortcut when it records a new one into the
+# field, and what the shortcut becomes.
 #
 # Shift because it is the one modifier the default binding does not use and the
 # one macOS spells third, so the new combination differs from the old by exactly

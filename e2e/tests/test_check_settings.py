@@ -136,42 +136,35 @@ THE_NEW_SHORTCUT = saved(hotkey={"enabled": True, "key": "U", "modifiers": ["shi
 
 
 # The Opening screen as the walk reads it, taken from the run that measured it
-# (.build/e2e/20260925-005230Z, settings.survey/tree-opening.txt). Not one of
-# these controls carries an identifier, a title or a description: the four
-# `AXToggle` checkboxes are the shortcut's modifiers, left to right, and the
-# four plain ones are the switches, top to bottom.
+# (2026-11-19, run 44483491444, plugins.gallery, gallery-opening-at-rest.txt):
+# each switch carries `opening.<the setting it writes>`, the field
+# `opening.shortcut`.
 OPENING_TREE = "\n".join([
-    "0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;",
-    "8|AXStaticText||section.opening||Opening||807;269;|77;18;",
-    "5|AXStaticText||||Gesture||1063;246;|48;16;",
-    "5|AXCheckBox||||1||1124;246;|328;16;",
-    "5|AXSlider||||0.08||1124;272;|230;20;",
-    "5|AXStaticText||||Shortcut||1058;377;|53;16;",
-    "5|AXCheckBox||||1||1124;377;|205;16;",
-    "5|AXCheckBox|AXToggle|||1||1124;403;|28;20;",
-    "5|AXCheckBox|AXToggle|||1||1160;403;|29;20;",
-    "5|AXCheckBox|AXToggle|||0||1197;403;|29;20;",
-    "5|AXCheckBox|AXToggle|||0||1234;403;|28;20;",
-    "5|AXPopUpButton||||U||1270;403;|110;20;",
-    "5|AXCheckBox||||1||1124;448;|303;16;",
-    "5|AXCheckBox||||1||1124;470;|221;16;",
-    "1|AXButton|AXCloseButton|||||800;205;|12;14;",
+    "0|AXWindow|AXStandardWindow||uDeck Settings|||60;40;|1500;961;",
+    "8|AXStaticText||section.opening||Opening||87;128;|79;20;",
+    "6|AXStaticText||||Open by moving the cursor to the top edge||542;165;|261;16;",
+    "6|AXCheckBox|AXSwitch|opening.gesture.enabled||1||1190;165;|36;16;",
+    "6|AXSlider||opening.gesture.dwellDuration||0.08|Wait at the edge|848;214;|187;16;",
+    "6|AXStaticText||||Open with a shortcut||542;386;|127;16;",
+    "6|AXButton||opening.shortcut||⌃⌥U||1068;388;|110;28;",
+    "6|AXCheckBox|AXToggle|opening.hotkey.enabled||1||1190;394;|36;16;",
+    "6|AXCheckBox|AXSwitch|opening.collapseOnAppSwitch||1||1190;529;|36;16;",
+    "6|AXCheckBox|AXSwitch|opening.gesture.enabledInFullscreen||1||1190;566;|36;16;",
+    "6|AXCheckBox|AXSwitch|opening.pollWhileCollapsed||0||1190;603;|36;16;",
+    "1|AXButton|AXCloseButton|||||68;48;|16;16;",
 ])  # fmt: skip
 
-# Where a click on the retract switch and on the shift modifier has to land,
-# from that same walk: the middle of the third plain checkbox and of the third
-# toggle.
-THE_RETRACT_SWITCH = (1124 + 303 // 2, 448 + 16 // 2)
-THE_SHIFT_BUTTON = (1197 + 29 // 2, 403 + 20 // 2)
+# Where a click on the retract switch and on the shortcut field has to land,
+# from that same walk: the middle of each.
+THE_RETRACT_SWITCH = (1190 + 36 // 2, 529 + 16 // 2)
+THE_SHORTCUT_FIELD = (1068 + 110 // 2, 388 + 28 // 2)
 
 # And the same screen after each of those clicks has landed, which is what the
 # lab walks the screen again to see (`ui.press`): a click that changed nothing
 # is the lab having missed the control, and must not travel into a verdict
-# about what uDeck saved.
-THE_SWITCH_PRESSED = OPENING_TREE.replace("5|AXCheckBox||||1||1124;448;|303;16;",
-                                          "5|AXCheckBox||||0||1124;448;|303;16;")
-THE_SHIFT_PRESSED = OPENING_TREE.replace("5|AXCheckBox|AXToggle|||0||1197;403;|29;20;",
-                                         "5|AXCheckBox|AXToggle|||1||1197;403;|29;20;")
+# about what uDeck saved. The field, clicked, records: it reads a prompt.
+THE_SWITCH_PRESSED = OPENING_TREE.replace("|opening.collapseOnAppSwitch||1|", "|opening.collapseOnAppSwitch||0|")
+THE_FIELD_RECORDING = OPENING_TREE.replace("|opening.shortcut||⌃⌥U|", "|opening.shortcut||Press keys…|")
 
 
 def a_machine(log_says, settings_says, running="404", in_front=None, pressed=THE_SWITCH_PRESSED):
@@ -443,8 +436,8 @@ def test_a_uDeck_that_died_while_the_panel_was_watched_is_uDecks_failure(monkeyp
 
 
 def a_shortcut_machine(log_says, settings_says, **rest):
-    """The same guest, walking back a screen where the *shift* button was pressed."""
-    return a_machine(log_says, settings_says, pressed=THE_SHIFT_PRESSED, **rest)
+    """The same guest, walking back a screen whose shortcut field was clicked and records."""
+    return a_machine(log_says, settings_says, pressed=THE_FIELD_RECORDING, **rest)
 
 
 # Launch, the window, the change, the old chord's silence, the new chord, the
@@ -462,18 +455,21 @@ def test_a_shortcut_changed_in_the_window_works_at_once_and_after_a_restart(
     machine = prepared(monkeypatch, a_shortcut_machine(a_shortcut_that_held(), ["", THE_NEW_SHORTCUT]))
     checks.check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab)
 
-    assert THE_SHIFT_BUTTON in [(x, y) for x, y, _ in machine.clicks]
+    assert THE_SHORTCUT_FIELD in [(x, y) for x, y, _ in machine.clicks]
     assert wrote_the_file(machine) == []
     assert nothing_real, "uDeck has to be restarted before the last half"
-    # Both combinations, made the same way, so that what the control controls
-    # for is the combination and not how the lab presses it — and the new one
-    # twice, once in the uDeck that was told and once in the one that read it.
+    # The new combination pressed into the field first, the way the operator
+    # records it; then both combinations, made the same way, so that what the
+    # control controls for is the combination and not how the lab presses it —
+    # and the new one twice, once in the uDeck that was told and once in the one
+    # that read it.
     held = [
         c.split("using {")[1].split("}")[0]
         for c in machine.ssh.commands
         if f"key code {config.HOTKEY_KEY_CODE} using" in c
     ]
     assert held == [
+        "control down, option down, shift down",
         "control down, option down",
         "control down, option down, shift down",
         "control down, option down, shift down",

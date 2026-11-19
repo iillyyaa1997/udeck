@@ -54,6 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.rebuildStatusMenu()
             self?.rebuildMainMenu()
         }
+        // Settings' shortcut field records with the shortcut let go, and says
+        // so when the system refuses the one it recorded.
+        model.onShortcutRecording = { [weak controller] in controller?.holdHotKey($0) }
+        controller.onHotKeyRefused = { [weak model] in model?.shortcutRefused = $0 }
         self.model = model
         rebuildMainMenu()
         self.screens = screens

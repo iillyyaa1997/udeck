@@ -154,3 +154,46 @@ public struct HotKeyBinding: Codable, Equatable, Sendable {
         return (letters + digits + functionKeys + named).filter { keyCodes[$0] != nil }
     }()
 }
+
+/// What one key press means to the shortcut field while it is recording.
+///
+/// The field in Settings → Opening replaced four modifier toggles and a list of
+/// keys (the redesign, 2026-11-18): the operator presses the combination and
+/// that is the shortcut. This is the whole of what decides it, kept out of the
+/// view so it can be tested — the view only reports a key code and the
+/// modifiers held with it.
+public enum HotKeyRecording: Equatable, Sendable {
+    /// A combination uDeck can register.
+    case recorded(HotKeyBinding)
+    /// Escape on its own: the operator changed their mind.
+    case cancelled
+    /// A key uDeck can bind, pressed with no modifier. Registering it would take
+    /// the key away from every application on the Mac (`HotKeyBinding.isValid`).
+    case needsModifier
+    /// A key that is not in `HotKeyBinding.keyCodes`, whatever was held with it.
+    case notBindable
+}
+
+extension HotKeyBinding {
+    /// The key's name for a virtual key code: the inverse of `keyCodes`.
+    public static func keyName(for keyCode: UInt32) -> String? {
+        keyNames[keyCode]
+    }
+
+    private static let keyNames: [UInt32: String] = Dictionary(
+        uniqueKeysWithValues: keyCodes.map { ($0.value, $0.key) }
+    )
+
+    /// One key press as the shortcut field reads it.
+    ///
+    /// Escape alone cancels; with a modifier it is a combination like any
+    /// other, since `ESCAPE` is a key uDeck can bind. A key it cannot bind is
+    /// said to be one before a missing modifier is, because adding a modifier
+    /// would not help.
+    public static func recording(keyCode: UInt32, modifiers: Set<HotKeyModifier>) -> HotKeyRecording {
+        if modifiers.isEmpty, keyCode == keyCodes["ESCAPE"] { return .cancelled }
+        guard let name = keyName(for: keyCode) else { return .notBindable }
+        guard !modifiers.isEmpty else { return .needsModifier }
+        return .recorded(HotKeyBinding(enabled: true, key: name, modifiers: modifiers))
+    }
+}

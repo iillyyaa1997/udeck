@@ -376,45 +376,49 @@ def test_a_control_that_goes_while_the_lab_scrolls_to_it_is_the_labs_failure_not
     assert not isinstance(raised.value, NotThere) and machine.clicks == []
 
 
-# --- Controls that have no name -----------------------------------------------------
+# --- The Opening screen ------------------------------------------------------------
 #
-# The Opening screen carries no accessibility identifier on any control, so the
-# lab finds them by where they sit and checks that finding against what they
-# read. Every test here asks the same question: would this still pick the right
-# control if the screen changed under it — and the answer has to be no, loudly.
+# Since the redesign (stage 2, 2026-11-19) every control the lab presses there
+# carries an identifier — `opening.<setting>` on each switch, `opening.shortcut`
+# on the field — so the lab finds them by name and role. Every test here asks the
+# same question: would this still pick the right control if the screen changed
+# under it — and the answer has to be no, loudly.
 
-# The screen as the walk read it in the guest (2026-09-25,
-# .build/e2e/20260925-005230Z). Deliberately not in the order the controls are
-# laid out in: the walk prints them in tree order, and what puts them in the
-# operator's order is `x` and `y`.
+# The screen as the walk read it in the guest (2026-11-19, run 44483491444,
+# plugins.gallery, gallery-opening-at-rest.txt), a few rows of it. Deliberately
+# not in the order the controls are laid out in: the walk prints them in tree
+# order, and nothing here may depend on it.
 OPENING = "\n".join([
-    "0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;",
-    "8|AXStaticText||section.opening||Opening||807;269;|77;18;",
-    "5|AXCheckBox||||1||1124;470;|221;16;",
-    "5|AXCheckBox|AXToggle|||0||1234;403;|28;20;",
-    "5|AXCheckBox||||1||1124;246;|328;16;",
-    "5|AXCheckBox|AXToggle|||1||1124;403;|28;20;",
-    "5|AXSlider||||0.08||1124;272;|230;20;",
-    "5|AXCheckBox|AXToggle|||0||1197;403;|29;20;",
-    "5|AXCheckBox||||1||1124;448;|303;16;",
-    "5|AXPopUpButton||||U||1270;403;|110;20;",
-    "5|AXCheckBox|AXToggle|||1||1160;403;|29;20;",
-    "5|AXCheckBox||||1||1124;377;|205;16;",
+    "0|AXWindow|AXStandardWindow||uDeck Settings|||60;40;|1500;961;",
+    "8|AXStaticText||section.opening||Opening||87;128;|79;20;",
+    "6|AXCheckBox|AXSwitch|opening.collapseOnAppSwitch||1||1190;529;|36;16;",
+    "6|AXSlider||opening.gesture.dwellDuration||0.08|Wait at the edge|848;214;|187;16;",
+    "6|AXCheckBox|AXSwitch|opening.gesture.enabled||1||1190;165;|36;16;",
+    "6|AXStaticText||||Open by moving the cursor to the top edge||542;165;|261;16;",
+    "6|AXButton||opening.shortcut||⌃⌥U||1068;388;|110;28;",
+    "6|AXCheckBox|AXToggle|opening.hotkey.enabled||1||1190;394;|36;16;",
+    "6|AXCheckBox|AXSwitch|opening.pollWhileCollapsed||0||1190;603;|36;16;",
+    "6|AXCheckBox|AXSwitch|opening.gesture.enabledInFullscreen||1||1190;566;|36;16;",
 ])  # fmt: skip
+
+EMPTY_PANE = "0|AXWindow|AXStandardWindow||uDeck Settings|||60;40;|1500;961;"
+
 
 def opened_on_opening(tree=OPENING):
     """A guest with the settings window open and the walk answering: twice to find Opening in the sidebar at rest, then `tree`."""
     return FakeMachine(walks=[OPENING, OPENING, *(tree if isinstance(tree, list) else [tree])])
 
 
-def test_the_walk_reads_every_attribute_a_click_at_an_unnamed_control_needs():
+def test_the_walk_reads_every_attribute_a_click_at_a_control_needs():
     controls = ui.controls(OPENING)
     window = controls[0]
     assert (window.role, window.title) == ("AXWindow", "uDeck Settings")
-    assert (window.x, window.y, window.width, window.height) == (790, 198, 980, 648)
-    # The identifiers that do exist are read too, so the sidebar can be told
-    # from the pane it opens.
-    assert [c.identifier for c in controls if c.identifier] == ["section.opening"]
+    assert (window.x, window.y, window.width, window.height) == (60, 40, 1500, 961)
+    assert [c.identifier for c in controls if c.identifier.startswith("opening.")] == [
+        "opening.collapseOnAppSwitch", "opening.gesture.dwellDuration", "opening.gesture.enabled",
+        "opening.shortcut", "opening.hotkey.enabled", "opening.pollWhileCollapsed",
+        "opening.gesture.enabledInFullscreen",
+    ]
     # Blank lines are not controls and are not pretending to be.
     assert ui.controls("\n" + OPENING + "\n") == controls
 
@@ -434,77 +438,83 @@ def test_a_control_the_walk_could_not_print_is_a_lab_error_with_the_line_in_it()
     # And the halves a line break leaves behind, neither of which is a control.
     with pytest.raises(LabError, match="not a control"):
         ui.controls(OPENING + "\n5|AXStaticText||||two\n lines||1124;520;|100;16;")
-    # The rows are read through the same parse, so nothing is lost behind them.
+    # The screen is read through the same parse, so nothing is lost behind it.
     with pytest.raises(LabError, match="not a control"):
-        ui.opening_switches(piped)
-    with pytest.raises(LabError, match="not a control"):
-        ui.modifier_buttons(piped)
+        ui.opening_controls(piped)
 
 
-def test_the_shortcuts_modifier_buttons_come_back_in_the_order_they_are_laid_out():
-    """Left to right, which is `HotKeyModifier.allCases.sorted()` — ⌃⌥⇧⌘."""
-    buttons = ui.modifier_buttons(OPENING)
-    assert [b.x for b in buttons] == [1124, 1160, 1197, 1234]
-    assert [b.value for b in buttons] == list(config.HOTKEY_MODIFIER_ROW_AT_REST)
-    # The plain checkboxes and the key's popup are not modifier buttons.
-    assert all(b.subrole == "AXToggle" for b in buttons)
-
-
-def test_the_plain_switches_come_back_top_to_bottom_and_without_the_toggles():
-    switches = ui.opening_switches(OPENING)
-    assert [s.y for s in switches] == [246, 377, 448, 470]
+def test_the_switches_come_back_in_the_configs_order_and_the_field_beside_them():
+    switches, shortcut = ui.opening_controls(OPENING)
+    assert [s.identifier for s in switches] == [f"opening.{name}" for name in config.OPENING_SWITCHES]
     assert [s.value for s in switches] == list(config.OPENING_SWITCHES_AT_REST)
-    assert all(not s.subrole for s in switches)
-    # A control that *has* a name is not one of these: the General screen's login
+    assert (shortcut.role, shortcut.value) == ("AXButton", config.THE_HOTKEY)
+    # The shortcut row's switch is drawn as a toggle and is a switch all the same.
+    assert switches[config.OPENING_SWITCHES.index("hotkey.enabled")].subrole == "AXToggle"
+    # A control of another screen is not one of these: the General screen's login
     # switch is an AXCheckBox with an identifier, and it must never be picked up.
-    named = OPENING + "\n5|AXCheckBox||general.openAtLogin||0||967;281;|104;16;"
-    assert ui.opening_switches(named) == switches
+    named = OPENING + "\n5|AXCheckBox|AXSwitch|general.openAtLogin||0||967;281;|104;16;"
+    assert ui.opening_controls(named) == (switches, shortcut)
+
+
+def test_a_name_on_a_control_of_another_kind_is_not_the_control():
+    """By role as well as name: an identifier that landed on the row's group, or a
+    field drawn as something that is not a button, is not what the lab presses."""
+    grouped = OPENING.replace("6|AXCheckBox|AXSwitch|opening.gesture.enabled||1||1190;165;|36;16;",
+                              "5|AXGroup||opening.gesture.enabled||||532;155;|704;165;")
+    switches, _ = ui.opening_controls(grouped)
+    assert switches[0] is None
+    as_text = OPENING.replace("6|AXButton||opening.shortcut||⌃⌥U||1068;388;|110;28;",
+                              "6|AXStaticText||opening.shortcut||⌃⌥U||1068;388;|110;28;")
+    assert ui.opening_controls(as_text)[1] is None
+
+
+def test_a_name_found_twice_is_the_labs_error():
+    """Two controls carrying one name: a click on either could be a click on the
+    other, so the lab refuses rather than choosing."""
+    twice = OPENING + "\n6|AXCheckBox|AXSwitch|opening.gesture.enabled||1||1190;700;|36;16;"
+    with pytest.raises(LabError, match="2 controls carry 'opening.gesture.enabled'"):
+        ui.opening_controls(twice)
 
 
 def test_the_screen_names_each_control_by_the_setting_it_writes():
     screen = ui.opening(opened_on_opening(), "opening the settings")
-    assert screen.modifier(config.THE_ADDED_MODIFIER).x == 1197
-    assert screen.switch(config.THE_SWITCH).y == 448
-    # The first of each row, so the order is the one the config states and not
-    # whatever the walk happened to print.
-    assert screen.modifier(config.HOTKEY_MODIFIER_ROW[0]).x == 1124
-    assert screen.switch(config.OPENING_SWITCHES[0]).y == 246
+    assert screen.switch(config.THE_SWITCH).y == 529
+    assert screen.switch(config.OPENING_SWITCHES[0]).y == 165
+    assert screen.switch("pollWhileCollapsed").value == "0"
+    assert (screen.shortcut.x, screen.shortcut.y) == (1068, 388)
     assert screen.dump == as_the_lab_keeps_it(OPENING)
 
 
-def test_a_row_that_does_not_read_uDecks_defaults_is_not_the_row():
-    """The whole identification: eight unnamed controls become *these* controls
-    only because they read what a machine at rest reads. A screen where they do
-    not is either not this screen or not at rest, and clicking on it would be a
+def test_a_screen_that_does_not_read_uDecks_defaults_is_not_at_rest():
+    """A screen where the switches or the field do not read what a machine at rest
+    reads is either not this screen or not at rest, and clicking on it would be a
     sentence about uDeck written from a random pixel."""
-    moved = OPENING.replace("5|AXCheckBox|AXToggle|||0||1197;403;|29;20;",
-                            "5|AXCheckBox|AXToggle|||1||1197;403;|29;20;")
-    with pytest.raises(LabError, match="not the row, or the machine is not at rest") as raised:
-        ui.opening(opened_on_opening(moved), "opening the settings")
-    assert "modifier buttons" in raised.value.reason
-
-    switched = OPENING.replace("5|AXCheckBox||||1||1124;448;|303;16;",
-                               "5|AXCheckBox||||0||1124;448;|303;16;")
-    with pytest.raises(LabError, match="switches read"):
+    switched = OPENING.replace("6|AXCheckBox|AXSwitch|opening.collapseOnAppSwitch||1||1190;529;|36;16;",
+                               "6|AXCheckBox|AXSwitch|opening.collapseOnAppSwitch||0||1190;529;|36;16;")
+    with pytest.raises(LabError, match="switches read") as raised:
         ui.opening(opened_on_opening(switched), "opening the settings")
+    assert "not at rest" in raised.value.reason
+
+    changed = OPENING.replace("|opening.shortcut||⌃⌥U|", f"|opening.shortcut||{config.THE_NEW_HOTKEY}|")
+    with pytest.raises(LabError, match="the shortcut field reads"):
+        ui.opening(opened_on_opening(changed), "opening the settings")
 
 
-def test_a_screen_whose_row_has_already_been_changed_is_taken_on_its_shape_alone():
-    """A caller that has already moved one of them says so, because the row no
-    longer reads what a default one does."""
-    moved = OPENING.replace("5|AXCheckBox|AXToggle|||0||1197;403;|29;20;",
-                            "5|AXCheckBox|AXToggle|||1||1197;403;|29;20;")
-    screen = ui.opening(opened_on_opening(moved), "opening the settings", at_rest=False)
-    assert screen.modifier(config.THE_ADDED_MODIFIER).value == "1"
+def test_a_screen_already_changed_is_taken_on_its_controls_alone():
+    """A caller that has already changed one of them says so, because the screen
+    no longer reads what a default one does."""
+    changed = OPENING.replace("|opening.shortcut||⌃⌥U|", f"|opening.shortcut||{config.THE_NEW_HOTKEY}|")
+    screen = ui.opening(opened_on_opening(changed), "opening the settings", at_rest=False)
+    assert screen.shortcut.value == config.THE_NEW_HOTKEY
 
 
 def test_a_screen_the_controls_never_appeared_on_is_the_labs_failure():
-    """A pane still being built answers with a tree that has neither row in it,
+    """A pane still being built answers with a tree that has none of them in it,
     and a check that clicked anyway would be clicking on the section before it."""
-    machine = opened_on_opening("0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;")
+    machine = opened_on_opening(EMPTY_PANE)
     with pytest.raises(LabError, match="did not appear within") as raised:
         ui.opening(machine, "opening the settings", seconds=5)
-    assert "0 modifier buttons" in raised.value.reason
+    assert "opening.gesture.enabled" in raised.value.reason and config.OPENING_SHORTCUT in raised.value.reason
     assert machine._clock.now >= 5
     assert not isinstance(raised.value, NotThere)
 
@@ -512,7 +522,7 @@ def test_a_screen_the_controls_never_appeared_on_is_the_labs_failure():
 def test_the_screen_is_waited_for_rather_than_slept_at():
     """One walk when the pane is there, more when it is not — and never a fixed
     pause, which would be a number nothing measured."""
-    machine = opened_on_opening(["0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;", OPENING])
+    machine = opened_on_opening([EMPTY_PANE, OPENING])
     ui.opening(machine, "opening the settings")
     assert len(machine.helper_calls("walk")) == 4, "two to find Opening in the sidebar at rest, two of the screen"
     assert machine._clock.now == 1 + ui.SETTLED_SECONDS
@@ -520,22 +530,36 @@ def test_the_screen_is_waited_for_rather_than_slept_at():
 
 # The same screen with the retract switch off, which is what the walk reads
 # after the click on it has landed.
-THE_SWITCH_PRESSED = OPENING.replace("5|AXCheckBox||||1||1124;448;|303;16;",
-                                     "5|AXCheckBox||||0||1124;448;|303;16;")
+THE_SWITCH_PRESSED = OPENING.replace("6|AXCheckBox|AXSwitch|opening.collapseOnAppSwitch||1||1190;529;|36;16;",
+                                     "6|AXCheckBox|AXSwitch|opening.collapseOnAppSwitch||0||1190;529;|36;16;")
+
+# And with the field recording, which is what it reads once a click on it landed.
+RECORDING = OPENING.replace("|opening.shortcut||⌃⌥U|", "|opening.shortcut||Press keys…|")
 
 
-def test_an_unnamed_control_is_pressed_with_the_pointer_and_never_through_the_api():
+def test_a_control_is_pressed_with_the_pointer_and_never_through_the_api():
     """The rule for every control on these screens. `AXPress` needs no
     coordinates and would look simpler; it also does not select anything
     (2026-09-17), and it is not what the operator has."""
     machine = opened_on_opening([OPENING, THE_SWITCH_PRESSED])
     screen = ui.opening(machine, "opening the settings")
     after = ui.press(machine, screen.switch(config.THE_SWITCH), "turning the switch off")
-    assert machine.clicks[-1] == (1124 + 303 // 2, 448 + 16 // 2)
+    assert machine.clicks[-1] == (1190 + 36 // 2, 529 + 16 // 2)
     assert not any(" click " in script or "AXPress" in script for script in machine.ssh.scripts)
     # And what the control reads now, which is what says the click landed.
-    assert (after.x, after.y, after.value) == (1124, 448, "0")
+    assert (after.x, after.y, after.value) == (1190, 529, "0")
     assert machine._clock.now == ui.SETTLED_SECONDS, "the control answered on the first walk after the click"
+
+
+def test_a_click_on_the_field_is_read_back_as_it_starting_to_record():
+    """The field keeps its place and size while it records, so the read-back that
+    tells a landed click from a missed one finds it where it was, reading the
+    prompt instead of the shortcut."""
+    machine = opened_on_opening([OPENING, RECORDING])
+    screen = ui.opening(machine, "opening the settings")
+    after = ui.press(machine, screen.shortcut, "clicking the shortcut field")
+    assert machine.clicks[-1] == (1068 + 110 // 2, 388 + 28 // 2)
+    assert after.value == "Press keys…"
 
 
 def test_a_click_that_left_the_control_as_it_was_is_the_labs_failure():
@@ -550,13 +574,13 @@ def test_a_click_that_left_the_control_as_it_was_is_the_labs_failure():
         ui.press(machine, screen.switch(config.THE_SWITCH), "turning the switch off", seconds=5)
     assert not isinstance(raised.value, NotThere)
     # Where the click went and what was found there, both in the reason.
-    assert "1275,456" in raised.value.reason and "value='1'" in raised.value.reason
+    assert "1208,537" in raised.value.reason and "value='1'" in raised.value.reason
     assert machine._clock.now >= 5
 
 
 def test_a_control_that_is_no_longer_on_the_screen_after_the_click_says_so():
     """The other way a click lands nowhere: the screen moved out from under it."""
-    machine = opened_on_opening([OPENING, "0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;"])
+    machine = opened_on_opening([OPENING, EMPTY_PANE])
     screen = ui.opening(machine, "opening the settings")
     with pytest.raises(LabError, match="no control there at all"):
         ui.press(machine, screen.switch(config.THE_SWITCH), "turning the switch off", seconds=5)

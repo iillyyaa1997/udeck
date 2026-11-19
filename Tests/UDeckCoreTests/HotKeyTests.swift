@@ -116,6 +116,47 @@ struct HotKeyTests {
         #expect(binding.key == HotKeyBinding().key)
         #expect(binding.modifiers == HotKeyBinding().modifiers)
     }
+
+    // MARK: The shortcut field
+
+    /// The key code is the key's place on the keyboard, so ⌥ held with U is
+    /// still U — the character it types is not asked.
+    @Test("a combination pressed into the field becomes the shortcut")
+    func recordsACombination() {
+        let pressed = HotKeyBinding.recording(keyCode: UInt32(kVK_ANSI_U), modifiers: [.control, .option, .shift])
+        #expect(pressed == .recorded(HotKeyBinding(enabled: true, key: "U", modifiers: [.control, .option, .shift])))
+        if case .recorded(let binding) = pressed {
+            #expect(binding.isValid)
+            #expect(binding.displayName == "⌃⌥⇧U")
+        }
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_F7), modifiers: [.command])
+            == .recorded(HotKeyBinding(enabled: true, key: "F7", modifiers: [.command])))
+    }
+
+    @Test("Escape alone cancels, and with a modifier it is a combination")
+    func escape() {
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_Escape), modifiers: []) == .cancelled)
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_Escape), modifiers: [.control, .option])
+            == .recorded(HotKeyBinding(enabled: true, key: "ESCAPE", modifiers: [.control, .option])))
+    }
+
+    @Test("a bare key is refused, and a key uDeck cannot bind says so first")
+    func refusals() {
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_ANSI_U), modifiers: []) == .needsModifier)
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_Space), modifiers: []) == .needsModifier)
+        // `[` is a key the table does not have, with or without ⌃⌥.
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_ANSI_LeftBracket), modifiers: [.control, .option])
+            == .notBindable)
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_ANSI_LeftBracket), modifiers: []) == .notBindable)
+    }
+
+    @Test("every key the table binds is found again by its code")
+    func keyNamesInvertTheTable() {
+        for (name, code) in HotKeyBinding.keyCodes {
+            #expect(HotKeyBinding.keyName(for: code) == name)
+        }
+        #expect(HotKeyBinding.keyName(for: UInt32(kVK_ANSI_LeftBracket)) == nil)
+    }
 }
 
 @Suite("Glass")

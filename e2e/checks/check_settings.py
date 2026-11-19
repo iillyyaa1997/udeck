@@ -201,8 +201,17 @@ def check_a_switch_survives_a_restart(machine, check_dir, lab):
 def check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab):
     """A shortcut changed in uDeck's window works at once, and still works after a restart.
 
-    Three sentences about one press of one button, and each of them fails on a
-    different build.
+    Three sentences about one combination recorded into one field, and each of
+    them fails on a different build.
+
+    **The change is the operator's: a click on the shortcut field and the new
+    combination pressed into it** (the field replaced four modifier buttons and a
+    list of keys with the redesign, stage 2, 2026-11-19). The field records with
+    the shortcut let go (`PanelController.holdHotKey`) — a combination the window
+    server holds for uDeck never reaches the window as a key press — and takes
+    the new one when the press is in, so uDeck says `registered` once, for the
+    combination chosen. A field that recorded nothing leaves the file and the log
+    as they were, and the halves below say so.
 
     **At once**, which is the part nothing else in the lab reaches.
     `RegisterEventHotKey` hands a combination to one process until it gives it
@@ -265,15 +274,17 @@ def check_the_shortcut_changes_at_once_and_survives(machine, check_dir, lab):
     try:
         _a_uDeck_holding(machine, story, check_dir, config.THE_HOTKEY, "uDeck starting")
 
-        # The change, made where the operator makes it: one modifier added to the
-        # combination, which differs from uDeck's own by exactly that one press.
+        # The change, made where the operator makes it: the field clicked, which
+        # it answers by recording, and a combination pressed into it that differs
+        # from uDeck's own by exactly one modifier.
         screen = ui.opening(machine, "opening uDeck's settings on Opening")
         _keep(check_dir, "opening-before-the-change.txt", screen.dump, lab)
         story.take("opening uDeck's settings")
-        ui.press(
-            machine,
-            screen.modifier(config.THE_ADDED_MODIFIER),
-            f"adding {config.THE_ADDED_MODIFIER} to the shortcut",
+        recording = ui.press(machine, screen.shortcut, "clicking the shortcut field to record a new one")
+        lab.note(f"   the field reads {recording.value!r} while it records")
+        panel.press_the_chord(
+            machine, config.HOTKEY_KEY_CODE,
+            f"{config.THE_NEW_HOTKEY} pressed into the field", config.NEW_HOTKEY_MODIFIERS,
         )
         machine.screenshot(check_dir, "the shortcut changed")
 
@@ -569,16 +580,16 @@ def _hotkey_in(saved):
 
     `HotKeyBinding.displayName` reads the modifiers in macOS's order and then
     the key, and the file keeps them as an unordered set — so the order is put
-    back from `config.HOTKEY_MODIFIER_ROW`, which is that same order, rather
+    back from `config.HOTKEY_MODIFIER_ORDER`, which is that same order, rather
     than from however the encoder happened to write them out.
     """
     binding = (saved or {}).get("hotkey")
     if not isinstance(binding, dict):
         return "(no shortcut in the file)"
-    symbols = dict(zip(config.HOTKEY_MODIFIER_ROW, ("⌃", "⌥", "⇧", "⌘")))
+    symbols = dict(zip(config.HOTKEY_MODIFIER_ORDER, ("⌃", "⌥", "⇧", "⌘")))
     named = sorted(
         (name for name in binding.get("modifiers", []) if name in symbols),
-        key=config.HOTKEY_MODIFIER_ROW.index,
+        key=config.HOTKEY_MODIFIER_ORDER.index,
     )
     return "".join(symbols[name] for name in named) + str(binding.get("key", "")).upper()
 

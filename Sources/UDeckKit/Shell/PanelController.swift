@@ -42,6 +42,19 @@ public final class PanelController {
     /// that stops matching the settings screen.
     private let hotKeys = HotKeyMonitor()
 
+    /// Settings' shortcut field is recording, and the shortcut is let go
+    /// meanwhile: a combination registered with the window server never reaches
+    /// the window as a key press, so the field could not record the one it
+    /// already is — pressing it would open the panel instead.
+    private var hotKeyHeld = false
+
+    /// Told whether the system refused the shortcut, each time one is handed to
+    /// it, so Settings can say so beside the field.
+    public var onHotKeyRefused: ((Bool) -> Void)?
+
+    /// Whether the system refused the shortcut last handed to it.
+    public var hotKeyRefused: Bool { hotKeys.refusedBySystem }
+
     /// The operator's settings, read live rather than copied.
     ///
     /// This used to be a copy taken at initialisation, refreshed by an
@@ -206,7 +219,7 @@ public final class PanelController {
 
     public func start() {
         hotKeys.onFire = { [weak self] in self?.toggleFromKeyboard() }
-        hotKeys.apply(settings.hotkey)
+        applyHotKey()
 
         pointer.fullscreenCheckInterval = settings.gesture.fullscreenCheckInterval
         pointer.onMove = { [weak self] sample, environment in
@@ -375,10 +388,31 @@ public final class PanelController {
     /// created with an interval can be recreated with the new one. Everything
     /// else is already read live.
     public func settingsChanged() {
-        hotKeys.apply(settings.hotkey)
+        applyHotKey()
         pointer.fullscreenCheckInterval = settings.gesture.fullscreenCheckInterval
         startPointerPoll()
         applyPhase(animated: false)
+    }
+
+    /// Lets the shortcut go while Settings records a new one, and takes the
+    /// settings' shortcut back when it is done — the new one if a combination
+    /// was recorded, which `settingsChanged` did not hand over while held, so
+    /// the log says `registered` once, for the combination that was chosen.
+    public func holdHotKey(_ held: Bool) {
+        guard held != hotKeyHeld else { return }
+        hotKeyHeld = held
+        if held {
+            hotKeys.stop()
+            DeckLog.panel.debug("hotkey let go while Settings records a new one")
+        } else {
+            applyHotKey()
+        }
+    }
+
+    private func applyHotKey() {
+        guard !hotKeyHeld else { return }
+        hotKeys.apply(settings.hotkey)
+        onHotKeyRefused?(hotKeys.refusedBySystem)
     }
 
     /// Reveals the panel from anywhere — the menu-bar item, for instance.
