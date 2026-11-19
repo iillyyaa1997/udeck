@@ -35,17 +35,32 @@ struct Russian: Vocabulary {
         case .sectionAbout: "О программе"
 
         // Появление
-        case .openingGesture: "Жест"
-        case .openingGestureToggle: "Открывать движением курсора к верхнему краю экрана"
-        case .openingPauseFirst: "Сначала пауза"
+        case .openingEdgeGroup: "Курсор у верхнего края"
+        case .openingGestureToggle: "Открывать движением курсора к верхнему краю"
+        case .openingWhereItFires: "оранжевое — где срабатывает"
+        case .openingWhereItFiresDescribed:
+            "Где срабатывает: узкая полоса у верхнего края экрана, вокруг выреза и немного шире него."
+        case .openingPauseFirst: "Подождать у края"
+        case .openingPauseHelp: "Меньше — быстрее, больше — меньше случайных открытий"
         case .openingPushPast: "Или продавить за край"
-        case .openingStayQuiet: "Затем тишина"
-        case .openingShortcut: "Сочетание"
-        case .openingShortcutToggle: "Открывать сочетанием клавиш"
-        case .openingKeys: "Клавиши"
+        case .openingStayQuiet: "Не открывать снова"
+        case .openingShortcutGroup: "Сочетание клавиш"
+        case .openingShortcutToggle: "Открывать сочетанием"
+        case .openingShortcutHint: "Нажмите на поле и затем новое сочетание"
+        case .openingShortcutRecordingHint: "Нажмите новое сочетание, Esc — отменить"
+        case .openingShortcutPrompt: "Нажмите…"
+        case .openingShortcutField(let shortcut): "Сочетание \(shortcut), нажмите, чтобы записать другое"
         case .openingNeedsModifier:
-            "Выберите хотя бы один модификатор — без него эта клавиша отбирается у всех приложений на этом Mac."
-        case .openingAlso: "Ещё"
+            "Добавьте ⌃ или ⌘ — без них эта клавиша отбирается у всех приложений на этом Mac."
+        case .openingNotBindable:
+            "Эту клавишу uDeck назначить не может — подойдут буквы, цифры, F1–F12, стрелки и клавиши вроде пробела, Return или Delete."
+        case .openingTypesText:
+            "Только с ⇧ или ⌥ эта клавиша набирает текст или двигает по нему курсор во всех приложениях — добавьте ⌃ или ⌘."
+        case .openingMenuCommand:
+            "⌘ с одной клавишей — команда меню почти во всех приложениях, как ⌘W или ⌘Q, — добавьте ⌃, ⌥ или ⇧."
+        case .openingShortcutTaken(let shortcut):
+            "\(shortcut) уже занято другим приложением — запишите другое сочетание."
+        case .openingBehaviour: "Поведение"
         case .openingRetract: "Убирать при переходе в другое приложение"
         case .openingFullscreen: "Открывать поверх полноэкранных приложений"
         case .openingKeepPolling: "Продолжать выполнять плагины, пока панель убрана"

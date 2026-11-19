@@ -141,16 +141,72 @@ public struct HotKeyBinding: Codable, Equatable, Sendable {
         }
         return table
     }()
+}
 
-    /// The bindable keys in the order a person would look for them, for the
-    /// settings picker. Letters, then digits, then function keys, then the
-    /// named ones — not one alphabetical list with `F10` between `F1` and `F2`.
-    public static let orderedKeyNames: [String] = {
-        let letters = (0 ..< 26).map { String(UnicodeScalar(UInt8(65 + $0))) }
-        let digits = (0 ... 9).map(String.init)
-        let functionKeys = (1 ... 12).map { "F\($0)" }
-        let named = ["SPACE", "RETURN", "TAB", "ESCAPE", "DELETE",
-                     "LEFT", "RIGHT", "UP", "DOWN", "HOME", "END", "PAGEUP", "PAGEDOWN"]
-        return (letters + digits + functionKeys + named).filter { keyCodes[$0] != nil }
-    }()
+/// What one key press means to the shortcut field while it is recording.
+///
+/// The field in Settings → Opening replaced four modifier toggles and a list of
+/// keys (the redesign, 2026-11-18): the operator presses the combination and
+/// that is the shortcut. This is the whole of what decides it, kept out of the
+/// view so it can be tested — the view only reports a key code and the
+/// modifiers held with it.
+public enum HotKeyRecording: Equatable, Sendable {
+    /// A combination uDeck can register — switched on, since recording one is
+    /// asking for it, and a shortcut turned off because it could not be
+    /// registered is mended this way.
+    case recorded(HotKeyBinding)
+    /// Escape on its own: the operator changed their mind.
+    case cancelled
+    /// A key uDeck can bind, pressed with no modifier. Registering it would take
+    /// the key away from every application on the Mac (`HotKeyBinding.isValid`).
+    case needsModifier
+    /// A key that is not in `HotKeyBinding.keyCodes`, whatever was held with it.
+    case notBindable
+    /// A key other than F1–F12 held with ⇧ or ⌥ only: that combination types a
+    /// character — ⇧U a capital U, ⌥U the umlaut — or moves through text
+    /// (⌥←), and registered it would be taken from every application.
+    case typesText
+    /// ⌘ alone with a key other than F1–F12: a menu command in nearly every
+    /// application — ⌘W, ⌘Q, ⌘C. Recording catches key presses before the
+    /// menu does, so this is the one an operator reaching for Close Window out
+    /// of habit would record by accident.
+    case menuCommand
+}
+
+extension HotKeyBinding {
+    /// The key's name for a virtual key code: the inverse of `keyCodes`.
+    public static func keyName(for keyCode: UInt32) -> String? {
+        keyNames[keyCode]
+    }
+
+    private static let keyNames: [UInt32: String] = Dictionary(
+        uniqueKeysWithValues: keyCodes.map { ($0.value, $0.key) }
+    )
+
+    /// One key press as the shortcut field reads it.
+    ///
+    /// Escape alone cancels; with a modifier it is a combination like any
+    /// other, since `ESCAPE` is a key uDeck can bind. A key it cannot bind is
+    /// said to be one before a missing modifier is, because adding a modifier
+    /// would not help.
+    ///
+    /// Stricter than `isValid`, which still governs what a settings file may
+    /// hold: a shortcut someone wrote into the file is theirs, but the field
+    /// does not hand out one that takes typing or a menu command away from
+    /// every application on the Mac. F1–F12 are the exception both ways — they
+    /// type nothing and are nobody's menu command.
+    public static func recording(keyCode: UInt32, modifiers: Set<HotKeyModifier>) -> HotKeyRecording {
+        if modifiers.isEmpty, keyCode == keyCodes["ESCAPE"] { return .cancelled }
+        guard let name = keyName(for: keyCode) else { return .notBindable }
+        guard !modifiers.isEmpty else { return .needsModifier }
+        if !isFunctionKey(name) {
+            if modifiers.isDisjoint(with: [.control, .command]) { return .typesText }
+            if modifiers == [.command] { return .menuCommand }
+        }
+        return .recorded(HotKeyBinding(enabled: true, key: name, modifiers: modifiers))
+    }
+
+    private static func isFunctionKey(_ name: String) -> Bool {
+        name.count > 1 && name.hasPrefix("F") && Int(name.dropFirst()) != nil
+    }
 }
