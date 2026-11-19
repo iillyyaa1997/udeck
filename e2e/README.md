@@ -268,7 +268,7 @@ title bar.
 A second self-check, `ax.cards-and-questions-read-as-system-events-read`, reads
 the screens the plugin checks make, made with their own helpers: the panel with
 a plugin's card asking for consent, the card once it has run and after a failed
-run (its dot and its line), Settings → Plugins with **More** open on that run,
+run (its dot and its line), Settings → Plugins with that plugin's card showing the run (**More** open on it, before the tabs of 0.8.12),
 the **Install from a link…** sheet with a pull request looked up, and the
 question **Remove** asks. Its card runs only when the lab reveals or refreshes
 the panel, so both readers read one screen. Its first run to get that far
@@ -2477,9 +2477,11 @@ fake gave the fixture), `installed.json`, `layout.json`, `grants.json`. And the
 screens — Settings → Plugins and the card in the panel, found by its subrole
 `AXSystemDialog` — are read through the identifiers uDeck gives every control
 there, and pressed with the machine's pointer. The settings window is moved and
-sized to most of the guest's screen first (`ui.place_settings`): the Plugins
-pane is one long scroll, and a control below the window's edge has a place and
-no pixel to click.
+sized to most of the guest's screen first (`ui.place_settings`): a tab of the
+Plugins pane scrolls, and a control below the window's edge has a place and no
+pixel to click. The pane is four tabs since 0.8.12, and the lab goes to the
+tab — and the plugin's card — that holds the control it asks for (`ui.reach`,
+docs/plugin-repository.md, "The lab's checks").
 
 **What the lab does by hand.** Placing a plugin on a tab is writing
 `layout.json` while uDeck is not running — the table asks what uDeck does with a
@@ -2582,8 +2584,8 @@ row of the same table:
   `~/.udeck/logs/<id>.log` over SSH.
 * `plugins.failed-run-on-a-fresh-card` makes its plugin fail by putting a file
   into its folder over SSH, and reads the panel's walk for the dot
-  (`card.<id>.failedDot`) and its texts for the line; then Settings, under
-  **More**. The same walk says which of the panel's own buttons are there, by
+  (`card.<id>.failedDot`) and its texts for the line; then Settings, on its
+  card. The same walk says which of the panel's own buttons are there, by
   their identifiers (`panel.refresh`, `panel.settings`, `panel.sendAway`,
   `panel.fullscreen`).
 * `plugins.install-command` runs `codesign --verify --deep --strict` on the

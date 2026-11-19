@@ -98,8 +98,8 @@ too, after it has said what becomes of the installed copy. Its row in Settings
 is marked **Linked**, with where the link leads. Removing the plugin —
 **Remove** in uDeck's Settings, which says first that only the link goes, or
 `rm` of the link — takes the link and nothing else: uDeck never deletes, moves
-to the Trash or writes into the folder a link leads to. Under **More** beside
-it, Settings shows its last run — how it ended, how long it took — and the end
+to the Trash or writes into the folder a link leads to. On its card in
+Settings → Plugins → Installed, Settings shows its last run — how it ended, how long it took — and the end
 of its standard error, a good run's as much as a failed one's; a run that fails
 while its card is still fresh puts an amber dot and a line on the card itself.
 A linked folder can also keep a log of every run on disk — **Keep a run log

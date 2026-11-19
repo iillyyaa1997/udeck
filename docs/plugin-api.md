@@ -273,8 +273,8 @@ A `poll` plugin prints exactly one JSON object to standard output and exits.
 Anything printed to standard **error** is the producer explaining itself, and
 uDeck keeps it: the last 64 KiB of every run's — the end, which is where an
 error is — with the plugin's last run, whatever it came to, a card as much as a
-failure. Settings shows the end of the last run's beside the plugin, under
-**More**, whatever the run came to — its last eight lines, and at most 800
+failure. Settings shows the end of the last run's on the plugin's card
+(Settings → Plugins → Installed), whatever the run came to — its last eight lines, and at most 800
 characters of them, with how many bytes came before what uDeck kept; for a
 [linked folder](#linked-folders) whose run log is on, every run's goes into the
 [run log](#the-run-log). It never counts toward the output limit and never
@@ -695,8 +695,8 @@ lower one keeps working — that is what the number is for.
 
 * **Print one JSON object and nothing else on standard output.** Diagnostics go
   to standard error, where uDeck keeps the end of them for you — the last
-  64 KiB of each run — and Settings shows the end of the last run's beside your
-  plugin, under **More**, a good run's as much as a failed one's.
+  64 KiB of each run — and Settings shows the end of the last run's on your
+  plugin's card, a good run's as much as a failed one's.
 * **Do not police your own deadline — uDeck does.** A stock macOS has neither
   `timeout` nor `gtimeout`, so a shell producer genuinely cannot. uDeck kills a
   run that overruns `timeout`, and kills whatever it started with it.

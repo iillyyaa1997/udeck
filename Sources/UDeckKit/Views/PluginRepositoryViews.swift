@@ -1,105 +1,12 @@
 import SwiftUI
 import UDeckCore
 
-// Settings → Plugins, the parts about repositories: the official catalogue, and
-// on every installed plugin's row, where it came from and what can be done
-// about it. Every control carries an accessibility identifier — the titles are
+// Settings → Plugins, the parts about repositories: a catalogue's row, and on
+// an installed plugin's card, where it came from and what can be done about it
+// (the tabs and their pages are in PluginsPane.swift). Every control carries an accessibility identifier — the titles are
 // translated, and the lab drives these screens by identifier.
 
-// MARK: - The official catalogue
-
-/// The official catalogue: its switch, how fresh it is, and one row per plugin.
-struct CatalogueSection: View {
-    @Bindable var model: DeckModel
-    @Environment(\.strings) private var strings
-
-    var body: some View {
-        SettingsBlock(strings(.pluginsOfficialCatalogue)) {
-            Toggle(strings(.pluginsOfficialCatalogue), isOn: Binding(
-                get: { model.settings.readsOfficialCatalogue },
-                set: { model.setOfficialCatalogue($0) }
-            ))
-            .accessibilityIdentifier("catalogue.enabled")
-            Text(strings(.pluginsOfficialCatalogueHelp(source: model.catalogueAddress.description)))
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            // Under the catalogue's own switch, while it is on or a source
-            // is trusted: off with no source trusted, nothing could update
-            // itself; a trusted source's copies update themselves whatever
-            // Official catalogue says (S4-04, S4-10).
-            if model.settings.readsOfficialCatalogue || !model.trustedSources.isEmpty {
-                Toggle(strings(.catalogueUpdatesByThemselves), isOn: Binding(
-                    get: { model.settings.updatesVerifiedByThemselves },
-                    set: { model.setAutoUpdateVerified($0) }
-                ))
-                .accessibilityIdentifier("catalogue.autoUpdate")
-                Text(strings(.catalogueUpdatesByThemselvesHelp))
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("catalogue.autoUpdateHelp")
-            }
-            if model.settings.readsOfficialCatalogue {
-                HStack(spacing: 10) {
-                    Button(strings(.catalogueCheckNow)) { model.checkCatalogueNow() }
-                        .disabled(model.catalogueRefreshing)
-                        .accessibilityIdentifier("catalogue.checkNow")
-                    if model.catalogueRefreshing {
-                        ProgressView().controlSize(.small)
-                        Text(strings(.catalogueReading)).font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text(freshness)
-                            .font(.caption).foregroundStyle(.secondary)
-                            .accessibilityIdentifier("catalogue.status")
-                    }
-                }
-                if let trouble {
-                    Label(trouble, systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("catalogue.trouble")
-                }
-                if model.updatesWaiting > 0 {
-                    Text(strings(.catalogueUpdatesWaiting(model.updatesWaiting)))
-                        .font(.callout).bold()
-                        .accessibilityIdentifier("catalogue.updatesWaiting")
-                }
-                // While the official address belongs to another repository,
-                // nothing of the catalogue read before is offered: uDeck asks
-                // it nothing but its number (`readsOfficialRepository`).
-                if let catalogue = model.catalogue, model.readsOfficialRepository {
-                    if catalogue.entries.isEmpty {
-                        Text(strings(.catalogueEmpty)).foregroundStyle(.secondary)
-                    }
-                    ForEach(catalogue.entries) { entry in
-                        CatalogueRowView(model: model, entry: entry, commit: catalogue.commit)
-                        Divider()
-                    }
-                }
-            } else {
-                Text(strings(.catalogueOff)).font(.caption).foregroundStyle(.secondary)
-                    .accessibilityIdentifier("catalogue.status")
-            }
-        }
-        .onAppear { model.pluginsPaneOpened() }
-    }
-
-    /// `github.com/owner/repo · checked 14:02`.
-    private var freshness: String {
-        let source = model.catalogueAddress.description
-        guard let success = model.catalogueState.lastSuccess else { return strings(.catalogueNeverRead(source: source)) }
-        return strings(.catalogueChecked(source: source, at: Clock.text(success, strings)))
-    }
-
-    /// Why the list is not fresh, when the last refresh did not finish — in
-    /// the official catalogue's words, which name GitHub (`CatalogueTrouble`).
-    private var trouble: String? {
-        guard let error = model.catalogueState.lastError else { return nil }
-        let readAt = model.catalogue == nil ? nil : model.catalogueState.lastSuccess.map { Clock.text($0, strings) }
-        return strings(CatalogueTrouble.phrase(error, address: model.catalogueAddress.description, host: nil, readAt: readAt,
-                                               until: { Clock.text($0, strings) }))
-    }
-}
+// MARK: - A catalogue's row
 
 /// One plugin a catalogue offers — the official one's, or a source of one's
 /// own's (`source`, its id), whose rows are `source.<sid>.plugin.<id>.*` and
@@ -140,11 +47,40 @@ struct CatalogueRowView: View {
     private var named: String { isOfficial ? "catalogue.\(id)" : "source.\(source).plugin.\(id)" }
 
     var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            PluginBadge(name: entry.name(in: strings.language.rawValue), id: id, size: 26)
+            content
+        }
+    }
+
+    /// *1.2.0 → 1.3.0* over a copy an update or a switch is offered for: the
+    /// version on disk and the one that comes (the redesign, 2026-11-18);
+    /// the catalogue's version otherwise.
+    private var version: String? {
+        guard let manifest else { return nil }
+        let offered: Bool
+        switch state {
+        case .installed(.newer), .installed(.changedStill), .installed(.older): offered = true
+        // A pull request's copy whose pull request was merged as something
+        // else: the verified version, offered as the update it is.
+        case .unverified(_, nil, _): offered = model.unverifiedRow(of: id)?.verifiedIsAnUpdate == true
+        default: offered = false
+        }
+        if offered, let installed = model.installed.plugins[id]?.version, installed != manifest.version {
+            return "\(installed) → \(manifest.version)"
+        }
+        return manifest.version
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(entry.name(in: strings.language.rawValue)).font(.headline)
                 if let manifest {
-                    Text(manifest.version).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    if let version {
+                        Text(version).font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                            .accessibilityIdentifier("\(named).version")
+                    }
                     if let author = manifest.author { Text(author).font(.caption).foregroundStyle(.secondary) }
                 }
                 if isOfficial {
@@ -201,7 +137,6 @@ struct CatalogueRowView: View {
                 }
             }
         }
-        .padding(.vertical, 3)
     }
 
     private var asks: String {
@@ -400,20 +335,32 @@ struct CatalogueRowView: View {
 
 // MARK: - An installed plugin's repository half
 
-/// On an installed plugin's row: where it came from, its mark, what the
-/// repository has for it now, and what can be done about it.
-struct InstalledRepositoryControls: View {
+/// On an installed plugin's card: where it came from, its mark, what the
+/// repository has for it now, and what can be done about it — and, along the
+/// card's bottom, Earlier versions…, Show in Finder and Remove.
+struct InstalledRepositoryControls<Middle: View>: View {
     @Bindable var model: DeckModel
     var id: String
     /// The version on disk, as its manifest says it.
     var versionOnDisk: String?
+    /// **Show in Finder**, on the bar along the card's bottom — of a plugin
+    /// on disk; a plugin whose folder has gone has nothing to show.
+    var reveal: (() -> Void)?
+    /// What the card says between where the plugin came from and the bar:
+    /// its own settings, its last run.
+    @ViewBuilder var middle: Middle
     @Environment(\.strings) private var strings
     @Environment(\.openURL) private var openURL
     @State private var confirming: Confirmation?
     /// The source whose history **Earlier versions…** was opened for: the
     /// list is shown while the copy is of that source still, and goes when
-    /// another source's copy takes its place (`EarlierVersions`).
-    @State private var historyOf: String?
+    /// another source's copy takes its place (`EarlierVersions`). Kept by the
+    /// model, so the list is still open after a look at another tab — where,
+    /// on Catalogue, another source's copy may be put in its place.
+    private var historyOf: String? {
+        get { model.earlierVersionsOpen[id] }
+        nonmutating set { model.earlierVersionsOpen[id] = newValue }
+    }
     /// Only while the copy's source can be read, too: a list read before the
     /// official address answered another repository's number goes with it,
     /// rather than stay with an **Install this version** that does nothing.
@@ -516,7 +463,7 @@ struct InstalledRepositoryControls: View {
                 }
             }
             buttons
-            if let confirming {
+            if let confirming, confirming.then != .remove {
                 confirmation(confirming)
             }
             if let version = model.autoUpdates.failures[id] {
@@ -529,6 +476,16 @@ struct InstalledRepositoryControls: View {
                 ProblemText(problem: problem, source: record.flatMap { model.source($0.source) },
                             address: record?.repository.description ?? model.catalogueAddress.description)
                     .accessibilityIdentifier("plugin.\(id).problem")
+            }
+            middle
+                .padding(.top, 7)
+            Divider()
+                .padding(.top, 7)
+            bar
+                .padding(.top, 5)
+            // **Remove**'s warning under the bar it was pressed on.
+            if let confirming, confirming.then == .remove {
+                confirmation(confirming)
             }
             if showingHistory {
                 HistoryList(model: model, id: id, installedCommit: record?.commit)
@@ -635,6 +592,16 @@ struct InstalledRepositoryControls: View {
                     .disabled(busy)
                     .accessibilityIdentifier("plugin.\(id).backTo")
             }
+        }
+        // One size for the card's buttons, these and the bar's.
+        .font(.callout)
+    }
+
+    /// Along the card's bottom: **Earlier versions…** and **Show in Finder**,
+    /// and **Remove** at the far end, away from them.
+    private var bar: some View {
+        let busy = model.busyPlugin != nil
+        return HStack(spacing: 8) {
             if let record, model.canRead(record.source) {
                 Button(strings(.catalogueEarlierVersions)) {
                     historyOf = showingHistory ? nil : record.source
@@ -643,11 +610,15 @@ struct InstalledRepositoryControls: View {
                 .disabled(busy && !showingHistory)
                 .accessibilityIdentifier("plugin.\(id).earlier")
             }
+            if let reveal {
+                Button(strings(.pluginShowInFinder), action: reveal)
+            }
+            Spacer(minLength: 8)
             Button(strings(.catalogueRemove), role: .destructive) { press(.remove) }
                 .disabled(busy)
                 .accessibilityIdentifier("plugin.\(id).remove")
         }
-        .font(.caption)
+        .font(.callout)
     }
 
     /// A press of the row's button, or of its warning's (`shown`): **Remove**
@@ -736,6 +707,12 @@ struct InstalledRepositoryControls: View {
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.1)))
+    }
+}
+
+extension InstalledRepositoryControls where Middle == EmptyView {
+    init(model: DeckModel, id: String, versionOnDisk: String?, reveal: (() -> Void)? = nil) {
+        self.init(model: model, id: id, versionOnDisk: versionOnDisk, reveal: reveal) { EmptyView() }
     }
 }
 
@@ -843,24 +820,6 @@ struct HistoryList: View {
     }
 }
 
-/// An installed plugin whose folder has gone: its record still says where it
-/// came from, so it can be put back.
-struct MissingPluginRow: View {
-    @Bindable var model: DeckModel
-    var id: String
-    @Environment(\.strings) private var strings
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(id).font(.headline)
-            Text(strings(.catalogueMissing(id: id, path: model.pluginsDirectoryDisplayPath)))
-                .font(.caption).foregroundStyle(.orange)
-            InstalledRepositoryControls(model: model, id: id, versionOnDisk: nil)
-        }
-        .padding(.vertical, 4)
-    }
-}
-
 // MARK: - Install from a link…
 
 /// **Install from a link…** (stage 3), on **Link a folder…**'s row: it opens
@@ -892,9 +851,11 @@ struct LinkInstallButton: View {
 struct LinkInstallSheet: View {
     @Bindable var model: DeckModel
     @Binding var open: Bool
+    /// What is typed in its field — kept above the tabs with `open`, so a look
+    /// at another tab finds the sheet as it was left (`PluginsSettingsPane`).
+    @Binding var text: String
     @Environment(\.strings) private var strings
     @Environment(\.openURL) private var openURL
-    @State private var text = ""
 
     var body: some View {
         Group {
@@ -907,9 +868,9 @@ struct LinkInstallSheet: View {
                 sheet
             }
         }
-        // Settings closed, or another section chosen: what the sheet said
-        // goes with it, and an answer still on its way is not shown.
-        .onDisappear { close() }
+        // Settings closed, or another section chosen, the pane closes it
+        // (`PluginsSettingsPane`): what the sheet said goes with it, and an
+        // answer still on its way is not shown. Another tab does not.
     }
 
     private func close() {

@@ -37,7 +37,7 @@ grants, its shell — in `guest-facts.txt`.
 (`ax.cards-and-questions-read-as-system-events-read`), made the way the plugin
 checks make them (`checks/check_plugins.py`'s own helpers): the panel with a
 plugin's card asking for consent, the card once it has run, and the card after
-a failed run (its dot and its line); Settings → Plugins with **More** open on
+a failed run (its dot and its line); Settings → Plugins with its card (once **More**) open on
 that run (its last run and the end of its stderr), and with the question
 **Remove** asks; and the **Install from a link…** sheet with a pull request
 looked up, its plugins listed. The card is one that changes only when the lab
@@ -636,10 +636,10 @@ def check_cards_and_questions_read_as_system_events_read(machine, check_dir, lab
         cp._put_the_panel_away(machine, "after the failed run")
 
         ui.plugins_pane(machine, "opening Settings → Plugins")
-        ui.click(machine, f"plugin.{plugin}.more", "opening More beside the plugin")
+        # Its card on Installed shows the last run, More gone with the tabs (0.8.12).
         ui.wait_for(machine, f"plugin.{plugin}.stderr", "waiting for the end of its stderr")
-        machine.screenshot(check_dir, "More on the failed run")
-        compare_screen(machine, comparison, "Settings → Plugins — More on a failed run")
+        machine.screenshot(check_dir, "its card on the failed run")
+        compare_screen(machine, comparison, "Settings → Plugins — its card on a failed run")
 
         cp._look_up(scene, cp.PULL_LINK, "the pull request")
         machine.screenshot(check_dir, "the link sheet with a pull request")
