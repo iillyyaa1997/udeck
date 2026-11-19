@@ -8,6 +8,25 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.8.11] — 2026-11-19
+
+Settings' redesign, third part: Look. 0.8.11 adds nothing to the plugin
+contract. The update to it goes by 0.8.8's rule.
+
+- **Appearance and style, apart.** Whether the panel is light or dark is one
+  row — Match the system, Light or Dark — and what it is made of is a style:
+  Glass, Solid, Smoke or Ghost. Each style holds a light and a dark variant,
+  and uDeck wears the one the appearance asks for, so a style is one click.
+  While the panel follows the Mac, the page shows it both ways side by side.
+- **Your own style.** Fine tuning edits either variant, every knob as before;
+  Save style… keeps both under a name, and it joins the cards. Looks saved by
+  an older uDeck become styles that wear the same look in both.
+- **By panel state** sets up the states as before, can save a group's look as
+  a style, and a style chosen on the main page reaches the states set up on
+  their own, each keeping how visible it is.
+- Changing by the clock instead of with the Mac moved into fine tuning.
+- Plugins follows in the next release.
+
 ## [0.8.10] — 2026-11-19
 
 Settings' redesign, second part: Opening. 0.8.10 adds nothing to the plugin

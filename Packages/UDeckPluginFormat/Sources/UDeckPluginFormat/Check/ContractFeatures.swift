@@ -119,11 +119,11 @@ public enum ContractFeatures {
     /// It is in no release here: no release has it in the contract.
     public static let outsideTheContract: Set<String> = ["restart"]
 
-    /// The release this registry was last brought up to date for. 0.8.10
-    /// adds nothing to the contract: Settings' Opening redrawn, the shortcut
-    /// recorded in a field, and no manifest field, card field or `UDECK_`
+    /// The release this registry was last brought up to date for. 0.8.11
+    /// adds nothing to the contract: Settings' Look redrawn — the appearance
+    /// and the style apart — and no manifest field, card field or `UDECK_`
     /// variable is new.
-    static let reviewedAt = "0.8.10"
+    static let reviewedAt = "0.8.11"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
