@@ -123,16 +123,14 @@ public struct SettingsView: View {
             case .general: GeneralSettings(model: model, loginItem: loginItem, updater: updater)
             case .opening: OpeningSettings(model: model)
             case .about: AboutSection(model: model, updater: updater)
-            case .look, .plugins: ScrollView {
+            case .look: LookSettings(model: model)
+            case .plugins: ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    switch navigation.section {
-                    case .look: LookSettings(model: model)
-                    default: PluginSettingsSection(model: model, selected: $navigation.selectedPlugin)
-                    }
+                    PluginSettingsSection(model: model, selected: $navigation.selectedPlugin)
                 }
                 .padding(20)
-                // Room under the last row. Measured on the look pane: scrolled
-                // to the very end, the scroll bar at 1.0, the last control was
+                // Room under the last row. Measured on the look pane when it
+                // scrolled here: scrolled to the very end, the scroll bar at 1.0, the last control was
                 // still cut by the window's bottom edge — the content is a
                 // little taller than the scroll view decides it is, and a pane
                 // whose last setting cannot be reached is a broken pane.
@@ -594,24 +592,12 @@ private struct OpeningSettings: View {
         GridRow {
             Text(strings(title))
                 .frame(minWidth: 130, alignment: .leading)
-            // Rounded to the step here rather than given `step:`, which on
-            // macOS draws a tick under every step — the canvas has a plain bar.
-            Slider(value: Binding(
-                get: { value.wrappedValue },
-                set: { newValue in
-                    let unit = V(step)
-                    value.wrappedValue = min(max((newValue / unit).rounded() * unit, range.lowerBound), range.upperBound)
-                }
-            ), in: range) { Text(strings(title)) }
+            // With `step:`, which draws a tick under every step: without it the
+            // keyboard's own increment could be smaller than half a step and be
+            // rounded away, leaving a slider that arrows cannot move (Fable,
+            // stage-3 review). The ticks are the cheaper of the two.
+            Slider(value: value, in: range, step: step) { Text(strings(title)) }
                 .labelsHidden()
-                // One step per increment for VoiceOver and the keyboard: without
-                // `step:` the slider would pick its own increment, which the
-                // rounding above could swallow whole.
-                .accessibilityAdjustableAction { direction in
-                    let unit = V(step)
-                    let moved = direction == .increment ? value.wrappedValue + unit : value.wrappedValue - unit
-                    value.wrappedValue = min(max((moved / unit).rounded() * unit, range.lowerBound), range.upperBound)
-                }
                 .accessibilityIdentifier(id)
             Text(readout)
                 .font(.caption.monospacedDigit())
@@ -889,17 +875,15 @@ private struct ShortcutRow: View {
 
 // MARK: - Look
 
-/// Everything about how the panel looks, on one screen.
+/// Everything about how the panel looks, on three pages.
 ///
-/// It was five headed groups down a scroll, with two previews of the same slab
-/// and a paragraph of explanation under nearly every control. The explanation
-/// was mine and there was far too much of it: a settings screen that has to be
-/// read is one that has failed, and the operator said so twice.
-///
-/// So: one sample at the top, every knob under it in a single grid, and prose
-/// only where a control is about to do something surprising. The sample is
-/// live, which is what replaces the paragraphs — a panel you can see is a panel
-/// you do not need described.
+/// The main page asks two questions apart, as the operator chose on the
+/// redesign canvas (2026-11-19): whether the panel is light or dark (the
+/// appearance, one row) and what it is made of (a style, one click, holding a
+/// light and a dark variant). Behind two › rows: fine tuning of either variant,
+/// every knob; and the look of each state of the panel. Prose only where a
+/// control is about to do something surprising — the samples are live, which is
+/// what replaces the paragraphs.
 private struct LookSettings: View {
     @Bindable var model: DeckModel
     @Environment(\.strings) private var strings
@@ -919,6 +903,17 @@ private struct LookSettings: View {
     /// in the settings, because a half-typed name is not a setting.
     @State private var newPresetName = ""
 
+    /// The three pages of the pane (the redesign, 2026-11-19): the main one —
+    /// the sample, the style, the appearance — and, behind its two › rows, fine
+    /// tuning of either variant and the look of each state of the panel.
+    enum Page { case main, fine, states }
+    @State private var page: Page = .main
+    /// Whether the field naming a style of one's own is open.
+    @State private var naming = false
+    /// The states' arrangement "set them all up together" replaced
+    /// (`IslandStatesEditor.previous`), held for as long as this pane is.
+    @State private var statesBefore: IslandStates?
+
     /// Whichever look the knobs are pointed at: the one being edited if the
     /// operator has picked one, otherwise the one on screen.
     private var edited: Bool {
@@ -931,7 +926,7 @@ private struct LookSettings: View {
     /// own look — which is the case both when nothing is selected and when the
     /// selection is a link that holds every state.
     private var editedLink: IslandLink? {
-        guard let selectedLink,
+        guard page == .states, let selectedLink,
               let link = model.settings.theme.states.links.first(where: { $0.id == selectedLink }),
               link.states.count < IslandState.allCases.count
         else { return nil }
@@ -1013,7 +1008,9 @@ private struct LookSettings: View {
     @ViewBuilder
     private func chain(_ fields: Set<LookField>) -> some View {
         let shared = model.settings.theme.states.shared
-        if model.settings.theme.states.links.count > 1 || !shared.isEmpty {
+        // Only where the states are: on fine tuning "the same in every state"
+        // would be a switch about something that page does not show.
+        if page == .states, model.settings.theme.states.links.count > 1 || !shared.isEmpty {
             Toggle(isOn: Binding(
                 get: { fields.allSatisfy(shared.contains) },
                 set: { share(fields, $0) }
@@ -1067,14 +1064,20 @@ private struct LookSettings: View {
         )
     }
 
-    /// What the "start from" menu calls itself: the preset this look currently
-    /// matches, or the honest answer that it matches none of them.
+    /// What the "start from" menu calls itself: the style whose variant on
+    /// this tab the look matches, or the honest answer that it matches none.
     private var startingPointName: String {
-        if let built = PanelMode.allCases.first(where: { $0.look == editedLook }) {
-            return strings(built.namePhrase)
+        // Values shared by every state are not a style's to decide, and
+        // pouring one keeps them — so they are left out here as well.
+        let shared = model.settings.theme.states.shared
+        let isThis = { (look: PanelLook) in look.taking(shared, from: editedLook) == editedLook }
+        if let style = PanelStyle.allCases.first(where: { isThis($0.look(forDark: edited)) }) {
+            return strings(style.namePhrase)
         }
-        if let mine = model.settings.theme.saved.first(where: { $0.look == editedLook }) { return mine.name }
-        return strings(.lookCustom)
+        if let mine = model.settings.theme.saved.first(where: { isThis(edited ? $0.darkLook : $0.look) }) {
+            return mine.name
+        }
+        return strings(.lookOwnStyle)
     }
 
     /// The one note worth keeping, because it is the only control on this
@@ -1111,13 +1114,25 @@ private struct LookSettings: View {
         model.update(settings: settings)
     }
 
-    private func saveCurrent() {
+    /// Saves both looks as a style of the operator's own — the light variant
+    /// and the dark one, whichever of them the knobs were pointed at.
+    private func saveStyle() {
         var settings = model.settings
-        // What is on screen, which is the selected state's look rather than the
-        // theme's when the two differ.
-        guard settings.theme.save(editedLook, as: newPresetName) != nil else { return }
+        let saved: PanelPreset?
+        if page == .states, let state = editedLink?.states.first {
+            // The group being set up, both variants as it wears them.
+            saved = settings.theme.saveStyle(
+                as: newPresetName,
+                light: settings.theme.look(for: state, forDark: false),
+                dark: settings.theme.look(for: state, forDark: true)
+            )
+        } else {
+            saved = settings.theme.saveStyle(as: newPresetName)
+        }
+        guard saved != nil else { return }
         model.update(settings: settings)
         newPresetName = ""
+        naming = false
     }
 
     private func percent(_ value: Double) -> String {
@@ -1125,11 +1140,32 @@ private struct LookSettings: View {
     }
 
     var body: some View {
-        // Two columns rather than one long scroll: the situations stay put on
-        // the left while the right half changes under them, and the sample sits
-        // directly above the knobs that move it. In one column the operator was
-        // setting a slider at the bottom of the window and watching for the
-        // result at the top of it.
+        Group {
+            switch page {
+            case .main: mainPage
+            case .fine: subpage(strings(.lookFineTuning)) { finePage }
+            case .states: subpage(strings(.lookByState)) { statesPage }
+            }
+        }
+        // A name for a style of one's own: an alert with a field rather than a
+        // popover from a card in a list-backed form, which may be dismissed
+        // when the row lays out again; the field takes the keyboard at once.
+        .alert(strings(.lookSaveStyle), isPresented: $naming) {
+            TextField(strings(.lookNameThisLook), text: $newPresetName)
+                .accessibilityIdentifier("look.styleName")
+            Button(strings(.actionSave), action: saveStyle)
+            Button(strings(.actionCancel), role: .cancel) { newPresetName = "" }
+        }
+    }
+
+    /// Each state of the panel and what it looks like, in either variant.
+    ///
+    /// Two columns rather than one long scroll: the situations stay put on
+    /// the left while the right half changes under them, and the sample sits
+    /// directly above the knobs that move it. In one column the operator was
+    /// setting a slider at the bottom of the window and watching for the
+    /// result at the top of it.
+    private var statesPage: some View {
         HStack(alignment: .top, spacing: 20) {
             situations
             VStack(alignment: .leading, spacing: 14) {
@@ -1140,8 +1176,6 @@ private struct LookSettings: View {
                 sample
                 Divider()
                 knobs
-                Divider()
-                presets
             }
             .frame(maxWidth: 560, alignment: .leading)
         }
@@ -1167,9 +1201,343 @@ private struct LookSettings: View {
             Text(strings(.lookStates))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            IslandStatesEditor(model: model, selected: $selectedLink)
+            IslandStatesEditor(model: model, selected: $selectedLink, previous: $statesBefore)
         }
         .frame(width: 236, alignment: .leading)
+    }
+
+    // MARK: - The main page
+
+    /// The sample, the style and the appearance — what most people come here
+    /// for — as the operator chose them on the canvas (2026-11-19): whether the
+    /// panel is light or dark is one row, as macOS and Slack ask it, and what it
+    /// is made of is one click on a style that holds both variants. Fine tuning
+    /// of either variant and the look of each state are behind the two › rows.
+    private var mainPage: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PaneTitle(strings(.sectionLook))
+            Form {
+                Section { samples }
+                Section(strings(.lookStyle)) { styleCards }
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker(strings(.lookAppearance), selection: Binding(
+                            get: { model.settings.theme.appearance },
+                            set: { newValue in
+                                var settings = model.settings
+                                settings.theme.appearance = newValue
+                                model.update(settings: settings)
+                            }
+                        )) {
+                            ForEach(ThemeAppearance.allCases) { appearance in
+                                Text(strings(appearance.namePhrase)).tag(appearance)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("look.appearance")
+                        // The clock is chosen under fine tuning; said here, so
+                        // "Match the system" is not taken at its word.
+                        if model.settings.theme.source == .schedule {
+                            Text(strings(.lookByClockCaption(
+                                light: model.settings.theme.schedule.lightFromHour,
+                                dark: model.settings.theme.schedule.darkFromHour
+                            )))
+                            .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Picker(strings(.lookDensity), selection: settings(\.density)) {
+                        ForEach(Density.allCases, id: \.self) { density in
+                            Text(strings(density.namePhrase)).tag(density)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("look.density")
+                    LabeledContent(strings(.lookTextSize)) {
+                        HStack(spacing: 8) {
+                            Text(verbatim: "A").font(.caption).foregroundStyle(.secondary)
+                            Slider(value: Binding(
+                                get: { model.settings.resolvedTextSize },
+                                set: { newValue in
+                                    var settings = model.settings
+                                    settings.textSize = newValue
+                                    model.update(settings: settings)
+                                }
+                            ), in: AppSettings.textSizeRange, step: 0.5) { Text(strings(.lookTextSize)) }
+                                .labelsHidden()
+                                .frame(width: 200)
+                                .accessibilityIdentifier("look.textSize")
+                            Text(verbatim: "A").font(.title3).foregroundStyle(.secondary)
+                            Text(String(format: "%.1f pt", model.settings.resolvedTextSize))
+                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                .frame(width: 46, alignment: .trailing)
+                        }
+                    }
+                }
+                Section {
+                    pageRow(.lookFineTuning, summary: strings(.lookFineTuningSummary), to: .fine, id: "look.fineTuning")
+                    pageRow(
+                        .lookByState,
+                        summary: strings(statesDiffer ? .lookByStateDiffers : .lookByStateSame),
+                        to: .states, id: "look.byState"
+                    )
+                }
+            }
+            .formStyle(.grouped)
+        }
+    }
+
+    /// The panel as it will look: both variants side by side, by day and in
+    /// the evening, while it follows the Mac; the one it wears otherwise.
+    private var samples: some View {
+        let theme = model.settings.theme
+        return HStack(spacing: 12) {
+            if theme.appearance == .automatic {
+                // What each variant follows: the Mac, or the clock.
+                let byClock = theme.source == .schedule
+                sample(of: theme.light, width: 300, caption: byClock
+                       ? strings(.lookLightFromHour(theme.schedule.lightFromHour)) : strings(.lookSampleDay))
+                sample(of: theme.dark, width: 300, caption: byClock
+                       ? strings(.lookDarkFromHour(theme.schedule.darkFromHour)) : strings(.lookSampleEvening))
+            } else {
+                sample(of: theme.look(forDark: theme.manualIsDark), width: 520, caption: nil)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 4)
+    }
+
+    private func sample(of look: PanelLook, width: CGFloat, caption: String?) -> some View {
+        VStack(spacing: 4) {
+            GlassPreview(glass: look.glass,
+                         theme: DeckTheme(density: model.settings.density, look: look,
+                                          textSize: model.settings.resolvedTextSize),
+                         presence: look.presence,
+                         width: width)
+            if let caption {
+                Text(caption).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// The styles that ship, the operator's own, the look as it is when it is
+    /// none of them, and a card that saves it as one.
+    ///
+    /// A plain grid of five to a row, not a lazy one: a handful of cards, in a
+    /// row of a grouped form, which is list-backed and re-lays out lazy content
+    /// in its own time (Fable, stage-3 review).
+    private var styleCards: some View {
+        let theme = model.settings.theme
+        let style = theme.style
+        let saved = theme.savedStyle
+        let items: [StyleItem] = PanelStyle.allCases.map(StyleItem.style)
+            + theme.saved.map(StyleItem.saved)
+            + (style == nil && saved == nil ? [.own] : [])
+            + [.save]
+        let rows = stride(from: 0, to: items.count, by: 5).map { Array(items[$0 ..< min($0 + 5, items.count)]) }
+        return Grid(alignment: .topLeading, horizontalSpacing: 12, verticalSpacing: 12) {
+            ForEach(rows.indices, id: \.self) { index in
+                GridRow {
+                    ForEach(rows[index]) { item in
+                        card(item, style: style, saved: saved).frame(width: 112)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private enum StyleItem: Identifiable {
+        case style(PanelStyle)
+        case saved(PanelPreset)
+        case own
+        case save
+
+        var id: String {
+            switch self {
+            case .style(let style): "style.\(style.rawValue)"
+            case .saved(let preset): "saved.\(preset.id.uuidString)"
+            case .own: "own"
+            case .save: "save"
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func card(_ item: StyleItem, style: PanelStyle?, saved: PanelPreset?) -> some View {
+        switch item {
+        case .style(let candidate):
+            StyleCard(name: strings(candidate.namePhrase), summary: strings(candidate.summaryPhrase),
+                      light: candidate.light, dark: candidate.dark, selected: style == candidate) {
+                var settings = model.settings
+                settings.theme.apply(candidate)
+                model.update(settings: settings)
+            }
+            .accessibilityIdentifier("look.style.\(candidate.rawValue)")
+        case .saved(let preset):
+            StyleCard(name: preset.name, summary: nil, light: preset.look, dark: preset.darkLook,
+                      selected: saved?.id == preset.id) {
+                var settings = model.settings
+                settings.theme.apply(preset)
+                model.update(settings: settings)
+            }
+            .contextMenu {
+                Button(strings(.actionDelete), role: .destructive) {
+                    var settings = model.settings
+                    settings.theme.remove(preset.id)
+                    model.update(settings: settings)
+                }
+            }
+            .accessibilityIdentifier("look.saved.\(preset.id.uuidString)")
+        case .own:
+            StyleCard(name: strings(.lookOwnStyle), summary: strings(.lookOwnStyleSummary),
+                      light: model.settings.theme.light, dark: model.settings.theme.dark, selected: true) {}
+                .accessibilityIdentifier("look.style.own")
+        case .save:
+            Button { naming = true } label: {
+                VStack(spacing: 4) {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .foregroundStyle(.secondary)
+                        .frame(height: 44)
+                        .overlay(Image(systemName: "plus").foregroundStyle(.secondary))
+                    Text(strings(.lookSaveStyle)).font(.caption).lineLimit(1)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("look.saveStyle")
+        }
+    }
+
+    /// Whether any state of the panel looks different from the theme, in
+    /// either variant — what it wears, not how the states are grouped.
+    private var statesDiffer: Bool {
+        let theme = model.settings.theme
+        return IslandState.allCases.contains { state in
+            theme.look(for: state, forDark: false) != theme.light
+                || theme.look(for: state, forDark: true) != theme.dark
+        }
+    }
+
+    /// A row that opens one of the two other pages.
+    ///
+    /// The variant the knobs edit is fixed on the way in — the one on screen —
+    /// so the appearance turning over while the page is open does not move
+    /// the knobs to the other variant under the operator's hand.
+    private func pageRow(_ title: Phrase, summary: String, to target: Page, id: String) -> some View {
+        Button {
+            editingDark = model.settings.isDark(systemIsDark: DeckModel.systemIsDark(), hour: DeckModel.currentHour())
+            page = target
+        } label: {
+            HStack(spacing: 8) {
+                Text(strings(title))
+                Spacer()
+                Text(summary).font(.callout).foregroundStyle(.secondary)
+                Image(systemName: "chevron.right").foregroundStyle(.tertiary).accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(id)
+    }
+
+    /// One of the two other pages, under a way back.
+    private func subpage<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        let inner = content()
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Button { page = .main } label: { Image(systemName: "chevron.left") }
+                    .accessibilityLabel(strings(.actionBack))
+                    .accessibilityIdentifier("look.back")
+                (Text(strings(.sectionLook) + " › ").foregroundStyle(.secondary) + Text(title))
+                    .font(.title2.bold())
+                    .accessibilityAddTraits(.isHeader)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            ScrollView {
+                inner
+                    .padding(20)
+                    .padding(.bottom, 28)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+
+    // MARK: - Fine tuning
+
+    /// The name of what the panel wears, for the fine-tuning page.
+    private var styleName: String {
+        let theme = model.settings.theme
+        if let style = theme.style { return strings(style.namePhrase) }
+        if let saved = theme.savedStyle { return saved.name }
+        return "\(strings(.lookOwnStyle)) (\(strings(.lookOwnStyleSummary)))"
+    }
+
+    /// Either variant of the style, every knob of it: the light one is worn
+    /// while the appearance is light, the dark one while it is dark. Moving a
+    /// knob makes the style the operator's own, which the button saves with
+    /// both variants.
+    private var finePage: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Picker("", selection: Binding(get: { edited }, set: { editingDark = $0 })) {
+                    Text(strings(.lookLightLook)).tag(false)
+                    Text(strings(.lookDarkLook)).tag(true)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 260)
+                .accessibilityLabel(strings(.lookFineTuning))
+                .accessibilityIdentifier("look.variant")
+                Text(strings(edited ? .lookVariantHintDark : .lookVariantHintLight))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+            }
+            HStack(spacing: 10) {
+                Text(strings(.lookStyleIs(styleName))).font(.callout)
+                Button(strings(.lookSaveStyleAction)) { naming = true }
+                    .accessibilityIdentifier("look.saveStyleAction")
+            }
+            GlassPreview(glass: editedLook.glass,
+                         theme: DeckTheme(density: model.settings.density, look: editedLook,
+                                          textSize: model.settings.resolvedTextSize),
+                         presence: editedLook.presence)
+            knobs.lookCard()
+            byTheClock.lookCard()
+        }
+        .frame(maxWidth: 640, alignment: .leading)
+    }
+
+    /// Following the clock instead of the Mac: a way of changing by itself, so
+    /// it applies only while the appearance does.
+    private var byTheClock: some View {
+        let current = model.settings.theme
+        return VStack(alignment: .leading, spacing: 6) {
+            Toggle(strings(.lookByClock), isOn: Binding(
+                get: { current.source == .schedule },
+                set: { on in
+                    var settings = model.settings
+                    settings.theme.source = on ? .schedule : .system
+                    model.update(settings: settings)
+                }
+            ))
+            .disabled(current.appearance != .automatic)
+            .accessibilityIdentifier("look.byClock")
+            if current.source == .schedule {
+                HStack(spacing: 14) {
+                    Stepper(strings(.lookLightFromHour(current.schedule.lightFromHour)),
+                            value: theme(\.schedule.lightFromHour), in: 0 ... 23)
+                    Stepper(strings(.lookDarkFromHour(current.schedule.darkFromHour)),
+                            value: theme(\.schedule.darkFromHour), in: 0 ... 23)
+                }
+                .font(.callout)
+            }
+            if current.appearance != .automatic {
+                Text(strings(.lookByClockOnlyAutomatic)).font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 
     // MARK: - The sample
@@ -1195,32 +1563,37 @@ private struct LookSettings: View {
                 // Labelled, because it was not. The menu showed only whichever
                 // preset the look currently matched — "Custom" most of the
                 // time — and the operator had to ask what it was.
-                Text(strings(.lookPresets))
+                Text(strings(.lookStyle))
                     .foregroundStyle(.secondary)
 
+                // The styles of the main page, each as its variant on the tab
+                // above: a state set up in the dark variant takes a style's
+                // dark look.
                 Menu(startingPointName) {
                     Section(strings(.lookBuiltIn)) {
-                        ForEach(PanelMode.allCases) { preset in
-                            // Name and summary, because the names do not explain
-                            // themselves: Ghost, Paper and Smoke tell you
-                            // nothing about what you are about to pour in.
+                        ForEach(PanelStyle.allCases) { style in
                             Button {
-                                pour(preset.look)
+                                pour(style.look(forDark: edited))
                             } label: {
-                                Text(strings(preset.namePhrase))
-                                Text(strings(preset.summaryPhrase))
+                                Text(strings(style.namePhrase))
+                                Text(strings(style.summaryPhrase))
                             }
                         }
                     }
                     if !model.settings.theme.saved.isEmpty {
                         Section(strings(.lookSaved)) {
                             ForEach(model.settings.theme.saved) { preset in
-                                Button(preset.name) { pour(preset.look) }
+                                Button(preset.name) { pour(edited ? preset.darkLook : preset.look) }
                             }
                         }
                     }
                 }
                 .frame(width: 150)
+
+                // The group being set up, saved as a style of its own: both
+                // variants as the group wears them (`saveStyle`).
+                Button(strings(.lookSaveStyleAction)) { naming = true }
+                    .accessibilityIdentifier("look.saveGroupStyle")
             }
         }
     }
@@ -1229,44 +1602,6 @@ private struct LookSettings: View {
 
     private var knobs: some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
-            GridRow {
-                label(strings(.lookShows))
-                VStack(alignment: .leading, spacing: 6) {
-                    Picker("", selection: theme(\.source)) {
-                        ForEach(ThemeSource.allCases) { source in
-                            Text(strings(source.namePhrase)).tag(source)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 300)
-
-                    switch model.settings.theme.source {
-                    case .manual:
-                        Picker("", selection: theme(\.manualIsDark)) {
-                            Text(strings(.lookLight)).tag(false)
-                            Text(strings(.lookDark)).tag(true)
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .frame(width: 160)
-                    case .schedule:
-                        HStack(spacing: 14) {
-                            Stepper(strings(.lookLightFromHour(model.settings.theme.schedule.lightFromHour)),
-                                    value: theme(\.schedule.lightFromHour), in: 0 ... 23)
-                            Stepper(strings(.lookDarkFromHour(model.settings.theme.schedule.darkFromHour)),
-                                    value: theme(\.schedule.darkFromHour), in: 0 ... 23)
-                        }
-                        .font(.callout)
-                    case .system:
-                        EmptyView()
-                    }
-                }
-            }
-
-            divider
-
-            divider
 
             // First of the values rather than last, because it is the one that
             // answers "should this situation be noticeable at all" — and every
@@ -1416,67 +1751,6 @@ private struct LookSettings: View {
                 chain([.inkColour])
             }
 
-            divider
-
-            GridRow {
-                label(strings(.lookDensity))
-                Picker("", selection: Binding(
-                    get: { model.settings.density },
-                    set: { newValue in
-                        var settings = model.settings
-                        settings.density = newValue
-                        model.update(settings: settings)
-                    }
-                )) {
-                    ForEach(Density.allCases, id: \.self) { density in
-                        Text(strings(density.namePhrase)).tag(density)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 260)
-            }
-
-            GridRow {
-                label(strings(.lookTextSize))
-                slider(Binding(
-                    get: { model.settings.resolvedTextSize },
-                    set: { newValue in
-                        var settings = model.settings
-                        settings.textSize = newValue
-                        model.update(settings: settings)
-                    }
-                ), in: AppSettings.textSizeRange, step: 0.5,
-                   readout: String(format: "%.1f pt", model.settings.resolvedTextSize))
-            }
-        }
-    }
-
-    // MARK: - Presets
-
-    private var presets: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                TextField(strings(.lookNameThisLook), text: $newPresetName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 180)
-                    .onSubmit(saveCurrent)
-                Button(strings(.actionSave), action: saveCurrent)
-                    .disabled(PanelPreset.cleaned(name: newPresetName).isEmpty)
-            }
-
-            ForEach(model.settings.theme.saved) { preset in
-                HStack(spacing: 10) {
-                    Text(preset.name).frame(width: 180, alignment: .leading)
-                    Button(strings(.actionUse)) { pour(preset.look) }
-                    Button(strings(.actionDelete), role: .destructive) {
-                        var settings = model.settings
-                        settings.theme.remove(preset.id)
-                        model.update(settings: settings)
-                    }
-                }
-                .font(.callout)
-            }
         }
     }
 
@@ -1499,16 +1773,17 @@ private struct LookSettings: View {
         }
     }
 
-    /// Generic over the number, because the text size is a `CGFloat` in points
-    /// and everything else here is a plain `Double`.
+    /// Generic over the number, as Opening's is.
     private func slider<V: BinaryFloatingPoint>(
         _ value: Binding<V>,
         in range: ClosedRange<V>,
         step: V.Stride,
         readout: String
     ) -> some View where V.Stride: BinaryFloatingPoint {
+        // With `step:` — see `OpeningSettings.slider`.
         HStack(spacing: 10) {
-            Slider(value: value, in: range, step: step).frame(width: 230)
+            Slider(value: value, in: range, step: step)
+                .frame(width: 230)
             Text(readout)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
@@ -2138,12 +2413,95 @@ private struct SettingsGroup<Content: View>: View {
 }
 
 
+extension View {
+    /// A group of rows on a page that is not a Form — fine tuning of Look — drawn
+    /// as a grouped Form draws its sections, so the two pages read as one.
+    func lookCard() -> some View {
+        padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
+            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color(nsColor: .separatorColor).opacity(0.6)))
+    }
+}
+
+/// A style on the Look pane: its light variant over a light window and its dark
+/// one over a dark window, side by side, its name and what it is.
+private struct StyleCard: View {
+    var name: String
+    var summary: String?
+    var light: PanelLook
+    var dark: PanelLook
+    var selected: Bool
+    var action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                HStack(spacing: 0) {
+                    StyleSwatch(look: light, behind: Color(white: 0.86))
+                    StyleSwatch(look: dark, behind: Color(white: 0.16))
+                }
+                .frame(height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8).strokeBorder(
+                        selected ? Color.accentColor : Color(nsColor: .separatorColor),
+                        lineWidth: selected ? 3 : 1
+                    )
+                )
+                Text(name).font(.caption).fontWeight(selected ? .semibold : .regular).lineLimit(1)
+                if let summary {
+                    Text(summary).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(summary.map { "\(name), \($0)" } ?? name)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// One variant of a style, drawn small: the tint over the window behind it and
+/// a line of its text. A sketch of the material, not the material — the sample
+/// above the cards is the real one.
+private struct StyleSwatch: View {
+    var look: PanelLook
+    var behind: Color
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            behind
+            RoundedRectangle(cornerRadius: 4)
+                .fill(fill)
+                .padding(6)
+            Capsule()
+                .fill(ink)
+                .frame(width: 18, height: 3)
+                .padding(.leading, 12)
+        }
+    }
+
+    private var fill: Color {
+        let glass = look.glass
+        let tint = glass.tintColor.map { Color(red: $0.red, green: $0.green, blue: $0.blue) }
+            ?? Color(white: glass.tintIsLight ? 0.97 : 0.1)
+        let strength = glass.tinted ? 0.25 + 0.75 * glass.tintStrength : 0.3
+        return tint.opacity(strength * glass.opacity)
+    }
+
+    private var ink: Color {
+        let colour = look.foreground
+        return Color(red: colour.red, green: colour.green, blue: colour.blue)
+    }
+}
+
 /// The panel, as it will actually look, over the two backgrounds that disagree
 /// about it.
 ///
-/// This is what replaced the paragraphs. There is one of it now — there used to
-/// be two of the same slab, once near the top of the pane and once further down
-/// beside the tint, which asked the operator to compare a thing with itself.
+/// This is what replaced the paragraphs: one per variant on Look's main page
+/// while the appearance follows the Mac, one above the knobs on the other two
+/// pages.
 ///
 /// The dark half and the light half are the whole of the trade-off: a tint that
 /// rescues the panel from a dark game is the same tint that washes it out over
@@ -2161,16 +2519,21 @@ private struct GlassPreview: View {
     /// How much of it is there, so that «Видно» is visible here rather than
     /// only on the real panel.
     var presence: Double = 1
+    /// How wide the sample is: the main page of Look puts two side by side.
+    var width: CGFloat = 520
     @Environment(\.strings) private var strings
 
     /// The panel's size in each phase, in the sample's own scale.
     private var cardSize: CGSize {
-        switch phase {
+        let size: CGSize = switch phase {
         case .collapsed: CGSize(width: 180, height: 30)
         case .peek: CGSize(width: 420, height: 92)
         case .open: CGSize(width: 470, height: 118)
         case .fullscreen: CGSize(width: 500, height: 132)
         }
+        // Narrowed only for the two samples side by side; at the full width
+        // the fullscreen slab keeps the 500 points it always had.
+        return width < 520 ? CGSize(width: min(size.width, width - 36), height: size.height) : size
     }
 
     private var cardRadius: CGFloat { phase == .collapsed ? 9 : 12 }
@@ -2251,7 +2614,7 @@ private struct GlassPreview: View {
             .opacity(presence)
             .animation(.easeOut(duration: PanelLook.presenceDuration(reaching: presence)), value: presence)
         }
-        .frame(width: 520, height: 150)
+        .frame(width: width, height: 150)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
     }

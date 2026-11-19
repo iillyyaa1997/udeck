@@ -46,20 +46,22 @@ struct LocalizationTests {
         .generalRecordVanished, .generalDidNotTake, .generalAnotherCopy("/x/uDeck.app"),
         .generalWaitsForApproval, .generalLoginFailed("no"), .generalOpenLoginItems,
 
-        .lookLightLook, .lookDarkLook, .lookCustom, .lookPresets, .lookBuiltIn, .lookSaved, .lookShows,
+        .lookLightLook, .lookDarkLook, .lookBuiltIn, .lookSaved, 
         .lookLight, .lookDark, .lookLightFromHour(7), .lookDarkFromHour(19), .lookGlass,
         .glassRegular, .glassClear, .lookTintCoversMaterial(percent: 58), .lookAmount,
         .lookTint, .tintLighter, .tintDarker, .lookStrength, .lookTintColour, .lookText, .lookBrightness,
         .lookColour, .lookDensity, .lookTextSize, .densityCompact, .densityNormal, .densityCozy,
         .lookLanguage, .languageSystem, .lookNameThisLook,
+        .styleGlass, .styleSolid, .styleSmoke, .styleGhost, .styleGlassSummary, .styleSolidSummary, .styleSmokeSummary, .styleGhostSummary, .appearanceAutomatic, .appearanceLight, .appearanceDark, .lookAppearance, .lookStyle, .lookOwnStyle, .lookOwnStyleSummary, .lookSaveStyle, .lookSaveStyleAction, .lookFineTuning, .lookFineTuningSummary, .lookByState, .lookByStateSame, .lookByStateDiffers, .lookSampleDay, .lookSampleEvening, .lookVariantHintLight, .lookVariantHintDark, .lookByClock, .lookByClockOnlyAutomatic,
+        .lookStyleIs("Ночь"), .lookByClockCaption(light: 7, dark: 19),
 
         .sampleTitle, .sampleChip, .sampleBody, .sampleFooter,
 
-        .modeLight, .modeDark, .modeContrast, .modeGhost, .modePaper, .modeSmoke,
-        .modeLightSummary, .modeDarkSummary, .modeContrastSummary,
-        .modeGhostSummary, .modePaperSummary, .modeSmokeSummary,
+        
+        
+        
 
-        .sourceSystem, .sourceManual, .sourceSchedule,
+        
 
         .pluginsInstalled, .pluginsOpenFolder, .pluginsLookAgain, .pluginsNothingInstalled,
         .pluginsStaleness(seconds: 60, multiplier: 3), .pluginEnabled, .pluginMore,
@@ -312,7 +314,7 @@ struct LocalizationTests {
         .tabName, .tabAdd, .tabRename, .tabClose, .tabClickAgainToRename, .tabShowThis,
         .controlRefresh, .controlSettings, .controlAddPlugin, .controlAddPluginHelp, .controlAddPluginHere, .controlSendAway,
 
-        .actionSave, .actionUse, .actionDelete, .actionAllow, .actionDecline,
+        .actionSave, .actionBack, .actionDelete, .actionAllow, .actionDecline,
         .actionRun, .actionCancel, .actionClear,
 
         .unitMilliseconds(60), .unitPoints(24), .unitSeconds(0.1), .unitPercent(58),
@@ -327,7 +329,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 541,
+        #expect(Self.all.count == 553,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")

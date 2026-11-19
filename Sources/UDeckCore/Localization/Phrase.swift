@@ -78,11 +78,8 @@ public enum Phrase: Sendable, Equatable {
 
     case lookLightLook
     case lookDarkLook
-    case lookCustom
-    case lookPresets
     case lookBuiltIn
     case lookSaved
-    case lookShows
     case lookLight
     case lookDark
     case lookLightFromHour(Int)
@@ -132,6 +129,36 @@ public enum Phrase: Sendable, Equatable {
     /// two names for one concept on one screen is one name too many.
     case languageSystem
     case lookNameThisLook
+    case styleGlass
+    case styleSolid
+    case styleSmoke
+    case styleGhost
+    case styleGlassSummary
+    case styleSolidSummary
+    case styleSmokeSummary
+    case styleGhostSummary
+    case appearanceAutomatic
+    case appearanceLight
+    case appearanceDark
+    case lookAppearance
+    case lookStyle
+    case lookOwnStyle
+    case lookOwnStyleSummary
+    case lookSaveStyle
+    case lookSaveStyleAction
+    case lookFineTuning
+    case lookFineTuningSummary
+    case lookByState
+    case lookByStateSame
+    case lookByStateDiffers
+    case lookSampleDay
+    case lookSampleEvening
+    case lookVariantHintLight
+    case lookVariantHintDark
+    case lookByClock
+    case lookByClockOnlyAutomatic
+    case lookStyleIs(String)
+    case lookByClockCaption(light: Int, dark: Int)
 
     /// The card in the sample. Illustrative, so it is written rather than
     /// translated — a Russian reader should see a card that reads as a card,
@@ -147,27 +174,12 @@ public enum Phrase: Sendable, Equatable {
 
     // MARK: - The built-in looks
 
-    case modeLight
-    case modeDark
-    case modeContrast
-    case modeGhost
-    case modePaper
-    case modeSmoke
 
     /// One line on what each built-in look is for. The names do not explain
     /// themselves — nobody guesses what Ghost or Paper is from the word.
-    case modeLightSummary
-    case modeDarkSummary
-    case modeContrastSummary
-    case modeGhostSummary
-    case modePaperSummary
-    case modeSmokeSummary
 
     // MARK: - What decides which look
 
-    case sourceSystem
-    case sourceManual
-    case sourceSchedule
 
     // MARK: - Plugins
 
@@ -798,7 +810,7 @@ public enum Phrase: Sendable, Equatable {
     // MARK: - Verbs
 
     case actionSave
-    case actionUse
+    case actionBack
     case actionDelete
     case actionAllow
     case actionDecline

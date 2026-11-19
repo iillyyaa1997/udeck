@@ -211,20 +211,31 @@ public struct PanelLook: Codable, Equatable, Sendable {
 
 /// A look the operator saved and named.
 ///
-/// The six that ship are an enum, because they are part of the program and
-/// change when it does. These are data: they are made at runtime, they outlive
+/// The styles that ship are an enum (`PanelStyle`), because they are part of
+/// the program and change when it does. These are data: they are made at runtime, they outlive
 /// the build, and there can be any number of them — which is the whole
 /// difference and the reason they are not the same type.
+///
+/// Since the redesign (2026-11-19) a saved look is a style of the operator's
+/// own: the light variant in `look` and the dark one in `dark`. One saved by an
+/// older uDeck has no `dark` and is the same look in both (`darkLook`).
 public struct PanelPreset: Codable, Equatable, Sendable, Identifiable {
     public var id: UUID
     public var name: String
+    /// The light variant — and the only one, for a preset an older uDeck saved.
     public var look: PanelLook
+    /// The dark variant, when the preset has one of its own.
+    public var dark: PanelLook?
 
-    public init(id: UUID = UUID(), name: String, look: PanelLook) {
+    public init(id: UUID = UUID(), name: String, look: PanelLook, dark: PanelLook? = nil) {
         self.id = id
         self.name = name
         self.look = look
+        self.dark = dark
     }
+
+    /// The look this style wears when the appearance is dark.
+    public var darkLook: PanelLook { dark ?? look }
 
     /// A name that will still be one after a person has finished typing.
     ///
@@ -242,7 +253,9 @@ public struct PanelPreset: Codable, Equatable, Sendable, Identifiable {
             // An id that is no UUID costs the id, not the preset (audit F12).
             id: ((try? c.decodeIfPresent(String.self, forKey: .id)) ?? nil).flatMap(UUID.init(uuidString:)) ?? UUID(),
             name: try c.decodeIfPresent(String.self, forKey: .name) ?? "Saved look",
-            look: try c.decodeIfPresent(PanelLook.self, forKey: .look) ?? PanelLook()
+            look: try c.decodeIfPresent(PanelLook.self, forKey: .look) ?? PanelLook(),
+            // A dark variant that will not read costs the variant, not the preset.
+            dark: (try? c.decodeIfPresent(PanelLook.self, forKey: .dark)) ?? nil
         )
     }
 
@@ -250,6 +263,7 @@ public struct PanelPreset: Codable, Equatable, Sendable, Identifiable {
         case id
         case name
         case look
+        case dark
     }
 }
 
@@ -271,23 +285,6 @@ public enum ThemeSource: String, Codable, CaseIterable, Sendable, Identifiable {
     case schedule
 
     public var id: String { rawValue }
-
-    public var namePhrase: Phrase {
-        switch self {
-        case .system: .sourceSystem
-        case .manual: .sourceManual
-        case .schedule: .sourceSchedule
-        }
-    }
-
-    public var name: String {
-        switch self {
-        case .system: "System"
-        case .manual: "Manual"
-        case .schedule: "By the clock"
-        }
-    }
-
 }
 
 /// When the scheduled source turns over, in whole hours of local time.
@@ -407,7 +404,10 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
         guard !cleaned.isEmpty else { return nil }
         let preset = PanelPreset(name: cleaned, look: look)
         if let index = saved.firstIndex(where: { $0.name.lowercased() == cleaned.lowercased() }) {
+            // One look saved over a style of two: it is one look now, not a
+            // new light variant beside an old dark one (Fable, stage 3).
             saved[index].look = preset.look
+            saved[index].dark = nil
             return saved[index]
         }
         saved.append(preset)
@@ -508,6 +508,7 @@ public struct ThemeSettings: Codable, Equatable, Sendable {
             preset.name = PanelPreset.cleaned(name: preset.name)
             guard !preset.name.isEmpty else { return nil }
             preset.look = preset.look.validated()
+            preset.dark = preset.dark?.validated()
             return preset
         }
         return result
