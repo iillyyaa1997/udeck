@@ -81,7 +81,7 @@ struct PluginsSettingsPane: View {
     @State private var linkText = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        ScrollView { VStack(alignment: .leading, spacing: 0) {
             PaneTitle(strings(.sectionPlugins))
             tabBar
                 .padding(.horizontal, 20)
@@ -95,7 +95,7 @@ struct PluginsSettingsPane: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 6)
                 .accessibilityIdentifier("plugins.page.\(navigation.pluginsTab.rawValue)")
-            ScrollView {
+            Group {
                 page
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
@@ -106,9 +106,8 @@ struct PluginsSettingsPane: View {
                     .padding(.bottom, 28)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            // Each tab from its own top.
+        } }
             .id(navigation.pluginsTab)
-        }
         // Whichever tab it opens on: the catalogue is read when it is stale,
         // and the sources with it (`pluginsPaneOpened`).
         .onAppear { model.pluginsPaneOpened() }
