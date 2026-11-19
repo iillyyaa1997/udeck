@@ -184,9 +184,10 @@ RESTART_SLACK_SECONDS = 5
 # here, for a runner's guest.
 GOING_SECONDS = 20
 
-# The Plugins pane, by a control only it has, and the General pane, which a
-# settings window opens on when nothing says otherwise — by one only it has.
-PLUGINS_PANE = "catalogue.enabled"
+# The General pane, which a settings window opens on when nothing says
+# otherwise — by a control only it has. The Plugins pane is told by its tabs, or
+# in a release from before them by its catalogue's switch, and nothing on it is
+# switched or touched to see it (`ui.wait_for_plugins_pane`).
 GENERAL_PANE = "general.openAtLogin"
 
 # The application put in front of Settings, as another was on the night of
@@ -418,7 +419,7 @@ def check_settings_left_open(machine, check_dir, lab, pair):
         touched = machine.clock()
         ui.click(machine, "section.plugins", "choosing Plugins, the last thing touched")
         clicked = machine.clock()
-        ui.wait_for(machine, PLUGINS_PANE, "waiting for the Plugins pane")
+        ui.wait_for_plugins_pane(machine, "waiting for the Plugins pane")
         panel.bring_forward(machine, IN_FRONT_OF_SETTINGS, f"putting the {IN_FRONT_OF_SETTINGS} in front of Settings")
         machine.screenshot(check_dir, "Settings left open on Plugins, behind the Finder")
         if not _still_the_same(machine, before, "reading uDeck's pids once Settings is open"):
@@ -456,7 +457,7 @@ def check_settings_left_open(machine, check_dir, lab, pair):
             expect(False, f"uDeck came back after restarting with Settings open on Plugins, and has no settings window "
                           f"{config.UI_APPEAR_SECONDS:.0f}s later: its windows {windows or 'none'}")
         try:
-            ui.wait_for(machine, PLUGINS_PANE, step, seconds=config.UI_APPEAR_SECONDS)
+            ui.wait_for_plugins_pane(machine, step, seconds=config.UI_APPEAR_SECONDS)
         except NotThere:
             _evidence(machine, check_dir, "no Plugins pane after the restart", lab)
             expect(False, f"uDeck came back after restarting with Settings open on Plugins, and its settings window "

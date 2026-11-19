@@ -318,14 +318,14 @@ is gone. Once exactly that folder is merged into the repository, it
 is **Verified** — nothing downloaded, nothing asked again — and updates as a
 verified plugin does; merged with changes, its row offers the verified version,
 and closed without being merged, its row says so and it keeps running. **Settings →
-Plugins → Update verified and trusted plugins by themselves** turns that off,
-and every update waits for a press. **Settings → Plugins → Official catalogue** turns all
+Plugins → Catalogue → Update verified and trusted plugins by themselves** turns that off,
+and every update waits for a press. **Settings → Plugins → Catalogue → Official catalogue** turns all
 of it off for the official repository: uDeck then makes no request to it, the
 plugins you have from it keep running, and uDeck stops knowing about their
 updates.
 
 **Your sources.** A GitHub repository or a GitLab project you add yourself under
-**Settings → Plugins → Your sources** is read on the same schedule, until you
+**Settings → Plugins → Sources** is read on the same schedule, until you
 remove it, from its own host: the github.com API and raw host, or a GitLab's
 `https://<host>/api/v4`, every file of it included, and its `/api/graphql` for
 the manifests of a plugin's history. **Official catalogue** off does not stop
