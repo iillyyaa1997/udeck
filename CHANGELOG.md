@@ -8,6 +8,29 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.8.12] — 2026-11-19
+
+Settings' redesign, fourth part: Plugins. 0.8.12 adds nothing to the plugin
+contract. The update to it goes by 0.8.8's rule.
+
+- **Four tabs instead of one long page.** Installed, Catalogue, Sources and
+  For developers, each with its icon and a line saying what it holds. The
+  Catalogue tab, and the Plugins row in the sidebar, show how many updates
+  wait as a blue arrow and a number.
+- **Installed: a list and a card.** Each plugin's line says the one thing
+  worth a glance — waiting for permission, an update, off, a failed run, on.
+  The chosen plugin's card shows everything at once (More is gone): what it
+  asks for, where it came from, its own settings, its last run, and Earlier
+  versions…, Show in Finder and Remove along the bottom.
+- **Catalogue: Update all (N).** Every update waiting, one after another, as
+  each row's Update would; one that has to warn first is left to its row and
+  named under the button. A row with an update shows "1.2.0 → 1.3.0". Your
+  sources' plugins are listed here too, under each source's name.
+- **Sources** holds the sources and Install from a link…; **For developers**
+  holds Link a folder…, the run log, where to look for commands and the
+  `udeck-plugin` command.
+- The sidebar is wide enough for its Russian names.
+
 ## [0.8.11] — 2026-11-19
 
 Settings' redesign, third part: Look. 0.8.11 adds nothing to the plugin
