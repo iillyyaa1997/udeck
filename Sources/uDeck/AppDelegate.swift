@@ -87,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings.show(after: controller.closeForAWindowOfUDeck())
         }
         // A notification about an update speaks uDeck's language, and a click
-        // on it opens the updates in Settings → About.
+        // on it opens the updates in Settings → General.
         updater.notifier.strings = { [model] in model.strings }
         updater.notifier.onOpen = { [weak self] in
             guard let self else { return }

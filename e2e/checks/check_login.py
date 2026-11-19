@@ -451,8 +451,7 @@ def _install_the_update(machine, check_dir, lab, seconds=240):
     not pronounce on it.
     """
     step = "installing the update uDeck is offered"
-    ui.click(machine, "section.about", "choosing the About section")
-    ui.wait_for(machine, "updates.checkNow", "waiting for the About section")
+    ui.open_updates_pane(machine, "choosing uDeck's updates")
     ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
     try:
         install = ui.wait_for(machine, "updates.install", "waiting for uDeck to offer the update", seconds=60)

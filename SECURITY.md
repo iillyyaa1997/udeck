@@ -117,7 +117,7 @@ launch and both with a switch to turn them off:
   `https://github.com/iillyyaa1997/udeck/releases/latest/download/appcast.xml`
   after launch when it has not asked in the last hour, then about once an hour
   while no update it downloaded is waiting, and what that finds is, as Settings
-  → About → *When a new version is out* says, downloaded, its EdDSA signature
+  → General → *When a new version is out* says, downloaded, its EdDSA signature
   checked against the key uDeck ships with, and put in place by itself, uDeck
   restarting while the panel is away (as uDeck ships); downloaded and checked
   and left for Update; or only said. Off with *Check for updates automatically*.

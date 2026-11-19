@@ -386,6 +386,49 @@ def open_settings(machine: Any, step: str, item: str = "Settings…") -> None:
     ax.ask(machine, ["press-menu-item", PROCESS, item], step)
 
 
+# How long the General section is given to show itself before the lab looks for
+# uDeck's updates in About, where releases before the redesign keep them — and
+# the control that says General is the pane showing: Open at Login, there in
+# every release.
+UPDATES_IN_GENERAL_SECONDS = 10
+UPDATES_AFTER_GENERAL_SECONDS = 2
+GENERAL_LOGIN = "general.openAtLogin"
+
+
+def open_updates_pane(machine: Any, step: str) -> Element:
+    """The section that holds uDeck's own updates chosen in an open settings window, and its **Check now**.
+
+    General since the redesign (2026-11-18); About in every release before it, so
+    a check that drives an older release as "from" finds it there. Which one is
+    told by the window itself — `updates.checkNow` showing in General or not —
+    and never by a version number.
+    """
+    if find(machine, "section.general", f"{step}: asking for General") is None:
+        # A release from before General: its updates can only be in About.
+        click(machine, "section.about", f"{step}: choosing About, in a uDeck with no General")
+        return wait_for(machine, "updates.checkNow", f"{step}: About")
+    click(machine, "section.general", f"{step}: choosing General")
+    # General shown first, by a control only General has and every release has
+    # there: a walk taken before the pane changed still holds About's **Check
+    # now**, and a release that keeps it in About would be read as one that has
+    # it in General (Codex, 2026-11-18, simulated).
+    try:
+        wait_for(machine, GENERAL_LOGIN, f"{step}: General", seconds=UPDATES_IN_GENERAL_SECONDS)
+    except NotThere:
+        pass
+    else:
+        # A moment for the rest of the pane to reach the walk after its first control.
+        deadline = machine.clock() + UPDATES_AFTER_GENERAL_SECONDS
+        while True:
+            if find(machine, "updates.checkNow", f"{step}: General") is not None:
+                return wait_for(machine, "updates.checkNow", f"{step}: General")
+            if machine.clock() >= deadline:
+                break
+            machine.sleep(0.5)
+    click(machine, "section.about", f"{step}: choosing About, where an older uDeck keeps its updates")
+    return wait_for(machine, "updates.checkNow", f"{step}: About, General having shown no Check now")
+
+
 def menu_items(machine: Any, step: str) -> str:
     """The titles in uDeck's own menu, for a reason — never for a verdict.
 

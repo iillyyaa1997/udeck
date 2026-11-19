@@ -28,7 +28,7 @@ import UDeckKit
 /// there is a newer version, as it reads the official plugin catalogue once a
 /// day — both on from the first launch, by the operator's decision that fewer
 /// questions for a new person outweigh a quiet first minute. The switch in
-/// Settings → About turns it off; README and SECURITY.md say what is asked and
+/// Settings → General turns it off; README and SECURITY.md say what is asked and
 /// when.
 ///
 /// **What a check of its own does with a new version is the operator's choice**

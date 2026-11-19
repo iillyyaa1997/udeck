@@ -8,10 +8,10 @@ import UDeckKit
 /// the corner of the screen, at most one for each version.
 ///
 /// Found or downloaded, it carries **Update** and **Later**; after a restart
-/// into the new version, nothing to press. Clicking it opens Settings → About,
+/// into the new version, nothing to press. Clicking it opens Settings → General,
 /// where the version, **Update** and "What's new" are. macOS asks whether uDeck
 /// may send notifications the first time there is one to send — not at launch —
-/// and a refusal is said on the About pane (`UpdateStatus.notificationsRefused`).
+/// and a refusal is said in General's updates (`UpdateStatus.notificationsRefused`).
 ///
 /// **An application signed ad hoc is refused the current API.** macOS answers
 /// uDeck's `requestAuthorization` with "Notifications are not allowed for this

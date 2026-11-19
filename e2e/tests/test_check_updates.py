@@ -12,6 +12,7 @@ the first about the second is how a lab loses the right to be believed.
 """
 
 import importlib.util
+import inspect
 import re
 import sys
 import time
@@ -990,7 +991,7 @@ def test_switched_on_and_heard_passes_without_check_now(machine, lab, check_dir,
     assert scene.walks == 1
     assert any("after automatic checks were turned on" in note for note in lab.notes)
     assert any(f"{app.AUTOMATIC_CHECKS} = {checks.KEPT_ON}" in note for note in lab.notes)
-    assert (check_dir / "about-before-the-switch.txt").read_text() == about_tree()
+    assert (check_dir / "updates-before-the-switch.txt").read_text() == about_tree()
 
 
 def test_a_switch_that_makes_one_check_instead_of_turning_checking_on_fails(machine, lab, check_dir, monkeypatch):
@@ -1081,16 +1082,16 @@ def test_the_switch_check_starts_from_a_machine_whose_operator_switched_it_off(m
 
 def test_a_pane_without_the_switch_is_the_lab_unable_to_find_it(machine, lab, check_dir, monkeypatch):
     scene = Scene(monkeypatch, machine, identifier="updates.somethingElse")
-    with pytest.raises(LabError, match=f"0 controls on the About pane carry '{checks.AUTOMATIC}'"):
+    with pytest.raises(LabError, match=f"0 controls in Settings' updates carry '{checks.AUTOMATIC}'"):
         checks.check_switched_on_it_looks_by_itself(machine, check_dir, lab)
     assert scene.switched == []
 
 
-def test_the_switch_is_the_one_uDecks_about_pane_names():
-    """The identifier is uDeck's, and it is held against the view that sets it."""
+def test_the_switch_is_the_one_uDecks_updates_name():
+    """The identifier is uDeck's, and it is held against the view that sets it: General's updates since the redesign."""
     view = (Path(__file__).resolve().parents[2] / "Sources" / "UDeckKit" / "Views" / "SettingsView.swift").read_text()
-    about = view[view.index("private struct AboutSection"):]
-    toggle = about[about.index("Toggle(strings(.updatesAutomatically)"):]
+    updates = view[view.index("private struct UpdatesSection"):]
+    toggle = updates[updates.index("Toggle(strings(.updatesAutomatically)"):]
     assert toggle.index(f'.accessibilityIdentifier("{checks.AUTOMATIC}")') < toggle.index("Text(")
 
 
@@ -1109,7 +1110,8 @@ def test_the_sections_the_lab_clicks_carry_their_tag_on_the_outside():
     view = (Path(__file__).resolve().parents[2] / "Sources" / "UDeckKit" / "Views" / "SettingsView.swift").read_text()
     row = view[view.index("List(Section.allCases, selection: $navigation.section)"):]
     row = row[:row.index(".accessibilityIdentifier(\"section.")]
-    assert ".badge(" in row and row.rindex(".tag(item)") > row.rindex(".badge(")
+    # Since the redesign the row is a view of its own and carries no `.badge`; the tag is still the last word on it.
+    assert "SidebarRow(" in row and row.rindex(".tag(item)") > row.rindex("SidebarRow(") and ".badge(" not in row
 
 
 # Preparing a machine that never looked.
@@ -1560,8 +1562,10 @@ def test_the_hour_is_the_lab_s_and_the_one_uDeck_ships():
 
 
 def test_the_identifiers_read_from_a_releases_source_are_the_ones_the_checks_press():
-    """`CHECK_NOW_PATH` is held to what checks/check_updates.py clicks and waits for, and to today's source."""
+    """`CHECK_NOW_PATH` is held to what checks/check_updates.py clicks and waits for — itself or through
+    `ui.open_updates_pane`, which goes by General first and About second — and to today's source."""
     source = (Path(__file__).resolve().parents[1] / "checks" / "check_updates.py").read_text()
+    source += inspect.getsource(ui.open_updates_pane)
     for identifier in releases.CHECK_NOW_PATH:
         assert f'"{identifier}"' in source, identifier
     view = (Path(__file__).resolve().parents[2] / "Sources" / "UDeckKit" / "Views" / "SettingsView.swift").read_text()

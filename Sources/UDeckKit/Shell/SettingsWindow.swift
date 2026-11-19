@@ -189,10 +189,11 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         present(handover)
     }
 
-    /// Opens the window on About's updates — what a notification about an
-    /// update opens when it is clicked (`UpdateNotice`).
+    /// Opens the window on General, where uDeck's updates are since the
+    /// redesign — what a notification about an update opens when it is clicked
+    /// (`UpdateNotice`).
     public func showUpdates(after handover: SettingsHandover? = nil) {
-        navigation.section = .about
+        navigation.section = .general
         show(after: handover)
     }
 
