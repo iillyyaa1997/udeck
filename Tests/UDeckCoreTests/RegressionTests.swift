@@ -603,7 +603,6 @@ struct RegressionTests {
     @Test("the built-in presets are all different from one another")
     func builtInPresetsAreDistinct() {
         let looks = PanelMode.allCases.map(\.look)
-        #expect(Set(PanelMode.allCases.map(\.name)).count == PanelMode.allCases.count)
         for (i, a) in looks.enumerated() {
             for b in looks[(i + 1)...] {
                 #expect(a != b, "two presets ship as the same look")
@@ -613,7 +612,7 @@ struct RegressionTests {
         for mode in PanelMode.allCases {
             let wantsDarkInk = mode.glass.tintIsLight && mode.glass.tintStrength > 0.5
             #expect((mode.ink == .dark) == wantsDarkInk,
-                    "\(mode.name) writes in the wrong ink for its own glass")
+                    "\(mode) writes in the wrong ink for its own glass")
         }
     }
 

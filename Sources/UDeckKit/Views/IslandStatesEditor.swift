@@ -17,8 +17,9 @@ struct IslandStatesEditor: View {
     @Binding var selected: UUID?
 
     /// The arrangement "настроить все вместе" replaced, for as long as the
-    /// window is open. Clearing the box puts it back.
-    @State private var previous: IslandStates?
+    /// window is open. Clearing the box puts it back. Held by Look rather than
+    /// here, so it survives going back to Look's main page and in again.
+    @Binding var previous: IslandStates?
     @Environment(\.strings) private var strings
 
     var body: some View {
