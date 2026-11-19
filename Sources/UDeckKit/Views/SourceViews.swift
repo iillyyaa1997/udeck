@@ -8,39 +8,6 @@ import UDeckCore
 // `source.<sid>.plugin.<id>.*` for its rows — because the titles are
 // translated and the lab drives these screens by identifier.
 
-/// **Your sources**: **Add a source…** and its sheet, the line a test build
-/// carries, what is wrong with `sources.json`, and one block per source.
-struct SourcesSection: View {
-    @Bindable var model: DeckModel
-    @Environment(\.strings) private var strings
-
-    var body: some View {
-        SettingsBlock(strings(.sourcesTitle)) {
-            Button(strings(.sourcesAdd)) { model.toggleAddSource() }
-                .accessibilityIdentifier("sources.add")
-            if model.sourceSheetOpen {
-                AddSourceSheet(model: model)
-            }
-            if !model.testBuild.isEmpty {
-                Text(model.testBuild.map { strings($0) }.joined(separator: "\n"))
-                    .font(.caption).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("sources.testBuild")
-            }
-            if !model.sourcesProblemLines.isEmpty {
-                Text(model.sourcesProblemLines.map { strings($0) }.joined(separator: "\n"))
-                    .font(.caption).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("sources.problem")
-            }
-            ForEach(model.sources, id: \.id) { source in
-                SourceBlock(model: model, source: source)
-                Divider()
-            }
-        }
-    }
-}
-
 /// **Add a source…**'s sheet, in the pane, as **Install from a link…**'s is:
 /// one field, **Look up**, and what it came to — the passport's name and
 /// description and the address, with **Add**; or why nothing is offered.
@@ -146,8 +113,8 @@ struct AddSourceSheet: View {
 
 /// One source the operator added: its name and address, whether it is
 /// trusted (S4-07), when it was read or why it was not, **Check now**,
-/// **Trust…** or **Stop trusting…** (S4-08) and **Remove…**, and its
-/// catalogue's rows.
+/// **Trust…** or **Stop trusting…** (S4-08) and **Remove…** — on Sources; its
+/// catalogue's rows are on Catalogue (`SourceCatalogue`).
 struct SourceBlock: View {
     @Bindable var model: DeckModel
     var source: OwnSource
@@ -240,18 +207,8 @@ struct SourceBlock: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("source.\(sid).problem")
             }
-            if let catalogue {
-                if catalogue.entries.isEmpty {
-                    Text(strings(.catalogueEmpty)).foregroundStyle(.secondary)
-                        .accessibilityIdentifier("source.\(sid).empty")
-                }
-                ForEach(catalogue.entries) { entry in
-                    CatalogueRowView(model: model, entry: entry, commit: catalogue.commit, source: sid)
-                    Divider()
-                }
-            }
+            // Its rows are on the Catalogue tab, under its name (`SourceCatalogue`).
         }
-        .padding(.vertical, 4)
     }
 
     /// When it was read, or why its last read did not finish (S4-20), naming

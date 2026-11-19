@@ -835,3 +835,101 @@ def test_a_release_from_before_General_goes_straight_to_About():
     machine = SectionsMachine({"general": [], "about": [CHECK_NOW]}, showing="about", general=False)
     assert ui.open_updates_pane(machine, "choosing the updates").identifier == "updates.checkNow"
     assert machine.sections == ["about"]
+
+
+# --- The Plugins pane's tabs -----------------------------------------------------------
+
+TABS = [
+    "6|AXButton||plugins.tab.installed||||900;250;|120;30;",
+    "6|AXButton||plugins.tab.catalogue||||1030;250;|100;30;",
+    "6|AXButton||plugins.tab.sources||||1140;250;|100;30;",
+    "6|AXButton||plugins.tab.developers||||1250;250;|140;30;",
+]
+INSTALLED_PAGE = "\n".join(["0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;", *TABS,
+    "6|AXStaticText||plugins.page.installed||What is installed||900;290;|300;16;",
+    "7|AXButton||plugins.row.uptime||||900;330;|230;40;",
+    "7|AXButton||plugins.row.team.clock||||900;372;|230;40;",
+    "7|AXStaticText||plugins.card.uptime||Uptime||1150;330;|100;20;",
+    "7|AXButton||plugin.uptime.remove||||1500;600;|60;20;",
+])  # fmt: skip
+CLOCK_CARD = INSTALLED_PAGE.replace("plugins.card.uptime||Uptime", "plugins.card.team.clock||team-clock").replace(
+    "plugin.uptime.remove", "plugin.team.clock.remove")
+CATALOGUE_PAGE = "\n".join(["0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;", *TABS,
+    "6|AXStaticText||plugins.page.catalogue||Plugins from the official catalogue||900;290;|300;16;",
+    "7|AXButton||catalogue.checkNow||||1500;320;|80;20;",
+    "7|AXStaticText||catalogue.uptime.state||Installed||1000;360;|200;16;",
+])  # fmt: skip
+OLD_PANE = "\n".join([
+    "0|AXWindow|AXStandardWindow||uDeck Settings|||790;198;|980;648;",
+    "5|AXCheckBox||catalogue.enabled||1||955;300;|20;20;",
+    "5|AXButton||plugin.uptime.remove||||955;400;|60;20;",
+])  # fmt: skip
+
+
+@pytest.mark.parametrize(("identifier", "tab"), [
+    ("plugin.uptime.remove", ui.INSTALLED), ("plugin.uptime.history.1.0.0.install", ui.INSTALLED),
+    ("plugins.nothingInstalled", ui.INSTALLED), ("catalogue.enabled", ui.CATALOGUE), ("catalogue.uptime.install", ui.CATALOGUE),
+    ("catalogue.updateAll", ui.CATALOGUE), ("source.github.com-team-1a2b3c4d.plugin.team-clock.install", ui.CATALOGUE),
+    ("source.github.com-team-1a2b3c4d.empty", ui.CATALOGUE), ("source.github.com-team-1a2b3c4d.mark", ui.SOURCES),
+    ("source.github.com-team-1a2b3c4d.token.tokenField", ui.SOURCES), ("sources.add.field", ui.SOURCES),
+    ("link.field", ui.SOURCES), ("plugins.installFromLink", ui.SOURCES), ("plugins.linkFolder.confirm", ui.DEVELOPERS),
+    ("plugins.runLog", ui.DEVELOPERS), ("searchPath.add", ui.DEVELOPERS), ("command.install", ui.DEVELOPERS),
+    ("plugins.tab.sources", None), ("plugins.row.uptime", None), ("section.plugins", None), ("updates.checkNow", None),
+])  # fmt: skip
+def test_every_control_of_the_plugins_pane_is_on_its_tab(identifier, tab):
+    assert ui.plugins_tab_of(identifier) == tab
+
+
+def test_a_plugin_with_dots_in_its_id_is_told_from_one_whose_id_it_starts_with():
+    ids = ["plugins.row.team", "plugins.row.team.clock"]
+    assert ui._plugin_of("plugin.team.clock.remove", ids) == "team.clock"
+    assert ui._plugin_of("plugin.team.remove", ids) == "team"
+    assert ui._plugin_of("plugin.uptime.remove", ids) is None
+
+
+def test_a_control_on_another_tab_is_found_there_after_one_click_on_its_tab():
+    machine = FakeMachine(walks=[INSTALLED_PAGE, CATALOGUE_PAGE])
+    found = ui.find(machine, "catalogue.uptime.state", "reading uptime's catalogue row")
+    assert found is not None and found.identifier == "catalogue.uptime.state"
+    # The Catalogue tab, in its middle — once.
+    assert machine.clicks == [(1080, 265)]
+
+
+def test_an_installed_plugins_control_is_found_on_its_card():
+    machine = FakeMachine(walks=[INSTALLED_PAGE, INSTALLED_PAGE, CLOCK_CARD])
+    found = ui.find(machine, "plugin.team.clock.remove", "reading team-clock's Remove")
+    assert found is not None and found.identifier == "plugin.team.clock.remove"
+    # team-clock's row in the list, and not uptime's.
+    assert machine.clicks == [(1015, 392)]
+
+
+def test_a_control_absent_from_its_own_tab_and_card_is_absent_with_nothing_clicked():
+    machine = FakeMachine(walks=[CATALOGUE_PAGE])
+    assert ui.find(machine, "catalogue.uptime.install", "looking for Install") is None
+    assert machine.clicks == []
+
+
+def test_a_release_from_before_the_tabs_is_never_switched():
+    machine = FakeMachine(walks=[OLD_PANE])
+    assert ui.find(machine, "catalogue.checkNow", "looking for Check now") is None
+    assert ui.find(machine, "plugin.uptime.remove", "finding Remove").identifier == "plugin.uptime.remove"
+    assert machine.clicks == []
+    ui.wait_for_plugins_pane(machine, "waiting for the pane")
+
+
+def test_a_walk_of_one_tab_asked_for_a_control_of_another_is_read_again_there():
+    machine = FakeMachine(walks=[INSTALLED_PAGE, INSTALLED_PAGE, CATALOGUE_PAGE, CATALOGUE_PAGE])
+    dump = ui.identified(machine, "reading the pane")
+    assert ui.element(dump, "plugin.uptime.remove") is not None
+    state = ui.element(dump, "catalogue.uptime.state")
+    assert state is not None and ui.says(state) == "Installed"
+    assert machine.clicks == [(1080, 265)]
+    # A control of the tab the walk is of, absent, is absent: nothing is read again.
+    assert ui.element(ui.showing(dump, "catalogue.uptime.state"), "catalogue.uptime.install") is None
+
+
+def test_a_tab_that_never_shows_its_page_is_the_labs_failure():
+    machine = FakeMachine(walks=[INSTALLED_PAGE])
+    with pytest.raises(LabError, match="plugins.tab.catalogue' was clicked 3 times"):
+        ui.find(machine, "catalogue.checkNow", "looking for Check now")
+    assert len(machine.clicks) == ui.TAB_CLICKS

@@ -1526,7 +1526,7 @@ def check_unverified_asks_even_for_nothing(machine, check_dir, lab):
     with nothing in it would let it run (`plugin-settings.json`) — and its
     count of runs, read with the panel away before the edit, is what it was:
     the edited code never ran on the decision made for the code before it.
-    Switched on again in Settings, its row asks the same, under **More** —
+    Switched on again in Settings, its card asks the same —
     *Asks nothing asks for nothing, but its code is unverified*; **Decline**
     there switches it off as the card's does, the count still what it was.
     Switched on once more, the row asks again; **Allow** there records the
@@ -1586,10 +1586,9 @@ def check_unverified_asks_even_for_nothing(machine, check_dir, lab):
                                  f"from {counted} to {after!r} between the edit and Decline on the card")
         _put_the_panel_away(machine, "after Decline on the card")
 
-        # The same question in Settings, under More — and its Decline and Allow.
+        # The same question in Settings, on its card — and its Decline and Allow.
         ui.plugins_pane(machine, "opening Settings → Plugins after the edit")
         _switch(machine, f"plugin.{ASKS_NOTHING}.enabled", True, f"switching {ASKS_NOTHING} on in Settings")
-        _press(machine, f"plugin.{ASKS_NOTHING}.more", f"opening More on {ASKS_NOTHING}")
         asks = _wait_until(machine, f"plugin.{ASKS_NOTHING}.asksNothing", lambda said: said == question, NOTICED_SECONDS)
         _keep_the_pane(machine, check_dir, lab, "settings-asks-after-the-edit.txt")
         expect(asks == question, f"after the edit, {ASKS_NOTHING}'s row in Settings says {asks!r}, not {question!r}")
@@ -1878,7 +1877,7 @@ def check_merged_with_changes_offers_the_verified(machine, check_dir, lab):
         state = ui.says(ui.element(dump, f"catalogue.{UPTIME}.state"))
         wanted = f"{INSTALLED_HERE_UNVERIFIED.format(line=f'pull request #{PULL}')} — {CATALOGUE_MERGED_DIFFERS}"
         expect(state == wanted, f"uptime's catalogue row says {state!r}, not {wanted!r}")
-        waiting = ui.says(ui.element(dump, "catalogue.updatesWaiting"))
+        waiting = ui.says(ui.element(dump, "catalogue.updateAll"))
         expect(waiting == "1 update is waiting", f"Settings says {waiting!r} of the updates waiting, not that one is")
         expect(ui.element(dump, f"plugin.{UPTIME}.update") is not None, "the row says to update, and offers no Update")
         # One press, one name: the catalogue row's button for the verified copy says what the plugin's row's says,
@@ -2200,7 +2199,7 @@ def check_unverified_only_offers(machine, check_dir, lab):
                f"{[c.identifier for c in ui.controls(dump) if UPTIME in c.identifier]}")  # fmt: skip
         expect(ui.element(dump, f"plugin.{UPTIME}.rewritten") is None,
                f"p2 continues pr3, and the row says {ui.says(ui.element(dump, f'plugin.{UPTIME}.rewritten'))!r}")
-        waiting = ui.says(ui.element(dump, "catalogue.updatesWaiting"))
+        waiting = ui.says(ui.element(dump, "catalogue.updateAll"))
         expect(waiting == ONE_UPDATE_WAITING, f"Settings says {waiting!r} of the updates waiting, not {ONE_UPDATE_WAITING!r}")
         _expect_the_copy_as_it_was(scene, installed, folder, "after the pull request moved on")
         followed = _followed(machine, UPTIME) or {}
@@ -2468,8 +2467,8 @@ def check_a_branch_is_followed(machine, check_dir, lab):
                f"the branch moved on, and uDeck asked {described(heard)}: not its head, p2's listing and one comparison")  # fmt: skip
         expect(ui.element(dump, f"plugin.{UPTIME}.update") is not None and ui.element(dump, f"plugin.{UPTIME}.whatChanged") is not None,
                "the row offers the branch's head without Update and What changed")
-        expect(ui.says(ui.element(dump, "catalogue.updatesWaiting")) == ONE_UPDATE_WAITING,
-               f"Settings says {ui.says(ui.element(dump, 'catalogue.updatesWaiting'))!r} of the updates waiting")
+        expect(ui.says(ui.element(dump, "catalogue.updateAll")) == ONE_UPDATE_WAITING,
+               f"Settings says {ui.says(ui.element(dump, 'catalogue.updateAll'))!r} of the updates waiting")
         _expect_the_copy_as_it_was(scene, installed, folder, "after the branch moved on")
 
         scene.github.tell("deleting the branch", branches={})
@@ -2482,7 +2481,7 @@ def check_a_branch_is_followed(machine, check_dir, lab):
         expect(said == gone, f"the branch was deleted, and uptime's row says {said!r}; uDeck asked {described(heard)}")
         asked = [r for r in heard if r.is_api and r.path == head]
         expect(len(asked) == 1 and asked[0].status == 422, f"the branch was deleted, and uDeck asked {described(asked)}")
-        offered = {c.identifier for c in ui.controls(dump) if UPTIME in c.identifier}
+        offered = {c.identifier for c in ui.controls(ui.showing(dump, f"plugin.{UPTIME}.remove")) if UPTIME in c.identifier}
         expect({f"plugin.{UPTIME}.switchToVerified", f"plugin.{UPTIME}.remove"} <= offered
                and f"plugin.{UPTIME}.update" not in offered and f"plugin.{UPTIME}.offer" not in offered,
                f"the branch's copy, its branch gone, is offered {sorted(offered)}: Switch to verified and Remove, "
@@ -2516,7 +2515,7 @@ def check_a_branch_is_followed(machine, check_dir, lab):
         heard = _since(scene, before)
         asked = [r for r in heard if r.is_api and r.path == head]
         expect(not asked, f"a read asked about the branch after the install, so the row says what it heard: {described(asked)}")
-        offered = {c.identifier for c in ui.controls(dump) if UPTIME in c.identifier}
+        offered = {c.identifier for c in ui.controls(ui.showing(dump, f"plugin.{UPTIME}.remove")) if UPTIME in c.identifier}
         expect(said is None and f"plugin.{UPTIME}.offer" not in offered and f"plugin.{UPTIME}.update" not in offered,
                f"uptime was installed from the branch made again, and its row says {said!r} and offers "
                f"{sorted(offered)}: nothing of a branch gone, nothing along it")  # fmt: skip
@@ -2967,8 +2966,8 @@ def check_failed_run_on_a_fresh_card(machine, check_dir, lab):
     its folder. Placed, allowed, its card is read; then `fail` is put there with
     the panel open, and within a few runs the card, its values still shown,
     has the dot beside its name and the line "Last run failed at …: the producer
-    exited with status 3" and "showing values from …". Settings → Plugins, under
-    **More**, says the same last run and the end of its stderr. `fail` taken
+    exited with status 3" and "showing values from …". Settings → Plugins, on
+    its card, says the same last run and the end of its stderr. `fail` taken
     away, the panel opened again runs it, and the dot and the line are gone.
     The panel in the screenshot has its own four buttons — refresh, Settings,
     send away, fill the screen — and no density button.
@@ -3003,7 +3002,6 @@ def check_failed_run_on_a_fresh_card(machine, check_dir, lab):
 
         _put_the_panel_away(machine, "after the failure")
         ui.plugins_pane(machine, "opening Settings → Plugins on the failed run")
-        _press(machine, f"plugin.{FLAKY}.more", "opening More beside the plugin")
         last = _wait_until(machine, f"plugin.{FLAKY}.lastRun", lambda said: bool(said), NOTICED_SECONDS)
         stderr = ui.reads(machine, f"plugin.{FLAKY}.stderr", "reading the end of its stderr")
         _keep_the_pane(machine, check_dir, lab, "settings-on-the-failed-run.txt")
@@ -3188,7 +3186,7 @@ def check_screens_in_russian(machine, check_dir, lab):
     screenshot of each — for a person to read: the **Linked** row and the
     warning before removing a link, **Link a folder…** over an installed plugin
     and its warning, the run log switch, **Where to look for commands**,
-    **Install command**, the last run under **More**, and a failed run on a
+    **Install command**, the last run on its card, and a failed run on a
     fresh card. Each is found by its identifier, and its words are uDeck's
     Russian ones (Russian.swift) — why the run failed too, on the card and in
     the last run, whose seconds are written with a comma; nothing is confirmed.
@@ -3228,8 +3226,8 @@ def check_screens_in_russian(machine, check_dir, lab):
 
         ui.plugins_pane(machine, "opening Settings → Plugins in Russian", language=ru)
         _the_catalogue_read(scene, since=0, commit="c1")
-        # The catalogue first: it is at the foot of the pane, and everything
-        # opened above it — More, a warning — pushes its buttons further down.
+        # The catalogue first: everything opened on the cards before it — a
+        # warning — would only be in the way.
         _install(scene, UPTIME, pane_open=True, window=window)
         over = f"{WORK}/{UPTIME_WORK}"
         machine.ssh.run(f"rm -rf {over} && cp -R {UDECK_HOME}/plugins/{UPTIME} {over}", "making a working copy of uptime")
@@ -3241,7 +3239,6 @@ def check_screens_in_russian(machine, check_dir, lab):
 
         mark = _wait_until(machine, f"plugin.{FLAKY}.mark", lambda said: said == RU_LINKED_MARK, NOTICED_SECONDS, window=window)
         expect(mark == RU_LINKED_MARK, f"the linked row is marked {mark!r} in Russian")
-        _press(machine, f"plugin.{FLAKY}.more", "opening More", window=window)
         last = _wait_until(machine, f"plugin.{FLAKY}.lastRun", lambda said: bool(said), NOTICED_SECONDS, window=window)
         _keep_the_pane(machine, check_dir, lab, "ru-plugins-pane.txt", window=window)
         expect(last is not None and RU_A_FAILURE + RU_EXITED_3 in last and re.search(r"\d+,\d\d с", last) is not None
@@ -3692,13 +3689,15 @@ def check_source_add_github(machine, check_dir, lab):
         # SwiftUI hands the accessibility API one element for texts that read alike (`_row_of`): the three rows'
         # **Unverified** come back as one, under one row's identifier — so the rows are read as one mark, and no row as
         # Verified.
-        rows = [row for row in ui.controls(dump) if row.identifier.startswith(f"source.{sid}.plugin.")]
+        # The rows on Catalogue, under the source's name; the block on Sources.
+        listed = ui.showing(dump, f"source.{sid}.plugin.{TEAM_CLOCK}.mark")
+        rows = [row for row in ui.controls(listed) if row.identifier.startswith(f"source.{sid}.plugin.")]
         marks = {ui.says(row) for row in rows if row.identifier.endswith(".mark")}
         expect(marks == {UNVERIFIED}, f"the source's rows are marked {marks}, not {UNVERIFIED!r}")
         expect(not [row for row in rows if row.identifier.endswith(".verified")], "a source's row says Verified")
         for plugin in (TEAM_CLOCK, TEAM_PING, UPTIME):
-            expect(ui.element(dump, f"source.{sid}.plugin.{plugin}.install") is not None
-                   or ui.element(dump, f"source.{sid}.plugin.{plugin}.installFromHere") is not None,
+            expect(ui.element(listed, f"source.{sid}.plugin.{plugin}.install") is not None
+                   or ui.element(listed, f"source.{sid}.plugin.{plugin}.installFromHere") is not None,
                    f"{plugin}'s row in the source's block offers no Install")
         source = _the_source(machine)
         expect(source == {"id": sid, "provider": "github", "host": "github.com", "path": TEAM, "remoteID": number,
@@ -4181,7 +4180,8 @@ def check_official_id_mismatch(machine, check_dir, lab):
         expect(ui.element(dump, f"plugin.{UPTIME}.earlier") is None,
                "with the official address another repository's, uptime's row offers Earlier versions…, which would list "
                "that repository's history")  # fmt: skip
-        rows = sorted(row.identifier for row in ui.controls(dump) if row.identifier.startswith(f"catalogue.{UPTIME}."))
+        rows = sorted(row.identifier for row in ui.controls(ui.showing(dump, f"catalogue.{UPTIME}.state"))
+                      if row.identifier.startswith(f"catalogue.{UPTIME}."))  # fmt: skip
         expect(not rows, f"with the official address another repository's, the catalogue read before is offered: {rows}")
         heard, dump = _look_up(scene, BRANCH_LINK, "a branch with the official address changed",
                                came_to="link.refused")
@@ -4428,7 +4428,8 @@ def check_source_trust(machine, check_dir, lab):
         expect(ran, f"{NOTICED_SECONDS}s after Trust, the panel away and polling on, team-clock had not run: the trust did "
                     "not run what it now allows — its interval is 60 s")  # fmt: skip
         dump = _keep_the_pane(machine, check_dir, lab, "the-source-trusted.txt")
-        verified = [row.identifier for row in ui.controls(dump)
+        # Its rows are on Catalogue.
+        verified = [row.identifier for row in ui.controls(ui.showing(dump, f"source.{sid}.plugin.{TEAM_CLOCK}.mark"))
                     if row.identifier.startswith(f"source.{sid}.") and row.identifier.endswith(".verified")]  # fmt: skip
         expect(not verified, f"a trusted source's rows say Verified: {verified}")
         _expect_a_source_record(_status_becomes(machine, TEAM_CLOCK, "trusted"), sid, t1, "1.0.0", TEAM_CLOCK, trusted=True)
@@ -4674,7 +4675,8 @@ def check_source_stop_trusting(machine, check_dir, lab):
         # the block says *Not trusted…*.
         rows = _the_marks(sid, copies=(TEAM_CLOCK, TEAM_PING))
         unverified = lambda identifier: rows(identifier) and identifier != f"source.{sid}.mark"  # noqa: E731
-        marks = _texts_of(machine, unverified, lambda said: said == {UNVERIFIED}, "after Stop trusting")
+        on = (CATALOGUE_PLACE, f"plugin.{TEAM_CLOCK}.mark", f"plugin.{TEAM_PING}.mark")
+        marks = _texts_of(machine, unverified, lambda said: said == {UNVERIFIED}, "after Stop trusting", places=on)
         expect(marks == {UNVERIFIED}, f"after Stop trusting, team-clock's and team-ping's rows are marked {marks}, not "
                                       f"{UNVERIFIED!r}")  # fmt: skip
         for plugin in (TEAM_CLOCK, TEAM_PING):
@@ -4700,7 +4702,7 @@ def check_source_stop_trusting(machine, check_dir, lab):
         _write(machine, SOURCES_FILE, listed, "taking the trust out of sources.json by hand")
         ui.plugins_pane(machine, "opening Settings → Plugins after the hand edit")
         marks = _texts_of(machine, unverified, lambda said: said == {UNVERIFIED}, "after the hand edit",
-                          TICK_SECONDS + NOTICED_SECONDS)  # fmt: skip
+                          TICK_SECONDS + NOTICED_SECONDS, places=on)  # fmt: skip
         expect(marks == {UNVERIFIED}, f"{TICK_SECONDS + NOTICED_SECONDS}s after the trust was taken out of {SOURCES_FILE} by "
                                       f"hand, the rows are marked {marks}, not {UNVERIFIED!r}")  # fmt: skip
         _the_card_asks(scene, TEAM_CLOCK, "its trust taken away by hand")
@@ -4820,7 +4822,8 @@ def check_source_screens_in_russian(machine, check_dir, lab):
         block = _wait_until(machine, f"source.{sid}.mark", lambda said: said == RU_NOT_TRUSTED, NOTICED_SECONDS, window=window)
         expect(block == RU_NOT_TRUSTED, f"the source's block says {block!r} in Russian, not {RU_NOT_TRUSTED!r}")
         rows = _texts_of(machine, lambda identifier: identifier.startswith(f"source.{sid}.plugin.") and identifier.endswith(".mark"),
-                         lambda said: said == {RU_UNVERIFIED}, "the source's rows in Russian", window=window)  # fmt: skip
+                         lambda said: said == {RU_UNVERIFIED}, "the source's rows in Russian", window=window,
+                         places=(CATALOGUE_PLACE,))  # fmt: skip
         expect(rows == {RU_UNVERIFIED}, f"the source's rows are marked {rows} in Russian, not {RU_UNVERIFIED!r}")
         _keep_the_pane(machine, check_dir, lab, "ru-the-source-added.txt", window=window)
         _install_from_the_source(scene, sid, TEAM_CLOCK, "team-clock in Russian", window=window)
@@ -6679,16 +6682,33 @@ def _trust(scene, sid, label, name=TEAM_NAME, address=TEAM_ADDRESS, copies=(), w
     return (_a_source(machine, sid) or {}).get("trustedAt")
 
 
-def _texts_of(machine, identifiers, satisfied, label, seconds=NOTICED_SECONDS, window=ui.SETTINGS_WINDOW):
+def _texts_of(machine, identifiers, satisfied, label, seconds=NOTICED_SECONDS, window=ui.SETTINGS_WINDOW, places=None):
     """What the controls on the screen whose identifier is one of `identifiers` — or, a callable, one it keeps — say,
     isolates taken out, as a set: once `satisfied` with it, or as it is when `seconds` have passed. For texts that read
     alike, which may come back as one element under any one of their identifiers (`_row_of`): a set of one text says
-    that none of them says another, not that each was read."""
+    that none of them says another, not that each was read.
+
+    Read on each of `places` — a control for each tab of Settings → Plugins, or plugin's card, the texts are on
+    (`ui.reach`) — and gathered into one set: by default where each of `identifiers` is, and for a callable the screen
+    as it is."""
     keeps = identifiers if callable(identifiers) else (lambda identifier: identifier in identifiers)
+    if places is None:
+        places = () if callable(identifiers) else tuple(identifiers)
+    # One read for each tab, or card, the places are on.
+    seen, visits = set(), []
+    for place in places:
+        where = (ui.plugins_tab_of(place), place.split(".")[1] if place.startswith("plugin.") else None)
+        if where not in seen:
+            seen.add(where)
+            visits.append(place)
     deadline = machine.clock() + seconds
     while True:
-        dump = _read_the_screen(machine, f"reading the texts that read alike: {label}", window)
-        said = {_strip(ui.says(row)) for row in ui.controls(dump) if row.identifier and keeps(row.identifier)}
+        said = set()
+        for place in visits or [None]:
+            if place is not None:
+                ui.reach(machine, place, f"going to {place}: {label}", window)
+            dump = _read_the_screen(machine, f"reading the texts that read alike: {label}", window)
+            said |= {_strip(ui.says(row)) for row in ui.controls(dump) if row.identifier and keeps(row.identifier)}
         if satisfied(said) or machine.clock() >= deadline:
             return said
         machine.sleep(1)
@@ -6702,8 +6722,14 @@ def _the_marks(sid, copies=()):
 
 
 def _source_marks(machine, sid, satisfied, label, seconds=NOTICED_SECONDS, copies=(), window=ui.SETTINGS_WINDOW):
-    """What the marks of the source's block, its rows and `copies`' rows say, as one set (`_texts_of`, `_the_marks`)."""
-    return _texts_of(machine, _the_marks(sid, copies), satisfied, label, seconds, window)
+    """What the marks of the source's block, its rows and `copies`' rows say, as one set (`_texts_of`, `_the_marks`) —
+    read on Sources, on Catalogue and on each copy's card."""
+    return _texts_of(machine, _the_marks(sid, copies), satisfied, label, seconds, window,
+                     places=(f"source.{sid}.mark", CATALOGUE_PLACE, *(f"plugin.{copy}.mark" for copy in copies)))
+
+
+# A control on Catalogue, whatever it lists: where a source's rows are read (`_texts_of`).
+CATALOGUE_PLACE = "catalogue.status"
 
 
 def _stop_trusting(scene, sid, label, name=TEAM_NAME, window=ui.SETTINGS_WINDOW, words=STOP_TRUSTING_CONFIRM,
@@ -7043,7 +7069,7 @@ def _row_of(dump, plugin):
     plugins.install-fetches-one-folder/after-the-install.txt). What a row always
     has of its own is its state, its button or its **Details**.
     """
-    return [row for row in ui.controls(dump) if row.identifier.startswith(f"catalogue.{plugin}.")]
+    return [row for row in ui.controls(ui.showing(dump, f"catalogue.{plugin}.state")) if row.identifier.startswith(f"catalogue.{plugin}.")]
 
 
 def _wait_for_disk(machine, satisfied, seconds):
@@ -7079,6 +7105,10 @@ def _count_of_runs(machine, path):
 def _keep_the_pane(machine, check_dir, lab, name, window=ui.SETTINGS_WINDOW, showing=None):
     """The settings window's walk, kept beside the report, and returned; its screenshot taken with the control
     `showing` scrolled into view first where the machine can scroll (a runner's screen is too short for the pane)."""
+    # On the tab — and the card — that holds what the screenshot is for, before
+    # the walk kept beside it: the two are of one screen.
+    if showing is not None:
+        ui.reach(machine, showing, f"going to {showing}", window)
     dump = _read_the_screen(machine, "reading Settings → Plugins", window)
     try:
         (check_dir / name).write_text(dump)
@@ -7953,3 +7983,58 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+def check_gallery(machine, check_dir, lab):
+    """Pictures of Settings → Plugins' tabs in Russian, for the redesign's stage 4 — a lab tree's only, never committed."""
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False, updates_itself=False)
+    ru = ui.RUSSIAN
+    window = ru.settings_window
+    try:
+        _write(machine, SETTINGS, {"language": ru.code, "autoUpdateVerified": False}, "setting uDeck's language to Russian")
+        app.launch(machine)
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins", language=ru)
+        _install(scene, UPTIME, pane_open=True, window=window)
+        scene.github.tell("moving main to c2", main="c2")
+        frame = ui.place_settings(machine, "placing Settings for the gallery", window=window)
+        lab.note(f"   Settings at {frame.x},{frame.y} {frame.width}x{frame.height}")
+        _press(machine, "catalogue.checkNow", "pressing Check now", window)
+        offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: bool(said), OPERATION_SECONDS, window=window)
+        lab.note(f"   offer: {offer!r}")
+
+        def shot(label):
+            machine.sleep(1.5)
+            machine.screenshot(check_dir, f"gallery {label}")
+            (check_dir / f"gallery-{label}.txt").write_text(ui.tree(machine, f"reading {label}", window))
+            (check_dir / f"gallery-{label}-identified.txt").write_text(ui.identified(machine, f"reading {label}", window))
+
+        def step(label, act):
+            try:
+                act()
+            except Exception as error:  # a gallery shows what it can
+                lab.note(f"   {label}: {error}")
+            shot(label)
+
+        for tab in ("installed", "catalogue", "sources", "developers"):
+            step(f"plugins-{tab}", lambda tab=tab: ui.click(machine, f"plugins.tab.{tab}", f"the {tab} tab", window))
+        step("plugins-sources-add", lambda: ui.click(machine, "sources.add", "opening Add a source", window))
+        step("plugins-sources-link", lambda: ui.click(machine, "plugins.installFromLink", "opening Install from a link", window))
+        # The router: a control of another tab, asked for, is found there.
+        found = ui.find(machine, f"plugin.{UPTIME}.remove", "finding uptime's Remove from Sources", window)
+        lab.note(f"   uptime's Remove from Sources: {found}")
+        shot("plugins-router-to-installed")
+        found = ui.find(machine, f"catalogue.{UPTIME}.update", "finding uptime's catalogue Update", window)
+        lab.note(f"   uptime's catalogue Update: {found}")
+        shot("plugins-router-to-catalogue")
+        waiting = ui.reads(machine, "catalogue.updateAll", "reading Update all", window)
+        lab.note(f"   Update all says {waiting!r}")
+        step("plugins-update-all", lambda: ui.click(machine, "catalogue.updateAll", "pressing Update all", window))
+        done = _wait_for_disk(machine, lambda: (_record(machine, UPTIME) or {}).get("version") == "1.1.0", OPERATION_SECONDS)
+        lab.note(f"   updated by Update all: {done}; record {(_record(machine, UPTIME) or {}).get('version')!r}")
+        shot("plugins-catalogue-after-update-all")
+        step("plugins-installed-after", lambda: ui.click(machine, "plugins.tab.installed", "the installed tab", window))
+        step("plugins-installed-remove-warning", lambda: ui.click(machine, f"plugin.{UPTIME}.remove", "pressing Remove", window))
+        step("plugins-installed-earlier", lambda: ui.click(machine, f"plugin.{UPTIME}.earlier", "pressing Earlier versions", window))
+    finally:
+        scene.close()

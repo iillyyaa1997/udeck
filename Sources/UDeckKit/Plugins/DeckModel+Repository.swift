@@ -408,13 +408,88 @@ extension DeckModel {
     /// copies of code nobody verified (`UnverifiedRow.waiting`): the verified
     /// version offered once a pull request was merged as something else, and
     /// a newer version or other files along a branch or a pull request.
-    public var updatesWaiting: Int {
+    public var updatesWaiting: Int { waitingUpdates.count }
+
+    /// The copies those updates are of, by id: what **Update all** goes
+    /// through, in this order.
+    public var waitingUpdates: [String] {
         // Only what the rows offer: a copy whose source cannot be read now is
         // offered nothing (`canRead`).
         installed.plugins.filter { id, record in
             canRead(record.source) && folderExists(id)
                 && (updateOffer(for: id)?.isWaiting == true || unverifiedRow(of: id)?.waiting == true)
-        }.count
+        }.keys.sorted()
+    }
+
+    /// The press the plugin's own **Update** makes while an update of it
+    /// waits (`InstalledRepositoryControls`): what its own source's head has;
+    /// its pull request merged as something else, the verified copy; else
+    /// what its own branch or pull request has now. Nothing while none waits.
+    public func updateWaiting(_ id: String, shown: ShownPlace.Place? = nil) -> ShownPlace.Press {
+        if let record = installed.plugins[id], canRead(record.source), updateOffer(for: id)?.isWaiting == true {
+            return update(id, from: record.source, shown: shown)
+        }
+        guard let row = unverifiedRow(of: id) else { return .goAhead }
+        if row.verifiedIsAnUpdate { return update(id, from: InstalledPlugins.officialSource, shown: shown) }
+        if row.lineOffer?.offer.isWaiting == true { return updateAlongItsLine(id, shown: shown) }
+        return .goAhead
+    }
+
+    /// **Update all (N)**: every copy an update waits for, one after another,
+    /// each by the press its own row's **Update** makes (`updateWaiting`) — so
+    /// each is what that press would have done, and fails, if it fails, on its
+    /// own row. A copy whose update has to warn first — something of the
+    /// operator's in its folder would go to the Trash, a copy of another line
+    /// of history would take its place (`ShownPlace`) — is not updated: it is
+    /// left to its row, which warns, and named under the button.
+    public func updateAll() {
+        guard !updatingAll, busyPlugin == nil else { return }
+        let ids = waitingUpdates
+        guard !ids.isEmpty else { return }
+        updatingAll = true
+        updateAllLeft = []
+        DeckLog.plugins.info("update all: \(ids.joined(separator: ", "), privacy: .public)")
+        Task {
+            var left: [String] = []
+            for id in ids {
+                await untilNoOperation()
+                // Updated by itself meanwhile, or no longer offered.
+                guard waitingUpdates.contains(id) else { continue }
+                if case .ask = updateWaiting(id) {
+                    DeckLog.plugins.info("update all: \(id, privacy: .public) left to its row, which warns first")
+                    left.append(id)
+                }
+                await untilNoOperation()
+            }
+            updateAllLeft = left
+            updatingAll = false
+        }
+    }
+
+    /// Until no install, update, removal or link runs.
+    private func untilNoOperation() async {
+        while busyPlugin != nil {
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+    }
+
+    /// What an installed plugin's line in the list says (`PluginListStatus`):
+    /// of a plugin on disk, or — `plugin` nil — of one installed through uDeck
+    /// whose folder has gone.
+    public func listStatus(of plugin: DiscoveredPlugin?, id: String) -> PluginListStatus {
+        guard let plugin else { return .of(.init(folderGone: true)) }
+        guard let manifest = plugin.manifest, plugin.problems.isEmpty else { return .of(.init(wontLoad: true)) }
+        let decision = launchDecision(for: manifest.id)
+        var facts = PluginListStatus.Facts(enabled: pluginSettings.isEnabled(manifest.id))
+        if case .awaitingDecision = decision { facts.asksPermission = true }
+        if case .refused = decision { facts.declined = true }
+        facts.failed = snapshot(for: manifest.id).failure != nil
+        if let record = installed.plugins[id], canRead(record.source), folderExists(id) {
+            let offer = updateOffer(for: id)
+            facts.updateWaits = offer?.isWaiting == true || unverifiedRow(of: id)?.waiting == true
+            if case .newer(let version)? = offer { facts.newerVersion = version }
+        }
+        return .of(facts)
     }
 
     /// What the rows of `id`'s copy say and offer when it is code nobody

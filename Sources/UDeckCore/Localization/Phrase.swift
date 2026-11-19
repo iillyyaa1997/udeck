@@ -189,8 +189,30 @@ public enum Phrase: Sendable, Equatable {
     case pluginsNothingInstalled
     case pluginsStaleness(seconds: Int, multiplier: Int)
     case pluginEnabled
-    case pluginMore
-    case pluginLess
+    /// The tabs of Settings → Plugins (the redesign, 2026-11-18), and the
+    /// line under them that says what each holds.
+    case pluginsTabCatalogue
+    case pluginsTabSources
+    case pluginsTabDevelopers
+    case pluginsAboutInstalled
+    case pluginsAboutCatalogue
+    case pluginsAboutSources
+    case pluginsAboutDevelopers
+    /// What the blue arrow and number on the Catalogue tab say to VoiceOver.
+    case pluginsUpdatesOnTab(Int)
+    /// An installed plugin's line in the list (`PluginListStatus`).
+    case pluginStatusFolderGone
+    case pluginStatusWontLoad
+    case pluginStatusAsksPermission
+    case pluginStatusDeclined
+    case pluginStatusOff
+    case pluginStatusFailed
+    case pluginStatusUpdate(version: String?)
+    case pluginStatusRuns
+    case pluginShowInFinder
+    /// **Update all (2)**, and what it left to the rows that warn first.
+    case catalogueUpdateAll(Int)
+    case catalogueUpdateAllLeft(names: String)
     case pluginSettings
     case pluginEverySeconds(Int)
     case pluginLastFailure(reason: PluginFailure.Reason)
