@@ -106,8 +106,6 @@ struct PluginsSettingsPane: View {
                     .padding(.bottom, 28)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            // Each tab from its own top.
-            .id(navigation.pluginsTab)
         }
         // Whichever tab it opens on: the catalogue is read when it is stale,
         // and the sources with it (`pluginsPaneOpened`).
