@@ -95,7 +95,7 @@ public struct SettingsView: View {
                 // looks for the Plugins pane.
                 SidebarRow(
                     title: model.strings(item.title), symbol: item.symbol, tint: item.tint,
-                    updates: item == .plugins ? model.updatesWaiting : 0
+                    updates: item == .plugins ? model.updatesWaiting : 0, chosen: item == navigation.section
                 )
                     // On the row itself: a List that finds no tag on its rows
                     // selects nothing — measured in the lab on 2026-09-28, no
@@ -1999,14 +1999,18 @@ struct PaneTitle: View {
 /// A section in the sidebar: its symbol white on a rounded square of its own
 /// colour, as System Settings draws its sidebar, and — for Plugins — how many
 /// plugin updates wait: an arrow and a number, the operator's choice on the
-/// redesign canvas (2026-11-18), white on the selected row and the accent colour
-/// elsewhere.
+/// redesign canvas (2026-11-18), in the row's own text colour on the chosen row
+/// and the accent colour elsewhere.
 private struct SidebarRow: View {
     var title: String
     var symbol: String
     var tint: Color
     var updates: Int
-    @Environment(\.backgroundProminence) private var prominence
+    /// The row of the pane on show. Its selection is the accent colour, and
+    /// an arrow in the accent colour on it is not there to see — measured in
+    /// the lab (gallery of 2026-11-19): `backgroundProminence` did not say
+    /// `.increased` there, and the arrow came out blue on blue.
+    var chosen: Bool
 
     var body: some View {
         HStack(spacing: 6) {
@@ -2026,7 +2030,9 @@ private struct SidebarRow: View {
                     Text("\(updates)")
                 }
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(prominence == .increased ? Color.white : Color.accentColor)
+                // The row's own text colour on the chosen row — white while
+                // the window is in front, dark on the grey of one behind.
+                .foregroundStyle(chosen ? AnyShapeStyle(.primary) : AnyShapeStyle(Color.accentColor))
             }
         }
     }
