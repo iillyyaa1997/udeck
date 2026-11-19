@@ -1,45 +1,13 @@
 import SwiftUI
 import UDeckCore
 
-// Settings → Plugins → **Your sources** (stage 4): the repositories the
-// operator added, each a catalogue of its own, after the official one. Every
+// Settings → Plugins → **Sources** (repository stage 4; the tab since the
+// redesign): the repositories the operator added, each a catalogue of its own
+// whose rows are on Catalogue, after the official one's (`SourceCatalogue`). Every
 // control carries an accessibility identifier (S4-06) — `sources.*` for the
 // group and its sheet, `source.<sid>.*` for a source's block and
 // `source.<sid>.plugin.<id>.*` for its rows — because the titles are
 // translated and the lab drives these screens by identifier.
-
-/// **Your sources**: **Add a source…** and its sheet, the line a test build
-/// carries, what is wrong with `sources.json`, and one block per source.
-struct SourcesSection: View {
-    @Bindable var model: DeckModel
-    @Environment(\.strings) private var strings
-
-    var body: some View {
-        SettingsBlock(strings(.sourcesTitle)) {
-            Button(strings(.sourcesAdd)) { model.toggleAddSource() }
-                .accessibilityIdentifier("sources.add")
-            if model.sourceSheetOpen {
-                AddSourceSheet(model: model)
-            }
-            if !model.testBuild.isEmpty {
-                Text(model.testBuild.map { strings($0) }.joined(separator: "\n"))
-                    .font(.caption).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("sources.testBuild")
-            }
-            if !model.sourcesProblemLines.isEmpty {
-                Text(model.sourcesProblemLines.map { strings($0) }.joined(separator: "\n"))
-                    .font(.caption).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("sources.problem")
-            }
-            ForEach(model.sources, id: \.id) { source in
-                SourceBlock(model: model, source: source)
-                Divider()
-            }
-        }
-    }
-}
 
 /// **Add a source…**'s sheet, in the pane, as **Install from a link…**'s is:
 /// one field, **Look up**, and what it came to — the passport's name and
@@ -83,8 +51,8 @@ struct AddSourceSheet: View {
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08)))
-        // Settings closed, or another section chosen: what the sheet said goes.
-        .onDisappear { model.closeAddSource() }
+        // Settings closed, or another section chosen, the pane closes it
+        // (`PluginsSettingsPane`); another tab does not.
     }
 
     private var isReading: Bool {
@@ -146,8 +114,8 @@ struct AddSourceSheet: View {
 
 /// One source the operator added: its name and address, whether it is
 /// trusted (S4-07), when it was read or why it was not, **Check now**,
-/// **Trust…** or **Stop trusting…** (S4-08) and **Remove…**, and its
-/// catalogue's rows.
+/// **Trust…** or **Stop trusting…** (S4-08) and **Remove…** — on Sources; its
+/// catalogue's rows are on Catalogue (`SourceCatalogue`).
 struct SourceBlock: View {
     @Bindable var model: DeckModel
     var source: OwnSource
@@ -158,8 +126,6 @@ struct SourceBlock: View {
     @State private var trusting: Bool?
 
     private var sid: String { source.id }
-    private var state: CatalogueState { model.catalogueState(of: sid) }
-    private var catalogue: Catalogue? { model.sourceCatalogues[sid] }
     private var reading: Bool { model.sourcesRefreshing.contains(sid) }
     private var trusted: Bool { model.trustedSources.contains(sid) }
 
@@ -208,7 +174,7 @@ struct SourceBlock: View {
                     Text(strings(.catalogueReading)).font(.caption).foregroundStyle(.secondary)
                 }
             }
-            statusLine
+            SourceStateLine(model: model, source: source, identifier: "source.\(sid).state")
             if model.sourceTokenOpen == sid {
                 let link = SourceLink(provider: source.provider, host: source.host, path: source.path)
                 SignInStep(model: model, key: sid, link: link, identifier: "source.\(sid)",
@@ -240,45 +206,7 @@ struct SourceBlock: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("source.\(sid).problem")
             }
-            if let catalogue {
-                if catalogue.entries.isEmpty {
-                    Text(strings(.catalogueEmpty)).foregroundStyle(.secondary)
-                        .accessibilityIdentifier("source.\(sid).empty")
-                }
-                ForEach(catalogue.entries) { entry in
-                    CatalogueRowView(model: model, entry: entry, commit: catalogue.commit, source: sid)
-                    Divider()
-                }
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    /// When it was read, or why its last read did not finish (S4-20), naming
-    /// its host and its address.
-    @ViewBuilder private var statusLine: some View {
-        let address = source.address.description
-        let readAt = catalogue == nil ? nil : state.lastSuccess.map { Clock.text($0, strings) }
-        // A token from Sign in refused: signed out, said as such (S4-23) —
-        // GitHub's do not expire, and are never renewed.
-        if let error = state.lastError.map({ error -> CatalogueError in
-            error == .unauthorized && source.access == OwnSource.Access.signIn ? .signedOut : error
-        }) {
-            Label(strings(CatalogueTrouble.phrase(error, address: address, host: source.host, readAt: readAt,
-                                                  until: { Clock.text($0, strings) }, provider: source.provider,
-                                                  tokened: source.access != OwnSource.Access.none)),
-                  systemImage: "exclamationmark.triangle")
-                .font(.caption).foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("source.\(sid).state")
-        } else if let success = state.lastSuccess {
-            Text(strings(.catalogueChecked(source: address, at: Clock.text(success, strings))))
-                .font(.caption).foregroundStyle(.secondary)
-                .accessibilityIdentifier("source.\(sid).state")
-        } else {
-            Text(strings(.catalogueNeverRead(source: address)))
-                .font(.caption).foregroundStyle(.secondary)
-                .accessibilityIdentifier("source.\(sid).state")
+            // Its rows are on the Catalogue tab, under its name (`SourceCatalogue`).
         }
     }
 
@@ -326,6 +254,45 @@ struct SourceBlock: View {
         }
         .padding(8)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.orange.opacity(0.1)))
+    }
+}
+
+/// When a source was read, or why its last read did not finish (S4-20),
+/// naming its host and its address: on its block on Sources, with the
+/// identifier the lab reads, and under its name on Catalogue, without one.
+struct SourceStateLine: View {
+    @Bindable var model: DeckModel
+    var source: OwnSource
+    var identifier: String = ""
+    @Environment(\.strings) private var strings
+
+    private var state: CatalogueState { model.catalogueState(of: source.id) }
+    private var catalogue: Catalogue? { model.sourceCatalogues[source.id] }
+
+    var body: some View {
+        let address = source.address.description
+        let readAt = catalogue == nil ? nil : state.lastSuccess.map { Clock.text($0, strings) }
+        // A token from Sign in refused: signed out, said as such (S4-23) —
+        // GitHub's do not expire, and are never renewed.
+        if let error = state.lastError.map({ error -> CatalogueError in
+            error == .unauthorized && source.access == OwnSource.Access.signIn ? .signedOut : error
+        }) {
+            Label(strings(CatalogueTrouble.phrase(error, address: address, host: source.host, readAt: readAt,
+                                                  until: { Clock.text($0, strings) }, provider: source.provider,
+                                                  tokened: source.access != OwnSource.Access.none)),
+                  systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(identifier)
+        } else if let success = state.lastSuccess {
+            Text(strings(.catalogueChecked(source: address, at: Clock.text(success, strings))))
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier(identifier)
+        } else {
+            Text(strings(.catalogueNeverRead(source: address)))
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier(identifier)
+        }
     }
 }
 

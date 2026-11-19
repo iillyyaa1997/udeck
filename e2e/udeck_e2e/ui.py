@@ -233,9 +233,165 @@ def static_texts(machine: Any, step: str, window: str = SETTINGS_WINDOW) -> list
 
 
 def find(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDOW) -> Element | None:
-    """The first control with this identifier, in the walk's order, or None."""
-    found = ax.first_with(walk(machine, step, window), identifier)
-    return None if found is None else _element(found)
+    """The first control with this identifier, in the walk's order, or None.
+
+    A control of Settings → Plugins that is not on the screen is looked for on
+    the tab that holds it, and an installed plugin's on its card (`reach`).
+    """
+    found = walk(machine, step, window)
+    target = ax.first_with(found, identifier)
+    if target is None:
+        shown = _show(machine, identifier, step, window, found)
+        if shown is not None:
+            target = ax.first_with(shown, identifier)
+    return None if target is None else _element(target)
+
+
+# --- The Plugins pane's tabs ---------------------------------------------------------
+
+# Settings → Plugins is four tabs since the redesign (2026-11-18): Installed — a
+# list and the chosen plugin's card —, Catalogue, Sources and For developers, a
+# tab's page built only while it is chosen. Every control kept the identifier it
+# had when the pane was one long scroll, and the lab goes where each is shown: a
+# control of the pane that is not on the screen is looked for on its tab, and an
+# installed plugin's on its card (`reach`), by `find` and everything built on
+# it, and by `element` reading a walk `identified` took (`Walk`). The screen
+# says where it is by three identifiers: `plugins.tab.<tab>` on each tab — the
+# pane is showing —, `plugins.page.<tab>` on the line under them — the tab
+# chosen —, and `plugins.card.<id>` on the name the card shows; the list's rows
+# are `plugins.row.<id>`. A release from before the tabs has none of them, and
+# nothing is ever switched in it.
+PLUGINS_TAB = "plugins.tab."
+PLUGINS_PAGE = "plugins.page."
+PLUGINS_ROW = "plugins.row."
+PLUGINS_CARD = "plugins.card."
+INSTALLED, CATALOGUE, SOURCES, DEVELOPERS = "installed", "catalogue", "sources", "developers"
+
+# How many times a tab or a row is clicked before the lab gives up on it, as for
+# the sidebar (`PLUGINS_CLICKS`).
+TAB_CLICKS = 3
+
+# `source.<id>.<rest>`, the id ending in the eight hexadecimal digits of its
+# identity (`SourceID.hash8`): what follows them is the control.
+_SOURCE = re.compile(r"^source\..*?-[0-9a-f]{8}\.(.+)$")
+
+
+def plugins_tab_of(identifier: str) -> str | None:
+    """The tab of Settings → Plugins a control is on, by its identifier — None for one that is on none.
+
+    A source's rows, and the line saying it has none, are under its name on
+    Catalogue; the source itself — its mark, its state, its buttons, its token
+    and Sign in — is on Sources.
+    """
+    if identifier.startswith((PLUGINS_TAB, PLUGINS_PAGE, PLUGINS_ROW, PLUGINS_CARD)):
+        return None
+    if identifier.startswith("plugin.") or identifier == "plugins.nothingInstalled":
+        return INSTALLED
+    if identifier.startswith("catalogue."):
+        return CATALOGUE
+    if identifier.startswith("source."):
+        # By the end of the source's id, eight hexadecimal digits
+        # (`SourceID.derive`): its slug is the host and the path's last
+        # segment, dots and all — `gitlab.plugin.example` has `.plugin.` in it.
+        known = _SOURCE.match(identifier)
+        rest = known.group(1) if known else identifier[len("source."):]
+        return CATALOGUE if rest.startswith("plugin.") or rest == "empty" else SOURCES
+    if identifier.startswith(("sources.", "link.")) or identifier == "plugins.installFromLink":
+        return SOURCES
+    if identifier.startswith(("plugins.linkFolder", "plugins.runLog", "searchPath.", "command.")):
+        return DEVELOPERS
+    return None
+
+
+def _plugin_of(identifier: str, ids: list[str]) -> str | None:
+    """The installed plugin a `plugin.<id>.…` control is of, among the list's rows — the longest id that fits: an id may have dots of its own."""
+    rows = [i[len(PLUGINS_ROW):] for i in ids if i.startswith(PLUGINS_ROW)]
+    fits = [row for row in rows if identifier == f"plugin.{row}" or identifier.startswith(f"plugin.{row}.")]
+    return max(fits, key=len, default=None)
+
+
+def _elsewhere(ids: list[str], identifier: str) -> bool:
+    """Whether a screen with these identifiers is Settings → Plugins on another tab — or another plugin's card — than the one holding `identifier`."""
+    tab = plugins_tab_of(identifier)
+    if tab is None or not any(i.startswith(PLUGINS_TAB) for i in ids):
+        return False
+    if PLUGINS_PAGE + tab not in ids:
+        return True
+    if tab != INSTALLED:
+        return False
+    plugin = _plugin_of(identifier, ids)
+    return plugin is not None and PLUGINS_CARD + plugin not in ids
+
+
+def _show(machine: Any, identifier: str, step: str, window: str, found: list[ax.Walked] | None = None) -> list[ax.Walked] | None:
+    """Settings → Plugins put on the tab — and, for an installed plugin, the card — that holds `identifier`, when `found` is elsewhere.
+
+    The walk after it, or None when nothing was changed: the control is on no
+    tab, the pane is not showing, the walk is of the tab and the card that hold
+    it, or — of a plugin not in the list — there is no card to choose.
+    """
+    if window == PANEL or plugins_tab_of(identifier) is None:
+        return None
+    found = walk(machine, step, window) if found is None else found
+    ids = [e.identifier for e in found if e.identifier]
+    if not _elsewhere(ids, identifier):
+        return None
+    tab = plugins_tab_of(identifier)
+    if PLUGINS_PAGE + tab not in ids:
+        found = _choose(machine, PLUGINS_TAB + tab, PLUGINS_PAGE + tab, f"{step}: the {tab} tab", window)
+        ids = [e.identifier for e in found if e.identifier]
+    plugin = _plugin_of(identifier, ids) if tab == INSTALLED else None
+    if plugin is not None and PLUGINS_CARD + plugin not in ids:
+        found = _choose(machine, PLUGINS_ROW + plugin, PLUGINS_CARD + plugin, f"{step}: {plugin}'s card", window)
+    return found
+
+
+def _choose(machine: Any, control: str, shows: str, step: str, window: str) -> list[ax.Walked]:
+    """`control` — a tab, a row of the list — clicked until the walk has `shows`: the walk that has it.
+
+    Clicked again when a click did not take, as the sidebar is (`plugins_pane`);
+    one never showing it after `TAB_CLICKS` clicks is the lab's failure, said
+    with what was there.
+    """
+    for _ in range(TAB_CLICKS):
+        machine.click(*in_view(machine, control, step, window).middle, step)
+        deadline = machine.clock() + config.UI_CHANGE_SECONDS
+        while True:
+            found = walk(machine, step, window)
+            if ax.first_with(found, shows) is not None:
+                return found
+            if machine.clock() >= deadline:
+                break
+            machine.sleep(0.5)
+    raise LabError(step, f"'{control}' was clicked {TAB_CLICKS} times and '{shows}' never showed; what is there: "
+                         f"{', '.join(ax.identifiers(found)) or 'nothing with an identifier'}")
+
+
+def reach(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDOW) -> None:
+    """Settings → Plugins on the tab, and the card, that hold `identifier` — before a screenshot meant to show it."""
+    _show(machine, identifier, step, window)
+
+
+def plugins_pane_shown(ids: list[str]) -> bool:
+    """Whether a walk with these identifiers is of Settings → Plugins: its tabs — or, in a release from before them, its catalogue's switch."""
+    return any(i.startswith(PLUGINS_TAB) for i in ids) or "catalogue.enabled" in ids
+
+
+def wait_for_plugins_pane(machine: Any, step: str, window: str = SETTINGS_WINDOW,
+                          seconds: float = config.UI_APPEAR_SECONDS) -> None:
+    """Until Settings → Plugins shows, on whatever tab it opened on — nothing switched, nothing touched.
+
+    The deadline raises `NotThere`, as `wait_for`'s.
+    """
+    deadline = machine.clock() + seconds
+    while True:
+        found = walk(machine, step, window)
+        if plugins_pane_shown([e.identifier for e in found if e.identifier]):
+            return
+        if machine.clock() >= deadline:
+            raise NotThere(step, f"Settings → Plugins did not show in '{window}' within {seconds:.0f}s; what is there: "
+                                 f"{', '.join(ax.identifiers(found)) or 'nothing with an identifier'}")
+        machine.sleep(1)
 
 
 def wait_for(machine: Any, identifier: str, step: str, window: str = SETTINGS_WINDOW,
@@ -309,6 +465,9 @@ def in_view(machine: Any, identifier: str, step: str, window: str = SETTINGS_WIN
     while True:
         found = walk(machine, step, window)
         target = ax.first_with(found, identifier)
+        if target is None and (shown := _show(machine, identifier, step, window, found)) is not None:
+            found = shown
+            target = ax.first_with(found, identifier)
         if target is None:
             if machine.clock() >= deadline:
                 raise LabError(
@@ -502,13 +661,51 @@ def open_settings_and_wait(machine: Any, step: str, item: str = "Settings…",
 # --- Controls that have no name ---------------------------------------------------
 
 
+class Walk(str):
+    """What `identified` read, knowing where it read it: the machine, the step, the window and the depth.
+
+    Asked by `element` for a control of Settings → Plugins on another tab than
+    the walk is of — or of another plugin's card — it is read again there
+    (`again`): a walk of one tab cannot say what another holds, and a verdict
+    of absence from it would be no verdict at all. What is read again is the
+    screen as it is then — later than this walk, and after a click on a tab —
+    and never this walk's moment: a check whose verdict is of that moment reads
+    its control on the tab that holds it before anything else.
+    """
+
+    machine: Any
+    step: str
+    window: str
+    depth: int
+
+    def again(self, identifier: str) -> "Walk | None":
+        """The screen read again on the tab and the card holding `identifier`, when this walk is of another — else None."""
+        ids = [row.identifier for row in controls(self, self.step)]
+        if not _elsewhere(ids, identifier):
+            return None
+        _show(self.machine, identifier, self.step, self.window)
+        return identified(self.machine, self.step, self.window, self.depth)
+
+
 def identified(machine: Any, step: str, window: str = SETTINGS_WINDOW, depth: int = IDENTIFIED_DEPTH) -> str:
     """The controls of `window` that carry an identifier, as `tree` prints them — and nothing else.
 
     No deeper than `depth`, the window itself left out. `controls`, `element`
-    and `says` read it exactly as they read `tree`.
+    and `says` read it exactly as they read `tree`; it is a `Walk`.
     """
-    return ax.dump(walk(machine, step, window, depth), identified_only=True)
+    dump = Walk(ax.dump(walk(machine, step, window, depth), identified_only=True))
+    dump.machine, dump.step, dump.window, dump.depth = machine, step, window, depth
+    return dump
+
+
+def showing(dump: str, identifier: str) -> str:
+    """`dump`, or — a `Walk` of another tab or card of Settings → Plugins than the one holding `identifier` — the screen read again there.
+
+    For a check that goes through every control of a walk (`controls`) rather
+    than asking for one by its identifier (`element`).
+    """
+    again = dump.again(identifier) if isinstance(dump, Walk) else None
+    return dump if again is None else again
 
 
 def tree(machine: Any, step: str, window: str = SETTINGS_WINDOW) -> str:
@@ -736,10 +933,10 @@ def press(machine: Any, control: Element, step: str, window: str = SETTINGS_WIND
 
 PLUGINS = "plugins"
 
-# Where the settings window is put before the plugin screens are read. The
-# Plugins pane is one long scroll — the installed plugins, then the catalogue —
-# and a control below the window's lower edge has a place the accessibility API
-# will report and a click there lands on nothing. The guest's screen is 2560 by
+# Where the settings window is put before the plugin screens are read. A tab of
+# the Plugins pane scrolls — a long card, a catalogue of many rows — and a
+# control below the window's lower edge has a place the accessibility API will
+# report and a click there lands on nothing. The guest's screen is 2560 by
 # 1440 (`config.GOLDEN_DISPLAY`); this is most of it.
 SETTINGS_FRAME = (60, 40, 1500, 1360)
 
@@ -785,8 +982,10 @@ def plugins_pane(machine: Any, step: str, language: "Language | None" = None) ->
     for attempt in range(1, PLUGINS_CLICKS + 1):
         click(machine, f"section.{PLUGINS}", f"{step}: choosing {PLUGINS.capitalize()}", window)
         try:
-            wait_for(machine, "catalogue.enabled", f"{step}: waiting for the Plugins section", window,
-                     seconds=config.UI_CHANGE_SECONDS)  # fmt: skip
+            # On whatever tab it opens on: the lab goes to a control's tab as
+            # it asks for the control (`reach`).
+            wait_for_plugins_pane(machine, f"{step}: waiting for the Plugins section", window,
+                                  seconds=config.UI_CHANGE_SECONDS)  # fmt: skip
             break
         except NotThere:
             if attempt == PLUGINS_CLICKS:
@@ -1017,10 +1216,19 @@ def press_return(machine: Any, step: str) -> None:
 
 
 def element(dump: str, identifier: str, step: str = "reading the screen") -> Element | None:
-    """The control with this identifier in a walk, or None."""
+    """The control with this identifier in a walk, or None.
+
+    Of a `Walk` of Settings → Plugins on another tab, or another plugin's card,
+    than the one holding the control: read again there (`Walk.again`).
+    """
     for row in controls(dump, step):
         if row.identifier == identifier:
             return row
+    again = dump.again(identifier) if isinstance(dump, Walk) else None
+    if again is not None:
+        for row in controls(again, step):
+            if row.identifier == identifier:
+                return row
     return None
 
 

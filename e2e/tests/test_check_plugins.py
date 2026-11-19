@@ -398,8 +398,9 @@ def test_the_words_the_update_checks_wait_for_are_uDecks_own():
     assert checks.RU_UPDATES_BY_THEMSELVES_HELP in russian
     assert 'case .catalogueAvailable(let version): "Доступна \\(version)"' in russian
     assert checks.RU_AVAILABLE_1_1_0 == "Доступна 1.1.0"
-    # The row joins the two (OfferText), and the identifiers the checks read are the views' own.
-    views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift")
+    # The row joins the two (OfferText), and the identifiers the checks read are the views' own — the rows' in
+    # PluginRepositoryViews.swift, the tabs' pages in PluginsPane.swift.
+    views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift") + _source("Sources", "UDeckKit", "Views", "PluginsPane.swift")
     assert '", " + strings(.catalogueAsksDifferently)' in views
     for identifier in ('"catalogue.autoUpdate"', '"catalogue.autoUpdateHelp"', '"plugin.\\(id).updatedByItself"'):
         assert identifier in views
@@ -748,18 +749,24 @@ def test_the_words_the_merge_and_close_checks_wait_for_are_uDecks_own():
 
 
 def test_the_controls_the_merge_and_close_checks_press_and_read_are_the_views_own():
-    views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift")
-    for identifier in ('"plugin.\\(id).update"', '"catalogue.updatesWaiting"',
+    views = _source("Sources", "UDeckKit", "Views", "PluginRepositoryViews.swift") + _source("Sources", "UDeckKit", "Views", "PluginsPane.swift")
+    # How many updates wait is read as the value of **Update all**, whose title the walk does not read.
+    assert '.accessibilityValue(strings(.catalogueUpdatesWaiting(model.updatesWaiting)))' in views
+    for identifier in ('"plugin.\\(id).update"', '"catalogue.updateAll"',
                        '"plugin.\\(id).mark"', '"plugin.\\(id).offer"', '"plugin.\\(id).remove"', '"catalogue.checkNow"'):
         assert identifier in views, identifier
     # What became of the pull request is one of the lines the row says of code nobody verified, each identified by
     # the end UDeckCore gives it (`UnverifiedRow.said`).
     assert '"plugin.\\(id).\\(said.suffix)"' in views
     assert 'Said(suffix: "pullRequest"' in _source("Sources", "UDeckCore", "Plugins", "Repository", "UnverifiedCopies.swift")
-    settings = _source("Sources", "UDeckKit", "Views", "SettingsView.swift")
-    for identifier in ('"plugins.nothingInstalled"', '"plugin.\\(plugin.folderName).enabled"', '"plugin.\\(plugin.folderName).more"',
+    # The installed plugins' list and cards are in PluginsPane.swift since the tabs; More went with them, the card
+    # showing everything.
+    settings = _source("Sources", "UDeckKit", "Views", "PluginsPane.swift")
+    for identifier in ('"plugins.nothingInstalled"', '"plugin.\\(plugin.folderName).enabled"', '"plugins.row.\\(entry.id)"',
+                       '"plugins.card.\\(plugin.folderName)"', '"plugins.card.\\(id)"', '"plugins.page.\\(navigation.pluginsTab.rawValue)"',
                        '"plugin.\\(manifest.id).allow"', '"plugin.\\(manifest.id).decline"', '"plugin.\\(manifest.id).asksNothing"'):
         assert identifier in settings, identifier
+    assert ".more" not in settings
     assert '"window.\\(window.pluginID.rawValue).reinstallSays"' in _source("Sources", "UDeckKit", "Views", "DeckWindowView.swift")
     store = _source("Sources", "UDeckCore", "Plugins", "Repository", "CatalogueStore.swift")
     assert checks.FOLLOWED == checks.UDECK_HOME + "/catalogue/official/followed.json"
@@ -1020,7 +1027,7 @@ def test_the_words_the_source_checks_wait_for_are_uDecks_own():
 
 def test_the_controls_the_source_checks_press_and_read_are_the_views_own():
     """S4-06's identifiers, in SourceViews.swift and PluginRepositoryViews.swift as the checks press and read them."""
-    sources = _source("Sources", "UDeckKit", "Views", "SourceViews.swift")
+    sources = _source("Sources", "UDeckKit", "Views", "SourceViews.swift") + _source("Sources", "UDeckKit", "Views", "PluginsPane.swift")
     for identifier in ('"sources.add"', '"sources.add.field"', '"sources.add.lookUp"', '"sources.add.close"',
                        '"sources.add.result"', '"sources.add.confirm"', '"sources.testBuild"', '"sources.problem"',
                        '"source.\\(sid).name"', '"source.\\(sid).address"', '"source.\\(sid).mark"',
@@ -1111,7 +1118,8 @@ def test_the_controls_the_gitlab_checks_press_and_read_are_the_views_own():
     assert '.accessibilityIdentifier("\\(named).size")' in views
     assert '.accessibilityIdentifier("\\(named).page")' in views and ".accessibilityValue(page.absoluteString)" in views
     assert '"link.addAsASource"' in views and "case .linkNotGitHubAddAsASource(_, let page): page" in views
-    assert '"source.\\(sid).empty"' in _source("Sources", "UDeckKit", "Views", "SourceViews.swift")
+    # A source's rows, and its empty line, are on Catalogue, under its name.
+    assert '"source.\\(source.id).empty"' in _source("Sources", "UDeckKit", "Views", "PluginsPane.swift")
 
 
 def test_the_gitlab_checks_judge_requests_by_their_port_their_site_and_their_path_as_sent():

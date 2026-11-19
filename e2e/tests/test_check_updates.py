@@ -1642,8 +1642,9 @@ def test_the_quiet_the_minute_and_the_panes_are_the_ones_udeck_has():
     updater = (root / "Sources" / "uDeck" / "SparkleUpdater.swift").read_text()
     assert f"Timer.scheduledTimer(withTimeInterval: {checks.RESTART_ASKED_EVERY_SECONDS}, repeats: true)" in updater
     views = "".join(p.read_text() for p in (root / "Sources" / "UDeckKit" / "Views").glob("*.swift"))
-    for identifier in (checks.PLUGINS_PANE, checks.GENERAL_PANE):
-        assert f'.accessibilityIdentifier("{identifier}")' in views, identifier
+    assert f'.accessibilityIdentifier("{checks.GENERAL_PANE}")' in views
+    # The Plugins pane by its tabs (`ui.plugins_pane_shown`), or in a release from before them by its catalogue's switch.
+    assert '.accessibilityIdentifier("plugins.tab.\\(tab.rawValue)")' in views and '"catalogue.enabled"' in views
     # What the check reads in uDeck's log is what uDeck writes there.
     assert '"Settings is in use"' in restart and checks.HELD_BY_SETTINGS.endswith("Settings is in use")
     assert f"waits: \\(hold.reason" in updater and f": {checks.NOTHING_HOLDS}\")" in updater

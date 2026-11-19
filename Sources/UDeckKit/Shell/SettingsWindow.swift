@@ -16,6 +16,10 @@ public final class SettingsNavigation {
     /// building it: somebody who has landed in a language they cannot read
     /// needs the language control before anything else, and it is there.
     var section: SettingsView.Section = .general
+    /// Settings → Plugins: which tab, and which installed plugin its card
+    /// shows (by its folder's name) — kept while the window is open, so going
+    /// to another section and back finds the pane as it was left.
+    var pluginsTab: PluginsTab = .installed
     var selectedPlugin: String?
 
     public init() {}

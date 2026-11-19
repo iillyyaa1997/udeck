@@ -530,7 +530,6 @@ struct SourceReadingTests {
                 == "Not trusted: nobody vouches for these plugins — each asks again whenever its code changes.")
         #expect(russian(.sourceNotTrusted)
                 == "Без доверия: за эти плагины никто не ручается — каждый спрашивает снова, когда меняется его код.")
-        #expect(english(.sourcesTitle) == "Your sources" && russian(.sourcesTitle) == "Свои источники")
         #expect(english(.sourcesAdd) == "Add a source…" && russian(.sourcesAdd) == "Добавить источник…")
         #expect(english(.sourceRemove) == "Remove…" && russian(.sourceRemove) == "Удалить…")
         #expect(english(.sourcesAddField) == "github.com/owner/repo or gitlab.com/group/project")

@@ -64,8 +64,13 @@ struct LocalizationTests {
         
 
         .pluginsInstalled, .pluginsOpenFolder, .pluginsLookAgain, .pluginsNothingInstalled,
-        .pluginsStaleness(seconds: 60, multiplier: 3), .pluginEnabled, .pluginMore,
-        .pluginLess, .pluginSettings, .pluginEverySeconds(30),
+        .pluginsStaleness(seconds: 60, multiplier: 3), .pluginEnabled,
+        .pluginsTabCatalogue, .pluginsTabSources, .pluginsTabDevelopers, .pluginsAboutInstalled,
+        .pluginsAboutCatalogue, .pluginsAboutSources, .pluginsAboutDevelopers, .pluginsUpdatesOnTab(2),
+        .pluginStatusFolderGone, .pluginStatusWontLoad, .pluginStatusAsksPermission, .pluginStatusDeclined,
+        .pluginStatusOff, .pluginStatusFailed, .pluginStatusUpdate(version: "1.3.0"), .pluginStatusRuns,
+        .pluginShowInFinder, .catalogueUpdateAll(2), .catalogueUpdateAllLeft(names: "Uptime"),
+        .pluginSettings, .pluginEverySeconds(30),
         .pluginLastFailure(reason: .exited(code: 1)), .permissionsAsksNothing, .permissionsAsksTo,
         .permissionsDeclared, .permissionsDeclaredHelp,
         .permissionsPluginAsksTo(name: "disk-space"), .permissionsAsksNothingUnverified(name: "asks-nothing"),
@@ -207,7 +212,7 @@ struct LocalizationTests {
                                 to: .sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x"), toTrash: false),
         .windowReinstallBrings(.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x")),
         .windowReinstallBrings(.sourceDefault(version: "1.1.0", address: "gitlab.example/tools/x", trustedName: "Team plugins")),
-        .sourcesTitle, .sourcesAdd, .sourcesAddField, .sourcesAddConfirm, .sourcesAsking(host: "github.com"),
+        .sourcesAdd, .sourcesAddField, .sourcesAddConfirm, .sourcesAsking(host: "github.com"),
         .sourceNotTrusted, .sourceRemove, .sourceTrust,
         .sourceTrustConfirm(name: "Team plugins", address: "gitlab.example/tools/x"), .sourceTrustConfirmButton,
         .sourceStopTrusting, .sourceStopTrustingConfirm(name: "Team plugins"), .sourceStopTrustingConfirmButton,
@@ -329,7 +334,7 @@ struct LocalizationTests {
     /// `Phrase` who runs the tests reads a message telling them where to put it.
     @Test("the checked list is the size it was left at")
     func listIsIntact() {
-        #expect(Self.all.count == 553,
+        #expect(Self.all.count == 569,
                 "Phrase has changed. Add the new phrase to LocalizationTests.all and update this count.")
         #expect(Set(Self.all.map(String.init(describing:))).count == Self.all.count,
                 "a phrase is listed twice")
