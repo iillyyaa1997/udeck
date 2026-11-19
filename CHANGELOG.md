@@ -8,6 +8,25 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.8.9] — 2026-11-19
+
+Settings begin their redesign: the sidebar of System Settings, General with
+uDeck's own updates, and About as a card. 0.8.9 adds nothing to the plugin
+contract. The update to it goes by 0.8.8's rule.
+
+- **A sidebar as System Settings draws one.** Each section has its symbol on a
+  square of its own colour; Plugins says how many plugin updates wait with an
+  arrow and a number.
+- **General holds uDeck's updates.** Open at Login and the language, then
+  Updates: what is installed and what was found, **Check now** and **Update**,
+  automatic checks, what happens when a new version is out, and notifications —
+  rows on grouped panels, each control at the right and what it does under it.
+  A notification about an update opens General.
+- **About is a card**: the icon, the version, **Check for updates** (and
+  **Update** when there is something to put in), what's new, then this build.
+- Opening, Look and Plugins follow in the next releases, as chosen on the
+  redesign canvas.
+
 ## [0.8.8] — 2026-11-18
 
 Settings opened from the panel comes up in front. 0.8.8 adds nothing to the
