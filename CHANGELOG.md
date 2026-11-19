@@ -8,6 +8,24 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.8.10] — 2026-11-19
+
+Settings' redesign, second part: Opening. 0.8.10 adds nothing to the plugin
+contract. The update to it goes by 0.8.8's rule.
+
+- **The top edge, drawn.** Beside the gesture's three sliders, a small picture
+  of the top of the screen shows where the cursor opens the panel; the sliders
+  are plain bars, and the first says which way it cuts.
+- **The shortcut is recorded, not spelled.** Click the field and press the new
+  combination — it replaces the four modifier buttons and the list of keys.
+  Escape cancels. A combination that would take typing (⇧U) or a menu command
+  (⌘W) away from every application is refused with the reason. The field
+  works with the shortcut switched off, and recording one switches it on.
+- **Behaviour** gathers what the panel does once it is out: retracting when you
+  switch applications, opening over fullscreen ones, and keeping plugins
+  running while the panel is away — moved here from Plugins.
+- Look and Plugins follow in the next releases.
+
 ## [0.8.9] — 2026-11-19
 
 Settings begin their redesign: the sidebar of System Settings, General with

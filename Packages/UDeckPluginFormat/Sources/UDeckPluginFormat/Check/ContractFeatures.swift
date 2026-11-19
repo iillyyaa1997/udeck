@@ -119,11 +119,11 @@ public enum ContractFeatures {
     /// It is in no release here: no release has it in the contract.
     public static let outsideTheContract: Set<String> = ["restart"]
 
-    /// The release this registry was last brought up to date for. 0.8.9
-    /// adds nothing to the contract: Settings' new sidebar, General with
-    /// uDeck's updates and About as a card, and no manifest field, card field
-    /// or `UDECK_` variable is new.
-    static let reviewedAt = "0.8.9"
+    /// The release this registry was last brought up to date for. 0.8.10
+    /// adds nothing to the contract: Settings' Opening redrawn, the shortcut
+    /// recorded in a field, and no manifest field, card field or `UDECK_`
+    /// variable is new.
+    static let reviewedAt = "0.8.10"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
