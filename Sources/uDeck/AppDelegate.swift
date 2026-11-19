@@ -54,6 +54,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.rebuildStatusMenu()
             self?.rebuildMainMenu()
         }
+        // Settings' shortcut field records with the shortcut let go, and says
+        // so when the system refuses the one it recorded.
+        model.onShortcutRecording = { [weak controller] in controller?.holdHotKey($0) }
+        // Handed over on every settings change; set only when it changes, so a
+        // slider's every tick does not redraw the shortcut row.
+        controller.onHotKeyRefused = { [weak model] refused in
+            if model?.shortcutRefused != refused { model?.shortcutRefused = refused }
+        }
         self.model = model
         rebuildMainMenu()
         self.screens = screens

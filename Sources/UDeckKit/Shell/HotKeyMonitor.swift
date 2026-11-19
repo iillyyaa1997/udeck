@@ -21,6 +21,12 @@ public final class HotKeyMonitor {
     private var handler: EventHandlerRef?
     private var registered: HotKeyBinding?
 
+    /// The system refused the binding last handed over — almost always another
+    /// application holding the same combination. Settings says so beside the
+    /// shortcut field, where a refusal would otherwise look like a key that does
+    /// nothing.
+    public private(set) var refusedBySystem = false
+
     /// The one monitor a process has. The Carbon callback is a C function
     /// pointer and cannot capture anything, so it needs somewhere to look the
     /// instance up; there is exactly one, and the id below is checked before
@@ -43,6 +49,7 @@ public final class HotKeyMonitor {
         guard binding != registered else { return }
         unregister()
         registered = binding
+        refusedBySystem = false
 
         guard binding.enabled else {
             DeckLog.panel.debug("hotkey disabled")
@@ -71,6 +78,7 @@ public final class HotKeyMonitor {
             DeckLog.panel.error(
                 "hotkey \(binding.displayName, privacy: .public) refused by the system (status \(status)) — most likely already taken by another application"
             )
+            refusedBySystem = true
             return
         }
         hotKey = reference
@@ -85,6 +93,7 @@ public final class HotKeyMonitor {
             self.handler = nil
         }
         registered = nil
+        refusedBySystem = false
     }
 
     private func unregister() {

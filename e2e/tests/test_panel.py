@@ -1121,11 +1121,11 @@ def test_a_chord_the_operator_chose_is_pressed_the_same_way_uDecks_own_is():
 
 # --- The settings window, against the screen uDeck actually draws ----------------------
 #
-# The same rule as the gesture's numbers and the shortcut's, and here it is
-# sharper: not one control on the Opening screen has a name, so the lab clicks
-# by position in a row and identifies the row by what it reads. Every way of
-# getting that wrong is a click somewhere else on the screen — which is a
-# sentence about uDeck written from a random pixel.
+# The same rule as the gesture's numbers and the shortcut's: what the lab says
+# about the Opening screen is held against the file that draws it. Since the
+# redesign (stage 2, 2026-11-19) the lab finds every control there by its
+# identifier, so what is held here is that each switch carries the name of the
+# setting it writes, and that the lab's list of them is the screen's.
 
 
 def _settings_view():
@@ -1143,30 +1143,23 @@ def _defaults(swift_file, type_name):
     return dict(re.findall(r"(\w+): [\w<>\[\]. ]+ = ([\w.\[\]\"', ]+?),?\n", body))
 
 
-def test_the_modifier_row_is_in_the_order_uDeck_lays_it_out():
-    """`ForEach(HotKeyModifier.allCases.sorted())`, and `sorted` is
-    `HotKeyModifier.order` — which is macOS's own order for ⌃⌥⇧⌘."""
+def test_the_modifier_order_is_macOS_order():
+    """`HotKeyModifier.order` — macOS's own order for ⌃⌥⇧⌘ — which is how the lab
+    spells a shortcut read out of the settings file the way uDeck spells it."""
     source = _hotkey_source()
     cases = re.findall(r"^    case (\w+)$", source, re.MULTILINE)
     order = {name: int(n) for name, n in re.findall(r"case \.(\w+): (\d+)", source)}
     assert set(cases) >= set(order), "HotKeyModifier no longer orders its own cases"
-    assert config.HOTKEY_MODIFIER_ROW == tuple(sorted(order, key=order.get))
-    assert "HotKeyModifier.allCases.sorted()" in _settings_view(), "the row is no longer laid out in that order"
-
-
-def test_the_modifier_row_reads_uDecks_default_binding_at_rest():
-    """What turns four unnamed toggles in a row into *the* row: on, on, off, off."""
-    at_rest = tuple("1" if name in config.HOTKEY_MODIFIERS else "0" for name in config.HOTKEY_MODIFIER_ROW)
-    assert config.HOTKEY_MODIFIER_ROW_AT_REST == at_rest
+    assert config.HOTKEY_MODIFIER_ORDER == tuple(sorted(order, key=order.get))
 
 
 def test_the_modifier_the_lab_adds_is_one_uDeck_does_not_already_hold():
-    """A press that turned a modifier *off* would leave a combination uDeck might
+    """A combination that dropped a modifier instead would be one uDeck might
     still register, and the two chords would no longer differ by one press."""
-    assert config.THE_ADDED_MODIFIER in config.HOTKEY_MODIFIER_ROW
+    assert config.THE_ADDED_MODIFIER in config.HOTKEY_MODIFIER_ORDER
     assert config.THE_ADDED_MODIFIER not in config.HOTKEY_MODIFIERS
     assert config.NEW_HOTKEY_MODIFIERS == tuple(
-        name for name in config.HOTKEY_MODIFIER_ROW
+        name for name in config.HOTKEY_MODIFIER_ORDER
         if name in (*config.HOTKEY_MODIFIERS, config.THE_ADDED_MODIFIER)
     )
 
@@ -1183,35 +1176,45 @@ def test_the_new_shortcut_is_spelled_the_way_uDeck_will_write_it():
     assert config.THE_NEW_HOTKEY != config.THE_HOTKEY
 
 
-def test_the_plain_switches_are_in_the_order_uDeck_lays_them_out():
-    """Top to bottom on the Opening screen: the gesture, the shortcut, and the
-    two under "Also". The lab clicks the third of them by counting, and the row
-    it counts in reads the same in any order — all four are on — so *this* is
-    where the order is held, against the file that draws them.
-
-    Which makes what the regex does not read a hole rather than a detail: a
-    `Toggle` written some other way would be drawn on the screen, counted by the
-    lab and missed here, and the assertion below would still pass over a row
-    whose third switch is no longer this one. So every `Toggle` on the screen
-    has to be one this reads.
-    """
+def _opening_source():
+    """`OpeningSettings` and the shortcut row it draws, up to the Look pane."""
     view = _settings_view()
     opening = view[view.index("private struct OpeningSettings"):]
-    opening = opening[: opening.index("\n    private func label(")]
-    drawn = re.findall(r"isOn: (?:binding\(\\\.([\w.]+)\)|Binding\()", opening)
-    assert len(drawn) == opening.count("Toggle("), (
-        "a Toggle on the Opening screen is declared in a form this test does not read, "
-        "so the order of the row the lab counts in is no longer held by anything"
+    return opening[: opening.index("// MARK: - Look")]
+
+
+def test_every_switch_on_the_opening_screen_is_named_by_the_setting_it_writes():
+    """The lab clicks a switch by `opening.<setting>` and then reads that setting
+    out of the file, so a switch whose name and binding disagree would be a
+    click on one setting and a verdict about another.
+
+    Every `Toggle` on the screen is read: its binding (`binding(\\.x)`, or the
+    shortcut row's `enabled`, which is `binding(\\.hotkey.enabled)` handed down)
+    and the identifier after it. A `Toggle` written some other way fails here
+    rather than slipping past.
+    """
+    opening = _opening_source()
+    toggles = re.findall(
+        r"Toggle\([^\n]*isOn: (?:binding\(\\\.([\w.]+)\)|(enabled))\)(?:\n\s+\.[^\n]+)*?"
+        r'\n\s+\.accessibilityIdentifier\("opening\.([\w.]+)"\)',
+        opening,
     )
-    # One of them is the modifier row's, inside a `ForEach` over a binding of
-    # its own; the rest are the plain switches, in the order they are drawn.
-    assert [name for name in drawn if not name] == [""]
-    assert tuple(name for name in drawn if name) == config.OPENING_SWITCHES
+    assert len(toggles) == opening.count("Toggle("), (
+        "a Toggle on the Opening screen is declared in a form this test does not read, "
+        "so its name is not held against the setting it writes"
+    )
+    handed = re.search(r"ShortcutRow\(model: model, enabled: binding\(\\\.([\w.]+)\)\)", opening)
+    assert handed, "the shortcut row is no longer handed its switch's binding"
+    written = [bound or handed.group(1) for bound, enabled, _ in toggles]
+    named = [name for _, _, name in toggles]
+    assert written == named, "a switch's identifier is not the setting it writes"
+    assert set(named) == set(config.OPENING_SWITCHES)
+    assert f'accessibilityIdentifier("{config.OPENING_SHORTCUT}")' in opening
 
 
-def test_the_plain_switches_all_read_on_at_rest():
-    """Every one of the four is true by default, which is what says the walk found
-    this row and not another — and that a machine reading otherwise is not at rest."""
+def test_the_switches_read_uDecks_defaults_at_rest():
+    """What a machine at rest reads, from the defaults of the types that own each
+    setting — and a machine reading otherwise is not at rest."""
     # Each switch is named by the setting it writes, and each setting's default
     # lives with the type that owns it.
     owners = {

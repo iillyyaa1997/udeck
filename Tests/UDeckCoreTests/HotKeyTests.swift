@@ -34,14 +34,14 @@ struct HotKeyTests {
         #expect(HotKeyModifier.command.carbonMask == UInt32(cmdKey))
     }
 
-    @Test("every offered key resolves, and none is offered twice")
-    func offeredKeysAreReal() {
-        let names = HotKeyBinding.orderedKeyNames
-        #expect(!names.isEmpty)
-        #expect(Set(names).count == names.count, "the picker lists a key twice")
-        for name in names {
-            #expect(HotKeyBinding.keyCodes[name] != nil, "\(name) is offered but cannot be bound")
-        }
+    /// The shortcut field reads a key press back to its name through the
+    /// inverse of the table (`HotKeyBinding.keyName(for:)`), which can only be
+    /// built if no two names share a code.
+    @Test("no two keys share a code")
+    func keyCodesAreUnique() {
+        let codes = Array(HotKeyBinding.keyCodes.values)
+        #expect(!codes.isEmpty)
+        #expect(Set(codes).count == codes.count, "two key names have the same code")
     }
 
     @Test("a key name is read whatever case it was written in")
@@ -115,6 +115,71 @@ struct HotKeyTests {
         #expect(binding.enabled == false)
         #expect(binding.key == HotKeyBinding().key)
         #expect(binding.modifiers == HotKeyBinding().modifiers)
+    }
+
+    // MARK: The shortcut field
+
+    /// The key code is the key's place on the keyboard, so ⌥ held with U is
+    /// still U — the character it types is not asked.
+    @Test("a combination pressed into the field becomes the shortcut")
+    func recordsACombination() {
+        let pressed = HotKeyBinding.recording(keyCode: UInt32(kVK_ANSI_U), modifiers: [.control, .option, .shift])
+        #expect(pressed == .recorded(HotKeyBinding(enabled: true, key: "U", modifiers: [.control, .option, .shift])))
+        if case .recorded(let binding) = pressed {
+            #expect(binding.isValid)
+            #expect(binding.displayName == "⌃⌥⇧U")
+        }
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_F7), modifiers: [.command])
+            == .recorded(HotKeyBinding(enabled: true, key: "F7", modifiers: [.command])))
+    }
+
+    @Test("Escape alone cancels, and with a modifier it is a combination")
+    func escape() {
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_Escape), modifiers: []) == .cancelled)
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_Escape), modifiers: [.control, .option])
+            == .recorded(HotKeyBinding(enabled: true, key: "ESCAPE", modifiers: [.control, .option])))
+    }
+
+    @Test("a bare key is refused, and a key uDeck cannot bind says so first")
+    func refusals() {
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_ANSI_U), modifiers: []) == .needsModifier)
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_Space), modifiers: []) == .needsModifier)
+        // `[` is a key the table does not have, with or without ⌃⌥.
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_ANSI_LeftBracket), modifiers: [.control, .option])
+            == .notBindable)
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_ANSI_LeftBracket), modifiers: []) == .notBindable)
+    }
+
+    /// ⇧ or ⌥ alone with a letter types it; ⌘ alone with one is some
+    /// application's menu command. F1–F12 type nothing and are nobody's.
+    @Test("a combination that types text or is a menu command is refused, F-keys excepted")
+    func takenFromEveryApplication() {
+        let u = UInt32(kVK_ANSI_U)
+        #expect(HotKeyBinding.recording(keyCode: u, modifiers: [.shift]) == .typesText)
+        #expect(HotKeyBinding.recording(keyCode: u, modifiers: [.option]) == .typesText)
+        #expect(HotKeyBinding.recording(keyCode: u, modifiers: [.option, .shift]) == .typesText)
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_LeftArrow), modifiers: [.option]) == .typesText)
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_ANSI_W), modifiers: [.command]) == .menuCommand)
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_ANSI_Q), modifiers: [.command]) == .menuCommand)
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_Space), modifiers: [.command]) == .menuCommand)
+        // With ⌃, or ⌘ and another modifier, it is a shortcut.
+        #expect(HotKeyBinding.recording(keyCode: u, modifiers: [.control])
+            == .recorded(HotKeyBinding(enabled: true, key: "U", modifiers: [.control])))
+        #expect(HotKeyBinding.recording(keyCode: u, modifiers: [.command, .option])
+            == .recorded(HotKeyBinding(enabled: true, key: "U", modifiers: [.command, .option])))
+        // F-keys take any modifier.
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_F5), modifiers: [.shift])
+            == .recorded(HotKeyBinding(enabled: true, key: "F5", modifiers: [.shift])))
+        #expect(HotKeyBinding.recording(keyCode: UInt32(kVK_F12), modifiers: [.command])
+            == .recorded(HotKeyBinding(enabled: true, key: "F12", modifiers: [.command])))
+    }
+
+    @Test("every key the table binds is found again by its code")
+    func keyNamesInvertTheTable() {
+        for (name, code) in HotKeyBinding.keyCodes {
+            #expect(HotKeyBinding.keyName(for: code) == name)
+        }
+        #expect(HotKeyBinding.keyName(for: UInt32(kVK_ANSI_LeftBracket)) == nil)
     }
 }
 
