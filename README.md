@@ -374,7 +374,8 @@ Measured on an M5 Pro, release build, with two plugins installed:
 
 Plugins do not run while the panel is away — opening it refreshes everything —
 so an idle uDeck is a pointer check ten times a second and nothing else. That
-is a setting if you want it the other way.
+is a setting if you want it the other way: **Keep running plugins while the panel
+is away**, under Settings → Opening → Behaviour.
 
 ## Permissions
 

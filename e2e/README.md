@@ -2297,26 +2297,21 @@ menu bar, and the next in the system's own order could be the Dock. Not asked:
 whether a key typed reaches Settings, since nothing in the General pane takes
 typing.
 
-**Nothing on the Opening screen has a name.** Not one control there carries an
-`AXIdentifier`, an `AXTitle` or an `AXDescription` — SwiftUI gives a `Toggle` no
-accessible name and the label beside it in the `Grid` is a separate element — so
-the identifiers on that screen belong to the sidebar and to nothing else. The
-lab finds those controls by where they sit among their own kind (the four
-`AXToggle` checkboxes are the shortcut's modifiers, left to right; the four
-plain ones are the switches, top to bottom) and then reads the row back before
-it clicks: it has to read what uDeck's shipped defaults read — on, on, off, off
-and on, on, on, on — or nothing is clicked at all. That guard catches a pane
-still being built, a pane that is not this one, and a machine an earlier check
-left changed; it does not catch a row laid out in another order, and cannot,
-because all four switches read alike and the modifier row survives swapping its
-two ons. So the order is not observed on the screen at all: it comes from
-`OpeningSettings`, and what holds it is the lab's own tests reading that file
-back — including a count of every `Toggle` on the screen, so that one declared
-in some other form fails the test rather than slipping past it. The two orders
-and the two readings are in `config` with their reasons, read back out of
-`OpeningSettings`, `HotKeyModifier` and the defaults of `AppSettings`,
-`GestureTuning` and `HotKeyBinding` — the way the gesture's numbers and the
-shortcut's are held.
+**The Opening screen names its controls** — since the redesign (stage 2,
+2026-11-19). Before it not one control there carried an `AXIdentifier`, an
+`AXTitle` or an `AXDescription`, and the lab counted unnamed checkboxes down the
+screen and held their order against `OpeningSettings` in its own tests. Now each
+switch carries `opening.<the setting it writes>` and the shortcut field
+`opening.shortcut`, and `ui.opening` finds them by name and role in either
+language. It still reads them back before it clicks: they have to read what
+uDeck's shipped defaults read (`config.OPENING_SWITCHES_AT_REST`, and the field
+`config.THE_HOTKEY`), or nothing is clicked at all — a pane still being built, a
+pane that is not this one, and a machine an earlier check left changed all read
+something else. What the lab's tests hold against the source is that every
+`Toggle` on the screen carries the name of the setting it binds, so a click on a
+name is a click on that setting. The shortcut is changed the way the operator
+changes it: the field clicked — it reads a prompt while it records — and the new
+combination pressed into it from inside the guest (`panel.press_the_chord`).
 
 **The one thing the lab trusts a translated name for is the way in.** uDeck's
 menu item is found by its title (`Settings…`), because it carries no identifier

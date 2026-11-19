@@ -335,6 +335,19 @@ public final class DeckModel {
     /// anything that was created with one.
     public var onSettingsChanged: ((AppSettings) -> Void)?
 
+    /// Told when Settings' shortcut field starts and stops recording, so the
+    /// shell lets the shortcut go meanwhile (`PanelController.holdHotKey`).
+    public var onShortcutRecording: ((Bool) -> Void)?
+
+    /// The system refused the shortcut last handed to it — another application
+    /// holds the same combination. Set by the shell; Settings says it beside
+    /// the shortcut field.
+    public var shortcutRefused = false
+
+    public func shortcutRecording(_ recording: Bool) {
+        onShortcutRecording?(recording)
+    }
+
     /// Told after the plugins folder has been read, which now happens whenever
     /// something in it changes rather than only at launch. The menu-bar item
     /// carries whether any of them will not run, and that answer is only as

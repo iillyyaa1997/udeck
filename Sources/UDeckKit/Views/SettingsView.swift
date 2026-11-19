@@ -121,11 +121,11 @@ public struct SettingsView: View {
             // Grouped forms, as System Settings draws its panes: each scrolls
             // by itself (the redesign, 2026-11-18).
             case .general: GeneralSettings(model: model, loginItem: loginItem, updater: updater)
+            case .opening: OpeningSettings(model: model)
             case .about: AboutSection(model: model, updater: updater)
-            case .opening, .look, .plugins: ScrollView {
+            case .look, .plugins: ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     switch navigation.section {
-                    case .opening: OpeningSettings(model: model)
                     case .look: LookSettings(model: model)
                     default: PluginSettingsSection(model: model, selected: $navigation.selectedPlugin)
                     }
@@ -475,14 +475,21 @@ private struct UpdateStatusRow: View {
 
 // MARK: - Opening
 
-/// How the panel is opened, on one screen.
+/// How the panel comes out: the gesture at the top edge, the keyboard
+/// shortcut, and how the panel behaves once it is out.
 ///
-/// Same treatment as the Look pane and for the same reason: this was four
-/// headed groups with a paragraph under nearly every control, and the
-/// paragraphs were mine. What survives is the one warning that stops a
-/// shortcut being set to something macOS will take from every other
-/// application, and one line at the foot about permissions — which is a fact
-/// about uDeck worth stating once rather than four times.
+/// A grouped form, as General — the operator's choice on the redesign canvas
+/// (2026-11-18, Opening1): the gesture's three sliders beside a drawing of
+/// where it fires, the shortcut as a field that records the combination
+/// pressed into it — it replaced four modifier toggles and a list of keys,
+/// which asked the operator to spell a shortcut out instead of pressing it —
+/// and a Behaviour group. That group took "keep running plugins while the
+/// panel is away" from Plugins: it is about what happens while the panel is
+/// away, which is this pane's subject.
+///
+/// Every switch carries `opening.<the setting it writes>`, the field
+/// `opening.shortcut`: the lab finds them by these in either language, where
+/// it used to count unnamed checkboxes down the screen.
 private struct OpeningSettings: View {
     @Bindable var model: DeckModel
     @Environment(\.strings) private var strings
@@ -499,134 +506,383 @@ private struct OpeningSettings: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
-                GridRow {
-                    label(strings(.openingGesture))
-                    Toggle(strings(.openingGestureToggle),
-                           isOn: binding(\.gesture.enabled))
+        VStack(alignment: .leading, spacing: 0) {
+            PaneTitle(strings(.sectionOpening))
+            form
+        }
+    }
+
+    private var form: some View {
+        Form {
+            Section(strings(.openingEdgeGroup)) {
+                Toggle(strings(.openingGestureToggle), isOn: binding(\.gesture.enabled))
+                    .accessibilityIdentifier("opening.gesture.enabled")
+                HStack(alignment: .center, spacing: 16) {
+                    EdgeDiagram(caption: strings(.openingWhereItFires), described: strings(.openingWhereItFiresDescribed))
+                    sliders
                 }
-
-                GridRow {
-                    label(strings(.openingPauseFirst))
-                    slider(binding(\.gesture.dwellDuration), in: 0.08 ... 0.8, step: 0.02,
-                           readout: strings(.unitMilliseconds(Int((model.settings.gesture.dwellDuration * 1000).rounded()))))
-                }
-
-                GridRow {
-                    label(strings(.openingPushPast))
-                    slider(binding(\.gesture.edgePushDistance), in: 10 ... 120, step: 5,
-                           readout: strings(.unitPoints(Int(model.settings.gesture.edgePushDistance))))
-                }
-
-                GridRow {
-                    label(strings(.openingStayQuiet))
-                    slider(binding(\.gesture.reopenCooldown), in: 0 ... 2, step: 0.1,
-                           readout: strings(.unitSeconds(model.settings.gesture.reopenCooldown)))
-                }
-
-                divider
-
-                GridRow {
-                    label(strings(.openingShortcut))
-                    Toggle(strings(.openingShortcutToggle), isOn: binding(\.hotkey.enabled))
-                }
-
-                GridRow {
-                    label(strings(.openingKeys))
-                    HStack(spacing: 8) {
-                        ForEach(HotKeyModifier.allCases.sorted(), id: \.self) { modifier in
-                            Toggle(modifier.symbol, isOn: Binding(
-                                get: { model.settings.hotkey.modifiers.contains(modifier) },
-                                set: { isOn in
-                                    var updated = model.settings
-                                    if isOn {
-                                        updated.hotkey.modifiers.insert(modifier)
-                                    } else {
-                                        updated.hotkey.modifiers.remove(modifier)
-                                    }
-                                    model.update(settings: updated)
-                                }
-                            ))
-                            .toggleStyle(.button)
-                        }
-                        Picker("", selection: Binding(
-                            get: { model.settings.hotkey.key.uppercased() },
-                            set: { key in
-                                var updated = model.settings
-                                updated.hotkey.key = key
-                                model.update(settings: updated)
-                            }
-                        )) {
-                            ForEach(HotKeyBinding.orderedKeyNames, id: \.self) { name in
-                                Text(name).tag(name)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 110)
-                    }
-                }
-
-                if model.settings.hotkey.modifiers.isEmpty {
-                    GridRow {
-                        Color.clear.frame(width: 1, height: 1)
-                        Text(strings(.openingNeedsModifier))
-                            .font(.caption).foregroundStyle(.orange)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                divider
-
-                GridRow {
-                    label(strings(.openingAlso))
-                    VStack(alignment: .leading, spacing: 6) {
-                        Toggle(strings(.openingRetract),
-                               isOn: binding(\.collapseOnAppSwitch))
-                        Toggle(strings(.openingFullscreen),
-                               isOn: binding(\.gesture.enabledInFullscreen))
-                    }
-                }
+                .padding(.vertical, 2)
+                // The sliders tune a gesture that is off: shown, so the operator
+                // sees what turning it on brings back, and not movable.
+                .disabled(!model.settings.gesture.enabled)
+                .opacity(model.settings.gesture.enabled ? 1 : 0.5)
             }
 
-            Divider()
+            Section {
+                ShortcutRow(model: model, enabled: binding(\.hotkey.enabled))
+            } header: {
+                Text(strings(.openingShortcutGroup))
+            } footer: {
+                // A fact about uDeck worth stating once, under the one setting
+                // that could look like it watches the keyboard.
+                Text(strings(.openingPermissions))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
-            Text(strings(.openingPermissions))
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Section(strings(.openingBehaviour)) {
+                Toggle(strings(.openingRetract), isOn: binding(\.collapseOnAppSwitch))
+                    .accessibilityIdentifier("opening.collapseOnAppSwitch")
+                Toggle(strings(.openingFullscreen), isOn: binding(\.gesture.enabledInFullscreen))
+                    .accessibilityIdentifier("opening.gesture.enabledInFullscreen")
+                Toggle(strings(.openingKeepPolling), isOn: binding(\.pollWhileCollapsed))
+                    .accessibilityIdentifier("opening.pollWhileCollapsed")
+            }
         }
-        .frame(maxWidth: 560, alignment: .leading)
+        .formStyle(.grouped)
     }
 
-    private func label(_ text: String) -> some View {
-        Text(text)
-            .gridColumnAlignment(.trailing)
-            .foregroundStyle(.secondary)
-    }
-
-    @ViewBuilder private var divider: some View {
-        GridRow {
-            Divider()
-                .gridCellColumns(2)
-                .padding(.vertical, 2)
+    /// The three numbers of the gesture, a label, a slider and its value each,
+    /// with the one line that says which way the first one cuts.
+    private var sliders: some View {
+        Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
+            slider(
+                .openingPauseFirst, binding(\.gesture.dwellDuration), in: 0.08 ... 0.8, step: 0.02,
+                readout: strings(.unitMilliseconds(Int((model.settings.gesture.dwellDuration * 1000).rounded()))),
+                id: "opening.gesture.dwellDuration"
+            )
+            GridRow {
+                Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                Text(strings(.openingPauseHelp))
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .gridCellColumns(2)
+            }
+            slider(
+                .openingPushPast, binding(\.gesture.edgePushDistance), in: 10 ... 120, step: 5,
+                readout: strings(.unitPoints(Int(model.settings.gesture.edgePushDistance))),
+                id: "opening.gesture.edgePushDistance"
+            )
+            slider(
+                .openingStayQuiet, binding(\.gesture.reopenCooldown), in: 0 ... 2, step: 0.1,
+                readout: strings(.unitSeconds(model.settings.gesture.reopenCooldown)),
+                id: "opening.gesture.reopenCooldown"
+            )
         }
     }
 
-    /// Generic over the number, because one of these four is a `CGFloat` — a
+    /// Generic over the number, because one of these three is a `CGFloat` — a
     /// distance in points — and the rest are plain `Double`s.
     private func slider<V: BinaryFloatingPoint>(
+        _ title: Phrase,
         _ value: Binding<V>,
         in range: ClosedRange<V>,
         step: V.Stride,
-        readout: String
+        readout: String,
+        id: String
     ) -> some View where V.Stride: BinaryFloatingPoint {
-        HStack(spacing: 10) {
-            Slider(value: value, in: range, step: step).frame(width: 230)
+        GridRow {
+            Text(strings(title))
+                .frame(minWidth: 130, alignment: .leading)
+            // Rounded to the step here rather than given `step:`, which on
+            // macOS draws a tick under every step — the canvas has a plain bar.
+            Slider(value: Binding(
+                get: { value.wrappedValue },
+                set: { newValue in
+                    let unit = V(step)
+                    value.wrappedValue = min(max((newValue / unit).rounded() * unit, range.lowerBound), range.upperBound)
+                }
+            ), in: range) { Text(strings(title)) }
+                .labelsHidden()
+                // One step per increment for VoiceOver and the keyboard: without
+                // `step:` the slider would pick its own increment, which the
+                // rounding above could swallow whole.
+                .accessibilityAdjustableAction { direction in
+                    let unit = V(step)
+                    let moved = direction == .increment ? value.wrappedValue + unit : value.wrappedValue - unit
+                    value.wrappedValue = min(max((moved / unit).rounded() * unit, range.lowerBound), range.upperBound)
+                }
+                .accessibilityIdentifier(id)
             Text(readout)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 52, alignment: .trailing)
+                .frame(width: 54, alignment: .trailing)
         }
+    }
+}
+
+/// Where the gesture fires, drawn: the top of a screen, the panel's place at
+/// the notch, the strip that answers the cursor in orange, and the cursor in it.
+///
+/// The strip is wider than the notch on purpose and so is the drawing — it is
+/// the anchor with a margin each side (`GestureTuning.stripSideMargin`). A
+/// picture rather than a control, so it keeps its own colours in dark mode, the
+/// way an illustration does.
+private struct EdgeDiagram: View {
+    var caption: String
+    /// What the drawing shows, in words, for VoiceOver — the caption alone
+    /// names a colour.
+    var described: String
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Color(red: 0.914, green: 0.933, blue: 0.961)
+            // The menu bar.
+            Color(red: 0.788, green: 0.827, blue: 0.878).frame(height: 6)
+            // The panel's place: the notch, or the one uDeck draws on a screen without one.
+            UnevenRoundedRectangle(bottomLeadingRadius: 7, bottomTrailingRadius: 7)
+                .fill(Color(red: 0.110, green: 0.114, blue: 0.129))
+                .frame(width: 60, height: 18)
+                .offset(x: 45)
+            // Where the cursor opens it.
+            Color(red: 1.0, green: 0.624, blue: 0.039)
+                .frame(width: 90, height: 3)
+                .offset(x: 30)
+            CursorArrow()
+                .fill(Color.white)
+                .overlay(CursorArrow().stroke(Color(red: 0.114, green: 0.114, blue: 0.122), lineWidth: 1.05))
+                .frame(width: 18, height: 18)
+                .offset(x: 66, y: 40)
+            Text(caption)
+                .font(.system(size: 10))
+                .foregroundStyle(Color(red: 0.235, green: 0.235, blue: 0.263))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(width: 136, alignment: .leading)
+                .offset(x: 8, y: 84)
+        }
+        .frame(width: 150, height: 104)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color(red: 0.875, green: 0.890, blue: 0.918)))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(described)
+    }
+}
+
+/// The arrow of the pointer, on a 24-point square: the canvas's own path.
+private struct CursorArrow: Shape {
+    func path(in rect: CGRect) -> Path {
+        let scale = min(rect.width, rect.height) / 24
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x * scale, y: rect.minY + y * scale)
+        }
+        var path = Path()
+        path.move(to: point(6, 3))
+        path.addLine(to: point(19, 11))
+        path.addLine(to: point(13, 12.5))
+        path.addLine(to: point(10, 19))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// The keyboard shortcut: a field that records the combination pressed into
+/// it, and the switch.
+///
+/// A click starts recording, and the panel lets its shortcut go meanwhile
+/// (`DeckModel.shortcutRecording`): a combination the window server holds for
+/// uDeck never reaches the window as a key press, so the field could not
+/// record the shortcut it already is. The next key press decides
+/// (`HotKeyBinding.recording`): a combination uDeck can register becomes the
+/// shortcut at once; Escape alone cancels; a bare key, one uDeck cannot bind, or
+/// one that would take typing or a menu command from every application says
+/// why and keeps listening. A click anywhere else, another window, another
+/// application or another pane stops it, and the shortcut from before is taken
+/// back; a click on the field itself starts it again.
+private struct ShortcutRow: View {
+    @Bindable var model: DeckModel
+    var enabled: Binding<Bool>
+    @Environment(\.strings) private var strings
+
+    @State private var recording = false
+    /// The modifiers held down while recording, shown in the field as they are pressed.
+    @State private var held: Set<HotKeyModifier> = []
+    /// The last key press that could not be a shortcut, while recording.
+    @State private var refused: HotKeyRecording?
+    @State private var keys: Any?
+    @State private var leaving: [any NSObjectProtocol] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(strings(.openingShortcutToggle))
+                    Text(strings(recording ? .openingShortcutRecordingHint : .openingShortcutHint))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                field
+                Toggle(strings(.openingShortcutToggle), isOn: enabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .accessibilityIdentifier("opening.hotkey.enabled")
+            }
+            if let problem {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text(problem).fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.caption)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("opening.shortcutProblem")
+            }
+        }
+        .onDisappear { stop() }
+    }
+
+    private var field: some View {
+        Button {
+            if recording { stop() } else { start() }  // see `take`: a click while recording arrives here stopped
+        } label: {
+            Text(shown)
+                .font(.system(size: 14))
+                .tracking(2)
+                // Grey for a prompt, and for a shortcut that is switched off.
+                .foregroundStyle(
+                    (recording && held.isEmpty) || (!recording && !enabled.wrappedValue) ? Color.secondary : Color.primary
+                )
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                // One width whatever it reads: a field that grew while it
+                // recorded would push the switch beside it about.
+                .frame(width: 104)
+                .padding(.horizontal, 14)
+                .frame(minHeight: 28)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color(nsColor: .controlBackgroundColor)))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6).strokeBorder(
+                        recording ? Color.accentColor : Color(nsColor: .separatorColor),
+                        lineWidth: recording ? 2 : 1
+                    )
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // Not disabled with the switch: a shortcut turned off because it could
+        // not be registered — one with no modifier left, written by an older
+        // uDeck, or a key this one has no name for — is mended here, and
+        // recording one turns it back on (`HotKeyBinding.recording`).
+        .accessibilityLabel(
+            recording ? strings(.openingShortcutRecordingHint)
+                : strings(.openingShortcutField(model.settings.hotkey.displayName))
+        )
+        // What the field reads, so a click on it can be heard to have started
+        // recording — VoiceOver, and the lab reading the control back.
+        .accessibilityValue(shown)
+        .accessibilityIdentifier("opening.shortcut")
+    }
+
+    /// What the field reads: the shortcut, or — while recording — the
+    /// modifiers held so far, or a prompt.
+    private var shown: String {
+        guard recording else { return model.settings.hotkey.displayName }
+        if held.isEmpty { return strings(.openingShortcutPrompt) }
+        return held.sorted().map(\.symbol).joined()
+    }
+
+    private var problem: String? {
+        if recording {
+            switch refused {
+            case .needsModifier: return strings(.openingNeedsModifier)
+            case .notBindable: return strings(.openingNotBindable)
+            case .typesText: return strings(.openingTypesText)
+            case .menuCommand: return strings(.openingMenuCommand)
+            default: return nil
+            }
+        }
+        guard enabled.wrappedValue, model.shortcutRefused else { return nil }
+        return strings(.openingShortcutTaken(model.settings.hotkey.displayName))
+    }
+
+    private func start() {
+        guard !recording, keys == nil else { return }
+        recording = true
+        held = []
+        refused = nil
+        model.shortcutRecording(true)
+        keys = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged, .leftMouseDown]) { event in
+            MainActor.assumeIsolated { take(event) } ? nil : event
+        }
+        // Recording ends when the keys stop coming here: the window the click
+        // came from stops being the key window — closed, or another chosen —
+        // or uDeck stops being the active application.
+        let center = NotificationCenter.default
+        var watched: [(Notification.Name, AnyObject?)] = [(NSApplication.didResignActiveNotification, NSApp)]
+        if let window = NSApp.keyWindow { watched.append((NSWindow.didResignKeyNotification, window)) }
+        leaving = watched.map { name, object in
+            center.addObserver(forName: name, object: object, queue: .main) { _ in
+                MainActor.assumeIsolated { stop() }
+            }
+        }
+    }
+
+    /// One event while recording; true when it was the field's and goes no further.
+    private func take(_ event: NSEvent) -> Bool {
+        switch event.type {
+        case .flagsChanged:
+            held = Self.modifiers(event.modifierFlags)
+            return false
+        case .leftMouseDown:
+            // Any click ends recording, here and at once, before the click is
+            // delivered: one elsewhere leaves it ended, and one on the field
+            // reaches the field's button afterwards — on the mouse-up — which
+            // finds it not recording and starts again. Always that order, so a
+            // click on the field while it records restarts it; Escape cancels.
+            stop()
+            return false
+        case .keyDown:
+            if event.isARepeat { return true }
+            let answer = HotKeyBinding.recording(
+                keyCode: UInt32(event.keyCode), modifiers: Self.modifiers(event.modifierFlags)
+            )
+            switch answer {
+            case .cancelled:
+                stop()
+            case .recorded(let binding):
+                // Saved while the shortcut is let go, so the panel takes it
+                // once, when `stop` gives the shortcut back.
+                var settings = model.settings
+                settings.hotkey = binding
+                model.update(settings: settings)
+                stop()
+            case .needsModifier, .notBindable, .typesText, .menuCommand:
+                refused = answer
+            }
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func stop() {
+        if let keys { NSEvent.removeMonitor(keys) }
+        keys = nil
+        for observer in leaving { NotificationCenter.default.removeObserver(observer) }
+        leaving = []
+        guard recording else { return }
+        recording = false
+        held = []
+        refused = nil
+        model.shortcutRecording(false)
+    }
+
+    private static func modifiers(_ flags: NSEvent.ModifierFlags) -> Set<HotKeyModifier> {
+        var found: Set<HotKeyModifier> = []
+        if flags.contains(.control) { found.insert(.control) }
+        if flags.contains(.option) { found.insert(.option) }
+        if flags.contains(.shift) { found.insert(.shift) }
+        if flags.contains(.command) { found.insert(.command) }
+        return found
     }
 }
 
@@ -1273,17 +1529,9 @@ private struct PluginSettingsSection: View {
 
     var body: some View {
         SettingsGroup(strings(.pluginsInstalled)) {
-            // It sat under Opening, which is about how the panel arrives. This
-            // is a fact about plugins — whether they keep running when nobody
-            // is looking — and it belongs with them.
-            Toggle(strings(.openingKeepPolling), isOn: Binding(
-                get: { model.settings.pollWhileCollapsed },
-                set: { newValue in
-                    var settings = model.settings
-                    settings.pollWhileCollapsed = newValue
-                    model.update(settings: settings)
-                }
-            ))
+            // "Keep running plugins while the panel is away" moved to Opening →
+            // Behaviour with the redesign (2026-11-18): it is about what
+            // happens while the panel is away, which is that pane's subject.
 
             // For somebody writing a plugin: every run of a linked one on disk.
             RunLogControls(model: model)

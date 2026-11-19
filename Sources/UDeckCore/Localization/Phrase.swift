@@ -47,16 +47,28 @@ public enum Phrase: Sendable, Equatable {
 
     // MARK: - Opening
 
-    case openingGesture
+    case openingEdgeGroup
     case openingGestureToggle
+    case openingWhereItFires
+    case openingWhereItFiresDescribed
     case openingPauseFirst
+    case openingPauseHelp
     case openingPushPast
     case openingStayQuiet
-    case openingShortcut
+    case openingShortcutGroup
     case openingShortcutToggle
-    case openingKeys
+    case openingShortcutHint
+    case openingShortcutRecordingHint
+    case openingShortcutPrompt
+    /// The shortcut field as VoiceOver reads it: the combination, and what a click does.
+    case openingShortcutField(String)
     case openingNeedsModifier
-    case openingAlso
+    case openingNotBindable
+    case openingTypesText
+    case openingMenuCommand
+    /// The system refused the combination: another application holds it.
+    case openingShortcutTaken(String)
+    case openingBehaviour
     case openingRetract
     case openingFullscreen
     case openingKeepPolling
