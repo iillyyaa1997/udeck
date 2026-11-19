@@ -7984,3 +7984,38 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+def check_gallery(machine, check_dir, lab):
+    """Settings → Plugins at the window's own size, measured: where the sidebar's first row and the tabs are against the window's top — a lab tree's only, never committed."""
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+
+        def measure(label):
+            machine.sleep(1.5)
+            found = ui.walk(machine, f"reading {label}")
+            window = found[0].frame
+            general = next((e for e in found if e.identifier == "section.general"), None)
+            tab = next((e for e in found if e.identifier == "plugins.tab.installed"), None)
+            page = next((e for e in found if e.identifier and e.identifier.startswith("plugins.page.")), None)
+            top = lambda e: None if e is None or e.frame is None or window is None else round(e.frame[1] - window[1])
+            lab.note(f"   MEASURE {label}: window {window} general+{top(general)} tab+{top(tab)} page+{top(page)}")
+            machine.screenshot(check_dir, f"gallery {label}")
+            (check_dir / f"gallery-{label}.txt").write_text(ui.tree(machine, f"reading {label}"))
+
+        ui.open_settings_and_wait(machine, "opening Settings at its own size")
+        measure("general-own-size")
+        ui.click(machine, "section.plugins", "choosing Plugins")
+        machine.sleep(2)
+        measure("plugins-own-size")
+        ui.click(machine, "plugins.tab.catalogue", "the catalogue tab")
+        measure("catalogue-own-size")
+        ui.click(machine, "section.general", "choosing General again")
+        measure("general-after-plugins")
+        ui.click(machine, "section.plugins", "choosing Plugins again")
+        measure("plugins-again")
+        ui.place_settings(machine, "resizing Settings", frame=(80, 60, 1000, 640))
+        measure("plugins-after-a-resize")
+    finally:
+        scene.close()
