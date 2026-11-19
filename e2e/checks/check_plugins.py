@@ -7953,3 +7953,101 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+def check_gallery(machine, check_dir, lab):
+    """Pictures of every section of Settings, scrolled through, for the redesign — a lab tree's only, never committed."""
+    scene = _prepare(machine, check_dir, lab, main="c1")
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        _install(scene, UPTIME)
+        frame = ui.place_settings(machine, "placing Settings for the gallery")
+        lab.note(f"   Settings at {frame.x},{frame.y} {frame.width}x{frame.height}")
+        scroll = getattr(machine, "scroll", None)
+        for section in ("general", "opening", "look", "plugins", "about"):
+            ui.click(machine, f"section.{section}", f"opening {section}")
+            machine.sleep(2)
+            for page in range(1, 7):
+                machine.screenshot(check_dir, f"gallery {section} {page}")
+                if page == 1:
+                    (check_dir / f"gallery-{section}.txt").write_text(ui.tree(machine, f"reading {section}"))
+                if scroll is None:
+                    break
+                scroll(frame.x + frame.width * 2 // 3, frame.y + frame.height // 2, -500, f"scrolling {section}")
+                machine.sleep(1)
+            if scroll is not None:
+                for _ in range(8):
+                    scroll(frame.x + frame.width * 2 // 3, frame.y + frame.height // 2, 800, f"back to the top of {section}")
+        # The shortcut field, in each of its states (stage 2).
+        from udeck_e2e import probes
+        ui.click(machine, "section.opening", "opening Opening again")
+        machine.sleep(1)
+        (check_dir / "gallery-opening-at-rest.txt").write_text(ui.tree(machine, "reading opening at rest"))
+        for label, act in (
+            ("recording", lambda: ui.click(machine, "opening.shortcut", "starting to record")),
+            ("bare", lambda: probes._ask_system_events(machine, "key code 32", "a bare U")),
+            ("brackets", lambda: probes.press_chord(machine, 33, ("control", "option"), "control option [")),
+            ("shift-u", lambda: probes.press_chord(machine, 32, ("shift",), "shift U")),
+            ("command-w", lambda: probes.press_chord(machine, 13, ("command",), "command W")),
+            ("recorded", lambda: probes.press_chord(machine, 32, ("control", "option", "shift"), "control option shift U")),
+            ("again", lambda: ui.click(machine, "opening.shortcut", "recording once more")),
+            ("cancelled", lambda: probes._ask_system_events(machine, "key code 53", "escape")),
+        ):
+            try:
+                act()
+            except Exception as error:  # a gallery shows what it can
+                lab.note(f"   {label}: {error}")
+            machine.sleep(1.5)
+            machine.screenshot(check_dir, f"gallery opening-{label}")
+            (check_dir / f"gallery-opening-{label}.txt").write_text(ui.tree(machine, f"reading {label}"))
+        lab.note("   settings.json: " + machine.ssh.ask("cat ~/.udeck/settings.json 2>/dev/null | tr -d '\\n' | head -c 600 || true", "reading settings").stdout)
+
+        # Look's pages (stage 3).
+        ui.click(machine, "section.look", "opening Look again")
+        machine.sleep(1.5)
+        (check_dir / "gallery-look-main.txt").write_text(ui.tree(machine, "reading look"))
+
+        def segment(described, step):
+            for row in ui.controls(ui.tree(machine, step), step):
+                if row.role == "AXRadioButton" and row.description == described:
+                    machine.click(*row.middle, step)
+                    return True
+            lab.note(f"   no segment {described!r}")
+            return False
+
+        for label, act in (
+            ("look-automatic", lambda: segment("Match the system", "appearance: match the system")),
+            ("look-solid", lambda: ui.click(machine, "look.style.solid", "style: solid")),
+            ("look-dark", lambda: segment("Dark", "appearance: dark")),
+            ("look-fine", lambda: ui.click(machine, "look.fineTuning", "opening fine tuning")),
+            ("look-fine-dark-variant", lambda: segment("Dark variant", "the dark variant")),
+            ("look-back", lambda: ui.click(machine, "look.back", "back to Look")),
+            ("look-states", lambda: ui.click(machine, "look.byState", "opening by state")),
+            ("look-back2", lambda: ui.click(machine, "look.back", "back to Look")),
+        ):
+            try:
+                act()
+            except Exception as error:  # a gallery shows what it can
+                lab.note(f"   {label}: {error}")
+            machine.sleep(1.5)
+            machine.screenshot(check_dir, f"gallery {label}")
+            (check_dir / f"gallery-{label}.txt").write_text(ui.tree(machine, f"reading {label}"))
+        lab.note("   theme: " + machine.ssh.ask("python3 -c 'import json,os; d=json.load(open(os.path.expanduser(\"~/.udeck/settings.json\"))); t=d.get(\"theme\",{}); print(t.get(\"source\"), t.get(\"manualIsDark\"), t.get(\"light\",{}).get(\"glass\"), t.get(\"dark\",{}).get(\"glass\"))' 2>&1 || true", "reading the theme").stdout)
+
+        ui.click(machine, "section.plugins", "opening plugins again")
+        machine.sleep(1)
+        more = ui.find(machine, f"plugin.{UPTIME}.more", "finding uptime's row")
+        lab.note(f"   uptime's more: {more}")
+        if more is not None:
+            machine.click(*more.middle, "opening uptime's row")
+            machine.sleep(2)
+            for page in range(1, 5):
+                machine.screenshot(check_dir, f"gallery plugins-uptime {page}")
+                if page == 1:
+                    (check_dir / "gallery-plugins-uptime.txt").write_text(ui.tree(machine, "reading uptime"))
+                if scroll is None:
+                    break
+                scroll(frame.x + frame.width * 2 // 3, frame.y + frame.height // 2, -500, "scrolling uptime")
+                machine.sleep(1)
+    finally:
+        scene.close()

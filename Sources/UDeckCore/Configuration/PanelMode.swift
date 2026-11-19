@@ -45,47 +45,6 @@ public enum PanelMode: String, Codable, CaseIterable, Sendable, Identifiable {
 
     public var id: String { rawValue }
 
-    /// What to call it in the settings screen.
-    /// The mode's name, for a screen that has a language.
-    ///
-    /// `name` below is the English one, kept because it is what a log line and
-    /// a settings file should say whoever is reading the screen.
-    public var namePhrase: Phrase {
-        switch self {
-        case .light: .modeLight
-        case .dark: .modeDark
-        case .contrast: .modeContrast
-        case .ghost: .modeGhost
-        case .paper: .modePaper
-        case .smoke: .modeSmoke
-        }
-    }
-
-    /// One line on what this look is for.
-    public var summaryPhrase: Phrase {
-        switch self {
-        case .light: .modeLightSummary
-        case .dark: .modeDarkSummary
-        case .contrast: .modeContrastSummary
-        case .ghost: .modeGhostSummary
-        case .paper: .modePaperSummary
-        case .smoke: .modeSmokeSummary
-        }
-    }
-
-    public var name: String {
-        switch self {
-        case .light: "Light"
-        case .dark: "Dark"
-        case .contrast: "Contrast"
-        case .ghost: "Ghost"
-        case .paper: "Paper"
-        case .smoke: "Smoke"
-        }
-    }
-
-    /// One line on what it is for.
-
     /// The glass this mode is made of.
     public var glass: GlassAppearance {
         switch self {
