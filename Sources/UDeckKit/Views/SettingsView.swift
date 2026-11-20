@@ -1539,22 +1539,33 @@ private struct LookSettings: View {
 
     private var sample: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // Narrower than the 520 of a page of its own: beside the states'
+            // column, 520 made the page wider than the window at its own size
+            // and the whole window's content moved 25 pt left (the lab,
+            // 2026-11-20 — in 0.8.13 too: the General row 2 pt from the
+            // window's left on this page, 27 on every other).
             GlassPreview(glass: editedLook.glass,
                          theme: DeckTheme(density: model.settings.density, look: editedLook,
                                           textSize: model.settings.resolvedTextSize),
                          phase: sampledState.phase,
                          surrounding: sampledState.surrounding,
-                         presence: editedLook.presence)
+                         presence: editedLook.presence,
+                         width: 440)
+
+            // Two rows, not one: in one, the variant tabs, the style menu and
+            // Save style… were wider than the column at the window's own size
+            // ("Save style…" cut short in the lab's gallery, 2026-11-20).
+            Picker("", selection: Binding(get: { edited }, set: { editingDark = $0 })) {
+                Text(strings(.lookLightLook)).tag(false)
+                Text(strings(.lookDarkLook)).tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            // Its own width: held to 220 the Russian names overflowed it and
+            // it stood out of the column to the left (the lab's gallery).
+            .fixedSize()
 
             HStack(spacing: 12) {
-                Picker("", selection: Binding(get: { edited }, set: { editingDark = $0 })) {
-                    Text(strings(.lookLightLook)).tag(false)
-                    Text(strings(.lookDarkLook)).tag(true)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 220)
-
                 // Labelled, because it was not. The menu showed only whichever
                 // preset the look currently matched — "Custom" most of the
                 // time — and the operator had to ask what it was.
@@ -1595,53 +1606,47 @@ private struct LookSettings: View {
 
     // MARK: - The knobs
 
+    /// Every knob of the look being edited, one row each — its name on the
+    /// left, its control on the right, a thin line between rows — as a grouped
+    /// form draws its rows (board LookFine, the operator's «1» of 2026-11-19;
+    /// the grid it replaces put the names in a right-aligned column of grey).
     private var knobs: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
-
+        VStack(alignment: .leading, spacing: 0) {
             // First of the values rather than last, because it is the one that
             // answers "should this situation be noticeable at all" — and every
             // other row is about a panel that has already decided to be there.
-            GridRow {
-                label(strings(.lookQuietLevel))
+            knobRow(strings(.lookQuietLevel), [.presence]) {
                 slider(look(\.presence, .presence), in: PanelLook.presenceRange,
                        step: 0.05, readout: percent(editedLook.presence))
-                chain([.presence])
             }
 
-            divider
-
-            GridRow {
-                label(strings(.lookGlass))
-                Picker("", selection: look(\.glass.style, .glassStyle)) {
+            knobRow(strings(.lookGlass), [.glassStyle]) {
+                Picker(strings(.lookGlass), selection: look(\.glass.style, .glassStyle)) {
                     Text(strings(.glassRegular)).tag(GlassStyle.regular)
                     Text(strings(.glassClear)).tag(GlassStyle.clear)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 200)
-                chain([.glassStyle])
             }
 
             if let warning = characterWarning {
-                GridRow {
-                    Color.clear.frame(width: 1, height: 1)
-                    Text(warning).font(.caption).foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(warning).font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .multilineTextAlignment(.trailing)
+                    .padding(.bottom, 6)
             }
 
-            GridRow {
-                label(strings(.lookAmount))
+            knobRow(strings(.lookAmount), [.glassOpacity]) {
                 slider(look(\.glass.opacity, .glassOpacity), in: GlassAppearance.opacityRange,
                        step: 0.05, readout: percent(editedLook.glass.opacity))
-                chain([.glassOpacity])
             }
 
-            GridRow {
-                label(strings(.lookTint))
+            knobRow(strings(.lookTint), [.tinted, .tintDirection]) {
                 HStack(spacing: 10) {
-                    Toggle("", isOn: look(\.glass.tinted, .tinted)).labelsHidden()
-                    Picker("", selection: look(\.glass.tintIsLight, .tintDirection)) {
+                    Toggle(strings(.lookTint), isOn: look(\.glass.tinted, .tinted)).labelsHidden()
+                    Picker(strings(.lookTint), selection: look(\.glass.tintIsLight, .tintDirection)) {
                         Text(strings(.tintLighter)).tag(true)
                         Text(strings(.tintDarker)).tag(false)
                     }
@@ -1650,26 +1655,22 @@ private struct LookSettings: View {
                     .frame(width: 180)
                     .disabled(!editedLook.glass.tinted)
                 }
-                chain([.tinted, .tintDirection])
             }
 
-            GridRow {
-                label(strings(.lookStrength))
+            knobRow(strings(.lookStrength), [.tintStrength]) {
                 slider(look(\.glass.tintStrength, .tintStrength), in: GlassAppearance.tintStrengthRange,
                        step: 0.02, readout: percent(editedLook.glass.tintStrength))
                     .disabled(!editedLook.glass.tinted)
-                chain([.tintStrength])
             }
 
-            GridRow {
-                label(strings(.lookTintColour))
+            knobRow(strings(.lookTintColour), [.tintColour]) {
                 HStack(spacing: 10) {
                     // Empty means the grey that "Lighter"/"Darker" names, which
                     // is what the tint always was. The toggle is the switch
                     // between "a shade of the background" and "a colour", and
                     // it reads better than a colour well that silently means
                     // grey when nobody has touched it.
-                    Toggle("", isOn: Binding(
+                    Toggle(strings(.lookTintColour), isOn: Binding(
                         get: { editedLook.glass.tintColor != nil },
                         set: { wantsColour in
                             // Through the same binding as every other value, so
@@ -1684,7 +1685,7 @@ private struct LookSettings: View {
                     .disabled(!editedLook.glass.tinted)
 
                     if let colour = editedLook.glass.tintColor {
-                        ColorPicker("", selection: Binding(
+                        ColorPicker(strings(.lookTintColour), selection: Binding(
                             get: { Color(red: colour.red, green: colour.green, blue: colour.blue) },
                             set: { newValue in
                                 guard let rgb = InkColor(newValue) else { return }
@@ -1695,34 +1696,26 @@ private struct LookSettings: View {
                         .disabled(!editedLook.glass.tinted)
                     }
                 }
-                chain([.tintColour])
             }
 
-            divider
-
-            GridRow {
-                label(strings(.lookText))
-                Picker("", selection: look(\.ink, .ink)) {
+            knobRow(strings(.lookText), [.ink]) {
+                Picker(strings(.lookText), selection: look(\.ink, .ink)) {
                     Text(strings(.lookLight)).tag(PanelInk.light)
                     Text(strings(.lookDark)).tag(PanelInk.dark)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(width: 200)
-                chain([.ink])
             }
 
-            GridRow {
-                label(strings(.lookBrightness))
+            knobRow(strings(.lookBrightness), [.inkBrightness]) {
                 slider(look(\.inkBrightness, .inkBrightness), in: 0 ... 1,
                        step: 0.02, readout: percent(editedLook.inkBrightness))
-                chain([.inkBrightness])
             }
 
-            GridRow {
-                label(strings(.lookColour))
+            knobRow(strings(.lookColour), [.inkColour], last: true) {
                 HStack(spacing: 10) {
-                    Toggle("", isOn: Binding(
+                    Toggle(strings(.lookColour), isOn: Binding(
                         get: { editedLook.inkColor != nil },
                         set: { wantsColour in
                             look(\.inkColor, .inkColour).wrappedValue = wantsColour
@@ -1733,7 +1726,7 @@ private struct LookSettings: View {
                     .labelsHidden()
 
                     if let colour = editedLook.inkColor {
-                        ColorPicker("", selection: Binding(
+                        ColorPicker(strings(.lookColour), selection: Binding(
                             get: { Color(red: colour.red, green: colour.green, blue: colour.blue) },
                             set: { newValue in
                                 guard let rgb = InkColor(newValue) else { return }
@@ -1743,28 +1736,33 @@ private struct LookSettings: View {
                         .labelsHidden()
                     }
                 }
-                chain([.inkColour])
             }
-
         }
     }
 
     // MARK: - Pieces
 
-    private func label(_ text: String) -> some View {
-        Text(text)
-            .gridColumnAlignment(.trailing)
-            .foregroundStyle(.secondary)
-    }
-
-    /// A rule across the whole grid, not just the column the controls are in —
-    /// a divider that starts where the second column does reads as a stray mark
-    /// rather than as a break between two groups of knobs.
-    @ViewBuilder private var divider: some View {
-        GridRow {
-            Divider()
-                .gridCellColumns(2)
-                .padding(.vertical, 2)
+    /// One knob's row: its name on the left, its control on the right — and,
+    /// on By panel state, the switch that shares the value across the states
+    /// (`chain`) — with a thin line under it unless it is the last.
+    private func knobRow<Control: View>(
+        _ name: String,
+        _ fields: Set<LookField>,
+        last: Bool = false,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 12) {
+                Text(name)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 12)
+                control()
+                chain(fields)
+            }
+            .padding(.vertical, 7)
+            if !last {
+                Divider()
+            }
         }
     }
 

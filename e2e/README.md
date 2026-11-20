@@ -2277,9 +2277,12 @@ is the system's own memory of uDeck that has to come through a boot.
 `settings.every-pane-starts-under-the-title-bar` leaves Settings at the size
 uDeck opens it at and chooses each section from the sidebar: the sidebar's
 General row has to stay where it is on General, within 2 pt, and under the top
-of the window's content (its hosting view, below the title bar), and on Plugins
-the first tab under that top too; then the window is made larger and its own
-size again, and Plugins read once more. 0.8.12's Plugins pushed the whole
+of the window's content (its hosting view, below the title bar) and as far from
+its left, and on Plugins the first tab under that top too; then Look's Fine
+tuning and By panel state the same — By panel state's one line of variant tabs,
+style menu and Save style… was wider than its column, and the content moved
+25 pt left (0.8.13); then the window is made larger and its own size again, and
+Plugins read once more. 0.8.12's Plugins pushed the whole
 window's content 68 pt up at that size — the General row 56 pt below the
 window's top on General and -12 on Plugins (labx/s4-v0) — and the gallery,
 which makes the window larger first, laid it out right and never showed it.
