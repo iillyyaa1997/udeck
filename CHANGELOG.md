@@ -8,6 +8,17 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.8.13] — 2026-11-20
+
+A fix to 0.8.12's Plugins pane. 0.8.13 adds nothing to the plugin contract.
+The update to it goes by 0.8.8's rule.
+
+- **Settings no longer slides under its title bar on Plugins.** At the size
+  the window opens at, the Plugins pane pushed the whole window's content up:
+  the sidebar's first rows and the pane's title hid under the title bar and
+  the tabs were cut by it. The pane's title, tabs and page now scroll as one,
+  and everything starts where it does on the other sections.
+
 ## [0.8.12] — 2026-11-19
 
 Settings' redesign, fourth part: Plugins. 0.8.12 adds nothing to the plugin
