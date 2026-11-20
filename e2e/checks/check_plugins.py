@@ -7984,3 +7984,48 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+def check_gallery(machine, check_dir, lab):
+    """Look's pages in Russian at the window's own size, then larger — a lab tree's only, never committed."""
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
+    ru = ui.RUSSIAN
+    window = ru.settings_window
+    try:
+        machine.ssh.run("mkdir -p ~/.udeck", "making uDeck's folder")
+        _write(machine, SETTINGS, {"language": ru.code}, "setting uDeck's language to Russian")
+        app.launch(machine)
+        ui.open_settings_and_wait(machine, "opening Settings", item=ru.settings_item, window=window)
+
+        def shot(label):
+            machine.sleep(1.5)
+            found = ui.walk(machine, f"reading {label}", window)
+            lab.note(f"   FRAME {label}: {found[0].frame if found else None}")
+            machine.screenshot(check_dir, f"gallery {label}")
+            (check_dir / f"gallery-{label}.txt").write_text(ui.tree(machine, f"reading {label}", window))
+
+        def step(label, act):
+            try:
+                act()
+            except Exception as error:  # a gallery shows what it can
+                lab.note(f"   {label}: {error}")
+            shot(label)
+
+        def segment(described, what):
+            for row in ui.controls(ui.tree(machine, what, window), what):
+                if row.role == "AXRadioButton" and row.description == described:
+                    machine.click(*row.middle, what)
+                    return
+            lab.note(f"   no segment {described!r}")
+
+        step("look-main", lambda: ui.click(machine, "section.look", "choosing Look", window))
+        step("look-fine-light", lambda: ui.click(machine, "look.fineTuning", "opening fine tuning", window))
+        step("look-fine-dark", lambda: segment("Тёмный вариант", "the dark variant"))
+        step("look-back", lambda: ui.click(machine, "look.back", "back to Look", window))
+        step("look-states", lambda: ui.click(machine, "look.byState", "opening by state", window))
+        ui.place_settings(machine, "making Settings larger", frame=(60, 40, 1300, 900), window=window)
+        shot("look-states-large")
+        step("look-back-large", lambda: ui.click(machine, "look.back", "back to Look", window))
+        step("look-fine-large", lambda: ui.click(machine, "look.fineTuning", "opening fine tuning", window))
+    finally:
+        scene.close()
