@@ -2274,6 +2274,16 @@ launch — and quitting uDeck and starting it again is exactly that question at 
 tenth of the cost. A machine restarting is the login checks' subject, where it
 is the system's own memory of uDeck that has to come through a boot.
 
+`settings.every-pane-starts-under-the-title-bar` leaves Settings at the size
+uDeck opens it at and chooses each section from the sidebar: the sidebar's
+General row has to stay where it is on General, within 2 pt, and under the top
+of the window's content (its hosting view, below the title bar), and on Plugins
+the first tab under that top too; then the window is made larger and its own
+size again, and Plugins read once more. 0.8.12's Plugins pushed the whole
+window's content 68 pt up at that size — the General row 56 pt below the
+window's top on General and -12 on Plugins (labx/s4-v0) — and the gallery,
+which makes the window larger first, laid it out right and never showed it.
+
 `settings.opened-from-the-panel-in-front` puts the Finder in front, opens the
 panel with the hotkey and presses its gear with the pointer, and then asks three
 things that have to agree, for up to five seconds and once more two seconds

@@ -81,34 +81,44 @@ struct PluginsSettingsPane: View {
     @State private var linkText = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            PaneTitle(strings(.sectionPlugins))
-            tabBar
-                .padding(.horizontal, 20)
-                .padding(.top, 10)
-            // The page's sentinel for the lab: one line per tab, so the walk
-            // says which page it read.
-            Text(strings(navigation.pluginsTab.about))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 20)
-                .padding(.top, 6)
-                .accessibilityIdentifier("plugins.page.\(navigation.pluginsTab.rawValue)")
-            ScrollView {
+        // One scroll view for the whole pane, its title and tabs included.
+        //
+        // With the title, the tabs and the line above a scroll view of the
+        // page alone, the whole window's content sat 68 pt too high at the
+        // window's own size — the sidebar's first row and the pane's title
+        // under the title bar, the tabs cut by it — measured in the lab
+        // (labx/s4-v0, v1, v2: without the scroll view's identity, or pinned
+        // to the top, the same; v3, this, where it belongs), and seen on the
+        // operator's Mac in 0.8.12. A window made larger laid it out right,
+        // which is why the gallery, which made it larger, never showed it.
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                PaneTitle(strings(.sectionPlugins))
+                tabBar
+                    .padding(.horizontal, 20)
+                    .padding(.top, 10)
+                // The page's sentinel for the lab: one line per tab, so the
+                // walk says which page it read.
+                Text(strings(navigation.pluginsTab.about))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 6)
+                    .accessibilityIdentifier("plugins.page.\(navigation.pluginsTab.rawValue)")
                 page
                     .padding(.horizontal, 20)
                     .padding(.top, 12)
                     // Room under the last row: measured on the look pane when
-                    // it scrolled here, the content is a little taller than the
-                    // scroll view decides it is, and a pane whose last setting
-                    // cannot be reached is a broken pane.
+                    // it scrolled here, the content is a little taller than
+                    // the scroll view decides it is, and a pane whose last
+                    // setting cannot be reached is a broken pane.
                     .padding(.bottom, 28)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            // Each tab from its own top.
-            .id(navigation.pluginsTab)
         }
+        // Each tab from its own top.
+        .id(navigation.pluginsTab)
         // Whichever tab it opens on: the catalogue is read when it is stale,
         // and the sources with it (`pluginsPaneOpened`).
         .onAppear { model.pluginsPaneOpened() }
