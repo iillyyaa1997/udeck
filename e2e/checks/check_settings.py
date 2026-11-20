@@ -641,8 +641,9 @@ def check_every_pane_starts_under_the_title_bar(machine, check_dir, lab):
     top on General, -12 on Plugins), and its gallery never showed it, because it made the window larger first and a
     larger window laid the pane out right. So the window is left as uDeck opens it, and each section is chosen from the
     sidebar in turn: the sidebar's General row has to be where it was on General, within `SAME_PLACE_POINTS`, and under
-    the top of the window's content — its hosting view, under the title bar; on Plugins, its first tab under that top
-    too. Then the window is made larger and smaller again, and Plugins read once more.
+    the top of the window's content — its hosting view, under the title bar — and as far from its left; on Plugins, its
+    first tab under that top too. Then Look's Fine tuning and By panel state, the same; then the window is made larger
+    and smaller again, and Plugins read once more.
 
     **Red for**: a pane whose layout pushes the window's content under the title bar (0.8.12's Plugins), at the size
     the window opens at or after a resize.
@@ -664,9 +665,9 @@ def check_every_pane_starts_under_the_title_bar(machine, check_dir, lab):
             raise LabError(f"reading Settings on {label}", "the walk has no window frame, hosting view or General row: "
                                                             f"{', '.join(ax.identifiers(found)) or 'nothing'}")
         top = lambda element: None if element is None or element.frame is None else round(element.frame[1] - window[1])
-        at = {"content": top(hosting), "general": top(general), "tab": top(tab)}
+        at = {"content": top(hosting), "general": top(general), "tab": top(tab), "left": round(general.frame[0] - window[0])}
         lab.note(f"   {label}: window {window}, from its top: content {at['content']}, General row {at['general']}, "
-                 f"first tab {at['tab']}")
+                 f"first tab {at['tab']}; General row {at['left']} pt from its left")
         (check_dir / f"walk-{label.replace(' ', '-')}.txt").write_text(ax.dump(found))
         return at
 
@@ -681,13 +682,30 @@ def check_every_pane_starts_under_the_title_bar(machine, check_dir, lab):
             ui.wait_for_plugins_pane(machine, "waiting for the Plugins pane", seconds=config.UI_CHANGE_SECONDS)
         at = where(section)
         machine.screenshot(check_dir, f"Settings on {section} at its own size")
-        expect(abs(at["general"] - first["general"]) <= SAME_PLACE_POINTS,
+        expect(abs(at["general"] - first["general"]) <= SAME_PLACE_POINTS
+               and abs(at["left"] - first["left"]) <= SAME_PLACE_POINTS,
                f"on {section}, at the window's own size, the sidebar's General row is {at['general']} pt from the "
-               f"window's top, and {first['general']} on General: the window's content moved with the pane")
+               f"window's top and {at['left']} from its left, and {first['general']} and {first['left']} on General: "
+               "the window's content moved with the pane")
         if section == "plugins":
             expect(at["tab"] is not None and at["tab"] >= at["content"],
                    f"on Plugins, at the window's own size, its first tab is {at['tab']} pt from the window's top, "
                    f"above the content's top at {at['content']}: cut by the title bar")
+
+    # Look's two pages behind its rows: By panel state set the variant tabs, the style menu and Save style… in one
+    # line wider than its column, and the window's content moved 25 pt left with them (the lab's gallery,
+    # 2026-11-20).
+    ui.click(machine, "section.look", "choosing Look again")
+    for page in ("look.fineTuning", "look.byState"):
+        ui.click(machine, page, f"opening {page}")
+        at = where(page)
+        machine.screenshot(check_dir, f"Settings on {page} at its own size")
+        expect(abs(at["general"] - first["general"]) <= SAME_PLACE_POINTS
+               and abs(at["left"] - first["left"]) <= SAME_PLACE_POINTS,
+               f"on {page}, at the window's own size, the sidebar's General row is {at['general']} pt from the "
+               f"window's top and {at['left']} from its left, and {first['general']} and {first['left']} on General: "
+               "the window's content moved with the page")
+        ui.click(machine, "look.back", f"back from {page}")
 
     # Plugins again, larger and back to its own size: a layout a resize puts right is not a layout that is right.
     ui.click(machine, "section.plugins", "choosing Plugins again")
