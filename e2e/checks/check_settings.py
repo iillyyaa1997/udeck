@@ -624,6 +624,82 @@ def _keep(check_dir, name, text, lab):
         lab.note(f"   {name} could not be written to {check_dir}: {error}")
 
 
+# The sections of the settings window, in the sidebar's order (`SettingsView.Section`).
+SECTIONS = ("general", "opening", "look", "plugins", "about")
+
+# How far the sidebar's first row may move between two sections before the
+# window's content is said to have moved: a point of rounding either way.
+SAME_PLACE_POINTS = 2
+
+
+def check_every_pane_starts_under_the_title_bar(machine, check_dir, lab):
+    """At the window's own size, every section's pane — and the sidebar beside it — starts under the title bar.
+
+    The operator's screenshot of 0.8.12 (2026-11-19, Settings reopened on Plugins after the update): the whole window's
+    content sat 68 pt too high — the sidebar's General row and the pane's title under the title bar, the Plugins tabs
+    cut by it. The lab measured the same at the window's own size (labx/s4-v0: the General row 56 pt below the window's
+    top on General, -12 on Plugins), and its gallery never showed it, because it made the window larger first and a
+    larger window laid the pane out right. So the window is left as uDeck opens it, and each section is chosen from the
+    sidebar in turn: the sidebar's General row has to be where it was on General, within `SAME_PLACE_POINTS`, and under
+    the top of the window's content — its hosting view, under the title bar; on Plugins, its first tab under that top
+    too. Then the window is made larger and smaller again, and Plugins read once more.
+
+    **Red for**: a pane whose layout pushes the window's content under the title bar (0.8.12's Plugins), at the size
+    the window opens at or after a resize.
+    """
+    step = "opening Settings at its own size"
+    _prepare(machine, check_dir, lab)
+    ui.open_settings_and_wait(machine, step)
+    ui.wait_for(machine, "section.general", f"{step}: the sidebar")
+
+    def where(label):
+        """The window's content top, the General row's top and, on Plugins, the first tab's: each from the window's top, in points."""
+        machine.sleep(config.SETTLE_SECONDS)
+        found = ui.walk(machine, f"reading Settings on {label}")
+        window = found[0].frame if found and found[0].frame else None
+        hosting = next((e for e in found if e.subrole == "AXHostingView" and e.frame), None)
+        general = ax.first_with(found, "section.general")
+        tab = ax.first_with(found, "plugins.tab.installed")
+        if window is None or hosting is None or general is None or general.frame is None:
+            raise LabError(f"reading Settings on {label}", "the walk has no window frame, hosting view or General row: "
+                                                            f"{', '.join(ax.identifiers(found)) or 'nothing'}")
+        top = lambda element: None if element is None or element.frame is None else round(element.frame[1] - window[1])
+        at = {"content": top(hosting), "general": top(general), "tab": top(tab)}
+        lab.note(f"   {label}: window {window}, from its top: content {at['content']}, General row {at['general']}, "
+                 f"first tab {at['tab']}")
+        (check_dir / f"walk-{label.replace(' ', '-')}.txt").write_text(ax.dump(found))
+        return at
+
+    first = where("general")
+    machine.screenshot(check_dir, "Settings on General at its own size")
+    expect(first["general"] >= first["content"],
+           f"on General, at the window's own size, the sidebar's General row is {first['general']} pt from the window's "
+           f"top, above its content's top at {first['content']}: under the title bar")
+    for section in SECTIONS[1:]:
+        ui.click(machine, f"section.{section}", f"choosing {section}")
+        if section == "plugins":
+            ui.wait_for_plugins_pane(machine, "waiting for the Plugins pane", seconds=config.UI_CHANGE_SECONDS)
+        at = where(section)
+        machine.screenshot(check_dir, f"Settings on {section} at its own size")
+        expect(abs(at["general"] - first["general"]) <= SAME_PLACE_POINTS,
+               f"on {section}, at the window's own size, the sidebar's General row is {at['general']} pt from the "
+               f"window's top, and {first['general']} on General: the window's content moved with the pane")
+        if section == "plugins":
+            expect(at["tab"] is not None and at["tab"] >= at["content"],
+                   f"on Plugins, at the window's own size, its first tab is {at['tab']} pt from the window's top, "
+                   f"above the content's top at {at['content']}: cut by the title bar")
+
+    # Larger and back to its own size: a layout a resize puts right is not a layout that is right.
+    frame = ui.place_settings(machine, "making Settings larger", frame=(60, 40, 1300, 900))
+    ui.place_settings(machine, "making Settings its own size again", frame=(frame.x, frame.y, 980, 652))
+    again = where("plugins after a resize")
+    expect(abs(again["general"] - first["general"]) <= SAME_PLACE_POINTS
+           and again["tab"] is not None and again["tab"] >= again["content"],
+           f"on Plugins, after the window was made larger and its own size again, the General row is {again['general']} "
+           f"pt from its top (on General {first['general']}) and the first tab {again['tab']} (content {again['content']})")
+    lab.note(f"   every section starts under the title bar, the General row {first['general']} pt from the window's top")
+
+
 def check_opened_from_the_panel_in_front(machine, check_dir, lab):
     """The panel's gear opens Settings in front: uDeck the active application, its window on top and focused.
 
