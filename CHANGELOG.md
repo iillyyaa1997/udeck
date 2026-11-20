@@ -8,6 +8,21 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.8.14] — 2026-11-20
+
+Look's Fine tuning redrawn, and a fix to By panel state. 0.8.14 adds nothing
+to the plugin contract. The update to it goes by 0.8.8's rule.
+
+- **Fine tuning as rows.** Every knob is a row of the form: its name on the
+  left, its control on the right, a line between rows — the same ten knobs as
+  before, nothing taken away. On By panel state each row keeps its chain.
+- **By panel state no longer pushes the window sideways.** At the size the
+  settings window opens at, the page was wider than its column and moved the
+  whole window's content 25 points to the left, sidebar included (0.8.13 did
+  it too). The preview is narrower and the variant picker has its own row;
+  the lab check that holds every section under the title bar now holds each
+  one to its left edge as well.
+
 ## [0.8.13] — 2026-11-20
 
 A fix to 0.8.12's Plugins pane. 0.8.13 adds nothing to the plugin contract.
