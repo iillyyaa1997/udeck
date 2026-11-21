@@ -159,3 +159,51 @@ struct ClaudeConnectionTests {
         }
     }
 }
+
+@Suite("Codex connection, against a replayed conversation")
+struct CodexConnectionTests {
+    @Test("handshake, a thread, a turn with a command approved, then limits, models and a file search")
+    func wholeSession() async throws {
+        let agent = try ReplayAgent(recording: "codex-session")
+        defer { agent.cleanUp() }
+        let connection = try CodexConnection(
+            executable: URL(fileURLWithPath: "/bin/sh"), arguments: [agent.script.path],
+            environment: ["PATH": "/usr/bin:/bin"], directory: agent.folder)
+        await connection.start()
+        var events = connection.events.makeAsyncIterator()
+
+        let hello = try await connection.handshake(client: "udeck-test", version: "0.0.1")
+        #expect(hello["platformOs"] != nil)
+        let started = try await connection.request("thread/start", ["cwd": "/tmp/udeck-fixture/work",
+                                                                    "approvalPolicy": "untrusted",
+                                                                    "sandbox": "workspace-write", "ephemeral": true])
+        let thread = try #require(started["thread"]?["id"]?.string)
+        _ = try await connection.request("turn/start", ["threadId": .string(thread),
+                                                        "input": [["type": "text", "text": "Append one line."]]])
+        var approvals = 0
+        var answer = ""
+        while let event = await events.next() {
+            if let ask = event.approval {
+                approvals += 1
+                try await connection.send(CodexOutbound.decide(ask, "accept"))
+                continue
+            }
+            if case .notification("item/completed", let params) = event {
+                let item = CodexItem(params["item"] ?? .null)
+                if item.type == "agentMessage" { answer = item.text }
+            }
+            if case .notification("turn/completed", _) = event { break }
+        }
+        #expect(approvals == 1)
+        #expect(answer.contains("Recorded by uDeck"))
+
+        let limits = try await connection.request("account/rateLimits/read")
+        #expect(CodexRateLimits(limits["rateLimits"] ?? .null).primary?.minutes == 300)
+        let models = try await connection.request("model/list")
+        #expect(models["data"]?.array?.isEmpty == false)
+        let files = try await connection.request("fuzzyFileSearch", ["query": "not", "roots": ["/tmp/udeck-fixture/work"],
+                                                                     "cancellationToken": nil])
+        #expect(files["files"] != nil)
+        #expect(await connection.close().status == 0)
+    }
+}
