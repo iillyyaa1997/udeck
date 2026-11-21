@@ -123,6 +123,8 @@ public struct Palette: Equatable, Sendable {
 
     // MARK: - Construction
 
+    public static let labFont: Int = Int((try? String(contentsOfFile: NSHomeDirectory() + "/.udeck/lab-font", encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 0
+
     public init(look: PanelLook) {
         let ink = look.ink
         let fg = look.foreground
@@ -143,8 +145,8 @@ public struct Palette: Equatable, Sendable {
         innerHighlight = PaletteColor(.white, alpha: Self.innerHighlightAlpha)
 
         text = PaletteColor(fg)
-        muted = inked(Self.muted)
-        dim = inked(Self.dim)
+        muted = Self.labFont >= 2 ? PaletteColor(fg, alpha: ink == .light ? 0.74 : 0.80) : inked(Self.muted)
+        dim = Self.labFont >= 2 ? PaletteColor(fg, alpha: ink == .light ? 0.56 : 0.64) : inked(Self.dim)
 
         let accent = PaletteColor(Self.accent.value(ink))
         self.accent = accent

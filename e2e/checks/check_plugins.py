@@ -7984,3 +7984,84 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+SESSIONS_ACTION = [{"label": "Открыть ждущую", "run": ["/usr/bin/true"]}]
+SESSIONS_WAITING = [
+    {"text": "UTF-8 lang en_us", "note": "53 мин", "icon": "wait", "state": "warn"},
+    {"text": "HANDOFF-2026 handoff docs", "note": "9 мин", "icon": "wait", "state": "warn"},
+    {"text": "PRO-6 deep waves", "note": "6 мин", "icon": "wait", "state": "warn"},
+]
+SESSIONS_CARDS = {
+    "sessions-1": {"state": "warn", "rows": [
+        {"kv": ["Ждут ответа", "6 из 11", "warn"]},
+        {"list": [
+            {"text": "UTF-8 lang en_us", "note": "53 мин · 91%", "icon": "wait", "state": "warn"},
+            {"text": "HANDOFF-2026 handoff docs", "note": "9 мин · 87%", "icon": "wait", "state": "warn"},
+            {"text": "PRO-6 deep waves", "note": "6 мин · 84%", "icon": "wait", "state": "warn"},
+        ]},
+        {"text": "Ждут ещё 3 · работают 4 · одна молчит 17 ч: ZT-0 only slit"},
+        {"meter": {"value": 0.30, "label": "Неделя · сброс в пт 04:00", "caption": "30%", "state": "warn"}},
+    ]},
+    "sessions-2": {"state": "warn", "rows": [
+        {"kv": ["Ждут ответа", "6", "warn"]},
+        {"kv": ["Работают", "4"]},
+        {"kv": ["Молчат больше часа", "1", "crit"]},
+        {"kv": ["Контекст почти полон", "3"]},
+        {"meter": {"value": 0.41, "label": "5 ч · сброс через 2 ч", "caption": "41%"}},
+        {"meter": {"value": 0.30, "label": "Неделя · хватит до вс", "caption": "30%", "state": "warn"}},
+        {"list": [
+            {"text": "UTF-8 lang en_us", "note": "53 мин · 91%", "icon": "wait"},
+            {"text": "operator skill", "note": "12 мин · 76%", "icon": "run"},
+        ]},
+    ]},
+}
+
+
+def check_gallery(machine, check_dir, lab):
+    """Two «Сессии Claude» cards in three type treatments (~/.udeck/lab-font 0/1/2) — a lab tree's only, never committed."""
+    scene = _prepare(machine, check_dir, lab, main="c1", launch=False)
+    ru = ui.RUSSIAN
+    try:
+        machine.ssh.run("mkdir -p ~/.udeck/plugins", "making uDeck's folder")
+        _write(machine, SETTINGS, {"language": ru.code}, "setting uDeck's language to Russian")
+        for plugin, card in SESSIONS_CARDS.items():
+            folder = f"{UDECK_HOME}/plugins/{plugin}"
+            manifest = {"id": plugin, "name": "Сессии Claude", "version": "0.1.0", "api": 1, "kind": "poll",
+                        "run": ["./card.sh"], "interval": 30, "timeout": 2, "permissions": {"exec": ["/usr/bin/true"]}}
+            script = "#!/bin/sh\nprintf '%s\\n' " + shlex.quote(json.dumps(card, ensure_ascii=False)) + "\n"
+            machine.ssh.run(
+                f"mkdir -p {folder} && printf %s {shlex.quote(json.dumps(manifest, ensure_ascii=False, indent=1))} > {folder}/manifest.json"
+                f" && printf %s {shlex.quote(script)} > {folder}/card.sh && chmod 755 {folder}/card.sh",
+                f"writing {plugin}",
+            )
+        def shoot(label, placed):
+            app.quit_app(machine, f"ending uDeck before {label}")
+            tab = str(uuid.uuid4()).upper()
+            windows = [{"id": str(uuid.uuid4()).upper(), "pluginID": plugin, "column": column, "row": 0, "width": width,
+                        "height": height} for plugin, column, width, height in placed]
+            _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab,
+                                     "tabs": [{"id": tab, "name": "Сессии", "windows": windows}]}, f"placing {label}")
+            app.launch(machine)
+            machine.sleep(4)
+            _open_the_panel(machine, f"opening the panel on {label}")
+            machine.sleep(2)
+            for plugin, *_ in placed:
+                try:
+                    allow = ui.wait_for(machine, f"consent.{plugin}.allow", f"waiting for {plugin} to ask", ui.PANEL, seconds=8)
+                    machine.click(*allow.middle, f"allowing {plugin}")
+                    machine.sleep(1.5)
+                except Exception as error:  # a gallery shows what it can
+                    lab.note(f"   {plugin}: {error}")
+            dump, texts = _wait_for_the_card(
+                machine, lambda found, texts: sum("UTF-8 lang en_us" in t for t in texts) >= len(placed), 30)
+            machine.sleep(2)
+            machine.screenshot(check_dir, f"gallery {label}")
+            (check_dir / f"gallery-{label}.txt").write_text("\n".join(texts) + "\n\n" + dump)
+            lab.note(f"   TEXTS {label} {texts}")
+
+        for variant in (0, 1, 2):
+            machine.ssh.run(f"printf {variant} > {UDECK_HOME}/lab-font", f"choosing type treatment {variant}")
+            shoot(f"font-{variant}", [("sessions-1", 0, 6, 6), ("sessions-2", 6, 6, 7)])
+    finally:
+        scene.close()

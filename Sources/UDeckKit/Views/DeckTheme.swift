@@ -135,9 +135,9 @@ public struct DeckTheme: Sendable {
     /// layout visibly moves when the size does — which is the honest answer.
     public var gridRowHeight: CGFloat { density.gridRowHeight * max(1, typeScale) }
     public var bodyFont: Font { .system(size: textSize) }
-    public var monoFont: Font { .system(size: textSize - 0.5, design: .monospaced) }
+    public var monoFont: Font { Palette.labFont >= 1 ? .system(size: textSize - 0.5).monospacedDigit() : .system(size: textSize - 0.5, design: .monospaced) }
     public var titleFont: Font { .system(size: density.titleFontSize * typeScale, weight: .semibold) }
-    public var chipFont: Font { .system(size: textSize - 2, design: .monospaced) }
+    public var chipFont: Font { Palette.labFont >= 1 ? .system(size: textSize - 1.5).monospacedDigit() : .system(size: textSize - 2, design: .monospaced) }
     public let windowCornerRadius: CGFloat = 13
 
     /// The bar inside the island, which is the whole of what the panel says
