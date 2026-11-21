@@ -264,6 +264,9 @@ public struct ClaudePermissionAsk: Sendable, Equatable {
     /// A user-configured ask rule forced this prompt — treat it as wanting a
     /// person, whatever automatic approval would say.
     public let matchedAskRule: JSONValue?
+    /// False when a safety check in the reason needs manual approval (a
+    /// dangerous `rm`, a path bypass); absent when no safety check is involved.
+    public let classifierApprovable: Bool?
     /// Rules the CLI proposes for "always allow"; echoed back when chosen.
     public let suggestions: [JSONValue]
 
@@ -278,6 +281,7 @@ public struct ClaudePermissionAsk: Sendable, Equatable {
         defaultToNo = body["default_to_no"]?.bool ?? false
         requiresUserInteraction = body["requires_user_interaction"]?.bool ?? false
         matchedAskRule = body["matched_ask_rule"]
+        classifierApprovable = body["classifier_approvable"]?.bool
         suggestions = body["permission_suggestions"]?.array ?? []
     }
 
@@ -285,10 +289,23 @@ public struct ClaudePermissionAsk: Sendable, Equatable {
     /// may answer this ask with one tap. AskUserQuestion is answered with its
     /// options, which is always a choice the user makes, so it may; a tool ask
     /// may only when none of the CLI's flags says it needs the session itself.
+    ///
+    /// Not from a surface: anything the CLI marks as needing the session
+    /// (`requires_user_interaction`), declining by default (`default_to_no`), a
+    /// prompt a user rule forced, and any ask whose reason is a safety check or
+    /// the auto-mode classifier — those are the dangerous ones, and a tap on a
+    /// notification is not a considered answer.
     public var answerableFromSurface: Bool {
         if questions != nil { return true }
-        return !requiresUserInteraction && !defaultToNo && matchedAskRule == nil
+        if requiresUserInteraction || defaultToNo || matchedAskRule != nil { return false }
+        if ["safetyCheck", "subcommandResults", "classifier"].contains(reasonType ?? "") { return false }
+        if classifierApprovable == false { return false }
+        return true
     }
+
+    /// Whether "always allow" may be offered: the CLI did not forbid it and
+    /// proposed the rule it would write.
+    public var offersAlways: Bool { !noAlwaysAllow && !suggestions.isEmpty }
 
     /// The questions, when this is an AskUserQuestion ask rather than a tool
     /// that needs permission.

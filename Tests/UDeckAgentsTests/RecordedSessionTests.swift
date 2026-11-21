@@ -303,3 +303,31 @@ struct JSONValueTests {
         #expect(JSONValue.line("hello from a tool") == nil)
     }
 }
+
+@Suite("Which asks a quick surface may answer")
+struct SurfaceRulesTests {
+    static func ask(_ fields: [String: JSONValue]) -> ClaudePermissionAsk {
+        var body: [String: JSONValue] = ["subtype": "can_use_tool", "tool_name": "Bash", "input": ["command": "ls"]]
+        body.merge(fields) { _, new in new }
+        let request = ClaudeControlRequest(["type": "control_request", "request_id": "r1", "request": .object(body)])
+        return request.permission!
+    }
+
+    @Test("a plain ask may be answered from a surface; a flagged or dangerous one only by opening the session")
+    func rules() {
+        #expect(Self.ask([:]).answerableFromSurface)
+        #expect(!Self.ask(["requires_user_interaction": true]).answerableFromSurface)
+        #expect(!Self.ask(["default_to_no": true]).answerableFromSurface)
+        #expect(!Self.ask(["matched_ask_rule": ["source": "user", "tool_name": "Bash"]]).answerableFromSurface)
+        #expect(!Self.ask(["decision_reason_type": "safetyCheck"]).answerableFromSurface)
+        #expect(!Self.ask(["decision_reason_type": "rule", "classifier_approvable": false]).answerableFromSurface)
+    }
+
+    @Test("always-allow is offered only with a proposed rule and when the CLI does not forbid it")
+    func always() {
+        let rule: JSONValue = ["type": "addRules", "rules": [["toolName": "Bash"]], "behavior": "allow"]
+        #expect(!Self.ask([:]).offersAlways)
+        #expect(Self.ask(["permission_suggestions": [rule]]).offersAlways)
+        #expect(!Self.ask(["permission_suggestions": [rule], "suppress_always_allow_rule": true]).offersAlways)
+    }
+}
