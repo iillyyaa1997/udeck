@@ -36,6 +36,12 @@ let package = Package(
             path: "Sources/UDeckCore"
         ),
 
+        // The agents uDeck's chat talks to — Claude Code and Codex — and their
+        // protocols, with no UI: what a line on their stdout means and what to
+        // write back. Foundation only, so all of it runs in `swift test`
+        // against conversations recorded from the real programs.
+        .target(name: "UDeckAgents", path: "Sources/UDeckAgents"),
+
         // Everything that touches AppKit/SwiftUI: the panel window, pointer
         // monitoring, screen observation, card rendering, settings UI.
         .target(name: "UDeckKit", dependencies: ["UDeckCore"], path: "Sources/UDeckKit"),
@@ -81,6 +87,13 @@ let package = Package(
                 .product(name: "UDeckPluginFormatFixtures", package: "UDeckPluginFormat"),
             ],
             path: "Tests/UDeckCoreTests"
+        ),
+
+        .testTarget(
+            name: "UDeckAgentsTests",
+            dependencies: ["UDeckAgents"],
+            path: "Tests/UDeckAgentsTests",
+            resources: [.copy("Fixtures")]
         ),
 
         // The plugin format's own tests, run from here as well: `swift test` in
