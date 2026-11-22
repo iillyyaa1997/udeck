@@ -20,6 +20,10 @@ public final class ChatStore {
     /// The account new sessions start under.
     public var account: ChatAccount
 
+    /// A session wants the user (an ask) or has finished a turn: the app
+    /// decides whether anyone is looking and notifies if not.
+    @ObservationIgnored public var onAttention: ((ChatSession, ChatAttention) -> Void)?
+
     @ObservationIgnored let launcher: ChatLauncher
     @ObservationIgnored private let home: URL
 
@@ -38,6 +42,7 @@ public final class ChatStore {
     @discardableResult
     public func newSession(in folder: URL, message: String? = nil) -> ChatSession {
         let session = ChatSession(folder: folder, account: account)
+        watch(session)
         sessions.append(session)
         selection = session.id
         Task {
@@ -64,9 +69,25 @@ public final class ChatStore {
             }.value
             let session = ChatSession(folder: folder, account: account, title: saved.title, resumeID: saved.sessionID,
                                       history: feed)
+            watch(session)
             sessions.append(session)
             selection = session.id
             await launcher.start(session, resume: saved.sessionID)
+        }
+    }
+
+    public func select(sessionWithID id: String) {
+        if let session = sessions.first(where: { $0.id.uuidString == id }) { selection = session.id }
+    }
+
+    private func watch(_ session: ChatSession) {
+        session.onAsk = { [weak self, weak session] ask in
+            guard let self, let session else { return }
+            onAttention?(session, .ask(ask))
+        }
+        session.onTurnFinished = { [weak self, weak session] words in
+            guard let self, let session else { return }
+            onAttention?(session, .finished(words))
         }
     }
 
@@ -93,6 +114,13 @@ public final class ChatStore {
     public func closeAll() async {
         for session in sessions { await session.close() }
     }
+}
+
+/// Why a session wants the user.
+public enum ChatAttention: Sendable {
+    case ask(ChatAsk)
+    /// A turn finished; its last words.
+    case finished(String)
 }
 
 /// Starts the user's own `claude` for a session: found through their login

@@ -52,6 +52,9 @@ public enum Phrase: Sendable, Equatable {
     case chatCloseSession
     case chatLoadingHistory
     case chatNoHistory
+    case chatNoticeAsk(session: String)
+    case chatNoticeQuestion(session: String)
+    case chatNoticeDone(session: String)
     case chatMainAccount
 
     // MARK: - The main menu, while the settings window is open

@@ -85,6 +85,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // registers at launch silently puts back a login item the operator removed.
         self.loginItem = SystemLoginItem()
         self.chat = ChatWindowController(strings: { [model] in model.strings })
+        // A session that wants you, or has finished, while you look elsewhere:
+        // macOS's notification; a click brings the chat up on it.
+        chat.store.onAttention = { [weak self] session, attention in
+            guard let self, !chat.isWatching(session) else { return }
+            let strings = model.strings
+            switch attention {
+            case .ask(let ask):
+                let isQuestion = ask.ask.questions != nil
+                updater.notifier.postChat(
+                    session: session.id.uuidString,
+                    title: strings(isQuestion ? .chatNoticeQuestion(session: session.title)
+                        : .chatNoticeAsk(session: session.title)),
+                    body: ask.summary)
+            case .finished(let words):
+                updater.notifier.postChat(session: session.id.uuidString,
+                                          title: strings(.chatNoticeDone(session: session.title)), body: words)
+            }
+        }
+        updater.notifier.onOpenChat = { [weak self] id in self?.chat.show(sessionWithID: id) }
         openChatForTheLab()
         // The chat's helper is registered by the chat, when there is one; until
         // then only the lab asks for it (AgentHelperSelfTest).

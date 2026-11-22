@@ -64,6 +64,11 @@ public final class ChatSession: Identifiable {
     public private(set) var pendingTurns = 0
     public var title: String
 
+    /// Told of every new ask, and of every turn that finished (with its last
+    /// words): for a notification when nobody is looking.
+    @ObservationIgnored public var onAsk: ((ChatAsk) -> Void)?
+    @ObservationIgnored public var onTurnFinished: ((String) -> Void)?
+
     @ObservationIgnored private var connection: ClaudeCodeConnection?
     @ObservationIgnored private var reader: Task<Void, Never>?
     /// The streaming answer's item, while one is arriving.
@@ -203,16 +208,29 @@ public final class ChatSession: Identifiable {
             guard result.turns > 0 || pendingTurns == 0 else { return }
             pendingTurns = max(0, pendingTurns - 1)
             if result.isError, !result.result.isEmpty { note(result.result) }
-            if pendingTurns == 0, !isEnded { state = .idle }
+            if pendingTurns == 0, !isEnded {
+                state = .idle
+                onTurnFinished?(lastAnswer)
+            }
         case .request(let request):
             if let permission = request.permission {
-                asks.append(ChatAsk(requestID: request.requestID, ask: permission))
+                let ask = ChatAsk(requestID: request.requestID, ask: permission)
+                asks.append(ask)
+                onAsk?(ask)
             }
         case .cancelled(let requestID, _):
             asks.removeAll { $0.requestID == requestID }
         case .response, .rateLimit, .system, .other:
             return
         }
+    }
+
+    /// The model's last words in the feed.
+    public var lastAnswer: String {
+        for item in items.reversed() {
+            if case .assistant(_, let text, _) = item { return text }
+        }
+        return ""
     }
 
     private func appendStreaming(_ delta: String) {

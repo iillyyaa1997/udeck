@@ -43,6 +43,18 @@ public final class ChatWindowController: NSObject, NSWindowDelegate {
 
     public var isOpen: Bool { window?.isVisible ?? false }
 
+    /// The user is looking at `session` right now: uDeck active, the chat
+    /// window key, that session chosen.
+    public func isWatching(_ session: ChatSession) -> Bool {
+        NSApp.isActive && (window?.isKeyWindow ?? false) && store.selection == session.id
+    }
+
+    /// Brings the window up on `id` (a session's id), from a notification.
+    public func show(sessionWithID id: String) {
+        store.select(sessionWithID: id)
+        show()
+    }
+
     public func windowWillClose(_ notification: Notification) {
         // Sessions go on running while the window is closed; only the Dock
         // place goes.

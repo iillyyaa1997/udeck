@@ -70,6 +70,24 @@ struct ChatSessionTests {
         await session.close()
     }
 
+    @Test("whoever watches is told of each ask and of each finished turn, with its last words")
+    func attentionHooks() async throws {
+        let (session, folder) = try await startFake()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var asked: [String] = [], finished: [String] = []
+        session.onAsk = { asked.append($0.ask.toolName) }
+        session.onTurnFinished = { finished.append($0) }
+        try await until("ready") { session.state == .idle }
+        session.send("Look at the folder")
+        try await until("the permission ask") { session.asks.count == 1 }
+        #expect(asked == ["Bash"])
+        #expect(finished.isEmpty)
+        session.answer(session.asks[0], with: .allow)
+        try await until("the turn's end") { session.state == .idle }
+        #expect(finished == ["There is one file here, notes.md, 42 bytes."])
+        await session.close()
+    }
+
     @Test("a declined tool call comes back as an error and the agent goes on")
     func declinedTurn() async throws {
         let (session, folder) = try await startFake()
