@@ -809,6 +809,11 @@ public final class DeckModel {
 
     private func poll(_ plugin: DiscoveredPlugin, reason requested: RefreshReason) async {
         guard let id = plugin.manifest?.id else { return }
+        // A resident plugin is never run as a producer: it runs once, in
+        // `ResidentRuns`, and prints its card when it changes. Refresh, a
+        // reveal or a change in the plugins folder polling it anyway would
+        // record a failure over its live card.
+        guard plugin.manifest?.kind != .resident else { return }
         // Held to its tree and not hashed, or changed since: not run, and no
         // failure — its card says why it waits (`HashedTrees.skipsRun`).
         guard !treesOnDisk.skipsRun(id.rawValue, basis: consentBasis(of: id)),
