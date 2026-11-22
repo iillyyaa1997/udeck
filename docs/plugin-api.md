@@ -348,6 +348,13 @@ were current is how a real outage hides inside a green signal.
 
 So: set `ttl` to roughly how long your data stays true, not to your `interval`.
 
+**A resident plugin's card does not age while its process runs** (uDeck 0.9.3
+and later). It prints its card when something changes, and an idle
+conversation is quiet for hours; that quiet is not a source gone away. With no
+`ttl` of its own its card stays as it is while the plugin runs, and ages from
+its last card like any other once the process exits. A `ttl` the plugin sets
+still holds.
+
 **A run that fails while the card is still within its `ttl` is said on the card
 at once.** The values stay — they are still current enough to show — and an
 amber dot goes beside the card's name, with one line under the values: *Last

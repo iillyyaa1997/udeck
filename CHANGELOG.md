@@ -8,6 +8,14 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.3] — 2026-11-22
+
+- **A resident plugin's card no longer goes blank when nothing happens.** Its
+  card was aged like a producer's: three minutes after the last change it was
+  hidden as "silent since", though the plugin was running and simply had
+  nothing new to say. While its process runs, a card with no `ttl` of its own
+  stays; once the process exits it ages as before.
+
 ## [0.9.2] — 2026-11-22
 
 A conversation on a card no longer slows the panel down.

@@ -370,6 +370,9 @@ public final class DeckModel {
     private let executor: PollExecutor
     /// Resident plugins' processes (`ResidentRuns`).
     private let residents = ResidentRuns()
+    /// The resident plugins whose process is running: their cards do not age
+    /// while they are quiet.
+    public private(set) var liveResidents: Set<PluginIdentifier> = []
     /// A resident plugin asked for a notification: (plugin, its id, title, body).
     public var onPluginNotice: ((PluginIdentifier, String, String, String) -> Void)?
     /// A resident plugin asked for a folder: (plugin, request id, prompt).
@@ -556,7 +559,8 @@ public final class DeckModel {
         snapshot(for: id).presentation(
             now: now,
             defaultTTL: settings.defaultCardTTL,
-            silentMultiplier: settings.silentTTLMultiplier
+            silentMultiplier: settings.silentTTLMultiplier,
+            live: liveResidents.contains(id)
         )
     }
 
@@ -566,7 +570,8 @@ public final class DeckModel {
         snapshot(for: id).failureOnAFreshCard(
             now: now,
             defaultTTL: settings.defaultCardTTL,
-            silentMultiplier: settings.silentTTLMultiplier
+            silentMultiplier: settings.silentTTLMultiplier,
+            live: liveResidents.contains(id)
         )
     }
 
@@ -705,6 +710,10 @@ public final class DeckModel {
     /// the panel is out — it is a conversation, not a reading.
     public func restartResidents() {
         residents.onMessage = { [weak self] id, message in self?.residentSaid(id, message) }
+        residents.onLive = { [weak self] live in
+            guard let self, live != liveResidents else { return }
+            liveResidents = live
+        }
         residents.language = { [weak self] in self?.strings.language.rawValue ?? "en" }
         let placed = placedPluginIDs
         var wanted: [ResidentRuns.Wanted] = []

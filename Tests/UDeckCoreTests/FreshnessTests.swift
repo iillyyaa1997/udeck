@@ -54,6 +54,29 @@ struct FreshnessTests {
         }
     }
 
+    /// A resident plugin prints its card when something changes: an idle
+    /// conversation is quiet for hours, and its card hid as silent minutes in
+    /// (0.9.2).
+    @Test("a running resident plugin's card with no ttl of its own does not age while it is quiet")
+    func liveResidentDoesNotAge() {
+        let s = snapshot(ttl: nil)
+        let later = start.addingTimeInterval(6 * 3600)
+        let p = s.presentation(now: later, defaultTTL: 60, silentMultiplier: 3, live: true)
+        #expect(p.freshness == .fresh)
+        #expect(p.card != nil)
+        #expect(p.note == nil)
+        guard case .silent = s.presentation(now: later, defaultTTL: 60, silentMultiplier: 3).freshness else {
+            Issue.record("expected silent once the process is not running"); return
+        }
+    }
+
+    @Test("a running resident plugin's own ttl still holds")
+    func liveResidentKeepsItsOwnTTL() {
+        let p = snapshot(ttl: 30).presentation(now: start.addingTimeInterval(45), defaultTTL: 60,
+                                               silentMultiplier: 3, live: true)
+        guard case .stale = p.freshness else { Issue.record("expected stale past its own ttl"); return }
+    }
+
     @Test("a plugin that has never produced a card says so, rather than looking healthy")
     func neverSpoke() {
         let p = PluginSnapshot(pluginID: plugin)

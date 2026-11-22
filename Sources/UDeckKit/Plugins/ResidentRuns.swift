@@ -46,6 +46,9 @@ final class ResidentRuns {
     /// What a running plugin said: the model records cards, posts
     /// notifications, asks for folders.
     var onMessage: (PluginIdentifier, ResidentMessage) -> Void = { _, _ in }
+    /// The plugins whose process is running changed: a running one's card
+    /// does not age while it is quiet (`PluginSnapshot.presentation`).
+    var onLive: (Set<PluginIdentifier>) -> Void = { _ in }
     var language: () -> String = { "en" }
 
     /// Starts what is wanted and not running, stops what runs and is no longer
@@ -56,6 +59,7 @@ final class ResidentRuns {
             stop(run)
             runs[id] = nil
         }
+        defer { onLive(live) }
         for item in wanted {
             let size = sizes[item.id] ?? (columns: 4, rows: 2)
             if let run = runs[item.id] {
@@ -77,9 +81,14 @@ final class ResidentRuns {
 
     var running: Set<PluginIdentifier> { Set(runs.keys) }
 
+    /// The plugins whose process is up now — not one waiting to be started
+    /// again after it exited.
+    var live: Set<PluginIdentifier> { Set(runs.filter { $0.value.process != nil && !$0.value.stopped }.keys) }
+
     func stopAll() {
         for run in runs.values { stop(run) }
         runs.removeAll()
+        onLive(live)
     }
 
     private func start(_ run: Run) {
@@ -89,6 +98,7 @@ final class ResidentRuns {
             let process = try AgentProcess(executable: wanted.executable, arguments: wanted.arguments,
                                            environment: wanted.environment, directory: wanted.directory)
             run.process = process
+            onLive(live)
             try? process.write(line: ResidentEvent.hello(columns: run.size.columns, rows: run.size.rows,
                                                          language: language()).line)
             let id = wanted.id
@@ -140,6 +150,8 @@ final class ResidentRuns {
     private func exited(_ id: PluginIdentifier, status: Int32, process: AgentProcess) async {
         guard let run = runs[id], run.process === process, !run.stopped else { return }
         DeckLog.plugins.notice("resident \(id.rawValue, privacy: .public) exited \(status); starting it again")
+        run.process = nil
+        onLive(live)
         run.failures += 1
         let pause = min(60.0, pow(2.0, Double(min(run.failures, 6))))
         try? await Task.sleep(for: .seconds(pause))

@@ -135,12 +135,12 @@ public struct PluginSnapshot: Equatable, Sendable {
     /// their `ttl`: without it a producer that just broke looked healthy until
     /// its card went stale. It goes with the next run that prints a card.
     public func failureOnAFreshCard(now: Date = Date(), defaultTTL: TimeInterval,
-                                    silentMultiplier: Double) -> FailureOnAFreshCard? {
+                                    silentMultiplier: Double, live: Bool = false) -> FailureOnAFreshCard? {
         guard let failure, let lastRun, let valuesFrom = cardProducedAt else { return nil }
         // The failure on record is the one the last run came to — not one an
         // attempt that ran nothing recorded after it.
         guard lastRun.result == .failure(failure.reason) || lastRun.result == .lateCard(failure.reason) else { return nil }
-        guard presentation(now: now, defaultTTL: defaultTTL, silentMultiplier: silentMultiplier).freshness == .fresh
+        guard presentation(now: now, defaultTTL: defaultTTL, silentMultiplier: silentMultiplier, live: live).freshness == .fresh
         else { return nil }
         return FailureOnAFreshCard(failedAt: failure.occurredAt, reason: failure.reason, valuesFrom: valuesFrom)
     }
@@ -154,10 +154,17 @@ public struct PluginSnapshot: Equatable, Sendable {
     /// closes, so its files are meant to be stale every night. A panel that
     /// screamed about that nightly would be ignored within a week, and an
     /// ignored panel is a dead one.
+    ///
+    /// `live` is a resident plugin whose process is running. It prints its
+    /// card when something changes and stays quiet while nothing does — an
+    /// idle conversation — so its quiet is not a source gone away: with no
+    /// `ttl` of its own its card does not age while it runs. One that dies
+    /// ages from its last card like any other; an explicit `ttl` still holds.
     public func presentation(
         now: Date = Date(),
         defaultTTL: TimeInterval,
-        silentMultiplier: Double
+        silentMultiplier: Double,
+        live: Bool = false
     ) -> CardPresentation {
         // A failure with no previous card at all: there is nothing to be stale.
         guard let card, let producedAt = cardProducedAt else {
@@ -170,7 +177,7 @@ public struct PluginSnapshot: Equatable, Sendable {
             )
         }
 
-        let ttl = card.ttl ?? defaultTTL
+        let ttl = card.ttl ?? (live ? .infinity : defaultTTL)
         let age = now.timeIntervalSince(producedAt)
         let silentAfter = ttl * max(1, silentMultiplier)
 
