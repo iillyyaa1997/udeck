@@ -83,6 +83,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // window appears, and written only when the operator asks. An application that
         // registers at launch silently puts back a login item the operator removed.
         self.loginItem = SystemLoginItem()
+        // The chat's helper is registered by the chat, when there is one; until
+        // then only the lab asks for it (AgentHelperSelfTest).
+        if AgentHelperSelfTest.isOn {
+            let helper = SystemAgentHelper()
+            Task { await AgentHelperSelfTest.run(helper) }
+        }
         self.settings = SettingsWindowController(
             model: model, updater: self.updater, loginItem: self.loginItem
         )

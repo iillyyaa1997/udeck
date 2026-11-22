@@ -382,7 +382,7 @@ struct CredentialTests {
 
     // MARK: - The Keychain itself
 
-    @Test("only KeychainCredentialStore.swift imports Security")
+    @Test("only KeychainCredentialStore.swift imports Security for the Keychain; CodeIdentity.swift only for signatures")
     func onlyOneFileImportsSecurity() throws {
         let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appendingPathComponent("Sources", isDirectory: true)
@@ -397,7 +397,15 @@ struct CredentialTests {
                 importing.append(file.lastPathComponent)
             }
         }
-        #expect(importing == ["KeychainCredentialStore.swift"])
+        // The chat's helper checks code signatures (SecCode, SecRequirement),
+        // which live in Security too. That file may import it, and must not
+        // touch the Keychain: tokens stay behind the one store.
+        #expect(importing.sorted() == ["CodeIdentity.swift", "KeychainCredentialStore.swift"])
+        let identity = try String(contentsOf: sources.appendingPathComponent("UDeckAgentHost/CodeIdentity.swift"),
+                                  encoding: .utf8)
+        for keychain in ["SecItem", "kSecClass", "SecKeychain", "kSecAttr"] {
+            #expect(!identity.contains(keychain), "CodeIdentity.swift uses \(keychain)")
+        }
         #expect(KeychainCredentialStore(bundleIdentifier: "place.unicorns.udeck").service == "place.unicorns.udeck.sources")
         #expect(KeychainCredentialStore.account == "tokens" && KeychainCredentialStore.label == "uDeck: tokens for plugin sources")
     }

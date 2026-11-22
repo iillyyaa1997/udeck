@@ -13,6 +13,7 @@ let package = Package(
     products: [
         .executable(name: "uDeck", targets: ["uDeck"]),
         .library(name: "UDeckCore", targets: ["UDeckCore"]),
+        .executable(name: "udeck-agentd", targets: ["udeck-agentd"]),
     ],
     dependencies: [
         // The project's first dependency, and it earns it: Sparkle is what a
@@ -42,6 +43,13 @@ let package = Package(
         // against conversations recorded from the real programs.
         .target(name: "UDeckAgents", path: "Sources/UDeckAgents"),
 
+        // The helper that owns the agents, `udeck-agentd`, and uDeck's side of
+        // the socket to it: agents keep working while uDeck restarts, crashes
+        // or updates. The helper pipes bytes and keeps a journal; what the bytes
+        // mean stays in UDeckAgents, on uDeck's side.
+        .target(name: "UDeckAgentHost", dependencies: ["UDeckAgents"], path: "Sources/UDeckAgentHost"),
+        .executableTarget(name: "udeck-agentd", dependencies: ["UDeckAgentHost"], path: "Sources/udeck-agentd"),
+
         // Everything that touches AppKit/SwiftUI: the panel window, pointer
         // monitoring, screen observation, card rendering, settings UI.
         .target(name: "UDeckKit", dependencies: ["UDeckCore"], path: "Sources/UDeckKit"),
@@ -49,7 +57,7 @@ let package = Package(
         .executableTarget(
             name: "uDeck",
             dependencies: [
-                "UDeckKit", "UDeckCore",
+                "UDeckKit", "UDeckCore", "UDeckAgentHost",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             path: "Sources/uDeck",
@@ -94,6 +102,12 @@ let package = Package(
             dependencies: ["UDeckAgents"],
             path: "Tests/UDeckAgentsTests",
             resources: [.copy("Fixtures")]
+        ),
+
+        .testTarget(
+            name: "UDeckAgentHostTests",
+            dependencies: ["UDeckAgentHost", "UDeckAgents"],
+            path: "Tests/UDeckAgentHostTests"
         ),
 
         // The plugin format's own tests, run from here as well: `swift test` in

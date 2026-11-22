@@ -16,7 +16,7 @@ public actor ClaudeCodeConnection {
 
     public nonisolated let events: AsyncStream<ClaudeInbound>
     private let eventsContinuation: AsyncStream<ClaudeInbound>.Continuation
-    private let process: AgentProcess
+    private let process: any AgentChannel
     private let nextID: @Sendable () -> String
     private var pending: [String: CheckedContinuation<ClaudeControlResponse, any Error>] = [:]
     private var reader: Task<Void, Never>?
@@ -31,8 +31,17 @@ public actor ClaudeCodeConnection {
                 nextID: @escaping @Sendable () -> String = { "udeck-" + UUID().uuidString.prefix(8).lowercased() })
         throws
     {
-        process = try AgentProcess(executable: executable, arguments: arguments, environment: environment,
-                                   directory: directory)
+        self.init(channel: try AgentProcess(executable: executable, arguments: arguments,
+                                            environment: environment, directory: directory),
+                  nextID: nextID)
+    }
+
+    /// Over an agent someone else started — the helper, which keeps it running
+    /// while uDeck restarts.
+    public init(channel: any AgentChannel,
+                nextID: @escaping @Sendable () -> String = { "udeck-" + UUID().uuidString.prefix(8).lowercased() })
+    {
+        process = channel
         self.nextID = nextID
         (events, eventsContinuation) = AsyncStream.makeStream(of: ClaudeInbound.self)
     }
@@ -135,7 +144,7 @@ public actor ClaudeCodeConnection {
             return await group.next() ?? nil
         }
         if let exit { return exit }
-        return await process.terminate()
+        return await process.terminate(grace: .seconds(3))
     }
 
     public nonisolated var processIdentifier: Int32 { process.processIdentifier }
