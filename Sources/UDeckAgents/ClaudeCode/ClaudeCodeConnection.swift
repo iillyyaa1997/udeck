@@ -91,7 +91,7 @@ public actor ClaudeCodeConnection {
     }
 
     /// Sends a control request built with a fresh id and waits for its answer.
-    public func request(_ build: @Sendable (String) -> JSONValue, timeout: Duration = .seconds(30)) async throws
+    public func request(_ build: (String) -> JSONValue, timeout: Duration = .seconds(30)) async throws
         -> ClaudeControlResponse
     {
         guard !finished else { throw Failure.closed }

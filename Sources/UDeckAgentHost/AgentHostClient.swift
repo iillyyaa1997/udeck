@@ -175,7 +175,7 @@ public actor AgentHostClient {
         return transport.send(line)
     }
 
-    public nonisolated var isClosed: Bool { transport.isClosed }
+    nonisolated var isClosed: Bool { transport.isClosed }
 
     /// A refusal the helper sent for a posted write to `session`, taken.
     nonisolated func takeRefusedWrite(session: String) -> String? {

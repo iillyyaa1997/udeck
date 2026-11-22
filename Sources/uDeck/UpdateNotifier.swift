@@ -35,38 +35,6 @@ final class UpdateNotifier: NSObject, UNUserNotificationCenterDelegate, NSUserNo
     var onUpdate: () -> Void = {}
     /// The notification itself clicked.
     var onOpen: () -> Void = {}
-    /// A chat notice clicked: the session's id.
-    var onOpenChat: (String) -> Void = { _ in }
-
-    static let chatPrefix = "chat "
-
-    /// A chat session wants the user, or finished: one notice per session at a
-    /// time (a newer one replaces it). Through the current API only — a signed
-    /// uDeck has it; an ad-hoc build just logs.
-    func postChat(session: String, title: String, body: String) {
-        guard bundled else { return }
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = String(body.prefix(240))
-        content.sound = .default
-        content.threadIdentifier = "chat"
-        let request = UNNotificationRequest(identifier: Self.chatPrefix + session, content: content, trigger: nil)
-        let center = center
-        Task { @MainActor in
-            do {
-                guard try await center.requestAuthorization(options: [.alert, .sound]) else { return }
-                try await center.add(request)
-            } catch {
-                DeckLog.updates.notice("chat notice not sent: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
-
-    /// Takes a session's notice away once it is seen to.
-    func withdrawChat(session: String) {
-        guard bundled else { return }
-        center.removeDeliveredNotifications(withIdentifiers: [Self.chatPrefix + session])
-    }
 
     /// What became of one: macOS took it, said no, or failed to.
     enum Delivery: Equatable { case sent, refused, failed }
@@ -254,12 +222,7 @@ final class UpdateNotifier: NSObject, UNUserNotificationCenterDelegate, NSUserNo
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
         let action = response.actionIdentifier
-        let identifier = response.notification.request.identifier
         await MainActor.run {
-            if identifier.hasPrefix(Self.chatPrefix) {
-                onOpenChat(String(identifier.dropFirst(Self.chatPrefix.count)))
-                return
-            }
             switch action {
             case Self.updateAction:
                 DeckLog.updates.notice("notice: Update pressed")

@@ -8,24 +8,6 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
-## [0.9.1] — 2026-11-22
-
-The chat's sessions outlive uDeck, and tell you when they want you. 0.9.1
-adds nothing to the plugin contract. The update to it goes by 0.8.8's rule.
-
-- **Sessions keep running when uDeck is away.** The first time the chat
-  opens, uDeck registers its helper, `udeck-agentd` (macOS lists it under
-  Login Items as a background item), and starts every session there. Quit
-  uDeck, or update it, and the sessions go on; the next uDeck shows each again
-  — its conversation, the turn under way, the questions still open — and you
-  carry on where it stands. If macOS has not allowed the helper, sessions run
-  inside uDeck as in 0.9.0.
-- **A notification when a session wants you.** A permission or a question,
-  or a turn finished, while you are looking at something else: macOS's
-  notification says which session; a click opens it.
-- **Every message acknowledged.** Claude Code repeats each message back once
-  it has it, which is also how a session is read back after a restart.
-
 ## [0.9.0] — 2026-11-22
 
 The chat: Claude Code sessions inside uDeck. 0.9.0 adds nothing to the plugin

@@ -37,10 +37,11 @@ let package = Package(
             path: "Sources/UDeckCore"
         ),
 
-        // The agents uDeck's chat talks to — Claude Code and Codex — and their
-        // protocols, with no UI: what a line on their stdout means and what to
-        // write back. Foundation only, so all of it runs in `swift test`
-        // against conversations recorded from the real programs.
+        // Claude Code's and Codex's protocols, with no UI — for the agents plugin
+        // to build on, not a part of uDeck: what a line on their stdout means
+        // and what to write back. Foundation only, so all of it runs in
+        // `swift test` against conversations recorded from the real programs.
+        // (The helper below uses only its process and JSON pieces.)
         .target(name: "UDeckAgents", path: "Sources/UDeckAgents"),
 
         // The helper that owns the agents, `udeck-agentd`, and uDeck's side of
@@ -50,14 +51,9 @@ let package = Package(
         .target(name: "UDeckAgentHost", dependencies: ["UDeckAgents"], path: "Sources/UDeckAgentHost"),
         .executableTarget(name: "udeck-agentd", dependencies: ["UDeckAgentHost"], path: "Sources/udeck-agentd"),
 
-        // The chat's model: sessions, their feed, asks and history, over any
-        // AgentChannel. No AppKit or SwiftUI, so all of it runs in `swift test`.
-        .target(name: "UDeckChat", dependencies: ["UDeckAgents"], path: "Sources/UDeckChat"),
-
         // Everything that touches AppKit/SwiftUI: the panel window, pointer
         // monitoring, screen observation, card rendering, settings UI.
-        .target(name: "UDeckKit", dependencies: ["UDeckCore", "UDeckChat", "UDeckAgents", "UDeckAgentHost"],
-                path: "Sources/UDeckKit"),
+        .target(name: "UDeckKit", dependencies: ["UDeckCore"], path: "Sources/UDeckKit"),
 
         .executableTarget(
             name: "uDeck",
@@ -107,12 +103,6 @@ let package = Package(
             dependencies: ["UDeckAgents"],
             path: "Tests/UDeckAgentsTests",
             resources: [.copy("Fixtures")]
-        ),
-
-        .testTarget(
-            name: "UDeckChatTests",
-            dependencies: ["UDeckChat", "UDeckAgents"],
-            path: "Tests/UDeckChatTests"
         ),
 
         .testTarget(

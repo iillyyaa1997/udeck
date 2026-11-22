@@ -23,7 +23,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainMenuLanguage: Language?
     private var updater: SparkleUpdater!
     private var loginItem: SystemLoginItem!
-    private var chat: ChatWindowController!
 
     /// Watches macOS's own appearance, so the `system` theme source means what
     /// it says rather than "whatever macOS was set to when uDeck started".
@@ -84,34 +83,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // window appears, and written only when the operator asks. An application that
         // registers at launch silently puts back a login item the operator removed.
         self.loginItem = SystemLoginItem()
-        self.chat = ChatWindowController(strings: { [model] in model.strings })
-        // A session that wants you, or has finished, while you look elsewhere:
-        // macOS's notification; a click brings the chat up on it.
-        chat.store.onAttention = { [weak self] session, attention in
-            guard let self, !chat.isWatching(session) else { return }
-            let strings = model.strings
-            switch attention {
-            case .ask(let ask):
-                let isQuestion = ask.ask.questions != nil
-                updater.notifier.postChat(
-                    session: session.id.uuidString,
-                    title: strings(isQuestion ? .chatNoticeQuestion(session: session.title)
-                        : .chatNoticeAsk(session: session.title)),
-                    body: ask.summary)
-            case .finished(let words):
-                updater.notifier.postChat(session: session.id.uuidString,
-                                          title: strings(.chatNoticeDone(session: session.title)), body: words)
-            }
-        }
-        updater.notifier.onOpenChat = { [weak self] id in self?.chat.show(sessionWithID: id) }
-        // The chat's agents live in the helper once it is registered; uDeck
-        // takes back at launch whatever it kept running meanwhile, so an ask
-        // that came while uDeck was away still notifies.
-        chat.onFirstShow = { [weak self] in self?.useTheHelper(register: true) }
-        if agentHelper.status == .enabled { useTheHelper(register: false) }
-        openChatForTheLab()
-        // The chat's helper is registered by the chat, when there is one; until
-        // then only the lab asks for it (AgentHelperSelfTest).
+        // The helper that keeps plugins' processes running is registered when a
+        // plugin needs it; until one does, only the lab asks (AgentHelperSelfTest).
         if AgentHelperSelfTest.isOn {
             let helper = SystemAgentHelper()
             Task { await AgentHelperSelfTest.run(helper) }
@@ -243,8 +216,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(withTitle: strings(.menuShowPanel), action: #selector(showPanel), keyEquivalent: "")
             .target = self
-        menu.addItem(withTitle: strings(.menuChat), action: #selector(openChat), keyEquivalent: "")
-            .target = self
         menu.addItem(withTitle: strings(.menuRefreshAll), action: #selector(refreshAll), keyEquivalent: "")
             .target = self
         menu.addItem(withTitle: strings(.menuSettings), action: #selector(openSettings), keyEquivalent: ",")
@@ -298,51 +269,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quitFromSettings() { NSApp.terminate(nil) }
 
     @objc private func showPanel() { controller.reveal() }
-    @objc private func openChat() { chat.show() }
-
-    private lazy var agentHelper = SystemAgentHelper()
-    private var usingTheHelper = false
-
-    /// Hands the chat's agents to `udeck-agentd` — registering it first when
-    /// asked (the first time the chat is opened) — and takes back the sessions
-    /// it kept. If the helper cannot be had (macOS wants approval in Login
-    /// Items, an ad-hoc copy without one), agents run in uDeck as before.
-    private func useTheHelper(register: Bool) {
-        guard !usingTheHelper else { return }
-        usingTheHelper = true
-        let helper = agentHelper
-        let store = chat.store
-        store.preparing = Task { @MainActor in
-            if register {
-                do {
-                    try helper.registerIfNeeded()
-                } catch {
-                    DeckLog.panel.notice("chat: the helper could not be registered: \(String(describing: error), privacy: .public)")
-                }
-            }
-            guard helper.status == .enabled else {
-                DeckLog.panel.notice("chat: the helper is \(SystemAgentHelper.describe(helper.status), privacy: .public); agents run in uDeck")
-                usingTheHelper = false
-                return
-            }
-            store.agents = HelperAgents(connect: { try await helper.connect().0 })
-            await store.restore()
-        }
-    }
-
-    /// The lab's screenshots of the chat: open it at launch, and start a
-    /// session in a folder with a first message (`ChatLabFolder`,
-    /// `ChatLabMessage`) against the lab's stand-in CLI (ChatClaudeExecutable).
-    /// Keys only the lab writes; without them nothing here runs.
-    private func openChatForTheLab() {
-        let defaults = UserDefaults.standard
-        guard defaults.bool(forKey: "ChatOpenAtLaunch") else { return }
-        chat.show()
-        if let folder = defaults.string(forKey: "ChatLabFolder"), !folder.isEmpty {
-            chat.store.newSession(in: URL(fileURLWithPath: folder, isDirectory: true),
-                                  message: defaults.string(forKey: "ChatLabMessage"))
-        }
-    }
     @objc private func refreshAll() { model.refreshAll(reason: .manual) }
     @objc private func openPlugins() { model.revealPluginsDirectory() }
     /// The status item's Settings…, through the panel as the gear goes: a click

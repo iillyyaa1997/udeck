@@ -17,9 +17,7 @@ away again, and the helper with it.
 import json
 import shlex
 
-from pathlib import Path
-
-from udeck_e2e import app, ui, updates
+from udeck_e2e import app, updates
 from udeck_e2e.errors import LabError, expect
 
 VERSION = ("0.4.1", "6")
@@ -29,8 +27,6 @@ LABEL = f"{app.BUNDLE_ID}.agentd"
 # Registering, launchd starting the helper on the first message, and the probe:
 # a few seconds measured locally; a cold guest is given far more.
 REPORT_SECONDS = 90
-CHAT_WINDOW = "uDeck Chat"
-FAKE_CLAUDE = Path(__file__).resolve().parent.parent / "fixtures" / "fake-claude.py"
 
 
 def check_survives_udeck_being_killed(machine, check_dir, lab):
@@ -118,78 +114,6 @@ def check_turns_away_everyone_else(machine, check_dir, lab):
         expect(not sockets.stdout.strip(), f"sockets in ~/.udeck: {sockets.stdout.strip()}")
     finally:
         _unregister(machine, lab)
-
-
-def check_chat_session_survives_udeck(machine, check_dir, lab):
-    """A chat session waiting on a permission outlives uDeck killed outright: the next uDeck shows it, ask and all, and the answer goes through."""
-    fake, folder = _prepare_chat(machine, check_dir, lab)
-    try:
-        app.launch(machine, "starting uDeck with a chat session to start")
-        allow = ui.wait_for(machine, "chat.ask.allow", "waiting for the session's permission ask", CHAT_WINDOW, seconds=90)
-        machine.screenshot(check_dir, "asked, before the kill")
-        agent = machine.ssh.ask(f"pgrep -f {shlex.quote(fake)}", "finding the agent's process").stdout.split()
-        expect(len(agent) == 1, f"one agent expected for the session, found {agent}")
-        _expect_agent_under_the_helper(machine, agent[0])
-
-        machine.ssh.run("pkill -9 -x uDeck; exit 0", "killing uDeck", check=False)
-        _wait_until_gone(machine)
-        still = machine.ssh.ask(f"kill -0 {agent[0]} && echo alive", "asking whether the agent outlived uDeck")
-        expect("alive" in still.stdout, f"the agent (pid {agent[0]}) died with uDeck")
-
-        # The next launch starts nothing new: it is to take back what is there.
-        machine.ssh.run(f"defaults delete {app.BUNDLE_ID} ChatLabFolder >/dev/null 2>&1; exit 0",
-                        "leaving the next launch nothing to start")
-        app.launch(machine, "starting uDeck again")
-        allow = ui.wait_for(machine, "chat.ask.allow", "waiting for the ask to come back", CHAT_WINDOW, seconds=60)
-        machine.screenshot(check_dir, "the ask back after the restart")
-        machine.click(*allow.middle, "allowing the command")
-        deadline = machine.clock() + 30
-        while ui.find(machine, "chat.stop", "watching the turn finish", CHAT_WINDOW) is not None:
-            expect(machine.clock() < deadline, "the turn did not finish within 30 s of the answer")
-            machine.sleep(1)
-        machine.screenshot(check_dir, "the turn finished in the restored session")
-        same = machine.ssh.ask(f"pgrep -f {shlex.quote(fake)}", "finding the agent again").stdout.split()
-        expect(same == agent, f"the restored session runs on another agent: {same} instead of {agent}")
-    finally:
-        machine.ssh.run(
-            f"for key in ChatOpenAtLaunch ChatLabFolder ChatLabMessage ChatClaudeExecutable; do "
-            f"defaults delete {app.BUNDLE_ID} $key >/dev/null 2>&1; done; exit 0",
-            "switching the chat's lab keys off",
-        )
-        _unregister(machine, lab)
-
-
-def _prepare_chat(machine, check_dir, lab):
-    """A lab build installed, not running, its chat pointed at the stand-in CLI with a session to start."""
-    feed = updates.Feed(machine, lab.note)
-    build = lab.builder(feed.url, check_dir.name).build(*VERSION)
-    app.quit_app(machine, "ending any uDeck already running")
-    app.install(machine, build.zip, lab.note)
-    app.no_installs_by_itself(machine, "leaving what uDeck finds for Install")
-    home = machine.ssh.run('printf %s "$HOME"', "reading the guest's home").stdout.strip()
-    fake = f"{home}/lab-chat/fake-claude.py"
-    folder = f"{home}/lab-chat/project"
-    machine.ssh.run(
-        f"mkdir -p {shlex.quote(folder)} && printf %s {shlex.quote(FAKE_CLAUDE.read_text())} > {shlex.quote(fake)}"
-        f" && chmod 755 {shlex.quote(fake)} && printf '# Notes\\n' > {shlex.quote(folder)}/notes.md"
-        f" && rm -f ~/.udeck/agents/chat-sessions.json",
-        "putting the stand-in CLI and a project folder in place",
-    )
-    machine.ssh.run(
-        f"defaults write {app.BUNDLE_ID} ChatOpenAtLaunch -bool true; "
-        f"defaults write {app.BUNDLE_ID} ChatLabFolder -string {shlex.quote(folder)}; "
-        f"defaults write {app.BUNDLE_ID} ChatLabMessage -string 'Look at the folder'; "
-        f"defaults write {app.BUNDLE_ID} ChatClaudeExecutable -string {shlex.quote(fake)}",
-        "pointing the chat at the stand-in CLI",
-    )
-    return fake, folder
-
-
-def _expect_agent_under_the_helper(machine, pid):
-    """The agent's parent is udeck-agentd (python3 runs the stand-in), not uDeck."""
-    parent = machine.ssh.ask(f"ps -o ppid= -p {pid}", "asking who started the agent").stdout.strip()
-    name = machine.ssh.ask(f"ps -o comm= -p {parent}", "naming the agent's parent").stdout.strip()
-    expect(name.endswith("udeck-agentd"), f"the agent (pid {pid}) is a child of {name or parent}, not of udeck-agentd")
 
 
 def _prepare(machine, check_dir, lab):
