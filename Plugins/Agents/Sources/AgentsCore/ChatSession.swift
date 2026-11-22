@@ -172,6 +172,9 @@ public final class ChatSession: Identifiable {
     /// Says the session is starting again — a new effort, another login —
     /// and why, in the feed. The caller closes and starts it.
     func beginRestart(_ note: String) {
+        // The process about to be closed is no longer this session's: its
+        // reader ending must not end the session started again after it.
+        generation += 1
         state = .starting
         turnStartedAt = nil
         asks.removeAll()

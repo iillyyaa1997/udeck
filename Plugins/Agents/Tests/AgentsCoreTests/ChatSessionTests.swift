@@ -281,4 +281,29 @@ struct ChatAccountTests {
             Issue.record("no tool line: \(items)")
         }
     }
+
+    /// The race this guards (lab gallery-11): the old process exited, and its
+    /// reader ended the session, before the new start took its place.
+    @MainActor
+    @Test("started again — a new effort — the session goes on: the old process's exit ends nothing")
+    func restartGoesOn() async throws {
+        let (session, folder) = try await startFake()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try await until("idle") { session.state == .idle }
+        session.beginRestart("effort:high")
+        await session.close()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!session.isEnded, "the old process's exit ended the session")
+        var arguments = [fakeClaude.path, "--replay-user-messages", "--resume", session.sessionID ?? "fake-session-0001"]
+        arguments += ["--effort", "high"]
+        let process = try AgentProcess(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: arguments,
+                                       environment: ["PATH": "/usr/bin:/bin", "FAKE_CLAUDE_DELAY": "0"], directory: folder)
+        await session.start(channel: process)
+        try await until("idle again") { session.state == .idle }
+        session.send("Look at the folder")
+        try await until("an ask after the restart") { !session.asks.isEmpty }
+        #expect(session.items.contains { if case .note(_, let text) = $0 { text == "effort:high" } else { false } })
+        await session.close()
+    }
 }
+
