@@ -64,6 +64,9 @@ public enum ResidentEvent: Equatable, Sendable {
     case folder(id: String, path: String?)
     /// A notification the plugin asked for was clicked.
     case notification(id: String)
+    /// An option of a menu was chosen: the row (a `bar` or an `input`), the
+    /// menu (or button) and the option.
+    case choose(row: String, menu: String, option: String)
 
     private struct Wire: Encodable {
         struct Size: Encodable { var columns: Int; var rows: Int }
@@ -74,6 +77,8 @@ public enum ResidentEvent: Equatable, Sendable {
         var row: String?
         var text: String?
         var path: String?
+        var menu: String?
+        var option: String?
     }
 
     /// The event as one line for the plugin's stdin.
@@ -88,6 +93,7 @@ public enum ResidentEvent: Equatable, Sendable {
         case .submit(let row, let text): wire = Wire(event: "submit", row: row, text: text)
         case .folder(let id, let path): wire = Wire(event: "folder", id: id, path: path)
         case .notification(let id): wire = Wire(event: "notification", id: id)
+        case .choose(let row, let menu, let option): wire = Wire(event: "choose", row: row, menu: menu, option: option)
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

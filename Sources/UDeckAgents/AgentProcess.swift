@@ -44,6 +44,10 @@ public final class AgentProcess: AgentChannel, @unchecked Sendable {
 
     private let process: Process
     private let stdin: FileHandle
+    /// Read once, at the start: asking a closed handle for its descriptor
+    /// raises an Objective-C exception no Swift code can catch, and a write
+    /// refused after stdin was closed used to ask before it was refused.
+    private let stdinDescriptor: Int32
     private let stdout: FileHandle
     private let stderr: FileHandle
     private let stdinQueue = DispatchQueue(label: "udeck.agent.stdin")
@@ -78,6 +82,7 @@ public final class AgentProcess: AgentChannel, @unchecked Sendable {
         process.standardError = errors
         self.process = process
         self.stdin = input.fileHandleForWriting
+        self.stdinDescriptor = input.fileHandleForWriting.fileDescriptor
         self.stdout = output.fileHandleForReading
         self.stderr = errors.fileHandleForReading
         (lines, linesContinuation) = AsyncStream.makeStream(of: LineFramer.Piece.self)
@@ -149,7 +154,7 @@ public final class AgentProcess: AgentChannel, @unchecked Sendable {
     /// Queues one line (a newline is added) for the program's stdin.
     public func write(line: String) throws {
         let bytes = Data((line + "\n").utf8)
-        let descriptor = stdin.fileDescriptor, state = self.state, queue = stdinQueue
+        let descriptor = stdinDescriptor, state = self.state, queue = stdinQueue
         // Admitted and queued in one step, so a close cannot slip in between
         // and leave an accepted line behind it.
         try state.withLock { current in

@@ -87,6 +87,13 @@ struct DeckWindowView: View {
         return model.failureOnAFreshCard(for: window.pluginID)
     }
 
+    /// The bar a card opens with, drawn as this title line (`Card.leadingBar`)
+    /// — unless the window was given a name of its own, which stays.
+    private var headerBar: BarRow? {
+        guard window.title == nil, case .allowed = model.launchDecision(for: window.pluginID) else { return nil }
+        return presentation.card?.leadingBar
+    }
+
     private var header: some View {
         HStack(spacing: 8) {
             if failureOnTheCard != nil {
@@ -98,10 +105,14 @@ struct DeckWindowView: View {
                     .accessibilityIdentifier("card.\(window.pluginID.rawValue).failedDot")
                     .help(strings(.cardLastRunFailedDot))
             }
-            Text(window.title ?? presentation.card?.title ?? manifest?.name ?? window.pluginID.rawValue)
-                .font(theme.titleFont)
-                .foregroundStyle(theme.text)
-                .lineLimit(1)
+            if let bar = headerBar {
+                BarRowView(bar: bar, theme: theme) { model.residentEvent(window.pluginID, $0) }
+            } else {
+                Text(window.title ?? presentation.card?.title ?? manifest?.name ?? window.pluginID.rawValue)
+                    .font(theme.titleFont)
+                    .foregroundStyle(theme.text)
+                    .lineLimit(1)
+            }
 
             // Code nobody verified — a branch's or a pull request's copy —
             // says so on its window too, not only in Settings: the card is
@@ -115,9 +126,9 @@ struct DeckWindowView: View {
                     .accessibilityIdentifier("card.\(window.pluginID.rawValue).unverified")
             }
 
-            Spacer(minLength: 0)
+            if headerBar == nil { Spacer(minLength: 0) }
 
-            if let chip = presentation.card?.chip {
+            if headerBar == nil, let chip = presentation.card?.chip {
                 Text(chip)
                     .font(theme.chipFont)
                     .foregroundStyle(theme.color(for: presentation.state))
@@ -254,7 +265,8 @@ struct DeckWindowView: View {
         case .allowed:
             if let card = presentation.card {
                 CardBodyView(card: card, presentation: presentation, theme: theme,
-                             pluginID: window.pluginID, model: model, shell: shell)
+                             pluginID: window.pluginID, model: model, shell: shell,
+                             skipsLeadingBar: headerBar != nil)
             } else {
                 note(presentation.note ?? "no data yet", tint: theme.dim)
             }

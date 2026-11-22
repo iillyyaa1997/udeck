@@ -14,6 +14,8 @@ struct CardBodyView: View {
     var pluginID: PluginIdentifier
     var model: DeckModel
     @Bindable var shell: ShellState
+    /// The card's first row is a bar the window draws as its title line.
+    var skipsLeadingBar = false
     @Environment(\.strings) private var strings
 
     @State private var actionProblem: String?
@@ -36,7 +38,7 @@ struct CardBodyView: View {
                     .foregroundStyle(theme.dim)
             }
 
-            ForEach(Array(card.rows.enumerated()), id: \.offset) { _, row in
+            ForEach(Array((skipsLeadingBar ? Array(card.rows.dropFirst()) : card.rows).enumerated()), id: \.offset) { _, row in
                 if case .feed = row {
                     rowView(row).frame(maxHeight: .infinity)
                 } else {
@@ -206,6 +208,8 @@ struct CardBodyView: View {
             AskRowView(ask: ask, theme: theme) { model.residentEvent(pluginID, $0) }
         case .input(let input):
             InputRowView(input: input, theme: theme) { model.residentEvent(pluginID, $0) }
+        case .bar(let bar):
+            BarRowView(bar: bar, theme: theme) { model.residentEvent(pluginID, $0) }
 
         case .unsupported(let kind):
             // Kept rather than dropped: a hole in a card with no explanation is

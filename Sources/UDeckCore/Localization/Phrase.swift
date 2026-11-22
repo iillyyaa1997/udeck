@@ -800,6 +800,14 @@ public enum Phrase: Sendable, Equatable {
     case cardLastRunFailedDot
     case cardKindNotDrawn(kind: String)
     case cardUnsupportedRow(kind: String)
+    /// A feed's folded run of operations: «4 действия», and what the last
+    /// one is doing.
+    case feedActions(count: Int)
+    case feedActionRunning
+    case feedActionFailed
+    /// The panel field's buttons, for their help and VoiceOver.
+    case inputSend
+    case inputStop
     case emptyNoPlugins
     case emptyTabEmpty
     case emptyNoPluginsBody(path: String)

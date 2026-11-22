@@ -673,6 +673,11 @@ struct English: Vocabulary {
         case .cardShowingValuesFrom(let time): "showing values from \(time)"
         case .cardLastRunFailedDot: "The last run failed"
         case .cardKindNotDrawn(let kind): "\"\(kind)\" is not drawn by this version of uDeck"
+        case .feedActions(let count): count == 1 ? "1 action" : "\(count) actions"
+        case .feedActionRunning: "running"
+        case .feedActionFailed: "failed"
+        case .inputSend: "Send"
+        case .inputStop: "Stop"
         case .cardUnsupportedRow(let kind):
             "this plugin sent a \"\(kind)\" row, which this version of uDeck does not draw"
         case .emptyNoPlugins: "No plugins installed"

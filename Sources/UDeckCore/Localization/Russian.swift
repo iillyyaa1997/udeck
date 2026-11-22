@@ -689,6 +689,16 @@ struct Russian: Vocabulary {
         case .cardShowingValuesFrom(let time): "показаны значения из \(time)"
         case .cardLastRunFailedDot: "Последний запуск упал"
         case .cardKindNotDrawn(let kind): "«\(kind)» эта версия uDeck не рисует"
+        case .feedActions(let count):
+            switch count % 10 {
+            case 1 where count % 100 != 11: "\(count) действие"
+            case 2...4 where !(12...14).contains(count % 100): "\(count) действия"
+            default: "\(count) действий"
+            }
+        case .feedActionRunning: "работает"
+        case .feedActionFailed: "ошибка"
+        case .inputSend: "Отправить"
+        case .inputStop: "Остановить"
         case .cardUnsupportedRow(let kind):
             "плагин прислал строку «\(kind)», которую эта версия uDeck не рисует"
         case .emptyNoPlugins: "Плагины не установлены"

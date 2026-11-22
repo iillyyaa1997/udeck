@@ -192,11 +192,17 @@ public struct FeedEntry: Codable, Equatable, Sendable {
     public var streaming: Bool?
     /// The operation failed: drawn as an error.
     public var error: Bool?
+    /// A `tool` entry's operation, short (`Bash`, `Read`): consecutive tool
+    /// entries fold into one line that counts them by it.
+    public var name: String?
+    /// A small label above an `assistant` entry: who said it, when more than
+    /// one side can.
+    public var label: String?
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case id, role, text, detail, streaming, error }
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, role, text, detail, streaming, error, name, label }
 
     public init(id: String, role: Role, text: String, detail: String? = nil, streaming: Bool? = nil,
-                error: Bool? = nil)
+                error: Bool? = nil, name: String? = nil, label: String? = nil)
     {
         self.id = id
         self.role = role
@@ -204,6 +210,8 @@ public struct FeedEntry: Codable, Equatable, Sendable {
         self.detail = detail
         self.streaming = streaming
         self.error = error
+        self.name = name
+        self.label = label
     }
 }
 
@@ -242,21 +250,27 @@ public struct AskRow: Codable, Equatable, Sendable {
 }
 
 /// A text field. Return sends the plugin a `submit` event with the row's `id`
-/// and the text; with `stop`, a Stop button (and Escape) sends a `press` event
-/// with that id (resident plugins only).
+/// and the text, Shift-Return starts a new line; with `stop`, a Stop button
+/// (and Escape) sends a `press` event with that id. With `pickers` the field
+/// is a panel: the menus sit under the text, beside Stop and Send, and
+/// choosing sends `choose` with the row's `id` (resident plugins only).
 public struct InputRow: Codable, Equatable, Sendable {
     public var id: String
     public var placeholder: String?
     public var enabled: Bool?
     public var stop: String?
+    public var pickers: [CardMenu]?
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case id, placeholder, enabled, stop }
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, placeholder, enabled, stop, pickers }
 
-    public init(id: String, placeholder: String? = nil, enabled: Bool? = nil, stop: String? = nil) {
+    public init(id: String, placeholder: String? = nil, enabled: Bool? = nil, stop: String? = nil,
+                pickers: [CardMenu]? = nil)
+    {
         self.id = id
         self.placeholder = placeholder
         self.enabled = enabled
         self.stop = stop
+        self.pickers = pickers
     }
 }
 
@@ -275,6 +289,8 @@ public enum CardRow: Equatable, Sendable {
     case feed([FeedEntry])
     case ask(AskRow)
     case input(InputRow)
+    /// A line of titles, menus, buttons and badges (0.9.4).
+    case bar(BarRow)
 
     /// A row this build does not understand.
     ///

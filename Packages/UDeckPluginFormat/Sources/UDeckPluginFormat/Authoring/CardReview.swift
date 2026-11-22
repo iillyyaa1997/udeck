@@ -23,6 +23,7 @@ public enum CardReview {
         "spark": SparkRow.CodingKeys.allCases.map(\.rawValue),
         "table": CardTable.CodingKeys.allCases.map(\.rawValue),
         "canvas": CanvasRow.CodingKeys.allCases.map(\.rawValue),
+        "bar": BarRow.CodingKeys.allCases.map(\.rawValue),
     ]
     static let listItemKeys = ListItem.CodingKeys.allCases.map(\.rawValue)
     static let columnKeys = CardTableColumn.CodingKeys.allCases.map(\.rawValue)
@@ -158,6 +159,29 @@ public enum CardReview {
                 }
             case .input(let input):
                 text(input.placeholder, "\(path).input.placeholder")
+                if (input.pickers?.count ?? 0) > CardLimits.pickers {
+                    said.append("\(path).input has \(input.pickers?.count ?? 0) pickers, and uDeck draws the first \(CardLimits.pickers)")
+                }
+            case .bar(let bar):
+                if bar.items.count > CardLimits.barItems {
+                    said.append("\(path).bar has \(bar.items.count) items, and uDeck draws the first \(CardLimits.barItems)")
+                }
+                for (item, entry) in bar.items.prefix(CardLimits.barItems).enumerated() {
+                    switch entry {
+                    case .title(let title): text(title.text, "\(path).bar.items[\(item)].title.text")
+                    case .tag(let tag): text(tag, "\(path).bar.items[\(item)].tag")
+                    case .badge(let badge): text(badge.text, "\(path).bar.items[\(item)].badge.text")
+                    case .menu(let menu):
+                        text(menu.text, "\(path).bar.items[\(item)].menu.text")
+                        if menu.options.count > CardLimits.menuOptions {
+                            said.append("\(path).bar.items[\(item)].menu has \(menu.options.count) options, and uDeck draws the first \(CardLimits.menuOptions)")
+                        }
+                    case .button(let button): text(button.label, "\(path).bar.items[\(item)].button.label")
+                    case .spacer: break
+                    case .unsupported(let kind):
+                        said.append("\(path).bar.items[\(item)] is a \"\(kind)\", which uDeck does not draw: it is left out")
+                    }
+                }
             case .log(let lines):
                 if lines.count > limits.logLines {
                     said.append("\(path) has \(lines.count) log lines, and uDeck draws the first \(limits.logLines)")

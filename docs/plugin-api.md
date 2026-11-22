@@ -275,6 +275,7 @@ What uDeck writes:
 {"event":"submit","row":"message","text":"Look at the folder"}
 {"event":"folder","id":"new","path":"/Users/me/Workspace/app"}
 {"event":"notification","id":"s-41"}
+{"event":"choose","row":"head","menu":"session","option":"s-42"}
 ```
 
 * `hello` — first, and again after each restart: the card's size in grid cells
@@ -283,6 +284,9 @@ What uDeck writes:
 * `select` — a chip was chosen; `press` — a button was pressed (an `ask` answer,
   an `input`'s Stop); `submit` — text was sent from an `input` row.
 * `folder` — the answer to a `pick`; `path` is absent when the person cancelled.
+* `choose` — an option of a menu was chosen (a `bar`'s menu or button, an
+  `input`'s picker): the row's `id`, the menu's or button's `id`, the option's
+  `id` (the release after 0.9.3).
 
 Settings reach a resident plugin as they reach any plugin, in its environment
 (see [How settings reach your plugin](#how-settings-reach-your-plugin)); a
@@ -447,8 +451,59 @@ knows nothing of what they are for.
 * `ask` — a question with its answers as buttons; a click sends `press` with
   the button's `id`.
 * `input` — a text field; Return sends `submit` with the row's `id` and the
-  text. `enabled: false` greys it out; `stop`, when present, adds a Stop button
-  that sends `press` with that id.
+  text, Shift-Return starts a new line. `enabled: false` greys it out; `stop`,
+  when present, adds a Stop button that sends `press` with that id.
+
+The release after 0.9.3 adds a fifth row, menus, and more to say in a feed:
+
+```json
+{ "bar": { "id": "head", "items": [
+    { "title": { "text": "release notes", "tone": "run" } },
+    { "menu": { "id": "session", "text": "", "selected": "s-41", "options": [
+        { "id": "s-41", "text": "release notes", "group": "Open", "tone": "run" },
+        { "id": "h-7", "text": "yesterday's tests", "group": "History", "note": "2 h ago" } ] } },
+    { "tag": "Claude" },
+    { "badge": { "text": "1", "tone": "wait" } },
+    { "spacer": true },
+    { "button": { "id": "new", "icon": "plus", "options": [
+        { "id": "new:claude", "text": "Claude" }, { "id": "new:codex", "text": "Codex" } ] } } ] } }
+
+{ "bar": { "id": "status", "items": [
+    { "badge": { "text": "Working 0:42", "tone": "run", "icon": "run" } },
+    { "badge": { "text": "context 14%", "tone": "info", "fill": 0.14 } } ] } }
+
+{ "input": { "id": "message", "stop": "stop", "pickers": [
+    { "id": "model", "text": "Opus 5.5", "icon": "model", "selected": "opus",
+      "note": "Right away, in this session",
+      "options": [ { "id": "opus", "text": "Opus 5.5" }, { "id": "sonnet", "text": "Sonnet 5.5" } ] } ] } }
+```
+
+* `bar` — a line of small things, left to right: a `title` (bold, with a dot
+  of its `tone`), a `menu`, a `tag` (outlined), a `badge` (tinted by its
+  `tone`; with `fill`, 0…1, it fills from the left like a battery), a `button`
+  (an icon, a `label` or both; a click sends `press` with its `id`, and with
+  `options` it opens them as a menu and sends `choose`), and a `spacer`, after
+  which everything sits at the right edge. The title gives way first when the
+  card is narrow. **A card whose first row is a `bar` has that bar drawn as its
+  window's title line**, in place of the card's name — the window is still
+  dragged by it.
+* A menu — a `bar`'s `menu` item or one of an `input`'s `pickers` — shows its
+  `text` (and `icon`) and opens its `options`: grouped under their `group`, in
+  order, the one named by `selected` checked, each option's `note` after its
+  text, the menu's `note` last. Choosing sends `choose`.
+* `input` with `pickers` is drawn as a panel: the text on top, the menus under
+  it beside Stop and Send.
+* A `feed` entry may carry `name` — a `tool` entry's operation, short, such as
+  `Bash`: two or more tool entries in a row fold into one line, «4 actions ·
+  Bash ×2, Read ×2», that opens to them — and `label`, a small line above an
+  `assistant` entry saying who answered. An `assistant` entry's text is
+  markdown: paragraphs, `-` and `1.` lists, `#` headings, fenced code, and
+  inline emphasis, code and links.
+* Tones are `run`, `wait`, `idle`, `ok`, `warn`, `crit` and `info`; bar icons
+  are `plus`, `history`, `folder`, `model`, `effort`, `account`, `gear`, `run`,
+  `wait`, `done`, `idle` and `info`. Both are closed sets, like the list icons.
+
+Say `"minUDeck"` of the release that brings these when the card uses them.
 
 On a `poll` plugin's card these rows are drawn, but nothing hears what the
 person does with them.
@@ -863,6 +918,9 @@ them out. So a card is also bounded by what it asks uDeck to draw:
 | Entries in a `feed` | 300 |
 | Characters in one `feed` entry's text or detail | 20 000 |
 | Buttons in an `ask` | 12 |
+| Items in a `bar` | 16 |
+| Options in one menu | 100 |
+| `pickers` in an `input` | 4 |
 
 "Any single piece of text" is every string uDeck draws, an action's `label` and
 `confirm` and each word of its `run` included. A card is a card, not a control

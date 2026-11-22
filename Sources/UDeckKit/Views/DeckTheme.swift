@@ -147,6 +147,8 @@ public struct DeckTheme: Sendable {
     public var monoFont: Font { .system(size: textSize - 0.5, design: .monospaced) }
     public var titleFont: Font { .system(size: density.titleFontSize * typeScale, weight: .semibold) }
     public var chipFont: Font { .system(size: textSize - 2, design: .monospaced) }
+    /// Small proportional text: bars, menus, badges, folded feed lines.
+    public var smallFont: Font { .system(size: textSize - 1.5) }
     public let windowCornerRadius: CGFloat = 13
 
     /// The bar inside the island, which is the whole of what the panel says

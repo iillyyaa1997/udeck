@@ -64,6 +64,10 @@ public struct CardLimits: Sendable, Equatable {
     /// A `feed` keeps its newest entries, each up to this long.
     static let feedEntries = 300
     static let feedTextLength = 20_000
+    /// A bar's items, a menu's options, an input's menus.
+    static let barItems = 16
+    static let menuOptions = 100
+    static let pickers = 4
 }
 
 extension Card {
@@ -79,6 +83,19 @@ extension Card {
             guard text.count > limits.textLength else { return text }
             cut = true
             return String(text.prefix(limits.textLength)) + "…"
+        }
+
+        func options(_ list: [MenuOption]) -> [MenuOption] {
+            if list.count > CardLimits.menuOptions { cut = true }
+            return list.prefix(CardLimits.menuOptions).map {
+                MenuOption(id: $0.id, text: trim($0.text), group: $0.group.map(trim), note: $0.note.map(trim),
+                           tone: $0.tone)
+            }
+        }
+
+        func menu(_ menu: CardMenu) -> CardMenu {
+            CardMenu(id: menu.id, text: trim(menu.text), icon: menu.icon, options: options(menu.options),
+                     selected: menu.selected, note: menu.note.map(trim))
         }
 
         var trimmed = self
@@ -155,7 +172,8 @@ extension Card {
                 }
                 return .feed(entries.suffix(CardLimits.feedEntries).map {
                     FeedEntry(id: $0.id, role: $0.role, text: long($0.text), detail: $0.detail.map(long),
-                              streaming: $0.streaming, error: $0.error)
+                              streaming: $0.streaming, error: $0.error, name: $0.name.map(trim),
+                              label: $0.label.map(trim))
                 })
 
             case .ask(let ask):
@@ -166,8 +184,27 @@ extension Card {
                                    }))
 
             case .input(let input):
+                if (input.pickers?.count ?? 0) > CardLimits.pickers { cut = true }
                 return .input(InputRow(id: input.id, placeholder: input.placeholder.map(trim),
-                                       enabled: input.enabled, stop: input.stop))
+                                       enabled: input.enabled, stop: input.stop,
+                                       pickers: input.pickers.map { Array($0.prefix(CardLimits.pickers).map(menu)) }))
+
+            case .bar(let bar):
+                if bar.items.count > CardLimits.barItems { cut = true }
+                return .bar(BarRow(id: bar.id, items: bar.items.prefix(CardLimits.barItems).map { item in
+                    switch item {
+                    case .title(let title): .title(BarTitle(text: trim(title.text), tone: title.tone))
+                    case .tag(let text): .tag(trim(text))
+                    case .badge(let badge): .badge(BarBadge(text: trim(badge.text), tone: badge.tone, icon: badge.icon,
+                                                            fill: badge.fill))
+                    case .menu(let value): .menu(menu(value))
+                    case .button(let button):
+                        .button(BarButton(id: button.id, icon: button.icon, label: button.label.map(trim),
+                                          options: button.options.map(options), note: button.note.map(trim)))
+                    case .spacer: .spacer
+                    case .unsupported(let kind): .unsupported(kind: trim(kind))
+                    }
+                }))
 
             case .unsupported(let kind):
                 // The diagnostic is drawn, and a row's *name* comes straight

@@ -22,6 +22,8 @@ public enum ContractFeature: Hashable, Sendable, CustomStringConvertible {
     case listIcon(String)
     case tableAlignment(String)
     case actionField(String)
+    case tone(String)
+    case barIcon(String)
 
     // What a producer is handed, and what a card's action is.
     case environment(String)
@@ -46,6 +48,8 @@ public enum ContractFeature: Hashable, Sendable, CustomStringConvertible {
         case .listIcon(let icon): "the list icon \"\(icon)\""
         case .tableAlignment(let align): "the column alignment \"\(align)\""
         case .actionField(let name): "the action field \"\(name)\""
+        case .tone(let tone): "the tone \"\(tone)\""
+        case .barIcon(let icon): "the bar icon \"\(icon)\""
         case .environment(let name): "the environment variable \(name)"
         case .actionEnvironment(let name): "the environment variable \(name) in a card's action"
         }
@@ -173,6 +177,21 @@ public enum ContractFeatures {
         add(residentRelease, ["id", "title", "detail", "buttons"].map { .rowField(row: "ask", field: $0) })
         add(residentRelease, ["id", "label", "primary"].map { .rowField(row: "ask.buttons", field: $0) })
         add(residentRelease, ["id", "placeholder", "enabled", "stop"].map { .rowField(row: "input", field: $0) })
+
+        // Bars, menus, badges, an input with menus, folding tool entries: the
+        // release after 0.9.3.
+        add(.next, [.row("bar"), .rowField(row: "input", field: "pickers")])
+        add(.next, ["name", "label"].map { .rowField(row: "feed", field: $0) })
+        add(.next, ["id", "items"].map { .rowField(row: "bar", field: $0) })
+        add(.next, ["title", "tag", "badge", "menu", "button", "spacer"].map { .rowField(row: "bar.items", field: $0) })
+        add(.next, ["text", "tone"].map { .rowField(row: "bar.title", field: $0) })
+        add(.next, ["text", "tone", "icon", "fill"].map { .rowField(row: "bar.badge", field: $0) })
+        add(.next, ["id", "text", "icon", "options", "selected", "note"].map { .rowField(row: "menu", field: $0) })
+        add(.next, ["id", "icon", "label", "options", "note"].map { .rowField(row: "bar.button", field: $0) })
+        add(.next, ["id", "text", "group", "note", "tone"].map { .rowField(row: "menu.options", field: $0) })
+        add(.next, ["run", "wait", "idle", "ok", "warn", "crit", "info"].map { .tone($0) })
+        add(.next, ["plus", "history", "folder", "model", "effort", "account", "gear", "run", "wait", "done", "idle",
+                    "info"].map { .barIcon($0) })
         return registry
     }()
 
@@ -255,6 +274,34 @@ public enum ContractFeatures {
                 for column in body?.object?.first("columns")?.array ?? [] {
                     for field in present(column.object) { used.insert(.rowField(row: "table.columns", field: field)) }
                     if let align = column.object?.first("align")?.string { used.insert(.tableAlignment(align)) }
+                }
+            case "bar":
+                for field in present(body?.object) { used.insert(.rowField(row: "bar", field: field)) }
+                for item in body?.object?.first("items")?.array ?? [] {
+                    guard let itemObject = item.object, itemObject.keys.count == 1, let name = itemObject.keys.first
+                    else { continue }
+                    used.insert(.rowField(row: "bar.items", field: name))
+                    let inner = itemObject.first(name)?.object
+                    let path = name == "menu" ? "menu" : "bar." + name
+                    for field in present(inner) { used.insert(.rowField(row: path, field: field)) }
+                    if let tone = inner?.first("tone")?.string { used.insert(.tone(tone)) }
+                    if let icon = inner?.first("icon")?.string { used.insert(.barIcon(icon)) }
+                    for option in inner?.first("options")?.array ?? [] {
+                        for field in present(option.object) { used.insert(.rowField(row: "menu.options", field: field)) }
+                    }
+                }
+            case "feed":
+                for entry in body?.array ?? [] {
+                    for field in present(entry.object) { used.insert(.rowField(row: "feed", field: field)) }
+                }
+            case "input":
+                for field in present(body?.object) { used.insert(.rowField(row: "input", field: field)) }
+                for picker in body?.object?.first("pickers")?.array ?? [] {
+                    for field in present(picker.object) { used.insert(.rowField(row: "menu", field: field)) }
+                    if let icon = picker.object?.first("icon")?.string { used.insert(.barIcon(icon)) }
+                    for option in picker.object?.first("options")?.array ?? [] {
+                        for field in present(option.object) { used.insert(.rowField(row: "menu.options", field: field)) }
+                    }
                 }
             default:
                 for field in present(body?.object) { used.insert(.rowField(row: kind, field: field)) }

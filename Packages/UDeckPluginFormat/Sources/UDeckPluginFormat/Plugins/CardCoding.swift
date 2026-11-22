@@ -80,7 +80,7 @@ extension CardRow {
     /// The row types a card may use: the one key each row object has. Every
     /// one is dated in the release registry (`ContractFeatures`).
     public enum Kind: String, Sendable, CaseIterable {
-        case text, kv, meter, list, spark, table, log, canvas, chips, feed, ask, input
+        case text, kv, meter, list, spark, table, log, canvas, chips, feed, ask, input, bar
     }
 }
 
@@ -115,6 +115,7 @@ extension CardRow: Codable {
         case .feed?: self = .feed(try container.decode([FeedEntry].self, forKey: key))
         case .ask?: self = .ask(try container.decode(AskRow.self, forKey: key))
         case .input?: self = .input(try container.decode(InputRow.self, forKey: key))
+        case .bar?: self = .bar(try container.decode(BarRow.self, forKey: key))
         case nil: self = .unsupported(kind: key.stringValue)
         }
     }
@@ -134,6 +135,7 @@ extension CardRow: Codable {
         case .feed(let value): try container.encode(value, forKey: AnyCodingKey("feed"))
         case .ask(let value): try container.encode(value, forKey: AnyCodingKey("ask"))
         case .input(let value): try container.encode(value, forKey: AnyCodingKey("input"))
+        case .bar(let value): try container.encode(value, forKey: AnyCodingKey("bar"))
         case .unsupported(let kind):
             // Round-tripping an unsupported row would fabricate a body this
             // build never understood. Encode the marker instead, honestly.
