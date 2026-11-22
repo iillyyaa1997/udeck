@@ -14,6 +14,8 @@ public final class ChatWindowController: NSObject, NSWindowDelegate {
     public let store: ChatStore
     private let strings: () -> Strings
     private var window: NSWindow?
+    /// Called once, the first time the window is shown.
+    public var onFirstShow: (() -> Void)?
 
     public init(store: ChatStore = ChatStore(), strings: @escaping () -> Strings) {
         self.store = store
@@ -22,6 +24,8 @@ public final class ChatWindowController: NSObject, NSWindowDelegate {
 
     public func show() {
         if window == nil {
+            onFirstShow?()
+            onFirstShow = nil
             let hosting = NSHostingController(rootView: ChatRootView(store: store, strings: strings))
             let window = NSWindow(contentViewController: hosting)
             window.title = strings()(.chatWindowTitle)

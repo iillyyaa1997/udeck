@@ -56,7 +56,8 @@ let package = Package(
 
         // Everything that touches AppKit/SwiftUI: the panel window, pointer
         // monitoring, screen observation, card rendering, settings UI.
-        .target(name: "UDeckKit", dependencies: ["UDeckCore", "UDeckChat", "UDeckAgents"], path: "Sources/UDeckKit"),
+        .target(name: "UDeckKit", dependencies: ["UDeckCore", "UDeckChat", "UDeckAgents", "UDeckAgentHost"],
+                path: "Sources/UDeckKit"),
 
         .executableTarget(
             name: "uDeck",
