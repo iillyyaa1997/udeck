@@ -8,6 +8,25 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.8.15] — 2026-11-22
+
+The first release signed with a Developer ID and notarised by Apple. 0.8.15
+adds nothing to the plugin contract. The update to it goes by 0.8.8's rule.
+
+- **Signed and notarised.** uDeck, its udeck-plugin command and the chat's
+  helper are signed by "Developer ID Application: Ilia Volkov (W27Z66HA4N)"
+  with a secure timestamp, and the bundle carries Apple's notarisation ticket:
+  a downloaded copy opens on any Mac without the right-click-and-Open step.
+  Updates from earlier, ad-hoc signed copies are accepted as before — they are
+  checked by the same EdDSA key.
+- **No provisioning profile, ever.** The build refuses a bundle that carries
+  one: uDeck registers no device and takes none of the account's device slots.
+- **The chat's helper travels in the bundle, unused.** `udeck-agentd` and its
+  launch agent are inside (Contents/Helpers, Contents/Library/LaunchAgents),
+  so that the chat, when it comes, keeps its agents running while uDeck quits,
+  crashes or updates. Nothing registers it yet: this release starts no
+  process it did not start before.
+
 ## [0.8.14] — 2026-11-20
 
 Look's Fine tuning redrawn, and a fix to By panel state. 0.8.14 adds nothing
