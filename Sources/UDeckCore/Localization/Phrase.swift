@@ -20,11 +20,39 @@ public enum Phrase: Sendable, Equatable {
     // MARK: - The status menu
 
     case menuShowPanel
+    case menuChat
     case menuRefreshAll
     case menuSettings
     case menuOpenPluginsFolder
     case menuCopyDiagnostics
     case menuQuit
+
+    // MARK: - The chat window
+
+    case chatWindowTitle
+    case chatNewSession
+    case chatSessions
+    case chatHistory
+    case chatChooseFolder
+    case chatAccount
+    case chatPlaceholder
+    case chatSend
+    case chatStop
+    case chatStarting
+    case chatWorking
+    case chatQueued(count: Int)
+    case chatEnded
+    case chatResumed
+    case chatAllow
+    case chatAllowAlways
+    case chatDeny
+    case chatWantsToUse(tool: String)
+    case chatQuestion
+    case chatNothingOpen
+    case chatCloseSession
+    case chatLoadingHistory
+    case chatNoHistory
+    case chatMainAccount
 
     // MARK: - The main menu, while the settings window is open
 
