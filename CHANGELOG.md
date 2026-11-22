@@ -8,6 +8,32 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.4] — 2026-11-22
+
+The Agents card gets its new look, and the cards of resident plugins get the
+parts it is made of — every plugin can use them.
+
+- **A card can open with a title line of its own.** A new `bar` row holds a
+  title with a dot of its state, menus, tags, badges and small buttons; a card
+  that starts with one has it drawn as its window's title line instead of the
+  plugin's name.
+- **Menus.** A bar's menu or button, or the menus of an input, open a list of
+  options grouped under headings, the chosen one checked, with a note under
+  them; choosing one tells the plugin.
+- **Badges** — a state, a count, a figure — tinted by meaning; one with a fill
+  fills like a battery, for how full something is.
+- **The message field as a panel.** With menus, the field is drawn with the
+  text on top and the menus, Stop and Send under it. Shift-Return starts a new
+  line in any field; Return sends.
+- **A conversation reads better.** Two or more tool calls in a row fold into
+  one line, «4 actions · Bash ×2, Read ×2», that opens to them; an answer's
+  lists, headings and code are drawn as such; an answer can say who gave it.
+- **A plugin exiting while uDeck tells it something no longer takes uDeck
+  down.** Writing to a program whose input was just closed raised an exception
+  no Swift code could catch.
+- **Plugin authors:** all of it is in `docs/plugin-api.md`; say
+  `"minUDeck": "0.9.4"` to use it.
+
 ## [0.9.3] — 2026-11-22
 
 - **A resident plugin's card no longer goes blank when nothing happens.** Its
