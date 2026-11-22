@@ -8,6 +8,31 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.0] — 2026-11-22
+
+The chat: Claude Code sessions inside uDeck. 0.9.0 adds nothing to the plugin
+contract. The update to it goes by 0.8.8's rule.
+
+- **A chat window.** The status menu's Chat… opens it: sessions down the side,
+  the chosen one beside them. A new session starts in a folder you choose,
+  under the account you choose — the main one, or any `~/.claude-<name>`
+  folder with a login of its own.
+- **Your own Claude Code, as it is.** uDeck runs the `claude` your shell finds,
+  with your shell's environment, in stream-json mode: your settings, hooks,
+  plugins and MCP servers apply as in the terminal. Variables that would bill
+  an API key instead of the subscription are left out.
+- **The conversation.** The answer arrives word by word; each tool call is one
+  line that opens to its result; permissions and questions are cards with
+  buttons. Return sends, Option-Return starts a new line, Escape or Stop
+  interrupts, and a message sent during a turn waits behind it.
+- **History.** The most recent saved sessions; opening one shows its
+  conversation and continues it where it stopped — sessions are the same ones
+  the terminal uses, in both directions.
+- **Not yet.** A session ends when uDeck quits, as one in a terminal does, and
+  continues from History; the helper that keeps sessions running, a
+  notification when one waits for you, model and effort controls, the context
+  bar, @-files and images come next.
+
 ## [0.8.15] — 2026-11-22
 
 The first release signed with a Developer ID and notarised by Apple. 0.8.15
