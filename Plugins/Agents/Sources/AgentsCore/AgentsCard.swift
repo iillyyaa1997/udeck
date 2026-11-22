@@ -276,6 +276,15 @@ enum AgentsCard {
         return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, rest) : String(format: "%d:%02d", minutes, rest)
     }
 
+    nonisolated static func russianCount(_ count: Int, _ one: String, _ few: String, _ many: String) -> String {
+        let word = switch count % 10 {
+        case 1 where count % 100 != 11: one
+        case 2...4 where !(12...14).contains(count % 100): few
+        default: many
+        }
+        return "\(count) \(word)"
+    }
+
     nonisolated static func questions(_ count: Int) -> String {
         switch count % 10 {
         case 1 where count % 100 != 11: "вопрос"
@@ -357,7 +366,8 @@ enum AgentsCard {
                 let amount = tokens >= 1000 ? app.t("около \(tokens / 1000) тыс. токенов", "about \(tokens / 1000)k tokens")
                     : app.t("около \(tokens) токенов", "about \(tokens) tokens")
                 return app.t("Дальше отвечает ", "From here ") + provider.name + app.t("", " answers") + " · " + parts[1] + " — "
-                    + app.t("ему передан разговор: \(parts[2]) сообщ., итоги \(parts[3]) действий, ",
+                    + app.t("ему передан разговор: \(russianCount(Int(parts[2]) ?? 0, "сообщение", "сообщения", "сообщений")), "
+                            + "\(russianCount(Int(parts[3]) ?? 0, "действие", "действия", "действий")), ",
                             "handed the conversation: \(parts[2]) messages, \(parts[3]) actions, ") + amount
             }
         }

@@ -74,6 +74,8 @@ struct AgentsCardTests {
         #expect(AgentsCard.questions(1) == "вопрос")
         #expect(AgentsCard.questions(3) == "вопроса")
         #expect(AgentsCard.questions(11) == "вопросов")
+        #expect(AgentsCard.russianCount(1, "действие", "действия", "действий") == "1 действие")
+        #expect(AgentsCard.russianCount(3, "сообщение", "сообщения", "сообщений") == "3 сообщения")
     }
 
     @Test("the models the CLI offers are read from initialize, with their effort levels")
