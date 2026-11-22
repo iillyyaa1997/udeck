@@ -8,6 +8,25 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.1] — 2026-11-22
+
+uDeck is only the board that holds plugins: the chat window 0.9.0 brought is
+taken out again, and what it did comes back as a plugin. For that, uDeck now
+runs resident plugins and lets their cards take input.
+
+- **Resident plugins run.** A plugin of kind `resident` is started once and
+  kept running while it is placed, enabled and allowed — whether or not the
+  panel is out — and started again, after a growing pause, if it exits. It
+  prints its card whenever it changes; it may ask for a macOS notification
+  (a click shows the panel and tells it) or for a folder.
+- **Cards that take input.** Four new row kinds for resident plugins: `chips`
+  (a choice among things the plugin keeps), `feed` (a conversation or running
+  log, newest last), `ask` (a question with its answers as buttons) and `input`
+  (a text field, with Stop). What the person does goes back to the plugin as
+  an event; uDeck draws everything and knows nothing of what a plugin is about.
+- **The chat window is gone.** Its sessions continue in the Agents plugin
+  (Claude Code sessions on a card), installed as a plugin.
+
 ## [0.9.0] — 2026-11-22
 
 The chat: Claude Code sessions inside uDeck. 0.9.0 adds nothing to the plugin

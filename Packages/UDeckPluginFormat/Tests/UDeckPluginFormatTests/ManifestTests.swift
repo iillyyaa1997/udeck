@@ -75,7 +75,7 @@ struct ManifestTests {
         #expect(m.problems().contains(.timeoutNotShorterThanInterval(timeout: 3, interval: 3)))
     }
 
-    @Test("the resident kind parses but is reported as not implemented yet")
+    @Test("the resident kind parses and is runnable (0.9.1)")
     func residentParsesAndIsRefused() throws {
         let m = try manifest("""
         { "id": "term", "name": "Terminal", "version": "1.0.0", "api": 1, "kind": "resident",
@@ -84,7 +84,8 @@ struct ManifestTests {
         """)
         #expect(m.kind == .resident)
         #expect(m.restart?.mode == .onFailure)
-        #expect(m.problems() == [.residentNotSupportedYet])
+        // Runs since 0.9.1.
+        #expect(m.problems().isEmpty)
     }
 
     @Test("every problem is reported at once, not one per attempt")

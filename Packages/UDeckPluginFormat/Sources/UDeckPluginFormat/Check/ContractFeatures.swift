@@ -119,10 +119,10 @@ public enum ContractFeatures {
     /// It is in no release here: no release has it in the contract.
     public static let outsideTheContract: Set<String> = ["restart"]
 
-    /// The release this registry was last brought up to date for. 0.9.0
-    /// adds nothing to the contract: the chat window is uDeck's own, and no
-    /// manifest field, card field or `UDECK_` variable is new.
-    static let reviewedAt = "0.9.0"
+    /// The release this registry was last brought up to date for. 0.9.1
+    /// runs resident plugins and gives their cards four interactive rows —
+    /// chips, feed, ask, input.
+    static let reviewedAt = "0.9.1"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
@@ -164,9 +164,8 @@ public enum ContractFeatures {
                            "UDECK_REFRESH_REASON", "UDECK_LANG", "UDECK_SETTING_*"].map { .environment($0) })
         add(firstRelease, ["UDECK_API", "UDECK_PLUGIN_ID", "UDECK_PLUGIN_DIR"].map { .actionEnvironment($0) })
 
-        // Resident plugins run, and their cards may take input: in the next
-        // release (dated when it gets its number).
-        let residentRelease = ContractRelease.next
+        // Resident plugins run, and their cards may take input: 0.9.1.
+        let residentRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 1))
         add(residentRelease, ["chips", "feed", "ask", "input"].map { .row($0) })
         add(residentRelease, ["id", "text", "state", "selected"].map { .rowField(row: "chips", field: $0) })
         add(residentRelease, ["id", "role", "text", "detail", "streaming", "error"].map { .rowField(row: "feed", field: $0) })
