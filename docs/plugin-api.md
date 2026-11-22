@@ -176,7 +176,7 @@ read, inside `~/.udeck` or around it — is refused, and the refusal says which.
 | `version` | yes | Your plugin's version, as `MAJOR.MINOR.PATCH` — see [Versions](#versions). Changing it re-asks the permission question, unless a verified update asks for exactly the same — see [Permissions](#permissions). |
 | `api` | yes | The contract version this plugin is written against. Currently `1`. |
 | `minUDeck` | no | The oldest uDeck release that has everything your plugin uses, as `MAJOR.MINOR.PATCH` — see [Versions](#versions). Absent means any uDeck that speaks your `api`. |
-| `kind` | yes | `poll` or `resident`. Only `poll` is implemented; see [Runtime kinds](#runtime-kinds). |
+| `kind` | yes | `poll` or `resident` (uDeck 0.9.1 and later); see [Runtime kinds](#runtime-kinds). |
 | `run` | yes | The command, as an argument vector. Never a shell string. |
 | `interval` | for `poll` | Seconds between runs. At least **1** — a producer is a whole process, and asking for one more often than that is a busy loop rather than a poll. |
 | `timeout` | for `poll` | Seconds a single run may take. At least **0.05**, and shorter than `interval`. |
@@ -234,11 +234,59 @@ another is close to impossible to debug.
 output, and the process exits. This is what is implemented today, and it is the
 right shape for anything that reports state.
 
-`resident` — a long-lived process owning a live surface (a terminal, an event
-stream). The manifest format describes it now so that adding it later cannot
-break plugins written today, but **uDeck does not run resident plugins yet**: a
-manifest declaring `"kind": "resident"` loads, validates, and reports that this
-version will not start it.
+`resident` (uDeck 0.9.1 and later; say `"minUDeck": "0.9.1"`) — a long-lived
+process whose card changes on its own and takes input: a conversation, an
+event stream. uDeck starts it once its card is on the panel, it is switched on
+and its permissions are allowed — whether or not the panel is out — and stops
+it when any of that stops being true. If it exits, uDeck starts it again after
+a pause that doubles each time it fails, up to a minute; a card resets the
+count. It has no `interval` or `timeout`.
+
+#### Talking to uDeck
+
+One JSON object per line, both ways: uDeck writes events to the plugin's
+standard input, the plugin prints messages on its standard output. Standard
+input closing means uDeck is done with it: exit.
+
+What the plugin prints:
+
+```json
+{"card": { "title": "Agents", "rows": [ … ] }}
+{"notify": {"id": "s-41", "title": "Waiting for you", "body": "Wants to run make"}}
+{"pick": {"id": "new", "prompt": "Choose the folder to work in"}}
+```
+
+* `card` — the whole card as it is now, every time, never a change to the last
+  one. Print it when something changed, not on a timer. uDeck draws at most ten
+  cards a second and the newest wins, so printing faster only costs you.
+* `notify` — a macOS notification. Clicking it shows the panel and sends a
+  `notification` event with the same `id`.
+* `pick` — ask for a folder; the answer comes as a `folder` event.
+
+A line uDeck does not understand is logged and ignored, never fatal.
+
+What uDeck writes:
+
+```json
+{"event":"hello","language":"ru","size":{"columns":6,"rows":4}}
+{"event":"size","size":{"columns":8,"rows":6}}
+{"event":"select","id":"s-41"}
+{"event":"press","id":"allow:req-7"}
+{"event":"submit","row":"message","text":"Look at the folder"}
+{"event":"folder","id":"new","path":"/Users/me/Workspace/app"}
+{"event":"notification","id":"s-41"}
+```
+
+* `hello` — first, and again after each restart: the card's size in grid cells
+  and uDeck's language. Draw for that size: a small card wants less on it.
+* `size` — the card was resized.
+* `select` — a chip was chosen; `press` — a button was pressed (an `ask` answer,
+  an `input`'s Stop); `submit` — text was sent from an `input` row.
+* `folder` — the answer to a `pick`; `path` is absent when the person cancelled.
+
+Settings reach a resident plugin as they reach any plugin, in its environment
+(see [How settings reach your plugin](#how-settings-reach-your-plugin)); a
+change of settings or permissions starts it again.
 
 ---
 
@@ -357,6 +405,46 @@ There is one further type, `canvas`, which is a plugin drawing its own content:
 It is **described by the format and not drawn by this version.** It appears as a
 labelled placeholder. When it does arrive it will be drawn inside a frame uDeck
 owns, so that a plugin drawing itself can never pass as something uDeck drew.
+
+#### Rows that take input (resident plugins)
+
+Four rows exist for a resident plugin's card (uDeck 0.9.1 and later). What the
+person does with them goes back to the plugin as an event; uDeck draws them and
+knows nothing of what they are for.
+
+```json
+{ "chips": [ { "id": "s-41", "text": "release notes", "selected": true },
+             { "id": "s-42", "text": "tests", "state": "warn" },
+             { "id": "new", "text": "＋ New" } ] }
+
+{ "feed": [ { "id": "1", "role": "user", "text": "Look at the folder" },
+            { "id": "2", "role": "tool", "text": "Bash  ls", "detail": "README.md\nSources" },
+            { "id": "3", "role": "assistant", "text": "Two entries…", "streaming": true },
+            { "id": "4", "role": "note", "text": "Resumed from history" } ] }
+
+{ "ask": { "id": "req-7", "title": "Wants to use Bash", "detail": "make test",
+           "buttons": [ { "id": "allow:req-7", "label": "Allow", "primary": true },
+                        { "id": "deny:req-7", "label": "Deny" } ] } }
+
+{ "input": { "id": "message", "placeholder": "Message — Return sends", "enabled": true, "stop": "stop" } }
+```
+
+* `chips` — a choice among things the plugin keeps; a click sends `select` with
+  the chip's `id`. `selected` draws it chosen, `state` puts a dot on it.
+* `feed` — a conversation or a running log, oldest first. `role` is `user`,
+  `assistant`, `tool` or `note`; a `tool` entry's `detail` opens under it;
+  `error` tints it; `streaming` marks text still arriving. Keep `id`s stable
+  across cards: they are how the feed knows an entry it has already drawn. A
+  card with a feed fills its window: the feed takes the room and scrolls, the
+  rows under it stay in view.
+* `ask` — a question with its answers as buttons; a click sends `press` with
+  the button's `id`.
+* `input` — a text field; Return sends `submit` with the row's `id` and the
+  text. `enabled: false` greys it out; `stop`, when present, adds a Stop button
+  that sends `press` with that id.
+
+On a `poll` plugin's card these rows are drawn, but nothing hears what the
+person does with them.
 
 A row type uDeck does not recognise is kept and rendered as a visible
 diagnostic, not dropped. A hole in a card with no explanation is a bug report
@@ -706,8 +794,7 @@ lower one keeps working — that is what the number is for.
   survive your producer, and neither does a child that ignores `SIGTERM`: the
   polite signal goes to the group, and what is left after the grace period is
   killed. If your plugin genuinely needs something long-lived, it wants to be a
-  `resident` plugin, which is a format that exists and an implementation that
-  does not yet.
+  `resident` plugin — see [Runtime kinds](#runtime-kinds).
 * **Never call anything that can block forever.** The classic is a command
   that touches a network mount whose server has gone away: it does not fail, it
   waits, and it may wait for the rest of the session. Anything speaking to a
@@ -765,6 +852,10 @@ them out. So a card is also bounded by what it asks uDeck to draw:
 | `actions` on a card | 12 |
 | Words in one action's `run` | 64 |
 | Characters in any single piece of text | 1000 |
+| Chips in a `chips` row | 200 |
+| Entries in a `feed` | 300 |
+| Characters in one `feed` entry's text or detail | 20 000 |
+| Buttons in an `ask` | 12 |
 
 "Any single piece of text" is every string uDeck draws, an action's `label` and
 `confirm` and each word of its `run` included. A card is a card, not a control
