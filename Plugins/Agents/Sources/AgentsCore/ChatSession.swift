@@ -184,6 +184,8 @@ public final class ChatSession: Identifiable {
     /// The session could not start at all (no `claude`, a folder gone).
     public func fail(_ reason: String) {
         state = .ended(reason)
+        // Said in the feed too: a card's placeholder has no room for why.
+        items.append(.note(id: UUID(), text: reason))
     }
 
     // MARK: - From the agent
