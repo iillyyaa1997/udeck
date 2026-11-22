@@ -156,6 +156,32 @@ def test_the_helper_travels_inside_the_bundle_with_its_launch_agent(checkout):
     assert '--identifier "$AGENT_LABEL"' in script
 
 
+def test_no_provisioning_profile_ever_reaches_the_bundle(checkout, tmp_path):
+    """No device slot of the Apple account may go to uDeck: a profile is what ties a build to registered devices.
+
+    A build as made carries none, and one that would — here a profile riding in with the prebuilt Sparkle — is
+    refused before it is signed, leaving no bundle behind."""
+    done = make_app(checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99", "--zip")
+    assert done.returncode == 0, done.stdout + done.stderr
+    with zipfile.ZipFile(checkout / "lab-builds" / "uDeck-9.9.9.zip") as archive:
+        assert not [name for name in archive.namelist() if name.endswith(".provisionprofile")]
+
+    (checkout / "stubs" / "swift").write_text("#!/bin/sh\necho 'swift was run' >&2\nexit 1\n")
+    prebuilt = tmp_path / "prebuilt-with-a-profile"
+    prebuilt.mkdir()
+    for name in ("uDeck", "udeck-plugin", "udeck-agentd"):
+        shutil.copy("/bin/echo", prebuilt / name)
+    resources = prebuilt / "uDeck_UDeckKit.bundle"
+    resources.mkdir()
+    (resources / "embedded.provisionprofile").write_bytes(b"not really a profile")
+    done = make_app(
+        checkout, "--out", "lab-builds-2", "--version", "9.9.9", "--build", "99", "--zip", "--prebuilt", str(prebuilt),
+    )  # fmt: skip
+    assert done.returncode != 0
+    assert "must not use any device slot" in done.stderr, done.stderr
+    assert not (checkout / "lab-builds-2" / "uDeck-9.9.9.zip").exists()
+
+
 def test_a_build_without_the_command_is_refused_and_leaves_no_bundle(checkout):
     (checkout / ".build" / "release" / "udeck-plugin").unlink()
     done = make_app(checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99", "--zip")

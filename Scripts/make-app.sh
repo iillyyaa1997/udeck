@@ -365,6 +365,20 @@ AGENT_PLIST="$APP/Contents/Library/LaunchAgents/$AGENT_LABEL.plist"
     "$AGENT_PLIST" >/dev/null
 plutil -lint "$AGENT_PLIST" >/dev/null
 
+# No provisioning profile, ever. A profile is what ties a build to devices
+# registered by UDID, and the Apple Developer account allows 100 devices per
+# family a year for all its apps together — slots the operator keeps for his
+# other apps. uDeck is distributed with Developer ID and notarisation, which
+# need no profile and register no device; anything that would need one (a
+# restricted entitlement, an embedded profile) is refused here rather than
+# discovered in the account.
+PROFILES="$(find "$APP" -name '*.provisionprofile' -print)"
+if [ -n "$PROFILES" ]; then
+    echo "The bundle carries a provisioning profile; uDeck must not use any device slot:" >&2
+    echo "$PROFILES" >&2
+    exit 1
+fi
+
 echo "==> Signing with identity: $IDENTITY"
 
 # See the comment in the file itself. Scoped to ad-hoc so that a Developer ID
