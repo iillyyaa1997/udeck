@@ -286,7 +286,7 @@ What uDeck writes:
 * `folder` — the answer to a `pick`; `path` is absent when the person cancelled.
 * `choose` — an option of a menu was chosen (a `bar`'s menu or button, an
   `input`'s picker): the row's `id`, the menu's or button's `id`, the option's
-  `id` (the release after 0.9.3).
+  `id` (uDeck 0.9.4 and later).
 
 Settings reach a resident plugin as they reach any plugin, in its environment
 (see [How settings reach your plugin](#how-settings-reach-your-plugin)); a
@@ -454,7 +454,7 @@ knows nothing of what they are for.
   text, Shift-Return starts a new line. `enabled: false` greys it out; `stop`,
   when present, adds a Stop button that sends `press` with that id.
 
-The release after 0.9.3 adds a fifth row, menus, and more to say in a feed:
+uDeck 0.9.4 adds a fifth row, menus, and more to say in a feed:
 
 ```json
 { "bar": { "id": "head", "items": [
@@ -503,7 +503,7 @@ The release after 0.9.3 adds a fifth row, menus, and more to say in a feed:
   are `plus`, `history`, `folder`, `model`, `effort`, `account`, `gear`, `run`,
   `wait`, `done`, `idle` and `info`. Both are closed sets, like the list icons.
 
-Say `"minUDeck"` of the release that brings these when the card uses them.
+Say `"minUDeck": "0.9.4"` when the card uses them.
 
 On a `poll` plugin's card these rows are drawn, but nothing hears what the
 person does with them.

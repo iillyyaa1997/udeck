@@ -123,11 +123,10 @@ public enum ContractFeatures {
     /// It is in no release here: no release has it in the contract.
     public static let outsideTheContract: Set<String> = ["restart"]
 
-    /// The release this registry was last brought up to date for. 0.9.3 adds
-    /// nothing to the contract: a running resident plugin's card no longer
-    /// ages while it is quiet, and no manifest field, card field or `UDECK_`
-    /// variable is new.
-    static let reviewedAt = "0.9.3"
+    /// The release this registry was last brought up to date for. 0.9.4
+    /// brings bars, menus, badges, an input with menus and the feed's `name`
+    /// and `label`, dated above.
+    static let reviewedAt = "0.9.4"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
@@ -178,19 +177,19 @@ public enum ContractFeatures {
         add(residentRelease, ["id", "label", "primary"].map { .rowField(row: "ask.buttons", field: $0) })
         add(residentRelease, ["id", "placeholder", "enabled", "stop"].map { .rowField(row: "input", field: $0) })
 
-        // Bars, menus, badges, an input with menus, folding tool entries: the
-        // release after 0.9.3.
-        add(.next, [.row("bar"), .rowField(row: "input", field: "pickers")])
-        add(.next, ["name", "label"].map { .rowField(row: "feed", field: $0) })
-        add(.next, ["id", "items"].map { .rowField(row: "bar", field: $0) })
-        add(.next, ["title", "tag", "badge", "menu", "button", "spacer"].map { .rowField(row: "bar.items", field: $0) })
-        add(.next, ["text", "tone"].map { .rowField(row: "bar.title", field: $0) })
-        add(.next, ["text", "tone", "icon", "fill"].map { .rowField(row: "bar.badge", field: $0) })
-        add(.next, ["id", "text", "icon", "options", "selected", "note"].map { .rowField(row: "menu", field: $0) })
-        add(.next, ["id", "icon", "label", "options", "note"].map { .rowField(row: "bar.button", field: $0) })
-        add(.next, ["id", "text", "group", "note", "tone"].map { .rowField(row: "menu.options", field: $0) })
-        add(.next, ["run", "wait", "idle", "ok", "warn", "crit", "info"].map { .tone($0) })
-        add(.next, ["plus", "history", "folder", "model", "effort", "account", "gear", "run", "wait", "done", "idle",
+        // Bars, menus, badges, an input with menus, folding tool entries: 0.9.4.
+        let barRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 4))
+        add(barRelease, [.row("bar"), .rowField(row: "input", field: "pickers")])
+        add(barRelease, ["name", "label"].map { .rowField(row: "feed", field: $0) })
+        add(barRelease, ["id", "items"].map { .rowField(row: "bar", field: $0) })
+        add(barRelease, ["title", "tag", "badge", "menu", "button", "spacer"].map { .rowField(row: "bar.items", field: $0) })
+        add(barRelease, ["text", "tone"].map { .rowField(row: "bar.title", field: $0) })
+        add(barRelease, ["text", "tone", "icon", "fill"].map { .rowField(row: "bar.badge", field: $0) })
+        add(barRelease, ["id", "text", "icon", "options", "selected", "note"].map { .rowField(row: "menu", field: $0) })
+        add(barRelease, ["id", "icon", "label", "options", "note"].map { .rowField(row: "bar.button", field: $0) })
+        add(barRelease, ["id", "text", "group", "note", "tone"].map { .rowField(row: "menu.options", field: $0) })
+        add(barRelease, ["run", "wait", "idle", "ok", "warn", "crit", "info"].map { .tone($0) })
+        add(barRelease, ["plus", "history", "folder", "model", "effort", "account", "gear", "run", "wait", "done", "idle",
                     "info"].map { .barIcon($0) })
         return registry
     }()
