@@ -1,0 +1,124 @@
+name: Sign check
+
+# Not a release: the signing half of release.yml's app job, step for step,
+# run by hand on a lab branch to prove the repository's Developer ID and notary
+# secrets before the first signed release. Nothing is archived, uploaded or
+# published. Lives only on labx/sign-check* branches, which a push runs.
+on:
+  push:
+    branches: ["labx/sign-check*"]
+
+permissions: {}
+
+jobs:
+  sign:
+    name: Sign, notarise and staple, publishing nothing
+    runs-on: macos-26
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Bring in the Developer ID certificate, if there is one
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEVELOPER_ID_P12:-}" ]; then
+            echo "::notice::No Developer ID in this repository's secrets: the build is ad-hoc signed and not notarised."
+            echo "SIGN_IDENTITY=-" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/developer-id.keychain-db"
+          password=$(uuidgen)
+          p12="$RUNNER_TEMP/developer-id.p12"
+          trap 'rm -f "$p12"' EXIT
+          printf '%s' "$DEVELOPER_ID_P12" | base64 --decode > "$p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$p12" -k "$keychain" -P "$DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+          # In the search list, or codesign does not find the identity by name;
+          # the keychains already there stay in it. Their paths have no spaces,
+          # so the list is split on purpose.
+          existing=$(security list-keychains -d user | tr -d '"' | xargs)
+          # shellcheck disable=SC2086
+          security list-keychains -d user -s "$keychain" $existing
+          echo "DEVELOPER_ID_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          identity=$(security find-identity -v -p codesigning "$keychain" \
+            | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)
+          if [ -z "$identity" ]; then
+            echo "DEVELOPER_ID_P12 holds no \"Developer ID Application\" identity" >&2
+            exit 1
+          fi
+          echo "Signing as: $identity"
+          echo "SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Build the application bundle
+        run: Scripts/make-app.sh --sign "$SIGN_IDENTITY"
+
+      # Notarised before it is archived: the ticket is stapled to the bundle,
+      # so a Mac that opens the downloaded copy offline still finds it, and the
+      # archive Sparkle signs below is the stapled one.
+      #
+      # NOTARY_KEY_P8 is an App Store Connect API key, the .p8 file's text as it
+      # is; NOTARY_KEY_ID and NOTARY_ISSUER_ID name it. A Developer ID without
+      # them is a failure: a signed release that Gatekeeper still refuses would
+      # be a release that looks finished and is not.
+      - name: Notarise and staple it, when it is signed with a Developer ID
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          if [ "$SIGN_IDENTITY" = "-" ]; then
+            echo "Ad-hoc build: nothing to notarise."
+            exit 0
+          fi
+          if [ -z "${NOTARY_KEY_P8:-}" ] || [ -z "${NOTARY_KEY_ID:-}" ] || [ -z "${NOTARY_ISSUER_ID:-}" ]; then
+            echo "Signed with a Developer ID, but NOTARY_KEY_P8, NOTARY_KEY_ID or NOTARY_ISSUER_ID is missing" >&2
+            exit 1
+          fi
+          key="$RUNNER_TEMP/notary-key.p8"
+          submission="$RUNNER_TEMP/uDeck-for-notarisation.zip"
+          result="$RUNNER_TEMP/notarisation.json"
+          trap 'rm -f "$key" "$submission"' EXIT
+          printf '%s\n' "$NOTARY_KEY_P8" > "$key"
+          ditto -c -k --keepParent dist/uDeck.app "$submission"
+          xcrun notarytool submit "$submission" \
+            --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" \
+            --wait --timeout 45m --output-format json > "$result"
+          cat "$result"
+          status=$(plutil -extract status raw -o - "$result")
+          if [ "$status" != "Accepted" ]; then
+            id=$(plutil -extract id raw -o - "$result")
+            echo "Notarisation says $status; Apple's log follows" >&2
+            xcrun notarytool log "$id" --key "$key" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID" >&2 || true
+            exit 1
+          fi
+          xcrun stapler staple dist/uDeck.app
+          xcrun stapler validate dist/uDeck.app
+          # What a Mac that downloaded it will ask: would Gatekeeper let it run?
+          spctl --assess --type execute --verbose=4 dist/uDeck.app
+
+      - name: Show what was signed
+        run: |
+          set -euo pipefail
+          for code in dist/uDeck.app dist/uDeck.app/Contents/Helpers/udeck-agentd dist/uDeck.app/Contents/Helpers/udeck-plugin; do
+            echo "--- $code"
+            codesign -dvv "$code" 2>&1 | grep -E "^(Identifier|Authority|TeamIdentifier|Timestamp|Runtime Version)=" || true
+            codesign -d -r- "$code" 2>&1 | tail -1
+          done
+          find dist/uDeck.app -name '*.provisionprofile' | tee /dev/stderr | wc -l | grep -q '^ *0$'
+
+      - name: Take the Developer ID keychain away
+        if: always()
+        run: |
+          if [ -n "${DEVELOPER_ID_KEYCHAIN:-}" ]; then
+            security delete-keychain "$DEVELOPER_ID_KEYCHAIN" || true
+          fi
