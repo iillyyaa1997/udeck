@@ -16,6 +16,11 @@ public final class AgentsApp {
     public private(set) var russian = false
     public private(set) var showingHistory = false
     public private(set) var history: [SavedSession] = []
+    /// Sessions opened from history only to be read, because their transcript
+    /// was written to a moment ago — by when it was last written.
+    public private(set) var heldBack: [UUID: Date] = [:]
+    /// How recent a write to a saved session means it is open somewhere else.
+    static let liveWindow: TimeInterval = 10 * 60
     public let accounts: [ChatAccount]
     public private(set) var account: ChatAccount
 
@@ -85,6 +90,17 @@ public final class AgentsApp {
 
     private func press(_ id: String) {
         if id == "stop" { selected?.interrupt(); return }
+        if id.hasPrefix("here:") || id.hasPrefix("drop:"), let uuid = UUID(uuidString: String(id.dropFirst(5))),
+           heldBack[uuid] != nil, let session = sessions.first(where: { $0.id == uuid }) {
+            heldBack[uuid] = nil
+            if id.hasPrefix("here:") {
+                Task { await start(session, resume: session.sessionID) }
+            } else {
+                sessions.removeAll { $0.id == uuid }
+                if selection == uuid { selection = sessions.last?.id }
+            }
+            return
+        }
         let parts = id.split(separator: ":", maxSplits: 2).map(String.init)
         guard parts.count >= 2 else { return }
         let request = parts[1]
@@ -125,6 +141,12 @@ public final class AgentsApp {
                                   history: feed)
         adopt(session)
         showingHistory = false
+        let written = (try? saved.file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            ?? saved.modified
+        if Date().timeIntervalSince(written) < Self.liveWindow {
+            heldBack[session.id] = written
+            return
+        }
         Task { await start(session, resume: saved.sessionID) }
     }
 

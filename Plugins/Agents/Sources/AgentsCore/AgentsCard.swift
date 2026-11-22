@@ -51,14 +51,21 @@ enum AgentsCard {
             rows.append(["text": .string(app.t("Выберите сессию или начните новую: ＋", "Choose a session, or start one: ＋"))])
             return rows
         }
-        let keep = app.size.rows <= 4 ? 40 : 300
+        // The card is sent whole on every change, five times a second while
+        // words stream in, and uDeck lays all of it out: the newest entries
+        // only, and no entry longer than a screenful.
+        let keep = app.size.rows <= 4 ? 30 : 60
         rows.append(["feed": .array(session.items.suffix(keep).map { feedEntry($0, app) })])
+        let held = app.heldBack[session.id] != nil
+        if held { rows.append(["ask": heldRow(session, app)]) }
         for ask in session.asks { rows.append(["ask": askRow(ask, app)]) }
+        let placeholder = held ? app.t("Только просмотр — сессия идёт в другом месте", "View only — it runs elsewhere")
+            : session.isEnded ? stateWord(session, app)
+            : app.t("Сообщение — Return отправляет", "Message — Return sends")
         var input: [String: JSONValue] = [
             "id": "message",
-            "placeholder": .string(session.isEnded ? stateWord(session, app)
-                : app.t("Сообщение — Return отправляет", "Message — Return sends")),
-            "enabled": .bool(!session.isEnded),
+            "placeholder": .string(placeholder),
+            "enabled": .bool(!session.isEnded && !held),
         ]
         if session.state == .working { input["stop"] = "stop" }
         rows.append(["input": .object(input)])
@@ -74,6 +81,29 @@ enum AgentsCard {
         }
     }
 
+    /// A saved session written to a moment ago is open somewhere else (a
+    /// terminal, another window): resuming it here would make two writers of
+    /// one conversation. It opens to be read, and continues here only when
+    /// asked to.
+    static func heldRow(_ session: ChatSession, _ app: AgentsApp) -> JSONValue {
+        let minutes = app.heldBack[session.id].map { max(0, Int(Date().timeIntervalSince($0) / 60)) } ?? 0
+        let when = minutes == 0 ? app.t("только что", "just now") : app.t("\(minutes) мин назад", "\(minutes) min ago")
+        return ["id": .string("held-" + session.id.uuidString),
+                "title": .string(app.t("Эта сессия сейчас идёт в другом месте", "This session is running elsewhere")),
+                "detail": .string(app.t("Последняя запись — \(when). Продолжить здесь значит писать в неё вдвоём",
+                                        "Last written \(when). Continuing here means two writers in one conversation")),
+                "buttons": [
+                    ["id": .string("here:" + session.id.uuidString), "label": .string(app.t("Продолжить здесь", "Continue here"))],
+                    ["id": .string("drop:" + session.id.uuidString), "label": .string(app.t("Закрыть", "Close")), "primary": true],
+                ]]
+    }
+
+    nonisolated static let longest = 4_000
+
+    nonisolated static func clipped(_ text: String, _ limit: Int = longest) -> String {
+        text.count <= limit ? text : String(text.prefix(limit)) + "…"
+    }
+
     static func chip(_ id: String, _ text: String, selected: Bool = false) -> JSONValue {
         ["id": .string(id), "text": .string(text), "selected": .bool(selected)]
     }
@@ -81,20 +111,22 @@ enum AgentsCard {
     static func feedEntry(_ item: FeedItem, _ app: AgentsApp) -> JSONValue {
         switch item {
         case .user(let id, let text):
-            return ["id": .string(id.uuidString), "role": "user", "text": .string(text)]
+            return ["id": .string(id.uuidString), "role": "user", "text": .string(clipped(text))]
         case .assistant(let id, let text, let streaming):
-            return ["id": .string(id.uuidString), "role": "assistant", "text": .string(text), "streaming": .bool(streaming)]
+            return ["id": .string(id.uuidString), "role": "assistant", "text": .string(clipped(text)), "streaming": .bool(streaming)]
         case .tool(let id, let name, let summary, let result):
             var entry: [String: JSONValue] = ["id": .string("tool-" + id), "role": "tool",
-                                              "text": .string(summary.isEmpty ? name : name + "  " + summary)]
+                                              "text": .string(clipped(summary.isEmpty ? name : name + "  " + summary, 300))]
             if let result {
-                entry["detail"] = .string(result.preview)
+                entry["detail"] = .string(clipped(result.preview, 1_200))
                 if result.isError { entry["error"] = true }
             }
             return .object(entry)
         case .note(let id, let text):
             return ["id": .string(id.uuidString), "role": "note",
-                    "text": .string(text == "resumed" ? app.t("Продолжено из истории", "Resumed from history") : text)]
+                    "text": .string(text == "resumed" ? app.t("Продолжено из истории", "Resumed from history")
+                        : text == "compacted" ? app.t("Здесь контекст был сжат", "The context was compacted here")
+                        : clipped(text, 600))]
         }
     }
 
@@ -117,6 +149,7 @@ enum AgentsCard {
     }
 
     static func stateWord(_ session: ChatSession, _ app: AgentsApp) -> String {
+        if app.heldBack[session.id] != nil { return app.t("просмотр", "view only") }
         if !session.asks.isEmpty { return app.t("ждёт", "waiting") }
         switch session.state {
         case .starting: return app.t("запускается", "starting")

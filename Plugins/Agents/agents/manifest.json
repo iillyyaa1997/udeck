@@ -6,17 +6,26 @@
   "kind": "resident",
   "description": "Sessions of AI agents on a card: start one in a folder, see it work, answer its questions and permissions, continue any saved one. Runs your own Claude Code (Codex next).",
   "author": "uDeck",
-  "run": ["./agents"],
-  "permissions": { "exec": ["claude"] },
-  "window": { "defaultWidth": 6, "defaultHeight": 4, "minWidth": 3, "minHeight": 2 },
-  "settings": [
-    { "key": "claude", "type": "string", "label": "claude to run (empty: the one your shell finds)", "default": "" }
+  "run": [
+    "./agents"
   ],
-  "translations": {
-    "ru": {
-      "name": "Agents",
-      "description": "Сессии ИИ-агентов на карточке: начать в папке, видеть работу, отвечать на вопросы и разрешения, продолжить любую сохранённую. Запускает ваш Claude Code (Codex — следом).",
-      "settings": { "claude": { "label": "Какой claude запускать (пусто — тот, что находит ваша оболочка)" } }
+  "permissions": {
+    "exec": [
+      "claude"
+    ]
+  },
+  "window": {
+    "defaultWidth": 6,
+    "defaultHeight": 4,
+    "minWidth": 3,
+    "minHeight": 2
+  },
+  "settings": [
+    {
+      "key": "claude",
+      "type": "string",
+      "label": "claude to run (empty: the one your shell finds)",
+      "default": ""
     }
-  }
+  ]
 }
