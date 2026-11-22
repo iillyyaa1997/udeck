@@ -194,6 +194,15 @@ struct CardBodyView: View {
                     .strokeBorder(theme.line, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
             )
 
+        case .chips(let items):
+            ChipsRowView(items: items, theme: theme) { model.residentEvent(pluginID, $0) }
+        case .feed(let entries):
+            FeedRowView(entries: entries, theme: theme)
+        case .ask(let ask):
+            AskRowView(ask: ask, theme: theme) { model.residentEvent(pluginID, $0) }
+        case .input(let input):
+            InputRowView(input: input, theme: theme) { model.residentEvent(pluginID, $0) }
+
         case .unsupported(let kind):
             // Kept rather than dropped: a hole in a card with no explanation is
             // a bug report waiting to happen.

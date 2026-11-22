@@ -83,6 +83,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // window appears, and written only when the operator asks. An application that
         // registers at launch silently puts back a login item the operator removed.
         self.loginItem = SystemLoginItem()
+        // Resident plugins: their notifications, and the folders they ask for.
+        model.onPluginNotice = { [weak self] plugin, id, title, body in
+            self?.updater.notifier.postPluginNotice(plugin: plugin.rawValue, id: id, title: title, body: body)
+        }
+        updater.notifier.onOpenPluginNotice = { [weak self, weak model] plugin, id in
+            self?.controller.reveal()
+            guard let plugin = PluginIdentifier(rawValue: plugin) else { return }
+            model?.residentEvent(plugin, .notification(id: id))
+        }
+        model.onPluginPicksFolder = { [weak model] plugin, request, prompt in
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.allowsMultipleSelection = false
+            if let prompt { panel.message = prompt }
+            NSApp.activate(ignoringOtherApps: true)
+            let path = panel.runModal() == .OK ? panel.url?.path : nil
+            model?.residentEvent(plugin, .folder(id: request, path: path))
+        }
         // The helper that keeps plugins' processes running is registered when a
         // plugin needs it; until one does, only the lab asks (AgentHelperSelfTest).
         if AgentHelperSelfTest.isOn {

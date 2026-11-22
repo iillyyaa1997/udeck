@@ -368,6 +368,12 @@ public final class DeckModel {
 
     let paths: UDeckPaths
     private let executor: PollExecutor
+    /// Resident plugins' processes (`ResidentRuns`).
+    private let residents = ResidentRuns()
+    /// A resident plugin asked for a notification: (plugin, its id, title, body).
+    public var onPluginNotice: ((PluginIdentifier, String, String, String) -> Void)?
+    /// A resident plugin asked for a folder: (plugin, request id, prompt).
+    public var onPluginPicksFolder: ((PluginIdentifier, String, String?) -> Void)?
     private var pollTasks: [String: Task<Void, Never>] = [:]
     /// What each running loop was started with (`PollLoops`).
     private var pollLoops: [String: PollLoop] = [:]
@@ -690,7 +696,62 @@ public final class DeckModel {
                 }
             }
         }
+        restartResidents()
         return begun
+    }
+
+    /// Starts and stops resident plugins as the plugins, the layout and the
+    /// decisions now say: one placed, enabled and allowed runs, whether or not
+    /// the panel is out — it is a conversation, not a reading.
+    public func restartResidents() {
+        residents.onMessage = { [weak self] id, message in self?.residentSaid(id, message) }
+        residents.language = { [weak self] in self?.strings.language.rawValue ?? "en" }
+        let placed = placedPluginIDs
+        var wanted: [ResidentRuns.Wanted] = []
+        var sizes: [PluginIdentifier: (columns: Int, rows: Int)] = [:]
+        for plugin in plugins {
+            guard let manifest = plugin.manifest, manifest.kind == .resident, plugin.isUsable,
+                  let executable = plugin.executable, placed.contains(manifest.id)
+            else { continue }
+            let decision = PermissionGate.launchDecision(for: manifest, grant: grants[manifest.id],
+                                                         enabled: pluginSettings.isEnabled(manifest.id),
+                                                         requiredTree: treeLastHashed(for: manifest.id),
+                                                         requiredSource: requiredSource(for: manifest.id))
+            guard decision.isAllowed else { continue }
+            let environment = executor.environment(
+                for: manifest, plugin: plugin, settings: pluginSettings,
+                cacheDirectory: paths.makeCache(forPlugin: manifest.id),
+                searchPath: settings.pluginExecutableSearchPath, appearance: appearance, reason: .launch,
+                language: strings.language.rawValue)
+            wanted.append(ResidentRuns.Wanted(
+                id: manifest.id, executable: executable, arguments: Array(manifest.run.dropFirst()),
+                environment: environment, directory: plugin.directory,
+                basis: (treeLastHashed(for: manifest.id) ?? "") + "|" + String(describing: grants[manifest.id])))
+            if let window = layout.tabs.flatMap(\.windows).first(where: { $0.pluginID == manifest.id }) {
+                sizes[manifest.id] = (window.width, window.height)
+            }
+        }
+        residents.reconcile(wanted, sizes: sizes)
+    }
+
+    /// Tells a resident plugin what the person did on its card.
+    public func residentEvent(_ id: PluginIdentifier, _ event: ResidentEvent) {
+        residents.send(event, to: id)
+    }
+
+    private func residentSaid(_ id: PluginIdentifier, _ message: ResidentMessage) {
+        switch message {
+        case .card(let card):
+            var snapshot = snapshots[id.rawValue] ?? PluginSnapshot(pluginID: id)
+            snapshot.record(card: card, at: Date())
+            snapshots[id.rawValue] = snapshot
+        case .notify(let notice, let title, let body):
+            onPluginNotice?(id, notice, title, body)
+        case .pickFolder(let request, let prompt):
+            onPluginPicksFolder?(id, request, prompt)
+        case .unknown(let line):
+            DeckLog.plugins.notice("resident \(id.rawValue, privacy: .public) said something uDeck does not know: \(line, privacy: .public)")
+        }
     }
 
     /// Cancels one plugin's poll loop. Part of quieting it: see `quiet`.

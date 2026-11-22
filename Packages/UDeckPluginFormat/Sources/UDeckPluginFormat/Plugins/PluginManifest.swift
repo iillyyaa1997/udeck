@@ -362,7 +362,8 @@ extension PluginManifest {
                 found.append(.timeoutNotShorterThanInterval(timeout: timeout, interval: interval))
             }
         case .resident:
-            found.append(.residentNotSupportedYet)
+            // Runs since 0.9.1: long-lived, its card drawn from what it says.
+            break
         }
 
         var seenKeys = Set<String>()
