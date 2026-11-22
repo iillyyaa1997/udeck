@@ -29,6 +29,9 @@ public final class AgentsApp {
     let home: URL
     private var shellEnvironment: [String: String]?
     private var lastCard = ""
+    /// When the saved sessions were last read: the session menu lists them,
+    /// and a menu cannot say it is about to open.
+    private var historyRead = Date.distantPast
 
     public init(home: URL, emit: @escaping (String) -> Void) {
         self.home = home
@@ -63,6 +66,8 @@ public final class AgentsApp {
                 selection = uuid
                 showingHistory = false
             }
+        case "choose":
+            choose(menu: event["menu"]?.string ?? "", option: event["option"]?.string ?? "")
         default:
             return
         }
@@ -88,8 +93,31 @@ public final class AgentsApp {
         }
     }
 
+    /// An option of a menu on the card: the session menu, the new-session
+    /// button, or the field's account, model and effort.
+    private func choose(menu: String, option: String) {
+        switch menu {
+        case "session", "new":
+            select(option)
+        case "account":
+            guard let chosen = accounts.first(where: { $0.name == option }) else { return }
+            account = chosen
+            if let session = selected, session.account != chosen { move(session, to: chosen) }
+        case "model":
+            selected?.switchModel(to: option)
+        case "effort":
+            if let session = selected { setEffort(option, of: session) }
+        case "me":
+            if option.hasPrefix("m:") { choose(menu: "model", option: String(option.dropFirst(2))) }
+            if option.hasPrefix("e:") { choose(menu: "effort", option: String(option.dropFirst(2))) }
+        default:
+            return
+        }
+    }
+
     private func press(_ id: String) {
         if id == "stop" { selected?.interrupt(); return }
+        if id == "new" { select("new"); return }
         if id.hasPrefix("here:") || id.hasPrefix("drop:"), let uuid = UUID(uuidString: String(id.dropFirst(5))),
            heldBack[uuid] != nil, let session = sessions.first(where: { $0.id == uuid }) {
             heldBack[uuid] = nil
@@ -121,6 +149,38 @@ public final class AgentsApp {
     }
 
     // MARK: - Sessions
+
+    /// Sessions that start again once their running turn has finished — a
+    /// new effort or login chosen mid-turn — and what to say when they do.
+    private var restartAfterTurn: [UUID: String] = [:]
+
+    /// The effort the session runs with: it starts again with `--effort`,
+    /// continuing where it was.
+    private func setEffort(_ level: String, of session: ChatSession) {
+        guard session.effort != level else { return }
+        session.effort = level
+        restart(session, saying: "effort:" + level)
+    }
+
+    /// Moves a session to another login: started again there, continuing it.
+    private func move(_ session: ChatSession, to account: ChatAccount) {
+        session.account = account
+        restart(session, saying: "account:" + account.name)
+    }
+
+    private func restart(_ session: ChatSession, saying note: String) {
+        guard heldBack[session.id] == nil, session.sessionID != nil, !session.isEnded else { return }
+        if session.state == .working {
+            restartAfterTurn[session.id] = note
+            return
+        }
+        session.beginRestart(note)
+        Task {
+            await session.close()
+            await start(session, resume: session.sessionID)
+            render()
+        }
+    }
 
     public func newSession(in folder: URL, message: String? = nil) async {
         let session = ChatSession(folder: folder, account: account)
@@ -158,6 +218,7 @@ public final class AgentsApp {
         session.onTurnFinished = { [weak self, weak session] words in
             guard let self, let session else { return }
             notify(session, title: t("Готово — ", "Done — ") + session.title, body: words)
+            if let note = restartAfterTurn.removeValue(forKey: session.id) { restart(session, saying: note) }
         }
         sessions.append(session)
         selection = session.id
@@ -178,7 +239,8 @@ public final class AgentsApp {
 
     private func start(_ session: ChatSession, resume: String?) async {
         let environment = session.account.environment(from: await environment())
-        var arguments = ClaudeOutbound.arguments(resume: resume, permissionMode: "default")
+        var arguments = ClaudeOutbound.arguments(model: session.chosenModel, resume: resume, permissionMode: "default")
+        if let effort = session.effort { arguments += ["--effort", effort] }
         var executable: URL
         // A path in the plugin's settings (the lab points it at a stand-in).
         if let override = Self.setting(ProcessInfo.processInfo.environment["UDECK_SETTING_CLAUDE"]), !override.isEmpty {
@@ -204,12 +266,14 @@ public final class AgentsApp {
 
     private func refreshHistory() {
         history = SessionHistory.recent(config: ChatAccount(name: "main", configDir: nil).folder(home: home), limit: 12)
+        historyRead = Date()
     }
 
     // MARK: - The card
 
     /// Writes the card if it changed since the last one written.
     public func render() {
+        if Date().timeIntervalSince(historyRead) > 30 { refreshHistory() }
         guard let line = try? JSONValue.object(["card": AgentsCard.card(for: self)]).encodedLine(),
               line != lastCard
         else { return }

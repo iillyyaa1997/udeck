@@ -36,6 +36,31 @@ public struct ChatAsk: Sendable, Equatable, Identifiable {
     public var summary: String { ToolSummary.of(name: ask.toolName, input: ask.input) }
 }
 
+/// A model the CLI offers: what to ask for, how to call it, and the effort
+/// levels it takes (from `initialize`).
+public struct ModelChoice: Sendable, Equatable {
+    public let value: String
+    public let name: String
+    public let resolved: String?
+    public let efforts: [String]
+
+    public init(value: String, name: String, resolved: String? = nil, efforts: [String] = []) {
+        self.value = value
+        self.name = name
+        self.resolved = resolved
+        self.efforts = efforts
+    }
+
+    static func list(_ body: JSONValue) -> [ModelChoice] {
+        (body["models"]?.array ?? []).compactMap { raw in
+            guard let value = raw["value"]?.string else { return nil }
+            return ModelChoice(value: value, name: raw["displayName"]?.string ?? value,
+                               resolved: raw["resolvedModel"]?.string,
+                               efforts: (raw["supportedEffortLevels"]?.array ?? []).compactMap(\.string))
+        }
+    }
+}
+
 /// The chat's view of one Claude Code session: the agent's lines turned into a
 /// feed, its asks into cards, the user's input into messages — over any
 /// AgentChannel, the process here or one the helper keeps.
@@ -52,13 +77,26 @@ public final class ChatSession: Identifiable {
 
     public let id: UUID
     public let folder: URL
-    public let account: ChatAccount
+    /// Whose login the session runs on; a move starts it again on another.
+    public internal(set) var account: ChatAccount
     public private(set) var state: State = .starting
     public private(set) var items: [FeedItem] = []
     public private(set) var asks: [ChatAsk] = []
     /// Claude Code's own id for the session, once it has said it.
     public private(set) var sessionID: String?
     public private(set) var model: String?
+    /// The models the CLI offers, from `initialize`.
+    public private(set) var models: [ModelChoice] = []
+    /// The model asked for here (a `value` of `models`), nil for the CLI's
+    /// own choice.
+    public internal(set) var chosenModel: String?
+    /// The effort the session runs with, nil for the CLI's own; a change
+    /// starts it again with `--effort`, continuing it.
+    public internal(set) var effort: String?
+    /// How full the context is, after the last turn.
+    public private(set) var context: ClaudeContextUsage?
+    /// When the running turn began, while one runs.
+    public private(set) var turnStartedAt: Date?
     /// Messages sent that no turn has finished yet: more than one means the
     /// rest are queued behind the running turn.
     public private(set) var pendingTurns = 0
@@ -79,6 +117,9 @@ public final class ChatSession: Identifiable {
 
     @ObservationIgnored private var connection: ClaudeCodeConnection?
     @ObservationIgnored private var reader: Task<Void, Never>?
+    /// Which start the reader belongs to: a session started again (a new
+    /// effort, another login) must not be ended by the old process exiting.
+    @ObservationIgnored private var generation = 0
     /// The streaming answer's item, while one is arriving.
     @ObservationIgnored private var streamingIndex: Int?
 
@@ -99,25 +140,70 @@ public final class ChatSession: Identifiable {
     /// it), only listens: the channel replays what the session said, and the
     /// feed, the asks still open and the turn under way are rebuilt from it.
     public func start(channel: any AgentChannel, reattached: Bool = false) async {
+        generation += 1
+        let mine = generation
+        reader?.cancel()
         let connection = ClaudeCodeConnection(channel: channel)
         self.connection = connection
         await connection.start()
         let events = connection.events
         reader = Task { [weak self] in
             for await event in events {
+                guard self?.generation == mine else { return }
                 self?.receive(event)
             }
-            self?.ended()
+            if self?.generation == mine { self?.ended() }
         }
         if reattached {
             if state == .starting { state = .idle }
             return
         }
         do {
-            _ = try await connection.request({ ClaudeOutbound.initialize(id: $0) }, timeout: .seconds(60))
+            let answer = try await connection.request({ ClaudeOutbound.initialize(id: $0) }, timeout: .seconds(60))
+            let offered = ModelChoice.list(answer.body)
+            if !offered.isEmpty { models = offered }
             if state == .starting { state = .idle }
+            refreshContext()
         } catch {
             state = .ended("could not start: \(error)")
+        }
+    }
+
+    /// Says the session is starting again — a new effort, another login —
+    /// and why, in the feed. The caller closes and starts it.
+    func beginRestart(_ note: String) {
+        state = .starting
+        turnStartedAt = nil
+        asks.removeAll()
+        items.append(.note(id: UUID(), text: note))
+    }
+
+    /// Switches the model in the running session (`set_model`).
+    public func switchModel(to value: String) {
+        guard let connection, !isEnded else { return }
+        Task {
+            do {
+                let answer = try await connection.request({ ClaudeOutbound.setModel(id: $0, value) }, timeout: .seconds(20))
+                if answer.succeeded {
+                    chosenModel = value
+                    note("model:" + value)
+                } else {
+                    note("model-failed:" + value)
+                }
+            } catch {
+                note("model-failed:" + value)
+            }
+        }
+    }
+
+    /// Asks how full the context is (`get_context_usage`).
+    func refreshContext() {
+        guard let connection, !isEnded else { return }
+        Task {
+            guard let answer = try? await connection.request({ ClaudeOutbound.contextUsage(id: $0) }, timeout: .seconds(20)),
+                  answer.succeeded else { return }
+            let usage = ClaudeContextUsage(answer.body)
+            if usage.window > 0 { context = usage }
         }
     }
 
@@ -131,6 +217,7 @@ public final class ChatSession: Identifiable {
         unconfirmed.append(text)
         pendingTurns += 1
         state = .working
+        if turnStartedAt == nil { turnStartedAt = Date() }
         if title == folder.lastPathComponent {
             title = String(text.prefix(40))
             onRecord?()
@@ -223,6 +310,7 @@ public final class ChatSession: Identifiable {
                 items.append(.user(id: UUID(), text: text))
                 pendingTurns += 1
                 state = .working
+                if turnStartedAt == nil { turnStartedAt = Date() }
             }
         case .toolResults(let results, _):
             for result in results {
@@ -246,6 +334,8 @@ public final class ChatSession: Identifiable {
             if result.isError, !result.result.isEmpty { note(result.result) }
             if pendingTurns == 0, !isEnded {
                 state = .idle
+                turnStartedAt = nil
+                refreshContext()
                 onTurnFinished?(lastAnswer)
             }
         case .request(let request):
@@ -289,7 +379,7 @@ public final class ChatSession: Identifiable {
         }
     }
 
-    private func note(_ text: String) {
+    func note(_ text: String) {
         items.append(.note(id: UUID(), text: text))
     }
 

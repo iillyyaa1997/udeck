@@ -135,8 +135,17 @@ while True:
     if kind == "control_request":
         request = message.get("request", {})
         body = {}
-        if request.get("subtype") == "initialize":
-            body = {"commands": [], "models": [{"value": "claude-fake", "displayName": "Fake"}]}
+        subtype = request.get("subtype")
+        if subtype == "initialize":
+            body = {"commands": [], "models": [
+                {"value": "default", "displayName": "Default (recommended)", "resolvedModel": "claude-fake-1-0",
+                 "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
+                {"value": "fake", "displayName": "Fake 1.0", "resolvedModel": "claude-fake-1-0",
+                 "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
+                {"value": "quick", "displayName": "Quick 1.0", "resolvedModel": "claude-quick-1-0",
+                 "supportedEffortLevels": ["low", "medium", "high"]}]}
+        elif subtype == "get_context_usage":
+            body = {"totalTokens": 28000, "maxTokens": 200000, "percentage": 14, "model": "claude-fake-1-0"}
         out({"type": "control_response", "response": {"subtype": "success", "request_id": message.get("request_id"),
              "response": body}})
     elif kind == "user":
