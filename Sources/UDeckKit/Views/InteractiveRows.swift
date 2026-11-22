@@ -68,7 +68,9 @@ struct FeedRowView: View {
                 .padding(.horizontal, 10)
             }
             .background(RoundedRectangle(cornerRadius: 10).fill(theme.backing))
-            .frame(minHeight: 60, maxHeight: .infinity)
+            // It gives way first: a question or the field under it is never
+            // pushed out, nor the title line above.
+            .frame(minHeight: 24, maxHeight: .infinity)
             .onChange(of: entries.last.map { $0.id + String($0.text.count) + String($0.detail?.count ?? 0) }) {
                 proxy.scrollTo("feed-end", anchor: .bottom)
             }

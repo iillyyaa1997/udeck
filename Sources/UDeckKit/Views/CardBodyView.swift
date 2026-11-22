@@ -40,7 +40,7 @@ struct CardBodyView: View {
 
             ForEach(Array((skipsLeadingBar ? Array(card.rows.dropFirst()) : card.rows).enumerated()), id: \.offset) { _, row in
                 if case .feed = row {
-                    rowView(row).frame(maxHeight: .infinity)
+                    rowView(row).frame(maxHeight: .infinity).layoutPriority(-1)
                 } else {
                     rowView(row).fixedSize(horizontal: false, vertical: true)
                 }
