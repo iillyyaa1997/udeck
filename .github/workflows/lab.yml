@@ -119,6 +119,7 @@ jobs:
           mkdir prebuilt
           ditto .build/release/uDeck prebuilt/uDeck
           ditto .build/release/udeck-plugin prebuilt/udeck-plugin
+          ditto .build/release/udeck-agentd prebuilt/udeck-agentd
           ditto .build/release/Sparkle.framework prebuilt/Sparkle.framework
           for bundle in .build/release/*.bundle; do
             [ -e "$bundle" ] || continue

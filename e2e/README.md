@@ -2636,6 +2636,29 @@ row of the same table:
   window's **Reinstall** warning and a fork's branch on its row. Measured: 7 min 15 s in a
   Tart guest (20261016-205217Z), 3 min 8 s on a runner (run 38966347071).
 
+### The chat's helper
+
+`agents` drives `udeck-agentd`, the launchd login agent that owns the chat's
+agents (`Sources/udeck-agentd`, spec 66-llm-chat). There is no chat to drive
+yet, so uDeck looks at the helper itself when the lab writes
+`AgentHelperSelfTest` into its defaults: each launch registers the helper,
+connects to it over XPC, starts (or finds) a long `sleep` agent, has an agent
+list `~/Documents`, and appends one JSON line to
+`~/.udeck/agents/selftest.jsonl`.
+
+* `agents.survives-udeck-being-killed` — uDeck is killed with SIGKILL; the
+  agent is still alive, and the next uDeck finds it under the same helper with
+  the same pid. The `~/Documents` probe is reported, not judged: a lab guest
+  has no Full Disk Access to give, so the refusal is expected — what is held
+  to is that the probe ran and its answer reached uDeck.
+* `agents.turns-away-everyone-else` — the helper's own binary, run as a
+  client (`udeck-agentd hello`) by the same user in the same login session, is
+  refused: every message is checked against uDeck's code signature. And there
+  is no socket in `~/.udeck` to try instead.
+
+Both leave the machine as they found it: uDeck is launched once more with
+`AgentHelperUnregister`, which takes the helper's registration away.
+
 ## Reading the result
 
 One line per check, then a summary:

@@ -62,6 +62,11 @@
 # Contents/MacOS: a tool in MacOS is taken for the application itself — by
 # Bundle.main, which would hand it uDeck's Info.plist, and by macOS.
 #
+# Beside it, Contents/Helpers/udeck-agentd: the helper that owns the chat's
+# agents, so that they keep working while uDeck quits, crashes or updates.
+# uDeck registers it with SMAppService from the launch agent written below,
+# Contents/Library/LaunchAgents/<bundle id>.agentd.plist.
+#
 # Without --sign the bundle is ad-hoc signed. That is enough for the machine it
 # was built on and not enough for anyone else: macOS will refuse a downloaded
 # ad-hoc copy on first launch, and the person opening it has to right-click and
@@ -151,6 +156,10 @@ if [ -n "$PREBUILT" ] && [ ! -f "$PREBUILT/uDeck" ]; then
     echo "--prebuilt $PREBUILT has no uDeck in it" >&2
     exit 2
 fi
+if [ -n "$PREBUILT" ] && [ ! -f "$PREBUILT/udeck-agentd" ]; then
+    echo "--prebuilt $PREBUILT has no udeck-agentd in it" >&2
+    exit 2
+fi
 
 if [ "$CONFIG" = "debug" ]; then
     APP="$OUT/uDeck-debug.app"
@@ -165,6 +174,8 @@ fi
 # The command, built beside the application from the plugin format's package,
 # which the application's own package links by path.
 COMMAND="$(dirname "$BUILT")/udeck-plugin"
+# The helper that owns the chat's agents, a product of this package.
+AGENTD="$(dirname "$BUILT")/udeck-agentd"
 PLIST="Sources/uDeck/Support/Info.plist"
 VERSION="${SET_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")}"
 
@@ -174,9 +185,11 @@ if [ -n "$PREBUILT" ]; then
 elif [ "$CONFIG" = "debug" ]; then
     swift build
     swift build --product udeck-plugin
+    swift build --product udeck-agentd
 else
     swift build -c release
     swift build -c release --product udeck-plugin
+    swift build -c release --product udeck-agentd
 fi
 
 echo "==> Assembling $APP"
@@ -201,6 +214,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Helpers"
 cp "$BUILT" "$APP/Contents/MacOS/uDeck"
 cp "$COMMAND" "$APP/Contents/Helpers/udeck-plugin"
+cp "$AGENTD" "$APP/Contents/Helpers/udeck-agentd"
 cp "$PLIST" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
@@ -321,6 +335,36 @@ if [ -d "$(dirname "$BUILT")/Sparkle.framework" ]; then
     cp -R "$(dirname "$BUILT")/Sparkle.framework" "$APP/Contents/Frameworks/"
 fi
 
+# The helper's launch agent, for SMAppService.agent(plistName:). Written here,
+# after the identifier is final, because a debug build's helper is a helper of
+# its own: its label, and the socket it listens on, follow the bundle
+# identifier (HostPaths), so the release's and a debug build's never meet.
+#
+# MachServices: uDeck reaches it through XPC, and launchd starts it on demand
+# when uDeck connects — no process while nobody uses the chat; it leaves by
+# itself when idle, and after uDeck asks it to quit so that an updated copy
+# takes over. ExitTimeOut: at logout its agents get the time to end their turns
+# cleanly (the helper allows itself 25 s of it). Interactive: the agents it
+# starts build and test code for a person who is waiting, and a Background
+# job's children would be throttled with it. Aqua: only in a login session with
+# a screen, where uDeck itself runs.
+FINAL_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
+AGENT_LABEL="$FINAL_ID.agentd"
+mkdir -p "$APP/Contents/Library/LaunchAgents"
+AGENT_PLIST="$APP/Contents/Library/LaunchAgents/$AGENT_LABEL.plist"
+/usr/libexec/PlistBuddy \
+    -c "Add :Label string $AGENT_LABEL" \
+    -c "Add :BundleProgram string Contents/Helpers/udeck-agentd" \
+    -c "Add :AssociatedBundleIdentifiers array" \
+    -c "Add :AssociatedBundleIdentifiers:0 string $FINAL_ID" \
+    -c "Add :MachServices dict" \
+    -c "Add :MachServices:$AGENT_LABEL bool true" \
+    -c "Add :ExitTimeOut integer 30" \
+    -c "Add :ProcessType string Interactive" \
+    -c "Add :LimitLoadToSessionType string Aqua" \
+    "$AGENT_PLIST" >/dev/null
+plutil -lint "$AGENT_PLIST" >/dev/null
+
 echo "==> Signing with identity: $IDENTITY"
 
 # See the comment in the file itself. Scoped to ad-hoc so that a Developer ID
@@ -358,6 +402,13 @@ fi
 # the bundle seals a hash of it. Signed alone it is its own code, with its own
 # identifier, and runs through the link in ~/.local/bin as it does in place.
 codesign "${SIGN_FLAGS[@]}" "$APP/Contents/Helpers/udeck-plugin"
+# The helper too, under an identifier of its own: it is what Full Disk Access
+# is granted to and what launchd runs, and with a Developer ID that grant
+# outlives updates. It loads no one else's libraries, so it needs none of the
+# ad-hoc build's entitlements.
+AGENTD_FLAGS=(--force --options runtime --sign "$IDENTITY" --identifier "$AGENT_LABEL")
+[ "$IDENTITY" = "-" ] || AGENTD_FLAGS+=(--timestamp)
+codesign "${AGENTD_FLAGS[@]}" "$APP/Contents/Helpers/udeck-agentd"
 # Not `--deep`: it would re-sign the framework's contents in its own order and
 # undo the inside-out pass above. Apple documents `--deep` as unsuitable for
 # signing an application for distribution, and this is why.

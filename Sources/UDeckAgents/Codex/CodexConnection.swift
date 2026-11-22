@@ -14,7 +14,7 @@ public actor CodexConnection {
 
     public nonisolated let events: AsyncStream<CodexInbound>
     private let eventsContinuation: AsyncStream<CodexInbound>.Continuation
-    private let process: AgentProcess
+    private let process: any AgentChannel
     private var nextID = 0
     private var pending: [Int: CheckedContinuation<JSONValue, any Error>] = [:]
     private var reader: Task<Void, Never>?
@@ -23,8 +23,14 @@ public actor CodexConnection {
     public init(executable: URL, arguments: [String] = ["app-server"], environment: [String: String],
                 directory: URL) throws
     {
-        process = try AgentProcess(executable: executable, arguments: arguments, environment: environment,
-                                   directory: directory)
+        self.init(channel: try AgentProcess(executable: executable, arguments: arguments,
+                                            environment: environment, directory: directory))
+    }
+
+    /// Over an agent someone else started — the helper, which keeps it running
+    /// while uDeck restarts.
+    public init(channel: any AgentChannel) {
+        process = channel
         (events, eventsContinuation) = AsyncStream.makeStream(of: CodexInbound.self)
     }
 
@@ -131,6 +137,6 @@ public actor CodexConnection {
             return await group.next() ?? nil
         }
         if let exit { return exit }
-        return await process.terminate()
+        return await process.terminate(grace: .seconds(3))
     }
 }

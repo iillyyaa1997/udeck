@@ -12,23 +12,39 @@ import Foundation
 /// `AsyncStream`, and the stream finishes when stdout closes. Writing after the
 /// program exited throws instead of raising SIGPIPE in uDeck.
 ///
+/// Writes never block the caller: a program that stops reading its stdin fills
+/// the pipe, and a blocking write would then stall whoever wrote — the helper's
+/// whole actor, every session with it. They go through a queue of their own, in
+/// order, with closing stdin queued behind them, and past `maxBacklog` unsent
+/// bytes a write is refused instead.
+///
 /// `@unchecked Sendable`: `Process` and `FileHandle` are not marked Sendable, but
 /// the only calls made on them after start — write, close, terminate, the pid —
 /// are safe from any thread; everything mutable is behind `state`'s lock.
-public final class AgentProcess: @unchecked Sendable {
+public final class AgentProcess: AgentChannel, @unchecked Sendable {
     public struct Exit: Sendable, Equatable {
         public let status: Int32
         /// The last part of what the program wrote on stderr.
         public let stderrTail: String
+
+        public init(status: Int32, stderrTail: String) {
+            self.status = status
+            self.stderrTail = stderrTail
+        }
     }
 
     public enum Failure: Error, Equatable {
         case notRunning
         case cannotStart(String)
+        /// The program has not read what it was sent; more is refused.
+        case backlogged(bytes: Int)
     }
+
+    public static let maxBacklog = 64 * 1024 * 1024
 
     private let process: Process
     private let stdin: FileHandle
+    private let stdinQueue = DispatchQueue(label: "udeck.agent.stdin")
     private let state = Locked(State())
     public let lines: AsyncStream<LineFramer.Piece>
     private let linesContinuation: AsyncStream<LineFramer.Piece>.Continuation
@@ -39,6 +55,8 @@ public final class AgentProcess: @unchecked Sendable {
         var exit: Exit?
         var exitWaiters: [CheckedContinuation<Exit, Never>] = []
         var stdoutDone = false
+        var backlog = 0
+        var inputClosed = false
     }
 
     /// Starts `executable` with `arguments` in `directory`, with exactly
@@ -115,20 +133,32 @@ public final class AgentProcess: @unchecked Sendable {
 
     public var isRunning: Bool { state.withLock { $0.exit == nil } }
 
-    /// Writes one line (a newline is added).
+    /// Queues one line (a newline is added) for the program's stdin.
     public func write(line: String) throws {
-        guard isRunning else { throw Failure.notRunning }
-        do {
-            try stdin.write(contentsOf: Data((line + "\n").utf8))
-        } catch {
-            throw Failure.notRunning
+        let bytes = Data((line + "\n").utf8)
+        try state.withLock { state in
+            guard state.exit == nil, !state.inputClosed else { throw Failure.notRunning }
+            guard state.backlog + bytes.count <= Self.maxBacklog else { throw Failure.backlogged(bytes: state.backlog) }
+            state.backlog += bytes.count
+        }
+        let stdin = self.stdin, state = self.state
+        stdinQueue.async {
+            // A program that exited meanwhile: the write fails, SIGPIPE is
+            // ignored, and its exit says the rest.
+            try? stdin.write(contentsOf: bytes)
+            state.withLock { $0.backlog -= bytes.count }
         }
     }
 
-    /// Closes stdin: for both agents, the end of the conversation. They finish
-    /// what they are doing and exit.
+    /// Bytes written but not yet taken by the program's stdin.
+    public var backlog: Int { state.withLock { $0.backlog } }
+
+    /// Closes stdin once everything written before has gone: for both agents,
+    /// the end of the conversation. They finish what they are doing and exit.
     public func closeInput() {
-        try? stdin.close()
+        state.withLock { $0.inputClosed = true }
+        let stdin = self.stdin
+        stdinQueue.async { try? stdin.close() }
     }
 
     /// Asks the program to stop (SIGTERM), then kills it if it has not gone
@@ -155,6 +185,27 @@ public final class AgentProcess: @unchecked Sendable {
             if let done { continuation.resume(returning: done) }
         }
     }
+}
+
+/// An agent's stdio as the connections use it: lines out, lines in.
+///
+/// Either the agent runs right here (`AgentProcess`), or the helper runs it and
+/// this is the helper's socket standing in for its pipes (`HostedAgent`, in
+/// UDeckAgentHost). The protocol code above does not know which.
+public protocol AgentChannel: Sendable {
+    /// What the agent writes, line by line; finishes when its stdout closes.
+    /// One reader.
+    var lines: AsyncStream<LineFramer.Piece> { get }
+    /// Queues one line for the agent's stdin, in order with every other line
+    /// written; throws if the agent is known to be gone.
+    func write(line: String) throws
+    /// Closes the agent's stdin.
+    func closeInput()
+    /// SIGTERM, then SIGKILL after `grace`.
+    func terminate(grace: Duration) async -> AgentProcess.Exit
+    /// Waits for the agent to exit.
+    func exit() async -> AgentProcess.Exit
+    var processIdentifier: Int32 { get }
 }
 
 /// A value behind a lock, for state the pipe handlers (on their own queues)
