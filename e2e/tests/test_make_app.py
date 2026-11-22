@@ -41,9 +41,11 @@ def checkout(tmp_path):
     built = tmp_path / ".build" / "release"
     built.mkdir(parents=True)
     # Real Mach-Os, so that codesign has something it can actually sign: the
-    # application, and the udeck-plugin command that travels inside it.
+    # application, the udeck-plugin command and the chat's helper that travel
+    # inside it.
     shutil.copy("/bin/echo", built / "uDeck")
     shutil.copy("/bin/echo", built / "udeck-plugin")
+    shutil.copy("/bin/echo", built / "udeck-agentd")
     stubs = tmp_path / "stubs"
     stubs.mkdir()
     (stubs / "swift").write_text("#!/bin/sh\nexit 0\n")
@@ -130,6 +132,28 @@ def test_the_command_travels_inside_the_bundle_signed_with_it(checkout):
     assert signed < script.index('codesign "${SIGN_FLAGS[@]}" "$APP"\n'), "the command is signed before the bundle"
     assert 'codesign --verify --deep --strict --verbose=2 "$APP"' in script
     assert "satisfies its Designated Requirement" in done.stderr or "valid on disk" in done.stderr, done.stderr
+
+
+def test_the_helper_travels_inside_the_bundle_with_its_launch_agent(checkout):
+    """The chat's helper: Contents/Helpers/udeck-agentd, signed under the label its launch agent names, and the
+    launch agent itself — started on demand through its Mach service, never kept alive or run at load."""
+    done = make_app(checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99", "--zip")
+    assert done.returncode == 0, done.stdout + done.stderr
+    label = "place.unicorns.udeck.agentd"
+    with zipfile.ZipFile(checkout / "lab-builds" / "uDeck-9.9.9.zip") as archive:
+        info = archive.getinfo("uDeck.app/Contents/Helpers/udeck-agentd")
+        assert (info.external_attr >> 16) & 0o111
+        agent = plistlib.loads(archive.read(f"uDeck.app/Contents/Library/LaunchAgents/{label}.plist"))
+    assert agent["Label"] == label
+    assert agent["BundleProgram"] == "Contents/Helpers/udeck-agentd"
+    assert agent["MachServices"] == {label: True}
+    assert agent["AssociatedBundleIdentifiers"] == ["place.unicorns.udeck"]
+    assert "KeepAlive" not in agent and "RunAtLoad" not in agent
+    assert agent["ExitTimeOut"] >= 30
+    script = (checkout / "Scripts" / "make-app.sh").read_text()
+    signed = script.index('codesign "${AGENTD_FLAGS[@]}" "$APP/Contents/Helpers/udeck-agentd"')
+    assert signed < script.index('codesign "${SIGN_FLAGS[@]}" "$APP"\n'), "the helper is signed before the bundle"
+    assert '--identifier "$AGENT_LABEL"' in script
 
 
 def test_a_build_without_the_command_is_refused_and_leaves_no_bundle(checkout):
@@ -335,6 +359,7 @@ def test_prebuilt_binaries_are_assembled_without_compiling_anything(checkout, tm
     prebuilt.mkdir()
     shutil.copy("/bin/echo", prebuilt / "uDeck")
     shutil.copy("/bin/echo", prebuilt / "udeck-plugin")
+    shutil.copy("/bin/echo", prebuilt / "udeck-agentd")
     done = make_app(
         checkout, "--out", "lab-builds", "--version", "9.9.9", "--build", "99", "--zip", "--prebuilt", str(prebuilt),
     )  # fmt: skip
