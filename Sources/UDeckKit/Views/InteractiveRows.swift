@@ -387,6 +387,9 @@ struct BarRowView: View {
                 }
             }
         }
+        // Its items keep identifiers of their own: one set on the stack alone
+        // would be given to every control in it.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("row.bar.\(bar.id)")
     }
 }
