@@ -7984,3 +7984,56 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+from pathlib import Path
+
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+def check_agents_gallery(machine, check_dir, lab):
+    """The Agents plugin on the panel against the stand-in CLI — a lab tree's only, never committed."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin and the stand-in CLI")
+    _write(machine, SETTINGS, {"language": "ru"}, "uDeck in Russian")
+    _write(machine, PLUGIN_SETTINGS, {"values": {"agents": {"claude": fake}}}, "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 7, "height": 5}]}]}, "placing Agents")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.screenshot(check_dir, "agents asks to run")
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.chip.new", "waiting for the card", ui.PANEL, seconds=30)
+    machine.screenshot(check_dir, "agents card empty")
+    machine.click(*new.middle, "starting a new session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "choosing the project folder")
+    field = ui.wait_for(machine, "row.input.message", "waiting for the session", ui.PANEL, seconds=30)
+    machine.click(*field.middle, "focusing the message field")
+    ui.type_text(machine, "Look at the folder", "typing")
+    ui.press_return(machine, "sending")
+    ask = ui.wait_for(machine, "row.ask.allow:perm-b1", "waiting for the permission", ui.PANEL, seconds=40)
+    machine.sleep(1)
+    machine.screenshot(check_dir, "agents permission asked")
+    machine.click(*ask.middle, "allowing the command")
+    machine.sleep(3)
+    machine.screenshot(check_dir, "agents turn done")
+    field = ui.wait_for(machine, "row.input.message", "the field again", ui.PANEL, seconds=20)
+    machine.click(*field.middle, "focusing the field")
+    ui.type_text(machine, "Ask me a question", "typing")
+    ui.press_return(machine, "sending")
+    ui.wait_for(machine, "row.ask.opt:perm-q2:1", "waiting for the question", ui.PANEL, seconds=40)
+    machine.sleep(1)
+    machine.screenshot(check_dir, "agents question")
