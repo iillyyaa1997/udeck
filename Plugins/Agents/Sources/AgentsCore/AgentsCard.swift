@@ -13,7 +13,7 @@ import UDeckAgents
 @MainActor
 enum AgentsCard {
     static func card(for app: AgentsApp) -> JSONValue {
-        let waiting = app.sessions.filter { !$0.asks.isEmpty }.count
+        let waiting = app.conversations.filter { $0.current.waiting > 0 }.count
         var rows: [JSONValue] = [header(app)]
         if app.size.rows <= 2 {
             rows += tiny(app)
@@ -34,9 +34,9 @@ enum AgentsCard {
         if let session { title["tone"] = .string(tone(session, app)) }
         items.append(["title": .object(title)])
         items.append(["menu": sessionMenu(app)])
-        if session != nil { items.append(["tag": "Claude"]) }
-        let others = app.sessions.filter { $0.id != session?.id }
-        let waiting = others.filter { !$0.asks.isEmpty }.count
+        if let session { items.append(["tag": .string(session.active.name)]) }
+        let others = app.conversations.filter { $0.id != session?.id }
+        let waiting = others.filter { $0.current.waiting > 0 }.count
         if narrow(app) {
             if waiting > 0 { items.append(["badge": ["text": .string("\(waiting)"), "tone": "wait", "icon": "wait"]]) }
         } else if !others.isEmpty {
@@ -45,18 +45,24 @@ enum AgentsCard {
             items.append(["badge": ["text": .string(text), "tone": .string(waiting > 0 ? "wait" : "idle")]])
         }
         items.append(["spacer": true])
-        items.append(["button": ["id": "new", "icon": "plus", "note": .string(app.t("Новая сессия", "New session"))]])
+        items.append(["button": [
+            "id": "new", "icon": "plus", "note": .string(app.t("Потом выбор папки", "Then the folder")),
+            "options": .array(Provider.allCases.map { provider in
+                ["id": .string("new:" + provider.rawValue), "text": .string(provider.name),
+                 "group": .string(app.t("Новая сессия", "New session"))]
+            }),
+        ]])
         return ["bar": ["id": "head", "items": .array(items)]]
     }
 
     /// The sessions open here, then the saved ones to continue.
     static func sessionMenu(_ app: AgentsApp) -> JSONValue {
-        var options: [JSONValue] = app.sessions.map { session in
+        var options: [JSONValue] = app.conversations.map { session in
             ["id": .string("s:" + session.id.uuidString), "text": .string(session.title),
              "group": .string(app.t("Открытые", "Open")), "note": .string(stateWord(session, app)),
              "tone": .string(tone(session, app))]
         }
-        let open = Set(app.sessions.compactMap(\.sessionID))
+        let open = Set(app.conversations.compactMap { $0.claude?.sessionID })
         options += app.history.filter { !open.contains($0.sessionID) }.map { saved in
             ["id": .string("h:" + saved.sessionID), "text": .string(saved.title),
              "group": .string(app.t("История — продолжить", "History — continue")),
@@ -70,15 +76,15 @@ enum AgentsCard {
     // MARK: - The body
 
     static func tiny(_ app: AgentsApp) -> [JSONValue] {
-        guard !app.sessions.isEmpty else { return [["text": .string(app.t("Сессий нет", "No sessions"))]] }
-        return [["list": .array(app.sessions.map { session in
+        guard !app.conversations.isEmpty else { return [["text": .string(app.t("Сессий нет", "No sessions"))]] }
+        return [["list": .array(app.conversations.map { session in
             ["text": .string(session.title), "note": .string(stateWord(session, app)), "icon": .string(icon(session))]
         })]]
     }
 
     static func body(_ app: AgentsApp) -> [JSONValue] {
         guard let session = app.selected else {
-            return [["text": .string(app.sessions.isEmpty
+            return [["text": .string(app.conversations.isEmpty
                 ? app.t("Сессий нет. Новая — ＋ справа вверху, продолжить сохранённую — в меню рядом с названием",
                         "No sessions. Start one with ＋ at the top right, or continue a saved one from the menu by the name")
                 : app.t("Выберите сессию в меню рядом с названием", "Choose a session from the menu by the name"))]]
@@ -88,19 +94,21 @@ enum AgentsCard {
         // words stream in, and uDeck lays all of it out: the newest entries
         // only, and no entry longer than a screenful.
         let keep = app.size.rows <= 4 ? 30 : 60
-        rows.append(["feed": .array(session.items.suffix(keep).map { feedEntry($0, app) })])
+        rows.append(["feed": .array(session.feed.suffix(keep).map { feedEntry($0.item, app, label: $0.label) })])
         let held = app.heldBack[session.id] != nil
         if held { rows.append(["ask": heldRow(session, app)]) }
-        for ask in session.asks { rows.append(["ask": askRow(ask, app)]) }
+        switch session.current {
+        case .claude(let agent): for ask in agent.asks { rows.append(["ask": askRow(ask, app)]) }
+        case .codex(let agent): for ask in agent.asks { rows.append(["ask": codexAskRow(ask, app)]) }
+        }
         rows.append(["input": input(session, app, held: held)])
         return rows
     }
 
     /// What the session is doing, how full its context is, and where it works.
-    static func status(_ session: ChatSession, _ app: AgentsApp) -> JSONValue {
+    static func status(_ session: Conversation, _ app: AgentsApp) -> JSONValue {
         var items: [JSONValue] = [["badge": stateBadge(session, app)]]
-        if let context = session.context {
-            let percent = max(0, min(100, context.percent))
+        if let percent = session.current.contextPercent {
             let tone = percent >= 90 ? "crit" : percent >= 75 ? "warn" : "info"
             items.append(["badge": ["text": .string(app.t("контекст \(Int(percent.rounded()))%", "context \(Int(percent.rounded()))%")),
                                     "tone": .string(tone), "fill": .number(percent / 100)]])
@@ -111,19 +119,20 @@ enum AgentsCard {
         return ["bar": ["id": "status", "items": .array(items)]]
     }
 
-    static func stateBadge(_ session: ChatSession, _ app: AgentsApp) -> JSONValue {
+    static func stateBadge(_ session: Conversation, _ app: AgentsApp) -> JSONValue {
         if app.heldBack[session.id] != nil {
             return ["text": .string(app.t("Только просмотр", "View only")), "tone": "warn", "icon": "info"]
         }
-        if !session.asks.isEmpty {
-            let count = session.asks.count
+        let agent = session.current
+        if agent.waiting > 0 {
+            let count = agent.waiting
             let text = narrow(app) ? app.t("Ждёт тебя", "Waiting")
                 : app.t("Ждёт тебя · \(count) \(questions(count))", "Waiting for you · \(count) question\(count == 1 ? "" : "s")")
             return ["text": .string(text), "tone": "wait", "icon": "wait"]
         }
-        switch session.state {
+        switch agent.state {
         case .working:
-            let elapsed = session.turnStartedAt.map { clock(Date().timeIntervalSince($0)) } ?? ""
+            let elapsed = agent.turnStartedAt.map { clock(Date().timeIntervalSince($0)) } ?? ""
             let text = narrow(app) ? elapsed : app.t("Работает", "Working") + (elapsed.isEmpty ? "" : " " + elapsed)
             return ["text": .string(text.isEmpty ? app.t("Работает", "Working") : text), "tone": "run", "icon": "run"]
         case .starting:
@@ -136,92 +145,97 @@ enum AgentsCard {
     }
 
     /// The field, with the login, the model and the effort beside Send —
-    /// the model and the effort in one menu on a narrow card.
-    static func input(_ session: ChatSession, _ app: AgentsApp, held: Bool) -> JSONValue {
+    /// the model and the effort in one menu on a narrow card. The model menu
+    /// lists the other provider's models too: one of them takes the
+    /// conversation over.
+    static func input(_ session: Conversation, _ app: AgentsApp, held: Bool) -> JSONValue {
+        let agent = session.current
         let placeholder = held ? app.t("Только просмотр — сессия идёт в другом месте", "View only — it runs elsewhere")
-            : session.isEnded ? stateWord(session, app)
+            : agent.isEnded ? stateWord(session, app)
             : narrow(app) ? app.t("Сообщение", "Message")
             : app.t("Сообщение · Return отправляет, Shift+Return — новая строка",
                     "Message · Return sends, Shift+Return starts a new line")
         var input: [String: JSONValue] = [
             "id": "message",
             "placeholder": .string(placeholder),
-            "enabled": .bool(!session.isEnded && !held),
+            "enabled": .bool(!agent.isEnded && !held),
         ]
-        if session.state == .working { input["stop"] = "stop" }
-        guard !held, !session.isEnded else { return .object(input) }
+        if agent.state == .working { input["stop"] = "stop" }
+        guard !held, !agent.isEnded else { return .object(input) }
         var pickers: [JSONValue] = []
-        if app.accounts.count > 1 {
-            pickers.append(["id": "account", "text": .string(accountName(session.account, app)),
-                            "selected": .string(session.account.name),
+        if case .claude(let claude) = agent, app.accounts.count > 1 {
+            pickers.append(["id": "account", "text": .string(accountName(claude.account, app)),
+                            "selected": .string(claude.account.name),
                             "note": .string(app.t("Сессия переедет на эту учётку и продолжится там",
                                                   "The session moves to this login and continues there")),
                             "options": .array(app.accounts.map {
                                 ["id": .string($0.name), "text": .string(accountName($0, app))]
                             })])
         }
-        let models = session.models.filter { $0.value != "default" }
-        let efforts = effortLevels(session)
+        let models = modelOptions(session, app, prefix: narrow(app) ? "m:" : "")
+        let efforts = effortLevels(agent)
+        let current = agent.currentModel.map { agent.provider.rawValue + ":" + $0.value }
+        let modelNote = agent.provider == .claude
+            ? app.t("Модель Claude — сразу, в этой же сессии. Модель Codex — разговор перейдёт к нему",
+                    "A Claude model right away, in this session. A Codex model — the conversation moves to it")
+            : app.t("Модель Codex — со следующего сообщения. Модель Claude — разговор перейдёт к нему",
+                    "A Codex model from the next message. A Claude model — the conversation moves to it")
         if narrow(app) {
-            var options: [JSONValue] = models.map {
-                ["id": .string("m:" + $0.value), "text": .string($0.name), "group": .string(app.t("Модель", "Model"))]
-            }
+            var options = models
             options += efforts.map { level in
                 ["id": .string("e:" + level),
-                 "text": .string(effortName(level, app) + (level == session.effort ? "  ✓" : "")),
+                 "text": .string(effortName(level, app) + (level == agent.effort ? "  ✓" : "")),
                  "group": .string(app.t("Усилие", "Effort"))]
             }
             var menu: [String: JSONValue] = [
-                "id": "me", "text": .string(shortModel(session) + " · " + (session.effort.map { effortName($0, app) } ?? app.t("усилие", "effort"))),
-                "note": .string(app.t("Модель — сразу, усилие — со следующего сообщения",
-                                      "The model right away, the effort from the next message")),
-                "options": .array(options),
+                "id": "me", "text": .string(shortModel(agent) + " · " + (agent.effort.map { effortName($0, app) } ?? app.t("усилие", "effort"))),
+                "note": .string(modelNote), "options": .array(options),
             ]
-            if let current = currentModel(session) { menu["selected"] = .string("m:" + current.value) }
+            if let current { menu["selected"] = .string("m:" + current) }
             pickers.append(.object(menu))
         } else {
-            if !models.isEmpty {
-                var menu: [String: JSONValue] = [
-                    "id": "model", "icon": "model", "text": .string(modelName(session, app)),
-                    "note": .string(app.t("Сразу, в этой же сессии", "Right away, in this session")),
-                    "options": .array(models.map { ["id": .string($0.value), "text": .string($0.name)] }),
-                ]
-                if let current = currentModel(session) { menu["selected"] = .string(current.value) }
-                pickers.append(.object(menu))
-            }
+            var menu: [String: JSONValue] = [
+                "id": "model", "icon": "model", "text": .string(agent.modelName ?? app.t("модель", "model")),
+                "note": .string(modelNote), "options": .array(models),
+            ]
+            if let current { menu["selected"] = .string(current) }
+            pickers.append(.object(menu))
             var effort: [String: JSONValue] = [
                 "id": "effort", "icon": "effort",
-                "text": .string(session.effort.map { effortName($0, app) } ?? app.t("усилие", "effort")),
-                "note": .string(app.t("Со следующего сообщения: сессия продолжится с ним",
-                                      "From the next message: the session continues with it")),
+                "text": .string(agent.effort.map { effortName($0, app) } ?? app.t("усилие", "effort")),
+                "note": .string(agent.provider == .claude
+                    ? app.t("Со следующего сообщения: сессия продолжится с ним", "From the next message: the session continues with it")
+                    : app.t("Со следующего сообщения", "From the next message")),
                 "options": .array(efforts.map { ["id": .string($0), "text": .string(effortName($0, app))] }),
             ]
-            if let level = session.effort { effort["selected"] = .string(level) }
+            if let level = agent.effort { effort["selected"] = .string(level) }
             pickers.append(.object(effort))
         }
         input["pickers"] = .array(pickers)
         return .object(input)
     }
 
+    /// The active provider's models, then the other's, under its name with
+    /// what choosing one means.
+    static func modelOptions(_ session: Conversation, _ app: AgentsApp, prefix: String) -> [JSONValue] {
+        let active = session.active
+        var out: [JSONValue] = []
+        for provider in [active] + Provider.allCases.filter({ $0 != active }) {
+            let models = session.agents[provider]?.models.nonEmpty ?? app.knownModels[provider] ?? []
+            let group = provider == active ? provider.name
+                : provider.name + app.t(" — разговор перейдёт к нему", " — the conversation moves to it")
+            out += models.map { ["id": .string(prefix + provider.rawValue + ":" + $0.value), "text": .string($0.name),
+                                 "group": .string(group)] }
+        }
+        return out
+    }
+
     // MARK: - Words
 
-    static func currentModel(_ session: ChatSession) -> ModelChoice? {
-        let models = session.models.filter { $0.value != "default" }
-        if let chosen = session.chosenModel { return models.first { $0.value == chosen } }
-        guard let model = session.model else { return nil }
-        return models.first { $0.resolved == model || model.hasPrefix($0.resolved ?? "\u{0}") }
-    }
-
-    static func modelName(_ session: ChatSession, _ app: AgentsApp) -> String {
-        if let current = currentModel(session) { return current.name }
-        if let chosen = session.chosenModel { return chosen }
-        if let model = session.model { return prettyModel(model) }
-        return app.t("модель", "model")
-    }
-
-    /// The model's family alone, for a narrow card: «Opus».
-    static func shortModel(_ session: ChatSession) -> String {
-        let name = currentModel(session)?.name ?? session.model.map(prettyModel) ?? ""
+    /// The model's family alone, for a narrow card: «Opus», «GPT-6-Astra».
+    static func shortModel(_ agent: Agent) -> String {
+        let name = agent.modelName ?? ""
+        if agent.provider == .codex { return name }
         return name.split(separator: " ").first.map(String.init) ?? name
     }
 
@@ -233,18 +247,21 @@ enum AgentsCard {
         return parts[1].capitalized + (numbers.isEmpty ? "" : " " + numbers.joined(separator: "."))
     }
 
-    static func effortLevels(_ session: ChatSession) -> [String] {
-        let offered = currentModel(session)?.efforts ?? session.models.first(where: { $0.value == "default" })?.efforts ?? []
+    static func effortLevels(_ agent: Agent) -> [String] {
+        let offered = agent.currentModel?.efforts ?? agent.models.first?.efforts ?? []
         return offered.isEmpty ? ["low", "medium", "high", "xhigh", "max"] : offered
     }
 
     static func effortName(_ level: String, _ app: AgentsApp) -> String {
         switch level {
+        case "none": app.t("без размышлений", "no reasoning")
+        case "minimal": app.t("минимальное", "minimal")
         case "low": app.t("низкое", "low")
         case "medium": app.t("среднее", "medium")
         case "high": app.t("высокое", "high")
         case "xhigh": app.t("очень высокое", "very high")
         case "max": app.t("максимум", "max")
+        case "ultra": app.t("ультра", "ultra")
         default: level
         }
     }
@@ -279,7 +296,7 @@ enum AgentsCard {
     /// terminal, another window): resuming it here would make two writers of
     /// one conversation. It opens to be read, and continues here only when
     /// asked to.
-    static func heldRow(_ session: ChatSession, _ app: AgentsApp) -> JSONValue {
+    static func heldRow(_ session: Conversation, _ app: AgentsApp) -> JSONValue {
         let minutes = app.heldBack[session.id].map { max(0, Int(Date().timeIntervalSince($0) / 60)) } ?? 0
         let when = minutes == 0 ? app.t("только что", "just now") : app.t("\(minutes) мин назад", "\(minutes) min ago")
         return ["id": .string("held-" + session.id.uuidString),
@@ -298,12 +315,15 @@ enum AgentsCard {
         text.count <= limit ? text : String(text.prefix(limit)) + "…"
     }
 
-    static func feedEntry(_ item: FeedItem, _ app: AgentsApp) -> JSONValue {
+    static func feedEntry(_ item: FeedItem, _ app: AgentsApp, label: String? = nil) -> JSONValue {
         switch item {
         case .user(let id, let text):
             return ["id": .string(id.uuidString), "role": "user", "text": .string(clipped(text))]
         case .assistant(let id, let text, let streaming):
-            return ["id": .string(id.uuidString), "role": "assistant", "text": .string(clipped(text)), "streaming": .bool(streaming)]
+            var entry: [String: JSONValue] = ["id": .string(id.uuidString), "role": "assistant", "text": .string(clipped(text)),
+                                              "streaming": .bool(streaming)]
+            if let label { entry["label"] = .string(label) }
+            return .object(entry)
         case .tool(let id, let name, let summary, let result):
             var entry: [String: JSONValue] = ["id": .string("tool-" + id), "role": "tool", "name": .string(name),
                                               "text": .string(clipped(summary.isEmpty ? name : name + "  " + summary, 300))]
@@ -322,7 +342,35 @@ enum AgentsCard {
     /// The notes the session keeps by name, in the card's language.
     static func noteText(_ text: String, _ app: AgentsApp) -> String {
         let session = app.selected
-        func model(_ value: String) -> String { session?.models.first { $0.value == value }?.name ?? value }
+        func model(_ value: String) -> String {
+            for provider in Provider.allCases {
+                if let name = (session?.agents[provider]?.models ?? app.knownModels[provider] ?? []).first(where: { $0.value == value })?.name {
+                    return name
+                }
+            }
+            return value
+        }
+        if text.hasPrefix("handoff:") {
+            let parts = text.dropFirst(8).split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+            if parts.count == 5, let provider = Provider(rawValue: parts[0]) {
+                let tokens = (Int(parts[4]) ?? 0)
+                let amount = tokens >= 1000 ? app.t("около \(tokens / 1000) тыс. токенов", "about \(tokens / 1000)k tokens")
+                    : app.t("около \(tokens) токенов", "about \(tokens) tokens")
+                return app.t("Дальше отвечает ", "From here ") + provider.name + app.t("", " answers") + " · " + parts[1] + " — "
+                    + app.t("ему передан разговор: \(parts[2]) сообщ., итоги \(parts[3]) действий, ",
+                            "handed the conversation: \(parts[2]) messages, \(parts[3]) actions, ") + amount
+            }
+        }
+        if text.hasPrefix("model-next:") {
+            return app.t("Модель: ", "Model: ") + model(String(text.dropFirst(11))) + app.t(" — со следующего сообщения", " — from the next message")
+        }
+        if text.hasPrefix("effort-next:") {
+            return app.t("Усилие: ", "Effort: ") + effortName(String(text.dropFirst(12)), app) + app.t(" — со следующего сообщения", " — from the next message")
+        }
+        if text == "switch-busy" {
+            return app.t("Сменить провайдера можно, когда ход закончится и вопросов нет",
+                         "The provider can change once the turn is over and nothing waits")
+        }
         if text == "resumed" { return app.t("Продолжено из истории", "Resumed from history") }
         if text == "compacted" { return app.t("Здесь контекст был сжат", "The context was compacted here") }
         if text.hasPrefix("model:") { return app.t("Модель: ", "Model: ") + model(String(text.dropFirst(6))) }
@@ -362,10 +410,23 @@ enum AgentsCard {
                 "detail": .string(ask.summary), "buttons": .array(buttons)]
     }
 
-    static func stateWord(_ session: ChatSession, _ app: AgentsApp) -> String {
+    static func codexAskRow(_ ask: CodexAsk, _ app: AgentsApp) -> JSONValue {
+        let short = narrow(app)
+        return ["id": .string(ask.requestID),
+                "title": .string(app.t("Хочет выполнить ", "Wants to run ") + ask.title),
+                "detail": .string(ask.summary),
+                "buttons": [
+                    ["id": .string("allow:" + ask.requestID), "label": .string(app.t("Разрешить", "Allow")), "primary": true],
+                    ["id": .string("always:" + ask.requestID),
+                     "label": .string(short ? app.t("В сессии", "Session") : app.t("Разрешать в этой сессии", "Allow this session"))],
+                    ["id": .string("deny:" + ask.requestID), "label": .string(app.t("Отклонить", "Deny"))],
+                ]]
+    }
+
+    static func stateWord(_ session: Conversation, _ app: AgentsApp) -> String {
         if app.heldBack[session.id] != nil { return app.t("просмотр", "view only") }
-        if !session.asks.isEmpty { return app.t("ждёт", "waiting") }
-        switch session.state {
+        if session.current.waiting > 0 { return app.t("ждёт", "waiting") }
+        switch session.current.state {
         case .starting: return app.t("запускается", "starting")
         case .working: return app.t("работает", "working")
         case .idle: return app.t("готово", "ready")
@@ -373,22 +434,27 @@ enum AgentsCard {
         }
     }
 
-    static func tone(_ session: ChatSession, _ app: AgentsApp) -> String {
+    static func tone(_ session: Conversation, _ app: AgentsApp) -> String {
         if app.heldBack[session.id] != nil { return "warn" }
-        if !session.asks.isEmpty { return "wait" }
-        switch session.state {
+        if session.current.waiting > 0 { return "wait" }
+        switch session.current.state {
         case .working, .starting: return "run"
         case .idle: return "idle"
         case .ended: return "idle"
         }
     }
 
-    static func icon(_ session: ChatSession) -> String {
-        if !session.asks.isEmpty { return "wait" }
-        switch session.state {
+    static func icon(_ session: Conversation) -> String {
+        if session.current.waiting > 0 { return "wait" }
+        switch session.current.state {
         case .working, .starting: return "run"
         case .idle: return "idle"
         case .ended: return "done"
         }
     }
+}
+
+extension Array {
+    /// Nil when empty: `models.nonEmpty ?? fallback`.
+    var nonEmpty: [Element]? { isEmpty ? nil : self }
 }

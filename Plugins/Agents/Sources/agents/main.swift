@@ -30,7 +30,9 @@ func run() async {
         }
     } catch {}
     ticker.cancel()
-    for session in app.sessions { await session.close() }
+    for conversation in app.conversations {
+        for agent in conversation.agents.values { await agent.close() }
+    }
 }
 
 await run()

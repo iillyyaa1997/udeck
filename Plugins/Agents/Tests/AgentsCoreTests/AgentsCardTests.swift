@@ -51,16 +51,16 @@ struct AgentsCardTests {
         await app.handle(#"{"event":"hello","size":{"columns":8,"rows":6},"language":"ru"}"#)
         await app.handle(#"{"event":"select","id":"history"}"#)
         await app.handle(#"{"event":"select","id":"h:\#(id)"}"#)
-        let session = try #require(app.sessions.first)
+        let session = try #require(app.conversations.first)
         #expect(app.heldBack[session.id] != nil)
-        #expect(session.state == .starting, "nothing was started")
-        #expect(session.items.contains { if case .user(_, let text) = $0 { text == "look at it" } else { false } })
-        #expect(!session.items.contains { if case .user(_, let text) = $0 { text.contains("task-notification") } else { false } })
+        #expect(session.current.state == .starting, "nothing was started")
+        #expect(session.current.items.contains { if case .user(_, let text) = $0 { text == "look at it" } else { false } })
+        #expect(!session.current.items.contains { if case .user(_, let text) = $0 { text.contains("task-notification") } else { false } })
         let card = try #require(said.last)
         #expect(card.contains("Эта сессия сейчас идёт в другом месте"))
         #expect(card.contains(#""enabled":false"#))
         await app.handle(#"{"event":"press","id":"drop:\#(session.id.uuidString)"}"#)
-        #expect(app.sessions.isEmpty)
+        #expect(app.conversations.isEmpty)
         #expect(app.heldBack.isEmpty)
     }
 
@@ -115,12 +115,59 @@ struct AgentsCardTests {
         // Chosen from the menu it opens — written a moment ago, so to be read,
         // and nothing is started (a test must not run the real CLI).
         await app.handle(#"{"event":"choose","row":"head","menu":"session","option":"h:\#(id)"}"#)
-        let session = try #require(app.sessions.first)
+        let session = try #require(app.conversations.first)
         #expect(app.heldBack[session.id] != nil)
         #expect(app.selection == session.id)
         let opened = try #require(said.last.flatMap { JSONValue.line(Substring($0)) }?["card"]?["rows"]?.array)
         #expect(opened.first?["bar"]?["items"]?.array?.first?["title"]?["text"]?.string == "fix the build")
         #expect(opened.dropFirst().first?["bar"]?["id"]?.string == "status")
+    }
+
+    @MainActor
+    @Test("handed over: the new provider gets what happened since it last spoke, with the next message")
+    func handoffGap() {
+        let folder = URL(fileURLWithPath: "/tmp/work")
+        let claude = ChatSession(folder: folder, account: ChatAccount(name: "main", configDir: nil), history: [
+            .user(id: UUID(), text: "look at the build"),
+            .tool(id: "t1", name: "Bash", summary: "swift build", result: ToolOutcome(isError: true, preview: "error")),
+            .assistant(id: UUID(), text: "It fails on a missing import.", streaming: false),
+        ])
+        let conversation = Conversation(.claude(claude))
+        let codex = CodexSession(folder: folder)
+        conversation.switchTo(.codex, agent: .codex(codex), model: "GPT-6-Astra")
+        #expect(conversation.active == .codex)
+        #expect(conversation.providers == [.claude, .codex])
+        let feed = conversation.feed
+        #expect(feed.count == 4, "three items, then the handoff note")
+        guard case .note(_, let note) = feed[3].item else { Issue.record("no handoff note"); return }
+        #expect(note == "handoff:codex|GPT-6-Astra|2|1|\(Conversation.gap(since: nil, in: conversation.segments, agents: conversation.agents).text.count / 4)"
+                || note.hasPrefix("handoff:codex|GPT-6-Astra|2|1|"))
+        #expect(feed[2].label == "Claude", "once two have answered, an answer says who gave it")
+        let gap = Conversation.gap(since: nil, in: conversation.segments, agents: conversation.agents)
+        #expect(gap.text.contains("Person: look at the build"))
+        #expect(gap.text.contains("(Claude ran Bash swift build — it failed)"))
+        #expect(gap.text.contains("Claude: It fails on a missing import."))
+        #expect(gap.messages == 2)
+        #expect(gap.actions == 1)
+    }
+
+    @Test("Codex's models are read from model/list, hidden ones left out, with their effort levels")
+    func codexModels() {
+        let list: JSONValue = ["data": [
+            ["id": "gpt-6-astra", "model": "gpt-6-astra", "displayName": "GPT-6-Astra",
+             "supportedReasoningEfforts": [["reasoningEffort": "low"], ["reasoningEffort": "ultra"]]],
+            ["id": "secret", "displayName": "Hidden", "hidden": true],
+        ]]
+        let models = CodexSession.models(list)
+        #expect(models.map(\.value) == ["gpt-6-astra"])
+        #expect(models[0].efforts == ["low", "ultra"])
+    }
+
+    @Test("a Codex operation reads as one tool line")
+    func codexTool() {
+        #expect(CodexSession.tool(["id": "c1", "type": "commandExecution", "command": "ls -la"])?.name == "Shell")
+        #expect(CodexSession.tool(["id": "f1", "type": "fileChange", "changes": [["path": "/a/b/Notes.md"]]])?.summary == "Notes.md")
+        #expect(CodexSession.tool(["id": "m1", "type": "agentMessage"]) == nil)
     }
 }
 

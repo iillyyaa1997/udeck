@@ -5,14 +5,15 @@
   "api": 1,
   "minUDeck": "0.9.4",
   "kind": "resident",
-  "description": "Sessions of AI agents on a card: start one in a folder, see it work, answer its questions and permissions, continue any saved one. Runs your own Claude Code (Codex next).",
+  "description": "Sessions of AI agents on a card: start one in a folder, see it work, answer its questions and permissions, continue any saved one. Runs your own Claude Code and Codex, and moves a conversation between them.",
   "author": "uDeck",
   "run": [
     "./agents"
   ],
   "permissions": {
     "exec": [
-      "claude"
+      "claude",
+      "codex"
     ]
   },
   "window": {
@@ -26,6 +27,12 @@
       "key": "claude",
       "type": "string",
       "label": "claude to run (empty: the one your shell finds)",
+      "default": ""
+    },
+    {
+      "key": "codex",
+      "type": "string",
+      "label": "codex to run (empty: the one your shell finds)",
       "default": ""
     }
   ]

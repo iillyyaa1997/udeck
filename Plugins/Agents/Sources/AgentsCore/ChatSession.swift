@@ -213,11 +213,15 @@ public final class ChatSession: Identifiable {
     // MARK: - From the user
 
     /// Sends a message; while a turn runs it queues behind it, as in the terminal.
-    public func send(_ text: String) {
+    /// `payload`, when given, is what the agent is told instead of what the
+    /// feed shows — the conversation so far, when it has just been handed
+    /// over.
+    public func send(_ text: String, payload: String? = nil) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let connection, !isEnded else { return }
+        let told = payload ?? text
         items.append(.user(id: UUID(), text: text))
-        unconfirmed.append(text)
+        unconfirmed.append(told)
         pendingTurns += 1
         state = .working
         if turnStartedAt == nil { turnStartedAt = Date() }
@@ -227,7 +231,7 @@ public final class ChatSession: Identifiable {
         }
         Task {
             do {
-                try await connection.send(ClaudeOutbound.userMessage(text))
+                try await connection.send(ClaudeOutbound.userMessage(told))
             } catch {
                 self.note("not sent: the session has ended")
             }
