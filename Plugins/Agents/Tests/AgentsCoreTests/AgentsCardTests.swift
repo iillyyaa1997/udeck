@@ -17,6 +17,14 @@ struct AgentsCardTests {
             == .compacted)
     }
 
+    @Test("a string setting is read as the JSON uDeck passes")
+    func setting() {
+        #expect(AgentsApp.setting(#""""#) == "")
+        #expect(AgentsApp.setting(#""/opt/claude""#) == "/opt/claude")
+        #expect(AgentsApp.setting("/bare/path") == "/bare/path")
+        #expect(AgentsApp.setting(nil) == nil)
+    }
+
     @Test("a long text is cut, a short one is kept")
     func clipped() {
         #expect(AgentsCard.clipped("short") == "short")

@@ -181,7 +181,7 @@ public final class AgentsApp {
         var arguments = ClaudeOutbound.arguments(resume: resume, permissionMode: "default")
         var executable: URL
         // A path in the plugin's settings (the lab points it at a stand-in).
-        if let override = ProcessInfo.processInfo.environment["UDECK_SETTING_CLAUDE"], !override.isEmpty {
+        if let override = Self.setting(ProcessInfo.processInfo.environment["UDECK_SETTING_CLAUDE"]), !override.isEmpty {
             executable = URL(fileURLWithPath: override)
             if executable.pathExtension == "py" {
                 arguments.insert(override, at: 0)
@@ -222,4 +222,13 @@ public final class AgentsApp {
     }
 
     func t(_ russian: String, _ english: String) -> String { self.russian ? russian : english }
+
+    /// A string setting as uDeck passes it: JSON, so an empty one arrives as
+    /// `""`, not as nothing. Bare text (an older uDeck, a hand-run) is taken
+    /// as it is.
+    nonisolated static func setting(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        if let decoded = try? JSONDecoder().decode(String.self, from: Data(raw.utf8)) { return decoded }
+        return raw
+    }
 }
