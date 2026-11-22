@@ -412,7 +412,7 @@ enum BarStyle {
         case .history: "clock.arrow.circlepath"
         case .folder: "folder"
         case .model: "sparkle"
-        case .effort: "gauge.medium"
+        case .effort: "speedometer"
         case .account: "person.crop.circle"
         case .gear: "gearshape"
         case .run: "arrow.triangle.2.circlepath"
@@ -463,21 +463,19 @@ struct BadgeView: View {
 }
 
 /// A menu drawn as a small pill (or plain text and a chevron, on a bar):
-/// options grouped under their `group`, the selected one checked, the note
-/// last.
+/// pressing it opens its options in a popover — grouped under their `group`,
+/// the selected one checked, the note last. Drawn by uDeck rather than as a
+/// system menu, whose button drops the pill's look.
 struct MenuPill: View {
     let menu: CardMenu
     let row: String
     let theme: DeckTheme
     let send: (ResidentEvent) -> Void
     var plain = false
+    @State private var open = false
 
     var body: some View {
-        Menu {
-            MenuOptions(options: menu.options, selected: menu.selected, note: menu.note) {
-                send(.choose(row: row, menu: menu.id, option: $0))
-            }
-        } label: {
+        Button { open.toggle() } label: {
             HStack(spacing: 5) {
                 if let icon = menu.icon { BarStyle.icon(icon) }
                 if !menu.text.isEmpty { Text(menu.text).lineLimit(1).truncationMode(.tail) }
@@ -485,21 +483,30 @@ struct MenuPill: View {
             }
             .font(theme.smallFont)
             .foregroundStyle(plain ? theme.muted : theme.text)
-            .padding(.horizontal, plain ? 2 : 9).padding(.vertical, plain ? 2 : 4)
-            .background(Capsule().fill(plain ? Color.clear : theme.subtleFill))
+            .padding(.horizontal, plain ? 3 : 9).padding(.vertical, plain ? 2 : 4)
+            .background(Capsule().fill(plain ? Color.clear : (open ? theme.selection : theme.subtleFill)))
             .contentShape(Capsule())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
         .fixedSize(horizontal: plain, vertical: true)
         .accessibilityIdentifier("row.menu.\(menu.id)")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            OptionList(options: menu.options, selected: menu.selected, note: menu.note, prefix: "row.menu.\(menu.id)",
+                       theme: theme) { option in
+                open = false
+                send(.choose(row: row, menu: menu.id, option: option))
+            }
+        }
     }
 }
 
-struct MenuOptions: View {
+/// A menu's options as uDeck draws them in a popover.
+struct OptionList: View {
     let options: [MenuOption]
     let selected: String?
     let note: String?
+    let prefix: String
+    let theme: DeckTheme
     let choose: (String) -> Void
 
     var body: some View {
@@ -507,27 +514,62 @@ struct MenuOptions: View {
             if let last = result.last, last.0 == option.group { result[result.count - 1].1.append(option) }
             else { result.append((option.group, [option])) }
         }
-        ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
-            Section(group.0 ?? "") {
-                ForEach(group.1, id: \.id) { option in
-                    Button { choose(option.id) } label: {
-                        if option.id == selected {
-                            Label(title(option), systemImage: "checkmark")
-                        } else {
-                            Text(title(option))
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(groups.enumerated()), id: \.offset) { index, group in
+                    if let title = group.0, !title.isEmpty {
+                        Text(title).font(theme.smallFont).foregroundStyle(.secondary)
+                            .padding(.horizontal, 8).padding(.top, index == 0 ? 2 : 8).padding(.bottom, 2)
+                    }
+                    ForEach(group.1, id: \.id) { option in
+                        OptionRow(option: option, chosen: option.id == selected, theme: theme) { choose(option.id) }
+                            .accessibilityIdentifier("\(prefix).\(option.id)")
                     }
                 }
+                if let note, !note.isEmpty {
+                    Divider().padding(.vertical, 4)
+                    Text(note).font(theme.smallFont).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 8).padding(.bottom, 2)
+                }
             }
+            .padding(6)
         }
-        if let note, !note.isEmpty {
-            Divider()
-            Text(note)
-        }
+        .frame(minWidth: 200, maxWidth: 300, maxHeight: 420)
+        .fixedSize(horizontal: false, vertical: options.count < 14)
     }
+}
 
-    private func title(_ option: MenuOption) -> String {
-        option.note.map { option.text + " — " + $0 } ?? option.text
+private struct OptionRow: View {
+    let option: MenuOption
+    let chosen: Bool
+    let theme: DeckTheme
+    let choose: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: choose) {
+            HStack(spacing: 8) {
+                if let tone = option.tone {
+                    Circle().fill(BarStyle.color(tone, theme)).frame(width: 6, height: 6)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(option.text).lineLimit(1).truncationMode(.tail)
+                    if let note = option.note, !note.isEmpty {
+                        Text(note).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                if chosen { Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.accentColor) }
+            }
+            .font(.system(size: 13))
+            .padding(.horizontal, 8).padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 6).fill(chosen ? Color.accentColor.opacity(0.18)
+                : hovering ? Color.primary.opacity(0.08) : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 
@@ -536,24 +578,22 @@ struct BarButtonView: View {
     let row: String
     let theme: DeckTheme
     let send: (ResidentEvent) -> Void
+    @State private var open = false
 
     var body: some View {
-        if let options = button.options, !options.isEmpty {
-            Menu {
-                MenuOptions(options: options, selected: nil, note: button.note) {
-                    send(.choose(row: row, menu: button.id, option: $0))
+        Button {
+            if let options = button.options, !options.isEmpty { open.toggle() } else { send(.press(id: button.id)) }
+        } label: { face }
+            .buttonStyle(.plain)
+            .help(button.note ?? "")
+            .accessibilityIdentifier("row.button.\(button.id)")
+            .popover(isPresented: $open, arrowEdge: .bottom) {
+                OptionList(options: button.options ?? [], selected: nil, note: button.note,
+                           prefix: "row.button.\(button.id)", theme: theme) { option in
+                    open = false
+                    send(.choose(row: row, menu: button.id, option: option))
                 }
-            } label: { face }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .accessibilityIdentifier("row.button.\(button.id)")
-        } else {
-            Button { send(.press(id: button.id)) } label: { face }
-                .buttonStyle(.plain)
-                .help(button.note ?? "")
-                .accessibilityIdentifier("row.button.\(button.id)")
-        }
+            }
     }
 
     private var face: some View {
@@ -564,6 +604,7 @@ struct BarButtonView: View {
         .font(theme.smallFont)
         .foregroundStyle(theme.muted)
         .frame(minWidth: 24, minHeight: 24)
+        .background(RoundedRectangle(cornerRadius: 6).fill(open ? theme.subtleFill : Color.clear))
         .contentShape(Rectangle())
     }
 }
