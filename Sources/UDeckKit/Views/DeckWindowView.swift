@@ -37,11 +37,20 @@ struct DeckWindowView: View {
                 // frame, which is what an unconstrained stack does.
                 .layoutPriority(1)
 
-            ScrollView(.vertical) {
+            if presentation.card?.hasFeed == true, case .allowed = model.launchDecision(for: window.pluginID) {
+                // A conversation card: the feed scrolls inside, and what is
+                // under it — the question, the field to answer in — stays in
+                // view. Inside the window's own scroll a feed would be laid
+                // out whole and push the field out of sight.
                 body(for: presentation)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else {
+                ScrollView(.vertical) {
+                    body(for: presentation)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .scrollIndicators(.never)
             }
-            .scrollIndicators(.never)
         }
         .padding(theme.windowPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

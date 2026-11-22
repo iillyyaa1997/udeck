@@ -57,6 +57,15 @@ public struct DeckTheme: Sendable {
     public var panelTint: Color { Color(palette.panelTint) }
     public var windowFill: Color { Color(palette.windowFill) }
     public var recess: Color { Color(palette.recess) }
+    /// Under long running text (a feed): glass shows whatever is behind the
+    /// panel through it, and lines of text over other lines of text do not
+    /// read. Dark under light ink, light under dark ink.
+    public var backing: Color {
+        switch ink {
+        case .light: Color.black.opacity(0.62)
+        case .dark: Color.white.opacity(0.78)
+        }
+    }
     public var selection: Color { Color(palette.selection) }
     public var subtleFill: Color { Color(palette.subtleFill) }
     public var line: Color { Color(palette.line) }

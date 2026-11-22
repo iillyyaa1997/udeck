@@ -54,8 +54,10 @@ struct FeedRowView: View {
                         FeedEntryView(entry: entry, theme: theme).id(entry.id)
                     }
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
             }
+            .background(RoundedRectangle(cornerRadius: 8).fill(theme.backing))
             .frame(minHeight: 60, maxHeight: .infinity)
             .onChange(of: entries.last.map { $0.id + String($0.text.count) }) {
                 if let last = entries.last?.id { proxy.scrollTo(last, anchor: .bottom) }
@@ -187,5 +189,12 @@ struct InputRowView: View {
         guard !text.isEmpty else { return }
         draft = ""
         send(.submit(row: input.id, text: text))
+    }
+}
+
+extension Card {
+    /// Whether the card holds a conversation, which takes the window's room.
+    var hasFeed: Bool {
+        rows.contains { if case .feed = $0 { true } else { false } }
     }
 }

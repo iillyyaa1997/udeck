@@ -37,7 +37,11 @@ struct CardBodyView: View {
             }
 
             ForEach(Array(card.rows.enumerated()), id: \.offset) { _, row in
-                rowView(row)
+                if case .feed = row {
+                    rowView(row).frame(maxHeight: .infinity)
+                } else {
+                    rowView(row).fixedSize(horizontal: false, vertical: true)
+                }
             }
             .opacity(contentOpacity)
 
