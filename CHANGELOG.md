@@ -8,6 +8,23 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.2] — 2026-11-22
+
+A conversation on a card no longer slows the panel down.
+
+- **A card with a feed fills its window.** The feed takes the room and scrolls
+  inside; what is under it — a question, the field to answer in — stays in
+  view. Before, the whole card scrolled as one, the field could end up out of
+  sight under a long conversation, and every entry was laid out at once, which
+  is what made the panel slow.
+- **The feed reads over any glass.** It sits on a dense backing instead of
+  showing whatever is behind the panel through the text.
+- **A busy plugin cannot keep the panel busy.** What a resident plugin prints
+  is read off the main thread, and its card is redrawn at most ten times a
+  second, the newest one winning.
+- **Plugin authors:** resident plugins and the rows that take input are now
+  described in `docs/plugin-api.md`.
+
 ## [0.9.1] — 2026-11-22
 
 uDeck is only the board that holds plugins: the chat window 0.9.0 brought is
