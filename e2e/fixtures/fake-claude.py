@@ -17,6 +17,7 @@ import time
 DELAY = float(os.environ.get("FAKE_CLAUDE_DELAY", "0.02"))
 args = sys.argv[1:]
 SESSION = args[args.index("--resume") + 1] if "--resume" in args else "fake-session-0001"
+REPLAY = "--replay-user-messages" in args
 waiting = []  # lines read while waiting for a particular answer, handled afterwards
 counter = {"turn": 0}
 # What it says, in the language of the message it answers — as the real one does.
@@ -100,7 +101,7 @@ def turn(text):
         tool_call(tool_id, "AskUserQuestion", {"questions": questions})
         out({"type": "control_request", "request_id": "perm-q%d" % n, "request": {
             "subtype": "can_use_tool", "tool_name": "AskUserQuestion", "display_name": "AskUserQuestion",
-            "input": {"questions": questions}, "permission_suggestions": []}})
+            "input": {"questions": questions}, "permission_suggestions": [], "tool_use_id": tool_id}})
         reply = answer_to("perm-q%d" % n) or {}
         chosen = (reply.get("updatedInput") or {}).get("answers", {}).get(questions[0]["question"], "nothing")
         tool_result(tool_id, "User answered: %s" % chosen)
@@ -112,7 +113,7 @@ def turn(text):
         tool_call(tool_id, "Bash", {"command": command, "description": "List the folder"})
         out({"type": "control_request", "request_id": "perm-b%d" % n, "request": {
             "subtype": "can_use_tool", "tool_name": "Bash", "display_name": "Bash",
-            "input": {"command": command, "description": "List the folder"},
+            "input": {"command": command, "description": "List the folder"}, "tool_use_id": tool_id,
             "permission_suggestions": [{"type": "addRules", "rules": [{"toolName": "Bash", "ruleContent": "ls:*"}],
                                         "behavior": "allow", "destination": "localSettings"}]}})
         reply = answer_to("perm-b%d" % n) or {}
@@ -139,6 +140,8 @@ while True:
         out({"type": "control_response", "response": {"subtype": "success", "request_id": message.get("request_id"),
              "response": body}})
     elif kind == "user":
+        if REPLAY:
+            out({**message, "isReplay": True, "uuid": "echo-%d" % time.time_ns(), "session_id": SESSION})
         content = message.get("message", {}).get("content", [])
         text = " ".join(part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text")
         turn(text)

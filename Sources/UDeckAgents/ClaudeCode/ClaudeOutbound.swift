@@ -14,8 +14,11 @@ public enum ClaudeOutbound {
     {
         // --include-partial-messages: the answer arrives word by word, as in
         // the terminal, instead of one block at a time.
+        // --replay-user-messages: every user message comes back on stdout once
+        // the CLI has it — the receipt, and the user's side of the conversation
+        // in the helper's journal, so a uDeck that restarts reads it all back.
         var arguments = ["--output-format", "stream-json", "--verbose", "--input-format", "stream-json",
-                         "--permission-prompt-tool=stdio", "--include-partial-messages"]
+                         "--permission-prompt-tool=stdio", "--include-partial-messages", "--replay-user-messages"]
         if let model { arguments += ["--model", model] }
         if let sessionID { arguments += ["--resume", sessionID] }
         if let permissionMode { arguments += ["--permission-mode", permissionMode] }

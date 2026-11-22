@@ -11,7 +11,7 @@ let fakeClaude = URL(fileURLWithPath: #filePath).deletingLastPathComponent().del
 func startFake(resume: String? = nil, history: [FeedItem] = []) async throws -> (ChatSession, URL) {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent("udeck-chat-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    var arguments = [fakeClaude.path]
+    var arguments = [fakeClaude.path, "--replay-user-messages"]
     if let resume { arguments += ["--resume", resume] }
     let process = try AgentProcess(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: arguments,
                                    environment: ["PATH": "/usr/bin:/bin", "FAKE_CLAUDE_DELAY": "0"], directory: folder)
@@ -159,6 +159,30 @@ struct ChatSessionTests {
         session.answer(session.asks[0], with: .allow)
         try await until("the turn's end") { session.state == .idle }
         await session.close()
+    }
+
+    @Test("read back after a restart: the feed rebuilt from the replay, an answered ask gone, an open one still open")
+    func rebuiltFromReplay() async throws {
+        let session = ChatSession(folder: URL(fileURLWithPath: "/tmp"), account: ChatAccount(name: "main", configDir: nil))
+        let lines: [JSONValue] = [
+            ["type": "user", "isReplay": true, "message": ["role": "user", "content": [["type": "text", "text": "first"]]]],
+            ["type": "assistant", "message": ["id": "m1", "content": [["type": "text", "text": "On it."],
+                                                                      ["type": "tool_use", "id": "t1", "name": "Bash", "input": ["command": "ls"]]]]],
+            ["type": "control_request", "request_id": "p1", "request": ["subtype": "can_use_tool", "tool_name": "Bash",
+                                                                         "input": ["command": "ls"], "tool_use_id": "t1"]],
+            ["type": "user", "message": ["role": "user", "content": [["type": "tool_result", "tool_use_id": "t1", "content": "a"]]]],
+            ["type": "result", "subtype": "success", "is_error": false, "num_turns": 2, "result": "", "session_id": "s"],
+            ["type": "user", "isReplay": true, "message": ["role": "user", "content": [["type": "text", "text": "second"]]]],
+            ["type": "assistant", "message": ["id": "m2", "content": [["type": "tool_use", "id": "t2", "name": "Bash", "input": ["command": "rm x"]]]]],
+            ["type": "control_request", "request_id": "p2", "request": ["subtype": "can_use_tool", "tool_name": "Bash",
+                                                                         "input": ["command": "rm x"], "tool_use_id": "t2"]],
+        ]
+        for line in lines { session.receive(ClaudeInbound(line)) }
+        let users = session.items.compactMap { item -> String? in if case .user(_, let text) = item { return text }; return nil }
+        #expect(users == ["first", "second"])
+        #expect(session.asks.map(\.requestID) == ["p2"])
+        #expect(session.state == .working)
+        #expect(session.pendingTurns == 1)
     }
 
     @Test("a resumed session starts with its history and the resume noted, under its own id")

@@ -69,6 +69,11 @@ public final class ChatSession: Identifiable {
     @ObservationIgnored public var onAsk: ((ChatAsk) -> Void)?
     @ObservationIgnored public var onTurnFinished: ((String) -> Void)?
 
+    /// Messages sent from here that the CLI has not repeated back yet, oldest
+    /// first: an echo of one confirms it; any other echo is the conversation
+    /// read back after a restart.
+    @ObservationIgnored private var unconfirmed: [String] = []
+
     @ObservationIgnored private var connection: ClaudeCodeConnection?
     @ObservationIgnored private var reader: Task<Void, Never>?
     /// The streaming answer's item, while one is arriving.
@@ -85,8 +90,11 @@ public final class ChatSession: Identifiable {
         if resumeID != nil, !history.isEmpty { items.append(.note(id: UUID(), text: "resumed")) }
     }
 
-    /// Starts the agent over `channel` and says hello to it.
-    public func start(channel: any AgentChannel) async {
+    /// Starts the agent over `channel` and says hello to it — or, for an agent
+    /// already running (`reattached`, after uDeck restarted and the helper kept
+    /// it), only listens: the channel replays what the session said, and the
+    /// feed, the asks still open and the turn under way are rebuilt from it.
+    public func start(channel: any AgentChannel, reattached: Bool = false) async {
         let connection = ClaudeCodeConnection(channel: channel)
         self.connection = connection
         await connection.start()
@@ -96,6 +104,10 @@ public final class ChatSession: Identifiable {
                 self?.receive(event)
             }
             self?.ended()
+        }
+        if reattached {
+            if state == .starting { state = .idle }
+            return
         }
         do {
             _ = try await connection.request({ ClaudeOutbound.initialize(id: $0) }, timeout: .seconds(60))
@@ -112,6 +124,7 @@ public final class ChatSession: Identifiable {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let connection, !isEnded else { return }
         items.append(.user(id: UUID(), text: text))
+        unconfirmed.append(text)
         pendingTurns += 1
         state = .working
         if title == folder.lastPathComponent { title = String(text.prefix(40)) }
@@ -190,9 +203,21 @@ public final class ChatSession: Identifiable {
                     continue
                 }
             }
+        case .userEcho(let text, _):
+            if let index = unconfirmed.firstIndex(of: text) {
+                unconfirmed.remove(at: index)
+            } else {
+                // Not one of ours: the conversation read back from the journal.
+                finishStreaming(with: nil)
+                items.append(.user(id: UUID(), text: text))
+                pendingTurns += 1
+                state = .working
+            }
         case .toolResults(let results, _):
             for result in results {
-                guard let index = items.firstIndex(where: { $0.id == "tool-" + result.toolUseID }),
+                // A tool's result answers the ask about it, whoever answered.
+                asks.removeAll { $0.ask.toolUseID == result.toolUseID }
+                guard let index = items.lastIndex(where: { $0.id == "tool-" + result.toolUseID }),
                       case .tool(let id, let name, let summary, _) = items[index]
                 else { continue }
                 let preview = result.text.split(separator: "\n", omittingEmptySubsequences: false).prefix(6)
