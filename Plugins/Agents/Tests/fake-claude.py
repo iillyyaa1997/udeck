@@ -69,12 +69,12 @@ def say(text):
         out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0,
              "delta": {"type": "text_delta", "text": piece}}, "parent_tool_use_id": None, "session_id": SESSION})
         time.sleep(DELAY)
-    out({"type": "assistant", "message": {"id": "msg-%d" % time.time_ns(), "model": "claude-fake", "role": "assistant",
+    out({"type": "assistant", "message": {"id": "msg-%d" % time.time_ns(), "model": "claude-fake-1-0", "role": "assistant",
          "content": [{"type": "text", "text": text}]}, "parent_tool_use_id": None, "session_id": SESSION})
 
 
 def tool_call(tool_id, name, tool_input):
-    out({"type": "assistant", "message": {"id": "msg-%d" % time.time_ns(), "model": "claude-fake", "role": "assistant",
+    out({"type": "assistant", "message": {"id": "msg-%d" % time.time_ns(), "model": "claude-fake-1-0", "role": "assistant",
          "content": [{"type": "tool_use", "id": tool_id, "name": name, "input": tool_input}]},
          "parent_tool_use_id": None, "session_id": SESSION})
 
@@ -89,7 +89,7 @@ def turn(text):
     words = RU if russian else EN
     counter["turn"] += 1
     n = counter["turn"]
-    out({"type": "system", "subtype": "init", "session_id": SESSION, "model": "claude-fake",
+    out({"type": "system", "subtype": "init", "session_id": SESSION, "model": "claude-fake-1-0",
          "permissionMode": "default", "cwd": os.getcwd(), "claude_code_version": "2.1.330",
          "slash_commands": ["compact", "review"], "capabilities": []})
     if "question" in text.lower() or "вопрос" in text.lower():
