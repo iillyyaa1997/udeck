@@ -141,6 +141,23 @@ public enum CardReview {
                         text(value, "\(path).table.rows[\(line)][\(cell)]")
                     }
                 }
+            case .chips(let items):
+                if items.count > limits.listItems {
+                    said.append("\(path) has \(items.count) chips, and uDeck draws the first \(limits.listItems)")
+                }
+                for (item, chip) in items.prefix(limits.listItems).enumerated() { text(chip.text, "\(path).chips[\(item)].text") }
+            case .feed(let entries):
+                if entries.count > CardLimits.feedEntries {
+                    said.append("\(path) has \(entries.count) feed entries, and uDeck draws the newest \(CardLimits.feedEntries)")
+                }
+            case .ask(let ask):
+                text(ask.title, "\(path).ask.title")
+                text(ask.detail, "\(path).ask.detail")
+                if ask.buttons.count > limits.actions {
+                    said.append("\(path) has \(ask.buttons.count) buttons, and uDeck draws the first \(limits.actions)")
+                }
+            case .input(let input):
+                text(input.placeholder, "\(path).input.placeholder")
             case .log(let lines):
                 if lines.count > limits.logLines {
                     said.append("\(path) has \(lines.count) log lines, and uDeck draws the first \(limits.logLines)")

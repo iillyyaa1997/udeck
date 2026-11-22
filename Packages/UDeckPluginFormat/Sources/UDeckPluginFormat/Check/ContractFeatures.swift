@@ -163,6 +163,16 @@ public enum ContractFeatures {
         add(firstRelease, ["UDECK_API", "UDECK_PLUGIN_ID", "UDECK_PLUGIN_DIR", "UDECK_CACHE_DIR", "UDECK_APPEARANCE",
                            "UDECK_REFRESH_REASON", "UDECK_LANG", "UDECK_SETTING_*"].map { .environment($0) })
         add(firstRelease, ["UDECK_API", "UDECK_PLUGIN_ID", "UDECK_PLUGIN_DIR"].map { .actionEnvironment($0) })
+
+        // Resident plugins run, and their cards may take input: in the next
+        // release (dated when it gets its number).
+        let residentRelease = ContractRelease.next
+        add(residentRelease, ["chips", "feed", "ask", "input"].map { .row($0) })
+        add(residentRelease, ["id", "text", "state", "selected"].map { .rowField(row: "chips", field: $0) })
+        add(residentRelease, ["id", "role", "text", "detail", "streaming", "error"].map { .rowField(row: "feed", field: $0) })
+        add(residentRelease, ["id", "title", "detail", "buttons"].map { .rowField(row: "ask", field: $0) })
+        add(residentRelease, ["id", "label", "primary"].map { .rowField(row: "ask.buttons", field: $0) })
+        add(residentRelease, ["id", "placeholder", "enabled", "stop"].map { .rowField(row: "input", field: $0) })
         return registry
     }()
 

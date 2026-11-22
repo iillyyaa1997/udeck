@@ -34,6 +34,11 @@ struct ContractFeaturesTests {
         features += CardTable.CodingKeys.allCases.map { .rowField(row: "table", field: $0.stringValue) }
         features += CardTableColumn.CodingKeys.allCases.map { .rowField(row: "table.columns", field: $0.stringValue) }
         features += CanvasRow.CodingKeys.allCases.map { .rowField(row: "canvas", field: $0.stringValue) }
+        features += ChipItem.CodingKeys.allCases.map { .rowField(row: "chips", field: $0.stringValue) }
+        features += FeedEntry.CodingKeys.allCases.map { .rowField(row: "feed", field: $0.stringValue) }
+        features += AskRow.CodingKeys.allCases.map { .rowField(row: "ask", field: $0.stringValue) }
+        features += AskButton.CodingKeys.allCases.map { .rowField(row: "ask.buttons", field: $0.stringValue) }
+        features += InputRow.CodingKeys.allCases.map { .rowField(row: "input", field: $0.stringValue) }
         features += CardIcon.allCases.map { .listIcon($0.rawValue) }
         features += CardTableColumn.Alignment.allCases.map { .tableAlignment($0.rawValue) }
         features += CardAction.CodingKeys.allCases.map { .actionField($0.stringValue) }
@@ -86,16 +91,23 @@ struct ContractFeaturesTests {
     /// Measured with git for every release tag: all of it was in v0.1.0,
     /// except `minUDeck`, which came in 0.6.0 — and nothing is waiting for a
     /// release.
-    @Test("what the registry says now: v0.1.0 for everything, and minUDeck from 0.6.0")
+    @Test("what the registry says now: v0.1.0 for everything, minUDeck from 0.6.0, the interactive rows next")
     func whatItSaysNow() throws {
         let first = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
+        let interactive: Set<String> = ["chips", "feed", "ask", "ask.buttons", "input"]
         for (feature, release) in ContractFeatures.registry where feature != .manifestField("minUDeck") {
-            #expect(release == first, "\(feature)")
+            switch feature {
+            case .row(let row) where interactive.contains(row), .rowField(let row, _) where interactive.contains(row):
+                #expect(release == .next, "\(feature)")
+            default:
+                #expect(release == first, "\(feature)")
+            }
         }
         let read = ContractRelease.released(SemanticVersion(major: 0, minor: 6, patch: 0))
         #expect(ContractFeatures.minimumUDeckReadFrom == read)
         #expect(ContractFeatures.release(of: .manifestField("minUDeck")) == Optional(read))
-        #expect(!ContractFeatures.registry.values.contains(.next), "nothing is waiting for a release")
+        // The interactive rows wait for the next release; nothing else does.
+        #expect(ContractFeatures.registry.filter { $0.value == .next }.count == 25)
         // The release after this one, which has no number yet: after every
         // released one, and met only by a uDeck after this one.
         let current = try #require(SemanticVersion(UDeckRelease.version))

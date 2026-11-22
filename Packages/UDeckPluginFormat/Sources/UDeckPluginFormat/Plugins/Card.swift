@@ -151,6 +151,115 @@ public struct CanvasRow: Codable, Equatable, Sendable {
     }
 }
 
+/// One chip of a `chips` row: a choice among several things the plugin keeps
+/// (sessions, tabs, accounts), one of them selected. Pressing it sends the
+/// plugin a `select` event with its `id` (resident plugins only).
+public struct ChipItem: Codable, Equatable, Sendable {
+    public var id: String
+    public var text: String
+    public var state: CardState?
+    public var selected: Bool?
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, text, state, selected }
+
+    public init(id: String, text: String, state: CardState? = nil, selected: Bool? = nil) {
+        self.id = id
+        self.text = text
+        self.state = state
+        self.selected = selected
+    }
+}
+
+/// One entry of a `feed` row: a conversation or a running log, newest last.
+public struct FeedEntry: Codable, Equatable, Sendable {
+    public enum Role: String, Codable, Sendable, CaseIterable {
+        /// What the person said — drawn on the right.
+        case user
+        /// What the other side said — plain text with inline markdown.
+        case assistant
+        /// One line about an operation, which opens to `detail`.
+        case tool
+        /// A line about the conversation rather than in it.
+        case note
+    }
+
+    public var id: String
+    public var role: Role
+    public var text: String
+    /// What a `tool` entry opens to (its result).
+    public var detail: String?
+    /// Still arriving: drawn with a caret.
+    public var streaming: Bool?
+    /// The operation failed: drawn as an error.
+    public var error: Bool?
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, role, text, detail, streaming, error }
+
+    public init(id: String, role: Role, text: String, detail: String? = nil, streaming: Bool? = nil,
+                error: Bool? = nil)
+    {
+        self.id = id
+        self.role = role
+        self.text = text
+        self.detail = detail
+        self.streaming = streaming
+        self.error = error
+    }
+}
+
+/// One button of an `ask` row.
+public struct AskButton: Codable, Equatable, Sendable {
+    public var id: String
+    public var label: String
+    public var primary: Bool?
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, label, primary }
+
+    public init(id: String, label: String, primary: Bool? = nil) {
+        self.id = id
+        self.label = label
+        self.primary = primary
+    }
+}
+
+/// A question the plugin waits on the person for: a title, what it is about,
+/// and the answers as buttons. A press sends the plugin a `press` event with
+/// the button's `id` (resident plugins only).
+public struct AskRow: Codable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var detail: String?
+    public var buttons: [AskButton]
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, title, detail, buttons }
+
+    public init(id: String, title: String, detail: String? = nil, buttons: [AskButton]) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.buttons = buttons
+    }
+}
+
+/// A text field. Return sends the plugin a `submit` event with the row's `id`
+/// and the text; with `stop`, a Stop button (and Escape) sends a `press` event
+/// with that id (resident plugins only).
+public struct InputRow: Codable, Equatable, Sendable {
+    public var id: String
+    public var placeholder: String?
+    public var enabled: Bool?
+    public var stop: String?
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, placeholder, enabled, stop }
+
+    public init(id: String, placeholder: String? = nil, enabled: Bool? = nil, stop: String? = nil) {
+        self.id = id
+        self.placeholder = placeholder
+        self.enabled = enabled
+        self.stop = stop
+    }
+}
+
 /// One line of a card's body.
 public enum CardRow: Equatable, Sendable {
     case text(String)
@@ -161,6 +270,11 @@ public enum CardRow: Equatable, Sendable {
     case table(CardTable)
     case log([String])
     case canvas(CanvasRow)
+    /// Interactive rows, for resident plugins (0.9.1).
+    case chips([ChipItem])
+    case feed([FeedEntry])
+    case ask(AskRow)
+    case input(InputRow)
 
     /// A row this build does not understand.
     ///

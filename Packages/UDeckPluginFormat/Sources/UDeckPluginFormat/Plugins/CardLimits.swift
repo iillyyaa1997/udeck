@@ -60,6 +60,10 @@ public struct CardLimits: Sendable, Equatable {
     }
 
     public static let standard = CardLimits()
+
+    /// A `feed` keeps its newest entries, each up to this long.
+    static let feedEntries = 300
+    static let feedTextLength = 20_000
 }
 
 extension Card {
@@ -133,6 +137,37 @@ extension Card {
                     payload: canvas.payload.map(trim),
                     height: canvas.height
                 ))
+
+            case .chips(let items):
+                if items.count > limits.listItems { cut = true }
+                return .chips(items.prefix(limits.listItems).map {
+                    ChipItem(id: $0.id, text: trim($0.text), state: $0.state, selected: $0.selected)
+                })
+
+            case .feed(let entries):
+                // The newest are what matters; an answer may be long, so its
+                // own bound is far above a label's.
+                if entries.count > CardLimits.feedEntries { cut = true }
+                func long(_ text: String) -> String {
+                    guard text.count > CardLimits.feedTextLength else { return text }
+                    cut = true
+                    return String(text.prefix(CardLimits.feedTextLength)) + "…"
+                }
+                return .feed(entries.suffix(CardLimits.feedEntries).map {
+                    FeedEntry(id: $0.id, role: $0.role, text: long($0.text), detail: $0.detail.map(long),
+                              streaming: $0.streaming, error: $0.error)
+                })
+
+            case .ask(let ask):
+                if ask.buttons.count > limits.actions { cut = true }
+                return .ask(AskRow(id: ask.id, title: trim(ask.title), detail: ask.detail.map(trim),
+                                   buttons: ask.buttons.prefix(limits.actions).map {
+                                       AskButton(id: $0.id, label: trim($0.label), primary: $0.primary)
+                                   }))
+
+            case .input(let input):
+                return .input(InputRow(id: input.id, placeholder: input.placeholder.map(trim),
+                                       enabled: input.enabled, stop: input.stop))
 
             case .unsupported(let kind):
                 // The diagnostic is drawn, and a row's *name* comes straight
