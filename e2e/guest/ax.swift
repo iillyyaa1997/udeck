@@ -194,7 +194,13 @@ func rect(_ position: AnyObject?, _ size: AnyObject?) -> CGRect? {
 
 func json(_ rect: CGRect?) -> Any {
     guard let rect else { return NSNull() }
-    return [Double(rect.minX), Double(rect.minY), Double(rect.width), Double(rect.height)]
+    let numbers = [Double(rect.minX), Double(rect.minY), Double(rect.width), Double(rect.height)]
+    // JSONSerialization raises an Objective-C exception, which no `try` catches,
+    // on a number that is not finite — and an element can report one (a SwiftUI
+    // window's walk did, 2026-11-22: the helper died mid-walk). Such a frame is
+    // no frame.
+    guard numbers.allSatisfy(\.isFinite) else { return NSNull() }
+    return numbers
 }
 
 let walkedAttributes = [
