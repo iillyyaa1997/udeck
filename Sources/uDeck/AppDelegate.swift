@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mainMenuLanguage: Language?
     private var updater: SparkleUpdater!
     private var loginItem: SystemLoginItem!
+    private var chat: ChatWindowController!
 
     /// Watches macOS's own appearance, so the `system` theme source means what
     /// it says rather than "whatever macOS was set to when uDeck started".
@@ -83,6 +84,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // window appears, and written only when the operator asks. An application that
         // registers at launch silently puts back a login item the operator removed.
         self.loginItem = SystemLoginItem()
+        self.chat = ChatWindowController(strings: { [model] in model.strings })
+        openChatForTheLab()
         // The chat's helper is registered by the chat, when there is one; until
         // then only the lab asks for it (AgentHelperSelfTest).
         if AgentHelperSelfTest.isOn {
@@ -216,6 +219,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(withTitle: strings(.menuShowPanel), action: #selector(showPanel), keyEquivalent: "")
             .target = self
+        menu.addItem(withTitle: strings(.menuChat), action: #selector(openChat), keyEquivalent: "")
+            .target = self
         menu.addItem(withTitle: strings(.menuRefreshAll), action: #selector(refreshAll), keyEquivalent: "")
             .target = self
         menu.addItem(withTitle: strings(.menuSettings), action: #selector(openSettings), keyEquivalent: ",")
@@ -269,6 +274,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quitFromSettings() { NSApp.terminate(nil) }
 
     @objc private func showPanel() { controller.reveal() }
+    @objc private func openChat() { chat.show() }
+
+    /// The lab's screenshots of the chat: open it at launch, and start a
+    /// session in a folder with a first message (`ChatLabFolder`,
+    /// `ChatLabMessage`) against the lab's stand-in CLI (ChatClaudeExecutable).
+    /// Keys only the lab writes; without them nothing here runs.
+    private func openChatForTheLab() {
+        let defaults = UserDefaults.standard
+        guard defaults.bool(forKey: "ChatOpenAtLaunch") else { return }
+        chat.show()
+        if let folder = defaults.string(forKey: "ChatLabFolder"), !folder.isEmpty {
+            chat.store.newSession(in: URL(fileURLWithPath: folder, isDirectory: true),
+                                  message: defaults.string(forKey: "ChatLabMessage"))
+        }
+    }
     @objc private func refreshAll() { model.refreshAll(reason: .manual) }
     @objc private func openPlugins() { model.revealPluginsDirectory() }
     /// The status item's Settings…, through the panel as the gear goes: a click
