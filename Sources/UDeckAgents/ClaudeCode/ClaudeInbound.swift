@@ -18,6 +18,10 @@ public enum ClaudeInbound: Sendable, Equatable {
     /// A user-role message — for a client like uDeck, almost always the results
     /// of tool calls the assistant made.
     case toolResults([ClaudeToolResult], raw: JSONValue)
+    /// A user message the CLI repeats back (`--replay-user-messages`): proof
+    /// it took the message, and — read back from the helper's journal — the
+    /// user's side of the conversation.
+    case userEcho(text: String, raw: JSONValue)
     /// The end of one turn: Claude is waiting for the next message.
     case turnFinished(ClaudeTurnResult, raw: JSONValue)
     /// The account's limits, as the API reported them during the turn.
@@ -50,6 +54,12 @@ public enum ClaudeInbound: Sendable, Equatable {
             self = .assistant(ClaudeAssistantMessage(raw), raw: raw)
         case "stream_event":
             self = .partial(ClaudeStreamEvent(raw), raw: raw)
+        case "user" where raw["isReplay"]?.bool == true:
+            let content = raw["message"]?["content"]
+            let text = content?.string
+                ?? (content?.array ?? []).compactMap { $0["type"]?.string == "text" ? $0["text"]?.string : nil }
+                    .joined(separator: "\n")
+            self = .userEcho(text: text, raw: raw)
         case "user":
             self = .toolResults(ClaudeToolResult.all(in: raw), raw: raw)
         case "result":
@@ -269,6 +279,8 @@ public struct ClaudePermissionAsk: Sendable, Equatable {
     public let classifierApprovable: Bool?
     /// Rules the CLI proposes for "always allow"; echoed back when chosen.
     public let suggestions: [JSONValue]
+    /// The tool call the ask is about: its result, when it comes, answers it.
+    public let toolUseID: String?
 
     init(_ body: JSONValue) {
         toolName = body["tool_name"]?.string ?? ""
@@ -283,6 +295,7 @@ public struct ClaudePermissionAsk: Sendable, Equatable {
         matchedAskRule = body["matched_ask_rule"]
         classifierApprovable = body["classifier_approvable"]?.bool
         suggestions = body["permission_suggestions"]?.array ?? []
+        toolUseID = body["tool_use_id"]?.string
     }
 
     /// Whether a quick surface — the panel card, the mini window, a notification —

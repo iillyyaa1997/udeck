@@ -14,6 +14,8 @@ let package = Package(
         .executable(name: "uDeck", targets: ["uDeck"]),
         .library(name: "UDeckCore", targets: ["UDeckCore"]),
         .executable(name: "udeck-agentd", targets: ["udeck-agentd"]),
+        // For the Agents plugin (Plugins/Agents), which is built on it.
+        .library(name: "UDeckAgents", targets: ["UDeckAgents"]),
     ],
     dependencies: [
         // The project's first dependency, and it earns it: Sparkle is what a
