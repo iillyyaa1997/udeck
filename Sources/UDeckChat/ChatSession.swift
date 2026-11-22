@@ -50,7 +50,7 @@ public final class ChatSession: Identifiable {
         case ended(String)
     }
 
-    public let id = UUID()
+    public let id: UUID
     public let folder: URL
     public let account: ChatAccount
     public private(set) var state: State = .starting
@@ -68,6 +68,9 @@ public final class ChatSession: Identifiable {
     /// words): for a notification when nobody is looking.
     @ObservationIgnored public var onAsk: ((ChatAsk) -> Void)?
     @ObservationIgnored public var onTurnFinished: ((String) -> Void)?
+    /// Told when what identifies the session changes (Claude's id, the title),
+    /// for whoever keeps it on disk.
+    @ObservationIgnored public var onRecord: (() -> Void)?
 
     /// Messages sent from here that the CLI has not repeated back yet, oldest
     /// first: an echo of one confirms it; any other echo is the conversation
@@ -79,9 +82,10 @@ public final class ChatSession: Identifiable {
     /// The streaming answer's item, while one is arriving.
     @ObservationIgnored private var streamingIndex: Int?
 
-    public init(folder: URL, account: ChatAccount, title: String? = nil, resumeID: String? = nil,
+    public init(id: UUID = UUID(), folder: URL, account: ChatAccount, title: String? = nil, resumeID: String? = nil,
                 history: [FeedItem] = [])
     {
+        self.id = id
         self.folder = folder
         self.account = account
         self.title = title ?? folder.lastPathComponent
@@ -127,7 +131,10 @@ public final class ChatSession: Identifiable {
         unconfirmed.append(text)
         pendingTurns += 1
         state = .working
-        if title == folder.lastPathComponent { title = String(text.prefix(40)) }
+        if title == folder.lastPathComponent {
+            title = String(text.prefix(40))
+            onRecord?()
+        }
         Task {
             do {
                 try await connection.send(ClaudeOutbound.userMessage(text))
@@ -184,8 +191,10 @@ public final class ChatSession: Identifiable {
     func receive(_ event: ClaudeInbound) {
         switch event {
         case .sessionStarted(let info, _):
+            let changed = sessionID != info.sessionID
             sessionID = info.sessionID
             model = info.model
+            if changed { onRecord?() }
         case .partial(let event, _):
             guard event.parentToolUseID == nil, case .text(let delta)? = event.delta else { return }
             appendStreaming(delta)

@@ -124,9 +124,17 @@ public enum SessionHistory {
     }
 
     /// A saved session's conversation as feed items, for the feed of a resume.
-    public static func feed(of transcript: ClaudeTranscript, limit: Int = 400) -> [FeedItem] {
+    /// With `before`, only what was said before then: for a session the helper
+    /// kept running, the run it journals replays the rest.
+    public static func feed(of transcript: ClaudeTranscript, before: Date? = nil, limit: Int = 400) -> [FeedItem] {
         var items: [FeedItem] = []
         for entry in transcript.entries {
+            if let before {
+                let at: Date? = switch entry {
+                case .userText(_, let at), .assistant(_, let at), .toolResults(_, let at): at
+                }
+                if let at, at >= before { break }
+            }
             switch entry {
             case .userText(let text, _):
                 items.append(.user(id: UUID(), text: text))

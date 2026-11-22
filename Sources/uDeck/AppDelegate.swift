@@ -104,6 +104,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         updater.notifier.onOpenChat = { [weak self] id in self?.chat.show(sessionWithID: id) }
+        // The chat's agents live in the helper once it is registered; uDeck
+        // takes back at launch whatever it kept running meanwhile, so an ask
+        // that came while uDeck was away still notifies.
+        chat.onFirstShow = { [weak self] in self?.useTheHelper(register: true) }
+        if agentHelper.status == .enabled { useTheHelper(register: false) }
         openChatForTheLab()
         // The chat's helper is registered by the chat, when there is one; until
         // then only the lab asks for it (AgentHelperSelfTest).
@@ -294,6 +299,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showPanel() { controller.reveal() }
     @objc private func openChat() { chat.show() }
+
+    private lazy var agentHelper = SystemAgentHelper()
+    private var usingTheHelper = false
+
+    /// Hands the chat's agents to `udeck-agentd` — registering it first when
+    /// asked (the first time the chat is opened) — and takes back the sessions
+    /// it kept. If the helper cannot be had (macOS wants approval in Login
+    /// Items, an ad-hoc copy without one), agents run in uDeck as before.
+    private func useTheHelper(register: Bool) {
+        guard !usingTheHelper else { return }
+        usingTheHelper = true
+        let helper = agentHelper
+        let store = chat.store
+        store.preparing = Task { @MainActor in
+            if register {
+                do {
+                    try helper.registerIfNeeded()
+                } catch {
+                    DeckLog.panel.notice("chat: the helper could not be registered: \(String(describing: error), privacy: .public)")
+                }
+            }
+            guard helper.status == .enabled else {
+                DeckLog.panel.notice("chat: the helper is \(SystemAgentHelper.describe(helper.status), privacy: .public); agents run in uDeck")
+                usingTheHelper = false
+                return
+            }
+            store.agents = HelperAgents(connect: { try await helper.connect().0 })
+            await store.restore()
+        }
+    }
 
     /// The lab's screenshots of the chat: open it at launch, and start a
     /// session in a folder with a first message (`ChatLabFolder`,

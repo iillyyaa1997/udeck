@@ -1,14 +1,16 @@
 import Foundation
 import Observation
+import UDeckAgentHost
 import UDeckAgents
 import UDeckChat
 
 /// The chat window's state: the sessions open in it, the saved ones it can
 /// resume, the accounts it can start under.
 ///
-/// Sessions run here, in uDeck's process, for now: closing uDeck ends them the
-/// way closing a terminal does, and each is resumed by its id from History. The
-/// helper (`udeck-agentd`), which keeps them running, comes next.
+/// Where sessions run is `agents`: the helper (`udeck-agentd`), which keeps
+/// them running while uDeck is away and gives them back when it returns
+/// (`restore`), or uDeck's own process, where they end with it as a
+/// terminal's do and are resumed from History.
 @MainActor
 @Observable
 public final class ChatStore {
@@ -26,6 +28,13 @@ public final class ChatStore {
 
     @ObservationIgnored let launcher: ChatLauncher
     @ObservationIgnored private let home: URL
+    /// Where agents run; the app sets the helper's once it is registered.
+    @ObservationIgnored public var agents: any ChatAgents = LocalAgents()
+    /// While the app is settling where agents run (registering the helper),
+    /// new sessions wait for it, so none starts in the wrong place.
+    @ObservationIgnored public var preparing: Task<Void, Never>?
+    @ObservationIgnored private var index: ChatIndex
+    @ObservationIgnored private var restored = false
 
     public init(home: URL = ChatLauncher.realHome) {
         self.home = home
@@ -33,6 +42,50 @@ public final class ChatStore {
         self.accounts = accounts
         account = accounts[0]
         launcher = ChatLauncher(home: home)
+        index = ChatIndex.load(home: home)
+    }
+
+    /// Takes back the sessions the helper kept running while uDeck was away:
+    /// each drawn again from its transcript up to its run's start and the
+    /// helper's journal from there — the feed, the turn under way, the asks
+    /// still open. Index entries whose agent is gone are dropped: those are
+    /// resumed from History like any saved session. Once per launch.
+    public func restore() async {
+        guard !restored else { return }
+        restored = true
+        let survivors = await agents.survivors()
+        var kept = ChatIndex()
+        for entry in index.entries {
+            guard let survivor = survivors.first(where: { $0.session == entry.id }),
+                  let id = UUID(uuidString: entry.id),
+                  !sessions.contains(where: { $0.id == id })
+            else { continue }
+            kept.upsert(entry)
+            let account = accounts.first { $0.name == entry.account } ?? accounts[0]
+            var history: [FeedItem] = []
+            if let claude = entry.claudeSessionID,
+               let file = SessionHistory.transcript(ofSession: claude, config: account.folder(home: home))
+            {
+                let started = survivor.startedAt
+                history = await Task.detached { () -> [FeedItem] in
+                    guard let transcript = try? ClaudeTranscript(url: file) else { return [] }
+                    return SessionHistory.feed(of: transcript, before: started)
+                }.value
+            }
+            let session = ChatSession(id: id, folder: URL(fileURLWithPath: entry.folder, isDirectory: true),
+                                      account: account, title: entry.title, resumeID: entry.claudeSessionID,
+                                      history: history)
+            watch(session)
+            sessions.append(session)
+            if selection == nil { selection = session.id }
+            do {
+                await session.start(channel: try await agents.attach(entry.id), reattached: true)
+            } catch {
+                session.fail("could not reach the session in udeck-agentd: \(error)")
+            }
+        }
+        index = kept
+        index.save(home: home)
     }
 
     public var selected: ChatSession? { sessions.first { $0.id == selection } }
@@ -46,7 +99,8 @@ public final class ChatStore {
         sessions.append(session)
         selection = session.id
         Task {
-            await launcher.start(session, resume: nil)
+            await preparing?.value
+            await launcher.start(session, resume: nil, agents: agents)
             if let message, !message.isEmpty { session.send(message) }
         }
         return session
@@ -72,7 +126,8 @@ public final class ChatStore {
             watch(session)
             sessions.append(session)
             selection = session.id
-            await launcher.start(session, resume: saved.sessionID)
+            await preparing?.value
+            await launcher.start(session, resume: saved.sessionID, agents: agents)
         }
     }
 
@@ -81,6 +136,11 @@ public final class ChatStore {
     }
 
     private func watch(_ session: ChatSession) {
+        remember(session)
+        session.onRecord = { [weak self, weak session] in
+            guard let self, let session else { return }
+            remember(session)
+        }
         session.onAsk = { [weak self, weak session] ask in
             guard let self, let session else { return }
             onAttention?(session, .ask(ask))
@@ -91,7 +151,18 @@ public final class ChatStore {
         }
     }
 
+    /// What it takes to find the session again after a restart.
+    private func remember(_ session: ChatSession) {
+        guard agents.keepsAgentsAlive || index.entries.contains(where: { $0.id == session.id.uuidString }) else { return }
+        index.upsert(ChatIndex.Entry(id: session.id.uuidString, folder: session.folder.path,
+                                     account: session.account.name, title: session.title,
+                                     claudeSessionID: session.sessionID))
+        index.save(home: home)
+    }
+
     public func close(_ session: ChatSession) {
+        index.remove(session.id.uuidString)
+        index.save(home: home)
         sessions.removeAll { $0.id == session.id }
         if selection == session.id { selection = sessions.last?.id }
         Task { await session.close() }
@@ -154,7 +225,7 @@ public final class ChatLauncher {
         return captured
     }
 
-    public func start(_ session: ChatSession, resume: String?) async {
+    public func start(_ session: ChatSession, resume: String?, agents: any ChatAgents) async {
         let environment = session.account.environment(from: await shellEnvironment())
         var executable: URL
         var arguments = ClaudeOutbound.arguments(resume: resume, permissionMode: "default")
@@ -170,10 +241,14 @@ public final class ChatLauncher {
             session.fail("claude was not found in your shell's PATH")
             return
         }
+        // At logout or when the helper stops, the agent gets the interrupt
+        // first, so a turn ends cleanly and its transcript is whole.
+        let stopLine = try? ClaudeOutbound.interrupt(id: "udeck-stop").encodedLine()
+        let spec = SpawnSpec(session: session.id.uuidString, executable: executable.path, arguments: arguments,
+                             environment: environment, directory: session.folder.path, stopLine: stopLine)
         do {
-            let process = try AgentProcess(executable: executable, arguments: arguments, environment: environment,
-                                           directory: session.folder)
-            await session.start(channel: process)
+            let channel = try await agents.spawn(spec)
+            await session.start(channel: channel)
         } catch {
             session.fail("could not start claude: \(error)")
         }
