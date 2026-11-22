@@ -386,6 +386,10 @@ echo "==> Signing with identity: $IDENTITY"
 SIGN_FLAGS=(--force --options runtime --sign "$IDENTITY")
 if [ "$IDENTITY" = "-" ]; then
     SIGN_FLAGS+=(--entitlements Scripts/adhoc.entitlements)
+else
+    # Notarisation refuses a Developer ID signature without a secure timestamp
+    # from Apple's server. An ad-hoc signature cannot carry one.
+    SIGN_FLAGS+=(--timestamp)
 fi
 # The hardened runtime is enabled now rather than later: it is what
 # notarisation will require, and finding out that something in the app is
@@ -405,7 +409,25 @@ if [ -d "$SPARKLE" ]; then
     # the version directory, then the framework — because signing a bundle
     # seals a hash of what is inside it, and anything signed afterwards
     # invalidates that seal.
-    for helper in "$SPARKLE/Versions/B/XPCServices/"*.xpc "$SPARKLE/Versions/B/Updater.app"; do
+    #
+    # The order and the pieces are Sparkle's own, from its documentation on
+    # re-signing it for distribution: the Installer and Downloader services,
+    # Autoupdate, Updater.app, then the framework. Autoupdate is a tool of its
+    # own inside the version directory, so signing the directory does not reach
+    # it, and notarisation looks at every executable in the bundle. The
+    # Downloader keeps the entitlements Sparkle gave it (Sparkle 2.6 and later
+    # ship it with them); the ad-hoc entitlements are this application's, not
+    # its, so they are not added there.
+    for helper in "$SPARKLE/Versions/B/XPCServices/"*.xpc; do
+        [ -e "$helper" ] || continue
+        if [ "$(basename "$helper")" = "Downloader.xpc" ]; then
+            codesign --force --options runtime --sign "$IDENTITY" --preserve-metadata=entitlements \
+                $([ "$IDENTITY" = "-" ] || echo --timestamp) "$helper"
+        else
+            codesign "${SIGN_FLAGS[@]}" "$helper"
+        fi
+    done
+    for helper in "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app"; do
         [ -e "$helper" ] || continue
         codesign "${SIGN_FLAGS[@]}" "$helper"
     done
