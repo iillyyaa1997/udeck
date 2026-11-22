@@ -3,8 +3,7 @@ import Testing
 @testable import UDeckPluginFormat
 
 /// Bars, menus, badges, an input with menus, and the `choose` event: what a
-/// resident plugin's card may say about itself beyond a feed (the release
-/// after 0.9.3).
+/// resident plugin's card may say about itself beyond a feed (0.9.4).
 @Suite("Bars and menus")
 struct BarRowTests {
     static let header = #"""
@@ -120,6 +119,6 @@ struct BarRowTests {
         #expect(used.contains(.rowField(row: "feed", field: "label")))
         #expect(used.contains(.tone("wait")))
         #expect(used.contains(.barIcon("plus")))
-        #expect(ContractFeatures.release(of: .row("bar")) == .next)
+        #expect(ContractFeatures.release(of: .row("bar")) == .released(SemanticVersion(major: 0, minor: 9, patch: 4)))
     }
 }
