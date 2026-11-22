@@ -52,6 +52,7 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
 import json
 import re
 import shlex
@@ -7984,3 +7985,155 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+def _ids(machine, step):
+    """The identifiers on the panel, without the role the walk puts before each: `AXButton [id]` → `id`."""
+    return [i.split("[", 1)[1].rstrip("]") if "[" in i else i for i in ui.identifiers(machine, step, ui.PANEL)]
+
+
+def _pick(machine, check_dir, identifier, step):
+    """An option of an open popover, by its identifier; what is there instead goes into the shot's name."""
+    try:
+        option = ui.wait_for(machine, identifier, step, ui.PANEL, seconds=8)
+        machine.click(*option.middle, step)
+    except Exception as error:  # noqa: BLE001 — a lab tree's gallery: say it and go on
+        print("popover option not found:", identifier, str(error)[-600:])
+        ui.ask(machine, 'tell application "System Events" to key code 53', "closing the popover", seconds=10)
+
+
+def check_agents_gallery(machine, check_dir, lab):
+    """The Agents plugin on the panel against the stand-in CLI — a lab tree's only, never committed."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    fake_codex = f"{home}/lab-chat/fake-codex.py"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && cp {root}/Tests/fake-codex.py {shlex.quote(fake_codex)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin and the stand-in CLI")
+    _write(machine, SETTINGS, {"language": "ru"}, "uDeck in Russian")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake, "codex": fake_codex}}}, "pointing Agents at the stand-in")
+    # A saved session written a moment ago: History opens it to be read.
+    saved = str(uuid.uuid4())
+    lines = [
+        {"type": "user", "sessionId": saved, "cwd": project, "message": {"role": "user", "content": "Fix the release notes"}, "timestamp": "2026-11-22T10:00:00Z"},
+        {"type": "assistant", "sessionId": saved, "message": {"role": "assistant", "content": [{"type": "text", "text": "Done: the notes now say what changed for the person."}]}, "timestamp": "2026-11-22T10:00:05Z"},
+        {"type": "user", "sessionId": saved, "cwd": project, "message": {"role": "user", "content": "<task-notification>\n<task-id>b1</task-id>\n</task-notification>"}, "timestamp": "2026-11-22T10:01:00Z"},
+        {"type": "last-prompt", "lastPrompt": "Fix the release notes"},
+    ]
+    projects = f"{home}/.claude/projects/-lab-work"
+    machine.ssh.run(f"mkdir -p {shlex.quote(projects)} && printf %s {shlex.quote(chr(10).join(json.dumps(l) for l in lines) + chr(10))} > {shlex.quote(projects)}/{saved}.jsonl",
+                    "writing a saved session")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 7, "height": 5}]}]}, "placing Agents")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.screenshot(check_dir, "agents asks to run")
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=30)
+    machine.sleep(1)
+    machine.screenshot(check_dir, "agents card empty")
+    machine.click(*new.middle, "opening the new-session menu")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "agents new menu")
+    _pick(machine, check_dir, "row.button.new.new:claude", "a new Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "choosing the project folder")
+    machine.sleep(3)
+    machine.screenshot(check_dir, "agents after the folder")
+    field = ui.wait_for(machine, "row.input.message", "waiting for the session", ui.PANEL, seconds=30)
+    machine.click(*field.middle, "focusing the message field")
+    ui.type_text(machine, "Look at the folder", "typing")
+    ui.press_return(machine, "sending")
+    ask = ui.wait_for(machine, "row.ask.allow:perm-b1", "waiting for the permission", ui.PANEL, seconds=40)
+    machine.sleep(1)
+    machine.screenshot(check_dir, "agents permission asked")
+    machine.click(*ask.middle, "allowing the command")
+    machine.sleep(3)
+    machine.screenshot(check_dir, "agents turn done")
+    groups = [i for i in _ids(machine, "the folded lines") if i.startswith("row.feed.group.")]
+    if groups:
+        fold = ui.wait_for(machine, groups[0], "the folded line", ui.PANEL, seconds=10)
+        machine.click(*fold.middle, "opening the folded line")
+        machine.sleep(1)
+        machine.screenshot(check_dir, "agents actions opened")
+    model = ui.wait_for(machine, "row.menu.model", "the model menu", ui.PANEL, seconds=20)
+    machine.click(*model.middle, "opening the model menu")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "agents model menu")
+    _pick(machine, check_dir, "row.menu.model.claude:quick", "choosing Quick")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "agents model switched")
+    effort = ui.wait_for(machine, "row.menu.effort", "the effort menu", ui.PANEL, seconds=20)
+    machine.click(*effort.middle, "opening the effort menu")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "agents effort menu")
+    _pick(machine, check_dir, "row.menu.effort.high", "choosing high effort")
+    machine.sleep(4)
+    machine.screenshot(check_dir, "agents effort switched")
+    field = ui.wait_for(machine, "row.input.message", "the field again", ui.PANEL, seconds=20)
+    machine.click(*field.middle, "focusing the field")
+    ui.type_text(machine, "Ask me a question", "typing")
+    ui.press_return(machine, "sending")
+    # Started again for the effort, the stand-in counts its questions from 1.
+    for _ in range(40):
+        if any(i.startswith("row.ask.opt:perm-q") for i in _ids(machine, "the question")):
+            break
+        machine.sleep(1)
+    machine.sleep(1)
+    machine.screenshot(check_dir, "agents question")
+    options = [i for i in _ids(machine, "the answers") if i.startswith("row.ask.opt:")]
+    if options:
+        answer = ui.wait_for(machine, options[-1], "an answer", ui.PANEL, seconds=10)
+        machine.click(*answer.middle, "answering the question")
+        machine.sleep(4)
+    model = ui.wait_for(machine, "row.menu.model", "the model menu", ui.PANEL, seconds=20)
+    machine.click(*model.middle, "opening the model menu")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "agents model menu with codex")
+    _pick(machine, check_dir, "row.menu.model.codex:fake-codex-1", "moving the conversation to Codex")
+    machine.sleep(4)
+    machine.screenshot(check_dir, "agents handed to codex")
+    field = ui.wait_for(machine, "row.input.message", "the field for Codex", ui.PANEL, seconds=20)
+    machine.click(*field.middle, "focusing the field")
+    ui.type_text(machine, "What changed?", "typing to Codex")
+    ui.press_return(machine, "sending to Codex")
+    allows = []
+    for _ in range(40):
+        allows = [i for i in _ids(machine, "Codex's approval") if i.startswith("row.ask.allow:")]
+        if allows:
+            break
+        machine.sleep(1)
+    machine.sleep(1)
+    machine.screenshot(check_dir, "agents codex asks")
+    if allows:
+        allow = ui.wait_for(machine, allows[0], "the approval", ui.PANEL, seconds=10)
+        machine.click(*allow.middle, "allowing the command")
+        machine.sleep(4)
+    machine.screenshot(check_dir, "agents codex turn done")
+    model = ui.wait_for(machine, "row.menu.model", "the model menu", ui.PANEL, seconds=20)
+    machine.click(*model.middle, "opening the model menu")
+    machine.sleep(1)
+    _pick(machine, check_dir, "row.menu.model.claude:fake", "moving the conversation back to Claude")
+    machine.sleep(4)
+    machine.screenshot(check_dir, "agents back to claude")
+    sessions = ui.wait_for(machine, "row.menu.session", "the session menu", ui.PANEL, seconds=20)
+    machine.click(*sessions.middle, "opening the session menu")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "agents session menu")
+    _pick(machine, check_dir, f"row.menu.session.h:{saved}", "choosing the saved session")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "agents held session")
