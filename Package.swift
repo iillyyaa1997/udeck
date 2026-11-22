@@ -50,9 +50,13 @@ let package = Package(
         .target(name: "UDeckAgentHost", dependencies: ["UDeckAgents"], path: "Sources/UDeckAgentHost"),
         .executableTarget(name: "udeck-agentd", dependencies: ["UDeckAgentHost"], path: "Sources/udeck-agentd"),
 
+        // The chat's model: sessions, their feed, asks and history, over any
+        // AgentChannel. No AppKit or SwiftUI, so all of it runs in `swift test`.
+        .target(name: "UDeckChat", dependencies: ["UDeckAgents"], path: "Sources/UDeckChat"),
+
         // Everything that touches AppKit/SwiftUI: the panel window, pointer
         // monitoring, screen observation, card rendering, settings UI.
-        .target(name: "UDeckKit", dependencies: ["UDeckCore"], path: "Sources/UDeckKit"),
+        .target(name: "UDeckKit", dependencies: ["UDeckCore", "UDeckChat", "UDeckAgents"], path: "Sources/UDeckKit"),
 
         .executableTarget(
             name: "uDeck",
@@ -102,6 +106,12 @@ let package = Package(
             dependencies: ["UDeckAgents"],
             path: "Tests/UDeckAgentsTests",
             resources: [.copy("Fixtures")]
+        ),
+
+        .testTarget(
+            name: "UDeckChatTests",
+            dependencies: ["UDeckChat", "UDeckAgents"],
+            path: "Tests/UDeckChatTests"
         ),
 
         .testTarget(
