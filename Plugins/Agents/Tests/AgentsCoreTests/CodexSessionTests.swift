@@ -49,4 +49,28 @@ struct CodexSessionTests {
         try await until("the turn's end") { session.state == .idle }
         await session.close()
     }
+
+    @Test("a saved thread continued: its turns read back oldest first, then the resume noted; the saved list leaves ephemeral ones out")
+    func savedThread() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("udeck-codex-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = CodexSession(folder: folder, title: "Fix the notes", threadID: "saved-thread-1")
+        await session.start(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: [fakeCodex.path, "app-server"],
+                            environment: ["PATH": "/usr/bin:/bin"])
+        let texts = session.items.map { item -> String in
+            switch item {
+            case .user(_, let text): "user:" + text
+            case .assistant(_, let text, _): "assistant:" + text
+            case .tool(_, let name, let summary, _): "tool:" + name + " " + summary
+            case .note(_, let text): "note:" + text
+            }
+        }
+        #expect(texts == ["user:Fix the notes", "tool:Shell ls", "assistant:Fixed.", "user:and now?", "assistant:Done.", "note:resumed"])
+        let saved = await session.savedThreads()
+        #expect(saved.map(\.id) == ["saved-thread-1"])
+        #expect(saved.first?.title == "Fix the notes")
+        await session.close()
+    }
 }
+

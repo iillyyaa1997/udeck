@@ -2,6 +2,24 @@ import Foundation
 import Observation
 import UDeckAgents
 
+/// A Codex thread saved by the CLI, to continue from the session menu.
+public struct CodexSaved: Sendable, Equatable {
+    public let id: String
+    public let title: String
+    public let cwd: String?
+    public let updated: Date
+
+    static func list(_ result: JSONValue) -> [CodexSaved] {
+        (result["data"]?.array ?? []).compactMap { raw in
+            guard let id = raw["id"]?.string, raw["ephemeral"]?.bool != true else { return nil }
+            let preview = raw["preview"]?.string ?? ""
+            let title = raw["name"]?.string ?? preview.split(separator: "\n").first.map(String.init) ?? id
+            return CodexSaved(id: id, title: String(title.prefix(80)), cwd: raw["cwd"]?.string,
+                              updated: Date(timeIntervalSince1970: raw["updatedAt"]?.number ?? 0))
+        }
+    }
+}
+
 /// An approval Codex waits on the person for.
 public struct CodexAsk: Sendable, Equatable, Identifiable {
     public let requestID: String
@@ -99,13 +117,49 @@ public final class CodexSession: Identifiable {
                 // project, as in the terminal.
                 result = try await connection.request("thread/start", ["cwd": .string(folder.path)])
             }
+            let resumed = threadID != nil
             threadID = result["thread"]?["id"]?.string ?? threadID
             model = result["model"]?.string
             if effort == nil { effort = result["reasoningEffort"]?.string }
             state = .idle
+            if resumed, items.isEmpty, let threadID,
+               let turns = try? await connection.request("thread/turns/list", ["threadId": .string(threadID), "limit": 30]) {
+                let history = Self.history(turns)
+                if !history.isEmpty { items = history + [.note(id: UUID(), text: "resumed")] + items }
+            }
         } catch {
             fail("could not start: \(error)")
         }
+    }
+
+    /// A saved thread's turns, newest first as the server lists them, as the
+    /// feed shows them, oldest first.
+    nonisolated static func history(_ turns: JSONValue) -> [FeedItem] {
+        var out: [FeedItem] = []
+        for turn in (turns["data"]?.array ?? []).reversed() {
+            for item in turn["items"]?.array ?? [] {
+                switch item["type"]?.string {
+                case "userMessage":
+                    let text = (item["content"]?.array ?? []).compactMap { $0["text"]?.string }.joined(separator: "\n")
+                    if !text.isEmpty { out.append(.user(id: UUID(), text: text)) }
+                case "agentMessage":
+                    if let text = item["text"]?.string, !text.isEmpty { out.append(.assistant(id: UUID(), text: text, streaming: false)) }
+                default:
+                    guard let tool = tool(item) else { continue }
+                    let output = item["aggregatedOutput"]?.string ?? ""
+                    let failed = (item["exitCode"]?.int).map { $0 != 0 } ?? false
+                    out.append(.tool(id: tool.id, name: tool.name, summary: tool.summary,
+                                     result: ToolOutcome(isError: failed, preview: String(output.prefix(600)))))
+                }
+            }
+        }
+        return Array(out.suffix(400))
+    }
+
+    /// The threads the CLI saved, newest first.
+    public func savedThreads(limit: Int = 10) async -> [CodexSaved] {
+        guard let connection, let list = try? await connection.request("thread/list", ["limit": .number(Double(limit))]) else { return [] }
+        return CodexSaved.list(list)
     }
 
     nonisolated static func models(_ list: JSONValue) -> [ModelChoice] {

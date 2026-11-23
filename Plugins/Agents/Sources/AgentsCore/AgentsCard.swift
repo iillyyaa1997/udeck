@@ -65,8 +65,14 @@ enum AgentsCard {
         let open = Set(app.conversations.compactMap { $0.claude?.sessionID })
         options += app.history.filter { !open.contains($0.sessionID) }.map { saved in
             ["id": .string("h:" + saved.sessionID), "text": .string(saved.title),
-             "group": .string(app.t("История — продолжить", "History — continue")),
+             "group": .string(app.t("История Claude — продолжить", "Claude history — continue")),
              "note": .string(ago(saved.modified, app))]
+        }
+        let openThreads = Set(app.conversations.compactMap { $0.codex?.threadID })
+        options += app.codexHistory.filter { !openThreads.contains($0.id) }.map { saved in
+            ["id": .string("ch:" + saved.id), "text": .string(saved.title),
+             "group": .string(app.t("История Codex — продолжить", "Codex history — continue")),
+             "note": .string(ago(saved.updated, app))]
         }
         var menu: [String: JSONValue] = ["id": "session", "text": "", "options": .array(options)]
         if let selection = app.selection { menu["selected"] = .string("s:" + selection.uuidString) }

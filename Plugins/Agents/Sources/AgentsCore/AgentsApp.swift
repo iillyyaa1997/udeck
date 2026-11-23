@@ -24,6 +24,8 @@ public final class AgentsApp {
     /// The models each provider offered when a session of it last started,
     /// kept for the model menu of a conversation that has not used it yet.
     public private(set) var knownModels: [Provider: [ModelChoice]] = [:]
+    /// Codex threads the CLI saved, for the session menu.
+    public private(set) var codexHistory: [CodexSaved] = []
 
     /// Where lines for uDeck go (stdout).
     let emit: (String) -> Void
@@ -62,7 +64,7 @@ public final class AgentsApp {
             if let language = event["language"]?.string { russian = language.hasPrefix("ru") }
             if kind == "hello" {
                 refreshHistory()
-                if knownModels[.codex] == nil { Task { await learnCodexModels() } }
+                if knownModels[.codex] == nil || codexHistory.isEmpty { Task { await learnCodex() } }
             }
         case "select":
             select(event["id"]?.string ?? "")
@@ -102,6 +104,19 @@ public final class AgentsApp {
         } else if id.hasPrefix("s:"), let uuid = UUID(uuidString: String(id.dropFirst(2))) {
             selection = uuid
             showingHistory = false
+        } else if id.hasPrefix("ch:") {
+            let threadID = String(id.dropFirst(3))
+            if let open = conversations.first(where: { $0.codex?.threadID == threadID }) {
+                selection = open.id
+            } else if let saved = codexHistory.first(where: { $0.id == threadID }) {
+                let folder = URL(fileURLWithPath: saved.cwd ?? home.path, isDirectory: true)
+                let session = CodexSession(folder: folder, title: saved.title, threadID: saved.id)
+                adopt(.codex(session))
+                Task {
+                    await startCodex(session)
+                    render()
+                }
+            }
         } else if id.hasPrefix("h:") {
             let sessionID = String(id.dropFirst(2))
             if let saved = history.first(where: { $0.sessionID == sessionID }) { open(saved) }
@@ -291,7 +306,14 @@ public final class AgentsApp {
             session.onTurnFinished = { words in finished(words) }
         case .codex(let session):
             session.onAsk = { ask in asked(ask.summary) }
-            session.onTurnFinished = { words in finished(words) }
+            session.onTurnFinished = { [weak self, weak session] words in
+                finished(words)
+                guard let self, let session else { return }
+                Task {
+                    let saved = await session.savedThreads()
+                    if !saved.isEmpty { self.codexHistory = saved; self.render() }
+                }
+            }
         }
     }
 
@@ -390,8 +412,9 @@ public final class AgentsApp {
     }
 
     /// The models Codex offers, for the menu of a conversation that has not
-    /// used it yet: one short run of `codex app-server`, no thread.
-    private func learnCodexModels() async {
+    /// used it yet, and the threads it saved: one short run of
+    /// `codex app-server`, no thread of its own.
+    private func learnCodex() async {
         let environment = await environment()
         guard let (executable, prefix) = program("codex", setting: "UDECK_SETTING_CODEX", path: environment["PATH"] ?? ""),
               let connection = try? CodexConnection(executable: executable, arguments: prefix + ["app-server"],
@@ -402,10 +425,11 @@ public final class AgentsApp {
         guard (try? await connection.handshake(client: "udeck-agents", version: "0.1.0")) != nil,
               let list = try? await connection.request("model/list", [:], timeout: .seconds(20)) else { return }
         let models = CodexSession.models(list)
-        if !models.isEmpty, knownModels[.codex] == nil {
-            knownModels[.codex] = models
-            render()
+        if !models.isEmpty, knownModels[.codex] == nil { knownModels[.codex] = models }
+        if let threads = try? await connection.request("thread/list", ["limit": 10], timeout: .seconds(20)) {
+            codexHistory = CodexSaved.list(threads)
         }
+        render()
     }
 
     /// The Claude session starts again — a new effort or login — continuing

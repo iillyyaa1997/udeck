@@ -106,6 +106,18 @@ while True:
     elif method == "turn/start":
         text = " ".join(part.get("text", "") for part in params.get("input", []))
         start_turn(request_id, text)
+    elif method == "thread/list":
+        out({"id": request_id, "result": {"data": [
+            {"id": "saved-thread-1", "name": None, "preview": "Fix the notes\nand more", "cwd": "/tmp",
+             "updatedAt": 1795390000, "ephemeral": False},
+            {"id": "ephemeral-1", "preview": "x", "ephemeral": True, "updatedAt": 1}]}})
+    elif method == "thread/turns/list":
+        out({"id": request_id, "result": {"data": [
+            {"id": "t2", "items": [{"type": "userMessage", "content": [{"type": "text", "text": "and now?"}]},
+                                   {"type": "agentMessage", "text": "Done."}]},
+            {"id": "t1", "items": [{"type": "userMessage", "content": [{"type": "text", "text": "Fix the notes"}]},
+                                   {"type": "commandExecution", "id": "c1", "command": "ls", "aggregatedOutput": "Notes.md", "exitCode": 0},
+                                   {"type": "agentMessage", "text": "Fixed."}]}]}})
     elif method == "turn/interrupt":
         out({"id": request_id, "result": {}})
     elif request_id is not None:

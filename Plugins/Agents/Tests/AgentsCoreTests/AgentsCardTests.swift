@@ -113,7 +113,7 @@ struct AgentsCardTests {
         let items = try #require(head["items"]?.array)
         #expect(items.first?["title"]?["text"]?.string == "Agents")
         let options = try #require(items.first(where: { $0["menu"] != nil })?["menu"]?["options"]?.array)
-        #expect(options.contains { $0["id"]?.string == "h:" + id && $0["group"]?.string == "История — продолжить" })
+        #expect(options.contains { $0["id"]?.string == "h:" + id && $0["group"]?.string == "История Claude — продолжить" })
         #expect(items.last?["button"]?["id"]?.string == "new")
         // Chosen from the menu it opens — written a moment ago, so to be read,
         // and nothing is started (a test must not run the real CLI).
