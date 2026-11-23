@@ -104,3 +104,26 @@ public enum MarkdownBlock: Equatable, Sendable {
         return blocks
     }
 }
+
+/// The rows of a card with a key that stays with each from one card to the
+/// next: a row that takes input keeps its own (`input:message`), so a
+/// question arriving above the field does not make it a new field and throw
+/// away what is being typed — which keying by position did (0.9.5).
+public enum CardRowKeys {
+    public static func keyed(_ rows: [CardRow]) -> [(key: String, row: CardRow)] {
+        var seen: Set<String> = []
+        return rows.enumerated().map { index, row in
+            var key: String
+            switch row {
+            case .input(let input): key = "input:" + input.id
+            case .ask(let ask): key = "ask:" + ask.id
+            case .bar(let bar): key = "bar:" + bar.id
+            case .feed: key = "feed"
+            default: key = "row:\(index)"
+            }
+            if seen.contains(key) { key += ":\(index)" }
+            seen.insert(key)
+            return (key, row)
+        }
+    }
+}

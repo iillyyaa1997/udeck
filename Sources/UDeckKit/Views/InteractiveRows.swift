@@ -125,16 +125,22 @@ private struct FeedEntryView: View {
     var body: some View {
         switch entry.role {
         case .user:
-            HStack {
-                Spacer(minLength: 30)
-                Text(entry.text)
-                    .font(theme.bodyFont)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 11).padding(.vertical, 6)
-                    .background(UnevenRoundedRectangle(topLeadingRadius: 13, bottomLeadingRadius: 13,
-                                                       bottomTrailingRadius: 4, topTrailingRadius: 13)
-                        .fill(Color.accentColor))
-                    .foregroundStyle(.white)
+            VStack(alignment: .trailing, spacing: 2) {
+                HStack {
+                    Spacer(minLength: 30)
+                    Text(entry.text)
+                        .font(theme.bodyFont)
+                        .textSelection(.enabled)
+                        .padding(.horizontal, 11).padding(.vertical, 6)
+                        .background(UnevenRoundedRectangle(topLeadingRadius: 13, bottomLeadingRadius: 13,
+                                                           bottomTrailingRadius: 4, topTrailingRadius: 13)
+                            .fill(Color.accentColor.opacity(entry.label == nil ? 1 : 0.55)))
+                        .foregroundStyle(.white)
+                }
+                // A message's state, under it: queued behind the running turn.
+                if let label = entry.label, !label.isEmpty {
+                    Text(label).font(theme.smallFont).foregroundStyle(theme.dim)
+                }
             }
         case .assistant:
             VStack(alignment: .leading, spacing: 3) {
@@ -295,6 +301,7 @@ struct InputRowView: View {
         HStack(spacing: 6) {
             field.textFieldStyle(.roundedBorder).lineLimit(1...6)
             if let stop = input.stop {
+                ProgressView().controlSize(.small)
                 Button { send(.press(id: stop)) } label: { Image(systemName: "stop.fill") }
                     .controlSize(.small)
                     .accessibilityIdentifier("row.input.\(input.id).stop")
@@ -314,6 +321,9 @@ struct InputRowView: View {
                 }
                 Spacer(minLength: 4)
                 if let stop = input.stop {
+                    // Something runs while there is a Stop: said where the eye
+                    // is, by the field, not only in a badge above.
+                    ProgressView().controlSize(.small).accessibilityIdentifier("row.input.\(input.id).busy")
                     Button { send(.press(id: stop)) } label: {
                         Image(systemName: "stop.fill").font(.system(size: 10))
                             .frame(width: 28, height: 28)

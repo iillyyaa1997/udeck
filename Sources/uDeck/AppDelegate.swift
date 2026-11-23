@@ -98,6 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.canChooseFiles = false
             panel.allowsMultipleSelection = false
             if let prompt { panel.message = prompt }
+            // Above the panel, which floats over other windows: at its own
+            // level the dialog opened under it, its folders hidden (0.9.5).
+            let top = NSApp.windows.filter(\.isVisible).map(\.level.rawValue).max() ?? NSWindow.Level.normal.rawValue
+            panel.level = NSWindow.Level(rawValue: max(top + 1, NSWindow.Level.modalPanel.rawValue))
             NSApp.activate(ignoringOtherApps: true)
             let path = panel.runModal() == .OK ? panel.url?.path : nil
             model?.residentEvent(plugin, .folder(id: request, path: path))

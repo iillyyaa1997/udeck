@@ -38,7 +38,8 @@ struct CardBodyView: View {
                     .foregroundStyle(theme.dim)
             }
 
-            ForEach(Array((skipsLeadingBar ? Array(card.rows.dropFirst()) : card.rows).enumerated()), id: \.offset) { _, row in
+            ForEach(CardRowKeys.keyed(skipsLeadingBar ? Array(card.rows.dropFirst()) : card.rows), id: \.key) { keyed in
+                let row = keyed.row
                 if case .feed = row {
                     rowView(row).frame(maxHeight: .infinity).layoutPriority(-1)
                 } else {

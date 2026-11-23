@@ -492,11 +492,14 @@ uDeck 0.9.4 adds a fifth row, menus, and more to say in a feed:
   order, the one named by `selected` checked, each option's `note` after its
   text, the menu's `note` last. Choosing sends `choose`.
 * `input` with `pickers` is drawn as a panel: the text on top, the menus under
-  it beside Stop and Send.
+  it beside Stop and Send. While there is a `stop`, a spinner turns beside it.
+* A row that takes input keeps its identity from one card to the next by its
+  `id`, so what is typed in a field stays when rows appear above it.
 * A `feed` entry may carry `name` — a `tool` entry's operation, short, such as
   `Bash`: two or more tool entries in a row fold into one line, «4 actions ·
-  Bash ×2, Read ×2», that opens to them — and `label`, a small line above an
-  `assistant` entry saying who answered. An `assistant` entry's text is
+  Bash ×2, Read ×2», that opens to them — and `label`, a small line: above an
+  `assistant` entry, who answered; under a `user` entry, its state (such as
+  *queued*), the bubble drawn paler. An `assistant` entry's text is
   markdown: paragraphs, `-` and `1.` lists, `#` headings, fenced code, and
   inline emphasis, code and links.
 * Tones are `run`, `wait`, `idle`, `ok`, `warn`, `crit` and `info`; bar icons

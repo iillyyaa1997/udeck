@@ -72,4 +72,16 @@ struct FeedLayoutTests {
         #expect(ru(.feedActions(count: 11)) == "11 действий")
         #expect(ru(.feedActions(count: 22)) == "22 действия")
     }
+
+    @Test("a field keeps its key when a question arrives above it, so what is typed in it stays")
+    func fieldKeepsItsKey() {
+        let before: [CardRow] = [.feed([]), .input(InputRow(id: "message"))]
+        let after: [CardRow] = [.feed([]), .ask(AskRow(id: "q1", title: "Which?", buttons: [])), .input(InputRow(id: "message"))]
+        let field = { (rows: [CardRow]) in CardRowKeys.keyed(rows).first { if case .input = $0.row { true } else { false } }?.key }
+        #expect(field(before) == "input:message")
+        #expect(field(after) == "input:message")
+        #expect(CardRowKeys.keyed([.text("a"), .text("b")]).map(\.key) == ["row:0", "row:1"])
+        #expect(CardRowKeys.keyed([.feed([]), .feed([])]).map(\.key) == ["feed", "feed:1"])
+    }
 }
+
