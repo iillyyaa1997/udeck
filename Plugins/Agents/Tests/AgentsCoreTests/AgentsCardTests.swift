@@ -54,7 +54,8 @@ struct AgentsCardTests {
         let session = try #require(app.conversations.first)
         #expect(app.heldBack[session.id] != nil)
         #expect(session.current.state == .starting, "nothing was started")
-        #expect(session.current.items.contains { if case .user(_, let text) = $0 { text == "look at it" } else { false } })
+        // The history is read off the main thread, from the transcript's tail.
+        try await until("the history") { session.current.items.contains { if case .user(_, let text) = $0 { text == "look at it" } else { false } } }
         #expect(!session.current.items.contains { if case .user(_, let text) = $0 { text.contains("task-notification") } else { false } })
         let card = try #require(said.last)
         #expect(card.contains("Эта сессия сейчас идёт в другом месте"))

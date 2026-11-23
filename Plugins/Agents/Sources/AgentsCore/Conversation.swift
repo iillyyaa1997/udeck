@@ -58,6 +58,13 @@ public enum Agent {
         }
     }
 
+    public var queued: [UUID] {
+        switch self {
+        case .claude(let session): session.queued
+        case .codex(let session): session.queued
+        }
+    }
+
     public var turnStartedAt: Date? {
         switch self {
         case .claude(let session): session.turnStartedAt
@@ -213,12 +220,21 @@ public final class Conversation: Identifiable {
             guard let items = agents[segment.provider]?.items else { continue }
             let end = min(segment.end ?? items.count, items.count)
             guard segment.start < end else { continue }
+            let queued = Set(agents[segment.provider]?.queued ?? [])
             for item in items[segment.start..<end] {
-                if case .assistant = item, several { out.append((item, segment.provider.name)) } else { out.append((item, nil)) }
+                switch item {
+                case .assistant where several: out.append((item, segment.provider.name))
+                case .user(let id, _) where queued.contains(id): out.append((item, Self.queuedLabel))
+                default: out.append((item, nil))
+                }
             }
         }
         return out
     }
+
+    /// The label of a message waiting behind the running turn, for the card
+    /// to put in words.
+    static let queuedLabel = "\u{0}queued"
 
     /// The handoff note's text, for the card to put in words.
     static func noteText(_ handoff: Handoff) -> String {

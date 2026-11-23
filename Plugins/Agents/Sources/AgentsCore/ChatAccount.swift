@@ -126,6 +126,22 @@ public enum SessionHistory {
     /// A saved session's conversation as feed items, for the feed of a resume.
     /// With `before`, only what was said before then: for a session the helper
     /// kept running, the run it journals replays the rest.
+    /// The feed of a saved session from the last `bytes` of its transcript:
+    /// the newest of it is what the card shows, and the whole of a long
+    /// session's file is a hundred megabytes.
+    public static func tailFeed(of file: URL, bytes: Int = 3_000_000) -> [FeedItem] {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return [] }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        let start = size > UInt64(bytes) ? size - UInt64(bytes) : 0
+        try? handle.seek(toOffset: start)
+        guard let data = try? handle.readToEnd() else { return [] }
+        var text = String(decoding: data, as: UTF8.self)
+        // A tail starts mid-line: what is before the first newline is not a line.
+        if start > 0, let newline = text.firstIndex(of: "\n") { text = String(text[text.index(after: newline)...]) }
+        return feed(of: ClaudeTranscript(contents: text))
+    }
+
     public static func feed(of transcript: ClaudeTranscript, before: Date? = nil, limit: Int = 400) -> [FeedItem] {
         var items: [FeedItem] = []
         for entry in transcript.entries {

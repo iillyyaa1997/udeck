@@ -46,6 +46,10 @@ public final class CodexSession: Identifiable {
     public internal(set) var effort: String?
     public private(set) var context: (tokens: Int, window: Int)?
     public private(set) var turnStartedAt: Date?
+    /// Messages sent while a turn ran, oldest first, with what Codex is to
+    /// be told: each starts a turn when the one before it is done.
+    public private(set) var queued: [UUID] = []
+    @ObservationIgnored private var waiting: [(id: UUID, text: String)] = []
 
     @ObservationIgnored public var onAsk: ((CodexAsk) -> Void)?
     @ObservationIgnored public var onTurnFinished: ((String) -> Void)?
@@ -90,9 +94,10 @@ public final class CodexSession: Identifiable {
             if let threadID {
                 result = try await connection.request("thread/resume", ["threadId": .string(threadID)])
             } else {
-                result = try await connection.request("thread/start", [
-                    "cwd": .string(folder.path), "approvalPolicy": "on-request", "sandbox": "workspace-write",
-                ])
+                // The approval policy and the sandbox are the person's, from
+                // their Codex settings: it asks when a command leaves the
+                // project, as in the terminal.
+                result = try await connection.request("thread/start", ["cwd": .string(folder.path)])
             }
             threadID = result["thread"]?["id"]?.string ?? threadID
             model = result["model"]?.string
@@ -119,13 +124,23 @@ public final class CodexSession: Identifiable {
     public func send(_ shown: String, text: String? = nil) {
         let shown = shown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !shown.isEmpty, let connection, let threadID, !isEnded else { return }
-        items.append(.user(id: UUID(), text: shown))
+        let id = UUID()
+        items.append(.user(id: id, text: shown))
+        if title == folder.lastPathComponent { title = String(shown.prefix(40)) }
+        if state == .working {
+            queued.append(id)
+            waiting.append((id, text ?? shown))
+            return
+        }
+        startTurn(text ?? shown, connection: connection, threadID: threadID)
+    }
+
+    private func startTurn(_ text: String, connection: CodexConnection, threadID: String) {
         state = .working
         if turnStartedAt == nil { turnStartedAt = Date() }
-        if title == folder.lastPathComponent { title = String(shown.prefix(40)) }
         var params: [String: JSONValue] = [
             "threadId": .string(threadID),
-            "input": [["type": "text", "text": .string(text ?? shown)]],
+            "input": [["type": "text", "text": .string(text)]],
         ]
         if let chosenModel { params["model"] = .string(chosenModel) }
         if let effort { params["effort"] = .string(effort) }
@@ -198,6 +213,13 @@ public final class CodexSession: Identifiable {
             turnID = nil
             if let error = params["turn"]?["error"]?["message"]?.string, !error.isEmpty { note(error) }
             if !isEnded {
+                if !waiting.isEmpty, let connection, let threadID {
+                    let next = waiting.removeFirst()
+                    queued.removeAll { $0 == next.id }
+                    turnStartedAt = nil
+                    startTurn(next.text, connection: connection, threadID: threadID)
+                    return
+                }
                 state = .idle
                 turnStartedAt = nil
                 onTurnFinished?(lastAnswer)

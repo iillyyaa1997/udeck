@@ -97,6 +97,9 @@ public final class ChatSession: Identifiable {
     public private(set) var context: ClaudeContextUsage?
     /// When the running turn began, while one runs.
     public private(set) var turnStartedAt: Date?
+    /// The person's messages sent while a turn ran, oldest first: each waits
+    /// its turn, and the feed says so.
+    public private(set) var queued: [UUID] = []
     /// Messages sent that no turn has finished yet: more than one means the
     /// rest are queued behind the running turn.
     public private(set) var pendingTurns = 0
@@ -171,6 +174,16 @@ public final class ChatSession: Identifiable {
 
     /// Says the session is starting again — a new effort, another login —
     /// and why, in the feed. The caller closes and starts it.
+    /// The conversation read back from its transcript, put before what the
+    /// session has said since: read off the main thread, as a transcript can
+    /// be a hundred megabytes.
+    func prependHistory(_ history: [FeedItem]) {
+        guard !history.isEmpty else { return }
+        items = history + [.note(id: UUID(), text: "resumed")] + items.filter {
+            if case .note(_, "loading-history") = $0 { false } else { true }
+        }
+    }
+
     func beginRestart(_ note: String) {
         // The process about to be closed is no longer this session's: its
         // reader ending must not end the session started again after it.
@@ -220,7 +233,9 @@ public final class ChatSession: Identifiable {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let connection, !isEnded else { return }
         let told = payload ?? text
-        items.append(.user(id: UUID(), text: text))
+        let id = UUID()
+        if state == .working || pendingTurns > 0 { queued.append(id) }
+        items.append(.user(id: id, text: text))
         unconfirmed.append(told)
         pendingTurns += 1
         state = .working
@@ -338,6 +353,8 @@ public final class ChatSession: Identifiable {
             // nothing of the user's.
             guard result.turns > 0 || pendingTurns == 0 else { return }
             pendingTurns = max(0, pendingTurns - 1)
+            // The next message waiting starts now.
+            if !queued.isEmpty { queued.removeFirst() }
             if result.isError, !result.result.isEmpty { note(result.result) }
             if pendingTurns == 0, !isEnded {
                 state = .idle

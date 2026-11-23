@@ -113,6 +113,10 @@ enum AgentsCard {
             items.append(["badge": ["text": .string(app.t("контекст \(Int(percent.rounded()))%", "context \(Int(percent.rounded()))%")),
                                     "tone": .string(tone), "fill": .number(percent / 100)]])
         }
+        let waiting = session.current.queued.count
+        if waiting > 0 {
+            items.append(["badge": ["text": .string(app.t("в очереди: \(waiting)", "queued: \(waiting)")), "tone": "info"]])
+        }
         if !narrow(app) {
             items.append(["badge": ["text": .string(session.folder.lastPathComponent), "icon": "folder"]])
         }
@@ -152,6 +156,8 @@ enum AgentsCard {
         let agent = session.current
         let placeholder = held ? app.t("Только просмотр — сессия идёт в другом месте", "View only — it runs elsewhere")
             : agent.isEnded ? stateWord(session, app)
+            : agent.state == .working ? (narrow(app) ? app.t("В очередь", "Queue")
+                : app.t("Работает · новое сообщение встанет в очередь", "Working · a new message waits its turn"))
             : narrow(app) ? app.t("Сообщение", "Message")
             : app.t("Сообщение · Return отправляет, Shift+Return — новая строка",
                     "Message · Return sends, Shift+Return starts a new line")
@@ -327,7 +333,11 @@ enum AgentsCard {
     static func feedEntry(_ item: FeedItem, _ app: AgentsApp, label: String? = nil) -> JSONValue {
         switch item {
         case .user(let id, let text):
-            return ["id": .string(id.uuidString), "role": "user", "text": .string(clipped(text))]
+            var entry: [String: JSONValue] = ["id": .string(id.uuidString), "role": "user", "text": .string(clipped(text))]
+            if label == Conversation.queuedLabel {
+                entry["label"] = .string(app.t("в очереди — уйдёт после текущего ответа", "queued — goes after the current answer"))
+            }
+            return .object(entry)
         case .assistant(let id, let text, let streaming):
             var entry: [String: JSONValue] = ["id": .string(id.uuidString), "role": "assistant", "text": .string(clipped(text)),
                                               "streaming": .bool(streaming)]
@@ -382,6 +392,7 @@ enum AgentsCard {
                          "The provider can change once the turn is over and nothing waits")
         }
         if text == "resumed" { return app.t("Продолжено из истории", "Resumed from history") }
+        if text == "loading-history" { return app.t("Читаю историю…", "Reading the history…") }
         if text == "compacted" { return app.t("Здесь контекст был сжат", "The context was compacted here") }
         if text.hasPrefix("model:") { return app.t("Модель: ", "Model: ") + model(String(text.dropFirst(6))) }
         if text.hasPrefix("model-failed:") {

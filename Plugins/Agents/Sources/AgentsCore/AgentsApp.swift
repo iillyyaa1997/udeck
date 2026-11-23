@@ -243,11 +243,19 @@ public final class AgentsApp {
             return
         }
         let folder = URL(fileURLWithPath: saved.cwd ?? home.path, isDirectory: true)
-        let feed = (try? ClaudeTranscript(url: saved.file)).map { SessionHistory.feed(of: $0) } ?? []
-        let session = ChatSession(folder: folder, account: account, title: saved.title, resumeID: saved.sessionID,
-                                  history: feed)
+        let session = ChatSession(folder: folder, account: account, title: saved.title, resumeID: saved.sessionID)
+        session.note("loading-history")
         let conversation = adopt(.claude(session))
         showingHistory = false
+        // Read off the main thread, and only the transcript's tail: a long
+        // session's is a hundred megabytes, and reading it whole here froze
+        // the card for seconds after «continue» (0.9.5).
+        let file = saved.file
+        Task {
+            let feed = await Task.detached(priority: .userInitiated) { SessionHistory.tailFeed(of: file) }.value
+            session.prependHistory(feed)
+            render()
+        }
         let written = (try? saved.file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             ?? saved.modified
         if Date().timeIntervalSince(written) < Self.liveWindow {
@@ -356,7 +364,10 @@ public final class AgentsApp {
             session.fail(t("claude не найден в PATH вашей оболочки", "claude was not found in your shell's PATH"))
             return
         }
-        var arguments = prefix + ClaudeOutbound.arguments(model: session.chosenModel, resume: resume, permissionMode: "default")
+        // No permission mode of the plugin's own: the person's settings decide
+        // (theirs is `auto`), as in the terminal — a forced `default` asked
+        // about every operation.
+        var arguments = prefix + ClaudeOutbound.arguments(model: session.chosenModel, resume: resume)
         if let effort = session.effort { arguments += ["--effort", effort] }
         do {
             let process = try AgentProcess(executable: executable, arguments: arguments, environment: environment,
