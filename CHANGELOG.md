@@ -8,6 +8,17 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.5] — 2026-11-23
+
+- **Choosing in a card's menu no longer closes the panel.** A choice made in a
+  menu's popover — a new conversation, a saved one to continue — lies outside
+  the panel, and was taken for a click past it; so was a click in the folder
+  dialog a plugin asks for. Both now count as uDeck's own.
+- **Working in a resident plugin's card holds a panel that was only peeking.**
+  Its menus, buttons and field take their clicks themselves, so the panel did
+  not hear them as the click that holds it, and let go when the pointer went
+  to a popover or a dialog.
+
 ## [0.9.4] — 2026-11-22
 
 The Agents card gets its new look, and the cards of resident plugins get the

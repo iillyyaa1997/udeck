@@ -124,9 +124,9 @@ public enum ContractFeatures {
     public static let outsideTheContract: Set<String> = ["restart"]
 
     /// The release this registry was last brought up to date for. 0.9.4
-    /// brings bars, menus, badges, an input with menus and the feed's `name`
-    /// and `label`, dated above.
-    static let reviewedAt = "0.9.4"
+    /// brought bars, menus, badges, an input with menus and the feed's `name`
+    /// and `label`, dated above; 0.9.5 adds nothing to the contract.
+    static let reviewedAt = "0.9.5"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
