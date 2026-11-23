@@ -46,6 +46,9 @@ struct CardBodyView: View {
                 }
             }
             .opacity(contentOpacity)
+            // A click on a row's own control — a menu opening, the field taking
+            // the keyboard — holds a peek too; the control still gets it.
+            .simultaneousGesture(TapGesture().onEnded { shell.onInteract() })
 
             // A run that failed while these values are still fresh is said
             // here at once, under them, and goes with the next good run
@@ -201,15 +204,15 @@ struct CardBodyView: View {
             )
 
         case .chips(let items):
-            ChipsRowView(items: items, theme: theme) { model.residentEvent(pluginID, $0) }
+            ChipsRowView(items: items, theme: theme, send: send)
         case .feed(let entries):
             FeedRowView(entries: entries, theme: theme)
         case .ask(let ask):
-            AskRowView(ask: ask, theme: theme) { model.residentEvent(pluginID, $0) }
+            AskRowView(ask: ask, theme: theme, send: send)
         case .input(let input):
-            InputRowView(input: input, theme: theme) { model.residentEvent(pluginID, $0) }
+            InputRowView(input: input, theme: theme, send: send)
         case .bar(let bar):
-            BarRowView(bar: bar, theme: theme) { model.residentEvent(pluginID, $0) }
+            BarRowView(bar: bar, theme: theme, send: send)
 
         case .unsupported(let kind):
             // Kept rather than dropped: a hole in a card with no explanation is
@@ -219,6 +222,16 @@ struct CardBodyView: View {
                 .foregroundStyle(theme.warn)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// What the person did on a resident plugin's row, told to the plugin —
+    /// and to the panel, as an interaction: a peek someone works in is held,
+    /// as a click anywhere else in it holds it. A row's own controls take
+    /// their clicks, and a choice made in a menu's popover is made in a
+    /// window of its own, so neither reaches the panel's click.
+    private func send(_ event: ResidentEvent) {
+        shell.onInteract()
+        model.residentEvent(pluginID, event)
     }
 
     // MARK: - Actions

@@ -752,6 +752,16 @@ public final class PanelController {
         // holds it.
         noteClickHeard(wentDown: wentDown)
         guard state.phase.isVisible else { return }
+        // A click on a window of uDeck's own — a card's menu open in its
+        // popover, the folder dialog a plugin asked for — is not past the
+        // panel, though it lies outside it: it closed the panel on the
+        // choice itself (0.9.4, the log of 2026-11-23 01:08:12, a new
+        // conversation chosen in the Agents card's menu).
+        if NSApp.modalWindow != nil || PopoverPresence.holds(at: wentDown)
+            || Self.landsOnAnOwnWindow(location, besides: panel) {
+            DeckLog.panel.debug("a click on a window of uDeck's own past the panel — a popover, a dialog — so it stays")
+            return
+        }
         // Where the click was, not where the pointer is now.
         guard isPastThePanel(location) else {
             DeckLog.panel.debug("a click outside uDeck but not past the panel, so it stays")
@@ -763,6 +773,15 @@ public final class PanelController {
         // and, where the click landed, for whatever it opened to go
         // (`KeyboardHandback`).
         apply(.closeRequested, closing: .byAClickHeard, clickAt: location)
+    }
+
+    /// Whether `location`, on the screen, is on one of uDeck's own windows
+    /// other than the panel's: a popover, a dialog.
+    static func landsOnAnOwnWindow(_ location: CGPoint, besides panel: NSWindow?) -> Bool {
+        NSApp.windows.contains { candidate in
+            candidate !== panel && candidate.isVisible && !candidate.ignoresMouseEvents
+                && candidate.frame.contains(location)
+        }
     }
 
     /// Whether the pointer is past the panel — the question itself is

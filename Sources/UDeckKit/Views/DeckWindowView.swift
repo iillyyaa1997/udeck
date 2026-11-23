@@ -106,7 +106,11 @@ struct DeckWindowView: View {
                     .help(strings(.cardLastRunFailedDot))
             }
             if let bar = headerBar {
-                BarRowView(bar: bar, theme: theme) { model.residentEvent(window.pluginID, $0) }
+                BarRowView(bar: bar, theme: theme) { event in
+                    shell.onInteract()
+                    model.residentEvent(window.pluginID, event)
+                }
+                .simultaneousGesture(TapGesture().onEnded { shell.onInteract() })
             } else {
                 Text(window.title ?? presentation.card?.title ?? manifest?.name ?? window.pluginID.rawValue)
                     .font(theme.titleFont)
