@@ -8,6 +8,17 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.6] — 2026-11-23
+
+- **What you type survives a question.** A question arriving above a card's
+  field made it a new field and threw the text away; rows now keep who they
+  are from one card to the next.
+- **You can see that something runs, and what waits.** A spinner turns by the
+  field while there is a Stop, and a message sent meanwhile is marked as
+  queued under it.
+- **A plugin's folder dialog opens above the panel**, not under it with its
+  folders hidden.
+
 ## [0.9.5] — 2026-11-23
 
 - **Choosing in a card's menu no longer closes the panel.** A choice made in a

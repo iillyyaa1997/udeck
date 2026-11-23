@@ -125,8 +125,9 @@ public enum ContractFeatures {
 
     /// The release this registry was last brought up to date for. 0.9.4
     /// brought bars, menus, badges, an input with menus and the feed's `name`
-    /// and `label`, dated above; 0.9.5 adds nothing to the contract.
-    static let reviewedAt = "0.9.5"
+    /// and `label`, dated above; 0.9.5 and 0.9.6 add nothing to the contract
+    /// (0.9.6 draws a user entry's `label`, a field 0.9.4 brought).
+    static let reviewedAt = "0.9.6"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
