@@ -125,9 +125,10 @@ public enum ContractFeatures {
 
     /// The release this registry was last brought up to date for. 0.9.4
     /// brought bars, menus, badges, an input with menus and the feed's `name`
-    /// and `label`, dated above; 0.9.5 and 0.9.6 add nothing to the contract
-    /// (0.9.6 draws a user entry's `label`, a field 0.9.4 brought).
-    static let reviewedAt = "0.9.6"
+    /// and `label`, dated above; 0.9.5, 0.9.6 and 0.9.7 add nothing to the
+    /// contract (0.9.6 draws a user entry's `label`, a field 0.9.4 brought;
+    /// 0.9.7's trust in a plugin's updates is the host's, not the card's).
+    static let reviewedAt = "0.9.7"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 

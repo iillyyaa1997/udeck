@@ -8,6 +8,14 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.7] — 2026-11-24
+
+- **Trust a plugin's updates.** A checkbox under Allow — *Trust uptime's
+  updates while it asks for the same* — lets a later copy from the same place
+  run without asking again: a new version, and for a branch's or a pull
+  request's code new content too. Anything asking for more is asked about as
+  before. Settings → Plugins takes the trust back.
+
 ## [0.9.6] — 2026-11-23
 
 - **What you type survives a question.** A question arriving above a card's
