@@ -685,6 +685,24 @@ struct Russian: Vocabulary {
         case .deckClickToWork: "Нажмите мышью или клавишей, чтобы работать здесь"
         case .cardRefreshNow: "Обновить сейчас"
         case .cardRemoveFromTab: "Убрать с этой вкладки"
+        case .placeShowAs: "Показывать"
+        case .placeName(let place):
+            switch place {
+            case .card: "Карточкой"
+            case .tab: "Вкладкой"
+            case .window: "Окном"
+            case .mini: "Мини-окном"
+            }
+        case .placeMiniNote: "поверх всех"
+        case .placeAway(let title, let place):
+            switch place {
+            case .card: title
+            case .tab: "\(title) — во вкладке"
+            case .window: "\(title) — в окне"
+            case .mini: "\(title) — в мини-окне"
+            }
+        case .placeShow: "Показать"
+        case .placeBringBack: "Вернуть сюда"
         case .cardDragToMove: "Тяните, чтобы переместить это окно"
         case .cardDragToResize: "Тяните, чтобы изменить размер — по целым ячейкам"
         case .cardOwnDrawing: "СОБСТВЕННЫЙ РИСУНОК ПЛАГИНА"

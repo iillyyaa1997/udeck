@@ -19,6 +19,10 @@ struct DeckWindowView: View {
     var onDragChanged: (CGSize) -> Void
     var onResizeChanged: (CGSize) -> Void
     var onGestureEnded: () -> Void
+    /// Shown away from its cell — a whole tab, a window of its own, a mini
+    /// window (`PlacedCard`): its size is its place's, so it has no grip, and
+    /// its title line does not move it about the board.
+    var isPlaced = false
 
     @State private var isHovering = false
     /// **Reinstall** was pressed over a folder holding something of the
@@ -64,11 +68,12 @@ struct DeckWindowView: View {
         )
         .overlay(RoundedRectangle(cornerRadius: theme.windowCornerRadius).strokeBorder(theme.line))
         .clipShape(RoundedRectangle(cornerRadius: theme.windowCornerRadius))
-        .overlay(alignment: .bottomTrailing) { resizeGrip }
+        .overlay(alignment: .bottomTrailing) { if !isPlaced { resizeGrip } }
         .opacity(isMoving ? 0.85 : 1)
         .onHover { isHovering = $0 }
         .contextMenu {
             Button(strings(.cardRefreshNow)) { model.refresh(window.pluginID) }
+            PlaceMenuItems(model: model, window: window)
             Button(strings(.cardRemoveFromTab), role: .destructive) {
                 model.removeWindow(window.id, from: tabID)
             }
@@ -142,6 +147,8 @@ struct DeckWindowView: View {
             }
 
             staleBadge
+
+            PlaceButton(model: model, theme: theme, window: window, onInteract: { shell.onInteract() })
         }
         .fixedSize(horizontal: false, vertical: true)
         // The header is the handle: dragging anywhere else would fight with a
@@ -154,9 +161,10 @@ struct DeckWindowView: View {
             // by exactly what it just achieved. See `DeckGridView.dragSpace`.
             DragGesture(minimumDistance: 3, coordinateSpace: .named(DeckGridView.dragSpace))
                 .onChanged { onDragChanged($0.translation) }
-                .onEnded { _ in onGestureEnded() }
+                .onEnded { _ in onGestureEnded() },
+            isEnabled: !isPlaced
         )
-        .help(strings(.cardDragToMove))
+        .help(isPlaced ? "" : strings(.cardDragToMove))
     }
 
     /// Says out loud when a card is older than it claims to be.
