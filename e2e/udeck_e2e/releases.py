@@ -122,8 +122,16 @@ CHECK_NOW_PATH: dict[str, tuple[tuple[tuple[str, bool], ...], ...]] = {
         (('accessibilityIdentifier("section.about")', False),),
         (('accessibilityIdentifier("section.\\(item)")', False), ("case about", True)),
     ),
-    "updates.checkNow": ((('accessibilityIdentifier("updates.checkNow")', False),),),
-    "updates.install": ((('accessibilityIdentifier("updates.install")', False),),),
+    # Since 0.9.12 one press looks and installs (`ui.CHECK_AND_INSTALL`): a
+    # release that names it can be driven to an update without the other two.
+    "updates.checkNow": (
+        (('accessibilityIdentifier("updates.checkNow")', False),),
+        (('accessibilityIdentifier("updates.checkAndInstall")', False),),
+    ),
+    "updates.install": (
+        (('accessibilityIdentifier("updates.install")', False),),
+        (('accessibilityIdentifier("updates.checkAndInstall")', False),),
+    ),
 }
 
 

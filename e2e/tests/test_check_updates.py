@@ -349,6 +349,84 @@ def test_an_old_uDeck_still_running_beside_the_new_one_is_not_an_update(machine,
         checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
+def one_press(monkeypatch):
+    """The pane of a uDeck from 0.9.12 on: **Check and update**, and no offer on the way."""
+    shown = ui.Element(ui.CHECK_AND_INSTALL, 300, 400, 120, 22)
+    monkeypatch.setattr(checks, "_open_the_about_pane", lambda machine, check_dir, shot=None: shown)
+    return shown
+
+
+def test_one_press_is_the_whole_update_and_nothing_waits_for_an_offer(machine, lab, check_dir, monkeypatch):
+    """From 0.9.12 the lab presses **Check and update** once, waits for no offer, and judges the disk and the process."""
+    prepared(monkeypatch)
+    shown = one_press(monkeypatch)
+    finds(monkeypatch, **{"updates.install": AssertionError("a one-press uDeck is waited on for no offer")})
+    says(monkeypatch, "Installed 0.4.1")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.SECOND)
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "202"]
+
+    checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
+    pressed = [c for c in machine.clicks if c[2] == "pressing Check and update"]
+    assert pressed == [(shown.middle[0], shown.middle[1], "pressing Check and update")]
+    assert "the update is offered" not in machine.shots
+
+
+def test_one_press_that_installs_nothing_is_red_when_the_feed_answers(machine, lab, check_dir, monkeypatch):
+    """No offer was waited for, so the feed is asked at the verdict: answering, the old version on disk is uDeck's."""
+    prepared(monkeypatch)
+    one_press(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1", "Installed the latest version.")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
+    machine.ssh.answers["pgrep -x uDeck"] = ["101"]
+    asked = []
+    monkeypatch.setattr(updates.Feed, "answers_now", lambda self, step: asked.append(step) or True)
+
+    with pytest.raises(CheckFailed, match="not"):
+        checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
+    assert asked, "the feed was asked before uDeck was blamed"
+
+
+def test_one_press_against_a_dead_feed_is_the_lab_s(machine, lab, check_dir, monkeypatch):
+    """A feed that died since it was started gives one press nothing to find: "could not check", never red."""
+    prepared(monkeypatch)
+    one_press(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
+    machine.ssh.answers["pgrep -x uDeck"] = ["101"]
+    monkeypatch.setattr(updates.Feed, "answers_now", lambda self, step: False)
+
+    with pytest.raises(LabError):
+        checks.check_sparkle(machine, check_dir, lab, BETWEEN_CHECKOUTS)
+
+
+def test_one_press_against_another_key_is_proved_by_the_feed_log(machine, lab, check_dir, monkeypatch):
+    """The control with one press: pressed once, the archive served, the old version kept — and no offer waited for."""
+    offer = prepared(monkeypatch)
+    one_press(monkeypatch)
+    finds(monkeypatch, **{"updates.install": AssertionError("a one-press uDeck is waited on for no offer")})
+    says(monkeypatch, "Installed 0.4.1", "The check did not finish")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.archive} HTTP/1.1" 200 -'))
+
+    checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
+    assert machine.clicks and machine.clicks[-1][2].startswith("pressing Check and update")
+
+
+def test_one_press_against_another_key_that_fetched_nothing_proves_nothing(machine, lab, check_dir, monkeypatch):
+    """One press that never reached the archive reached no signature: the lab's, not a passed control."""
+    prepared(monkeypatch)
+    one_press(monkeypatch)
+    finds(monkeypatch)
+    says(monkeypatch, "Installed 0.4.1")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(""))
+
+    with pytest.raises(LabError, match="never answered for"):
+        checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
+
+
 def test_the_uDeck_that_came_back_is_watched_for_the_whole_settle(machine, lab, check_dir, monkeypatch):
     """Watched, not read once at the end: the sentence has to be able to say when it
     went, and a crash in the middle of the window must not be missed by a read after."""

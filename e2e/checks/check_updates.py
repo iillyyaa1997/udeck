@@ -241,19 +241,27 @@ def _the_whole_update(machine, check_dir, lab, pair):
     feed = updates.Feed(machine, lab.note)
     try:
         offered = _prepare(machine, check_dir, lab, feed, pair)
-        _open_the_about_pane(machine, check_dir)
+        shown = _open_the_about_pane(machine, check_dir)
 
-        ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
-        install = _wait_until_it_is_offered(machine, check_dir, lab, offered, feed)
-        machine.screenshot(check_dir, "the update is offered")
-        said = _what_the_pane_says(machine)
-        expect(
-            offered.version in said,
-            f"uDeck offered an update but does not name {offered.version}; it says: {said}",
-        )
-
-        before = app.running_pids(machine)
-        machine.click(*install.middle, "installing the update")
+        one_press = _one_press(shown)
+        if one_press:
+            # Since 0.9.12 one press looks, downloads and restarts into what it
+            # finds: there is no offer to read on the way, and the verdict is
+            # what it always was — the disk and the process that came back.
+            before = app.running_pids(machine)
+            machine.click(*shown.middle, "pressing Check and update")
+        else:
+            if not _offered_already(shown):
+                ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
+            install = _wait_until_it_is_offered(machine, check_dir, lab, offered, feed)
+            machine.screenshot(check_dir, "the update is offered")
+            said = _what_the_pane_says(machine)
+            expect(
+                offered.version in said,
+                f"uDeck offered an update but does not name {offered.version}; it says: {said}",
+            )
+            before = app.running_pids(machine)
+            machine.click(*install.middle, "installing the update")
         deadline = machine.clock() + INSTALL_SECONDS
         version = _the_version_once_it_is(machine, offered.keys, deadline)
         after = _wait_for_the_relaunch(machine, before, deadline)
@@ -266,6 +274,10 @@ def _the_whole_update(machine, check_dir, lab, pair):
             # download read the same on the disk. Both go into the red line.
             reached = _expect_the_guest_still_reaches_github(machine, offered, lab)
             said = _what_the_pane_says_or_why_not(machine)
+            if one_press and offered.release is None:
+                # No offer was waited for on the way, so the feed is asked here
+                # what `_wait_until_it_is_offered` asks: a dead one is the lab's.
+                _expect_the_feed_still_answers(feed, said)
             expect(
                 False,
                 f"the version on disk is {version}, not {offered.keys}" + (f"; {reached[1]}" if reached else "")
@@ -597,6 +609,12 @@ def check_tells_when_found(machine, check_dir, lab, pair):
         before = updates.asked_for_the_appcast(log)
         _open_the_about_pane(machine, check_dir, shot="the found version on the pane")
         ui.wait_for(machine, "updates.install", "waiting for the pane to offer the found version", seconds=OFFER_SECONDS)
+        if ui.find(machine, ui.CHECK_NOW, "asking for Check now beside the found version") is None:
+            # One button since 0.9.12, and on a found version it is Update,
+            # which puts it in: no look to press beside it. The next look by
+            # itself is `updates.looks-every-hour`'s.
+            lab.note("   one button since 0.9.12: Update on the found version, and no Check now beside it to look again")
+            return
         ui.click(machine, "updates.checkNow", "pressing Check now after the find")
         asked = _uDeck_asks(machine, feed, before, SWITCHED_ON_SECONDS, "listening for Check now after the find")
         if not asked:
@@ -831,29 +849,36 @@ def check_wrong_key(machine, check_dir, lab, pair):
         # The key "from" does not trust. None is the run's own, which no release trusts.
         another = builds.make_key(check_dir / "another-key") if pairs.signs_with_another_key(pair.from_) else None
         offered = _prepare(machine, check_dir, lab, feed, pair, signed_by=another)
-        _open_the_about_pane(machine, check_dir)
+        shown = _open_the_about_pane(machine, check_dir)
 
-        ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
-        # The signature is checked when the update is installed, not when it is
-        # offered, so the control has to press Install — and an update it was
-        # never offered is one whose signature was never reached. That is the lab
-        # failing to set the question up, not uDeck answering it.
-        step = "waiting for what uDeck does with an update signed by another key"
-        try:
-            install = ui.wait_for(machine, "updates.install", step, seconds=OFFER_SECONDS)
-        except NotThere:
-            raise LabError(
-                step,
-                "uDeck never offered the update, so nothing ever reached its signature. The "
-                "appcast is served unsigned and Sparkle checks the key when it downloads, so "
-                "the offer not appearing is about the feed, the window or the click — never "
-                "about the key this control is named after",
-            ) from None
-        # The pids before the press. uDeck refusing an update carries on running as
-        # itself; a uDeck that installed one comes back as a new process, and a
-        # uDeck that died leaves none.
-        before = app.running_pids(machine, "reading uDeck's pids before Install is pressed")
-        machine.click(*install.middle, "pressing Install on an update signed with another key")
+        if _one_press(shown):
+            # One press since 0.9.12 looks and downloads, and the signature is
+            # checked on the download: whether it got that far is the feed's
+            # log, below (`_prove_it_fetched_and_refused`).
+            before = app.running_pids(machine, "reading uDeck's pids before Check and update is pressed")
+            machine.click(*shown.middle, "pressing Check and update, the update signed with another key")
+        else:
+            ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
+            # The signature is checked when the update is installed, not when it is
+            # offered, so the control has to press Install — and an update it was
+            # never offered is one whose signature was never reached. That is the lab
+            # failing to set the question up, not uDeck answering it.
+            step = "waiting for what uDeck does with an update signed by another key"
+            try:
+                install = ui.wait_for(machine, "updates.install", step, seconds=OFFER_SECONDS)
+            except NotThere:
+                raise LabError(
+                    step,
+                    "uDeck never offered the update, so nothing ever reached its signature. The "
+                    "appcast is served unsigned and Sparkle checks the key when it downloads, so "
+                    "the offer not appearing is about the feed, the window or the click — never "
+                    "about the key this control is named after",
+                ) from None
+            # The pids before the press. uDeck refusing an update carries on running as
+            # itself; a uDeck that installed one comes back as a new process, and a
+            # uDeck that died leaves none.
+            before = app.running_pids(machine, "reading uDeck's pids before Install is pressed")
+            machine.click(*install.middle, "pressing Install on an update signed with another key")
 
         version = _the_version_after(machine, REFUSAL_SECONDS)
         _evidence(machine, check_dir, "after the refusal", lab)
@@ -1530,6 +1555,16 @@ def _the_feed_from_asks(pair, feed):
             return pair.from_.shipped_feed, False
         return config.LATEST_FEED, True
     return pair.to.own_appcast, True
+
+
+def _one_press(shown):
+    """Whether the uDeck in front looks and installs in one press (0.9.12 on): what `_open_the_about_pane` found."""
+    return getattr(shown, "identifier", None) == ui.CHECK_AND_INSTALL
+
+
+def _offered_already(shown):
+    """Whether the pane opened on **Update** — a version found or downloaded before anything was pressed."""
+    return getattr(shown, "identifier", None) in ("updates.install", "updates.restartAndInstall")
 
 
 def _open_the_about_pane(machine, check_dir, shot="the updates in Settings"):

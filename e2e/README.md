@@ -687,9 +687,11 @@ driven.
 **Which releases can be "from" is read from each release's own source**, at its
 tag in this checkout. Once the settings window is open, the lab presses its way
 to an update by the identifiers uDeck gives the controls — `section.about`,
-`updates.checkNow`, `updates.install` (`releases.CHECK_NOW_PATH`) — never by
-translated titles, and a release whose source names none of them has a window
-the lab cannot drive. The way into that window is the exception every check
+`updates.checkNow`, `updates.install` (`releases.CHECK_NOW_PATH`), or since
+0.9.12 the one press `updates.checkAndInstall`, which looks, downloads and
+restarts into what it finds — never by translated titles, and a release whose
+source names none of them has a window the lab cannot drive. Which press a uDeck
+has is told by its window (`ui.open_updates_pane`), never by its version. The way into that window is the exception every check
 shares: uDeck's menu item, which carries no identifier, is found by its English
 title `Settings…` and the window by `uDeck Settings` (see "The one thing the lab
 trusts a translated name for is the way in" under "The settings the operator

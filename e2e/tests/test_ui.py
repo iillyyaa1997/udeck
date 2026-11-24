@@ -837,6 +837,24 @@ def test_a_release_from_before_General_goes_straight_to_About():
     assert machine.sections == ["about"]
 
 
+CHECK_AND_INSTALL = "5|AXButton||updates.checkAndInstall||||955;455;|83;20;"
+UPDATE = "5|AXButton||updates.install||||955;455;|83;20;"
+
+
+def test_one_press_in_General_is_found_as_the_updates():
+    """0.9.12: Check now is gone, Check and update is the press — General is still told by it."""
+    machine = SectionsMachine({"general": [LOGIN_SWITCH, CHECK_AND_INSTALL], "about": []})
+    assert ui.open_updates_pane(machine, "choosing the updates").identifier == ui.CHECK_AND_INSTALL
+    assert machine.sections == ["general"]
+
+
+def test_a_version_waiting_on_one_button_is_found_as_the_updates():
+    """With one button a found version shows only Update: that is the updates showing, not a pane without them."""
+    machine = SectionsMachine({"general": [LOGIN_SWITCH, UPDATE], "about": []})
+    assert ui.open_updates_pane(machine, "choosing the updates").identifier == "updates.install"
+    assert machine.sections == ["general"]
+
+
 # --- The Plugins pane's tabs -----------------------------------------------------------
 
 TABS = [

@@ -451,14 +451,20 @@ def _install_the_update(machine, check_dir, lab, seconds=240):
     not pronounce on it.
     """
     step = "installing the update uDeck is offered"
-    ui.open_updates_pane(machine, "choosing uDeck's updates")
-    ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
-    try:
-        install = ui.wait_for(machine, "updates.install", "waiting for uDeck to offer the update", seconds=60)
-    except LabError as error:
-        raise LabError(step, f"uDeck did not offer the update: {error.reason}") from None
-    machine.screenshot(check_dir, "the update is offered")
-    machine.click(*install.middle, "installing the update")
+    shown = ui.open_updates_pane(machine, "choosing uDeck's updates")
+    found = getattr(shown, "identifier", None)
+    if found == ui.CHECK_AND_INSTALL:
+        # One press since 0.9.12: it looks, downloads and restarts into it.
+        machine.click(*shown.middle, "pressing Check and update")
+    else:
+        if found not in ("updates.install", "updates.restartAndInstall"):
+            ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
+        try:
+            install = ui.wait_for(machine, "updates.install", "waiting for uDeck to offer the update", seconds=60)
+        except LabError as error:
+            raise LabError(step, f"uDeck did not offer the update: {error.reason}") from None
+        machine.screenshot(check_dir, "the update is offered")
+        machine.click(*install.middle, "installing the update")
 
     deadline = machine.clock() + seconds
     while True:

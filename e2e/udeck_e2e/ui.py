@@ -549,18 +549,61 @@ UPDATES_AFTER_GENERAL_SECONDS = 2
 GENERAL_LOGIN = "general.openAtLogin"
 
 
+# The press that asks uDeck for an update. Since 0.9.12 one button looks,
+# downloads and restarts into what it finds (`updates.checkAndInstall`); every
+# release before it has **Check now**, which only looks, and then **Update**
+# (`updates.install`). A check presses whichever the uDeck in front of it has,
+# told by its window, never by its version.
+CHECK_AND_INSTALL = "updates.checkAndInstall"
+CHECK_NOW = "updates.checkNow"
+LOOKS = (CHECK_AND_INSTALL, CHECK_NOW)
+# What says the updates are showing: a press that looks, or — in a uDeck with
+# one button, which is **Update** while a found or downloaded version waits —
+# that **Update**. A release before 0.9.12 shows **Check now** in every state.
+UPDATES_SHOWN = (*LOOKS, "updates.install", "updates.restartAndInstall")
+
+
+def find_any(machine: Any, names: tuple[str, ...], step: str, window: str = SETTINGS_WINDOW) -> Element | None:
+    """The first of these controls the walk holds, in the order given, or None."""
+    found = walk(machine, step, window)
+    for identifier in names:
+        target = ax.first_with(found, identifier)
+        if target is not None:
+            return _element(target)
+    return None
+
+
+def wait_for_any(machine: Any, names: tuple[str, ...], step: str, window: str = SETTINGS_WINDOW,
+                 seconds: float = config.UI_APPEAR_SECONDS) -> Element:
+    """Until one of these controls is there — `wait_for` for a control that has more than one name across releases."""
+    deadline = machine.clock() + seconds
+    while True:
+        element = find_any(machine, names, step, window)
+        if element is not None:
+            return _settled(machine, element, step, window, deadline)
+        if machine.clock() >= deadline:
+            raise NotThere(
+                step,
+                f"none of {', '.join(repr(i) for i in names)} appeared in '{window}' within {seconds:.0f}s; "
+                f"what is there: {', '.join(identifiers(machine, step, window)) or 'nothing with an identifier'}",
+            )
+        machine.sleep(1)
+
+
 def open_updates_pane(machine: Any, step: str) -> Element:
-    """The section that holds uDeck's own updates chosen in an open settings window, and its **Check now**.
+    """The section that holds uDeck's own updates chosen in an open settings window, and its press that looks.
 
     General since the redesign (2026-11-18); About in every release before it, so
     a check that drives an older release as "from" finds it there. Which one is
-    told by the window itself — `updates.checkNow` showing in General or not —
-    and never by a version number.
+    told by the window itself — the updates showing in General or not
+    (`UPDATES_SHOWN`) — and never by a version number. What comes back is the
+    control found: **Check and update**, **Check now**, or **Update** on a
+    version that waits.
     """
     if find(machine, "section.general", f"{step}: asking for General") is None:
         # A release from before General: its updates can only be in About.
         click(machine, "section.about", f"{step}: choosing About, in a uDeck with no General")
-        return wait_for(machine, "updates.checkNow", f"{step}: About")
+        return wait_for(machine, CHECK_NOW, f"{step}: About")
     click(machine, "section.general", f"{step}: choosing General")
     # General shown first, by a control only General has and every release has
     # there: a walk taken before the pane changed still holds About's **Check
@@ -574,13 +617,13 @@ def open_updates_pane(machine: Any, step: str) -> Element:
         # A moment for the rest of the pane to reach the walk after its first control.
         deadline = machine.clock() + UPDATES_AFTER_GENERAL_SECONDS
         while True:
-            if find(machine, "updates.checkNow", f"{step}: General") is not None:
-                return wait_for(machine, "updates.checkNow", f"{step}: General")
+            if find_any(machine, UPDATES_SHOWN, f"{step}: General") is not None:
+                return wait_for_any(machine, UPDATES_SHOWN, f"{step}: General")
             if machine.clock() >= deadline:
                 break
             machine.sleep(0.5)
     click(machine, "section.about", f"{step}: choosing About, where an older uDeck keeps its updates")
-    return wait_for(machine, "updates.checkNow", f"{step}: About, General having shown no Check now")
+    return wait_for_any(machine, UPDATES_SHOWN, f"{step}: About, General having shown no updates")
 
 
 def menu_items(machine: Any, step: str) -> str:
