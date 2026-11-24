@@ -657,6 +657,7 @@ struct English: Vocabulary {
         case .noticeUpdatedTitle(let version): "uDeck updated to \(version)"
         case .noticeUpdatedBody: "Click to see what's new."
         case .noticeLater: "Later"
+        case .noticeSend: "Send"
 
         case .menuBrokenPlugins(let count):
             count == 1 ? "1 plugin will not run" : "\(count) plugins will not run"

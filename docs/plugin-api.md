@@ -254,6 +254,10 @@ What the plugin prints:
 {"card": { "title": "Agents", "rows": [ … ] }}
 {"notify": {"id": "s-41", "title": "Waiting for you", "body": "Wants to run make"}}
 {"pick": {"id": "new", "prompt": "Choose the folder to work in"}}
+{"notify": {"id": "s-41", "title": "Waiting for you", "body": "Wants to run make",
+            "actions": [{"id": "allow:r7", "text": "Allow"}, {"id": "deny:r7", "text": "Deny"}],
+            "reply": {"button": "Reply", "placeholder": "Message"}}}
+{"unnotify": {"id": "s-41"}}
 {"card": { … }, "view": "4F2A…", "keep": "s-41", "name": "Fix the badge"}
 {"show": {"view": "4F2A…"}}
 ```
@@ -262,7 +266,14 @@ What the plugin prints:
   one. Print it when something changed, not on a timer. uDeck draws at most ten
   cards a second and the newest wins, so printing faster only costs you.
 * `notify` — a macOS notification. Clicking it shows the panel and sends a
-  `notification` event with the same `id`.
+  `notification` event with the same `id`. It may carry up to three buttons,
+  `actions`, and a field to write a reply in, `reply` — the button that opens
+  it and what it says while empty (uDeck 0.9.9 and later). macOS draws them:
+  on a banner they show when the pointer is over it. A button pressed or a
+  reply sent comes as a `notification` event with `action` or `text`, and
+  nothing opens: an answer, given where it was asked.
+* `unnotify` — the notification `id` is not wanted any more, answered on the
+  card: it leaves Notification Centre, its buttons with it.
 * `pick` — ask for a folder; the answer comes as a `folder` event.
 * `view`, `keep` and `name` beside a `card`, and `show` — the card's places,
   below (uDeck 0.9.9 and later).
@@ -279,6 +290,8 @@ What uDeck writes:
 {"event":"submit","row":"message","text":"Look at the folder"}
 {"event":"folder","id":"new","path":"/Users/me/Workspace/app"}
 {"event":"notification","id":"s-41"}
+{"event":"notification","id":"s-41","action":"allow:r7"}
+{"event":"notification","id":"s-41","text":"Run the tests first"}
 {"event":"choose","row":"head","menu":"session","option":"s-42"}
 ```
 

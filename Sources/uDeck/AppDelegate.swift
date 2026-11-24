@@ -86,8 +86,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // registers at launch silently puts back a login item the operator removed.
         self.loginItem = SystemLoginItem()
         // Resident plugins: their notifications, and the folders they ask for.
-        model.onPluginNotice = { [weak self] plugin, id, title, body in
-            self?.updater.notifier.postPluginNotice(plugin: plugin.rawValue, id: id, title: title, body: body)
+        model.onPluginNotice = { [weak self] plugin, notice in
+            self?.updater.notifier.postPluginNotice(plugin: plugin.rawValue, notice: notice)
+        }
+        model.onPluginUnnotify = { [weak self] plugin, id in
+            self?.updater.notifier.withdrawPluginNotice(plugin: plugin.rawValue, id: id)
+        }
+        // A button pressed or a reply written in a plugin's notification: the
+        // plugin is told, and nothing opens.
+        updater.notifier.onAnswerPluginNotice = { [weak model] plugin, id, action, text in
+            guard let plugin = PluginIdentifier(rawValue: plugin) else { return }
+            model?.residentEvent(plugin, .notification(id: id, action: action, text: text))
         }
         updater.notifier.onOpenPluginNotice = { [weak self, weak model] plugin, id in
             self?.controller.reveal()

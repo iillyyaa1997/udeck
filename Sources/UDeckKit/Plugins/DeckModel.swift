@@ -397,8 +397,10 @@ public final class DeckModel {
     /// The resident plugins whose process is running: their cards do not age
     /// while they are quiet.
     public private(set) var liveResidents: Set<PluginIdentifier> = []
-    /// A resident plugin asked for a notification: (plugin, its id, title, body).
-    public var onPluginNotice: ((PluginIdentifier, String, String, String) -> Void)?
+    /// A resident plugin asked for a notification (`PluginNotice`).
+    public var onPluginNotice: ((PluginIdentifier, PluginNotice) -> Void)?
+    /// A resident plugin's notification is not wanted any more: (plugin, its id).
+    public var onPluginUnnotify: ((PluginIdentifier, String) -> Void)?
     /// A resident plugin asked for a folder: (plugin, request id, prompt).
     public var onPluginPicksFolder: ((PluginIdentifier, String, String?) -> Void)?
     private var pollTasks: [String: Task<Void, Never>] = [:]
@@ -812,8 +814,10 @@ public final class DeckModel {
         switch message {
         case .card(let card, let place):
             recordCard(card, place, of: id)
-        case .notify(let notice, let title, let body):
-            onPluginNotice?(id, notice, title, body)
+        case .notify(let notice):
+            onPluginNotice?(id, notice)
+        case .unnotify(let notice):
+            onPluginUnnotify?(id, notice)
         case .pickFolder(let request, let prompt):
             onPluginPicksFolder?(id, request, prompt)
         case .show(let view):

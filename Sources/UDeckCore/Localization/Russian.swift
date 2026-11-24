@@ -663,6 +663,7 @@ struct Russian: Vocabulary {
         case .noticeUpdatedTitle(let version): "uDeck обновилась до \(version)"
         case .noticeUpdatedBody: "Нажмите, чтобы посмотреть, что нового"
         case .noticeLater: "Позже"
+        case .noticeSend: "Отправить"
 
         case .menuBrokenPlugins(let count):
             {

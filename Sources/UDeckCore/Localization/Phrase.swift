@@ -779,6 +779,8 @@ public enum Phrase: Sendable, Equatable {
     case noticeUpdatedTitle(String)
     case noticeUpdatedBody
     case noticeLater
+    /// The button that sends a reply written in a plugin's notification.
+    case noticeSend
 
     // MARK: - Plugins that will not run
 

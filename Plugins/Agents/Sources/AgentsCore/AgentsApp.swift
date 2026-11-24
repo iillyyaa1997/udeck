@@ -123,6 +123,17 @@ public final class AgentsApp {
             }
         case "notification":
             if let id = event["id"]?.string, let uuid = UUID(uuidString: id) {
+                // A button of the notification: the answer it names, as on
+                // the card — nothing, for a question answered meanwhile.
+                if let action = event["action"]?.string {
+                    press(action)
+                    break
+                }
+                // A reply written in it: the question's answer, or a message.
+                if let text = event["text"]?.string {
+                    reply(text, to: uuid)
+                    break
+                }
                 // Shown in a place of its own: that place comes forward.
                 if let other = place(showing: uuid) {
                     send(["show": ["view": .string(other)]])
@@ -139,6 +150,22 @@ public final class AgentsApp {
     }
 
     var selected: Conversation? { conversations.first { $0.id == selection } }
+
+    /// A reply written in a notification of `id`: the answer to its open
+    /// question, or else a message — queued while it works.
+    private func reply(_ text: String, to id: UUID) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, let conversation = conversations.first(where: { $0.id == id }),
+              heldBack[id] == nil else { return }
+        if let session = conversation.claude, conversation.active == .claude,
+           let ask = session.asks.first(where: { $0.ask.questions?.first != nil }),
+           let question = ask.ask.questions?.first {
+            session.answer(ask, with: .choices([question.question: [text]]))
+            unnotify(id)
+            return
+        }
+        conversation.send(text)
+    }
 
     // MARK: - Places
 
@@ -310,6 +337,7 @@ public final class AgentsApp {
     }
 
     private func press(_ id: String) {
+        defer { withdrawAnswered() }
         if id == "stop" { selected?.current.interrupt(); return }
         if id == "new" { select("new"); return }
         if id.hasPrefix("here:") || id.hasPrefix("drop:"), let uuid = UUID(uuidString: String(id.dropFirst(5))),
@@ -420,22 +448,49 @@ public final class AgentsApp {
     }
 
     /// Notifications for an agent's asks and finished turns, and the restart
-    /// a Claude session waits for until its turn is done.
+    /// a Claude session waits for until its turn is done. Each can be
+    /// answered where it shows: an ask by its buttons — a question's options,
+    /// or a field for an answer of one's own — and a finished turn by a
+    /// message written in it.
     private func watch(_ agent: Agent, in conversation: Conversation) {
         let id = conversation.id
-        func asked(_ summary: String) {
-            notify(id, title: t("Ждёт ответа — ", "Waiting for you — ") + conversation.title, body: summary)
+        func asked(_ body: String, actions: [JSONValue], reply: JSONValue? = nil) {
+            notify(id, title: t("Ждёт ответа — ", "Waiting for you — ") + conversation.title, body: body,
+                   actions: actions, reply: reply)
         }
         func finished(_ words: String) {
-            notify(id, title: t("Готово — ", "Done — ") + conversation.title, body: words)
+            notify(id, title: t("Готово — ", "Done — ") + conversation.title, body: words, actions: [],
+                   reply: ["button": .string(t("Ответить", "Reply")), "placeholder": .string(t("Сообщение", "Message"))])
             if let note = restartAfterTurn.removeValue(forKey: id) { restartClaude(conversation, saying: note) }
         }
+        func action(_ id: String, _ text: String) -> JSONValue { ["id": .string(id), "text": .string(text)] }
         switch agent {
         case .claude(let session):
-            session.onAsk = { ask in asked(ask.summary) }
+            session.onAsk = { [weak self] ask in
+                guard let self else { return }
+                if let question = ask.ask.questions?.first {
+                    asked(question.question,
+                          actions: question.options.prefix(2).enumerated().map { index, option in
+                              action("opt:\(ask.requestID):\(index)", option.label)
+                          },
+                          reply: ["button": .string(t("Свой ответ…", "Own answer…")), "placeholder": .string(t("Ответ", "Answer"))])
+                    return
+                }
+                var actions = [action("allow:" + ask.requestID, t("Разрешить", "Allow"))]
+                if ask.ask.offersAlways { actions.append(action("always:" + ask.requestID, t("Разрешать в сессии", "Allow in session"))) }
+                actions.append(action("deny:" + ask.requestID, t("Отклонить", "Deny")))
+                asked(t("Хочет запустить: ", "Wants to run: ") + ask.summary, actions: actions)
+            }
             session.onTurnFinished = { words in finished(words) }
         case .codex(let session):
-            session.onAsk = { ask in asked(ask.summary) }
+            session.onAsk = { [weak self] ask in
+                guard let self else { return }
+                asked(t("Хочет запустить: ", "Wants to run: ") + ask.summary, actions: [
+                    action("allow:" + ask.requestID, t("Разрешить", "Allow")),
+                    action("always:" + ask.requestID, t("Разрешать в сессии", "Allow in session")),
+                    action("deny:" + ask.requestID, t("Отклонить", "Deny")),
+                ])
+            }
             session.onTurnFinished = { [weak self, weak session] words in
                 finished(words)
                 guard let self, let session else { return }
@@ -486,8 +541,35 @@ public final class AgentsApp {
         render()
     }
 
-    private func notify(_ id: UUID, title: String, body: String) {
-        send(["notify": ["id": .string(id.uuidString), "title": .string(title), "body": .string(String(body.prefix(240)))]])
+    /// Conversations whose «waiting for you» notification may still show.
+    private var notifiedWaiting: Set<UUID> = []
+
+    private func notify(_ id: UUID, title: String, body: String, actions: [JSONValue] = [], reply: JSONValue? = nil) {
+        var notice: [String: JSONValue] = ["id": .string(id.uuidString), "title": .string(title),
+                                           "body": .string(String(body.prefix(240)))]
+        if !actions.isEmpty { notice["actions"] = .array(actions) }
+        if let reply { notice["reply"] = reply }
+        if actions.isEmpty { notifiedWaiting.remove(id) } else { notifiedWaiting.insert(id) }
+        send(["notify": .object(notice)])
+    }
+
+    /// The notification of `id` is not wanted any more.
+    private func unnotify(_ id: UUID) {
+        notifiedWaiting.remove(id)
+        send(["unnotify": ["id": .string(id.uuidString)]])
+    }
+
+    /// A conversation answered on the card, or in its notification, waits
+    /// for nothing now: its «waiting for you» leaves Notification Centre, and
+    /// its buttons with it.
+    private func withdrawAnswered() {
+        for id in notifiedWaiting {
+            guard let conversation = conversations.first(where: { $0.id == id }) else {
+                unnotify(id)
+                continue
+            }
+            if conversation.current.waiting == 0 { unnotify(id) }
+        }
     }
 
     func environment() async -> [String: String] {

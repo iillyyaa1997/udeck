@@ -37,29 +37,101 @@ final class UpdateNotifier: NSObject, UNUserNotificationCenterDelegate, NSUserNo
     var onOpen: () -> Void = {}
     /// A resident plugin's notice clicked: (plugin id, the plugin's notice id).
     var onOpenPluginNotice: (String, String) -> Void = { _, _ in }
+    /// A button of a resident plugin's notice pressed, or a reply written in
+    /// it: (plugin id, notice id, the button's id, the reply).
+    var onAnswerPluginNotice: (String, String, String?, String?) -> Void = { _, _, _, _ in }
 
     static let pluginPrefix = "plugin\u{1F}"
+    static let pluginActionPrefix = "place.unicorns.udeck.plugin.action\u{1F}"
+    static let pluginReplyAction = "place.unicorns.udeck.plugin.reply"
+    /// The categories of plugins' notices with buttons or a field, by
+    /// identifier: macOS keeps one set of categories for the application, the
+    /// update's offer among them, so the whole set is given each time.
+    private var pluginCategories: [String: UNNotificationCategory] = [:]
+    /// The newest last: the oldest go once there are more than this.
+    private var pluginCategoryOrder: [String] = []
+    static let pluginCategoryLimit = 32
 
     /// A notification a resident plugin asked for; a newer one with the same
-    /// id replaces it. Through the current API, which a signed uDeck has.
-    func postPluginNotice(plugin: String, id: String, title: String, body: String) {
+    /// id replaces it. Its buttons and its field, if it has them, come as a
+    /// category of its own. Through the current API, which a signed uDeck has.
+    func postPluginNotice(plugin: String, notice: PluginNotice) {
         guard bundled else { return }
         let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = String(body.prefix(240))
+        content.title = notice.title
+        content.body = String(notice.body.prefix(240))
         content.sound = .default
         content.threadIdentifier = plugin
-        let identifier = Self.pluginPrefix + plugin + "\u{1F}" + id
+        if notice.answers {
+            let category = pluginCategory(for: notice)
+            if pluginCategories[category.identifier] == nil {
+                pluginCategories[category.identifier] = category
+                pluginCategoryOrder.append(category.identifier)
+                if pluginCategoryOrder.count > Self.pluginCategoryLimit {
+                    pluginCategories[pluginCategoryOrder.removeFirst()] = nil
+                }
+            }
+            content.categoryIdentifier = category.identifier
+            setCategories()
+        }
+        let identifier = Self.pluginPrefix + plugin + "\u{1F}" + notice.id
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         let center = center
         Task { @MainActor in
             do {
                 guard try await center.requestAuthorization(options: [.alert, .sound]) else { return }
+                // Read back: the category is in the set before the notice
+                // that names it is.
+                _ = await center.notificationCategories()
                 try await center.add(request)
             } catch {
                 DeckLog.updates.notice("plugin notice not sent: \(error.localizedDescription, privacy: .public)")
             }
         }
+    }
+
+    /// Takes a plugin's notice away, shown or waiting to be.
+    func withdrawPluginNotice(plugin: String, id: String) {
+        guard bundled else { return }
+        let identifier = Self.pluginPrefix + plugin + "\u{1F}" + id
+        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
+    }
+
+    /// A category for what `notice` offers: its buttons, then its field. Named
+    /// by what it holds, so that notices offering the same share one.
+    private func pluginCategory(for notice: PluginNotice) -> UNNotificationCategory {
+        var actions: [UNNotificationAction] = notice.actions.map {
+            UNNotificationAction(identifier: Self.pluginActionPrefix + $0.id, title: $0.text, options: [])
+        }
+        if let reply = notice.reply {
+            actions.append(UNTextInputNotificationAction(
+                identifier: Self.pluginReplyAction, title: reply.button, options: [],
+                textInputButtonTitle: strings()(.noticeSend), textInputPlaceholder: reply.placeholder ?? ""))
+        }
+        let parts = notice.actions.map { $0.id + "\u{1F}" + $0.text }
+            + [notice.reply.map { $0.button + "\u{1F}" + ($0.placeholder ?? "") } ?? "", strings()(.noticeSend)]
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in parts.joined(separator: "\u{1E}").utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x100000001b3
+        }
+        return UNNotificationCategory(identifier: "place.unicorns.udeck.plugin." + String(hash, radix: 16),
+                                      actions: actions, intentIdentifiers: [])
+    }
+
+    /// Every category uDeck's notices use: the update's offer, and the
+    /// plugins'.
+    private func setCategories() {
+        let strings = strings()
+        let offer = UNNotificationCategory(
+            identifier: Self.offerCategory,
+            actions: [
+                UNNotificationAction(identifier: Self.updateAction, title: strings(.updatesUpdate)),
+                UNNotificationAction(identifier: Self.laterAction, title: strings(.noticeLater)),
+            ],
+            intentIdentifiers: []
+        )
+        center.setNotificationCategories(Set([offer] + pluginCategoryOrder.compactMap { pluginCategories[$0] }))
     }
 
     /// What became of one: macOS took it, said no, or failed to.
@@ -106,16 +178,7 @@ final class UpdateNotifier: NSObject, UNUserNotificationCenterDelegate, NSUserNo
             return
         }
         let strings = strings()
-        center.setNotificationCategories([
-            UNNotificationCategory(
-                identifier: Self.offerCategory,
-                actions: [
-                    UNNotificationAction(identifier: Self.updateAction, title: strings(.updatesUpdate)),
-                    UNNotificationAction(identifier: Self.laterAction, title: strings(.noticeLater)),
-                ],
-                intentIdentifiers: []
-            ),
-        ])
+        setCategories()
         let content = UNMutableNotificationContent()
         switch notice {
         case .found(let version):
@@ -249,10 +312,22 @@ final class UpdateNotifier: NSObject, UNUserNotificationCenterDelegate, NSUserNo
     ) async {
         let action = response.actionIdentifier
         let identifier = response.notification.request.identifier
+        let written = (response as? UNTextInputNotificationResponse)?.userText
         await MainActor.run {
             if identifier.hasPrefix(Self.pluginPrefix) {
                 let parts = identifier.dropFirst(Self.pluginPrefix.count).split(separator: "\u{1F}", maxSplits: 1)
-                if parts.count == 2 { onOpenPluginNotice(String(parts[0]), String(parts[1])) }
+                guard parts.count == 2 else { return }
+                let (plugin, notice) = (String(parts[0]), String(parts[1]))
+                // A button or a reply is an answer, given where it was asked:
+                // the plugin is told, and the panel stays as it is.
+                if action.hasPrefix(Self.pluginActionPrefix) {
+                    onAnswerPluginNotice(plugin, notice, String(action.dropFirst(Self.pluginActionPrefix.count)), nil)
+                } else if action == Self.pluginReplyAction {
+                    let text = (written ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty { onAnswerPluginNotice(plugin, notice, nil, text) }
+                } else if action == UNNotificationDefaultActionIdentifier {
+                    onOpenPluginNotice(plugin, notice)
+                }
                 return
             }
             switch action {

@@ -14,8 +14,12 @@ public enum ResidentMessage: Equatable, Sendable {
     /// The card as it is now, and which of its places it is for.
     case card(Card, CardPlace)
     /// A macOS notification; clicking it shows the plugin's card and sends a
-    /// `notification` event with `id`.
-    case notify(id: String, title: String, body: String)
+    /// `notification` event with `id`, as does a button of it or a reply
+    /// written in it (`PluginNotice`).
+    case notify(PluginNotice)
+    /// The notification `id` is not wanted any more — answered on the card:
+    /// it leaves Notification Centre.
+    case unnotify(id: String)
     /// Ask the person for a folder; the answer comes as a `folder` event.
     case pickFolder(id: String, prompt: String?)
     /// Bring the place `view` forward: its window, its mini window, its tab.
@@ -29,7 +33,14 @@ public enum ResidentMessage: Equatable, Sendable {
     public static let nameLimit = 200
 
     private struct Envelope: Decodable {
-        struct Notify: Decodable { var id: String; var title: String?; var body: String? }
+        struct Notify: Decodable {
+            var id: String
+            var title: String?
+            var body: String?
+            var actions: [PluginNotice.Action]?
+            var reply: PluginNotice.Reply?
+        }
+        struct Unnotify: Decodable { var id: String }
         struct Pick: Decodable { var id: String; var prompt: String? }
         struct Show: Decodable { var view: String }
         var card: Card?
@@ -37,6 +48,7 @@ public enum ResidentMessage: Equatable, Sendable {
         var keep: String?
         var name: String?
         var notify: Notify?
+        var unnotify: Unnotify?
         var pick: Pick?
         var show: Show?
     }
@@ -52,7 +64,10 @@ public enum ResidentMessage: Equatable, Sendable {
                                          keep: envelope.keep.flatMap { $0.count <= Self.keepLimit ? $0 : nil },
                                          name: envelope.name.flatMap { $0.count <= Self.nameLimit ? $0 : nil }))
         } else if let notify = envelope.notify {
-            self = .notify(id: notify.id, title: notify.title ?? "", body: notify.body ?? "")
+            self = .notify(PluginNotice(id: notify.id, title: notify.title ?? "", body: notify.body ?? "",
+                                        actions: notify.actions ?? [], reply: notify.reply))
+        } else if let unnotify = envelope.unnotify {
+            self = .unnotify(id: unnotify.id)
         } else if let pick = envelope.pick {
             self = .pickFolder(id: pick.id, prompt: pick.prompt)
         } else if let show = envelope.show {
@@ -61,6 +76,63 @@ public enum ResidentMessage: Equatable, Sendable {
             self = .unknown(String(line.prefix(200)))
         }
     }
+}
+
+/// A notification a resident plugin asks for: macOS draws it, with up to
+/// three buttons and a field to write a reply in (uDeck 0.9.9 and later).
+/// What the person pressed or wrote comes back as a `notification` event —
+/// without the panel opening: an answer, given where it was asked.
+public struct PluginNotice: Equatable, Sendable {
+    public struct Action: Codable, Equatable, Sendable {
+        public var id: String
+        public var text: String
+
+        public init(id: String, text: String) {
+            self.id = id
+            self.text = text
+        }
+    }
+
+    /// A field to write in: the button that opens it, and what it says while
+    /// empty.
+    public struct Reply: Codable, Equatable, Sendable {
+        public var button: String
+        public var placeholder: String?
+
+        public init(button: String, placeholder: String? = nil) {
+            self.button = button
+            self.placeholder = placeholder
+        }
+    }
+
+    /// The most buttons a notice carries, and the longest anything in it
+    /// may be: macOS cuts a long title short, and a long id is no one's.
+    public static let actionLimit = 3
+    public static let textLimit = 60
+    public static let idLimit = 200
+
+    public var id: String
+    public var title: String
+    public var body: String
+    public var actions: [Action]
+    public var reply: Reply?
+
+    /// The notice as uDeck holds it: at most three buttons, each with an id
+    /// and a text of its own; anything too long cut or left out.
+    public init(id: String, title: String, body: String, actions: [Action] = [], reply: Reply? = nil) {
+        func cut(_ text: String) -> String { String(text.prefix(Self.textLimit)) }
+        self.id = id
+        self.title = title
+        self.body = body
+        var seen = Set<String>()
+        self.actions = Array(actions.filter { action in
+            !action.id.isEmpty && action.id.count <= Self.idLimit && !action.text.isEmpty && seen.insert(action.id).inserted
+        }.prefix(Self.actionLimit)).map { Action(id: $0.id, text: cut($0.text)) }
+        self.reply = reply.flatMap { $0.button.isEmpty ? nil : Reply(button: cut($0.button), placeholder: $0.placeholder.map(cut)) }
+    }
+
+    /// Whether it carries anything to press or write in.
+    public var answers: Bool { !actions.isEmpty || reply != nil }
 }
 
 /// Which place a card is for, and what it shows there (uDeck 0.9.9 and
@@ -103,8 +175,9 @@ public enum ResidentEvent: Equatable, Sendable {
     case submit(row: String, text: String)
     /// The folder the person chose for a `pick` request; nil when they cancelled.
     case folder(id: String, path: String?)
-    /// A notification the plugin asked for was clicked.
-    case notification(id: String)
+    /// A notification the plugin asked for was clicked — or one of its
+    /// buttons pressed, `action`, or a reply written in it, `text`.
+    case notification(id: String, action: String? = nil, text: String? = nil)
     /// An option of a menu was chosen: the row (a `bar` or an `input`), the
     /// menu (or button) and the option.
     case choose(row: String, menu: String, option: String)
@@ -141,6 +214,7 @@ public enum ResidentEvent: Equatable, Sendable {
         var path: String?
         var menu: String?
         var option: String?
+        var action: String?
         var view: String?
         var place: String?
         var keep: String?
@@ -161,7 +235,9 @@ public enum ResidentEvent: Equatable, Sendable {
         case .press(let id): wire = Wire(event: "press", id: id)
         case .submit(let row, let text): wire = Wire(event: "submit", row: row, text: text)
         case .folder(let id, let path): wire = Wire(event: "folder", id: id, path: path)
-        case .notification(let id): wire = Wire(event: "notification", id: id)
+        case .notification(let id, let action, let text):
+            wire = Wire(event: "notification", id: id, text: text)
+            wire.action = action
         case .choose(let row, let menu, let option): wire = Wire(event: "choose", row: row, menu: menu, option: option)
         case .closed(let to): wire = Wire(event: "closed", to: to)
         }
