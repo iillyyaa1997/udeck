@@ -2388,8 +2388,9 @@ struct IslandPreview: View {
                                 .accessibilityIdentifier("look.islandPreview.glow")
                         }
                     }
+                    // Hanging from the top of the screen, over the menu bar,
+                    // as the island does where there is no notch.
                     .frame(width: 150, height: 22)
-                    .padding(.top, 24)
                 }
             }
         }
