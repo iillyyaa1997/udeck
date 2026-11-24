@@ -560,7 +560,12 @@ case "press-menu-item":
     let process = argument(0, "a process name")
     let title = argument(1, "the item's title")
     let items = menuItems(firstMenu(application(process), process: process))
-    guard let item = items.first(where: { text(attribute($0, kAXTitleAttribute)) == title }) else {
+    // By its title — or its title and the line under it, which macOS reads as
+    // one title joined by ", " (uDeck's Check and Update uDeck, 0.9.12: "Check
+    // and Update uDeck, Version 0.4.2 is available.").
+    let named = { (item: AXUIElement) in text(attribute(item, kAXTitleAttribute)) }
+    guard let item = items.first(where: { named($0) == title })
+        ?? items.first(where: { named($0).hasPrefix(title + ", ") }) else {
         refuse("\(process)'s menu has no item called \(title); it has \(items.map { text(attribute($0, kAXTitleAttribute)) })")
     }
     // An accessibility action, as System Events' `click menu item` was: the
