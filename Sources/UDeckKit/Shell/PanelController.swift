@@ -295,7 +295,11 @@ public final class PanelController {
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] event in
             let wentDown = event.timestamp
-            MainActor.assumeIsolated { self?.noteClickHeard(wentDown: wentDown) }
+            let carried = MainThreadKeyEvent(event)
+            MainActor.assumeIsolated {
+                self?.noteClickHeard(wentDown: wentDown)
+                self?.promoteOnAClick(carried.event)
+            }
             return event
         }
 
@@ -474,6 +478,22 @@ public final class PanelController {
     /// Called by the content when the operator interacts with it, which is what
     /// turns a glance into a working panel.
     public func noteInteraction() {
+        apply(.interacted)
+    }
+
+    /// A click on a peek is the first interaction, wherever on the panel it
+    /// lands. The content's own tap on its background was the only one that
+    /// promoted it, and a click that something in the panel took for its own
+    /// — a card's title line, which drags; a conversation's text, which
+    /// selects; a field — never reached it: the panel stayed a peek, and it
+    /// took a second click, or a third (0.9.8, the operator's «иногда нужно
+    /// несколько раз нажать»). Heard here, before any of them, it cannot be
+    /// missed. A click in the margin round the panel is not on it.
+    private func promoteOnAClick(_ event: NSEvent) {
+        guard state.phase == .peek, event.window === panel, let geometry else { return }
+        let point = panel.convertPoint(toScreen: event.locationInWindow)
+        guard geometry.frame(for: .peek).contains(point) else { return }
+        DeckLog.panel.debug("a click on the peek: it is held")
         apply(.interacted)
     }
 

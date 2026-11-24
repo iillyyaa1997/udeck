@@ -529,13 +529,23 @@ struct MenuPill: View {
 /// (`PanelController.handleClickOutside`).
 @MainActor
 enum PopoverPresence {
-    static var open = 0
     static var closedAt: TimeInterval = 0
 
     /// A click whose button went down at `wentDown` (system uptime) was made
     /// while a popover was open, or within the moment it takes to close.
+    ///
+    /// Open is asked of the windows, not counted: a count of appearances and
+    /// disappearances stayed above nought once a popover went with the panel
+    /// without saying so, and every click past the panel was then taken for
+    /// one at a popover — the panel would not close (0.9.8, the operator's
+    /// «нажимаю на пустое место, а ничего не происходит»).
     static func holds(at wentDown: TimeInterval) -> Bool {
-        open > 0 || wentDown - closedAt < 0.8
+        isOpen || wentDown - closedAt < 0.8
+    }
+
+    /// Whether a popover of uDeck's is on the screen now.
+    @MainActor static var isOpen: Bool {
+        NSApp.windows.contains { $0.isVisible && String(describing: type(of: $0)).contains("Popover") }
     }
 }
 
@@ -576,11 +586,7 @@ struct OptionList: View {
         }
         .frame(minWidth: 200, maxWidth: 300, maxHeight: 420)
         .fixedSize(horizontal: false, vertical: options.count < 14)
-        .onAppear { PopoverPresence.open += 1 }
-        .onDisappear {
-            PopoverPresence.open = max(0, PopoverPresence.open - 1)
-            PopoverPresence.closedAt = ProcessInfo.processInfo.systemUptime
-        }
+        .onDisappear { PopoverPresence.closedAt = ProcessInfo.processInfo.systemUptime }
     }
 }
 

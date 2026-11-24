@@ -26,6 +26,12 @@ for what that promises.
   while uDeck quits, crashes or updates; the next uDeck takes them back where
   they are, a question still waiting. macOS says once that uDeck added a
   background item.
+- **The first click on the panel always holds it.** A click on a card's title
+  line, on a conversation's text or on a field left the panel a peek, and it
+  took another click or two to work in it.
+- **A click past the panel always closes it.** Once a card's menu had gone
+  away with the panel, uDeck went on taking every click past the panel for a
+  click at that menu, and the panel stayed open.
 
 ## [0.9.8] — 2026-11-24
 
