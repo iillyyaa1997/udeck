@@ -8,6 +8,17 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.8] — 2026-11-24
+
+- **Show a card wherever you want it.** A button at the end of every card's
+  title line, and its right-click menu, show it *As a card*, *As a tab* (the
+  whole tab of the panel), *In a window* of its own, or *In a mini window*
+  that stays above every other in a corner. Its cell keeps its place on the
+  board and offers *Show* and *Bring back here*; closing the window brings
+  the card back. Each place remembers its own size and position, and the card
+  is drawn for that size: Agents in a mini window keeps only its feed and its
+  field.
+
 ## [0.9.7] — 2026-11-24
 
 - **Trust a plugin's updates.** A checkbox under Allow — *Trust uptime's
