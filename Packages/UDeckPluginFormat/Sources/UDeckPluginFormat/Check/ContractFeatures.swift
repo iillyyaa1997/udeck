@@ -131,8 +131,9 @@ public enum ContractFeatures {
     /// 0.9.8's places tell a card their size by the `size` event it always
     /// had; 0.9.9's are lines beside a card and events — `view`, `keep`,
     /// `name`, `show`, a notice's `actions` and `reply`, `unnotify` — which a
-    /// uDeck before it ignores, and the docs date).
-    static let reviewedAt = "0.9.9"
+    /// uDeck before it ignores, and the docs date). 0.9.10 brings a card's
+    /// `attention`, dated above.
+    static let reviewedAt = "0.9.10"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
@@ -199,9 +200,10 @@ public enum ContractFeatures {
                     "info"].map { .barIcon($0) })
 
         // Something waits for the person — the island says so, and the peek
-        // shows its question first: the release after 0.9.9.
-        add(.next, [.cardField("attention")])
-        add(.next, ["count", "ask"].map { .rowField(row: "attention", field: $0) })
+        // shows its question first: 0.9.10.
+        let attentionRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 10))
+        add(attentionRelease, [.cardField("attention")])
+        add(attentionRelease, ["count", "ask"].map { .rowField(row: "attention", field: $0) })
         return registry
     }()
 

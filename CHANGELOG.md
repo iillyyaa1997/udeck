@@ -8,6 +8,19 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.10] — 2026-11-24
+
+- **The island says when something waits for you.** On a MacBook the notch
+  hid it: now ears grow beside the notch while an agent waits — a dot and how
+  many — or, as chosen in Settings → Look → Island, a glow along the notch's
+  edge, or ears always in the colour of how things are. Without a notch the
+  island glows. Peeking at the panel shows the waiting question first, with its
+  buttons, and the panel goes once it is answered.
+- **A card can say what waits for the person** (`attention`): how many things,
+  and the question to show first. Agents says it for every session.
+- Claude Code's and Codex's protocols live in the Agents plugin now, not in
+  uDeck.
+
 ## [0.9.9] — 2026-11-24
 
 - **Each session in a place of its own.** A card that says what it shows —
