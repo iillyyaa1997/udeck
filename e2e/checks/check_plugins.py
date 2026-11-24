@@ -52,6 +52,7 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
 import json
 import re
 import shlex
@@ -8056,3 +8057,254 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+def _ids_in(machine, step, window):
+    """The identifiers in a window, without the role the walk puts before each: `AXButton [id]` → `id`."""
+    return [i.split("[", 1)[1].rstrip("]") if "[" in i else i for i in ui.identifiers(machine, step, window)]
+
+
+def _windows(machine, step):
+    titles = ui.ask(machine, 'tell application "System Events" to get name of every window of process "uDeck"', step, seconds=10)
+    names = [t.strip() for t in str(titles).replace("{", "").replace("}", "").split(",") if t.strip()]
+    print(step, "->", names)
+    return names
+
+
+def _window_named(machine, part, step):
+    return next((name for name in _windows(machine, step) if part in name), None)
+
+
+def _click(machine, identifier, step, window=None, seconds=15):
+    try:
+        found = ui.wait_for(machine, identifier, step, window or ui.PANEL, seconds=seconds)
+        machine.click(*found.middle, step)
+        return True
+    except Exception as error:  # noqa: BLE001 — a lab tree's gallery: say it and go on
+        print("not found:", identifier, "in", window or "the panel", str(error)[-500:])
+        ui.ask(machine, 'tell application "System Events" to key code 53', "closing a popover", seconds=10)
+        return False
+
+
+def check_agents_views(machine, check_dir, lab):
+    """Each Agents session in a place of its own, against the stand-in CLI — a lab tree's only, never committed."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    fake_codex = f"{home}/lab-chat/fake-codex.py"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && cp {root}/Tests/fake-codex.py {shlex.quote(fake_codex)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin and the stand-in CLI")
+    _write(machine, SETTINGS, {"language": "ru"}, "uDeck in Russian")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake, "codex": fake_codex}}}, "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 7, "height": 5}]}]}, "placing Agents")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.click(*allow.middle, "allowing Agents")
+    ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=30)
+
+    def new_session(message, step):
+        _click(machine, "row.button.new", f"＋: {step}")
+        machine.sleep(1)
+        _click(machine, "row.button.new.new:claude", f"a new Claude session: {step}")
+        machine.sleep(2)
+        ui.choose_folder(machine, project, f"the folder: {step}")
+        machine.sleep(3)
+        field = ui.wait_for(machine, "row.input.message", f"the field: {step}", ui.PANEL, seconds=30)
+        machine.click(*field.middle, f"focusing the field: {step}")
+        ui.type_text(machine, message, f"typing: {step}")
+        ui.press_return(machine, f"sending: {step}")
+        machine.sleep(3)
+
+    # Two sessions: one done, one waiting on a question.
+    new_session("Look at the folder", "the first")
+    _click(machine, "row.ask.allow:perm-b1", "allowing the command", seconds=40)
+    machine.sleep(3)
+    new_session("Ask me a question", "the second")
+    machine.sleep(3)
+    machine.screenshot(check_dir, "views 1 board with the waiting session")
+
+    # The place menu names the session, and sends it to a mini window.
+    _click(machine, "card.agents.place", "the place menu")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "views 2 place menu names the session")
+    _click(machine, "card.agents.place.mini", "sending the session to a mini window")
+    machine.sleep(4)
+    mini = _window_named(machine, "Ask me a question", "the windows after the mini")
+    machine.screenshot(check_dir, "views 3 mini with the session and the board with the other")
+    print("layout after mini:", machine.ssh.run(f"cat {LAYOUT}", "the layout").stdout[-2500:])
+
+    # The board's session menu says where each is; choosing the one in the
+    # mini window brings it, and the board stays.
+    _open_the_panel(machine, "the panel for the menu")
+    machine.sleep(1)
+    _click(machine, "row.menu.session", "the board's session menu")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "views 4 the board's menu says where")
+    options = [i for i in _ids_in(machine, "the menu's options", ui.PANEL) if i.startswith("row.menu.session.s:")]
+    print("session options:", options)
+    ui.ask(machine, 'tell application "System Events" to key code 53', "closing the menu", seconds=10)
+    machine.sleep(1)
+
+    # Answered in the mini window.
+    if mini:
+        answers = [i for i in _ids_in(machine, "the mini's answers", mini) if i.startswith("row.ask.opt:")]
+        print("mini answers:", answers)
+        if answers:
+            _click(machine, answers[0], "answering in the mini window", mini)
+            machine.sleep(4)
+        machine.screenshot(check_dir, "views 5 answered in the mini")
+
+    # The board's session goes to a window of its own: the board lists where each is.
+    _open_the_panel(machine, "the panel for the window")
+    machine.sleep(1)
+    _click(machine, "card.agents.place", "the place menu again")
+    machine.sleep(1)
+    _click(machine, "card.agents.place.window", "sending the other session to a window")
+    machine.sleep(4)
+    window = _window_named(machine, "Look at the folder", "the windows after the window")
+    _open_the_panel(machine, "the panel with every session away")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "views 6 the board lists where each is")
+
+    # From the window back to the board.
+    _put_the_panel_away(machine, "the panel away from the window")
+    machine.sleep(1)
+    if window:
+        _click(machine, "card.agents.place", "the window's place menu", window)
+        machine.sleep(1)
+        machine.screenshot(check_dir, "views 7 the window's place menu")
+        _click(machine, "card.agents.place.card", "back to the board", window)
+        machine.sleep(3)
+    _windows(machine, "the windows after back")
+    _open_the_panel(machine, "the panel after back")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "views 8 back on the board")
+
+    # uDeck starts again: the mini window comes back with its session.
+    print("layout before the restart:", machine.ssh.run(f"cat {LAYOUT}", "the layout").stdout[-2500:])
+    app.quit_app(machine, "quitting uDeck")
+    machine.sleep(2)
+    app.launch(machine)
+    machine.sleep(8)
+    mini = _window_named(machine, "Ask me a question", "the windows after the restart")
+    machine.screenshot(check_dir, "views 9 after a restart")
+    _open_the_panel(machine, "the panel after the restart")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "views 10 the board after a restart")
+
+    # Closed by its own button: the session stays in the menu.
+    if mini:
+        ui.ask(machine, f'tell application "System Events" to click button 1 of window "{mini}" of process "uDeck"',
+               "closing the mini window", seconds=10)
+        machine.sleep(3)
+    _windows(machine, "the windows after closing")
+    _open_the_panel(machine, "the panel after closing")
+    machine.sleep(1)
+    _click(machine, "row.menu.session", "the menu after closing")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "views 11 closed, the session stays in the menu")
+    ui.ask(machine, 'tell application "System Events" to key code 53', "closing the menu", seconds=10)
+    print("layout at the end:", machine.ssh.run(f"cat {LAYOUT}", "the layout").stdout[-2500:])
+
+
+
+
+def _agents_pid(machine, step):
+    out = machine.ssh.ask("pgrep -f '/plugins/agents/agents' | head -1; exit 0", step).stdout.strip()
+    parent = machine.ssh.ask(f"ps -o ppid= -p {out} 2>/dev/null; ps -o comm= -p $(ps -o ppid= -p {out} 2>/dev/null) 2>/dev/null; exit 0",
+                             f"{step}: its parent").stdout.split() if out else []
+    print(step, "-> agents pid", out or "none", "parent", parent)
+    return out
+
+
+def check_agents_kept(machine, check_dir, lab):
+    """Agents in the helper: a question waiting survives uDeck quitting and being killed — a lab tree's only, never committed."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    fake_codex = f"{home}/lab-chat/fake-codex.py"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && cp {root}/Tests/fake-codex.py {shlex.quote(fake_codex)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin and the stand-in CLI")
+    _write(machine, SETTINGS, {"language": "ru"}, "uDeck in Russian")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake, "codex": fake_codex}}}, "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 7, "height": 5}]}]}, "placing Agents")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=40)
+    machine.click(*new.middle, "＋")
+    machine.sleep(1)
+    option = ui.wait_for(machine, "row.button.new.new:claude", "a new Claude session", ui.PANEL, seconds=8)
+    machine.click(*option.middle, "a new Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "the folder")
+    machine.sleep(3)
+    field = ui.wait_for(machine, "row.input.message", "the field", ui.PANEL, seconds=30)
+    machine.click(*field.middle, "focusing the field")
+    ui.type_text(machine, "Ask me a question", "typing")
+    ui.press_return(machine, "sending")
+    ui.wait_for(machine, "row.ask.opt:perm-q1:0", "the question", ui.PANEL, seconds=40)
+    machine.screenshot(check_dir, "kept 1 a question waits")
+    before = _agents_pid(machine, "before quitting")
+    print("helper:", machine.ssh.ask("pgrep -lf udeck-agentd; exit 0", "the helper").stdout.strip())
+    print("uDeck log:", machine.ssh.ask("/usr/bin/log show --last 3m --style compact --predicate 'subsystem BEGINSWITH \"place.unicorns.udeck\"' 2>/dev/null | grep -i -E 'resident|helper' | tail -12; exit 0", "the log").stdout[-2500:])
+
+    app.quit_app(machine, "quitting uDeck")
+    machine.sleep(3)
+    during = _agents_pid(machine, "with uDeck gone")
+    machine.screenshot(check_dir, "kept 2 uDeck gone")
+    app.launch(machine)
+    machine.sleep(6)
+    _open_the_panel(machine, "the panel after starting again")
+    machine.sleep(2)
+    after = _agents_pid(machine, "after starting again")
+    found = True
+    try:
+        answer = ui.wait_for(machine, "row.ask.opt:perm-q1:0", "the question, still waiting", ui.PANEL, seconds=20)
+    except Exception as error:  # noqa: BLE001 — a lab tree's gallery: say it and go on
+        found = False
+        print("the question did not come back:", str(error)[-500:])
+    machine.screenshot(check_dir, "kept 3 the question after uDeck started again")
+    print("SAME PROCESS:", before == during == after and bool(before), before, during, after, "question back:", found)
+    if found:
+        machine.click(*answer.middle, "answering it")
+        machine.sleep(4)
+        machine.screenshot(check_dir, "kept 4 answered after the restart")
+
+    # Killed outright: the same.
+    machine.ssh.run("pkill -9 -x uDeck; exit 0", "killing uDeck", check=False)
+    machine.sleep(3)
+    killed = _agents_pid(machine, "with uDeck killed")
+    app.launch(machine)
+    machine.sleep(6)
+    _open_the_panel(machine, "the panel after a crash")
+    machine.sleep(3)
+    again = _agents_pid(machine, "after a crash")
+    machine.screenshot(check_dir, "kept 5 after a crash")
+    print("SAME AFTER A CRASH:", before == killed == again, killed, again)
+    print("uDeck log after:", machine.ssh.ask("/usr/bin/log show --last 2m --style compact --predicate 'subsystem BEGINSWITH \"place.unicorns.udeck\"' 2>/dev/null | grep -i -E 'resident|helper' | tail -12; exit 0", "the log").stdout[-2500:])
