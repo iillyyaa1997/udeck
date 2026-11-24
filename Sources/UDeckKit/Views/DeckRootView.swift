@@ -344,6 +344,8 @@ struct PeekView: View {
                     model.residentEvent(first.plugin, event)
                     shell.onCollapse()
                 }
+                // Its buttons keep their own ids (`row.ask.<id>`).
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("peek.attention")
             }
             if summary.placedPlugins == 0 {
