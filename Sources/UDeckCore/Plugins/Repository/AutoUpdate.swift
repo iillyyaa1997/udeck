@@ -403,6 +403,7 @@ public enum GrantCarry {
               grant.decidedForVersion == old.version,
               !AutoUpdate.asksDifferently(old.asks, new.asks) else { return grant }
         return PluginGrant(granted: grant.granted, denied: grant.denied, decidedForVersion: new.version,
-                           decidedForSource: grant.decidedForSource, decidedAt: grant.decidedAt)
+                           decidedForSource: grant.decidedForSource, trustsUpdates: grant.trustsUpdates,
+                           decidedForOrigin: grant.decidedForOrigin, decidedAt: grant.decidedAt)
     }
 }

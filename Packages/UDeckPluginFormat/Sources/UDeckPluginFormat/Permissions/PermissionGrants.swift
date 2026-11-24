@@ -39,6 +39,24 @@ public struct PluginGrant: Codable, Equatable, Sendable {
     /// absent `decidedForSource` is read as.
     public static let officialSource = "official"
 
+    /// Whether the operator trusted this plugin's updates when allowing it:
+    /// a new version — or, for code held to its tree, new content — that asks
+    /// for nothing it was not granted here, from the same place
+    /// (`decidedForOrigin`), runs without being asked about again
+    /// (`carriedOver`). Anything more is asked about as before. Nil — absent
+    /// from every decision written before there was such trust, and from one
+    /// a uDeck from before rewrote — is no trust: such a decision asks again,
+    /// the safe way.
+    public var trustsUpdates: Bool?
+
+    /// Where the copy the trust was given to came from, as uDeck names it
+    /// (`DeckModel.origin(of:)`): how its decision is held, its source and
+    /// the line of history it follows — or a folder of one's own, or a link.
+    /// Trust is carried over only to a copy from exactly that place: another
+    /// source's, another branch's, a pull request's put at the same id is a
+    /// different plugin, and asks.
+    public var decidedForOrigin: String?
+
     /// Truncated to whole seconds.
     ///
     /// The file this is stored in uses ISO-8601 timestamps, which carry no
@@ -53,6 +71,8 @@ public struct PluginGrant: Codable, Equatable, Sendable {
         decidedForVersion: String,
         decidedForTree: String? = nil,
         decidedForSource: String? = nil,
+        trustsUpdates: Bool? = nil,
+        decidedForOrigin: String? = nil,
         decidedAt: Date = Date()
     ) {
         self.granted = granted
@@ -60,6 +80,8 @@ public struct PluginGrant: Codable, Equatable, Sendable {
         self.decidedForVersion = decidedForVersion
         self.decidedForTree = decidedForTree
         self.decidedForSource = decidedForSource
+        self.trustsUpdates = trustsUpdates
+        self.decidedForOrigin = decidedForOrigin
         self.decidedAt = Date(timeIntervalSince1970: decidedAt.timeIntervalSince1970.rounded(.down))
     }
 
@@ -73,6 +95,33 @@ public struct PluginGrant: Codable, Equatable, Sendable {
         if let requiredSource, (decidedForSource ?? Self.officialSource) != requiredSource { return false }
         guard let requiredTree else { return true }
         return !requiredTree.isEmpty && decidedForTree == requiredTree
+    }
+
+    /// Whether the operator trusted the updates of the copy from `origin`.
+    public func trusts(origin: String?) -> Bool {
+        guard trustsUpdates == true, let origin, let decidedForOrigin else { return false }
+        return decidedForOrigin == origin
+    }
+
+    /// This decision carried over to an update the operator trusted: the
+    /// copy from `origin` now at `manifest`'s version — and, held to its
+    /// tree, at `requiredTree` — asks for nothing this decision did not
+    /// grant, so it is decided for the update as it was for the copy before,
+    /// trust and all. Granted is only what the update asks for: what it no
+    /// longer asks for is not kept. Nil when nothing is carried over — no
+    /// trust, or trust in a copy from another place; a decision that holds
+    /// already; a folder not hashed yet; something refused; something asked
+    /// for that was not granted, which the operator is asked about.
+    public func carriedOver(to manifest: PluginManifest, tree requiredTree: String?, source requiredSource: String?,
+                            origin: String?, at date: Date = Date()) -> PluginGrant? {
+        guard trusts(origin: origin), denied.isEmpty else { return nil }
+        guard !holds(forVersion: manifest.version, tree: requiredTree, source: requiredSource) else { return nil }
+        if let requiredTree, requiredTree.isEmpty { return nil }
+        let requested = manifest.permissions.capabilities
+        guard requested.allSatisfy(granted.contains) else { return nil }
+        return PluginGrant(granted: Set(requested), decidedForVersion: manifest.version, decidedForTree: requiredTree,
+                           decidedForSource: requiredSource ?? decidedForSource, trustsUpdates: true,
+                           decidedForOrigin: decidedForOrigin, decidedAt: date)
     }
 }
 

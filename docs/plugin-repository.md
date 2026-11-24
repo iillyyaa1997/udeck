@@ -907,7 +907,7 @@ new optional fields are exactly what the `api: 1` promise allows.
 ```
 
 Optional, the same `MAJOR.MINOR.PATCH` grammar, compared with the running
-uDeck's own version (`CFBundleShortVersionString`, `0.9.6` at the time of
+uDeck's own version (`CFBundleShortVersionString`, `0.9.7` at the time of
 writing). Absent means "any uDeck that speaks my `api`".
 
 `api` and `minUDeck` answer different questions. `api` says which *contract*;
@@ -2444,6 +2444,21 @@ Carrying grants nothing: the gate still holds every capability the new
 manifest asks for against what the decision holds. If uDeck stops between the
 swap and writing the decision, the plugin asks again. The rule is `GrantCarry`
 in UDeckCore, tested there.
+
+**Trusted updates.** Under **Allow** — on the card and in Settings → Plugins —
+is a checkbox, *Trust uptime's updates while it asks for the same*. Ticked, the
+decision remembers where the copy came from: how its decision is held, its
+source and the line of history it follows — a branch, a pull request, the
+default branch — or a folder of one's own, or a link. A later copy from exactly
+that place, whose manifest asks for nothing the decision did not grant, is
+decided as the copy before it was, trust and all, without asking: a new
+`version`, and for code held to its tree new content too. A copy from anywhere
+else — another source, another branch, the same id put there by hand — and one
+asking for anything more asks on the card, as it always has; one asking for
+less is granted only what it still asks for. A refusal is never carried this
+way, and nothing is decided while the folder is not hashed. Settings →
+Plugins keeps the checkbox under a decision that holds, to take the trust back
+or give it. The rule is `PluginGrant.carriedOver` in UDeckPluginFormat.
 
 A plugin whose copy holds anything of the operator's is not updated over
 without a word: *"Your changes to uptime will be moved to the Trash and

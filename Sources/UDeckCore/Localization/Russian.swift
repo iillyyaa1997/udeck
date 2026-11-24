@@ -226,6 +226,9 @@ struct Russian: Vocabulary {
         case .permissionsUnsandboxed:
             "uDeck запускает этот плагин от вашего имени, без песочницы. Разрешить — значит согласиться запустить эту программу; отказать — значит uDeck её никогда не запустит."
         case .permissionsAllowAndRun: "Разрешить и запустить"
+        case .permissionsTrustUpdates(let name): "Доверять обновлениям \(name), пока права те же"
+        case .permissionsTrustUpdatesHelp:
+            "Обновление из того же места, которое не просит большего, запустится без вопроса. Если попросит больше, uDeck спросит."
 
         // Плагины из репозитория
         case .pluginsOfficialCatalogue: "Официальный каталог"
