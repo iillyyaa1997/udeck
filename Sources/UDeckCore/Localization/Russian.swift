@@ -73,6 +73,11 @@ struct Russian: Vocabulary {
             }
         case .lookIslandGlows: "Подсвечивать шторку, когда агент ждёт"
         case .lookIslandGlowsHelp: "На мониторе без челки шторка светится тем же цветом"
+        case .lookIslandPreview: "Предпросмотр"
+        case .lookIslandPreviewWaiting: "Агент ждёт"
+        case .lookIslandPreviewIdle: "Не ждёт"
+        case .lookIslandPreviewNotch: "С челкой"
+        case .lookIslandPreviewNoNotch: "Без челки"
         case .openingHeldLeaveChoice(let leave):
             switch leave {
             case .backAsItWas: "Убирать, наведением — как была"

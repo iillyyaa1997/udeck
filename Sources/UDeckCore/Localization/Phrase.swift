@@ -79,6 +79,11 @@ public enum Phrase: Sendable, Equatable {
     case lookNotchAttentionChoice(NotchAttention)
     case lookIslandGlows
     case lookIslandGlowsHelp
+    case lookIslandPreview
+    case lookIslandPreviewWaiting
+    case lookIslandPreviewIdle
+    case lookIslandPreviewNotch
+    case lookIslandPreviewNoNotch
     case openingHeldLeaveChoice(HeldPanelLeave)
     case openingFullscreen
     case openingKeepPolling

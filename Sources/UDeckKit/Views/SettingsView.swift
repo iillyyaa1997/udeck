@@ -1224,6 +1224,12 @@ private struct LookSettings: View {
                 Section { samples }
                 Section(strings(.lookStyle)) { styleCards }
                 Section(strings(.lookIslandGroup)) {
+                    IslandPreview(choice: model.settings.notchAttention ?? .standard,
+                                  glows: model.settings.islandGlowsWhenWaiting ?? true,
+                                  theme: DeckTheme(density: model.settings.density,
+                                                   look: model.settings.look(for: IslandState(phase: .collapsed,
+                                                                                              surrounding: .ordinary)),
+                                                   textSize: model.settings.resolvedTextSize))
                     Picker(strings(.lookNotchAttention), selection: Binding(
                         get: { model.settings.notchAttention ?? .standard },
                         set: { newValue in
@@ -2143,32 +2149,31 @@ private struct StyleCard: View {
     }
 }
 
-/// One variant of a style, drawn small: the tint over the window behind it and
-/// a line of its text. A sketch of the material, not the material — the sample
-/// above the cards is the real one.
+/// One variant of a style, drawn small: the material itself over a window with
+/// something in it, and a line of its text. Over a flat colour every style
+/// looked the same — what tells them apart is what each does to what is behind
+/// (the operator's screenshot, 11-24) — so there are stripes and lines of
+/// "text" to blur, cover, dull or leave.
 private struct StyleSwatch: View {
     var look: PanelLook
     var behind: Color
 
     var body: some View {
         ZStack(alignment: .leading) {
-            behind
-            RoundedRectangle(cornerRadius: 4)
-                .fill(fill)
-                .padding(6)
+            SwatchBackdrop(base: behind)
+            PanelSurface(shape: RoundedRectangle(cornerRadius: 4),
+                         fallbackFill: DeckTheme(density: .normal, look: look).windowFill,
+                         glass: look.glass)
+                .opacity(look.presence)
+                .padding(.horizontal, 6)
+                .padding(.top, 12)
+                .padding(.bottom, 5)
             Capsule()
                 .fill(ink)
                 .frame(width: 18, height: 3)
                 .padding(.leading, 12)
+                .padding(.top, 7)
         }
-    }
-
-    private var fill: Color {
-        let glass = look.glass
-        let tint = glass.tintColor.map { Color(red: $0.red, green: $0.green, blue: $0.blue) }
-            ?? Color(white: glass.tintIsLight ? 0.97 : 0.1)
-        let strength = glass.tinted ? 0.25 + 0.75 * glass.tintStrength : 0.3
-        return tint.opacity(strength * glass.opacity)
     }
 
     private var ink: Color {
@@ -2298,5 +2303,113 @@ private struct GlassPreview: View {
         .frame(width: width, height: 150)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
+    }
+}
+
+/// What a style swatch sits over: the window's colour with coloured stripes and
+/// two lines of "text" across it, for the material to blur, cover or leave.
+private struct SwatchBackdrop: View {
+    var base: Color
+
+    var body: some View {
+        Canvas { context, size in
+            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(base))
+            let colours: [Color] = [Color(red: 0.24, green: 0.44, blue: 0.71),
+                                    Color(red: 0.91, green: 0.69, blue: 0.29),
+                                    Color(red: 0.18, green: 0.56, blue: 0.36)]
+            var x: CGFloat = -size.height
+            var index = 0
+            while x < size.width {
+                var stripe = Path()
+                stripe.move(to: CGPoint(x: x, y: size.height))
+                stripe.addLine(to: CGPoint(x: x + size.height, y: 0))
+                stripe.addLine(to: CGPoint(x: x + size.height + 5, y: 0))
+                stripe.addLine(to: CGPoint(x: x + 5, y: size.height))
+                stripe.closeSubpath()
+                context.fill(stripe, with: .color(colours[index % colours.count]))
+                x += 11
+                index += 1
+            }
+            let text = Color(white: isLight ? 0.1 : 0.92)
+            context.fill(Path(CGRect(x: 6, y: 4, width: size.width * 0.55, height: 2.5)), with: .color(text))
+            context.fill(Path(CGRect(x: 6, y: size.height - 5, width: size.width * 0.4, height: 2.5)), with: .color(text))
+        }
+    }
+
+    private var isLight: Bool {
+        (NSColor(base).usingColorSpace(.deviceRGB)?.brightnessComponent ?? 0) > 0.5
+    }
+}
+
+/// Settings → Look → Island, before anything waits: a menu bar with a notch,
+/// with the ears or the glow as chosen, and one without, with the island as it
+/// glows. «Агент ждёт / Не ждёт» is the preview's own and changes nothing else.
+struct IslandPreview: View {
+    var choice: NotchAttention
+    var glows: Bool
+    var theme: DeckTheme
+    @State private var waiting = true
+    @Environment(\.strings) private var strings
+
+    private static let notch = CGSize(width: 96, height: 24)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker(strings(.lookIslandPreview), selection: $waiting) {
+                Text(strings(.lookIslandPreviewWaiting)).tag(true)
+                Text(strings(.lookIslandPreviewIdle)).tag(false)
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .accessibilityIdentifier("look.islandPreview.waiting")
+            HStack(alignment: .top, spacing: 12) {
+                screen(caption: strings(.lookIslandPreviewNotch)) {
+                    ZStack(alignment: .top) {
+                        UnevenRoundedRectangle(bottomLeadingRadius: 9, bottomTrailingRadius: 9)
+                            .fill(Color.black)
+                            .frame(width: Self.notch.width, height: Self.notch.height)
+                        NotchMarkDrawing(count: waiting ? 1 : 0, choice: choice,
+                                         dot: waiting ? NotchMarkView.waiting : NotchMarkView.fine,
+                                         ear: NotchMarks.ear, below: NotchMarks.below,
+                                         identifier: "look.islandPreview.notch")
+                            .frame(width: Self.notch.width + 2 * NotchMarks.ear,
+                                   height: Self.notch.height + NotchMarks.below)
+                    }
+                }
+                screen(caption: strings(.lookIslandPreviewNoNotch)) {
+                    ZStack {
+                        BottomRoundedRectangle(radius: 9).fill(theme.windowFill)
+                        Capsule().fill(theme.text.opacity(0.55)).frame(width: 34, height: 4)
+                        if waiting && glows {
+                            BottomRoundedRectangle(radius: 9)
+                                .stroke(NotchMarkView.waiting, lineWidth: 2)
+                                .shadow(color: NotchMarkView.waiting.opacity(0.9), radius: 5)
+                                .accessibilityElement()
+                                .accessibilityIdentifier("look.islandPreview.glow")
+                        }
+                    }
+                    .frame(width: 150, height: 22)
+                    .padding(.top, 24)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// A screen's top: a menu bar over a wallpaper, with what is drawn on it.
+    private func screen(caption: String, @ViewBuilder island: () -> some View) -> some View {
+        VStack(spacing: 4) {
+            ZStack(alignment: .top) {
+                LinearGradient(colors: [Color(red: 0.44, green: 0.48, blue: 0.55),
+                                        Color(red: 0.30, green: 0.33, blue: 0.39)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                Rectangle().fill(Color(white: 0.17)).frame(height: Self.notch.height)
+                island()
+            }
+            .frame(width: 260, height: 78)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
+            Text(caption).font(.caption).foregroundStyle(.secondary)
+        }
     }
 }

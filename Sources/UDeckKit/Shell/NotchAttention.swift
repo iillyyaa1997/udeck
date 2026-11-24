@@ -57,22 +57,50 @@ struct NotchMarkView: View {
     var below: CGFloat
 
     static let waiting = Color(red: 0.94, green: 0.66, blue: 0.23)
+    static let fine = Color(red: 0.25, green: 0.75, blue: 0.37)
 
     var body: some View {
         let count = model.attention.count
-        let choice = model.settings.notchAttention ?? .standard
+        NotchMarkDrawing(count: count, choice: model.settings.notchAttention ?? .standard,
+                         dot: dot(count: count), ear: ear, below: below, identifier: "island.notch")
+    }
+
+    /// The colour of the dot: waiting, or how things are.
+    private func dot(count: Int) -> Color {
+        if count > 0 { return Self.waiting }
+        let states = model.snapshots.values.compactMap { $0.card?.state }
+        if states.contains(.crit) { return .red }
+        if states.contains(.warn) { return Self.waiting }
+        return Self.fine
+    }
+}
+
+/// The ears or the glow themselves, for a count and a choice: beside the real
+/// notch, and in Settings → Look, where the person sees them before anything
+/// waits.
+struct NotchMarkDrawing: View {
+    var count: Int
+    var choice: NotchAttention
+    var dot: Color
+    var ear: CGFloat
+    var below: CGFloat
+    /// `island.notch` on the screen; the preview has its own, so a check of the
+    /// panel never takes one for the other.
+    var identifier: String
+
+    var body: some View {
         GeometryReader { geometry in
             let notch = CGRect(x: ear, y: 0, width: geometry.size.width - 2 * ear, height: geometry.size.height - below)
             switch choice {
             case .earsWhileWaiting where count > 0, .earsAlways:
                 ears(count: count, notch: notch, width: geometry.size.width)
                     .accessibilityElement()
-                    .accessibilityIdentifier("island.notch.ears")
+                    .accessibilityIdentifier("\(identifier).ears")
                     .accessibilityLabel("\(count)")
             case .glowAlongTheEdge where count > 0:
                 glow(notch: notch)
                     .accessibilityElement()
-                    .accessibilityIdentifier("island.notch.glow")
+                    .accessibilityIdentifier("\(identifier).glow")
             default:
                 Color.clear
             }
@@ -87,34 +115,25 @@ struct NotchMarkView: View {
                 .fill(Color.black)
                 .frame(width: width, height: notch.height)
             Circle()
-                .fill(dot(count: count))
+                .fill(dot)
                 .frame(width: 9, height: 9)
-                .shadow(color: count > 0 ? Self.waiting.opacity(0.8) : .clear, radius: 4)
+                .shadow(color: count > 0 ? NotchMarkView.waiting.opacity(0.8) : .clear, radius: 4)
                 .position(x: ear / 2 + 2, y: notch.height / 2)
             if count > 0 {
                 Text("\(count)")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Self.waiting)
+                    .foregroundStyle(NotchMarkView.waiting)
                     .position(x: width - ear / 2 - 2, y: notch.height / 2)
             }
         }
     }
 
-    /// The colour of the dot: waiting, or how things are.
-    private func dot(count: Int) -> Color {
-        if count > 0 { return Self.waiting }
-        let states = model.snapshots.values.compactMap { $0.card?.state }
-        if states.contains(.crit) { return .red }
-        if states.contains(.warn) { return Self.waiting }
-        return Color(red: 0.25, green: 0.75, blue: 0.37)
-    }
-
     /// A glow along the notch's lower edge.
     private func glow(notch: CGRect) -> some View {
         UnevenRoundedRectangle(bottomLeadingRadius: 9, bottomTrailingRadius: 9)
-            .stroke(Self.waiting, lineWidth: 2)
+            .stroke(NotchMarkView.waiting, lineWidth: 2)
             .frame(width: notch.width, height: notch.height)
-            .shadow(color: Self.waiting.opacity(0.9), radius: 5)
+            .shadow(color: NotchMarkView.waiting.opacity(0.9), radius: 5)
             .position(x: notch.midX, y: notch.height / 2)
     }
 }

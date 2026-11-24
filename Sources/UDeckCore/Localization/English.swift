@@ -69,6 +69,11 @@ struct English: Vocabulary {
             }
         case .lookIslandGlows: "Light up the island while something waits"
         case .lookIslandGlowsHelp: "On a screen without a notch the island glows in the same colour"
+        case .lookIslandPreview: "Preview"
+        case .lookIslandPreviewWaiting: "An agent waits"
+        case .lookIslandPreviewIdle: "Nothing waits"
+        case .lookIslandPreviewNotch: "With a notch"
+        case .lookIslandPreviewNoNotch: "Without a notch"
         case .openingHeldLeaveChoice(let leave):
             switch leave {
             case .backAsItWas: "Put it away; it comes back as it was"
