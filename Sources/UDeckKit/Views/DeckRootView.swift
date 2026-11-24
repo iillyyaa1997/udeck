@@ -48,6 +48,19 @@ public struct DeckRootView: View {
                 material(theme: theme)
             }
 
+            // Something waits for the person: the island glows, on a screen
+            // without a notch (beside a notch it is `NotchMarks`).
+            if shell.phase == .collapsed, !shell.screenHasNotch, model.attention.count > 0,
+               model.settings.islandGlowsWhenWaiting != false {
+                BottomRoundedRectangle(radius: PanelChrome.cornerRadius(phase: .collapsed, metrics: model.settings.panel))
+                    .stroke(NotchMarkView.waiting, lineWidth: 2)
+                    .shadow(color: NotchMarkView.waiting.opacity(0.9), radius: 5)
+                    .frame(width: shell.panelRect.width, height: shell.panelRect.height)
+                    .offset(x: shell.panelRect.minX, y: shell.panelRect.minY)
+                    .accessibilityElement()
+                    .accessibilityIdentifier("island.glow")
+            }
+
             panel(theme: theme)
                 .frame(
                     width: shell.panelRect.width,
@@ -143,7 +156,7 @@ public struct DeckRootView: View {
                 // panel rather than by this state — see `IslandMark`.
                 Color.clear
             case .peek:
-                PeekView(theme: theme, summary: summary, model: model)
+                PeekView(theme: theme, summary: summary, model: model, shell: shell)
             case .open, .fullscreen:
                 WorkspaceView(shell: shell, model: model, theme: theme)
             }
@@ -320,9 +333,19 @@ struct PeekView: View {
     @Environment(\.strings) private var strings
     var summary: DeckSummary
     var model: DeckModel
+    var shell: ShellState
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.rowSpacing) {
+            // What waits for the person comes first, with its buttons: an
+            // answer from the glance, after which the glance goes.
+            if let first = model.attention.asks.first {
+                AskRowView(ask: first.ask, theme: theme) { event in
+                    model.residentEvent(first.plugin, event)
+                    shell.onCollapse()
+                }
+                .accessibilityIdentifier("peek.attention")
+            }
             if summary.placedPlugins == 0 {
                 Text(strings(.deckNothingPlaced))
                     .font(theme.titleFont)
