@@ -54,6 +54,19 @@ public enum PanelPhase: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// How the island says something waits for the person on a screen whose
+/// notch hides it — the operator's choice, in Settings → Look.
+public enum NotchAttention: String, Codable, CaseIterable, Sendable {
+    /// The notch grows ears while something waits: a dot, and how many.
+    case earsWhileWaiting
+    /// The notch's lower edge glows while something waits.
+    case glowAlongTheEdge
+    /// Ears always, the dot in the colour of how things are.
+    case earsAlways
+
+    public static let standard = NotchAttention.earsWhileWaiting
+}
+
 /// What a held panel does when the cursor leaves it — the operator's choice,
 /// in Settings → Opening.
 public enum HeldPanelLeave: String, Codable, CaseIterable, Sendable {

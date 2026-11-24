@@ -59,6 +59,16 @@ struct English: Vocabulary {
         case .openingBehaviour: "Behaviour"
         case .openingRetract: "Retract when you switch to another application"
         case .openingHeldLeave: "When the pointer leaves the open panel"
+        case .lookIslandGroup: "Island"
+        case .lookNotchAttention: "Screen with a notch"
+        case .lookNotchAttentionChoice(let choice):
+            switch choice {
+            case .earsWhileWaiting: "Ears while something waits"
+            case .glowAlongTheEdge: "A glow along the notch"
+            case .earsAlways: "Ears always"
+            }
+        case .lookIslandGlows: "Light up the island while something waits"
+        case .lookIslandGlowsHelp: "On a screen without a notch the island glows in the same colour"
         case .openingHeldLeaveChoice(let leave):
             switch leave {
             case .backAsItWas: "Put it away; it comes back as it was"

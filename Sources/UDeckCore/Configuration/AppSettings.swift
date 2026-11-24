@@ -55,6 +55,14 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// operator chooses, which is `HeldPanelLeave.standard`.
     public var heldPanelLeave: HeldPanelLeave?
 
+    /// How the island says something waits on a screen with a notch; nil
+    /// until chosen, which is `NotchAttention.standard`.
+    public var notchAttention: NotchAttention?
+
+    /// Whether the island glows while something waits, on a screen without
+    /// a notch; nil until chosen, which is yes.
+    public var islandGlowsWhenWaiting: Bool?
+
     /// Default lifetime applied to a card whose producer did not declare a
     /// `ttl`. Kept generous: a producer that forgot to declare one should not
     /// be accused of being broken a few seconds later.
@@ -175,6 +183,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         resolvedIsDark: Bool = false,
         collapseOnAppSwitch: Bool = true,
         heldPanelLeave: HeldPanelLeave? = nil,
+        notchAttention: NotchAttention? = nil,
+        islandGlowsWhenWaiting: Bool? = nil,
         defaultCardTTL: TimeInterval = 60,
         silentTTLMultiplier: Double = 3,
         pluginExecutableSearchPath: [String] = PluginEnvironment.defaultSearchPath,
@@ -195,6 +205,8 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.resolvedIsDark = resolvedIsDark
         self.collapseOnAppSwitch = collapseOnAppSwitch
         self.heldPanelLeave = heldPanelLeave
+        self.notchAttention = notchAttention
+        self.islandGlowsWhenWaiting = islandGlowsWhenWaiting
         self.defaultCardTTL = defaultCardTTL
         self.silentTTLMultiplier = silentTTLMultiplier
         self.pluginExecutableSearchPath = pluginExecutableSearchPath
@@ -393,6 +405,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         // Read as a string: a choice a later uDeck adds reads here as none.
         heldPanelLeave = (try? c.decodeIfPresent(String.self, forKey: .heldPanelLeave)).flatMap { $0 }
             .flatMap(HeldPanelLeave.init(rawValue:))
+        notchAttention = (try? c.decodeIfPresent(String.self, forKey: .notchAttention)).flatMap { $0 }
+            .flatMap(NotchAttention.init(rawValue:))
+        islandGlowsWhenWaiting = (try? c.decodeIfPresent(Bool.self, forKey: .islandGlowsWhenWaiting)) ?? nil
         defaultCardTTL = try c.decodeIfPresent(TimeInterval.self, forKey: .defaultCardTTL)
             ?? defaults.defaultCardTTL
         silentTTLMultiplier = try c.decodeIfPresent(Double.self, forKey: .silentTTLMultiplier)

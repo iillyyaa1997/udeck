@@ -72,6 +72,13 @@ public enum Phrase: Sendable, Equatable {
     case openingRetract
     /// What a held panel does when the pointer leaves it (`HeldPanelLeave`).
     case openingHeldLeave
+    /// The island in Settings → Look: how a notch says something waits, and
+    /// whether the island glows on a screen without one.
+    case lookIslandGroup
+    case lookNotchAttention
+    case lookNotchAttentionChoice(NotchAttention)
+    case lookIslandGlows
+    case lookIslandGlowsHelp
     case openingHeldLeaveChoice(HeldPanelLeave)
     case openingFullscreen
     case openingKeepPolling

@@ -63,6 +63,16 @@ struct Russian: Vocabulary {
         case .openingBehaviour: "Поведение"
         case .openingRetract: "Убирать при переходе в другое приложение"
         case .openingHeldLeave: "Когда мышь уходит с открытой панели"
+        case .lookIslandGroup: "Шторка"
+        case .lookNotchAttention: "Экран с челкой"
+        case .lookNotchAttentionChoice(let choice):
+            switch choice {
+            case .earsWhileWaiting: "Ушки, когда агент ждёт"
+            case .glowAlongTheEdge: "Свечение по краю челки"
+            case .earsAlways: "Ушки всегда"
+            }
+        case .lookIslandGlows: "Подсвечивать шторку, когда агент ждёт"
+        case .lookIslandGlowsHelp: "На мониторе без челки шторка светится тем же цветом"
         case .openingHeldLeaveChoice(let leave):
             switch leave {
             case .backAsItWas: "Убирать, наведением — как была"
