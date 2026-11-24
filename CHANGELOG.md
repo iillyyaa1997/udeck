@@ -8,6 +8,25 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.9] — 2026-11-24
+
+- **Each session in a place of its own.** A card that says what it shows —
+  Agents does, a session — sends *that* to a tab, a window or a mini window
+  from its place menu, whose heading names it, and stays on the board showing
+  another. Each session is in one place: chosen where another place shows it,
+  that place comes forward. *As a card* in a place of its own brings the
+  session back to the board; closing it leaves the session running. Places
+  open again where they were, with the same sessions, after uDeck starts again.
+- **Answer from the notification.** A plugin's notification may carry buttons
+  and a field to reply in, and the answer goes to the plugin without opening
+  anything: Agents asks for a permission with *Allow*, *Allow in session* and
+  *Deny*, a question with its options and *Own answer…*, and a finished turn
+  takes the next message. Answered on the card, the notification goes away.
+- **Sessions outlive uDeck.** Resident plugins run in uDeck's helper and go on
+  while uDeck quits, crashes or updates; the next uDeck takes them back where
+  they are, a question still waiting. macOS says once that uDeck added a
+  background item.
+
 ## [0.9.8] — 2026-11-24
 
 - **Show a card wherever you want it.** A button at the end of every card's
