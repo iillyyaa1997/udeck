@@ -651,7 +651,7 @@ struct Russian: Vocabulary {
         case .menuCheckAndInstall: "Проверить и обновить uDeck"
         case .updatesAutomatically: "Проверять обновления автоматически"
         case .updatesAutomaticallyHelp:
-            "Раз в час uDeck спрашивает github.com, нет ли новой версии. Если выключить — только по кнопке «Проверить сейчас»."
+            "Раз в час uDeck спрашивает github.com, нет ли новой версии. Если выключить — только по кнопке «Проверить и обновить»."
         case .updatesWhenNew: "Когда выходит новая версия"
         case .updatesModeTell: "Только сообщить"
         case .updatesModeTellHelp: "Ничего не скачивается, пока вы не нажмёте «Обновить»."

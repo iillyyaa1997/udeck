@@ -427,6 +427,26 @@ def test_one_press_against_another_key_that_fetched_nothing_proves_nothing(machi
         checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
+def test_a_version_found_before_the_pane_opened_is_installed_without_a_look(machine, lab, check_dir, monkeypatch):
+    """One button and the version already found by itself: the pane shows Update, and Update is what is pressed.
+
+    The lab's run 45505811140: a one-button uDeck found it at launch, and the control pressed a Check now it no
+    longer has."""
+    offer = prepared(monkeypatch)
+    waiting = ui.Element("updates.install", 300, 400, 80, 22)
+    monkeypatch.setattr(checks, "_open_the_about_pane", lambda machine, check_dir, shot=None: waiting)
+    finds(monkeypatch)
+    pressed = []
+    monkeypatch.setattr(ui, "click", lambda machine, identifier, step, window=ui.SETTINGS_WINDOW: pressed.append(identifier))
+    says(monkeypatch, "Installed 0.4.1", "Version 0.4.2 is available.")
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
+    monkeypatch.setattr(updates.Feed, "collect_log", feed_log(f'"GET /{offer.archive} HTTP/1.1" 200 -'))
+
+    checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
+    assert "updates.checkNow" not in pressed
+    assert machine.clicks and machine.clicks[-1][2].startswith("pressing Install")
+
+
 def test_the_menu_item_is_pressed_once_and_the_restart_is_said(machine, lab, check_dir, monkeypatch):
     """`updates.from-the-menu`: the item pressed by its title, no window opened, and the notice after the restart."""
     prepared(monkeypatch)

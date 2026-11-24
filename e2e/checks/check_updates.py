@@ -907,7 +907,8 @@ def check_wrong_key(machine, check_dir, lab, pair):
             before = app.running_pids(machine, "reading uDeck's pids before Check and update is pressed")
             machine.click(*shown.middle, "pressing Check and update, the update signed with another key")
         else:
-            ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
+            if not _offered_already(shown):
+                ui.click(machine, "updates.checkNow", "asking uDeck to look for an update")
             # The signature is checked when the update is installed, not when it is
             # offered, so the control has to press Install — and an update it was
             # never offered is one whose signature was never reached. That is the lab

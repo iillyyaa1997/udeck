@@ -645,7 +645,7 @@ struct English: Vocabulary {
         case .menuCheckAndInstall: "Check and Update uDeck"
         case .updatesAutomatically: "Check for updates automatically"
         case .updatesAutomaticallyHelp:
-            "Once an hour, uDeck asks github.com whether there is a newer version. Off, it asks only when you press Check now."
+            "Once an hour, uDeck asks github.com whether there is a newer version. Off, it asks only when you press Check and update."
         case .updatesWhenNew: "When a new version is out"
         case .updatesModeTell: "Only tell me"
         case .updatesModeTellHelp: "Nothing is downloaded until you press Update."
