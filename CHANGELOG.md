@@ -8,6 +8,16 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.11] — 2026-11-24
+
+- **See the island's marks before anything waits.** Settings → Look → Island
+  shows a menu bar with a notch and one without, with the ears or the glow as
+  chosen; «Агент ждёт / Не ждёт» switches the preview only.
+- **The style cards show what each style does.** They looked the same: each was
+  a flat tint over a flat colour. Now each card is the real material over
+  stripes and lines of text, so Glass blurs them, Solid covers them, Smoke dulls
+  them and Ghost barely touches them.
+
 ## [0.9.10] — 2026-11-24
 
 - **The island says when something waits for you.** On a MacBook the notch
