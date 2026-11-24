@@ -67,6 +67,119 @@ struct WindowPlaceTests {
     }
 }
 
+/// Places apart: what a plugin's window on the board shows, sent to a place
+/// of its own while the window stays on its cell.
+@Suite("Places apart")
+struct PlacesApartTests {
+    static let agents = PluginIdentifier(rawValue: "agents")!
+
+    static func layout() -> DeckLayout {
+        var layout = WindowPlaceTests.layout()
+        layout.keep("s-1", showing: "Fix it", for: WindowPlaceTests.id)
+        return layout
+    }
+
+    @Test("a place apart starts with what the window keeps, its name and its size; the window stays on its cell")
+    func open() throws {
+        var layout = Self.layout()
+        let apartMade = layout.openApart(from: WindowPlaceTests.id, in: .mini)
+        let apart = try #require(apartMade)
+        let board = try #require(layout.window(withID: WindowPlaceTests.id)?.window)
+        #expect(board.place == .card)
+        let found = try #require(layout.window(withID: apart))
+        #expect(found.tabID == layout.tabs[0].id, "a place apart answers its plugin's tab")
+        #expect(found.window.place == .mini && found.window.keep == "s-1" && found.window.showing == "Fix it")
+        #expect(found.window.width == 2 && found.window.height == 3)
+        #expect(layout.isApart(apart) && !layout.isApart(WindowPlaceTests.id))
+        #expect(layout.views(of: Self.agents).map(\.id) == [WindowPlaceTests.id, apart], "the board's first")
+        #expect(layout.windowsAway.map(\.id) == [apart])
+        let asCell = layout.openApart(from: WindowPlaceTests.id, in: .card)
+        let fromApart = layout.openApart(from: apart, in: .window)
+        #expect(asCell == nil, "a place apart is never a cell")
+        #expect(fromApart == nil, "only a window on the board sends a thing apart")
+    }
+
+    @Test("a place apart moves between places, never to a cell; it keeps its frame and what it shows")
+    func moves() throws {
+        var layout = Self.layout()
+        let apartMade = layout.openApart(from: WindowPlaceTests.id, in: .window)
+        let apart = try #require(apartMade)
+        let toTab = layout.show(apart, in: .tab)
+        let again = layout.show(apart, in: .tab)
+        let toCell = layout.show(apart, in: .card)
+        #expect(toTab)
+        #expect(!again)
+        #expect(!toCell)
+        #expect(layout.window(withID: apart)?.window.place == .tab)
+        layout.remember(frame: CGRect(x: 10, y: 20, width: 300, height: 200), of: apart, in: .window)
+        #expect(layout.window(withID: apart)?.window.frame(in: .window) == [10, 20, 300, 200])
+        let changed = layout.keep("s-2", showing: "Other", for: apart)
+        let same = layout.keep("s-2", showing: "Other", for: apart)
+        #expect(changed)
+        #expect(!same, "the same again changes nothing")
+        #expect(layout.window(withID: apart)?.window.keep == "s-2")
+        #expect(layout.window(withID: WindowPlaceTests.id)?.window.keep == "s-1", "the board's window keeps its own")
+    }
+
+    @Test("places apart are written and read back, and a layout without them reads as before")
+    func codable() throws {
+        var layout = Self.layout()
+        let opened = layout.openApart(from: WindowPlaceTests.id, in: .mini)
+        #expect(opened != nil)
+        let back = try JSONDecoder().decode(DeckLayout.self, from: JSONEncoder().encode(layout))
+        #expect(back == layout)
+        let old = try JSONDecoder().decode(DeckLayout.self, from: JSONEncoder().encode(WindowPlaceTests.layout()))
+        #expect(old.apart == nil)
+    }
+
+    @Test("a place apart goes when it is closed, with the last of its plugin's windows on the board, or with its tab")
+    func gone() throws {
+        var layout = Self.layout()
+        let apartMade = layout.openApart(from: WindowPlaceTests.id, in: .window)
+        let apart = try #require(apartMade)
+        let removed = layout.removeApart(apart)
+        let twice = layout.removeApart(apart)
+        #expect(removed?.id == apart)
+        #expect(layout.apart == nil && twice == nil)
+
+        let secondMade = layout.openApart(from: WindowPlaceTests.id, in: .mini)
+        let second = try #require(secondMade)
+        layout.removeWindow(WindowPlaceTests.id, from: layout.tabs[0].id)
+        #expect(!layout.isApart(second), "its plugin has no window on the board left")
+
+        var again = Self.layout()
+        let thirdMade = again.openApart(from: WindowPlaceTests.id, in: .mini)
+        let third = try #require(thirdMade)
+        again.removeWindows([WindowPlaceTests.id])
+        #expect(!again.isApart(third))
+
+        var tabbed = Self.layout()
+        _ = tabbed.addTab(named: "Second")
+        let fourthMade = tabbed.openApart(from: WindowPlaceTests.id, in: .tab)
+        let fourth = try #require(fourthMade)
+        tabbed.removeTab(tabbed.tabs[0].id)
+        #expect(!tabbed.isApart(fourth))
+    }
+
+    @Test("read from a file: a place apart whose plugin is not on the board, or that claims a cell, is dropped; a shared id is renumbered")
+    func normalized() throws {
+        var layout = Self.layout()
+        let apartMade = layout.openApart(from: WindowPlaceTests.id, in: .window)
+        let apart = try #require(apartMade)
+        var stray = GridWindow(pluginID: PluginIdentifier(rawValue: "gone")!, column: 0, row: 0, width: 1, height: 1)
+        stray.place = .mini
+        var cell = GridWindow(pluginID: Self.agents, column: 0, row: 0, width: 1, height: 1)
+        cell.place = .card
+        var twin = GridWindow(id: apart, pluginID: Self.agents, column: 0, row: 0, width: 1, height: 1)
+        twin.place = .mini
+        layout.apart = (layout.apart ?? []) + [stray, cell, twin]
+        let read = layout.normalized()
+        #expect(read.apart?.count == 2)
+        #expect(Set(read.apart?.map(\.id) ?? []).count == 2, "each has its own id")
+        #expect(read.apart?.allSatisfy { $0.pluginID == Self.agents && $0.place.isAway } == true)
+    }
+}
+
 /// What a plugin is told of a place's size: whole cells, at least one.
 @Suite("A place's size in cells")
 struct CellSizeTests {

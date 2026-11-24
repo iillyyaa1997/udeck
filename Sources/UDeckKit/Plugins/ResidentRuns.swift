@@ -21,23 +21,54 @@ final class ResidentRuns {
         let basis: String
     }
 
+    /// One place a plugin's card is shown in, as its plugin is told of it.
+    struct View: Equatable {
+        /// The window's or the place's id: the plugin's `view`.
+        let id: String
+        var columns: Int
+        var rows: Int
+        /// `card`, `tab`, `window` or `mini`.
+        var place: String
+        /// What the plugin last said it shows there.
+        var keep: String?
+
+        var about: ResidentEvent.About { .init(view: id, place: place, keep: keep) }
+    }
+
     private final class Run {
         let wanted: Wanted
         var process: AgentProcess?
         var reader: Task<Void, Never>?
         var failures = 0
-        var size: (columns: Int, rows: Int)
+        /// Every place its card is shown in, its first window on the board
+        /// first.
+        var views: [View]
+        /// The places the running process has been told of, and as what.
+        var told: [View] = []
+        /// Whether the running process named a place (`CardPlace`): until it
+        /// does, it is told of its first window only, as a plugin was before
+        /// places had names — a second window of it on the board, or a place
+        /// apart, would only confuse it.
+        var speaksOfPlaces = false
         var stopped = false
 
-        init(wanted: Wanted, size: (columns: Int, rows: Int)) {
+        init(wanted: Wanted, views: [View]) {
             self.wanted = wanted
-            self.size = size
+            self.views = views
         }
+
+        /// The places it should have been told of.
+        var toTell: [View] { speaksOfPlaces ? views : Array(views.prefix(1)) }
     }
 
     private var runs: [PluginIdentifier: Run] = [:]
-    /// The newest card a plugin printed and uDeck has not drawn yet.
-    private var pendingCards: [PluginIdentifier: Card] = [:]
+    private struct Pending: Hashable {
+        let plugin: PluginIdentifier
+        let view: String?
+    }
+    /// The newest card a plugin printed for each of its places and uDeck has
+    /// not drawn yet.
+    private var pendingCards: [Pending: (Card, CardPlace)] = [:]
     private var lastDrawn: [PluginIdentifier: ContinuousClock.Instant] = [:]
     private var drawScheduled: Set<PluginIdentifier> = []
     /// However fast a plugin prints, its card is redrawn at most this often —
@@ -52,8 +83,9 @@ final class ResidentRuns {
     var language: () -> String = { "en" }
 
     /// Starts what is wanted and not running, stops what runs and is no longer
-    /// wanted (or changed), and tells running ones their size when it changed.
-    func reconcile(_ wanted: [Wanted], sizes: [PluginIdentifier: (columns: Int, rows: Int)]) {
+    /// wanted (or changed), and tells running ones of their places: a new
+    /// one's `hello`, a changed one's `size`, a gone one's `closed`.
+    func reconcile(_ wanted: [Wanted], views: [PluginIdentifier: [View]]) {
         let wantedIDs = Set(wanted.map(\.id))
         for (id, run) in runs where !wantedIDs.contains(id) || wanted.first(where: { $0.id == id }) != run.wanted {
             stop(run)
@@ -61,23 +93,60 @@ final class ResidentRuns {
         }
         defer { onLive(live) }
         for item in wanted {
-            let size = sizes[item.id] ?? (columns: 4, rows: 2)
+            let places = views[item.id] ?? []
             if let run = runs[item.id] {
-                if run.size != size {
-                    run.size = size
-                    send(.size(columns: size.columns, rows: size.rows), to: item.id)
-                }
+                run.views = places
+                tell(run)
                 continue
             }
-            let run = Run(wanted: item, size: size)
+            let run = Run(wanted: item, views: places)
             runs[item.id] = run
             start(run)
         }
     }
 
-    func send(_ event: ResidentEvent, to id: PluginIdentifier) {
-        try? runs[id]?.process?.write(line: event.line)
+    /// Tells the running process of the places it has not been told of as
+    /// they are now.
+    private func tell(_ run: Run) {
+        guard let process = run.process else { return }
+        let now = run.toTell
+        for view in run.told where !now.contains(where: { $0.id == view.id }) {
+            try? process.write(line: ResidentEvent.closed(to: nil).line(about: .init(view: view.id, keep: view.keep)))
+        }
+        for view in now {
+            guard let before = run.told.first(where: { $0.id == view.id }) else {
+                try? process.write(line: ResidentEvent.hello(columns: view.columns, rows: view.rows, language: language())
+                    .line(about: view.about))
+                continue
+            }
+            if before.columns != view.columns || before.rows != view.rows || before.place != view.place {
+                try? process.write(line: ResidentEvent.size(columns: view.columns, rows: view.rows)
+                    .line(about: .init(view: view.id, place: view.place)))
+            }
+        }
+        run.told = now
     }
+
+    /// Tells `id` of something done on its card — in the place `view`, or,
+    /// with none, its first window on the board.
+    func send(_ event: ResidentEvent, to id: PluginIdentifier, view: String? = nil) {
+        guard let run = runs[id] else { return }
+        let about = view.map { ResidentEvent.About(view: $0) } ?? run.views.first.map { ResidentEvent.About(view: $0.id) }
+        try? run.process?.write(line: event.line(about: about))
+    }
+
+    /// The place `view` of `id` was closed by the person: the plugin is told,
+    /// with `to` when what it showed goes back to that window on the board.
+    func closed(_ view: String, of id: PluginIdentifier, keep: String?, to: String?) {
+        guard let run = runs[id] else { return }
+        run.views.removeAll { $0.id == view }
+        guard run.told.contains(where: { $0.id == view }) else { return }
+        run.told.removeAll { $0.id == view }
+        try? run.process?.write(line: ResidentEvent.closed(to: to).line(about: .init(view: view, keep: keep)))
+    }
+
+    /// Whether `id` named a place: it can show each of its things apart.
+    func speaksOfPlaces(_ id: PluginIdentifier) -> Bool { runs[id]?.speaksOfPlaces ?? false }
 
     var running: Set<PluginIdentifier> { Set(runs.keys) }
 
@@ -98,9 +167,10 @@ final class ResidentRuns {
             let process = try AgentProcess(executable: wanted.executable, arguments: wanted.arguments,
                                            environment: wanted.environment, directory: wanted.directory)
             run.process = process
+            run.told = []
+            run.speaksOfPlaces = false
             onLive(live)
-            try? process.write(line: ResidentEvent.hello(columns: run.size.columns, rows: run.size.rows,
-                                                         language: language()).line)
+            tell(run)
             let id = wanted.id
             // Read and decoded off the main thread: a card can be large, and
             // the panel must not wait on a plugin's output.
@@ -120,12 +190,17 @@ final class ResidentRuns {
 
     private func heard(_ id: PluginIdentifier, _ message: ResidentMessage, from process: AgentProcess) {
         guard let run = runs[id], run.process === process, !run.stopped else { return }
-        guard case .card(let card) = message else {
+        guard case .card(let card, let place) = message else {
             onMessage(id, message)
             return
         }
         run.failures = 0
-        pendingCards[id] = card
+        if place.speaksOfPlaces, !run.speaksOfPlaces {
+            run.speaksOfPlaces = true
+            tell(run)
+        }
+        // A card a place: each place's newest is drawn.
+        pendingCards[Pending(plugin: id, view: place.view)] = (card, place)
         guard !drawScheduled.contains(id) else { return }
         let since = lastDrawn[id].map { ContinuousClock.now - $0 } ?? Self.cardInterval
         if since >= Self.cardInterval {
@@ -142,9 +217,13 @@ final class ResidentRuns {
     }
 
     private func draw(_ id: PluginIdentifier) {
-        guard let card = pendingCards.removeValue(forKey: id), runs[id] != nil else { return }
+        let pending = pendingCards.keys.filter { $0.plugin == id }
+        guard runs[id] != nil, !pending.isEmpty else { return }
         lastDrawn[id] = .now
-        onMessage(id, .card(card))
+        for key in pending {
+            guard let (card, place) = pendingCards.removeValue(forKey: key) else { continue }
+            onMessage(id, .card(card, place))
+        }
     }
 
     private func exited(_ id: PluginIdentifier, status: Int32, process: AgentProcess) async {

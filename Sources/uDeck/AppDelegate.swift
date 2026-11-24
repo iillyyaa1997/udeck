@@ -129,6 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if places.showsInAWindow(id) { _ = controller?.closeForAWindowOfUDeck() }
             places.bringForward(id)
         }
+        // A plugin asked for its window on the board: the panel comes out.
+        model.onRevealPanel = { [weak controller] in controller?.reveal() }
         places.sync()
         // The panel sits above ordinary windows, so leaving it open would put
         // it on top of the settings it was asked to show.

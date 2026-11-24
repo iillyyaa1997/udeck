@@ -28,8 +28,8 @@ struct PlaceButton: View {
         .help(strings(.placeShowAs))
         .accessibilityIdentifier("card.\(window.pluginID.rawValue).place")
         .popover(isPresented: $open, arrowEdge: .bottom) {
-            OptionList(options: Self.options(strings), selected: window.place.rawValue, note: nil,
-                       prefix: "card.\(window.pluginID.rawValue).place", theme: theme) { chosen in
+            OptionList(options: Self.options(strings, model: model, window: window), selected: window.place.rawValue,
+                       note: nil, prefix: "card.\(window.pluginID.rawValue).place", theme: theme) { chosen in
                 open = false
                 guard let place = WindowPlace(rawValue: chosen) else { return }
                 model.show(window.id, in: place)
@@ -37,12 +37,20 @@ struct PlaceButton: View {
         }
     }
 
-    /// The places, as the menu lists them: under one heading, the mini
-    /// window saying it stays above everything.
-    static func options(_ strings: Strings) -> [MenuOption] {
-        WindowPlace.allCases.map { place in
-            MenuOption(id: place.rawValue, text: strings(.placeName(place)), group: strings(.placeShowAs),
-                       note: place == .mini ? strings(.placeMiniNote) : nil)
+    /// The places, as the menu lists them: under one heading — naming the
+    /// thing the card shows, when that is what moves (`placeMenuSubject`) —
+    /// the mini window saying it stays above everything, and a place apart's
+    /// *As a card* that it goes back to the board.
+    static func options(_ strings: Strings, model: DeckModel, window: GridWindow) -> [MenuOption] {
+        let heading = model.placeMenuSubject(of: window).map { strings(.placeShowThing($0)) } ?? strings(.placeShowAs)
+        let apart = model.layout.isApart(window.id)
+        return WindowPlace.allCases.map { place in
+            let note: String? = switch place {
+            case .mini: strings(.placeMiniNote)
+            case .card where apart: strings(.placeBackToBoard)
+            default: nil
+            }
+            return MenuOption(id: place.rawValue, text: strings(.placeName(place)), group: heading, note: note)
         }
     }
 }
@@ -54,7 +62,7 @@ struct PlaceMenuItems: View {
     var window: GridWindow
 
     var body: some View {
-        Section(strings(.placeShowAs)) {
+        Section(model.placeMenuSubject(of: window).map { strings(.placeShowThing($0)) } ?? strings(.placeShowAs)) {
             ForEach(WindowPlace.allCases, id: \.self) { place in
                 Toggle(strings(.placeName(place)), isOn: Binding(
                     get: { window.place == place },

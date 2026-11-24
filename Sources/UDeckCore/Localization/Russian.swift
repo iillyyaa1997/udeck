@@ -703,6 +703,9 @@ struct Russian: Vocabulary {
             }
         case .placeShow: "Показать"
         case .placeBringBack: "Вернуть сюда"
+        case .placeShowThing(let name): "Показывать «\(name)»"
+        case .placeBackToBoard: "вернуть на доску"
+        case .placeClose: "Закрыть"
         case .cardDragToMove: "Тяните, чтобы переместить это окно"
         case .cardDragToResize: "Тяните, чтобы изменить размер — по целым ячейкам"
         case .cardOwnDrawing: "СОБСТВЕННЫЙ РИСУНОК ПЛАГИНА"

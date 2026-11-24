@@ -687,6 +687,9 @@ struct English: Vocabulary {
             }
         case .placeShow: "Show"
         case .placeBringBack: "Bring back here"
+        case .placeShowThing(let name): "Show “\(name)”"
+        case .placeBackToBoard: "back to the board"
+        case .placeClose: "Close"
         case .cardDragToMove: "Drag to move this window"
         case .cardDragToResize: "Drag to resize, in whole cells"
         case .cardOwnDrawing: "PLUGIN'S OWN DRAWING"

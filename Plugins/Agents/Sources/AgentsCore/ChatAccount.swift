@@ -97,6 +97,24 @@ public enum SessionHistory {
         }
     }
 
+    /// The saved session `sessionID` of the account whose folder is `config`,
+    /// wherever its project is; nil when there is none.
+    public static func saved(_ sessionID: String, config: URL) -> SavedSession? {
+        let projects = config.appendingPathComponent("projects", isDirectory: true)
+        let manager = FileManager.default
+        guard Kept.isName(sessionID),
+              let folders = try? manager.contentsOfDirectory(at: projects, includingPropertiesForKeys: nil) else { return nil }
+        for folder in folders {
+            let file = folder.appendingPathComponent(sessionID + ".jsonl")
+            guard manager.fileExists(atPath: file.path) else { continue }
+            let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            let (cwd, prompt) = glance(file)
+            return SavedSession(sessionID: sessionID, file: file, cwd: cwd, lastPrompt: prompt,
+                                modified: date ?? .distantPast)
+        }
+        return nil
+    }
+
     /// The working folder (from the head) and the last prompt (from the tail).
     static func glance(_ file: URL) -> (cwd: String?, lastPrompt: String?) {
         guard let handle = try? FileHandle(forReadingFrom: file) else { return (nil, nil) }

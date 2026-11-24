@@ -801,6 +801,13 @@ public enum Phrase: Sendable, Equatable {
     case placeAway(title: String, place: WindowPlace)
     case placeShow
     case placeBringBack
+    /// The place menu of a card that sends what it shows elsewhere: its
+    /// heading names that thing, and *As a card* in a place apart says it
+    /// goes back to the board.
+    case placeShowThing(String)
+    case placeBackToBoard
+    /// A place apart's tab, closed from its right-click menu.
+    case placeClose
     case cardDragToMove
     case cardDragToResize
     case cardOwnDrawing

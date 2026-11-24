@@ -116,8 +116,7 @@ struct WorkspaceView: View {
     /// right-click brings it back to its cell.
     private func placedTabButton(_ window: GridWindow) -> some View {
         let isSelected = model.tabShown == window.id
-        let name = window.title ?? model.presentation(for: window.pluginID).card?.title
-            ?? model.displayManifest(withID: window.pluginID)?.name ?? window.pluginID.rawValue
+        let name = model.title(of: window)
         return Button {
             shell.onInteract()
             model.selectTabShown(window.id)
@@ -137,6 +136,9 @@ struct WorkspaceView: View {
         .accessibilityIdentifier("tab.placed.\(window.pluginID.rawValue)")
         .contextMenu {
             Button(strings(.placeBringBack)) { model.show(window.id, in: .card) }
+            if model.layout.isApart(window.id) {
+                Button(strings(.placeClose)) { model.closePlace(window.id) }
+            }
         }
     }
 

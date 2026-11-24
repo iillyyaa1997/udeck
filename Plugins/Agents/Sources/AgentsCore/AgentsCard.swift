@@ -71,7 +71,7 @@ enum AgentsCard {
     static func sessionMenu(_ app: AgentsApp) -> JSONValue {
         var options: [JSONValue] = app.conversations.map { session in
             ["id": .string("s:" + session.id.uuidString), "text": .string(session.title),
-             "group": .string(app.t("Открытые", "Open")), "note": .string(stateWord(session, app)),
+             "group": .string(app.t("Открытые", "Open")), "note": .string(placeNote(session, app)),
              "tone": .string(tone(session, app))]
         }
         let open = Set(app.conversations.compactMap { $0.claude?.sessionID })
@@ -102,10 +102,24 @@ enum AgentsCard {
 
     static func body(_ app: AgentsApp) -> [JSONValue] {
         guard let session = app.selected else {
-            return [["text": .string(app.conversations.isEmpty
-                ? app.t("Сессий нет. Новая — ＋ справа вверху, продолжить сохранённую — в меню рядом с названием",
-                        "No sessions. Start one with ＋ at the top right, or continue a saved one from the menu by the name")
-                : app.t("Выберите сессию в меню рядом с названием", "Choose a session from the menu by the name"))]]
+            guard !app.conversations.isEmpty else {
+                return [["text": .string(app.t(
+                    "Сессий нет. Новая — ＋ справа вверху, продолжить сохранённую — в меню рядом с названием",
+                    "No sessions. Start one with ＋ at the top right, or continue a saved one from the menu by the name"))]]
+            }
+            // Each session where it is: choosing one shows it — here, or
+            // in the place it has of its own.
+            let everywhere = app.conversations.allSatisfy { app.place(showing: $0.id) != nil }
+            return [
+                ["text": .string(everywhere
+                    ? app.t("Все сессии открыты в других местах. Выберите, чтобы показать",
+                            "Every session is shown in another place. Choose one to bring it forward")
+                    : app.t("Выберите сессию", "Choose a session"))],
+                ["chips": .array(app.conversations.map { session in
+                    ["id": .string("s:" + session.id.uuidString),
+                     "text": .string(String(session.title.prefix(40)) + " · " + placeNote(session, app))]
+                })],
+            ]
         }
         var rows: [JSONValue] = compact(app) ? [] : [status(session, app)]
         // The card is sent whole on every change, five times a second while
@@ -460,6 +474,20 @@ enum AgentsCard {
                      "label": .string(short ? app.t("В сессии", "Session") : app.t("Разрешать в этой сессии", "Allow this session"))],
                     ["id": .string("deny:" + ask.requestID), "label": .string(app.t("Отклонить", "Deny"))],
                 ]]
+    }
+
+    /// What a session is doing, and where it is shown when that is another
+    /// place than this one: «в окне · работает».
+    static func placeNote(_ session: Conversation, _ app: AgentsApp) -> String {
+        let state = stateWord(session, app)
+        guard let other = app.place(showing: session.id), let kind = app.places[other]?.kind else { return state }
+        let place = switch kind {
+        case "tab": app.t("во вкладке", "in a tab")
+        case "window": app.t("в окне", "in a window")
+        case "mini": app.t("в мини-окне", "in a mini window")
+        default: app.t("на доске", "on the board")
+        }
+        return place + " · " + state
     }
 
     static func stateWord(_ session: Conversation, _ app: AgentsApp) -> String {

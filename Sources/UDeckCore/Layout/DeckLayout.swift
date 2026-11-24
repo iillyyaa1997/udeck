@@ -47,6 +47,13 @@ public struct DeckLayout: Codable, Equatable, Sendable {
     public var tabs: [DeckTab]
     public var selectedTabID: UUID?
 
+    /// Places of their own that a plugin's things are shown in, apart from
+    /// its windows on the board: one session of a conversation in a window,
+    /// another in a mini window (`openApart`). They have no cell. Each goes
+    /// when it is closed, or with the last of its plugin's windows on the
+    /// board. Nil in a layout that never had one.
+    public var apart: [GridWindow]?
+
     public init(
         version: Int = 1,
         columns: Int = DeckLayout.defaultColumns,
@@ -99,6 +106,7 @@ public struct DeckLayout: Codable, Equatable, Sendable {
         if selectedTabID == id {
             selectedTabID = tabs.indices.contains(index) ? tabs[index].id : tabs.last?.id
         }
+        pruneApart()
     }
 
     public mutating func moveTab(from source: Int, to destination: Int) {
@@ -156,6 +164,7 @@ public struct DeckLayout: Codable, Equatable, Sendable {
         guard let index = index(ofTab: tabID) else { return }
         tabs[index].windows.removeAll { $0.id == windowID }
         tabs[index].windows = GridEngine.normalized(tabs[index].windows, columns: columns)
+        pruneApart()
     }
 
     /// Places a window at a new position and/or size, pushing the neighbours out
@@ -182,16 +191,33 @@ public struct DeckLayout: Codable, Equatable, Sendable {
         )
     }
 
-    /// The window with `id`, wherever it is, and its tab's id.
+    /// The window with `id`, wherever it is, and its tab's id — for a place
+    /// apart, the tab of its plugin's first window on the board.
     public func window(withID id: UUID) -> (window: GridWindow, tabID: UUID)? {
         for tab in tabs {
             if let window = tab.windows.first(where: { $0.id == id }) { return (window, tab.id) }
         }
-        return nil
+        guard let window = apart?.first(where: { $0.id == id }) else { return nil }
+        let tab = tabs.first { $0.windows.contains { $0.pluginID == window.pluginID } } ?? tabs.first
+        guard let tab else { return nil }
+        return (window, tab.id)
+    }
+
+    /// Whether `id` is a place apart (`apart`), not a window on the board.
+    public func isApart(_ id: UUID) -> Bool {
+        apart?.contains { $0.id == id } ?? false
+    }
+
+    /// Every place a plugin's card is shown in: its windows on the board, in
+    /// the order of the tabs, then its places apart.
+    public func views(of pluginID: PluginIdentifier) -> [GridWindow] {
+        tabs.flatMap { $0.windows.filter { $0.pluginID == pluginID } } + (apart ?? []).filter { $0.pluginID == pluginID }
     }
 
     /// Shows the window with `id` in `place`, its cell keeping its place on
-    /// the board (`WindowPlace`). Answers whether anything changed.
+    /// the board (`WindowPlace`), or moves a place apart to another place —
+    /// never to a cell, which it has none of. Answers whether anything
+    /// changed.
     @discardableResult
     public mutating func show(_ id: UUID, in place: WindowPlace) -> Bool {
         for tabIndex in tabs.indices {
@@ -200,24 +226,86 @@ public struct DeckLayout: Codable, Equatable, Sendable {
             tabs[tabIndex].windows[index].place = place
             return true
         }
-        return false
+        guard place.isAway, let index = apart?.firstIndex(where: { $0.id == id }), apart?[index].place != place else {
+            return false
+        }
+        apart?[index].place = place
+        return true
+    }
+
+    /// Opens a place of its own, `place`, for what the window `id` on the
+    /// board keeps (`GridWindow.keep`): the window stays on its cell, and the
+    /// new place starts with the window's size, its `keep` and its name.
+    /// Answers the new place's id.
+    public mutating func openApart(from id: UUID, in place: WindowPlace) -> UUID? {
+        guard place.isAway, let source = tabs.lazy.flatMap(\.windows).first(where: { $0.id == id }) else { return nil }
+        var window = GridWindow(pluginID: source.pluginID, column: 0, row: 0, width: source.width, height: source.height)
+        window.place = place
+        window.keep = source.keep
+        window.showing = source.showing
+        apart = (apart ?? []) + [window]
+        return window.id
+    }
+
+    /// Takes the place apart `id` away, and answers it.
+    @discardableResult
+    public mutating func removeApart(_ id: UUID) -> GridWindow? {
+        guard let index = apart?.firstIndex(where: { $0.id == id }) else { return nil }
+        let window = apart?.remove(at: index)
+        if apart?.isEmpty == true { apart = nil }
+        return window
+    }
+
+    /// What the plugin says the window or place `id` shows (`GridWindow.keep`,
+    /// `showing`). Answers whether that changed.
+    @discardableResult
+    public mutating func keep(_ keep: String?, showing: String?, for id: UUID) -> Bool {
+        func set(_ window: inout GridWindow) -> Bool {
+            guard window.keep != keep || window.showing != showing else { return false }
+            window.keep = keep
+            window.showing = showing
+            return true
+        }
+        for tabIndex in tabs.indices {
+            guard let index = tabs[tabIndex].windows.firstIndex(where: { $0.id == id }) else { continue }
+            return set(&tabs[tabIndex].windows[index])
+        }
+        guard let index = apart?.firstIndex(where: { $0.id == id }), var window = apart?[index] else { return false }
+        let changed = set(&window)
+        apart?[index] = window
+        return changed
     }
 
     /// Where the window with `id` was last on the screen shown in `place` — its
     /// own window or its mini window (`GridWindow.placeFrames`).
     public mutating func remember(frame: CGRect, of id: UUID, in place: WindowPlace) {
         let numbers = [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height].map(Double.init)
+        func merge(_ window: inout GridWindow) {
+            window.placeFrames = (window.placeFrames ?? [:]).merging([place.rawValue: numbers]) { $1 }
+        }
         for tabIndex in tabs.indices {
             guard let index = tabs[tabIndex].windows.firstIndex(where: { $0.id == id }) else { continue }
-            tabs[tabIndex].windows[index].placeFrames = (tabs[tabIndex].windows[index].placeFrames ?? [:])
-                .merging([place.rawValue: numbers]) { $1 }
+            merge(&tabs[tabIndex].windows[index])
             return
         }
+        guard let index = apart?.firstIndex(where: { $0.id == id }), var window = apart?[index] else { return }
+        merge(&window)
+        apart?[index] = window
     }
 
-    /// Every window shown away from its cell, in the order of the tabs.
+    /// Every window shown away from its cell, in the order of the tabs, then
+    /// every place apart.
     public var windowsAway: [GridWindow] {
-        tabs.flatMap { $0.windows.filter { $0.place.isAway } }
+        tabs.flatMap { $0.windows.filter { $0.place.isAway } } + (apart ?? [])
+    }
+
+    /// Places apart go with the last of their plugin's windows on the board,
+    /// and none is ever on a cell.
+    private mutating func pruneApart() {
+        guard let places = apart else { return }
+        let placed = Set(tabs.flatMap { $0.windows.map(\.pluginID) })
+        let kept = places.filter { placed.contains($0.pluginID) && $0.place.isAway }
+        apart = kept.isEmpty ? nil : kept
     }
 
     /// Takes these windows out, wherever they are, and lets every grid they
@@ -228,6 +316,8 @@ public struct DeckLayout: Codable, Equatable, Sendable {
             tabs[tabIndex].windows.removeAll { ids.contains($0.id) }
             tabs[tabIndex].windows = GridEngine.normalized(tabs[tabIndex].windows, columns: columns)
         }
+        apart?.removeAll { ids.contains($0.id) }
+        pruneApart()
     }
 
     /// Brings a decoded layout into a legal state: a positive column count, at
@@ -245,6 +335,7 @@ public struct DeckLayout: Codable, Equatable, Sendable {
         if result.selectedTabID == nil || !result.tabs.contains(where: { $0.id == result.selectedTabID }) {
             result.selectedTabID = result.tabs.first?.id
         }
+        result.pruneApart()
         return result
     }
 
@@ -278,6 +369,11 @@ public struct DeckLayout: Codable, Equatable, Sendable {
                     seenWindows.insert(replacement)
                 }
             }
+        }
+        for index in (apart ?? []).indices where !seenWindows.insert(apart?[index].id ?? UUID()).inserted {
+            let replacement = UUID()
+            apart?[index].id = replacement
+            seenWindows.insert(replacement)
         }
     }
 }
