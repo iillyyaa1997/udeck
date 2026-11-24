@@ -182,6 +182,43 @@ public struct DeckLayout: Codable, Equatable, Sendable {
         )
     }
 
+    /// The window with `id`, wherever it is, and its tab's id.
+    public func window(withID id: UUID) -> (window: GridWindow, tabID: UUID)? {
+        for tab in tabs {
+            if let window = tab.windows.first(where: { $0.id == id }) { return (window, tab.id) }
+        }
+        return nil
+    }
+
+    /// Shows the window with `id` in `place`, its cell keeping its place on
+    /// the board (`WindowPlace`). Answers whether anything changed.
+    @discardableResult
+    public mutating func show(_ id: UUID, in place: WindowPlace) -> Bool {
+        for tabIndex in tabs.indices {
+            guard let index = tabs[tabIndex].windows.firstIndex(where: { $0.id == id }) else { continue }
+            guard tabs[tabIndex].windows[index].place != place else { return false }
+            tabs[tabIndex].windows[index].place = place
+            return true
+        }
+        return false
+    }
+
+    /// Where the window with `id` was last on the screen, in its own window or
+    /// its mini window (`GridWindow.placeFrame`).
+    public mutating func remember(frame: CGRect, of id: UUID) {
+        let numbers = [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height].map(Double.init)
+        for tabIndex in tabs.indices {
+            guard let index = tabs[tabIndex].windows.firstIndex(where: { $0.id == id }) else { continue }
+            tabs[tabIndex].windows[index].placeFrame = numbers
+            return
+        }
+    }
+
+    /// Every window shown away from its cell, in the order of the tabs.
+    public var windowsAway: [GridWindow] {
+        tabs.flatMap { $0.windows.filter { $0.place.isAway } }
+    }
+
     /// Takes these windows out, wherever they are, and lets every grid they
     /// were in settle.
     public mutating func removeWindows(_ ids: Set<UUID>) {

@@ -793,6 +793,14 @@ public enum Phrase: Sendable, Equatable {
     case deckClickToWork
     case cardRefreshNow
     case cardRemoveFromTab
+    /// Where a card is shown (`WindowPlace`): the menu's heading, each place
+    /// in it, and what the cell says while the card is elsewhere.
+    case placeShowAs
+    case placeName(WindowPlace)
+    case placeMiniNote
+    case placeAway(title: String, place: WindowPlace)
+    case placeShow
+    case placeBringBack
     case cardDragToMove
     case cardDragToResize
     case cardOwnDrawing

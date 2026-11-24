@@ -48,6 +48,13 @@ struct DeckGridView: View {
                 ZStack(alignment: .topLeading) {
                     ForEach(windows) { window in
                         let placed = draftApplied(to: window)
+                        if window.place.isAway {
+                            // Shown elsewhere: the cell keeps its place and says where it went.
+                            AwaySlot(model: model, theme: theme, window: window, title: title(of: window),
+                                     onInteract: { shell.onInteract() })
+                                .frame(width: metrics.width(cells: placed.width), height: metrics.height(cells: placed.height))
+                                .offset(x: metrics.x(column: placed.column), y: metrics.y(row: placed.row))
+                        } else {
                         DeckWindowView(
                             model: model,
                             theme: theme,
@@ -72,6 +79,7 @@ struct DeckGridView: View {
                             y: metrics.y(row: placed.row)
                         )
                         .zIndex(draft?.id == window.id ? 1 : 0)
+                        }
                     }
                 }
                 .frame(
@@ -104,7 +112,15 @@ struct DeckGridView: View {
                 .animation(.easeOut(duration: 0.12), value: draft)
             }
             .scrollIndicators(.never)
+            .onAppear { model.boardColumnWidth(metrics.columnWidth) }
+            .onChange(of: metrics.columnWidth) { _, width in model.boardColumnWidth(width) }
         }
+    }
+
+    /// What a window is called where its cell says it went elsewhere.
+    private func title(of window: GridWindow) -> String {
+        window.title ?? model.presentation(for: window.pluginID).card?.title
+            ?? model.displayManifest(withID: window.pluginID)?.name ?? window.pluginID.rawValue
     }
 
     @ViewBuilder

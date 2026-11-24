@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: PanelController!
     private var statusItem: NSStatusItem!
     private var settings: SettingsWindowController!
+    /// The windows that show a card away from the panel (`WindowPlace`).
+    private var places: PlacesController!
     /// The language the main menu was last built in: it is built again only
     /// when that changes, not on every change of a setting — a slider dragged
     /// in Look fires many a second, and a menu replaced while it is open closes.
@@ -115,6 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.settings = SettingsWindowController(
             model: model, updater: self.updater, loginItem: self.loginItem
         )
+        // A card shown in a window of its own, or a mini window, has it from
+        // launch on, as the layout says.
+        let places = PlacesController(model: model)
+        self.places = places
+        model.onPlacesChanged = { [weak places] in places?.sync() }
+        model.onBringPlaceForward = { [weak places] id in places?.bringForward(id) }
+        places.sync()
         // The panel sits above ordinary windows, so leaving it open would put
         // it on top of the settings it was asked to show.
         // And it closes for Settings, not like an Escape: an Escape brings back
@@ -190,6 +199,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Closed as uDeck quits, not by the person: the cards stay where they
+        // are shown, and their windows open again at the next launch.
+        places?.closeAll()
         controller?.stop()
     }
 

@@ -33,6 +33,10 @@ struct WorkspaceView: View {
             ForEach(model.layout.tabs) { tab in
                 tabButton(tab)
             }
+            // A card shown as a whole tab has a tab of its own, after the board's.
+            ForEach(model.layout.windowsAway.filter { $0.place == .tab }) { window in
+                placedTabButton(window)
+            }
 
             Button {
                 shell.onInteract()
@@ -52,7 +56,7 @@ struct WorkspaceView: View {
 
     @ViewBuilder
     private func tabButton(_ tab: DeckTab) -> some View {
-        let isSelected = tab.id == model.layout.selectedTabID
+        let isSelected = tab.id == model.layout.selectedTabID && model.tabShown == nil
 
         if shell.tabRename?.tabID == tab.id {
             TextField(strings(.tabName), text: Binding(
@@ -105,6 +109,34 @@ struct WorkspaceView: View {
                 Button(strings(.tabClose), role: .destructive) { model.removeTab(tab.id) }
                     .disabled(model.layout.tabs.count <= 1)
             }
+        }
+    }
+
+    /// The tab of a card shown as a whole tab: named after it; its
+    /// right-click brings it back to its cell.
+    private func placedTabButton(_ window: GridWindow) -> some View {
+        let isSelected = model.tabShown == window.id
+        let name = window.title ?? model.presentation(for: window.pluginID).card?.title
+            ?? model.displayManifest(withID: window.pluginID)?.name ?? window.pluginID.rawValue
+        return Button {
+            shell.onInteract()
+            model.selectTabShown(window.id)
+        } label: {
+            Text(name)
+                .font(theme.bodyFont)
+                .foregroundStyle(isSelected ? theme.text : theme.muted)
+                .lineLimit(1)
+                .frame(maxWidth: 180)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 4)
+                .background {
+                    if isSelected { RoundedRectangle(cornerRadius: 9).fill(theme.selection) }
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("tab.placed.\(window.pluginID.rawValue)")
+        .contextMenu {
+            Button(strings(.placeBringBack)) { model.show(window.id, in: .card) }
         }
     }
 
@@ -227,7 +259,9 @@ struct WorkspaceView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let tab = model.layout.selectedTab {
+        if let shown = model.tabShown, model.layout.window(withID: shown)?.window.place == .tab {
+            PlacedCard(model: model, theme: theme, windowID: shown, shell: shell)
+        } else if let tab = model.layout.selectedTab {
             if tab.windows.isEmpty {
                 EmptyDeckView(model: model, theme: theme, tabID: tab.id, shell: shell)
             } else {

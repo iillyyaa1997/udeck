@@ -27,6 +27,17 @@ public struct GridWindow: Identifiable, Codable, Equatable, Sendable {
     /// An operator-supplied title, overriding the plugin's own.
     public var title: String?
 
+    /// Where the window is shown, by name (`place`): nil for its cell. Kept
+    /// as written, so that a place a later uDeck adds reads here as the cell
+    /// rather than failing the whole layout.
+    public var shownIn: String?
+
+    /// Its own window's, or its mini window's, frame on the screen where it
+    /// was last — x, y, width and height in points, the origin bottom-left as
+    /// AppKit counts — so that it opens there again. Nil until it has been
+    /// shown so.
+    public var placeFrame: [Double]?
+
     public init(
         id: UUID = UUID(),
         pluginID: PluginIdentifier,
@@ -45,6 +56,13 @@ public struct GridWindow: Identifiable, Codable, Equatable, Sendable {
         self.title = title
     }
 
+    /// Where the window is shown: its cell on the board, a whole tab of the
+    /// panel, a window of its own, or a mini window above every other.
+    public var place: WindowPlace {
+        get { shownIn.flatMap(WindowPlace.init(rawValue:)) ?? .card }
+        set { shownIn = newValue == .card ? nil : newValue.rawValue }
+    }
+
     public var columnRange: Range<Int> { column ..< (column + width) }
     public var rowRange: Range<Int> { row ..< (row + height) }
 
@@ -61,4 +79,24 @@ public struct GridWindow: Identifiable, Codable, Equatable, Sendable {
         let h = CGFloat(height) * rowHeight + CGFloat(height - 1) * spacing
         return CGRect(x: x, y: y, width: w, height: h)
     }
+}
+
+/// Where a window of the board is shown. Every place shows the same card; the
+/// plugin is told the size it has there and draws for it.
+public enum WindowPlace: String, Codable, Sendable, CaseIterable {
+    /// Its cell on the board, as always.
+    case card
+    /// A whole tab of the panel, named after it; its cell says where it went.
+    case tab
+    /// An ordinary window of its own; closing it brings the card back.
+    case window
+    /// A small window above every other, full-screen apps' too, that takes
+    /// the keyboard only when clicked; closing it brings the card back.
+    case mini
+
+    /// Whether it is shown away from its cell, which then says where it went.
+    public var isAway: Bool { self != .card }
+
+    /// Whether it is shown in a window of uDeck's own outside the panel.
+    public var isOwnWindow: Bool { self == .window || self == .mini }
 }
