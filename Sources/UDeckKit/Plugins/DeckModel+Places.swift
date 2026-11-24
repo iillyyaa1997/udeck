@@ -166,3 +166,23 @@ extension DeckModel {
                   textSize: settings.resolvedTextSize)
     }
 }
+
+extension DeckModel {
+    /// What waits for the person across the cards of running plugins
+    /// (`CardAttention`): how many things, and the questions to answer, each
+    /// with its plugin — for the island and the peek.
+    public var attention: (count: Int, asks: [(plugin: PluginIdentifier, ask: AskRow)]) {
+        var count = 0
+        var asks: [(plugin: PluginIdentifier, ask: AskRow)] = []
+        var seen = Set<String>()
+        let cards = snapshots.values.map { ($0.pluginID, $0.card) } + placeCards.values.map { ($0.pluginID, $0.card) }
+        for (plugin, card) in cards where liveResidents.contains(plugin) {
+            guard let attention = card?.attention, attention.count > 0 else { continue }
+            // The same plugin's places say the same thing: counted once.
+            guard seen.insert(plugin.rawValue).inserted else { continue }
+            count += attention.count
+            if let ask = attention.ask { asks.append((plugin, ask)) }
+        }
+        return (count, asks)
+    }
+}
