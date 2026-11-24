@@ -318,13 +318,19 @@ public struct Card: Equatable, Sendable {
     /// ignored, which is the one failure that kills a thing like this.
     public var ttl: TimeInterval?
 
+    /// Something here waits for the person (uDeck 0.9.10 and later): uDeck
+    /// says so on the island — ears beside a notch, a glow — and shows `ask`
+    /// first when the panel is peeked at.
+    public var attention: CardAttention?
+
     public init(
         state: CardState = .ok,
         title: String? = nil,
         chip: String? = nil,
         rows: [CardRow] = [],
         actions: [CardAction] = [],
-        ttl: TimeInterval? = nil
+        ttl: TimeInterval? = nil,
+        attention: CardAttention? = nil
     ) {
         self.state = state
         self.title = title
@@ -332,6 +338,28 @@ public struct Card: Equatable, Sendable {
         self.rows = rows
         self.actions = actions
         self.ttl = ttl
+        self.attention = attention
+    }
+}
+
+/// What waits for the person on a card: how many things, and the one to
+/// answer first — an `ask` uDeck draws when the panel is peeked at, its
+/// buttons sent back as `press`, as on the card.
+public struct CardAttention: Codable, Equatable, Sendable {
+    public var count: Int
+    public var ask: AskRow?
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case count, ask }
+
+    public init(count: Int, ask: AskRow? = nil) {
+        self.count = max(0, count)
+        self.ask = ask
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(count: (try? c.decodeIfPresent(Int.self, forKey: .count)) ?? 0,
+                  ask: try? c.decodeIfPresent(AskRow.self, forKey: .ask))
     }
 }
 

@@ -146,7 +146,7 @@ extension CardRow: Codable {
 }
 
 extension Card: Codable {
-    enum CodingKeys: String, CodingKey, CaseIterable { case state, title, chip, rows, actions, ttl }
+    enum CodingKeys: String, CodingKey, CaseIterable { case state, title, chip, rows, actions, ttl, attention }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -156,7 +156,9 @@ extension Card: Codable {
             chip: try c.decodeIfPresent(String.self, forKey: .chip),
             rows: try c.decodeIfPresent([CardRow].self, forKey: .rows) ?? [],
             actions: try c.decodeIfPresent([CardAction].self, forKey: .actions) ?? [],
-            ttl: try c.decodeIfPresent(TimeInterval.self, forKey: .ttl)
+            ttl: try c.decodeIfPresent(TimeInterval.self, forKey: .ttl),
+            // Lenient: a card is drawn whatever its attention says.
+            attention: (try? c.decodeIfPresent(CardAttention.self, forKey: .attention)) ?? nil
         )
     }
 
@@ -168,5 +170,6 @@ extension Card: Codable {
         try c.encode(rows, forKey: .rows)
         if !actions.isEmpty { try c.encode(actions, forKey: .actions) }
         try c.encodeIfPresent(ttl, forKey: .ttl)
+        try c.encodeIfPresent(attention, forKey: .attention)
     }
 }

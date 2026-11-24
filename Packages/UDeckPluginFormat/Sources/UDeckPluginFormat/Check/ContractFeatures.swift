@@ -197,6 +197,11 @@ public enum ContractFeatures {
         add(barRelease, ["run", "wait", "idle", "ok", "warn", "crit", "info"].map { .tone($0) })
         add(barRelease, ["plus", "history", "folder", "model", "effort", "account", "gear", "run", "wait", "done", "idle",
                     "info"].map { .barIcon($0) })
+
+        // Something waits for the person — the island says so, and the peek
+        // shows its question first: the release after 0.9.9.
+        add(.next, [.cardField("attention")])
+        add(.next, ["count", "ask"].map { .rowField(row: "attention", field: $0) })
         return registry
     }()
 
@@ -260,6 +265,7 @@ public enum ContractFeatures {
             if let text = value?.string { used.insert(.cardState(text)) }
         }
         for field in present(card) { used.insert(.cardField(field)) }
+        for field in present(card.first("attention")?.object) { used.insert(.rowField(row: "attention", field: field)) }
         state(card.first("state"))
         for row in card.first("rows")?.array ?? [] {
             guard let object = row.object, object.keys.count == 1, let kind = object.keys.first else { continue }
