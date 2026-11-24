@@ -534,6 +534,15 @@ private struct OpeningSettings: View {
             }
 
             Section(strings(.openingBehaviour)) {
+                Picker(strings(.openingHeldLeave), selection: Binding(
+                    get: { model.settings.heldPanelLeave ?? .standard },
+                    set: { binding(\.heldPanelLeave).wrappedValue = $0 }
+                )) {
+                    ForEach(HeldPanelLeave.allCases, id: \.self) { leave in
+                        Text(strings(.openingHeldLeaveChoice(leave))).tag(leave)
+                    }
+                }
+                .accessibilityIdentifier("opening.heldPanelLeave")
                 Toggle(strings(.openingRetract), isOn: binding(\.collapseOnAppSwitch))
                     .accessibilityIdentifier("opening.collapseOnAppSwitch")
                 Toggle(strings(.openingFullscreen), isOn: binding(\.gesture.enabledInFullscreen))

@@ -1,6 +1,6 @@
 """Does the panel open when it should, and close when it should?
 
-Twenty-two checks in three parts. The first six are about the panel appearing
+Twenty-three checks in three parts. The first six are about the panel appearing
 and by which path; the next ten are about it going away again, and they are
 where the promise the panel is built on lives — **once the panel is held, the
 cursor leaving never closes it**, and everything that does close it is the
@@ -674,6 +674,56 @@ def check_a_click_past_the_panel(machine, check_dir, lab):
             f"the panel came back as {came_back} after a click outside it, not as a peek — so uDeck "
             "read the operator putting it away as something interrupting him, and gave him back work "
             "he had finished with",
+        )
+    finally:
+        story.keep()
+
+
+def check_a_held_panel_leaves_with_the_pointer(machine, check_dir, lab):
+    """A held panel goes when the pointer leaves it, gives the keyboard back, and comes back held.
+
+    What uDeck does when nobody chose (`HeldPanelLeave.standard`, 0.9.9): the
+    operator asked for a held panel to go when the cursor leaves it, as a peek
+    does, and for the next reveal to bring it back as it was — so its going
+    costs nothing. Every other check here keeps the panel as it was before
+    there was a choice (`app.launch` says `HeldPanelLeaveDefault` is
+    `stays`); this one launches uDeck without it, so what runs is the standard.
+
+    Three sentences, and each without the others passes for the wrong reason.
+    `open -> collapsed on pointerLeft`: the held panel went, and because the
+    pointer left — not a click, not a switch. The application from before is
+    in front a moment later: the operator went back to it, and a panel that
+    went while uDeck kept the keyboard would leave keystrokes going nowhere.
+    And the next gesture brings it back `open`, not as a peek: going as an
+    interruption is what keeps what was being worked on.
+    """
+    log = _prepare(machine, check_dir, lab, the_standard_leave=True)
+    story = panel.Story(machine, log, check_dir, lab.note)
+    try:
+        before = panel.bring_forward_before_the_panel(machine, lab.note)
+        panel.reveal_a_peek(machine, story, "the reveal")
+        panel.hold_it_open(machine, story, check_dir)
+        machine.move_pointer(*panel.past_the_panel(), f"past the held panel, to {panel.past_the_panel()}")
+        said = panel.wait_for_it_to_close(machine, story, "the pointer taken past the held panel")
+        machine.screenshot(check_dir, "after the pointer left the held panel")
+        panel.expect_it_closed(said, "open", "pointerLeft", "the pointer taken past the held panel")
+
+        machine.sleep(config.SETTLE_SECONDS)
+        in_front = probes.frontmost(machine, "asking which application has the keyboard after the panel went")
+        lab.note(f"   in front after the held panel went: {in_front}")
+        expect(
+            in_front == before,
+            f"{in_front} is in front {config.SETTLE_SECONDS}s after the held panel went with the pointer, not "
+            f"{before}, which was in front before it — the keyboard did not go back to what the operator "
+            f"went back to: {panel.short(said)}",
+        )
+
+        said = panel.reveal(machine, story, "the gesture after the pointer left")
+        came_back = panel.revealed(said)
+        expect(
+            came_back == ["open"],
+            f"the panel came back as {came_back} after the pointer left it held, not held — what was being "
+            "worked on in it was given up",
         )
     finally:
         story.keep()
@@ -1772,7 +1822,7 @@ def _where_uDeck_hears_each_report(lab):
         raise LabError("wobbling along the strip", REPORTS_ONE_BY_ONE)
 
 
-def _prepare(machine, check_dir, lab, launch=True):
+def _prepare(machine, check_dir, lab, launch=True, the_standard_leave=False):
     """A lab build of uDeck installed and running, and its own messages being kept.
 
     The build carries a feed nobody serves, on the guest's own loopback: a lab
@@ -1803,7 +1853,11 @@ def _prepare(machine, check_dir, lab, launch=True):
     # The control starts uDeck itself, after its window on the log has opened, so that
     # the one line uDeck always writes — the first gate it sees — is inside it.
     if launch:
-        app.launch(machine)
+        app.held_panels_stay = not the_standard_leave
+        try:
+            app.launch(machine)
+        finally:
+            app.held_panels_stay = True
         machine.screenshot(check_dir, "uDeck running")
     return log
 

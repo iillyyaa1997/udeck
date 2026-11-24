@@ -102,6 +102,10 @@ public final class PanelController {
     /// A click from before it is about something else, and
     /// `ApplicationSwitch` asks whether the last click came after this.
     private var shownAt: TimeInterval?
+    /// Whether the cursor has been on the panel since it last showed: a held
+    /// panel the shortcut opened with the cursor elsewhere does not go for a
+    /// cursor that never came.
+    private var pointerHasBeenOnThePanel = false
 
     /// The youngest click uDeck has heard itself — by its local monitor, its
     /// global one, or one of its own menus letting go — dated by when the
@@ -622,8 +626,32 @@ public final class PanelController {
     }
 
 
+    /// What a held panel does when the cursor leaves it: the operator's
+    /// choice, or — chosen by nobody — the standard, which the lab sets to
+    /// `stays` for the checks written before there was a choice
+    /// (`HeldPanelLeaveDefault`).
+    var heldLeave: HeldPanelLeave {
+        settings.heldPanelLeave
+            ?? UserDefaults.standard.string(forKey: "HeldPanelLeaveDefault").flatMap(HeldPanelLeave.init(rawValue:))
+            ?? .standard
+    }
+
+    /// Whether the cursor leaving may close the panel now: the phase allows it
+    /// (`PanelPhase.isDismissibleByPointer`), and for a held panel nothing is
+    /// in the way — a menu or a dialog of uDeck's open, a button held down
+    /// (a card dragged, text selected past the edge), or a cursor that has not
+    /// been on the panel since it opened, as when the shortcut opened it with
+    /// the cursor elsewhere.
+    private var mayLeaveWithThePointer: Bool {
+        guard state.phase.isDismissibleByPointer(heldLeave) else { return false }
+        guard state.phase == .open else { return true }
+        return pointerHasBeenOnThePanel && NSEvent.pressedMouseButtons == 0
+            && NSApp.modalWindow == nil && !PopoverPresence.isOpen
+    }
+
     /// A peek closes when the cursor has been away from the panel for a grace
-    /// period — long enough that flicking past a corner does not count.
+    /// period — long enough that flicking past a corner does not count — and
+    /// a held panel too, as the operator chose (`HeldPanelLeave`).
     private func trackPeekExit(_ sample: PointerSample) {
         guard let geometry else {
             peekExit.reset()
@@ -632,12 +660,13 @@ public final class PanelController {
         let inside = geometry.containsPointer(
             sample.location, in: geometry.keepAliveRegion(for: state.phase)
         )
-        // The same property `PanelState` asks before it collapses on
+        if inside, state.phase.isVisible { pointerHasBeenOnThePanel = true }
+        // The same question `PanelState` asks before it collapses on
         // `pointerLeft`, so that the rule cannot be broken in one layer and kept
         // in the other — which is exactly how the lab stayed green over half of
         // it (see `PanelPhase.isDismissibleByPointer`).
         switch peekExit.update(
-            isPeeking: state.phase.isDismissibleByPointer,
+            isPeeking: mayLeaveWithThePointer,
             isInsideRegion: inside,
             now: sample.timestamp,
             grace: settings.gesture.peekExitGrace
@@ -647,8 +676,14 @@ public final class PanelController {
         case .leftJustNow:
             scheduleExitCheck()
         case .close:
-            apply(.pointerLeft)
+            leave()
         }
+    }
+
+    /// The cursor left: the panel goes, and a held one gives the keyboard
+    /// back to what the operator went back to.
+    private func leave() {
+        apply(.pointerLeft, closing: state.phase == .open ? .byThePointerLeaving : .atThePanel)
     }
 
     /// Feeds the recognizer a still sample, so a dwell can complete without the
@@ -683,11 +718,11 @@ public final class PanelController {
             every: settings.gesture.peekExitGrace, repeats: false
         ) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.state.phase.isDismissibleByPointer, self.peekExit.isTiming,
+                guard let self, self.mayLeaveWithThePointer, self.peekExit.isTiming,
                       let geometry = self.geometry
                 else { return }
                 if geometry.isPastThePanel(NSEvent.mouseLocation, in: self.state.phase) {
-                    self.apply(.pointerLeft)
+                    self.leave()
                 }
             }
         }
@@ -966,7 +1001,7 @@ public final class PanelController {
         clickAt point: CGPoint? = nil
     ) {
         let before = state.phase
-        let changed = state.apply(event, collapseOnAppSwitch: settings.collapseOnAppSwitch)
+        let changed = state.apply(event, collapseOnAppSwitch: settings.collapseOnAppSwitch, heldLeave: heldLeave)
         guard changed else {
             DeckLog.panel.debug("\(String(describing: event), privacy: .public) ignored in \(before.rawValue, privacy: .public)")
             return
@@ -975,6 +1010,9 @@ public final class PanelController {
 
         if before == .collapsed, state.phase != .collapsed {
             shownAt = ProcessInfo.processInfo.systemUptime
+            pointerHasBeenOnThePanel = geometry.map {
+                $0.containsPointer(NSEvent.mouseLocation, in: $0.keepAliveRegion(for: state.phase))
+            } ?? false
             // Reveal: hand the gesture a clean slate so a half-armed dwell from
             // before cannot fire into the newly opened panel.
             recognizer.reset()
@@ -1241,6 +1279,7 @@ public final class PanelController {
         case .byAClickHeard: " by a click past the panel"
         case .byAClickThatBroughtAnotherForward: " by a click past the panel that brought another application forward"
         case .forAWindowOfUDeck: " for a window of uDeck's own"
+        case .byThePointerLeaving: " by the pointer leaving it"
         }
         let wait = Self.milliseconds(KeyboardHandback.answerSeconds)
         let then = switch handback {

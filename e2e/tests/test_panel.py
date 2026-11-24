@@ -1247,7 +1247,7 @@ def test_the_settings_file_carries_every_key_uDeck_encodes():
     written = tuple(name for name, kind in stored if not kind.strip().endswith("?"))
     optional = [name for name, kind in stored if kind.strip().endswith("?")]
     assert config.SETTINGS_KEYS == written
-    assert optional == ["textSize", "language", "officialCatalogue", "autoUpdateVerified", "linkedFolderRunLog"]
+    assert optional == ["heldPanelLeave", "textSize", "language", "officialCatalogue", "autoUpdateVerified", "linkedFolderRunLog"]
 
 
 def test_the_defaults_the_file_has_to_still_carry_are_uDecks_own():

@@ -62,6 +62,13 @@ struct Russian: Vocabulary {
             "\(shortcut) уже занято другим приложением — запишите другое сочетание."
         case .openingBehaviour: "Поведение"
         case .openingRetract: "Убирать при переходе в другое приложение"
+        case .openingHeldLeave: "Когда мышь уходит с открытой панели"
+        case .openingHeldLeaveChoice(let leave):
+            switch leave {
+            case .backAsItWas: "Убирать, наведением — как была"
+            case .backAsAPeek: "Убирать, наведением — подглядывание"
+            case .stays: "Не убирать"
+            }
         case .openingFullscreen: "Открывать поверх полноэкранных приложений"
         case .openingKeepPolling: "Продолжать выполнять плагины, пока панель убрана"
         case .openingPermissions:

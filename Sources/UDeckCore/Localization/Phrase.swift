@@ -70,6 +70,9 @@ public enum Phrase: Sendable, Equatable {
     case openingShortcutTaken(String)
     case openingBehaviour
     case openingRetract
+    /// What a held panel does when the pointer leaves it (`HeldPanelLeave`).
+    case openingHeldLeave
+    case openingHeldLeaveChoice(HeldPanelLeave)
     case openingFullscreen
     case openingKeepPolling
     case openingPermissions

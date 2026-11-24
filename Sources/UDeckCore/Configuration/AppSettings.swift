@@ -51,6 +51,10 @@ public struct AppSettings: Codable, Equatable, Sendable {
     /// Retract the panel when the operator activates another application.
     public var collapseOnAppSwitch: Bool
 
+    /// What a held panel does when the cursor leaves it; nil until the
+    /// operator chooses, which is `HeldPanelLeave.standard`.
+    public var heldPanelLeave: HeldPanelLeave?
+
     /// Default lifetime applied to a card whose producer did not declare a
     /// `ttl`. Kept generous: a producer that forgot to declare one should not
     /// be accused of being broken a few seconds later.
@@ -170,6 +174,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         look: PanelLook = .light,
         resolvedIsDark: Bool = false,
         collapseOnAppSwitch: Bool = true,
+        heldPanelLeave: HeldPanelLeave? = nil,
         defaultCardTTL: TimeInterval = 60,
         silentTTLMultiplier: Double = 3,
         pluginExecutableSearchPath: [String] = PluginEnvironment.defaultSearchPath,
@@ -189,6 +194,7 @@ public struct AppSettings: Codable, Equatable, Sendable {
         self.look = look
         self.resolvedIsDark = resolvedIsDark
         self.collapseOnAppSwitch = collapseOnAppSwitch
+        self.heldPanelLeave = heldPanelLeave
         self.defaultCardTTL = defaultCardTTL
         self.silentTTLMultiplier = silentTTLMultiplier
         self.pluginExecutableSearchPath = pluginExecutableSearchPath
@@ -384,6 +390,9 @@ public struct AppSettings: Codable, Equatable, Sendable {
         }
         collapseOnAppSwitch = try c.decodeIfPresent(Bool.self, forKey: .collapseOnAppSwitch)
             ?? defaults.collapseOnAppSwitch
+        // Read as a string: a choice a later uDeck adds reads here as none.
+        heldPanelLeave = (try? c.decodeIfPresent(String.self, forKey: .heldPanelLeave)).flatMap { $0 }
+            .flatMap(HeldPanelLeave.init(rawValue:))
         defaultCardTTL = try c.decodeIfPresent(TimeInterval.self, forKey: .defaultCardTTL)
             ?? defaults.defaultCardTTL
         silentTTLMultiplier = try c.decodeIfPresent(Double.self, forKey: .silentTTLMultiplier)

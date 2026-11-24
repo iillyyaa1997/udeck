@@ -127,6 +127,16 @@ def installed_version(machine) -> tuple[str, str]:
     return lines[0], lines[1]
 
 
+# What a held panel does when the cursor leaves it, for every check but the one
+# about it: as before there was a choice (`HeldPanelLeave`, 0.9.9). The checks
+# of the panel, and every check that opens it and goes on to another window,
+# were written for a held panel that stays. Said as an argument at launch,
+# which macOS reads as a default for that run and writes nowhere: a check of
+# what uDeck ships finds nothing of the lab's in its defaults.
+HELD_PANEL_LEAVE_KEY = "HeldPanelLeaveDefault"
+held_panels_stay = True
+
+
 def launch(machine, step: str = "starting uDeck") -> set[str]:
     """Start uDeck in the guest, and answer with the one pid it is running as.
 
@@ -135,7 +145,8 @@ def launch(machine, step: str = "starting uDeck") -> set[str]:
     was there before it, which on a shared machine is the previous check's uDeck
     (--vm per-group, per-run).
     """
-    machine.ssh.run(f"open -a {shlex.quote(GUEST_APPLICATIONS)}/{APP}", step)
+    held = f" --args -{HELD_PANEL_LEAVE_KEY} stays" if held_panels_stay else ""
+    machine.ssh.run(f"open -a {shlex.quote(GUEST_APPLICATIONS)}/{APP}{held}", step)
     running = wait_until_running(machine)
     if len(running) != 1:
         raise LabError(step, f"{len(running)} copies of uDeck are running in the guest: {sorted(running)}")

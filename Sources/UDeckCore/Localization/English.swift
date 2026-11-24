@@ -58,6 +58,13 @@ struct English: Vocabulary {
             "\(shortcut) is already taken by another application — record another shortcut."
         case .openingBehaviour: "Behaviour"
         case .openingRetract: "Retract when you switch to another application"
+        case .openingHeldLeave: "When the pointer leaves the open panel"
+        case .openingHeldLeaveChoice(let leave):
+            switch leave {
+            case .backAsItWas: "Put it away; it comes back as it was"
+            case .backAsAPeek: "Put it away; it comes back as a peek"
+            case .stays: "Keep it open"
+            }
         case .openingFullscreen: "Open over fullscreen applications"
         case .openingKeepPolling: "Keep running plugins while the panel is away"
         case .openingPermissions:

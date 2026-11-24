@@ -25,9 +25,9 @@ struct PanelStateTests {
         #expect(state.phase.isHeld)
     }
 
-    /// The rule the whole design exists to guarantee. If this ever regresses,
-    /// a half-typed answer goes to whatever shell was frontmost.
-    @Test("once held, the pointer leaving never closes the panel")
+    /// The rule as it was, and as an operator who chose `stays` keeps it: a
+    /// half-typed answer must not go to whatever shell was frontmost.
+    @Test("once held, the pointer leaving never closes the panel that stays")
     func heldSurvivesPointerLeaving() {
         var state = PanelState()
         state.apply(.revealRequested)
@@ -39,12 +39,56 @@ struct PanelStateTests {
         }
     }
 
-    /// The property the controller's gates read as well as `PanelState`, so a
+    /// The question the controller's gates ask as well as `PanelState`, so a
     /// phase added to it is a phase the cursor can close in both layers at once.
-    @Test("only a peek is dismissible by the pointer")
-    func onlyAPeekIsDismissibleByThePointer() {
-        let dismissible = PanelPhase.allCases.filter(\.isDismissibleByPointer)
-        #expect(dismissible == [.peek], "the cursor may close \(dismissible), and only a peek has nothing typed in it")
+    @Test("a peek always, a held panel as the operator chose, never the whole screen")
+    func whatThePointerMayClose() {
+        #expect(PanelPhase.allCases.filter { $0.isDismissibleByPointer(.stays) } == [.peek])
+        for leave in [HeldPanelLeave.backAsItWas, .backAsAPeek] {
+            #expect(PanelPhase.allCases.filter { $0.isDismissibleByPointer(leave) } == [.peek, .open])
+        }
+        #expect(HeldPanelLeave.standard == .backAsItWas)
+    }
+
+    /// The operator, 2026-11-24: «если мышка ушла за границы юдеск в среднем
+    /// режиме, то стоит сразу скрывать окно» — and it costs nothing, because
+    /// the next reveal brings it back held.
+    @Test("a held panel that goes with the pointer comes back held, or as a peek, as chosen")
+    func heldLeavesWithThePointer() {
+        var state = PanelState()
+        state.apply(.revealRequested)
+        state.apply(.interacted)
+        let went = state.apply(.pointerLeft, heldLeave: .backAsItWas)
+        #expect(went)
+        #expect(state.phase == .collapsed && state.collapseReason == .interrupted)
+        state.apply(.revealRequested)
+        #expect(state.phase == .open, "back as it was")
+
+        let wentAgain = state.apply(.pointerLeft, heldLeave: .backAsAPeek)
+        #expect(wentAgain)
+        #expect(state.collapseReason == .dismissed)
+        state.apply(.revealRequested)
+        #expect(state.phase == .peek, "back as a peek")
+
+        // A peek goes as it always did, whatever was chosen for a held panel.
+        let peekWent = state.apply(.pointerLeft, heldLeave: .backAsItWas)
+        #expect(peekWent)
+        #expect(state.collapseReason == .dismissed)
+
+        state.apply(.revealRequested)
+        state.apply(.toggleFullscreen)
+        let wholeScreen = state.apply(.pointerLeft, heldLeave: .backAsItWas)
+        #expect(!wholeScreen, "the whole screen cannot be left")
+    }
+
+    @Test("a setting a later uDeck adds reads as none, and nobody's choice is the standard")
+    func heldLeaveSetting() throws {
+        let read = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"heldPanelLeave":"hologram"}"#.utf8))
+        #expect(read.heldPanelLeave == nil)
+        let chosen = try JSONDecoder().decode(AppSettings.self, from: Data(#"{"heldPanelLeave":"stays"}"#.utf8))
+        #expect(chosen.heldPanelLeave == .stays)
+        let back = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(chosen))
+        #expect(back.heldPanelLeave == .stays)
     }
 
     @Test("fullscreen also survives the pointer leaving")
@@ -747,10 +791,21 @@ struct KeyboardHandbackTests {
         #expect(KeyboardHandback.distance(from: CGPoint(x: 33, y: 34), to: rect) == 5)
     }
 
-    @Test("an interruption never brings anything back, in front or not, however it closed")
+    /// The cursor leaving a held panel is the operator going back to what
+    /// they were doing: it has the keyboard back, though the panel will come
+    /// back whole — or the keys after it go to uDeck with nothing on screen.
+    @Test("the pointer leaving a held panel brings the application from before back")
+    func thePointerLeavingRestores() {
+        for reason in [CollapseReason.interrupted, .dismissed] {
+            #expect(KeyboardHandback.handback(after: reason, closing: .byThePointerLeaving, uDeckIsInFront: true) == .restore)
+            #expect(KeyboardHandback.handback(after: reason, closing: .byThePointerLeaving, uDeckIsInFront: false) == .leave)
+        }
+    }
+
+    @Test("an interruption brings nothing back, in front or not, however it closed but by the pointer leaving")
     func anInterruptionNeverRestores() {
         for inFront in [true, false] {
-            for closing in KeyboardHandback.Closing.allCases {
+            for closing in KeyboardHandback.Closing.allCases where closing != .byThePointerLeaving {
                 #expect(KeyboardHandback.handback(
                     after: .interrupted, closing: closing, uDeckIsInFront: inFront
                 ) == .leave)

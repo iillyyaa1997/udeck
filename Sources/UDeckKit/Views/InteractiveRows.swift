@@ -282,8 +282,21 @@ struct InputRowView: View {
     let input: InputRow
     let theme: DeckTheme
     let send: (ResidentEvent) -> Void
-    @State private var draft = ""
+    /// Whose field this is — the card's window and the row — for `Drafts`.
+    var draftKey: String = ""
     @Environment(\.strings) private var strings
+
+    /// What is typed here, kept outside the view (`Drafts`).
+    private var draft: String {
+        get { Drafts.shared.texts[key] ?? "" }
+        nonmutating set { Drafts.shared.texts[key] = newValue.isEmpty ? nil : newValue }
+    }
+
+    private var key: String { draftKey + "/" + input.id }
+
+    private var draftBinding: Binding<String> {
+        Binding(get: { draft }, set: { draft = $0 })
+    }
 
     var body: some View {
         if let pickers = input.pickers, !pickers.isEmpty {
@@ -294,7 +307,7 @@ struct InputRowView: View {
     }
 
     private var field: some View {
-        TextField(input.placeholder ?? "", text: $draft, axis: .vertical)
+        TextField(input.placeholder ?? "", text: draftBinding, axis: .vertical)
             .font(theme.bodyFont)
             .disabled(input.enabled == false)
             .onSubmit(submit)
@@ -523,6 +536,16 @@ struct MenuPill: View {
     }
 }
 
+/// What is typed into cards' fields, kept outside the views that show them:
+/// the panel's content goes when the panel collapses, and the text did with
+/// it — an application switched to, the cursor leaving a held panel — so the
+/// panel came back whole with its field empty.
+@MainActor @Observable
+final class Drafts {
+    static let shared = Drafts()
+    var texts: [String: String] = [:]
+}
+
 /// Whether one of the cards' popovers is open, or closed a moment ago: a
 /// click made in one is a choice in uDeck, wherever the popover's window lies
 /// and whichever process draws it, and never a click past the panel
@@ -544,7 +567,7 @@ enum PopoverPresence {
     }
 
     /// Whether a popover of uDeck's is on the screen now.
-    @MainActor static var isOpen: Bool {
+    static var isOpen: Bool {
         NSApp.windows.contains { $0.isVisible && String(describing: type(of: $0)).contains("Popover") }
     }
 }

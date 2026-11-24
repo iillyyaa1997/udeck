@@ -26,6 +26,14 @@ for what that promises.
   while uDeck quits, crashes or updates; the next uDeck takes them back where
   they are, a question still waiting. macOS says once that uDeck added a
   background item.
+- **The open panel goes when the pointer leaves it**, as the peek does, and
+  the next reveal brings it back as it was, whatever was being typed still in
+  its field. Settings → Opening chooses: back as it was, back as a peek, or
+  kept open until a click past it, Escape or the shortcut, as before. It stays
+  while a card's menu or a folder dialog is open, while a mouse button is
+  held, and when the shortcut opened it with the pointer elsewhere.
+- **What you type in a card's field survives the panel going away** — another
+  application switched to, the pointer leaving it.
 - **The first click on the panel always holds it.** A click on a card's title
   line, on a conversation's text or on a field left the panel a peek, and it
   took another click or two to work in it.

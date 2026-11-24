@@ -214,7 +214,8 @@ struct CardBodyView: View {
         case .ask(let ask):
             AskRowView(ask: ask, theme: theme, send: send)
         case .input(let input):
-            InputRowView(input: input, theme: theme, send: send)
+            InputRowView(input: input, theme: theme, send: send,
+                         draftKey: (windowID?.uuidString ?? "") + "/" + pluginID.rawValue)
         case .bar(let bar):
             BarRowView(bar: bar, theme: theme, send: send)
 

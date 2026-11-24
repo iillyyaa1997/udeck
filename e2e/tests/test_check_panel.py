@@ -152,11 +152,12 @@ def prepared(monkeypatch, log_says, in_front=None, holds=None, running="404"):
     """Skip the preparation — its own tests are at the end — and hand back the log."""
     machine = a_machine(log_says, running=running, in_front=in_front, holds=holds)
 
-    def prepare(machine_, check_dir, lab, launch=True):
+    def prepare(machine_, check_dir, lab, launch=True, the_standard_leave=False):
         # `launch` is real: the control starts uDeck itself, after its window on
         # the log has opened, and a stub that swallowed the difference would let
         # that ordering rot without a test noticing.
         machine_.prepared_with_launch = launch
+        machine_.with_the_standard_leave = the_standard_leave
         kept = panel.GestureLog(machine_, lab.note)
         kept.kept = True
         return kept
@@ -739,6 +740,45 @@ def test_a_held_panel_that_closed_while_the_pointer_was_merely_away_fails(monkey
     machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, POINTER_LEFT, DISMISSED, REVEAL))
     with pytest.raises(CheckFailed, match="while the pointer was merely taken away"):
         checks.check_a_click_past_the_panel(machine, check_dir, lab)
+
+
+HELD_LEFT = "2026-09-18 18:20:09.100 Db uDeck[404:1a2b] [place.unicorns.udeck:panel] open -> collapsed on pointerLeft\n"
+KEYBOARD_BACK = [config.IN_FRONT_BEFORE_THE_PANEL, config.IN_FRONT_BEFORE_THE_PANEL]
+
+
+def test_a_held_panel_goes_with_the_pointer_gives_the_keyboard_back_and_comes_back_held(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, HELD_LEFT, RESTORED), in_front=KEYBOARD_BACK)
+    checks.check_a_held_panel_leaves_with_the_pointer(machine, check_dir, lab)
+    assert machine.with_the_standard_leave, "what uDeck does when nobody chose, not the lab's `stays`"
+    # On the panel, then past it — and no click past it: the pointer alone.
+    assert [(x, y) for x, y, _ in machine.clicks] == [panel.inside_the_peek()]
+    assert (*panel.past_the_panel(),) in [(x, y) for x, y, _ in machine.pointer]
+
+
+def test_a_held_panel_that_stayed_when_the_pointer_left_fails(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, NOTHING), in_front=KEYBOARD_BACK)
+    with pytest.raises(CheckFailed, match="did not close the panel"):
+        checks.check_a_held_panel_leaves_with_the_pointer(machine, check_dir, lab)
+
+
+def test_a_held_panel_that_went_for_another_reason_is_not_the_pointer_leaving(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, DISMISSED, RESTORED), in_front=KEYBOARD_BACK)
+    with pytest.raises(CheckFailed, match="pointerLeft"):
+        checks.check_a_held_panel_leaves_with_the_pointer(machine, check_dir, lab)
+
+
+def test_a_held_panel_that_went_and_kept_the_keyboard_from_the_application_fails(monkeypatch, lab, check_dir):
+    """The keystrokes after it would go nowhere: uDeck in front with nothing on screen."""
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, HELD_LEFT, RESTORED),
+                       in_front=[config.IN_FRONT_BEFORE_THE_PANEL, "uDeck"])
+    with pytest.raises(CheckFailed, match="the keyboard did not go back"):
+        checks.check_a_held_panel_leaves_with_the_pointer(machine, check_dir, lab)
+
+
+def test_a_held_panel_that_came_back_as_a_peek_after_the_pointer_left_fails(monkeypatch, lab, check_dir):
+    machine = prepared(monkeypatch, growing(REVEAL, PROMOTED, HELD_LEFT, REVEAL), in_front=KEYBOARD_BACK)
+    with pytest.raises(CheckFailed, match="not held"):
+        checks.check_a_held_panel_leaves_with_the_pointer(machine, check_dir, lab)
 
 
 def test_a_click_outside_read_as_an_interruption_fails(monkeypatch, lab, check_dir):

@@ -31,17 +31,42 @@ public enum PanelPhase: String, Codable, CaseIterable, Sendable {
 
     /// Whether the cursor leaving is allowed to close the panel in this phase.
     ///
-    /// Only a peek: nothing has been typed into it yet, so nothing can be lost.
-    /// This is the typing-safety rule, and it is stated here once because it
-    /// used to be stated three times — in `PanelState` and in both of the
-    /// controller's gates that decide whether a departure is worth timing at
-    /// all. Measured on 2026-09-21: breaking only the gates left the lab green,
-    /// because the state machine still refused, and breaking only the state
-    /// machine left it green too, because the gates never asked it. One
-    /// property read in all three places means one edit breaks both layers,
-    /// and the lab sees it: letting `open` in here turned the check of a click
-    /// past the panel red on `open -> collapsed on pointerLeft`.
-    public var isDismissibleByPointer: Bool { self == .peek }
+    /// A peek always: nothing has been typed into it yet, so nothing can be
+    /// lost. A held panel as the operator chose (`HeldPanelLeave`): by default
+    /// it goes too, and comes back whole at the next reveal, which is what makes
+    /// its going cost nothing (the operator, 2026-11-24: «если мышка ушла за
+    /// границы юдеск в среднем режиме, то стоит сразу скрывать окно»). Never
+    /// the whole screen, which the cursor cannot leave.
+    ///
+    /// Stated here once because it used to be stated three times — in
+    /// `PanelState` and in both of the controller's gates that decide whether
+    /// a departure is worth timing at all. Measured on 2026-09-21: breaking
+    /// only the gates left the lab green, because the state machine still
+    /// refused, and breaking only the state machine left it green too, because
+    /// the gates never asked it. One question asked in all three places means
+    /// one edit breaks both layers, and the lab sees it.
+    public func isDismissibleByPointer(_ held: HeldPanelLeave) -> Bool {
+        switch self {
+        case .peek: true
+        case .open: held != .stays
+        case .collapsed, .fullscreen: false
+        }
+    }
+}
+
+/// What a held panel does when the cursor leaves it — the operator's choice,
+/// in Settings → Opening.
+public enum HeldPanelLeave: String, Codable, CaseIterable, Sendable {
+    /// It goes, and the next reveal brings it back as it was: held, whatever
+    /// was being typed still there.
+    case backAsItWas
+    /// It goes as a click past it would: the next reveal is a peek.
+    case backAsAPeek
+    /// It stays until it is put away — a click past it, Escape, the shortcut.
+    case stays
+
+    /// What uDeck does when nobody chose.
+    public static let standard = HeldPanelLeave.backAsItWas
 }
 
 /// Why the panel last collapsed. This decides what a later reveal restores.
@@ -464,6 +489,10 @@ public enum KeyboardHandback {
         /// opened from the gear (the operator, 2026-11-18: «настройки не
         /// становятся активным окном»; the lab, run 44291798885).
         case forAWindowOfUDeck
+        /// The cursor left a held panel (`HeldPanelLeave`): the operator went
+        /// back to what they were doing, which has the keyboard back — even
+        /// though the panel will come back whole.
+        case byThePointerLeaving
     }
 
     /// What becomes of the application from before.
@@ -494,9 +523,12 @@ public enum KeyboardHandback {
     public static let answerSeconds: TimeInterval = 2
 
     public static func handback(after reason: CollapseReason, closing: Closing, uDeckIsInFront: Bool) -> Handback {
-        guard reason == .dismissed, uDeckIsInFront else { return .leave }
+        guard uDeckIsInFront else { return .leave }
+        // The one interruption that is not another application coming forward.
+        if closing == .byThePointerLeaving { return .restore }
+        guard reason == .dismissed else { return .leave }
         switch closing {
-        case .atThePanel: return .restore
+        case .atThePanel, .byThePointerLeaving: return .restore
         case .byAClickHeard: return .restoreUnlessAnotherComesForward
         case .byAClickThatBroughtAnotherForward, .forAWindowOfUDeck: return .leave
         }
@@ -695,7 +727,8 @@ public struct PanelState: Equatable, Sendable {
 
     /// Applies an event and returns whether the phase changed.
     @discardableResult
-    public mutating func apply(_ event: PanelEvent, collapseOnAppSwitch: Bool = true) -> Bool {
+    public mutating func apply(_ event: PanelEvent, collapseOnAppSwitch: Bool = true,
+                               heldLeave: HeldPanelLeave = .stays) -> Bool {
         let before = phase
         lastEventWasConsumedByField = false
 
@@ -713,9 +746,11 @@ public struct PanelState: Equatable, Sendable {
 
         case .pointerLeft:
             // The whole typing-safety rule, and `PanelPhase` is where it is
-            // stated: the controller asks the same property before it times a
-            // departure at all.
-            if phase.isDismissibleByPointer { collapse(reason: .dismissed) }
+            // stated: the controller asks the same question before it times a
+            // departure at all. A held panel the operator wants back as it was
+            // goes as an interruption, which is what brings it back whole.
+            guard phase.isDismissibleByPointer(heldLeave) else { break }
+            collapse(reason: phase == .open && heldLeave == .backAsItWas ? .interrupted : .dismissed)
 
         case .interacted:
             if phase == .peek { phase = .open }

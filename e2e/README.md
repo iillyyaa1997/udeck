@@ -1540,6 +1540,14 @@ side and reaching up into the menu bar. The middle of the screen — the lab's
 the open panel, so the closing checks have a third place of their own
 (`panel.past_the_panel()`, left of the panel and below it at once).
 
+`panel.a-held-panel-leaves-with-the-pointer` is what uDeck does when nobody
+chose (`HeldPanelLeave`, 0.9.9): a held panel goes when the pointer leaves it,
+`open -> collapsed on pointerLeft`, the application from before has the
+keyboard again a moment later, and the next gesture brings the panel back
+`open`. Every other check launches uDeck with `-HeldPanelLeaveDefault stays`
+— an argument, read as a default for that run and written nowhere — because
+they were written for a held panel that stays; this one launches it without.
+
 `panel.a-click-past-the-panel` is two sentences that have to be checked
 together, because each one alone is satisfied by the panel being wrong in the
 other direction. It promotes a peek to a held panel with a click on it, takes
