@@ -1223,6 +1223,33 @@ private struct LookSettings: View {
             Form {
                 Section { samples }
                 Section(strings(.lookStyle)) { styleCards }
+                Section(strings(.lookIslandGroup)) {
+                    Picker(strings(.lookNotchAttention), selection: Binding(
+                        get: { model.settings.notchAttention ?? .standard },
+                        set: { newValue in
+                            var settings = model.settings
+                            settings.notchAttention = newValue
+                            model.update(settings: settings)
+                        }
+                    )) {
+                        ForEach(NotchAttention.allCases, id: \.self) { choice in
+                            Text(strings(.lookNotchAttentionChoice(choice))).tag(choice)
+                        }
+                    }
+                    .accessibilityIdentifier("look.notchAttention")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Toggle(strings(.lookIslandGlows), isOn: Binding(
+                            get: { model.settings.islandGlowsWhenWaiting ?? true },
+                            set: { newValue in
+                                var settings = model.settings
+                                settings.islandGlowsWhenWaiting = newValue
+                                model.update(settings: settings)
+                            }
+                        ))
+                        .accessibilityIdentifier("look.islandGlowsWhenWaiting")
+                        Text(strings(.lookIslandGlowsHelp)).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
                         Picker(strings(.lookAppearance), selection: Binding(
