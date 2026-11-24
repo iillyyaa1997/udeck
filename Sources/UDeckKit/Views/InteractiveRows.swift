@@ -67,6 +67,10 @@ struct FeedRowView: View {
                 .padding(.vertical, 8)
                 .padding(.horizontal, 10)
             }
+            // Shown again — back from a window of its own, a tab switched to —
+            // it opens on the newest entry: scrolling there on appearing alone
+            // landed half-way, the lazy stack not laid out yet.
+            .defaultScrollAnchor(.bottom)
             .background(RoundedRectangle(cornerRadius: 10).fill(theme.backing))
             // It gives way first: a question or the field under it is never
             // pushed out, nor the title line above.

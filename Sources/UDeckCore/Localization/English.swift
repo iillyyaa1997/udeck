@@ -669,6 +669,24 @@ struct English: Vocabulary {
         case .deckClickToWork: "Click or press a key to work in here"
         case .cardRefreshNow: "Refresh now"
         case .cardRemoveFromTab: "Remove from this tab"
+        case .placeShowAs: "Show"
+        case .placeName(let place):
+            switch place {
+            case .card: "As a card"
+            case .tab: "As a tab"
+            case .window: "In a window"
+            case .mini: "In a mini window"
+            }
+        case .placeMiniNote: "above everything"
+        case .placeAway(let title, let place):
+            switch place {
+            case .card: title
+            case .tab: "\(title) is in a tab of its own"
+            case .window: "\(title) is in a window"
+            case .mini: "\(title) is in a mini window"
+            }
+        case .placeShow: "Show"
+        case .placeBringBack: "Bring back here"
         case .cardDragToMove: "Drag to move this window"
         case .cardDragToResize: "Drag to resize, in whole cells"
         case .cardOwnDrawing: "PLUGIN'S OWN DRAWING"
