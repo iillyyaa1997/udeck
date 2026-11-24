@@ -8,6 +8,7 @@
 #         Scripts/make-cli.sh linux --arch x86_64|aarch64 [--version X.Y.Z] [--out DIR]
 #         Scripts/make-cli.sh image [--version X.Y.Z] [--out DIR] [--stage REGISTRY/NAME] [--revision COMMIT]
 #         Scripts/make-cli.sh sources [--version X.Y.Z] [--out DIR] [--stage REGISTRY/NAME] [--aports URL] [--distfiles URL]
+#                                     [--distfiles-edge URL]
 #         Scripts/make-cli.sh push [--version X.Y.Z] [--out DIR] [--stage REGISTRY/NAME] [--repository REGISTRY/NAME]
 #         Scripts/make-cli.sh sums [--version X.Y.Z] [--out DIR] [--repository REGISTRY/NAME]
 #         Scripts/make-cli.sh notes [--version X.Y.Z] [--out DIR] [--repository REGISTRY/NAME]
@@ -87,7 +88,9 @@
 # whichever packages a release's image happens to hold. It runs after image
 # and before push, so that an image whose sources cannot be gathered is never
 # published. --aports and --distfiles say where to read from (default:
-# Alpine's own); the harness points them at copies of its own.
+# Alpine's own), and --distfiles-edge where an archive the release's
+# distfiles do not hold yet is read from instead; the harness points them at
+# copies of its own.
 #
 # push copies that index — by its digest, byte for byte — to --repository
 # (ghcr.io/iillyyaa1997/udeck-plugin unless told otherwise), tagged
@@ -147,6 +150,12 @@ LOCK_READER='/^<!-- \/lock-reader -->$/ { inside = 0 } inside && !/^```/ { print
 # mirror is held to its id, so the mirror decides nothing.
 APORTS="https://github.com/alpinelinux/aports.git"
 DISTFILES="https://distfiles.alpinelinux.org/distfiles/v3.24"
+# A package a release's branch takes from edge — a fix, built first there —
+# has its archive in edge's distfiles, and in the release's only once Alpine
+# copies it over: zstd 1.6.0 was in an image while v3.24's distfiles had no
+# zstd-1.6.0.tar.gz (run 45404091671). Read from there then, held to the same
+# sha512 its APKBUILD gives.
+DISTFILES_EDGE="https://distfiles.alpinelinux.org/distfiles/edge"
 
 # The licences of what the image holds, for its licenses label, one SPDX
 # expression to a line. First the command's — its own and those of what is
@@ -248,6 +257,7 @@ while [ $# -gt 0 ]; do
         --revision) REVISION="${2-}"; shift 2 ;;
         --aports) APORTS="${2-}"; shift 2 ;;
         --distfiles) DISTFILES="${2-}"; shift 2 ;;
+        --distfiles-edge) DISTFILES_EDGE="${2-}"; shift 2 ;;
         *) echo "make-cli: unknown option: $1" >&2; usage ;;
     esac
 done
@@ -1038,7 +1048,7 @@ build_sources() {
     awk -F "$tab" '$4 ~ /GPL/' "$packages" > "$copyleft"
     [ -s "$copyleft" ] || fail "no package in udeck-plugin-staged-packages.txt is under the GPL or the LGPL, and BusyBox is: the list is not the image's"
 
-    local commit origin folder sum file count=0
+    local commit origin folder sum file from count=0
     local a_sha512='^[0-9a-f]{128}$' a_name='^[A-Za-z0-9_][A-Za-z0-9._+~-]*$'
     while IFS="$tab" read -r commit origin; do
         folder="$tree/aports/$commit/main/$origin"
@@ -1056,16 +1066,24 @@ build_sources() {
                     || fail "aports $commit main/$origin/$file is not what its APKBUILD's sha512sums says"
                 continue
             fi
-            # An upstream archive, as Alpine's distfiles keep it.
+            # An upstream archive, as Alpine's distfiles keep it: the
+            # release's, or edge's for one the release's do not hold yet.
             if [ ! -f "$tree/distfiles/$file" ]; then
-                curl -fsSL --proto '=https,file' --retry 3 -o "$SCRATCH/download" "$DISTFILES/$file" < /dev/null \
-                    || fail "$file, which aports $commit main/$origin builds from, cannot be read from $DISTFILES"
+                from="$DISTFILES"
+                if ! curl -fsSL --proto '=https,file' --retry 3 -o "$SCRATCH/download" "$from/$file" < /dev/null; then
+                    from="$DISTFILES_EDGE"
+                    if [ -z "$from" ] || ! curl -fsSL --proto '=https,file' --retry 3 -o "$SCRATCH/download" "$from/$file" < /dev/null; then
+                        fail "$file, which aports $commit main/$origin builds from, cannot be read from $DISTFILES or ${DISTFILES_EDGE:-anywhere else}"
+                    fi
+                fi
                 mv "$SCRATCH/download" "$tree/distfiles/$file"
                 chmod 644 "$tree/distfiles/$file"
+                [ "$(sha512_of "$tree/distfiles/$file")" = "$sum" ] \
+                    || fail "$file from $from is not what the APKBUILD of aports $commit main/$origin says: its sha512 is $(sha512_of "$tree/distfiles/$file")"
                 count=$((count + 1))
             fi
             [ "$(sha512_of "$tree/distfiles/$file")" = "$sum" ] \
-                || fail "$file from $DISTFILES is not what the APKBUILD of aports $commit main/$origin says: its sha512 is $(sha512_of "$tree/distfiles/$file")"
+                || fail "$file is not what the APKBUILD of aports $commit main/$origin says: its sha512 is $(sha512_of "$tree/distfiles/$file")"
         done < "$SCRATCH/sums.txt"
     done < <(cut -f5,6 "$copyleft" | sort -u)
 
@@ -1106,6 +1124,8 @@ source of every package there under the GPL or the LGPL, as Alpine built it:
       the upstream archives those APKBUILDs name, each the file its
       APKBUILD's sha512sums names, from Alpine's distfiles:
       $DISTFILES
+      or, for one those do not hold yet, from edge's:
+      ${DISTFILES_EDGE:-none}
   SHA512SUMS
       the sha512 of every file here but this one and itself
 

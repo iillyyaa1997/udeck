@@ -898,9 +898,12 @@ class Alpine:
         self.checkout = checkout
         self.aports = checkout.parent / "aports"
         self.distfiles = checkout.parent / "distfiles"
+        # edge's distfiles: empty unless a test puts an archive there.
+        self.edge = checkout.parent / "distfiles-edge"
         self.out = checkout / "out"
         self.aports.mkdir()
         self.distfiles.mkdir()
+        self.edge.mkdir()
         self.out.mkdir()
         self.env = {**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1",
                     "TMPDIR": str(checkout.parent / "tmp")}
@@ -968,7 +971,8 @@ class Alpine:
 
     def run(self, *args, **env):
         return make_cli(self.checkout, "sources", "--out", "out", "--aports", f"file://{self.aports}",
-                        "--distfiles", f"file://{self.distfiles}", *args, GIT_CONFIG_GLOBAL="/dev/null",
+                        "--distfiles", f"file://{self.distfiles}", "--distfiles-edge", f"file://{self.edge}", *args,
+                        GIT_CONFIG_GLOBAL="/dev/null",
                         GIT_CONFIG_NOSYSTEM="1", **env)
 
     @property
@@ -1034,6 +1038,18 @@ def test_sources_gather_each_gpl_and_lgpl_package_s_aports_folder_at_its_commit_
     assert alpine.archive.read_bytes() == made
 
 
+def test_an_archive_the_release_s_distfiles_do_not_hold_yet_is_read_from_edge_s(alpine):
+    """zstd 1.6.0 was in an image while v3.24's distfiles had no
+    zstd-1.6.0.tar.gz, and edge's had it (run 45404091671)."""
+    (alpine.distfiles / "zstd-1.5.7.tar.gz").rename(alpine.edge / "zstd-1.5.7.tar.gz")
+    done = alpine.run("--version", VERSION)
+    assert done.returncode == 0, done.stdout + done.stderr
+    folder = f"udeck-plugin-image-sources-{VERSION}"
+    with tarfile.open(alpine.archive) as tar:
+        assert tar.extractfile(f"{folder}/distfiles/zstd-1.5.7.tar.gz").read() == Alpine.UPSTREAM["zstd-1.5.7.tar.gz"]
+        assert f"file://{alpine.edge}" in tar.extractfile(f"{folder}/README").read().decode()
+
+
 def test_sums_take_the_sources_that_sources_made(alpine):
     assert alpine.run("--version", VERSION).returncode == 0
     for name in ("macos-universal", "linux-x86_64", "linux-aarch64"):
@@ -1077,6 +1093,9 @@ def a_submodule_in_the_folder(alpine):
         (lambda a: (a.distfiles / "git-2.54.0.tar.xz").write_bytes(b"another git\n"),
          "git-2.54.0.tar.xz from file://"),
         (lambda a: (a.distfiles / "zstd-1.5.7.tar.gz").unlink(), "zstd-1.5.7.tar.gz, which aports"),
+        # edge's copy is held to the same sum.
+        (lambda a: ((a.distfiles / "zstd-1.5.7.tar.gz").unlink(), (a.edge / "zstd-1.5.7.tar.gz").write_bytes(b"another zstd\n")),
+         "zstd-1.5.7.tar.gz from file://"),
         # A file of the folder that is not what its APKBUILD says, as abuild
         # would refuse it.
         (lambda a: point(a, "git", a_patch_its_apkbuild_does_not_name(a)),
@@ -1138,6 +1157,7 @@ def test_the_sources_are_read_from_the_alpine_release_the_image_is_built_on():
     release = re.search(r"^FROM mirror\.gcr\.io/library/alpine:(\d+\.\d+)\.\d+@sha256:", dockerfile, re.M).group(1)
     script = (REPO / "Scripts" / "make-cli.sh").read_text()
     assert re.findall(r'^DISTFILES="(.*)"$', script, re.M) == [f"https://distfiles.alpinelinux.org/distfiles/v{release}"]
+    assert re.findall(r'^DISTFILES_EDGE="(.*)"$', script, re.M) == ["https://distfiles.alpinelinux.org/distfiles/edge"]
     # aports from its GitHub mirror: Alpine's GitLab turns GitHub's runners away.
     assert re.findall(r'^APORTS="(.*)"$', script, re.M) == ["https://github.com/alpinelinux/aports.git"]
 

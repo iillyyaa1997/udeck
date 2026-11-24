@@ -331,7 +331,8 @@ LGPL is the release's `udeck-plugin-image-sources-X.Y.Z.tar`, which
 `ALPINE-PACKAGES` and `THIRD_PARTY_NOTICES` name: `make-cli.sh sources` reads
 the list out of the image that ran, takes each package's aports folder by git
 at its commit — so each file is the one that commit holds — and the upstream
-archives its APKBUILD names from Alpine's distfiles, each held to the sha512
+archives its APKBUILD names from Alpine's distfiles — the release's, or
+edge's for an archive the release's do not hold yet — each held to the sha512
 the APKBUILD gives, before the image is published. Pull it by its digest — a
 tag can be moved, a digest cannot:
 
