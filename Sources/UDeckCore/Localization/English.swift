@@ -641,6 +641,8 @@ struct English: Vocabulary {
 
         case .updatesTitle: "Updates"
         case .updatesCheckNow: "Check now"
+        case .updatesCheckAndInstall: "Check and update"
+        case .menuCheckAndInstall: "Check and Update uDeck"
         case .updatesAutomatically: "Check for updates automatically"
         case .updatesAutomaticallyHelp:
             "Once an hour, uDeck asks github.com whether there is a newer version. Off, it asks only when you press Check now."
@@ -678,6 +680,8 @@ struct English: Vocabulary {
         case .noticeDownloadedBody: "Update now? uDeck restarts in a couple of seconds."
         case .noticeUpdatedTitle(let version): "uDeck updated to \(version)"
         case .noticeUpdatedBody: "Click to see what's new."
+        case .noticeUpToDateTitle(let version): "uDeck \(version) is the latest"
+        case .noticeUpToDateBody: "There is nothing newer."
         case .noticeLater: "Later"
         case .noticeSend: "Send"
 

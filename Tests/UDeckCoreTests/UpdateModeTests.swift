@@ -73,6 +73,28 @@ struct UpdateModeTests {
         }
     }
 
+    @Test("updated after a press too (0.9.12), even about a version said before")
+    func updatedAfterAPress() {
+        let pressed = UpdateEvent.launched(running: "0.9.12", restartedInto: nil, pressedInto: "0.9.12")
+        for mode in UpdateMode.allCases {
+            #expect(UpdateNotice.after(pressed, mode: mode, notifies: true, notified: ["0.9.12"])
+                        == .updated(version: "0.9.12"),
+                    "its offer said and put off with Later, then Check and update pressed: it is in now")
+            #expect(UpdateNotice.after(pressed, mode: mode, notifies: false, notified: []) == nil, "switched off")
+        }
+        let elsewhere = UpdateEvent.launched(running: "0.9.12", restartedInto: nil, pressedInto: "0.9.13")
+        #expect(UpdateNotice.after(elsewhere, mode: .tell, notifies: true, notified: []) == nil,
+                "pressed into 0.9.13, and something else is running: replaced by hand")
+    }
+
+    @Test("up to date, from the menu: no buttons, a key of its own")
+    func upToDate() {
+        let notice = UpdateNotice.upToDate(version: "0.9.12")
+        #expect(notice.offersUpdate == false)
+        #expect(notice.key == "up to date 0.9.12")
+        #expect(notice.version == "0.9.12")
+    }
+
     @Test("switched off, nothing is said")
     func switchedOff() {
         let events: [UpdateEvent] = [

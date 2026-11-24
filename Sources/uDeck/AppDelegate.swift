@@ -26,6 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// in Look fires many a second, and a menu replaced while it is open closes.
     private var mainMenuLanguage: Language?
     private var updater: SparkleUpdater!
+    /// The menu's **Check and Update uDeck**, whose line under it follows the
+    /// update as the menu opens.
+    private var updateItem: NSMenuItem?
     private var loginItem: SystemLoginItem!
 
     /// Watches macOS's own appearance, so the `system` theme source means what
@@ -293,12 +296,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: strings(.menuSettings), action: #selector(openSettings), keyEquivalent: ",")
             .target = self
         menu.addItem(.separator())
+        // An update in one press, without the settings window (0.9.12). What
+        // it is doing is said under it each time the menu opens
+        // (`menuNeedsUpdate`).
+        let update = menu.addItem(withTitle: strings(.menuCheckAndInstall), action: #selector(checkAndInstall),
+                                  keyEquivalent: "")
+        update.target = self
+        updateItem = update
+        menu.addItem(.separator())
         menu.addItem(withTitle: strings(.menuOpenPluginsFolder), action: #selector(openPlugins), keyEquivalent: "")
             .target = self
         menu.addItem(withTitle: strings(.menuCopyDiagnostics), action: #selector(copyDiagnostics), keyEquivalent: "")
             .target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: strings(.menuQuit), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.delegate = self
         statusItem.menu = menu
     }
 
@@ -342,6 +354,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showPanel() { controller.reveal() }
     @objc private func refreshAll() { model.refreshAll(reason: .manual) }
+
+    @objc private func checkAndInstall() { updater.installFromTheMenu() }
     @objc private func openPlugins() { model.revealPluginsDirectory() }
     /// The status item's Settings…, through the panel as the gear goes: a click
     /// on the status item can have closed a held panel and left the application
@@ -369,8 +383,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension AppDelegate: NSMenuItemValidation {
     /// Every item of uDeck's own is offered, but the main menu's **Quit uDeck**
     /// only while the settings window takes the keyboard: a disabled item's key
-    /// equivalent does nothing, so ⌘Q in the panel stays what it always was.
+    /// equivalent does nothing, so ⌘Q in the panel stays what it always was —
+    /// and **Check and Update uDeck** not while a look is under way.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
-        item.action != #selector(quitFromSettings) || settings?.isKey == true
+        if item.action == #selector(checkAndInstall) {
+            if case .checking = updater.status.stage { return false }
+            return true
+        }
+        return item.action != #selector(quitFromSettings) || settings?.isKey == true
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    /// The line under **Check and Update uDeck**: what the update is doing, as
+    /// General says it — checking, downloading, the latest, a failure.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let item = updateItem, menu.items.contains(item) else { return }
+        let strings = model.strings
+        let status = updater.status
+        let line: String? = switch status.stage {
+        case .idle: nil
+        case .checking: strings(.updatesChecking)
+        case .upToDate: strings(.updatesUpToDate)
+        case .available(let version): strings(.updatesAvailable(version))
+        case .downloading: strings(.updatesDownloading)
+        case .readyToInstall: strings(.updatesReady)
+        case .failed(let reason): strings(.updatesFailed(reason))
+        }
+        if #available(macOS 14.4, *) {
+            item.subtitle = line
+        } else {
+            // No line under an item before 14.4: the item's own title says it.
+            item.title = [strings(.menuCheckAndInstall), line].compactMap { $0 }.joined(separator: " — ")
+        }
     }
 }

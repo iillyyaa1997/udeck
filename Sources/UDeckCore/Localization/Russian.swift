@@ -647,6 +647,8 @@ struct Russian: Vocabulary {
 
         case .updatesTitle: "Обновления"
         case .updatesCheckNow: "Проверить сейчас"
+        case .updatesCheckAndInstall: "Проверить и обновить"
+        case .menuCheckAndInstall: "Проверить и обновить uDeck"
         case .updatesAutomatically: "Проверять обновления автоматически"
         case .updatesAutomaticallyHelp:
             "Раз в час uDeck спрашивает github.com, нет ли новой версии. Если выключить — только по кнопке «Проверить сейчас»."
@@ -684,6 +686,8 @@ struct Russian: Vocabulary {
         case .noticeDownloadedBody: "Обновить сейчас? uDeck перезапустится за пару секунд"
         case .noticeUpdatedTitle(let version): "uDeck обновилась до \(version)"
         case .noticeUpdatedBody: "Нажмите, чтобы посмотреть, что нового"
+        case .noticeUpToDateTitle(let version): "uDeck \(version) — последняя версия"
+        case .noticeUpToDateBody: "Новее ничего нет"
         case .noticeLater: "Позже"
         case .noticeSend: "Отправить"
 

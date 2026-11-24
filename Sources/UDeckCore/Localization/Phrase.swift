@@ -742,6 +742,8 @@ public enum Phrase: Sendable, Equatable {
     /// about by itself (the other is the official plugin catalogue).
     case updatesTitle
     case updatesCheckNow
+    case updatesCheckAndInstall
+    case menuCheckAndInstall
     case updatesAutomatically
     case updatesAutomaticallyHelp
     /// "When a new version is out" (0.8.6, `UpdateMode`): only say so, download
@@ -793,6 +795,8 @@ public enum Phrase: Sendable, Equatable {
     case noticeDownloadedBody
     case noticeUpdatedTitle(String)
     case noticeUpdatedBody
+    case noticeUpToDateTitle(String)
+    case noticeUpToDateBody
     case noticeLater
     /// The button that sends a reply written in a plugin's notification.
     case noticeSend

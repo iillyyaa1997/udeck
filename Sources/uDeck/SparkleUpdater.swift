@@ -71,6 +71,10 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     private static let notifiesKey = "UDeckUpdateNotifies"
     private static let notifiedKey = "UDeckUpdateNotifiedVersions"
     private static let restartedIntoKey = "UDeckUpdateRestartedInto"
+    /// The version a press restarted uDeck into (0.9.12): "uDeck updated" is
+    /// said after that launch too, for a press from the menu has no pane to
+    /// watch.
+    private static let pressedIntoKey = "UDeckUpdatePressedInto"
     /// Sparkle's own name for "download what a check of its own finds".
     private static let sparkleDownloadsKey = "SUAutomaticallyUpdate"
 
@@ -85,6 +89,9 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     private var installRequested = false
     /// **Update** pressed: what reaches "ready to install" goes in at once.
     private var installWhenReady = false
+    /// **Check and update** came from the menu: finding nothing is said in a
+    /// notification, there being no pane to say it on.
+    private var askedFromTheMenu = false
     /// Versions whose notice is on its way to macOS: not sent twice meanwhile.
     private var noticesUnderWay: Set<String> = []
     /// A notice macOS refused or failed to take, sent again once it allows
@@ -193,10 +200,12 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     /// is for one launch.
     func noteLaunch() {
         let restartedInto = defaults.string(forKey: Self.restartedIntoKey)
+        let pressedInto = defaults.string(forKey: Self.pressedIntoKey)
         defaults.removeObject(forKey: Self.restartedIntoKey)
+        defaults.removeObject(forKey: Self.pressedIntoKey)
         // What the last run offered is not on offer now.
         notifier.withdrawOffers()
-        tell(.launched(running: status.installedVersion, restartedInto: restartedInto))
+        tell(.launched(running: status.installedVersion, restartedInto: restartedInto, pressedInto: pressedInto))
     }
 
     func checkNow() {
@@ -207,13 +216,24 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
         updater.checkForUpdates()
     }
 
+    /// **Check and update** from the menu: as the button, and finding nothing
+    /// is said in a notification.
+    func installFromTheMenu() {
+        askedFromTheMenu = true
+        install()
+    }
+
     func install() {
+        // Said from the menu only when this press is a look of its own.
+        let fromTheMenu = askedFromTheMenu
+        askedFromTheMenu = false
         installWhenReady = true
         // Pressed: whatever uDeck restarts into now, it did not by itself.
         defaults.removeObject(forKey: Self.restartedIntoKey)
         notifier.withdrawOffers()
         if let restart = pendingRestart {
             restartingByItself = false
+            notePressedRestart()
             restartNow(restart)
             return
         }
@@ -236,6 +256,7 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
         // already under way puts it in when it finds it.
         installRequested = true
         guard updater.canCheckForUpdates else { return }
+        askedFromTheMenu = fromTheMenu
         status.stage = .checking
         updater.checkForUpdates()
     }
@@ -403,7 +424,9 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
         restartingIntoAnUpdate = false
         installRequested = false
         installWhenReady = false
+        askedFromTheMenu = false
         defaults.removeObject(forKey: Self.restartedIntoKey)
+        defaults.removeObject(forKey: Self.pressedIntoKey)
         saidHold = nil
         stopWaitingToRestart()
         failed(error)
@@ -423,6 +446,7 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     fileprivate func found(_ item: SUAppcastItem, state: SPUUserUpdateState,
                            reply: @escaping (SPUUserUpdateChoice) -> Void) {
         let version = item.displayVersionString
+        askedFromTheMenu = false
         finishedCheck(foundSomething: true)
         status.latestVersion = version
         if item.isInformationOnlyUpdate {
@@ -481,11 +505,19 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
         if !foundSomething {
             status.latestVersion = status.installedVersion
             status.stage = .upToDate
+            if askedFromTheMenu {
+                askedFromTheMenu = false
+                let installed = status.installedVersion
+                notifier.post(.upToDate(version: installed)) { delivery in
+                    DeckLog.updates.notice("up to date \(installed, privacy: .public), asked from the menu: \(String(describing: delivery), privacy: .public)")
+                }
+            }
         }
     }
 
     fileprivate func failed(_ error: any Error) {
         installRequested = false
+        askedFromTheMenu = false
         status.stage = .failed(reason: error.localizedDescription)
     }
 
@@ -513,6 +545,13 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     private func readyToInstall() {
         status.stage = .readyToInstall(version: status.latestVersion ?? "—")
         restartingIntoAnUpdate = true
+        notePressedRestart()
+    }
+
+    /// Noted for the launch after a pressed restart: "uDeck updated" is said
+    /// then (`UpdateEvent.launched`'s `pressedInto`).
+    private func notePressedRestart() {
+        if let version = status.latestVersion { defaults.set(version, forKey: Self.pressedIntoKey) }
     }
 }
 

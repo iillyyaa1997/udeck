@@ -43,8 +43,10 @@ public enum UpdateEvent: Equatable, Sendable {
     /// `version` is downloaded and verified, and waits for **Update**.
     case downloaded(version: String)
     /// uDeck started as `running`; `restartedInto` is the version uDeck last
-    /// restarted into *by itself*, noted at that restart, or nil.
-    case launched(running: String, restartedInto: String?)
+    /// restarted into *by itself*, noted at that restart, or nil; `pressedInto`
+    /// the one it restarted into because **Check and update** or **Update** was
+    /// pressed (0.9.12).
+    case launched(running: String, restartedInto: String?, pressedInto: String? = nil)
 }
 
 /// A notification about an update (0.8.6): at most one for each version —
@@ -56,12 +58,17 @@ public enum UpdateNotice: Equatable, Sendable {
     case found(version: String)
     /// Downloaded and verified: **Update** and **Later**.
     case downloaded(version: String)
-    /// Running the new version after uDeck restarted into it by itself.
+    /// Running the new version after uDeck restarted into it — by itself, or
+    /// pressed (0.9.12).
     case updated(version: String)
+    /// **Check and update** pressed from the menu found nothing newer than
+    /// `version` (0.9.12): from the menu there is no pane to say so. Sent
+    /// directly, never by `after`, and never counted in `notified`.
+    case upToDate(version: String)
 
     public var version: String {
         switch self {
-        case .found(let version), .downloaded(let version), .updated(let version): version
+        case .found(let version), .downloaded(let version), .updated(let version), .upToDate(let version): version
         }
     }
 
@@ -71,13 +78,16 @@ public enum UpdateNotice: Equatable, Sendable {
         case .found(let version): "found \(version)"
         case .downloaded(let version): "downloaded \(version)"
         case .updated(let version): "updated \(version)"
+        case .upToDate(let version): "up to date \(version)"
         }
     }
 
     /// Whether it carries **Update** and **Later**: there is something to put in.
     public var offersUpdate: Bool {
-        if case .updated = self { return false }
-        return true
+        switch self {
+        case .found, .downloaded: true
+        case .updated, .upToDate: false
+        }
     }
 
     /// The notice `event` is worth, or nil.
@@ -101,7 +111,13 @@ public enum UpdateNotice: Equatable, Sendable {
             notice = .found(version: version)
         case .downloaded(let version):
             notice = mode == .downloadAhead ? .downloaded(version: version) : nil
-        case .launched(let running, let restartedInto):
+        case .launched(let running, let restartedInto, let pressedInto):
+            if pressedInto == running {
+                // Asked for in a press, perhaps from the menu with no pane
+                // open: said once, whatever was said about the version before
+                // — "Later" on its offer meant not now, and now it is in.
+                return .updated(version: running)
+            }
             notice = restartedInto == running ? .updated(version: running) : nil
         }
         guard let notice, !notified.contains(notice.version) else { return nil }

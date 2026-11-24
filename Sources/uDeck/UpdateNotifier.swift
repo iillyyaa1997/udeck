@@ -190,6 +190,9 @@ final class UpdateNotifier: NSObject, UNUserNotificationCenterDelegate, NSUserNo
         case .updated(let version):
             content.title = strings(.noticeUpdatedTitle(version))
             content.body = strings(.noticeUpdatedBody)
+        case .upToDate(let version):
+            content.title = strings(.noticeUpToDateTitle(version))
+            content.body = strings(.noticeUpToDateBody)
         }
         if notice.offersUpdate { content.categoryIdentifier = Self.offerCategory }
         let request = UNNotificationRequest(identifier: "update \(notice.key)", content: content, trigger: nil)
@@ -248,6 +251,9 @@ final class UpdateNotifier: NSObject, UNUserNotificationCenterDelegate, NSUserNo
         case .updated(let version):
             note.title = strings(.noticeUpdatedTitle(version))
             note.informativeText = strings(.noticeUpdatedBody)
+        case .upToDate(let version):
+            note.title = strings(.noticeUpToDateTitle(version))
+            note.informativeText = strings(.noticeUpToDateBody)
         }
         note.hasActionButton = notice.offersUpdate
         if notice.offersUpdate {

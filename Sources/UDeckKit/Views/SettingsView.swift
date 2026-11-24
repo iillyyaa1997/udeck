@@ -445,21 +445,25 @@ private struct UpdateStatusRow: View {
             // depending on the translated title, and it is what a screen reader's
             // scripting hooks look for.
             //
-            // Nothing to check while a download waits for Update: the session it
-            // holds is Sparkle's until then.
-            Button(strings(.updatesCheckNow)) { updater.checkNow() }
-                .disabled(!UpdateWords.canCheck(status.stage))
-                .accessibilityIdentifier("updates.checkNow")
-            // **Update** whichever it is: found, or downloaded and ready.
-            if case .available = status.stage {
+            // One button (0.9.12): it looks, downloads what it finds and
+            // restarts into it — an update in one press, as the operator asked
+            // (11-24), where it used to take Check now, a wait and Update. What
+            // was found or downloaded already is put in by the same press,
+            // named **Update**.
+            switch status.stage {
+            case .available:
                 Button(strings(.updatesUpdate)) { updater.install() }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("updates.install")
-            }
-            if case .readyToInstall = status.stage {
+            case .readyToInstall:
                 Button(strings(.updatesUpdate)) { updater.install() }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("updates.restartAndInstall")
+            default:
+                Button(strings(.updatesCheckAndInstall)) { updater.install() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(UpdateWords.isLooking(status.stage))
+                    .accessibilityIdentifier("updates.checkAndInstall")
             }
         }
         .padding(.vertical, 2)
@@ -1865,16 +1869,17 @@ private struct AboutSection: View {
                     if let updater {
                         HStack(spacing: 10) {
                             UpdateWords.symbol(updater.status.stage)
-                            Button(strings(.aboutCheckForUpdates)) { updater.checkNow() }
-                                .disabled(!UpdateWords.canCheck(updater.status.stage))
-                                .accessibilityIdentifier("about.checkForUpdates")
-                            // What the check found can be put in from here too:
-                            // a card that says a version is ready and offers no
-                            // way to it is a dead end (Codex, 2026-11-18).
+                            // As in General: one press looks and puts in what it
+                            // finds; what was found already is put in by it.
                             if UpdateWords.canInstall(updater.status.stage) {
                                 Button(strings(.updatesUpdate)) { updater.install() }
                                     .buttonStyle(.borderedProminent)
                                     .accessibilityIdentifier("about.install")
+                            } else {
+                                Button(strings(.updatesCheckAndInstall)) { updater.install() }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(UpdateWords.isLooking(updater.status.stage))
+                                    .accessibilityIdentifier("about.checkAndInstall")
                             }
                             UpdateWords.sentence(updater.status, strings: strings)
                         }
@@ -1949,6 +1954,13 @@ private enum UpdateWords {
         case .checking, .readyToInstall: false
         default: true
         }
+    }
+
+    /// Whether a look is under way: **Check and update** waits for it. A
+    /// download is not — pressed then, what it brings is put in once it is in.
+    static func isLooking(_ stage: UpdateStage) -> Bool {
+        if case .checking = stage { return true }
+        return false
     }
 
     /// Whether there is a found or a downloaded version for **Update** to put in.
