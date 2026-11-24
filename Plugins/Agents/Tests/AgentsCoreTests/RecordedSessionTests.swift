@@ -1,6 +1,7 @@
 import Foundation
 import Testing
-@testable import UDeckAgents
+@testable import AgentsCore
+import UDeckAgents
 
 /// Conversations recorded from the real programs on 2026-11-21 — Claude Code
 /// 2.1.330 in stream-json mode and codex-cli 0.160.0 over app-server — driven

@@ -1,4 +1,5 @@
 import Foundation
+import UDeckAgents
 
 /// What uDeck writes to Claude Code's stdin, one line each.
 ///

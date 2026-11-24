@@ -1,4 +1,5 @@
 import Foundation
+import UDeckAgents
 
 /// A Claude Code session as it is saved on disk, read back for the chat's feed.
 ///

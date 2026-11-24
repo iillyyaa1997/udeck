@@ -2,7 +2,7 @@
 """A stand-in for `claude` in stream-json mode, for uDeck's chat tests and the lab's screenshots.
 
 It speaks the protocol as Claude Code 2.1.330 does (shapes taken from the recordings in
-Tests/UDeckAgentsTests/Fixtures): it answers `initialize` and `interrupt`, and for every user
+Plugins/Agents/Tests/AgentsCoreTests/Fixtures): it answers `initialize` and `interrupt`, and for every user
 message plays one turn — the answer streamed word by word, a Bash call that asks for permission,
 its result, and a closing sentence. A message that mentions "question" asks an AskUserQuestion
 instead. Nothing here touches the network or the user's files. It exits when stdin closes.

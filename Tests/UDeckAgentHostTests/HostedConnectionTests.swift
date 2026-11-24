@@ -21,43 +21,58 @@ func controlEcho(_ rig: Rig) throws -> String {
     """)
 }
 
-@Suite("Claude Code and Codex connections through the helper", .serialized)
+/// One request as one JSON line, and the line answering it read back: what
+/// any program a plugin runs does over its channel — Claude Code's control
+/// requests, Codex's JSON-RPC — with nothing of either one's meaning, which is
+/// the plugin's (Plugins/Agents).
+func ask(_ channel: any AgentChannel, _ lines: inout AsyncStream<LineFramer.Piece>.Iterator,
+         id: String) async throws -> JSONValue {
+    try channel.write(line: #"{"type":"control_request","request_id":"\#(id)","request":{"subtype":"initialize"}}"#)
+    while let piece = await lines.next() {
+        guard case .line(let text) = piece, let value = JSONValue.line(Substring(text)),
+              value["response"]?["request_id"]?.string == id else { continue }
+        return value["response"]?["response"] ?? .null
+    }
+    throw CancellationError()
+}
+
+@Suite("A program's JSON lines through the helper", .serialized)
 struct HostedConnectionTests {
-    @Test("a Claude Code connection works over the helper exactly as over a pipe")
-    func claudeOverHelper() async throws {
+    @Test("a conversation in JSON lines works over the helper exactly as over a pipe")
+    func linesOverHelper() async throws {
         let rig = try Rig()
         let client = try await rig.client()
         let agent = try await HostedAgent.spawn(rig.spec("c1", try controlEcho(rig)), on: client)
         #expect(agent.processIdentifier > 0)
-        let connection = ClaudeCodeConnection(channel: agent)
-        await connection.start()
-        let response = try await connection.request { ClaudeOutbound.initialize(id: $0) }
-        #expect(response.succeeded)
-        #expect(response.body["answered"]?.int == 1)
-        #expect(response.body["pid"]?.int == Int(agent.processIdentifier))
-        try await connection.send(ClaudeOutbound.userMessage("hi"))
-        var iterator = connection.events.makeAsyncIterator()
-        let note = await iterator.next()
-        if case .system(let subtype, _)? = note { #expect(subtype == "note") } else { Issue.record("got \(String(describing: note))") }
-        let exit = await connection.close(grace: .seconds(3))
+        var lines = agent.lines.makeAsyncIterator()
+        let response = try await ask(agent, &lines, id: "r1")
+        #expect(response["answered"]?.int == 1)
+        #expect(response["pid"]?.int == Int(agent.processIdentifier))
+        try agent.write(line: #"{"type":"user","message":"hi"}"#)
+        var note: JSONValue?
+        while let piece = await lines.next() {
+            if case .line(let text) = piece { note = JSONValue.line(Substring(text)); break }
+        }
+        #expect(note?["subtype"]?.string == "note")
+        agent.closeInput()
+        let exit = await agent.exit()
         #expect(exit.status == 0)
         await client.close()
         await rig.cleanUp()
     }
 
-    @Test("uDeck restarts mid-session: a new connection picks up the same agent where the old one stopped")
+    @Test("uDeck restarts mid-session: a new channel picks up the same program where the old one stopped")
     func reattach() async throws {
         let rig = try Rig()
         let echo = try controlEcho(rig)
         // The first uDeck.
         let first = try await rig.client()
         let agent = try await HostedAgent.spawn(rig.spec("c1", echo), on: first)
-        let connection = ClaudeCodeConnection(channel: agent)
-        await connection.start()
-        let before = try await connection.request { ClaudeOutbound.initialize(id: $0) }
-        #expect(before.body["answered"]?.int == 1)
+        var lines = agent.lines.makeAsyncIterator()
+        let before = try await ask(agent, &lines, id: "r1")
+        #expect(before["answered"]?.int == 1)
         let seen = agent.lastSeq
-        // uDeck goes away without a word: the agent is not told.
+        // uDeck goes away without a word: the program is not told.
         await first.close()
         try await Task.sleep(for: .milliseconds(100))
         // The next uDeck finds the session in hello and attaches after what it saw.
@@ -67,13 +82,12 @@ struct HostedConnectionTests {
         #expect(summary.running)
         let (again, subscription) = try await HostedAgent.attach(session: "c1", after: seen, on: second)
         #expect(!subscription.gap)
-        let resumed = ClaudeCodeConnection(channel: again)
-        await resumed.start()
-        let after = try await resumed.request { ClaudeOutbound.interrupt(id: $0) }
+        var resumedLines = again.lines.makeAsyncIterator()
+        let after = try await ask(again, &resumedLines, id: "r2")
         // The same process: it counts on from where it was.
-        #expect(after.body["answered"]?.int == 2)
-        #expect(after.body["pid"]?.int == before.body["pid"]?.int)
-        _ = await resumed.close(grace: .seconds(3))
+        #expect(after["answered"]?.int == 2)
+        #expect(after["pid"]?.int == before["pid"]?.int)
+        _ = await again.terminate(grace: .seconds(3))
         await second.close()
         await rig.cleanUp()
     }
@@ -162,26 +176,6 @@ struct HostedConnectionTests {
         #expect(await lines.next() == .line("still mine"))
         agent.closeInput()
         #expect(await agent.exit().status == 0)
-        await client.close()
-        await rig.cleanUp()
-    }
-
-    @Test("a Codex connection works over the helper too")
-    func codexOverHelper() async throws {
-        let rig = try Rig()
-        let fake = try rig.script("fake-codex.sh", """
-        while IFS= read -r line; do
-          id=$(printf '%s' "$line" | sed -n 's/^{"id":\\([0-9]*\\).*/\\1/p')
-          [ -n "$id" ] && printf '{"id":%s,"result":{"userAgent":"fake"}}\\n' "$id"
-        done
-        """)
-        let client = try await rig.client()
-        let agent = try await HostedAgent.spawn(rig.spec("x1", fake), on: client)
-        let connection = CodexConnection(channel: agent)
-        await connection.start()
-        let result = try await connection.request("initialize", ["clientInfo": ["name": "t", "version": "0"]])
-        #expect(result["userAgent"]?.string == "fake")
-        _ = await connection.close(grace: .seconds(3))
         await client.close()
         await rig.cleanUp()
     }

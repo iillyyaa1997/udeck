@@ -2,12 +2,12 @@ import Foundation
 
 /// Any JSON value, kept as it came.
 ///
-/// The agents uDeck talks to — Claude Code and Codex — change their protocols
-/// every week or two, and most of what they send is detail uDeck does not draw
-/// yet. Decoding into closed structs would turn every new field into a crash or
-/// a silent loss; decoding into this keeps everything, so a message uDeck does
-/// not understand still reaches the screen as something ("an event uDeck does
-/// not know yet") and is still there to write back if it has to be.
+/// The programs plugins talk to — Claude Code and Codex, for Agents — change
+/// their protocols every week or two, and most of what they send is detail
+/// nobody draws yet. Decoding into closed structs would turn every new field
+/// into a crash or a silent loss; decoding into this keeps everything, so a
+/// message not understood still reaches the screen as something and is still
+/// there to write back if it has to be.
 public enum JSONValue: Sendable, Equatable, Hashable {
     case null
     case bool(Bool)

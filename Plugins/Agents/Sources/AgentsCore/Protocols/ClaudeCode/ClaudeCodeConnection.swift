@@ -1,4 +1,5 @@
 import Foundation
+import UDeckAgents
 
 /// One Claude Code session: the user's `claude` running in stream-json mode,
 /// and the control protocol on top of its lines.

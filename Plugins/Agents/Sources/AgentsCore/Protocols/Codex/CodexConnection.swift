@@ -1,4 +1,5 @@
 import Foundation
+import UDeckAgents
 
 /// One `codex app-server`: JSON-RPC over the program's stdio.
 ///

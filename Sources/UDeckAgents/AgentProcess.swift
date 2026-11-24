@@ -1,12 +1,13 @@
 import Foundation
 
-/// One agent program running with its stdio connected: lines in, lines out.
+/// One program running with its stdio connected: lines in, lines out — a
+/// resident plugin, or a program a plugin runs.
 ///
-/// Both agents speak newline-delimited JSON on stdin/stdout, so this is the one
-/// place that starts a program, cuts its stdout into lines, writes lines to its
-/// stdin and keeps the tail of its stderr for when something goes wrong.
-/// Protocol meaning lives above it, in `ClaudeCodeConnection` and its Codex
-/// sibling.
+/// They speak newline-delimited JSON on stdin/stdout, so this is the one place
+/// that starts a program, cuts its stdout into lines, writes lines to its stdin
+/// and keeps the tail of its stderr for when something goes wrong. What the
+/// lines mean is not uDeck's: the Agents plugin's protocols for Claude Code and
+/// Codex are built on this, in the plugin (Plugins/Agents).
 ///
 /// Lines are delivered in the order the program wrote them, through one
 /// `AsyncStream`, and the stream finishes when stdout closes. Writing after the

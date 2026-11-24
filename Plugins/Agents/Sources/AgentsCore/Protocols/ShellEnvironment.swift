@@ -1,4 +1,5 @@
 import Foundation
+import UDeckAgents
 
 /// The environment a terminal would give an agent, for an app that has none.
 ///

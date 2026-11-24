@@ -14,7 +14,8 @@ let package = Package(
         .executable(name: "uDeck", targets: ["uDeck"]),
         .library(name: "UDeckCore", targets: ["UDeckCore"]),
         .executable(name: "udeck-agentd", targets: ["udeck-agentd"]),
-        // For the Agents plugin (Plugins/Agents), which is built on it.
+        // The process plumbing, for plugins built in Swift: Agents
+        // (Plugins/Agents) runs its programs with it.
         .library(name: "UDeckAgents", targets: ["UDeckAgents"]),
     ],
     dependencies: [
@@ -39,17 +40,16 @@ let package = Package(
             path: "Sources/UDeckCore"
         ),
 
-        // Claude Code's and Codex's protocols, with no UI — for the agents plugin
-        // to build on, not a part of uDeck: what a line on their stdout means
-        // and what to write back. Foundation only, so all of it runs in
-        // `swift test` against conversations recorded from the real programs.
-        // (The helper below uses only its process and JSON pieces.)
+        // The plumbing a plugin's process is run with: a process, its stdout as
+        // lines, its stdin written in order, JSON. Nothing of what any program
+        // means — Claude Code's and Codex's protocols are the Agents plugin's
+        // (Plugins/Agents) — so uDeck knows no agent by name.
         .target(name: "UDeckAgents", path: "Sources/UDeckAgents"),
 
         // The helper that owns the agents, `udeck-agentd`, and uDeck's side of
         // the socket to it: agents keep working while uDeck restarts, crashes
         // or updates. The helper pipes bytes and keeps a journal; what the bytes
-        // mean stays in UDeckAgents, on uDeck's side.
+        // mean is the plugin's.
         .target(name: "UDeckAgentHost", dependencies: ["UDeckAgents"], path: "Sources/UDeckAgentHost"),
         .executableTarget(name: "udeck-agentd", dependencies: ["UDeckAgentHost"], path: "Sources/udeck-agentd"),
 
@@ -103,8 +103,7 @@ let package = Package(
         .testTarget(
             name: "UDeckAgentsTests",
             dependencies: ["UDeckAgents"],
-            path: "Tests/UDeckAgentsTests",
-            resources: [.copy("Fixtures")]
+            path: "Tests/UDeckAgentsTests"
         ),
 
         .testTarget(

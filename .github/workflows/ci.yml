@@ -67,6 +67,13 @@ jobs:
         # One at a time, too: two timing tests side by side measure each other.
         run: swift test --filter UDeckPluginFormatTimingTests --no-parallel
 
+      # The Agents plugin (Plugins/Agents). What Claude Code's and Codex's
+      # protocols mean is the plugin's, not uDeck's, and so are their tests:
+      # conversations recorded from the real programs, and stand-ins of both
+      # driven through the card's events.
+      - name: Test the Agents plugin
+        run: swift test --package-path Plugins/Agents
+
       # Every test takes away the temporary folder it made — a
       # `TemporaryDirectory`, kept alive for as long as the folder is used. One
       # that let it go too early left the folder behind on every run, and

@@ -1,6 +1,7 @@
 import Foundation
 import Testing
-@testable import UDeckAgents
+@testable import AgentsCore
+import UDeckAgents
 
 /// A transcript Claude Code 2.1.330 saved for a session driven as uDeck drives
 /// it, cut down to its conversation entries and with personal details replaced.

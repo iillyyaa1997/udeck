@@ -1,6 +1,7 @@
 import Foundation
 import Testing
-@testable import UDeckAgents
+@testable import AgentsCore
+import UDeckAgents
 
 /// A fake `claude`: a shell script that replays a recording. For every line
 /// uDeck sent in the recording it waits for one line on stdin (and keeps it in
@@ -42,8 +43,8 @@ struct ReplayAgent {
     }
 
     func idGenerator() -> @Sendable () -> String {
-        let queue = Locked(requestIDs)
-        return { queue.withLock { $0.isEmpty ? "unexpected" : $0.removeFirst() } }
+        let queue = IDQueue(requestIDs)
+        return { queue.next() }
     }
 
     func receivedLines() throws -> [JSONValue] {
@@ -205,5 +206,19 @@ struct CodexConnectionTests {
                                                                      "cancellationToken": nil])
         #expect(files["files"] != nil)
         #expect(await connection.close().status == 0)
+    }
+}
+
+/// The request ids a fake was written to answer, handed out in order.
+final class IDQueue: @unchecked Sendable {
+    private var ids: [String]
+    private let lock = NSLock()
+
+    init(_ ids: [String]) { self.ids = ids }
+
+    func next() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return ids.isEmpty ? "unexpected" : ids.removeFirst()
     }
 }

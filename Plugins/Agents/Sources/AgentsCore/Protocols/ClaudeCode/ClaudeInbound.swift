@@ -1,4 +1,5 @@
 import Foundation
+import UDeckAgents
 
 /// One line Claude Code wrote on stdout in stream-json mode, sorted by kind.
 ///

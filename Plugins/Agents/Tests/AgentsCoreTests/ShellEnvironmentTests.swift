@@ -1,6 +1,7 @@
 import Foundation
 import Testing
-@testable import UDeckAgents
+@testable import AgentsCore
+import UDeckAgents
 
 @Suite("The terminal's environment, for agents started by uDeck")
 struct ShellEnvironmentTests {
