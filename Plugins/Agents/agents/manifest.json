@@ -36,7 +36,7 @@
       "default": ""
     },
     {
-      "key": "accountMode",
+      "key": "account_mode",
       "type": "enum",
       "default": "burnFirst",
       "label": "How Auto picks an account",

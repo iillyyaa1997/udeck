@@ -68,7 +68,7 @@ public struct AccountLimits: Sendable, Equatable {
 }
 
 /// How «Авто» picks an account, as the plugin's setting says
-/// (`UDECK_SETTING_ACCOUNTMODE`): what would expire first unless told otherwise.
+/// (`UDECK_SETTING_ACCOUNT_MODE`): what would expire first unless told otherwise.
 public enum AccountMode: String, CaseIterable, Sendable {
     case burnFirst, headroom, spareMain, even
 

@@ -8,7 +8,7 @@ import UDeckAgents
 extension AgentsApp {
     /// How «Авто» picks: the plugin's setting.
     var accountMode: AccountMode {
-        AccountMode.fromSetting(Self.setting(ProcessInfo.processInfo.environment["UDECK_SETTING_ACCOUNTMODE"]))
+        AccountMode.fromSetting(Self.setting(ProcessInfo.processInfo.environment["UDECK_SETTING_ACCOUNT_MODE"]))
     }
 
     /// The accounts as the picker weighs them, now.

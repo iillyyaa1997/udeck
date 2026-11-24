@@ -33,7 +33,7 @@ struct AgentsAccountsTests {
     func app(_ home: URL, said: Said = Said()) -> AgentsApp {
         setenv("UDECK_SETTING_CLAUDE", "\"\(fakeClaude.path)\"", 1)
         setenv("FAKE_CLAUDE_DELAY", "0", 1)
-        unsetenv("UDECK_SETTING_ACCOUNTMODE")
+        unsetenv("UDECK_SETTING_ACCOUNT_MODE")
         return AgentsApp(home: home) { said.lines.append($0) }
     }
 
@@ -82,8 +82,8 @@ struct AgentsAccountsTests {
         app.limits["main"] = AccountLimits(fiveHour: UsageWindow(used: 0.9, resetsAt: nil), week: UsageWindow(used: 0.7, resetsAt: nil))
         app.limits["pers2"] = AccountLimits(fiveHour: UsageWindow(used: 0.1, resetsAt: nil), week: UsageWindow(used: 0.3, resetsAt: nil))
         app.limits["solo"] = AccountLimits(fiveHour: UsageWindow(used: 0.0, resetsAt: nil), week: UsageWindow(used: 0.0, resetsAt: nil))
-        setenv("UDECK_SETTING_ACCOUNTMODE", "\"headroom\"", 1)
-        defer { unsetenv("UDECK_SETTING_ACCOUNTMODE") }
+        setenv("UDECK_SETTING_ACCOUNT_MODE", "\"headroom\"", 1)
+        defer { unsetenv("UDECK_SETTING_ACCOUNT_MODE") }
         #expect(app.autoPick()?.account == solo, "the most left")
         #expect(app.autoPick(excluding: ["main"], sharingWith: main)?.account == pers2, "solo does not share main's sessions")
         app.limits["pers2"]?.limitedUntil = Date().addingTimeInterval(600)
@@ -98,8 +98,8 @@ struct AgentsAccountsTests {
         for name in ["pers2", "solo"] { try Data().write(to: home.appendingPathComponent(".claude-\(name)/fake-limited")) }
         let said = Said()
         let app = app(home, said: said)
-        setenv("UDECK_SETTING_ACCOUNTMODE", "\"spareMain\"", 1)
-        defer { unsetenv("UDECK_SETTING_ACCOUNTMODE") }
+        setenv("UDECK_SETTING_ACCOUNT_MODE", "\"spareMain\"", 1)
+        defer { unsetenv("UDECK_SETTING_ACCOUNT_MODE") }
         await app.newConversation(in: home, provider: .claude)
         let conversation = try #require(app.conversations.first)
         let claude = try #require(conversation.claude)
