@@ -8056,3 +8056,40 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+def check_look_preview(machine, check_dir, lab):
+    """Settings → Look: the style cards over stripes, and the island preview for each choice — a lab tree's only."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    machine.ssh.run(f"mkdir -p {UDECK_HOME}", "a home for uDeck's settings")
+    for index, choice in enumerate(("earsWhileWaiting", "glowAlongTheEdge", "earsAlways")):
+        if index:
+            app.quit_app(machine, f"quitting before {choice}")
+        _write(machine, SETTINGS, {"language": "ru", "notchAttention": choice}, f"choosing {choice}")
+        app.launch(machine)
+        machine.sleep(4)
+        ui.open_settings_and_wait(machine, f"settings for {choice}", item=ui.RUSSIAN.settings_item,
+                                  window=ui.RUSSIAN.settings_window)
+        ui.click(machine, "section.look", "choosing Look", ui.RUSSIAN.settings_window)
+        machine.sleep(3)
+        if index == 0:
+            machine.screenshot(check_dir, "look 0 the style cards")
+        try:
+            ui.reach(machine, "look.islandPreview.waiting", "scrolling to the preview", ui.RUSSIAN.settings_window)
+        except Exception as error:  # noqa: BLE001 — a lab tree's gallery: say it and go on
+            print("reach:", str(error)[-300:])
+        machine.sleep(2)
+        machine.screenshot(check_dir, f"look {index + 1} {choice} waiting")
+        ids = ui.identifiers(machine, "the preview", ui.RUSSIAN.settings_window)
+        print(choice, [i for i in ids if "islandPreview" in i or "look.style" in i][:16])
+        try:
+            picker = ui.wait_for(machine, "look.islandPreview.waiting", "the preview's switch", ui.RUSSIAN.settings_window,
+                                 seconds=5)
+            x, y = picker.middle
+            machine.click(x + picker.width / 4, y, "Не ждёт")
+            machine.sleep(2)
+            machine.screenshot(check_dir, f"look {index + 1} {choice} idle")
+            print(choice, "idle:", [i for i in ui.identifiers(machine, "idle", ui.RUSSIAN.settings_window)
+                                    if "islandPreview" in i][:8])
+        except Exception as error:  # noqa: BLE001
+            print("idle:", str(error)[-300:])
