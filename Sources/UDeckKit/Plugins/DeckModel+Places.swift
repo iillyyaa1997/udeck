@@ -124,6 +124,9 @@ extension DeckModel {
             var snapshot = snapshots[id.rawValue] ?? PluginSnapshot(pluginID: id)
             snapshot.record(card: card, at: Date())
             snapshots[id.rawValue] = snapshot
+            // A window that became the first when the one before it went
+            // draws the plugin's card now, not the one it had of its own.
+            if let first = views.first { placeCards[first.id] = nil }
         }
         guard let keeper = target ?? views.first,
               layout.keep(place.keep, showing: place.name, for: keeper.id) else { return }
