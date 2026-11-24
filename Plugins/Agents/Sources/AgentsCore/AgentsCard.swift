@@ -330,11 +330,10 @@ enum AgentsCard {
         }
         let name = accountName(account, app)
         let why: String = switch pick.reason {
-        case .mostHeadroom(let headroom):
-            app.t("больше всего запаса — \(percent(headroom))", "the most left — \(percent(headroom))")
-        case .burnsSoonest(let left, let resets):
-            app.t("его неделя сгорит раньше: осталось \(percent(left)), сброс \(when(resets, app, now: now))",
-                  "its week expires first: \(percent(left)) left, resets \(when(resets, app, now: now))")
+        case .mostHeadroom:
+            app.t("больше всего запаса", "the most left")
+        case .burnsSoonest:
+            app.t("её неделя сгорит раньше", "its week expires first")
         case .fewestSessions:
             app.t("меньше всего сессий", "the fewest sessions")
         case .onlyTheMainLeft:
@@ -507,18 +506,25 @@ enum AgentsCard {
             func named(_ name: String) -> String {
                 app.accounts.first { $0.name == name }.map { accountName($0, app) } ?? name
             }
+            // «Лимит основной учётки», «на основную учётку»; a named one as it is.
+            func whose(_ name: String) -> String {
+                app.accounts.first { $0.name == name }?.configDir == nil && app.russian ? "основной учётки" : named(name)
+            }
+            func onto(_ name: String) -> String {
+                app.accounts.first { $0.name == name }?.configDir == nil && app.russian ? "основную учётку" : named(name)
+            }
             let epoch = parts.last.flatMap(Double.init).map { Date(timeIntervalSince1970: $0) } ?? Date()
             let at = time(epoch, app, now: Date())
             if text.hasPrefix("limit-move:"), parts.count == 3 {
-                return app.t("Лимит \(named(parts[0])) кончился, сброс в \(at) — сессия продолжилась на \(named(parts[1]))",
+                return app.t("Лимит \(whose(parts[0])) кончился, сброс в \(at) — сессия продолжилась на \(onto(parts[1]))",
                              "\(named(parts[0])) ran out of its limit, resets at \(at) — the session went on under \(named(parts[1]))")
             }
             if text.hasPrefix("limit-wait:"), parts.count == 2 {
-                return app.t("Лимит кончился у всех учёток. Ближайший сброс — \(named(parts[0])) в \(at), тогда продолжу сам",
+                return app.t("Лимит кончился у всех учёток. Ближайший сброс — у \(whose(parts[0])) в \(at), тогда продолжу сам",
                              "Every account is at its limit. The first to reset is \(named(parts[0])) at \(at); it goes on then")
             }
             if parts.count == 2 {
-                return app.t("Лимит \(named(parts[0])) кончился, сброс в \(at) — тогда продолжу сам",
+                return app.t("Лимит \(whose(parts[0])) кончился, сброс в \(at) — тогда продолжу сам",
                              "\(named(parts[0])) ran out of its limit, resets at \(at); it goes on then")
             }
         }
