@@ -117,8 +117,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let path = panel.runModal() == .OK ? panel.url?.path : nil
             model?.residentEvent(plugin, .folder(id: request, path: path))
         }
-        // The helper that keeps plugins' processes running is registered when a
-        // plugin needs it; until one does, only the lab asks (AgentHelperSelfTest).
+        // Resident plugins run in the helper, which keeps them through a
+        // restart of uDeck; it is registered when the first of them starts.
+        if !AgentHelperSelfTest.isOn, Bundle.main.bundleURL.pathExtension == "app",
+           !UserDefaults.standard.bool(forKey: "ResidentsRunHere") {
+            model.residentLauncher = HelperResidentLauncher(helper: SystemAgentHelper())
+        }
+        // The lab's own look at the helper (AgentHelperSelfTest).
         if AgentHelperSelfTest.isOn {
             let helper = SystemAgentHelper()
             Task { await AgentHelperSelfTest.run(helper) }

@@ -242,6 +242,15 @@ it when any of that stops being true. If it exits, uDeck starts it again after
 a pause that doubles each time it fails, up to a minute; a card resets the
 count. It has no `interval` or `timeout`.
 
+It outlives uDeck (uDeck 0.9.9 and later): the process runs in uDeck's helper,
+`udeck-agentd`, and goes on while uDeck quits, crashes or updates; the next
+uDeck takes it back and says `hello` again. What you print while uDeck is away
+is not read — a card, a `notify`, a `pick` — so print the card again on
+`hello`. Your standard input closes only when uDeck is done with you: your
+card was taken off the panel, you were switched off, your permissions or your
+settings changed. A uDeck that cannot have its helper runs you as before, as
+its own child, and you go with it.
+
 #### Talking to uDeck
 
 One JSON object per line, both ways: uDeck writes events to the plugin's
@@ -295,8 +304,10 @@ What uDeck writes:
 {"event":"choose","row":"head","menu":"session","option":"s-42"}
 ```
 
-* `hello` — first, and again after each restart: the card's size in grid cells
-  and uDeck's language. Draw for that size: a small card wants less on it.
+* `hello` — first, and again after each restart — yours, or uDeck's: the
+  card's size in grid cells and uDeck's language. Draw for that size: a small
+  card wants less on it, and print the card on every `hello`, even one the
+  same as the last you printed.
 * `size` — the card was resized, or shown somewhere else. The person can show
   any card as a whole tab of the panel, in a window of its own or in a mini
   window above every other (uDeck 0.9.8 and later): the size is then that

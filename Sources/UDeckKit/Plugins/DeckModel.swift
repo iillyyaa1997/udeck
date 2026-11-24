@@ -394,6 +394,12 @@ public final class DeckModel {
     private let executor: PollExecutor
     /// Resident plugins' processes (`ResidentRuns`).
     private let residents = ResidentRuns()
+    /// Where resident plugins' processes run (`ResidentLauncher`): set by the
+    /// application to its helper; nil, as uDeck's own children.
+    public var residentLauncher: ResidentLauncher? {
+        get { residents.launcher }
+        set { residents.launcher = newValue }
+    }
     /// The resident plugins whose process is running: their cards do not age
     /// while they are quiet.
     public private(set) var liveResidents: Set<PluginIdentifier> = []

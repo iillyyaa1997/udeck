@@ -100,6 +100,9 @@ public final class AgentsApp {
             if let place = event["place"]?.string { places[here, default: Place()].kind = place }
             if let language = event["language"]?.string { russian = language.hasPrefix("ru") }
             if kind == "hello" {
+                // uDeck took this plugin back after it started again, or saw
+                // the place for the first time: the card is written again.
+                lastCards[here] = nil
                 refreshHistory()
                 if knownModels[.codex] == nil || codexHistory.isEmpty { Task { await learnCodex() } }
                 if let keep = event["keep"]?.string { restore(keep) }
