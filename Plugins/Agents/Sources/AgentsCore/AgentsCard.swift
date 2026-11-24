@@ -20,7 +20,35 @@ enum AgentsCard {
         } else {
             rows += body(app)
         }
-        return ["title": "Agents", "state": .string(waiting > 0 ? "warn" : "ok"), "rows": .array(rows)]
+        var card: [String: JSONValue] = ["title": "Agents", "state": .string(waiting > 0 ? "warn" : "ok"),
+                                         "rows": .array(rows)]
+        if let attention = attention(app) { card["attention"] = attention }
+        return .object(card)
+    }
+
+    /// What waits for the person across every session (`attention`): how
+    /// many questions and permissions, and the first session's first one,
+    /// named after its session — uDeck shows it first when the panel is
+    /// peeked at, and its buttons come back as `press`, which answers it
+    /// wherever the session is shown.
+    static func attention(_ app: AgentsApp) -> JSONValue? {
+        let count = app.conversations.reduce(0) { $0 + $1.current.waiting }
+        guard count > 0 else { return nil }
+        var attention: [String: JSONValue] = ["count": .number(Double(count))]
+        if let conversation = app.conversations.first(where: { $0.current.waiting > 0 }) {
+            let row: JSONValue? = switch conversation.current {
+            case .claude(let session): session.asks.first.map { askRow($0, app) }
+            case .codex(let session): session.asks.first.map { codexAskRow($0, app) }
+            }
+            if let row, let id = row["id"]?.string, let buttons = row["buttons"] {
+                let what = [row["title"]?.string, row["detail"]?.string].compactMap { $0 }.filter { !$0.isEmpty }
+                attention["ask"] = ["id": .string(id),
+                                    "title": .string(app.t("Ждёт тебя — ", "Waiting for you — ") + conversation.title),
+                                    "detail": .string(clipped(what.joined(separator: ": "), 200)),
+                                    "buttons": buttons]
+            }
+        }
+        return .object(attention)
     }
 
     static func narrow(_ app: AgentsApp) -> Bool { app.size.columns <= 4 }

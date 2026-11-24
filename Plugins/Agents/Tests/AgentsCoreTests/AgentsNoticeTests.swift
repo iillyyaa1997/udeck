@@ -43,8 +43,17 @@ struct AgentsNoticeTests {
         #expect(notice["actions"]?.array?.compactMap { $0["text"]?.string } == ["Allow", "Allow in session", "Deny"])
         #expect(notice["reply"] == nil)
 
+        // The card says it waits, with the question to show first when peeked at.
+        app.render()
+        let waiting = try #require(said.values.reversed().compactMap { $0["card"] }.first?["attention"])
+        #expect(waiting["count"]?.int == 1)
+        #expect(waiting["ask"]?["title"]?.string == "Waiting for you — " + conversation.title)
+        #expect(waiting["ask"]?["buttons"]?.array?.compactMap { $0["id"]?.string }.first == "allow:\(request)")
+
         await app.handle(#"{"event":"notification","id":"\#(conversation.id.uuidString)","action":"allow:\#(request)"}"#)
         #expect(claude.asks.isEmpty, "answered from the notification")
+        app.render()
+        #expect(said.values.reversed().compactMap { $0["card"] }.first?["attention"] == nil, "nothing waits now")
         #expect(said.withdrawn == [conversation.id.uuidString], "and the notification taken away")
         #expect(app.selection == conversation.id)
         try await until("the turn's end") { claude.state == .idle }
