@@ -16,6 +16,10 @@ public final class DeckModel {
     public internal(set) var layout: DeckLayout
     public private(set) var plugins: [DiscoveredPlugin] = []
     public internal(set) var snapshots: [String: PluginSnapshot] = [:]
+    /// The card a resident plugin printed for one of its places by name
+    /// (`CardPlace.view`): what that window, or that place apart, shows
+    /// instead of the plugin's card.
+    public internal(set) var placeCards: [UUID: PluginSnapshot] = [:]
     public internal(set) var grants: PermissionGrants
     public internal(set) var pluginSettings: PluginSettings
 
@@ -373,6 +377,9 @@ public final class DeckModel {
     /// **Show** on a cell whose window is shown elsewhere: the shell brings
     /// that window, or that tab, to the front.
     public var onBringPlaceForward: ((UUID) -> Void)?
+    /// A plugin asked for its window on the board to be shown: the shell
+    /// brings the panel out.
+    public var onRevealPanel: (() -> Void)?
     /// Where a window shown away from its cell is, the size it has there in
     /// cells: what its plugin is told (`ResidentEvent.size`).
     public internal(set) var placeSizes: [UUID: CellSize] = [:]
@@ -582,6 +589,22 @@ public final class DeckModel {
         )
     }
 
+    /// What `window` shows: the card its plugin printed for it, or the
+    /// plugin's card.
+    public func presentation(for window: GridWindow, now: Date = Date()) -> CardPresentation {
+        guard let own = placeCards[window.id] else { return presentation(for: window.pluginID, now: now) }
+        return own.presentation(now: now, defaultTTL: settings.defaultCardTTL,
+                                silentMultiplier: settings.silentTTLMultiplier,
+                                live: liveResidents.contains(window.pluginID))
+    }
+
+    /// What `window` is called: the name the person gave it, what its plugin
+    /// says it shows, its card's title, its plugin's name.
+    public func title(of window: GridWindow) -> String {
+        window.title ?? window.showing ?? presentation(for: window).card?.title
+            ?? displayManifest(withID: window.pluginID)?.name ?? window.pluginID.rawValue
+    }
+
     /// A run that failed while `id`'s card is still fresh — what the card says
     /// at once, by the dot beside its name and one line (Q128) — or nil.
     public func failureOnAFreshCard(for id: PluginIdentifier, now: Date = Date()) -> FailureOnAFreshCard? {
@@ -738,7 +761,7 @@ public final class DeckModel {
         residents.language = { [weak self] in self?.strings.language.rawValue ?? "en" }
         let placed = placedPluginIDs
         var wanted: [ResidentRuns.Wanted] = []
-        var sizes: [PluginIdentifier: (columns: Int, rows: Int)] = [:]
+        var views: [PluginIdentifier: [ResidentRuns.View]] = [:]
         for plugin in plugins {
             guard let manifest = plugin.manifest, manifest.kind == .resident, plugin.isUsable,
                   let executable = plugin.executable, placed.contains(manifest.id)
@@ -757,33 +780,46 @@ public final class DeckModel {
                 id: manifest.id, executable: executable, arguments: Array(manifest.run.dropFirst()),
                 environment: environment, directory: plugin.directory,
                 basis: (treeLastHashed(for: manifest.id) ?? "") + "|" + String(describing: grants[manifest.id])))
-            if let window = layout.tabs.flatMap(\.windows).first(where: { $0.pluginID == manifest.id }) {
-                // Shown elsewhere, it is told the size it has there.
-                if window.place.isAway, let size = placeSizes[window.id] {
-                    sizes[manifest.id] = (size.columns, size.rows)
-                } else {
-                    sizes[manifest.id] = (window.width, window.height)
-                }
+            // Every place its card is shown in, each told the size it has
+            // there: a cell's, or the place's own away from the board.
+            views[manifest.id] = layout.views(of: manifest.id).map { window in
+                let size = window.place.isAway ? placeSizes[window.id] : nil
+                return ResidentRuns.View(id: window.id.uuidString, columns: size?.columns ?? window.width,
+                                         rows: size?.rows ?? window.height, place: window.place.rawValue,
+                                         keep: window.keep)
             }
         }
-        residents.reconcile(wanted, sizes: sizes)
+        residents.reconcile(wanted, views: views)
     }
 
-    /// Tells a resident plugin what the person did on its card.
-    public func residentEvent(_ id: PluginIdentifier, _ event: ResidentEvent) {
-        residents.send(event, to: id)
+    /// Tells a resident plugin what the person did on its card — in the
+    /// window, or the place apart, `window`; with none, on the board.
+    public func residentEvent(_ id: PluginIdentifier, _ event: ResidentEvent, in window: UUID? = nil) {
+        residents.send(event, to: id, view: window?.uuidString)
+    }
+
+    /// Whether `id`'s running process named a place, and so can show each of
+    /// its things in a place of its own.
+    func speaksOfPlaces(_ id: PluginIdentifier) -> Bool { residents.speaksOfPlaces(id) }
+
+    /// Tells the plugin its place `view` was closed: with `to`, what it showed
+    /// goes back to that window on the board.
+    func residentPlaceClosed(_ view: UUID, of id: PluginIdentifier, keep: String?, to: UUID?) {
+        residents.closed(view.uuidString, of: id, keep: keep, to: to?.uuidString)
     }
 
     private func residentSaid(_ id: PluginIdentifier, _ message: ResidentMessage) {
         switch message {
-        case .card(let card):
-            var snapshot = snapshots[id.rawValue] ?? PluginSnapshot(pluginID: id)
-            snapshot.record(card: card, at: Date())
-            snapshots[id.rawValue] = snapshot
+        case .card(let card, let place):
+            recordCard(card, place, of: id)
         case .notify(let notice, let title, let body):
             onPluginNotice?(id, notice, title, body)
         case .pickFolder(let request, let prompt):
             onPluginPicksFolder?(id, request, prompt)
+        case .show(let view):
+            guard let uuid = UUID(uuidString: view), let found = layout.window(withID: uuid),
+                  found.window.pluginID == id else { return }
+            bringForward(found.window, tabID: found.tabID)
         case .unknown(let line):
             DeckLog.plugins.notice("resident \(id.rawValue, privacy: .public) said something uDeck does not know: \(line, privacy: .public)")
         }
@@ -948,6 +984,11 @@ public final class DeckModel {
     }
 
     public func removeWindow(_ windowID: UUID, from tabID: UUID) {
+        // A place apart has no cell to leave: taking it away closes it.
+        if layout.isApart(windowID) {
+            closeApart(windowID, back: false)
+            return
+        }
         let gone = WindowRule.windowsToRemove(after: .removedByOperator(window: windowID), from: layout)
         guard !gone.isEmpty else { return }
         layout.removeWindows(gone)

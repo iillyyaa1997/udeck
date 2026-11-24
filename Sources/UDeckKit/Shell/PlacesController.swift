@@ -55,6 +55,12 @@ public final class PlacesController: NSObject, NSWindowDelegate {
         for (id, place) in wanted.sorted(by: { $0.key.uuidString < $1.key.uuidString }) where windows[id] == nil {
             open(id, as: place)
         }
+        // A place apart is called after what it shows, which changes.
+        for (id, window) in windows {
+            guard let found = model.layout.window(withID: id)?.window else { continue }
+            let title = title(of: found)
+            if window.title != title { window.title = title }
+        }
     }
 
     /// Whether the card of `id` is shown in an ordinary window: the panel,
@@ -160,8 +166,8 @@ public final class PlacesController: NSObject, NSWindowDelegate {
 
     private func title(of window: GridWindow) -> String {
         let name = model.displayManifest(withID: window.pluginID)?.name ?? window.pluginID.rawValue
-        let title = window.title ?? model.presentation(for: window.pluginID).card?.title
-        guard let title, title != name else { return name }
+        let title = model.title(of: window)
+        guard title != name else { return name }
         return "\(title) — \(name)"
     }
 
@@ -177,8 +183,9 @@ public final class PlacesController: NSObject, NSWindowDelegate {
         guard !closingQuietly.contains(id) else { return }
         windows[id] = nil
         kinds[id] = nil
-        // Closed by the person: the card goes back to its cell.
-        model.show(id, in: .card)
+        // Closed by the person: the card goes back to its cell; a place apart
+        // goes, what it showed staying with its plugin.
+        model.closePlace(id)
     }
 
     public func windowDidMove(_ notification: Notification) {

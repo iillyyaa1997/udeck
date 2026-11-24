@@ -119,8 +119,7 @@ struct DeckGridView: View {
 
     /// What a window is called where its cell says it went elsewhere.
     private func title(of window: GridWindow) -> String {
-        window.title ?? model.presentation(for: window.pluginID).card?.title
-            ?? model.displayManifest(withID: window.pluginID)?.name ?? window.pluginID.rawValue
+        model.title(of: window)
     }
 
     @ViewBuilder

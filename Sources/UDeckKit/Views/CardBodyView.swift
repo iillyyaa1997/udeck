@@ -12,6 +12,9 @@ struct CardBodyView: View {
     var presentation: CardPresentation
     var theme: DeckTheme
     var pluginID: PluginIdentifier
+    /// The window, or the place apart, the card is drawn in: what the person
+    /// does on it is told to the plugin as done there.
+    var windowID: UUID? = nil
     var model: DeckModel
     @Bindable var shell: ShellState
     /// The card's first row is a bar the window draws as its title line.
@@ -232,7 +235,7 @@ struct CardBodyView: View {
     /// window of its own, so neither reaches the panel's click.
     private func send(_ event: ResidentEvent) {
         shell.onInteract()
-        model.residentEvent(pluginID, event)
+        model.residentEvent(pluginID, event, in: windowID)
     }
 
     // MARK: - Actions

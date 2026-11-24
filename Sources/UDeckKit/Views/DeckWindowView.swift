@@ -31,7 +31,7 @@ struct DeckWindowView: View {
     @State private var confirmingReinstall: ShownPlace.Place?
 
     private var manifest: PluginManifest? { model.displayManifest(withID: window.pluginID) }
-    private var presentation: CardPresentation { model.presentation(for: window.pluginID) }
+    private var presentation: CardPresentation { model.presentation(for: window) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: theme.rowSpacing) {
@@ -113,7 +113,7 @@ struct DeckWindowView: View {
             if let bar = headerBar {
                 BarRowView(bar: bar, theme: theme) { event in
                     shell.onInteract()
-                    model.residentEvent(window.pluginID, event)
+                    model.residentEvent(window.pluginID, event, in: window.id)
                 }
                 .simultaneousGesture(TapGesture().onEnded { shell.onInteract() })
             } else {
@@ -277,7 +277,7 @@ struct DeckWindowView: View {
         case .allowed:
             if let card = presentation.card {
                 CardBodyView(card: card, presentation: presentation, theme: theme,
-                             pluginID: window.pluginID, model: model, shell: shell,
+                             pluginID: window.pluginID, windowID: window.id, model: model, shell: shell,
                              skipsLeadingBar: headerBar != nil)
             } else {
                 note(presentation.note ?? "no data yet", tint: theme.dim)

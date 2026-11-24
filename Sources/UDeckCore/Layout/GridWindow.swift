@@ -38,6 +38,15 @@ public struct GridWindow: Identifiable, Codable, Equatable, Sendable {
     /// window is not the size of a window. Nil until it has been shown so.
     public var placeFrames: [String: [Double]]?
 
+    /// What its plugin last said the window shows, in a string of the
+    /// plugin's own (`CardPlace.keep`): handed back when the plugin starts
+    /// again, and carried to a place of its own when the thing is sent there.
+    public var keep: String?
+
+    /// What it shows, by the plugin's name for it (`CardPlace.name`): the
+    /// title of its window and of its tab.
+    public var showing: String?
+
     /// Where it was last on the screen shown in `place`.
     public func frame(in place: WindowPlace) -> [Double]? {
         placeFrames?[place.rawValue]
@@ -86,8 +95,8 @@ public struct GridWindow: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
-/// Where a window of the board is shown. Every place shows the same card; the
-/// plugin is told the size it has there and draws for it.
+/// Where a window of the board is shown. The plugin is told the size it has
+/// there and draws for it.
 public enum WindowPlace: String, Codable, Sendable, CaseIterable {
     /// Its cell on the board, as always.
     case card

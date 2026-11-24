@@ -254,6 +254,8 @@ What the plugin prints:
 {"card": { "title": "Agents", "rows": [ … ] }}
 {"notify": {"id": "s-41", "title": "Waiting for you", "body": "Wants to run make"}}
 {"pick": {"id": "new", "prompt": "Choose the folder to work in"}}
+{"card": { … }, "view": "4F2A…", "keep": "s-41", "name": "Fix the badge"}
+{"show": {"view": "4F2A…"}}
 ```
 
 * `card` — the whole card as it is now, every time, never a change to the last
@@ -262,6 +264,8 @@ What the plugin prints:
 * `notify` — a macOS notification. Clicking it shows the panel and sends a
   `notification` event with the same `id`.
 * `pick` — ask for a folder; the answer comes as a `folder` event.
+* `view`, `keep` and `name` beside a `card`, and `show` — the card's places,
+  below (uDeck 0.9.9 and later).
 
 A line uDeck does not understand is logged and ignored, never fatal.
 
@@ -291,6 +295,41 @@ What uDeck writes:
 * `choose` — an option of a menu was chosen (a `bar`'s menu or button, an
   `input`'s picker): the row's `id`, the menu's or button's `id`, the option's
   `id` (uDeck 0.9.4 and later).
+* `closed` — a place of the card's own was closed (below).
+
+#### Each thing in a place of its own
+
+A card that shows one of several things — one conversation among many — can
+let the person show each in a place of its own: one in a window, another in a
+mini window, a third on the board (uDeck 0.9.9 and later).
+
+```json
+{"event":"hello","view":"4F2A…","place":"card","keep":"s-41","language":"en","size":{"columns":8,"rows":6}}
+{"card": { … }, "view": "4F2A…", "keep": "s-41", "name": "Fix the badge"}
+{"event":"hello","view":"9C07…","place":"mini","keep":"s-41","language":"en","size":{"columns":4,"rows":3}}
+{"event":"closed","view":"9C07…","keep":"s-41","to":"4F2A…"}
+```
+
+* Every event names the place it is about, `view`; `hello` and `size` say
+  where it is, `place` — `card` (a cell on the board), `tab`, `window` or
+  `mini` — and `hello` what you kept there, `keep`. A plugin that ignores
+  them is told of its first window only, as before.
+* Name a place — print `view` or `keep` beside a card — and every other place
+  your card is shown in gets a `hello` of its own. Print a card for each, with
+  its `view`; a card without one is the card of your windows on the board.
+* `keep` is a short string of your own, up to 1024 characters, saying what
+  the place shows. uDeck keeps it with the place, across restarts, and hands
+  it back in that place's `hello`. While your window on the board has one,
+  its place menu sends *that thing* to a place of its own: the window stays,
+  a new place opens with your `keep`, and the board shows something else —
+  your choice. `name`, up to 200 characters, is what the place shows by name:
+  its window's title, its tab's, the place menu's heading.
+* `closed` — a place of its own was closed. With `to`, the person asked for
+  what it showed back on the board: show it in the place `to`. Without, it
+  stays yours, shown nowhere.
+* `show` — bring a place forward: its window, its mini window, its tab, or
+  the panel at the tab of a window on the board. Show one thing in one place:
+  when the person picks a thing another place shows, bring that place.
 
 Settings reach a resident plugin as they reach any plugin, in its environment
 (see [How settings reach your plugin](#how-settings-reach-your-plugin)); a

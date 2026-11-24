@@ -9,10 +9,32 @@ import UDeckAgents
 @MainActor
 public final class AgentsApp {
     public private(set) var conversations: [Conversation] = []
-    public var selection: UUID?
-    public private(set) var size = (columns: 6, rows: 4)
+    /// One place uDeck shows the card in — its cell on the board, a tab, a
+    /// window, a mini window — its size there, and what it shows.
+    public struct Place {
+        public var size = (columns: 6, rows: 4)
+        public var selection: UUID?
+        public var showingHistory = false
+        /// Where uDeck says it is: `card`, `tab`, `window` or `mini`.
+        public var kind = "card"
+    }
+    /// Every place, by uDeck's name for it (`view`): "" until uDeck names
+    /// one, and for good on a uDeck older than places.
+    public private(set) var places: [String: Place] = ["": Place()]
+    /// The place an event came from, or the card is drawn for, now.
+    public private(set) var here = ""
     public private(set) var russian = false
-    public private(set) var showingHistory = false
+
+    /// The conversation shown here.
+    public var selection: UUID? {
+        get { places[here]?.selection }
+        set { places[here, default: Place()].selection = newValue }
+    }
+    public var size: (columns: Int, rows: Int) { places[here]?.size ?? (6, 4) }
+    public private(set) var showingHistory: Bool {
+        get { places[here]?.showingHistory ?? false }
+        set { places[here, default: Place()].showingHistory = newValue }
+    }
     public private(set) var history: [SavedSession] = []
     /// Conversations opened from history only to be read, because their
     /// transcript was written to a moment ago — by when it was last written.
@@ -31,7 +53,8 @@ public final class AgentsApp {
     let emit: (String) -> Void
     let home: URL
     private var shellEnvironment: [String: String]?
-    private var lastCard = ""
+    /// The card last written for each place.
+    private var lastCards: [String: String] = [:]
     /// When the saved sessions were last read: the session menu lists them,
     /// and a menu cannot say it is about to open.
     private var historyRead = Date.distantPast
@@ -56,16 +79,33 @@ public final class AgentsApp {
 
     public func handle(_ line: String) async {
         guard let event = JSONValue.line(Substring(line)), let kind = event["event"]?.string else { return }
+        if let view = event["view"]?.string, !view.isEmpty {
+            if places[view] == nil {
+                guard kind != "closed" else { return }
+                // The first place uDeck names is the one drawn until then.
+                if let unnamed = places.removeValue(forKey: "") {
+                    places[view] = unnamed
+                    lastCards[""] = nil
+                } else {
+                    places[view] = Place()
+                }
+            }
+            here = view
+        }
         switch kind {
         case "hello", "size":
             if let columns = event["size"]?["columns"]?.int, let rows = event["size"]?["rows"]?.int {
-                size = (columns, rows)
+                places[here, default: Place()].size = (columns, rows)
             }
+            if let place = event["place"]?.string { places[here, default: Place()].kind = place }
             if let language = event["language"]?.string { russian = language.hasPrefix("ru") }
             if kind == "hello" {
                 refreshHistory()
                 if knownModels[.codex] == nil || codexHistory.isEmpty { Task { await learnCodex() } }
+                if let keep = event["keep"]?.string { restore(keep) }
             }
+        case "closed":
+            closed(here, to: event["to"]?.string)
         case "select":
             select(event["id"]?.string ?? "")
         case "press":
@@ -75,13 +115,20 @@ public final class AgentsApp {
         case "folder":
             let id = event["id"]?.string ?? ""
             if id.hasPrefix("new"), let path = event["path"]?.string {
-                let provider = Provider(rawValue: String(id.dropFirst(4))) ?? .claude
+                // `new:<provider>@<place>`: the session opens where ＋ was pressed.
+                let parts = id.dropFirst(4).split(separator: "@", maxSplits: 1).map(String.init)
+                if parts.count == 2, places[parts[1]] != nil { here = parts[1] }
+                let provider = Provider(rawValue: parts.first ?? "") ?? .claude
                 await newConversation(in: URL(fileURLWithPath: path, isDirectory: true), provider: provider)
             }
         case "notification":
             if let id = event["id"]?.string, let uuid = UUID(uuidString: id) {
-                selection = uuid
-                showingHistory = false
+                // Shown in a place of its own: that place comes forward.
+                if let other = place(showing: uuid) {
+                    send(["show": ["view": .string(other)]])
+                } else {
+                    take(uuid)
+                }
             }
         case "choose":
             choose(menu: event["menu"]?.string ?? "", option: event["option"]?.string ?? "")
@@ -93,21 +140,97 @@ public final class AgentsApp {
 
     var selected: Conversation? { conversations.first { $0.id == selection } }
 
+    // MARK: - Places
+
+    /// The place other than here that shows `id`.
+    public func place(showing id: UUID) -> String? {
+        places.keys.sorted().first { $0 != here && places[$0]?.selection == id }
+    }
+
+    /// Shows the conversation `id` here — or, shown in another place
+    /// already, brings that place forward: one conversation, one place.
+    private func show(_ id: UUID) {
+        if let other = place(showing: id) {
+            send(["show": ["view": .string(other)]])
+            return
+        }
+        selection = id
+        showingHistory = false
+    }
+
+    /// Shows `id` here, and another place that showed it something else.
+    private func take(_ id: UUID) {
+        selection = id
+        showingHistory = false
+        for name in places.keys.sorted() where name != here && places[name]?.selection == id {
+            let next = unshown()
+            places[name]?.selection = next
+        }
+    }
+
+    /// The newest conversation no place shows.
+    private func unshown() -> UUID? {
+        let shown = Set(places.values.compactMap(\.selection))
+        return conversations.last { !shown.contains($0.id) }?.id
+    }
+
+    /// uDeck closed the place `view`; with `to`, what it showed goes there.
+    private func closed(_ view: String, to: String?) {
+        guard let gone = places.removeValue(forKey: view) else { return }
+        lastCards[view] = nil
+        if places.isEmpty { places[""] = Place() }
+        guard let to, places[to] != nil else {
+            here = places.keys.sorted().first ?? ""
+            return
+        }
+        here = to
+        if let selection = gone.selection, conversations.contains(where: { $0.id == selection }) {
+            take(selection)
+        }
+    }
+
+    /// What a place showed before, by what uDeck kept of it (`keep`): the
+    /// conversation, while it is open; otherwise its Claude session or its
+    /// Codex thread, continued — after uDeck or this plugin started again.
+    private func restore(_ keep: String) {
+        guard let kept = Kept(keep) else { return }
+        let found = conversations.first { kept.id != nil && $0.id == kept.id }
+            ?? conversations.first { kept.claude != nil && $0.claude?.sessionID == kept.claude }
+            ?? conversations.first { kept.codex != nil && $0.codex?.threadID == kept.codex }
+        if let found {
+            take(found.id)
+            return
+        }
+        if let sessionID = kept.claude {
+            let login = accounts.first { $0.name == kept.account } ?? account
+            guard let saved = SessionHistory.saved(sessionID, config: login.folder(home: home)) else { return }
+            // Its own, a moment ago: no other program has it open.
+            open(saved, account: login, holdIfRecent: false)
+        } else if let threadID = kept.codex {
+            let folder = URL(fileURLWithPath: kept.folder ?? home.path, isDirectory: true)
+            let session = CodexSession(folder: folder, title: kept.title, threadID: threadID)
+            adopt(.codex(session))
+            Task {
+                await startCodex(session)
+                render()
+            }
+        }
+    }
+
     private func select(_ id: String) {
         if id == "new" || id.hasPrefix("new:") {
             let provider = id.hasPrefix("new:") ? String(id.dropFirst(4)) : "claude"
-            send(["pick": ["id": .string("new:" + provider),
+            send(["pick": ["id": .string("new:" + provider + (here.isEmpty ? "" : "@" + here)),
                            "prompt": .string(t("Папка для новой сессии", "Choose the folder to work in"))]])
         } else if id == "history" {
             showingHistory.toggle()
             if showingHistory { refreshHistory() }
         } else if id.hasPrefix("s:"), let uuid = UUID(uuidString: String(id.dropFirst(2))) {
-            selection = uuid
-            showingHistory = false
+            show(uuid)
         } else if id.hasPrefix("ch:") {
             let threadID = String(id.dropFirst(3))
             if let open = conversations.first(where: { $0.codex?.threadID == threadID }) {
-                selection = open.id
+                show(open.id)
             } else if let saved = codexHistory.first(where: { $0.id == threadID }) {
                 let folder = URL(fileURLWithPath: saved.cwd ?? home.path, isDirectory: true)
                 let session = CodexSession(folder: folder, title: saved.title, threadID: saved.id)
@@ -196,7 +319,11 @@ public final class AgentsApp {
                 Task { await startClaude(session, resume: session.sessionID) }
             } else if id.hasPrefix("drop:") {
                 conversations.removeAll { $0.id == uuid }
-                if selection == uuid { selection = conversations.last?.id }
+                for name in places.keys.sorted() where places[name]?.selection == uuid {
+                    places[name]?.selection = nil
+                    let next = unshown()
+                    places[name]?.selection = next
+                }
             }
             return
         }
@@ -251,14 +378,17 @@ public final class AgentsApp {
         await newConversation(in: folder, provider: .claude, message: message)
     }
 
-    private func open(_ saved: SavedSession) {
+    /// A saved session, continued here. One its transcript was written to a
+    /// moment ago may be open in another program, and is held back to be
+    /// read first — unless it is this plugin's own (`restore`).
+    private func open(_ saved: SavedSession, account: ChatAccount? = nil, holdIfRecent: Bool = true) {
         if let open = conversations.first(where: { $0.claude?.sessionID == saved.sessionID && !($0.claude?.isEnded ?? true) }) {
-            selection = open.id
-            showingHistory = false
+            show(open.id)
             return
         }
         let folder = URL(fileURLWithPath: saved.cwd ?? home.path, isDirectory: true)
-        let session = ChatSession(folder: folder, account: account, title: saved.title, resumeID: saved.sessionID)
+        let session = ChatSession(folder: folder, account: account ?? self.account, title: saved.title,
+                                  resumeID: saved.sessionID)
         session.note("loading-history")
         let conversation = adopt(.claude(session))
         showingHistory = false
@@ -273,7 +403,7 @@ public final class AgentsApp {
         }
         let written = (try? saved.file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             ?? saved.modified
-        if Date().timeIntervalSince(written) < Self.liveWindow {
+        if holdIfRecent, Date().timeIntervalSince(written) < Self.liveWindow {
             heldBack[conversation.id] = written
             return
         }
@@ -456,14 +586,25 @@ public final class AgentsApp {
 
     // MARK: - The card
 
-    /// Writes the card if it changed since the last one written.
+    /// Writes each place's card if it changed since the last one written:
+    /// the place's name, and what it shows (`keep`, `name`) for uDeck to keep
+    /// with it and to carry to a place of its own.
     public func render() {
         if Date().timeIntervalSince(historyRead) > 30 { refreshHistory() }
-        guard let line = try? JSONValue.object(["card": AgentsCard.card(for: self)]).encodedLine(),
-              line != lastCard
-        else { return }
-        lastCard = line
-        emit(line)
+        let current = here
+        defer { here = current }
+        for name in places.keys.sorted() {
+            here = name
+            var message: [String: JSONValue] = ["card": AgentsCard.card(for: self)]
+            if !name.isEmpty { message["view"] = .string(name) }
+            if let conversation = selected {
+                message["keep"] = .string(Kept.of(conversation))
+                message["name"] = .string(String(conversation.title.prefix(120)))
+            }
+            guard let line = try? JSONValue.object(message).encodedLine(), line != lastCards[name] else { continue }
+            lastCards[name] = line
+            emit(line)
+        }
     }
 
     private func send(_ value: JSONValue) {
