@@ -584,6 +584,7 @@ check's own default:
 | `updates.settings-left-open` | checkout → checkout | nothing else: the same, with Settings opened before uDeck looks and touched no more |
 | `updates.tells-when-found`, `updates.downloads-ahead`, `updates.notice-shows` | checkout → checkout | nothing else: each starts this checkout's uDeck in a mode of its own (`app.choose_update_mode`) |
 | `updates.a-published-release` | the release before latest → latest | any pair whose "to" is a release |
+| `updates.from-the-menu` | checkout → checkout | nothing else: it presses the menu item this checkout added (0.9.12) |
 
 So a run without arguments asks the first four what they asked before pairs
 existed, and the fifth its own question — with one change: `updates.sparkle` and

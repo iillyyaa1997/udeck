@@ -540,6 +540,11 @@ def open_settings(machine: Any, step: str, item: str = "Settings…") -> None:
     ax.ask(machine, ["press-menu-item", PROCESS, item], step)
 
 
+def press_menu_item(machine: Any, item: str, step: str) -> None:
+    """An item of uDeck's own menu pressed by its title, as `open_settings` presses Settings… — none carries an identifier."""
+    ax.ask(machine, ["press-menu-item", PROCESS, item], step)
+
+
 # How long the General section is given to show itself before the lab looks for
 # uDeck's updates in About, where releases before the redesign keep them — and
 # the control that says General is the pane showing: Open at Login, there in

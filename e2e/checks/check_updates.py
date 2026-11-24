@@ -811,6 +811,55 @@ def _titles(kind, version):
     }[kind]
 
 
+# The menu's item for an update in one press (0.9.12), by its English title: like
+# Settings… beside it, it carries no identifier (`ui.open_settings`).
+MENU_CHECK_AND_INSTALL = "Check and Update uDeck"
+
+
+@pairs.takes(pairs.FROM_THE_MENU)
+def check_from_the_menu(machine, check_dir, lab, pair):
+    """**Check and Update uDeck** in uDeck's menu, pressed once with no window open, puts "to" in and says so after.
+
+    The update in one press the operator asked for (0.9.12). "from" is this
+    checkout's, its settings never opened, and the item is pressed through the
+    accessibility API as Settings… is. Then what decides `updates.sparkle`
+    decides it here — the disk holds "to", a new process comes and stays, the
+    old one gone — and the uDeck that came back says "uDeck updated"
+    (`_the_notice_sent`): pressed from the menu there is no pane to watch it on.
+
+    **Red for**: an item that does nothing, one that only looks, and a restart
+    after a press that says nothing.
+    """
+    feed = updates.Feed(machine, lab.note)
+    try:
+        since = login.clock(machine)
+        offered = _prepare(machine, check_dir, lab, feed, pair)
+        before = app.running_pids(machine, "reading uDeck's pids before the menu item is pressed")
+        ui.press_menu_item(machine, MENU_CHECK_AND_INSTALL, "pressing Check and Update uDeck in uDeck's menu")
+        deadline = machine.clock() + INSTALL_SECONDS
+        version = _the_version_once_it_is(machine, offered.keys, deadline)
+        after = _wait_for_the_relaunch(machine, before, deadline)
+        said = None
+        if after - before:
+            said = _the_notice_sent(machine, check_dir, since, f"restart into {offered.version}: pressed",
+                                    f"notice updated {offered.version}", NOTICE_SECONDS)
+        _evidence(machine, check_dir, "after the update from the menu", lab)
+        if version != offered.keys:
+            _expect_the_feed_still_answers(feed, "pressed from the menu, nothing of uDeck's open")
+        expect(version == offered.keys, f"{INSTALL_SECONDS}s after Check and Update uDeck was pressed in the menu, with "
+                                        f"{offered.version} offered, the version on disk is {version}, not "
+                                        f"{offered.keys}")  # fmt: skip
+        expect(bool(after - before), f"uDeck did not come back as a new process after the update from the menu: it "
+                                     f"was {sorted(before) or 'not running'} before and is "
+                                     f"{sorted(after) or 'not running'} now")  # fmt: skip
+        _expect_the_new_uDeck_stayed(machine, before, after)
+        lab.note(f"   one press in the menu: the guest's disk holds {offered.version} ({offered.build}), uDeck came "
+                 f"back as {sorted(after - before)}, and said so: {said}")
+    finally:
+        feed.collect_log(check_dir)
+        feed.stop()
+
+
 @pairs.takes(pairs.INSTALLS_BY_ITSELF)
 def check_notice_shows(machine, check_dir, lab, pair):
     """uDeck's notice about a found version shows as a banner, with macOS's question answered Allow on the way.

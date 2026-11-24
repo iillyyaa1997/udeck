@@ -254,11 +254,23 @@ class InstallsByItself(Rule):
                 "its only pair is checkout → checkout")
 
 
+@dataclass(frozen=True)
+class FromTheMenu(Rule):
+    """`updates.from-the-menu`: **Check and Update uDeck** in uDeck's menu, which a uDeck has only since 0.9.12."""
+
+    def refusal(self, pair: Pair) -> str | None:
+        if pair.from_.is_checkout and pair.to.is_checkout:
+            return None
+        return ("this check presses the menu item this checkout added — no release before it has one, and the lab "
+                "signs what it is offered — so its only pair is checkout → checkout")
+
+
 THE_WHOLE_UPDATE = TheWholeUpdate(BETWEEN_CHECKOUTS)
 INSTALLS_BY_ITSELF = InstallsByItself(BETWEEN_CHECKOUTS, presses_check_now=False)
 A_PUBLISHED_RELEASE = APublishedRelease(THE_RELEASE_BEFORE_LATEST_TO_LATEST)
 THE_WRONG_KEY = TheWrongKey(BETWEEN_CHECKOUTS)
 ONLY_THIS_CHECKOUT = OnlyThisCheckout(BETWEEN_CHECKOUTS, presses_check_now=False, offers=False)
+FROM_THE_MENU = FromTheMenu(BETWEEN_CHECKOUTS, presses_check_now=False)
 
 
 def takes(rule: Rule) -> Callable[[Callable[..., Any]], Callable[..., Any]]:

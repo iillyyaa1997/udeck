@@ -551,7 +551,9 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate {
     /// Noted for the launch after a pressed restart: "uDeck updated" is said
     /// then (`UpdateEvent.launched`'s `pressedInto`).
     private func notePressedRestart() {
-        if let version = status.latestVersion { defaults.set(version, forKey: Self.pressedIntoKey) }
+        guard let version = status.latestVersion else { return }
+        defaults.set(version, forKey: Self.pressedIntoKey)
+        DeckLog.updates.notice("restart into \(version, privacy: .public): pressed")
     }
 }
 

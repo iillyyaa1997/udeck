@@ -427,6 +427,37 @@ def test_one_press_against_another_key_that_fetched_nothing_proves_nothing(machi
         checks.check_wrong_key(machine, check_dir, lab, BETWEEN_CHECKOUTS)
 
 
+def test_the_menu_item_is_pressed_once_and_the_restart_is_said(machine, lab, check_dir, monkeypatch):
+    """`updates.from-the-menu`: the item pressed by its title, no window opened, and the notice after the restart."""
+    prepared(monkeypatch)
+    pressed = []
+    monkeypatch.setattr(ui, "press_menu_item", lambda machine, item, step: pressed.append(item))
+    monkeypatch.setattr(checks, "_open_the_about_pane",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("no window is opened")))
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.SECOND)
+    machine.ssh.answers["pgrep -x uDeck"] = ["101", "202"]
+    heard = []
+    monkeypatch.setattr(checks, "_the_notice_sent",
+                        lambda machine, check_dir, since, found, notice, seconds: heard.append((found, notice)) or notice)
+
+    machine.ssh.answers["/bin/date"] = "2026-11-25 00:30:00"
+    checks.check_from_the_menu(machine, check_dir, lab, BETWEEN_CHECKOUTS)
+    assert pressed == [checks.MENU_CHECK_AND_INSTALL]
+    assert heard == [("restart into 0.4.2: pressed", "notice updated 0.4.2")]
+
+
+def test_a_menu_item_that_installs_nothing_is_red(machine, lab, check_dir, monkeypatch):
+    prepared(monkeypatch)
+    monkeypatch.setattr(ui, "press_menu_item", lambda machine, item, step: None)
+    monkeypatch.setattr(app, "installed_version", lambda m: checks.FIRST)
+    machine.ssh.answers["pgrep -x uDeck"] = ["101"]
+    monkeypatch.setattr(updates.Feed, "answers_now", lambda self, step: True)
+    machine.ssh.answers["/bin/date"] = "2026-11-25 00:30:00"
+
+    with pytest.raises(CheckFailed, match="pressed in the menu"):
+        checks.check_from_the_menu(machine, check_dir, lab, BETWEEN_CHECKOUTS)
+
+
 def test_the_uDeck_that_came_back_is_watched_for_the_whole_settle(machine, lab, check_dir, monkeypatch):
     """Watched, not read once at the end: the sentence has to be able to say when it
     went, and a crash in the middle of the window must not be missed by a read after."""
@@ -1603,6 +1634,7 @@ def test_the_wrong_key_control_with_a_real_from_holds_the_disk_to_that_release(m
 def test_every_update_check_says_which_pairs_it_takes():
     rules = {name: pairs.rule_of(getattr(checks, name)) for name in dir(checks) if name.startswith("check_")}
     assert rules == {
+        "check_from_the_menu": pairs.FROM_THE_MENU,
         "check_sparkle": pairs.THE_WHOLE_UPDATE,
         "check_wrong_key": pairs.THE_WRONG_KEY,
         "check_it_looks_by_itself": pairs.ONLY_THIS_CHECKOUT,
