@@ -202,13 +202,7 @@ enum AgentsCard {
         guard !held, !agent.isEnded, !compact(app) else { return .object(input) }
         var pickers: [JSONValue] = []
         if case .claude(let claude) = agent, app.accounts.count > 1 {
-            pickers.append(["id": "account", "text": .string(accountName(claude.account, app)),
-                            "selected": .string(claude.account.name),
-                            "note": .string(app.t("Сессия переедет на эту учётку и продолжится там",
-                                                  "The session moves to this login and continues there")),
-                            "options": .array(app.accounts.map {
-                                ["id": .string($0.name), "text": .string(accountName($0, app))]
-                            })])
+            pickers.append(accountMenu(claude, app))
         }
         let models = modelOptions(session, app, prefix: narrow(app) ? "m:" : "")
         let efforts = effortLevels(agent)
@@ -302,6 +296,80 @@ enum AgentsCard {
         case "ultra": app.t("ультра", "ultra")
         default: level
         }
+    }
+
+    /// The account menu by the field: «Авто» and why it picks what it picks,
+    /// then each account with its limits — picking one moves the session.
+    static func accountMenu(_ session: ChatSession, _ app: AgentsApp) -> JSONValue {
+        let now = Date()
+        let group = app.t("Учётка", "Account")
+        var options: [JSONValue] = [["id": "auto", "text": .string(app.t("Авто", "Auto")), "group": .string(group),
+                                     "note": .string(autoReason(app, now: now))]]
+        for account in app.accounts {
+            var option: [String: JSONValue] = ["id": .string(account.name), "text": .string(accountName(account, app)),
+                                               "group": .string(group), "note": .string(limitsText(account, app, now: now))]
+            let limits = app.limits[account.name]
+            if limits?.isLimited(at: now) == true || (limits?.fiveHour?.used ?? 0) >= 0.9 || (limits?.week?.used ?? 0) >= 0.9 {
+                option["tone"] = "warn"
+            }
+            options.append(.object(option))
+        }
+        let text = app.autoAccount ? app.t("Авто · ", "Auto · ") + accountName(session.account, app)
+            : accountName(session.account, app)
+        return ["id": "account", "text": .string(text), "icon": "account",
+                "selected": .string(app.autoAccount ? "auto" : session.account.name),
+                "note": .string(app.t("Выбор учётки здесь переносит эту сессию на неё сразу. «Авто» выбирает для новых сессий и переносит сессию, когда у учётки кончился лимит",
+                                      "Choosing an account here moves this session to it now. Auto picks for new sessions and moves a session when its account runs out")),
+                "options": .array(options)]
+    }
+
+    /// Why «Авто» picks what it would pick now.
+    static func autoReason(_ app: AgentsApp, now: Date) -> String {
+        guard let (account, pick) = app.autoPick(now: now) else {
+            return app.t("сейчас все учётки упёрлись в лимит", "every account is at its limit now")
+        }
+        let name = accountName(account, app)
+        let why: String = switch pick.reason {
+        case .mostHeadroom(let headroom):
+            app.t("больше всего запаса — \(percent(headroom))", "the most left — \(percent(headroom))")
+        case .burnsSoonest(let left, let resets):
+            app.t("его неделя сгорит раньше: осталось \(percent(left)), сброс \(when(resets, app, now: now))",
+                  "its week expires first: \(percent(left)) left, resets \(when(resets, app, now: now))")
+        case .fewestSessions:
+            app.t("меньше всего сессий", "the fewest sessions")
+        case .onlyTheMainLeft:
+            app.t("других не осталось", "nothing else is left")
+        }
+        return app.t("сейчас ", "now ") + name + ": " + why + (pick.estimated && app.limits.isEmpty ? app.t(" (оценка)", " (a guess)") : "")
+    }
+
+    /// An account's limits in a line: «5 ч 92% · неделя 71% · сброс в 18:40».
+    static func limitsText(_ account: ChatAccount, _ app: AgentsApp, now: Date) -> String {
+        guard let limits = app.limits[account.name] else { return app.t("лимиты ещё не известны", "limits not known yet") }
+        var parts: [String] = []
+        if let five = limits.fiveHour { parts.append(app.t("5 ч ", "5 h ") + percent(five.used)) }
+        if let week = limits.week { parts.append(app.t("неделя ", "week ") + percent(week.used)) }
+        if limits.isLimited(at: now), let until = limits.limitedUntil {
+            parts.append(app.t("лимит до ", "limit until ") + time(until, app, now: now))
+        } else if let five = limits.fiveHour, five.used >= 0.8, let resets = five.resetsAt {
+            parts.append(app.t("сброс ", "resets ") + when(resets, app, now: now))
+        }
+        return parts.isEmpty ? app.t("лимиты ещё не известны", "limits not known yet") : parts.joined(separator: " · ")
+    }
+
+    static func percent(_ fraction: Double) -> String { "\(Int((max(0, min(1, fraction)) * 100).rounded()))%" }
+
+    /// «в 18:40» today, «пт 18:40» another day.
+    static func when(_ date: Date, _ app: AgentsApp, now: Date) -> String {
+        Calendar.current.isDate(date, inSameDayAs: now) ? app.t("в ", "at ") + time(date, app, now: now)
+            : time(date, app, now: now)
+    }
+
+    static func time(_ date: Date, _ app: AgentsApp, now: Date) -> String {
+        let format = DateFormatter()
+        format.locale = Locale(identifier: app.russian ? "ru_RU" : "en_US")
+        format.dateFormat = Calendar.current.isDate(date, inSameDayAs: now) ? "HH:mm" : "EE HH:mm"
+        return format.string(from: date)
     }
 
     static func accountName(_ account: ChatAccount, _ app: AgentsApp) -> String {
@@ -433,6 +501,26 @@ enum AgentsCard {
         if text.hasPrefix("effort:") {
             return app.t("Усилие: ", "Effort: ") + effortName(String(text.dropFirst(7)), app)
                 + app.t(" — сессия продолжена с ним", " — the session continues with it")
+        }
+        if text.hasPrefix("limit-move:") || text.hasPrefix("limit-wait:") || text.hasPrefix("limit-stop:") {
+            let parts = text.split(separator: ":", maxSplits: 1).last.map { $0.split(separator: "|").map(String.init) } ?? []
+            func named(_ name: String) -> String {
+                app.accounts.first { $0.name == name }.map { accountName($0, app) } ?? name
+            }
+            let epoch = parts.last.flatMap(Double.init).map { Date(timeIntervalSince1970: $0) } ?? Date()
+            let at = time(epoch, app, now: Date())
+            if text.hasPrefix("limit-move:"), parts.count == 3 {
+                return app.t("Лимит \(named(parts[0])) кончился, сброс в \(at) — сессия продолжилась на \(named(parts[1]))",
+                             "\(named(parts[0])) ran out of its limit, resets at \(at) — the session went on under \(named(parts[1]))")
+            }
+            if text.hasPrefix("limit-wait:"), parts.count == 2 {
+                return app.t("Лимит кончился у всех учёток. Ближайший сброс — \(named(parts[0])) в \(at), тогда продолжу сам",
+                             "Every account is at its limit. The first to reset is \(named(parts[0])) at \(at); it goes on then")
+            }
+            if parts.count == 2 {
+                return app.t("Лимит \(named(parts[0])) кончился, сброс в \(at) — тогда продолжу сам",
+                             "\(named(parts[0])) ran out of its limit, resets at \(at); it goes on then")
+            }
         }
         if text.hasPrefix("account:") {
             let name = String(text.dropFirst(8))

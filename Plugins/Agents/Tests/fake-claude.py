@@ -7,6 +7,11 @@ message plays one turn — the answer streamed word by word, a Bash call that as
 its result, and a closing sentence. A message that mentions "question" asks an AskUserQuestion
 instead. Nothing here touches the network or the user's files. It exits when stdin closes.
 
+Its account is the folder `CLAUDE_CONFIG_DIR` names (`~/.claude` without it). `get_usage`
+answers what `fake-usage.json` there says — `{"five_hour": {"utilization": 40, "resets_at": …},
+"seven_day": …}` — or a little of both. A `fake-limited` file there makes every turn hit the
+limit, as the real one reports it: a `rate_limit_event` rejected, then an error result.
+
     fake-claude.py [--resume SESSION_ID] [anything else the real CLI takes]
 """
 import json
@@ -18,6 +23,7 @@ DELAY = float(os.environ.get("FAKE_CLAUDE_DELAY", "0.02"))
 args = sys.argv[1:]
 SESSION = args[args.index("--resume") + 1] if "--resume" in args else "fake-session-0001"
 REPLAY = "--replay-user-messages" in args
+CONFIG = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 waiting = []  # lines read while waiting for a particular answer, handled afterwards
 counter = {"turn": 0}
 # What it says, in the language of the message it answers — as the real one does.
@@ -84,7 +90,37 @@ def tool_result(tool_id, text, is_error=False):
          "content": text, "is_error": is_error}]}, "parent_tool_use_id": None, "session_id": SESSION})
 
 
+def limited():
+    return os.path.exists(os.path.join(CONFIG, "fake-limited"))
+
+
+def usage():
+    if limited():
+        return {"five_hour": {"utilization": 100, "resets_at": "2099-01-01T00:00:00Z"},
+                "seven_day": {"utilization": 60, "resets_at": "2099-01-07T00:00:00Z"}}
+    try:
+        with open(os.path.join(CONFIG, "fake-usage.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {"five_hour": {"utilization": 5, "resets_at": "2099-01-01T00:00:00Z"},
+                "seven_day": {"utilization": 20, "resets_at": "2099-01-07T00:00:00Z"}}
+
+
+def hit_the_limit():
+    resets = int(time.time()) + 3600
+    out({"type": "system", "subtype": "init", "session_id": SESSION, "model": "claude-fake-1-0",
+         "permissionMode": "default", "cwd": os.getcwd(), "claude_code_version": "2.1.330",
+         "slash_commands": [], "capabilities": []})
+    out({"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "rateLimitType": "five_hour",
+         "utilization": 1.0, "resetsAt": resets}, "session_id": SESSION})
+    out({"type": "result", "subtype": "success", "is_error": True, "num_turns": 1,
+         "result": "Claude AI usage limit reached|%d" % resets, "session_id": SESSION, "total_cost_usd": 0})
+
+
 def turn(text):
+    if limited():
+        hit_the_limit()
+        return
     russian = any("а" <= ch.lower() <= "я" for ch in text)
     words = RU if russian else EN
     counter["turn"] += 1
@@ -146,6 +182,8 @@ while True:
                  "supportedEffortLevels": ["low", "medium", "high"]}]}
         elif subtype == "get_context_usage":
             body = {"totalTokens": 28000, "maxTokens": 200000, "percentage": 14, "model": "claude-fake-1-0"}
+        elif subtype == "get_usage":
+            body = {"subscription_type": "max", "rate_limits": usage()}
         out({"type": "control_response", "response": {"subtype": "success", "request_id": message.get("request_id"),
              "response": body}})
     elif kind == "user":

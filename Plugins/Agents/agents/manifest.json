@@ -34,6 +34,31 @@
       "type": "string",
       "label": "codex to run (empty: the one your shell finds)",
       "default": ""
+    },
+    {
+      "key": "accountMode",
+      "type": "enum",
+      "default": "burnFirst",
+      "label": "How Auto picks an account",
+      "help": "For a new session, and when a session's account runs out of its limit.",
+      "options": [
+        {
+          "value": "burnFirst",
+          "label": "What would expire first"
+        },
+        {
+          "value": "headroom",
+          "label": "The most left"
+        },
+        {
+          "value": "spareMain",
+          "label": "Spare the main account"
+        },
+        {
+          "value": "even",
+          "label": "Evenly by sessions"
+        }
+      ]
     }
   ]
 }

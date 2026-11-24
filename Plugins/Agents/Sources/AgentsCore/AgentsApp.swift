@@ -43,6 +43,18 @@ public final class AgentsApp {
     static let liveWindow: TimeInterval = 10 * 60
     public let accounts: [ChatAccount]
     public private(set) var account: ChatAccount
+    /// What each account's limits were last seen to be, by its name.
+    public internal(set) var limits: [String: AccountLimits] = [:]
+    /// Whether «Авто» picks the account for a new session and moves a session
+    /// whose account ran out of its limit: on, until one is chosen by hand.
+    public internal(set) var autoAccount = true
+    /// When each account's limits were last asked for by a probe, and the
+    /// probes running.
+    var probedAt: [String: Date] = [:]
+    var probing: Set<String> = []
+    var probeLoop: Task<Void, Never>?
+    /// Sessions waiting for a limit to reset, to go on then.
+    var waitingForLimit: [UUID: Task<Void, Never>] = [:]
     /// The models each provider offered when a session of it last started,
     /// kept for the model menu of a conversation that has not used it yet.
     public private(set) var knownModels: [Provider: [ModelChoice]] = [:]
@@ -103,6 +115,7 @@ public final class AgentsApp {
                 // uDeck took this plugin back after it started again, or saw
                 // the place for the first time: the card is written again.
                 lastCards[here] = nil
+                watchLimits()
                 refreshHistory()
                 if knownModels[.codex] == nil || codexHistory.isEmpty { Task { await learnCodex() } }
                 if let keep = event["keep"]?.string { restore(keep) }
@@ -285,7 +298,12 @@ public final class AgentsApp {
         case "session", "new":
             select(option)
         case "account":
+            if option == "auto" {
+                autoAccount = true
+                return
+            }
             guard let chosen = accounts.first(where: { $0.name == option }) else { return }
+            autoAccount = false
             account = chosen
             if let conversation = selected, let session = conversation.claude, conversation.active == .claude,
                session.account != chosen {
@@ -392,7 +410,7 @@ public final class AgentsApp {
     public func newConversation(in folder: URL, provider: Provider = .claude, message: String? = nil) async {
         switch provider {
         case .claude:
-            let session = ChatSession(folder: folder, account: account)
+            let session = ChatSession(folder: folder, account: autoAccount ? (autoPick()?.account ?? account) : account)
             let conversation = adopt(.claude(session))
             await startClaude(session, resume: nil)
             if let message, !message.isEmpty { conversation.send(message) }
@@ -485,6 +503,19 @@ public final class AgentsApp {
                 asked(t("Хочет запустить: ", "Wants to run: ") + ask.summary, actions: actions)
             }
             session.onTurnFinished = { words in finished(words) }
+            session.onRateLimit = { [weak self, weak session] limit in
+                guard let self, let session else { return }
+                limits[session.account.name, default: AccountLimits()].note(limit, at: Date())
+            }
+            session.onUsage = { [weak self] usage, account in
+                guard let self else { return }
+                limits[account.name, default: AccountLimits()].note(usage, at: Date())
+                render()
+            }
+            session.onLimit = { [weak self, weak session] resets in
+                guard let self, let session else { return }
+                reachedTheLimit(conversation, session, resets: resets)
+            }
         case .codex(let session):
             session.onAsk = { [weak self] ask in
                 guard let self else { return }
@@ -587,7 +618,7 @@ public final class AgentsApp {
     /// The program to run for `name`: the path in the plugin's settings (the
     /// lab points it at a stand-in; a `.py` runs with python3), or the one
     /// the shell finds.
-    private func program(_ name: String, setting: String, path: String) -> (URL, [String])? {
+    func program(_ name: String, setting: String, path: String) -> (URL, [String])? {
         if let override = Self.setting(ProcessInfo.processInfo.environment[setting]), !override.isEmpty {
             let url = URL(fileURLWithPath: override)
             return url.pathExtension == "py" ? (URL(fileURLWithPath: "/usr/bin/python3"), [override]) : (url, [])
@@ -595,7 +626,7 @@ public final class AgentsApp {
         return ShellEnvironment.resolve(name, path: path).map { ($0, []) }
     }
 
-    private func startClaude(_ session: ChatSession, resume: String?) async {
+    func startClaude(_ session: ChatSession, resume: String?) async {
         let environment = session.account.environment(from: await environment())
         guard let (executable, prefix) = program("claude", setting: "UDECK_SETTING_CLAUDE", path: environment["PATH"] ?? "") else {
             session.fail(t("claude не найден в PATH вашей оболочки", "claude was not found in your shell's PATH"))
@@ -649,7 +680,7 @@ public final class AgentsApp {
 
     /// The Claude session starts again — a new effort or login — continuing
     /// where it was; after the running turn, if one runs.
-    private func restartClaude(_ conversation: Conversation, saying note: String) {
+    func restartClaude(_ conversation: Conversation, saying note: String, then: (() -> Void)? = nil) {
         guard let session = conversation.claude, heldBack[conversation.id] == nil, session.sessionID != nil,
               !session.isEnded else { return }
         if session.state == .working {
@@ -660,6 +691,7 @@ public final class AgentsApp {
         Task {
             await session.close()
             await startClaude(session, resume: session.sessionID)
+            then?()
             render()
         }
     }

@@ -112,6 +112,20 @@ public final class ChatSession: Identifiable {
     /// Told when what identifies the session changes (Claude's id, the title),
     /// for whoever keeps it on disk.
     @ObservationIgnored public var onRecord: (() -> Void)?
+    /// Told what the account's limits are: a window as the CLI reports it
+    /// during a turn, and the whole picture after each (`get_usage`).
+    @ObservationIgnored public var onRateLimit: ((ClaudeRateLimit) -> Void)?
+    /// With the account it was asked of: the session may be on another by
+    /// the time the answer comes.
+    @ObservationIgnored public var onUsage: ((ClaudeUsage, ChatAccount) -> Void)?
+    /// Told when a turn stopped at the account's limit, with when it resets
+    /// if the CLI said: the message it stopped at is `lastSent`.
+    @ObservationIgnored public var onLimit: ((Date?) -> Void)?
+    /// The last message sent, as shown and as told: what to send again
+    /// where the session goes on after a limit.
+    public private(set) var lastSent: (text: String, payload: String?)?
+    /// A limit the CLI said it refused this turn over.
+    @ObservationIgnored private var refused: ClaudeRateLimit?
 
     /// Messages sent from here that the CLI has not repeated back yet, oldest
     /// first: an echo of one confirms it; any other echo is the conversation
@@ -213,6 +227,30 @@ public final class ChatSession: Identifiable {
     }
 
     /// Asks how full the context is (`get_context_usage`).
+    /// Asks what the account's limits are now (`get_usage`, which spends
+    /// nothing).
+    func refreshUsage() {
+        guard let connection, !isEnded else { return }
+        let asked = account
+        Task {
+            guard let answer = try? await connection.request({ ClaudeOutbound.usage(id: $0) }, timeout: .seconds(20)),
+                  answer.succeeded else { return }
+            onUsage?(ClaudeUsage(answer.body), asked)
+        }
+    }
+
+    /// Whether what a failed turn said is the account's limit.
+    nonisolated static func isLimit(_ text: String) -> Bool {
+        let text = text.lowercased()
+        return text.contains("limit") && (text.contains("reached") || text.contains("hit your") || text.contains("resets"))
+    }
+
+    /// When a limit resets, from what the CLI said: `…|<epoch seconds>`.
+    nonisolated static func resetTime(_ text: String) -> Date? {
+        guard let tail = text.split(separator: "|").last, let seconds = Double(tail), seconds > 1_000_000_000 else { return nil }
+        return Date(timeIntervalSince1970: seconds)
+    }
+
     func refreshContext() {
         guard let connection, !isEnded else { return }
         Task {
@@ -230,12 +268,24 @@ public final class ChatSession: Identifiable {
     /// feed shows — the conversation so far, when it has just been handed
     /// over.
     public func send(_ text: String, payload: String? = nil) {
+        send(text, payload: payload, again: false)
+    }
+
+    /// The message a turn stopped at, sent again where the session goes on —
+    /// already in the feed, so not put there twice.
+    public func sendAgain() {
+        guard let lastSent else { return }
+        send(lastSent.text, payload: lastSent.payload, again: true)
+    }
+
+    private func send(_ text: String, payload: String?, again: Bool) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let connection, !isEnded else { return }
         let told = payload ?? text
         let id = UUID()
+        lastSent = (text, payload)
         if state == .working || pendingTurns > 0 { queued.append(id) }
-        items.append(.user(id: id, text: text))
+        if !again { items.append(.user(id: id, text: text)) }
         unconfirmed.append(told)
         pendingTurns += 1
         state = .working
@@ -355,12 +405,18 @@ public final class ChatSession: Identifiable {
             pendingTurns = max(0, pendingTurns - 1)
             // The next message waiting starts now.
             if !queued.isEmpty { queued.removeFirst() }
-            if result.isError, !result.result.isEmpty { note(result.result) }
+            // Stopped at the account's limit: not an error to read, but a
+            // session to go on elsewhere, or later (`onLimit`).
+            let limit = result.isError && (refused != nil || Self.isLimit(result.result))
+            let resets = refused?.usage.resetsAt ?? Self.resetTime(result.result)
+            refused = nil
+            if result.isError, !result.result.isEmpty, !limit { note(result.result) }
             if pendingTurns == 0, !isEnded {
                 state = .idle
                 turnStartedAt = nil
                 refreshContext()
-                onTurnFinished?(lastAnswer)
+                refreshUsage()
+                if limit { onLimit?(resets) } else { onTurnFinished?(lastAnswer) }
             }
         case .request(let request):
             if let permission = request.permission {
@@ -370,7 +426,10 @@ public final class ChatSession: Identifiable {
             }
         case .cancelled(let requestID, _):
             asks.removeAll { $0.requestID == requestID }
-        case .response, .rateLimit, .system, .other:
+        case .rateLimit(let limit, _):
+            onRateLimit?(limit)
+            if limit.status == "rejected" { refused = limit }
+        case .response, .system, .other:
             return
         }
     }
