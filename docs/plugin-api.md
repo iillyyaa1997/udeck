@@ -388,6 +388,7 @@ A `poll` plugin prints exactly one JSON object to standard output and exits.
 | `rows` | `[]` | The body. See [Row types](#row-types). |
 | `actions` | `[]` | Buttons. See [Actions](#actions). |
 | `ttl` | the host's default (60 s) | **How long this card can be trusted.** See below. |
+| `attention` | none | Something waits for the person (uDeck 0.9.10 and later): `{"count": 2, "ask": { an ask row }}`. The island says so — ears or a glow beside a notch, a glowing island without one, as the person chose in Settings → Look — and `ask`, if given, is shown first when the panel is peeked at, its buttons sent back as `press` as from the card. Leave it out when nothing waits. |
 
 Anything printed to standard **error** is the producer explaining itself, and
 uDeck keeps it: the last 64 KiB of every run's — the end, which is where an
