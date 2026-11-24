@@ -8,6 +8,19 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.12] — 2026-11-25
+
+- **Update in one press.** Settings → General has one button, **Check and
+  update**: it looks, downloads the new version, checks its signature and
+  restarts uDeck into it. Before, it took **Check now**, a wait and **Update**.
+  A version already found or downloaded is put in by the same button, named
+  **Update**. About has it too.
+- **Check and Update uDeck** in uDeck's menu does the same without opening
+  Settings; what it is doing is written under it when the menu opens, and when
+  there is nothing newer a notification says so.
+- After an update you asked for, uDeck says "uDeck updated to …" once it is
+  back, as it did after updating by itself.
+
 ## [0.9.11] — 2026-11-24
 
 - **See the island's marks before anything waits.** Settings → Look → Island
