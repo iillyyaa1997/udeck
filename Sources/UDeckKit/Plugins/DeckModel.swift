@@ -537,6 +537,7 @@ public final class DeckModel {
             if !treesOnDisk.inQuestion { treesOnDisk.mayHaveChanged() }
             reverify()
         }
+        carryTrustedDecisionsOver()
         restartPolling()
         onPluginsChanged?()
     }
@@ -1022,7 +1023,7 @@ public final class DeckModel {
     /// **Decline** of such a plugin that asks for nothing switches it off —
     /// a decision with nothing in it would let it run.
     public func decidePermissions(for id: PluginIdentifier, allow: Bool, shown: [Capability], shownTree: String? = nil,
-                                  shownSource: String? = nil) {
+                                  shownSource: String? = nil, trustUpdates: Bool = false) {
         guard let manifest = plugin(withID: id)?.manifest else { return }
         // The record's source, for the copy the decision is about; none for a
         // folder uDeck has no record of, or a link (S4-09).
@@ -1037,12 +1038,77 @@ public final class DeckModel {
             DeckLog.plugins.info("\(id.rawValue, privacy: .public) asks for nothing, its code is unverified, and it was declined: switched off")
             setEnabled(false, for: id)
             return
-        case .record(let grant):
+        case .record(var grant):
+            // Trust in its updates goes with an Allow only, and only to a
+            // copy whose place uDeck can name (`origin(of:)`).
+            if allow, trustUpdates, let origin = origin(of: id) {
+                grant.trustsUpdates = true
+                grant.decidedForOrigin = origin
+            }
             grants[id] = grant
         }
         save(grantsStore, grants, named: "permission decisions")
         restartPolling()
         if allow { refresh(id) }
+    }
+
+    /// Where `id`'s copy came from, as a decision's trust is held to it
+    /// (`PluginGrant.decidedForOrigin`): how its decision is held, and its
+    /// record's source and line of history — or a folder of one's own, or a
+    /// link. Nil while `installed.json` cannot be read: nothing says where
+    /// any copy came from then, and no trust is given or carried over.
+    func origin(of id: PluginIdentifier) -> String? {
+        guard installedProblem == nil else { return nil }
+        let basis = consentBasis(of: id) == .tree ? "tree" : "version"
+        if plugin(withID: id)?.isLinked ?? false { return "\(basis) link" }
+        guard let record = installed.plugins[id.rawValue] else { return "\(basis) folder" }
+        return "\(basis) \(record.source) \(record.ref.kind) \(record.ref.name ?? "")"
+    }
+
+    /// Whether the operator trusts `id`'s updates now — for the switch in
+    /// Settings that takes the trust back.
+    public func trustsUpdates(of id: PluginIdentifier) -> Bool {
+        grants[id]?.trusts(origin: origin(of: id)) ?? false
+    }
+
+    /// Takes the trust in `id`'s updates back, or gives it to the decision
+    /// that holds now: from then on its next update is asked about, or is
+    /// not while it asks for the same.
+    public func setTrustsUpdates(_ trust: Bool, for id: PluginIdentifier) {
+        guard var grant = grants[id] else { return }
+        if trust {
+            guard let manifest = plugin(withID: id)?.manifest, let origin = origin(of: id),
+                  grant.holds(forVersion: manifest.version, tree: requiredTree(for: id), source: requiredSource(for: id)),
+                  grant.denied.isEmpty else { return }
+            grant.trustsUpdates = true
+            grant.decidedForOrigin = origin
+        } else {
+            grant.trustsUpdates = nil
+            grant.decidedForOrigin = nil
+        }
+        guard grant != grants[id] else { return }
+        grants[id] = grant
+        save(grantsStore, grants, named: "permission decisions")
+    }
+
+    /// Carries each decision the operator trusted over to its plugin's
+    /// update (`PluginGrant.carriedOver`): a new version, or new content,
+    /// that asks for nothing more runs without asking. Answers whether any
+    /// was.
+    @discardableResult
+    func carryTrustedDecisionsOver() -> Bool {
+        var carried = false
+        for plugin in plugins {
+            guard let manifest = plugin.manifest, let grant = grants[manifest.id],
+                  let update = grant.carriedOver(to: manifest, tree: requiredTree(for: manifest.id),
+                                                 source: requiredSource(for: manifest.id), origin: origin(of: manifest.id))
+            else { continue }
+            grants[manifest.id] = update
+            carried = true
+            DeckLog.plugins.info("\(manifest.id.rawValue, privacy: .public) updated to \(manifest.version, privacy: .public) asking for nothing more; its updates are trusted, so it was not asked about again")
+        }
+        if carried { save(grantsStore, grants, named: "permission decisions") }
+        return carried
     }
 
     /// Runs a card's action, if the plugin was granted the right to.

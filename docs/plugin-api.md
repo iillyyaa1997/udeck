@@ -567,7 +567,10 @@ unverified code](plugin-repository.md#consent-for-unverified-code)).
 A copy from a branch or a pull request — code nobody verified — is decided
 against its folder's content instead: every change to it asks again, under the
 same version too, and so does a plugin of that kind that asks for nothing
-([Consent for unverified code](plugin-repository.md#consent-for-unverified-code)). A version that drops a permission drops the buttons that used it, in
+([Consent for unverified code](plugin-repository.md#consent-for-unverified-code)).
+The operator can trust a plugin's updates when allowing it: a later copy from
+the same place asking for nothing more then runs without asking, a new version
+or new content alike ([Trusted updates](plugin-repository.md#updating)). A version that drops a permission drops the buttons that used it, in
 the same release rather than the next one the operator happens to reinstall.
 
 **A relative path is resolved with symlinks followed, on both sides.** Declaring

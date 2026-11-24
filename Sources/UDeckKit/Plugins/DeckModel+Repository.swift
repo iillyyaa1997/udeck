@@ -663,7 +663,10 @@ extension DeckModel {
             if hashed != treesOnDisk {
                 let moved = hashed.trees != treesOnDisk.trees
                 treesOnDisk = hashed
-                if moved { restartPolling() }
+                // New content of a plugin whose updates are trusted runs on
+                // the decision before it, when it asks for nothing more.
+                let carried = carryTrustedDecisionsOver()
+                if moved || carried { restartPolling() }
             }
             // Never while an install, update, removal or link runs: its
             // records are being written, and these were read before it — the

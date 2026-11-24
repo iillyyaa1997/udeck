@@ -220,6 +220,9 @@ struct English: Vocabulary {
         case .permissionsUnsandboxed:
             "uDeck runs this plugin as you, without a sandbox. Allowing it means agreeing to run this program; declining means uDeck never starts it."
         case .permissionsAllowAndRun: "Allow and run"
+        case .permissionsTrustUpdates(let name): "Trust \(name)'s updates while it asks for the same"
+        case .permissionsTrustUpdatesHelp:
+            "An update from the same place that asks for nothing more runs without asking. One that asks for more is asked about."
 
         // Plugins from a repository
         case .pluginsOfficialCatalogue: "Official catalogue"

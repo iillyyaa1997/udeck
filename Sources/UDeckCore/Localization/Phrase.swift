@@ -261,6 +261,11 @@ public enum Phrase: Sendable, Equatable {
     case permissionsTrustedSource(name: String, address: String, changedHere: Bool)
     case permissionsUnsandboxed
     case permissionsAllowAndRun
+    /// The checkbox beside Allow, and the switch in Settings that takes it
+    /// back: an update asking for nothing more runs without being asked
+    /// about (`PluginGrant.trustsUpdates`).
+    case permissionsTrustUpdates(name: String)
+    case permissionsTrustUpdatesHelp
 
     // MARK: - Plugins from a repository
 

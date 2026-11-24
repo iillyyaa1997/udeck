@@ -122,6 +122,12 @@ struct AutoUpdateTests {
         // Back to an earlier version is a swap like any other.
         let back = GrantCarry.after(Self.grant(for: "1.1.0"), old: Self.new, new: Self.old)
         #expect(back?.decidedForVersion == "1.0.0")
+        // Trust in the plugin's updates goes with the decision it is part of.
+        var trusting = Self.grant()
+        trusting.trustsUpdates = true
+        trusting.decidedForOrigin = "version official default main"
+        let trusted = try #require(GrantCarry.after(trusting, old: Self.old, new: Self.new))
+        #expect(trusted.trustsUpdates == true && trusted.decidedForOrigin == "version official default main")
     }
 
     static let kept: [(String, PluginGrant?, GrantCarry.Copy?, GrantCarry.Copy)] = [

@@ -381,6 +381,9 @@ struct InstalledPluginsPage: View {
 /// last run, and Earlier versions, Show in Finder and Remove along the bottom.
 struct InstalledPluginCard: View {
     @Bindable var model: DeckModel
+    /// The checkbox beside **Allow** while nobody has decided: an update
+    /// asking for nothing more runs without asking (`PluginGrant.trustsUpdates`).
+    @State private var trustOnAllow: Bool?
     var plugin: DiscoveredPlugin
     @Environment(\.strings) private var strings
 
@@ -551,7 +554,8 @@ struct InstalledPluginCard: View {
                     let tree = model.consentTree(for: manifest.id)
                     let shownSource = model.requiredSource(for: manifest.id)
                     Button(strings(.actionAllow)) {
-                        model.decidePermissions(for: manifest.id, allow: true, shown: [], shownTree: tree, shownSource: shownSource)
+                        model.decidePermissions(for: manifest.id, allow: true, shown: [], shownTree: tree, shownSource: shownSource,
+                                                trustUpdates: trustChoice(manifest))
                     }
                     .buttonStyle(.borderedProminent)
                     .accessibilityIdentifier("plugin.\(manifest.id).allow")
@@ -561,6 +565,7 @@ struct InstalledPluginCard: View {
                     .accessibilityIdentifier("plugin.\(manifest.id).decline")
                 }
                 .padding(.top, 2)
+                trustSwitch(manifest, undecided: true)
             }
             .permissionsBox(undecided: true)
         } else if requested.isEmpty {
@@ -592,16 +597,44 @@ struct InstalledPluginCard: View {
                     let tree = model.consentTree(for: manifest.id)
                     let shownSource = model.requiredSource(for: manifest.id)
                     allowButton(prominent: undecided) {
-                        model.decidePermissions(for: manifest.id, allow: true, shown: requested, shownTree: tree, shownSource: shownSource)
+                        model.decidePermissions(for: manifest.id, allow: true, shown: requested, shownTree: tree, shownSource: shownSource,
+                                                trustUpdates: undecided ? trustChoice(manifest) : model.trustsUpdates(of: manifest.id))
                     }
                     Button(strings(.actionDecline)) {
                         model.decidePermissions(for: manifest.id, allow: false, shown: requested, shownTree: tree, shownSource: shownSource)
                     }
                 }
                 .padding(.top, 2)
+                trustSwitch(manifest, undecided: undecided)
             }
             .permissionsBox(undecided: undecided)
         }
+    }
+
+    /// Whether `manifest`'s updates are trusted: while nobody has decided,
+    /// what **Allow** decides with; once allowed, the switch that takes the
+    /// trust back — or gives it. Not shown under a refusal.
+    @ViewBuilder
+    private func trustSwitch(_ manifest: PluginManifest, undecided: Bool) -> some View {
+        let allowed = model.launchDecision(for: manifest.id).isAllowed
+        if undecided || allowed {
+            Toggle(strings(.permissionsTrustUpdates(name: manifest.name)), isOn: Binding(
+                get: { undecided ? trustChoice(manifest) : model.trustsUpdates(of: manifest.id) },
+                set: { trust in
+                    if undecided { trustOnAllow = trust } else { model.setTrustsUpdates(trust, for: manifest.id) }
+                }
+            ))
+            .toggleStyle(.checkbox)
+            .font(.caption)
+            .help(strings(.permissionsTrustUpdatesHelp))
+            .accessibilityIdentifier("plugin.\(manifest.id).trust")
+        }
+    }
+
+    /// The checkbox as it stands while nobody has decided: as ticked, or as
+    /// the decision before.
+    private func trustChoice(_ manifest: PluginManifest) -> Bool {
+        trustOnAllow ?? (model.grants[manifest.id]?.trustsUpdates == true)
     }
 
     /// **Allow**, the button to press while nobody has decided.

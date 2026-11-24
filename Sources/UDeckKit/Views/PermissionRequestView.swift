@@ -24,6 +24,11 @@ struct PermissionRequestView: View {
     /// The source the decision is held to, as it was when the card was drawn (`DeckModel.requiredSource`).
     var source: String? = nil
     @Bindable var shell: ShellState
+    /// The checkbox beside **Allow**: an update asking for nothing more runs
+    /// without asking (`PluginGrant.trustsUpdates`). Ticked when the
+    /// decision before this one trusted the updates — an update asking for
+    /// more keeps the trust it had, unless it is unticked here.
+    @State private var trustUpdates: Bool?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -69,10 +74,22 @@ struct PermissionRequestView: View {
                 .foregroundStyle(theme.dim)
                 .fixedSize(horizontal: false, vertical: true)
 
+            Toggle(isOn: Binding(get: { trusting }, set: { shell.onInteract(); trustUpdates = $0 })) {
+                Text(strings(.permissionsTrustUpdates(name: manifest?.name ?? pluginID.rawValue)))
+                    .font(theme.chipFont)
+                    .foregroundStyle(theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+            .help(strings(.permissionsTrustUpdatesHelp))
+            .accessibilityIdentifier("consent.\(pluginID.rawValue).trust")
+
             HStack(spacing: 7) {
                 Button(strings(.permissionsAllowAndRun)) {
                     shell.onInteract()
-                    model.decidePermissions(for: pluginID, allow: true, shown: pending, shownTree: tree, shownSource: source)
+                    model.decidePermissions(for: pluginID, allow: true, shown: pending, shownTree: tree, shownSource: source,
+                                            trustUpdates: trusting)
                 }
                 .buttonStyle(GhostButtonStyle(theme: theme))
                 // Identifiers, not titles, for whatever drives the panel from
@@ -88,6 +105,11 @@ struct PermissionRequestView: View {
                 .accessibilityIdentifier("consent.\(pluginID.rawValue).decline")
             }
         }
+    }
+
+    /// The checkbox as it stands: as ticked, or as the decision before.
+    private var trusting: Bool {
+        trustUpdates ?? (model.grants[pluginID]?.trustsUpdates == true)
     }
 
     private func symbol(for capability: Capability) -> String {

@@ -2523,6 +2523,78 @@ def check_a_branch_is_followed(machine, check_dir, lab):
         scene.close()
 
 
+def check_trusted_updates_run_without_asking(machine, check_dir, lab):
+    """Trust in a branch copy's updates: new content asking for the same runs without asking; the switch in Settings takes the trust back.
+
+    uptime 1.0.1 installed from the branch fix/uptime at pr3 and placed: its
+    card asks, and **Trust uptime's updates while it asks for the same** is
+    ticked before **Allow** — `grants.json` holds the decision for pr3's tree,
+    trusting the updates of the copy from that branch. The fake moves the
+    branch on to p2 — the same manifest, its script changed, so another tree —
+    and **Update** puts p2 in place: within `NOTICED_SECONDS` the decision is
+    for p2's tree, trust and all, and the card runs as 1.0.1 without asking.
+    The trust switch in Settings → Plugins, unticked, takes the trust back:
+    `grants.json` no longer says it, the decision standing.
+
+    **Red for**: a checkbox that is not there or decides nothing, a branch's
+    new content that asks again although its updates are trusted, a carried
+    decision that drops the trust, and a switch that cannot take it back.
+    """
+    scene = _prepare(machine, check_dir, lab, main="c1", branches=BRANCHES)
+    try:
+        _the_catalogue_read(scene, since=0, commit="c1")
+        ui.plugins_pane(machine, "opening Settings → Plugins")
+        p2 = scene.github.commit("p2")
+        _look_up(scene, BRANCH_LINK, "the branch")
+        installed, _ = _install_from_the_link(scene, UPTIME, "the branch")
+        _close_the_link_sheet(scene, "after installing")
+        _place(scene, UPTIME)
+        found, texts = _the_card_asks(scene, UPTIME, "the branch's copy")
+        trust = found.get(f"consent.{UPTIME}.trust")
+        expect(trust is not None, f"uptime's card asks without the trust checkbox: {texts}")
+        machine.click(trust.x + 7, trust.y + trust.height // 2, "ticking the trust in uptime's updates")
+        machine.click(*found[f"consent.{UPTIME}.allow"].middle, "allowing uptime, its updates trusted")
+        _read_the_card(scene, UPTIME, "the branch's copy", lambda card: RUNS in card and card[RUNS] not in ("", "unknown"))
+        _put_the_panel_away(machine, "the branch's copy")
+        grant = ((_read_json(machine, GRANTS) or {}).get("byPlugin") or {}).get(UPTIME) or {}
+        expect(grant.get("trustsUpdates") is True and grant.get("decidedForOrigin") == f"tree official branch {BRANCH}"
+               and grant.get("decidedForTree") == installed.get("tree"),
+               f"uptime was allowed with its updates trusted, and {GRANTS} holds {grant!r}")  # fmt: skip
+
+        scene.github.tell("moving the branch on to p2", branches={BRANCH: "p2"})
+        ui.plugins_pane(machine, "opening Settings → Plugins after the branch moved on")
+        _press(machine, "catalogue.checkNow", "pressing Check now after the branch moved on")
+        changed = CHANGED_STILL.format(line=f"branch {BRANCH}", version="1.0.1")
+        offer = _wait_until(machine, f"plugin.{UPTIME}.offer", lambda said: said == changed, CATALOGUE_SECONDS)
+        expect(offer == changed, f"the branch moved on to p2, and uptime's row says {offer!r}, not {changed!r}")
+        record = _operate(scene, f"plugin.{UPTIME}.update", "updating uptime along the branch",
+                          lambda r: r is not None and r.get("commit") == p2)
+        expect(record is not None and record.get("tree") != installed.get("tree"),
+               f"Update was pressed with the branch at p2, and installed.json says {record!r}")
+
+        def carried():
+            now = ((_read_json(machine, GRANTS) or {}).get("byPlugin") or {}).get(UPTIME) or {}
+            return now.get("decidedForTree") == record.get("tree") and now.get("trustsUpdates") is True
+
+        expect(_wait_for_disk(machine, carried, NOTICED_SECONDS),
+               f"uptime's updates are trusted and p2 asks for what pr3 asked, and {GRANTS} holds "
+               f"{((_read_json(machine, GRANTS) or {}).get('byPlugin') or {}).get(UPTIME)!r}, not a decision for p2's tree")
+        _the_card_without_asking(scene, UPTIME, "1.0.1", "after the trusted update")
+
+        ui.plugins_pane(machine, "opening Settings → Plugins to take the trust back")
+        _press(machine, f"plugin.{UPTIME}.trust", "unticking the trust in uptime's updates")
+
+        def taken_back():
+            now = ((_read_json(machine, GRANTS) or {}).get("byPlugin") or {}).get(UPTIME) or {}
+            return "trustsUpdates" not in now and now.get("decidedForTree") == record.get("tree")
+
+        expect(_wait_for_disk(machine, taken_back, NOTICED_SECONDS),
+               f"the trust switch was unticked, and {GRANTS} holds "
+               f"{((_read_json(machine, GRANTS) or {}).get('byPlugin') or {}).get(UPTIME)!r}")
+    finally:
+        scene.close()
+
+
 def check_window_survives_a_broken_manifest(machine, check_dir, lab):
     """A placed plugin's manifest broken over SSH keeps its window, which says what is wrong; mended, the card comes back.
 
