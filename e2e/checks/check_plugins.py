@@ -52,6 +52,7 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
 import json
 import re
 import shlex
@@ -8056,3 +8057,102 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+def check_panel_clicks(machine, check_dir, lab):
+    """Probe: a click on a field of a peek holds it; a click past the panel closes it after a menu went with the panel — a lab tree's only."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin and the stand-in CLI")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake}}}, "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Now", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 7, "height": 5}]}]}, "placing Agents")
+    log = panel.GestureLog(machine, lab.note)
+    log.keep("keeping uDeck's debug messages")
+    app.launch(machine)
+    machine.sleep(4)
+    story = panel.Story(machine, log, check_dir, lab.note)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=40)
+    machine.click(*new.middle, "＋")
+    machine.sleep(1)
+    option = ui.wait_for(machine, "row.button.new.new:claude", "a new Claude session", ui.PANEL, seconds=8)
+    machine.click(*option.middle, "a new Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "the folder")
+    machine.sleep(3)
+    ui.wait_for(machine, "row.input.message", "the field", ui.PANEL, seconds=30)
+    story.take("setting up")
+
+    # 1. A menu of the card open, and the panel put away with it open.
+    place = ui.wait_for(machine, "card.agents.place", "the place button", ui.PANEL, seconds=15)
+    machine.click(*place.middle, "opening the place menu")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "probe 1 the menu open")
+    panel.press_the_chord(machine, config.HOTKEY_KEY_CODE, "putting the panel away with the menu open")
+    machine.sleep(2)
+    print("PROBE 1 put away:", panel.phases(story.take("put away with the menu open")))
+    machine.screenshot(check_dir, "probe 1 put away")
+    panel.press_the_chord(machine, config.HOTKEY_KEY_CODE, "the panel again")
+    machine.sleep(2)
+    print("PROBE 1 again:", panel.phases(story.take("the panel again")))
+    machine.screenshot(check_dir, "probe 1 the panel again")
+    for attempt in (1, 2):
+        machine.move_pointer(*panel.past_the_panel(), "past the panel")
+        machine.sleep(1)
+        machine.click(*panel.past_the_panel(), f"a click past the panel, {attempt}")
+        machine.sleep(3)
+        said = story.take(f"the click past the panel {attempt}")
+        print(f"PROBE 1 click past {attempt}:", panel.phases(said), "| kept:", [l for l in said.splitlines() if "popover" in l or "own" in l][-3:])
+        machine.screenshot(check_dir, f"probe 1 after the click past {attempt}")
+        if any(p[1] == "collapsed" for p in panel.phases(said)):
+            break
+        _open_the_panel(machine, "putting it away to start over")
+        machine.sleep(1)
+
+    # 2. A peek, and a click on its field.
+    # Away for certain: Escape twice — the field first, then the panel.
+    machine.ssh.run("osascript -e 'tell application \"System Events\" to key code 53' -e 'delay 0.3' -e 'tell application \"System Events\" to key code 53'; exit 0", "escape", check=False)
+    machine.sleep(2)
+    print("PROBE 2 before:", panel.phases(story.take("before the reveal")))
+    for target in ("row.input.message", "card.agents.place"):
+        panel.park_in_the_middle(machine)
+        machine.sleep(1)
+        story.take("away")
+        try:
+            panel.reveal_a_peek(machine, story, f"the reveal before a click on {target}")
+        except Exception as error:  # noqa: BLE001
+            print(f"PROBE 2 {target}: no peek:", str(error)[-400:])
+            continue
+        try:
+            found = ui.wait_for(machine, target, f"{target} on the peek", ui.PANEL, seconds=10)
+        except Exception as error:  # noqa: BLE001
+            print(f"PROBE 2 {target}: not on the peek:", str(error)[-300:])
+            continue
+        x, y = found.middle
+        # The field itself; and, on the title line, well left of the place button: the card's name.
+        machine.click(x if target == "row.input.message" else x - 260, y, f"a click on {target} of the peek")
+        machine.sleep(2)
+        said = story.take(f"the click on {target}")
+        print(f"PROBE 2 click on {target}:", panel.phases(said))
+        machine.screenshot(check_dir, f"probe 2 after a click on {target}")
+        # Away again, by Escape twice (a field first, then the panel).
+        machine.ssh.run("osascript -e 'tell application \"System Events\" to key code 53' -e 'delay 0.3' -e 'tell application \"System Events\" to key code 53'; exit 0", "escape", check=False)
+        machine.sleep(2)
+        story.take("escaped")
+    story.keep()
