@@ -52,6 +52,7 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
 import json
 import re
 import shlex
@@ -8056,3 +8057,93 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+def _agents_pid(machine, step):
+    out = machine.ssh.ask("pgrep -f '/plugins/agents/agents' | head -1; exit 0", step).stdout.strip()
+    parent = machine.ssh.ask(f"ps -o ppid= -p {out} 2>/dev/null; ps -o comm= -p $(ps -o ppid= -p {out} 2>/dev/null) 2>/dev/null; exit 0",
+                             f"{step}: its parent").stdout.split() if out else []
+    print(step, "-> agents pid", out or "none", "parent", parent)
+    return out
+
+
+def check_agents_kept(machine, check_dir, lab):
+    """Agents in the helper: a question waiting survives uDeck quitting and being killed — a lab tree's only, never committed."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    fake_codex = f"{home}/lab-chat/fake-codex.py"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && cp {root}/Tests/fake-codex.py {shlex.quote(fake_codex)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin and the stand-in CLI")
+    _write(machine, SETTINGS, {"language": "ru"}, "uDeck in Russian")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake, "codex": fake_codex}}}, "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 7, "height": 5}]}]}, "placing Agents")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=40)
+    machine.click(*new.middle, "＋")
+    machine.sleep(1)
+    option = ui.wait_for(machine, "row.button.new.new:claude", "a new Claude session", ui.PANEL, seconds=8)
+    machine.click(*option.middle, "a new Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "the folder")
+    machine.sleep(3)
+    field = ui.wait_for(machine, "row.input.message", "the field", ui.PANEL, seconds=30)
+    machine.click(*field.middle, "focusing the field")
+    ui.type_text(machine, "Ask me a question", "typing")
+    ui.press_return(machine, "sending")
+    ui.wait_for(machine, "row.ask.opt:perm-q1:0", "the question", ui.PANEL, seconds=40)
+    machine.screenshot(check_dir, "kept 1 a question waits")
+    before = _agents_pid(machine, "before quitting")
+    print("helper:", machine.ssh.ask("pgrep -lf udeck-agentd; exit 0", "the helper").stdout.strip())
+    print("uDeck log:", machine.ssh.ask("/usr/bin/log show --last 3m --style compact --predicate 'subsystem BEGINSWITH \"place.unicorns.udeck\"' 2>/dev/null | grep -i -E 'resident|helper' | tail -12; exit 0", "the log").stdout[-2500:])
+
+    app.quit_app(machine, "quitting uDeck")
+    machine.sleep(3)
+    during = _agents_pid(machine, "with uDeck gone")
+    machine.screenshot(check_dir, "kept 2 uDeck gone")
+    app.launch(machine)
+    machine.sleep(6)
+    _open_the_panel(machine, "the panel after starting again")
+    machine.sleep(2)
+    after = _agents_pid(machine, "after starting again")
+    found = True
+    try:
+        answer = ui.wait_for(machine, "row.ask.opt:perm-q1:0", "the question, still waiting", ui.PANEL, seconds=20)
+    except Exception as error:  # noqa: BLE001 — a lab tree's gallery: say it and go on
+        found = False
+        print("the question did not come back:", str(error)[-500:])
+    machine.screenshot(check_dir, "kept 3 the question after uDeck started again")
+    print("SAME PROCESS:", before == during == after and bool(before), before, during, after, "question back:", found)
+    if found:
+        machine.click(*answer.middle, "answering it")
+        machine.sleep(4)
+        machine.screenshot(check_dir, "kept 4 answered after the restart")
+
+    # Killed outright: the same.
+    machine.ssh.run("pkill -9 -x uDeck; exit 0", "killing uDeck", check=False)
+    machine.sleep(3)
+    killed = _agents_pid(machine, "with uDeck killed")
+    app.launch(machine)
+    machine.sleep(6)
+    _open_the_panel(machine, "the panel after a crash")
+    machine.sleep(3)
+    again = _agents_pid(machine, "after a crash")
+    machine.screenshot(check_dir, "kept 5 after a crash")
+    print("SAME AFTER A CRASH:", before == killed == again, killed, again)
+    print("uDeck log after:", machine.ssh.ask("/usr/bin/log show --last 2m --style compact --predicate 'subsystem BEGINSWITH \"place.unicorns.udeck\"' 2>/dev/null | grep -i -E 'resident|helper' | tail -12; exit 0", "the log").stdout[-2500:])
