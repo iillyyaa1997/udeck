@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: SettingsWindowController!
     /// The windows that show a card away from the panel (`WindowPlace`).
     private var places: PlacesController!
+    /// What waits for the person, said beside a notch (`NotchMarks`).
+    private var notchMarks: NotchMarks!
     /// The language the main menu was last built in: it is built again only
     /// when that changes, not on every change of a setting — a slider dragged
     /// in Look fires many a second, and a menu replaced while it is open closes.
@@ -146,6 +148,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A plugin asked for its window on the board: the panel comes out.
         model.onRevealPanel = { [weak controller] in controller?.reveal() }
         places.sync()
+        // Beside every notch: ears or a glow while something waits. Placed
+        // again when the screens change, after the observer has read them.
+        let marks = NotchMarks(model: model)
+        self.notchMarks = marks
+        marks.sync(screens: screens.screens)
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                guard let self else { return }
+                self.notchMarks?.sync(screens: self.screens.screens)
+            }
+        }
         // The panel sits above ordinary windows, so leaving it open would put
         // it on top of the settings it was asked to show.
         // And it closes for Settings, not like an Escape: an Escape brings back
