@@ -280,7 +280,11 @@ What uDeck writes:
 
 * `hello` — first, and again after each restart: the card's size in grid cells
   and uDeck's language. Draw for that size: a small card wants less on it.
-* `size` — the card was resized.
+* `size` — the card was resized, or shown somewhere else. The person can show
+  any card as a whole tab of the panel, in a window of its own or in a mini
+  window above every other (uDeck 0.9.8 and later): the size is then that
+  place's, in the same grid cells, so a card drawn for its size looks right
+  wherever it is. A mini window is about three rows high.
 * `select` — a chip was chosen; `press` — a button was pressed (an `ask` answer,
   an `input`'s Stop); `submit` — text was sent from an `input` row.
 * `folder` — the answer to a `pick`; `path` is absent when the person cancelled.

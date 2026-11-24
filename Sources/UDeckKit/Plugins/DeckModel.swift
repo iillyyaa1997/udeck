@@ -366,6 +366,23 @@ public final class DeckModel {
     /// current as the last thing that told it.
     public var onPluginsChanged: (() -> Void)?
 
+    /// A window was shown in another place, or brought back to its cell: the
+    /// shell opens or closes the windows of uDeck's own that show cards
+    /// (`PlacesController`).
+    public var onPlacesChanged: (() -> Void)?
+    /// **Show** on a cell whose window is shown elsewhere: the shell brings
+    /// that window, or that tab, to the front.
+    public var onBringPlaceForward: ((UUID) -> Void)?
+    /// Where a window shown away from its cell is, the size it has there in
+    /// cells: what its plugin is told (`ResidentEvent.size`).
+    public internal(set) var placeSizes: [UUID: CellSize] = [:]
+    /// The window whose card the panel shows as a whole tab now, chosen in
+    /// its tab bar (`WindowPlace.tab`); nil while a tab of the board is shown.
+    public internal(set) var tabShown: UUID?
+    /// The width of one column on the board as it was last drawn: what a
+    /// window shown elsewhere is measured in.
+    var gridColumnWidth: CGFloat = 150
+
     let paths: UDeckPaths
     private let executor: PollExecutor
     /// Resident plugins' processes (`ResidentRuns`).
@@ -672,7 +689,10 @@ public final class DeckModel {
     /// loop was not running before and is now.
     @discardableResult
     public func restartPolling(again: Bool = false) -> Set<String> {
+        // A card shown in a window of its own is on the screen whether or not
+        // the panel is: it is kept up to date as the open panel's are.
         let polling = panelIsVisible || settings.pollWhileCollapsed
+            || layout.windowsAway.contains { $0.place.isOwnWindow }
         if !polling { refreshTask?.cancel() }
         let pluginRuns = self.pluginRuns
         let wanted = PollLoops.wanted(plugins, placed: placedPluginIDs, grants: grants, settings: pluginSettings,
@@ -738,7 +758,12 @@ public final class DeckModel {
                 environment: environment, directory: plugin.directory,
                 basis: (treeLastHashed(for: manifest.id) ?? "") + "|" + String(describing: grants[manifest.id])))
             if let window = layout.tabs.flatMap(\.windows).first(where: { $0.pluginID == manifest.id }) {
-                sizes[manifest.id] = (window.width, window.height)
+                // Shown elsewhere, it is told the size it has there.
+                if window.place.isAway, let size = placeSizes[window.id] {
+                    sizes[manifest.id] = (size.columns, size.rows)
+                } else {
+                    sizes[manifest.id] = (window.width, window.height)
+                }
             }
         }
         residents.reconcile(wanted, sizes: sizes)
@@ -877,8 +902,16 @@ public final class DeckModel {
     // MARK: - Layout editing
 
     public func selectTab(_ id: UUID) {
+        tabShown = nil
         layout.selectedTabID = id
         saveLayout()
+    }
+
+    /// Shows the card of the window with `id`, shown as a whole tab, in the
+    /// panel (`tabShown`).
+    public func selectTabShown(_ id: UUID) {
+        guard layout.window(withID: id)?.window.place == .tab else { return }
+        tabShown = id
     }
 
     @discardableResult
@@ -1239,6 +1272,9 @@ public final class DeckModel {
 
     func saveLayout() {
         save(layoutStore, layout, named: "layout")
+        // Every change of the layout may show a card in a window of its own,
+        // or take one away with its window or its tab (`PlacesController`).
+        onPlacesChanged?()
     }
 
     func savePluginSettings() {

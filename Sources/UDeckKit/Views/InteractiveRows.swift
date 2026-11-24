@@ -67,6 +67,11 @@ struct FeedRowView: View {
                 .padding(.vertical, 8)
                 .padding(.horizontal, 10)
             }
+            // Shown again — back from a window of its own, a tab switched to —
+            // it opens on the newest entry: scrolling there on appearing alone
+            // landed half-way, the lazy stack not laid out yet. Only where it
+            // starts: a short conversation stays at the top, not pushed down.
+            .modifier(StartsAtTheBottom())
             .background(RoundedRectangle(cornerRadius: 10).fill(theme.backing))
             // It gives way first: a question or the field under it is never
             // pushed out, nor the title line above.
@@ -74,7 +79,13 @@ struct FeedRowView: View {
             .onChange(of: entries.last.map { $0.id + String($0.text.count) + String($0.detail?.count ?? 0) }) {
                 proxy.scrollTo("feed-end", anchor: .bottom)
             }
-            .onAppear { proxy.scrollTo("feed-end", anchor: .bottom) }
+            // Again once the lazy stack has been laid out: on appearing alone
+            // it measured entries not drawn yet and stopped half-way.
+            .onAppear {
+                proxy.scrollTo("feed-end", anchor: .bottom)
+                DispatchQueue.main.async { proxy.scrollTo("feed-end", anchor: .bottom) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { proxy.scrollTo("feed-end", anchor: .bottom) }
+            }
         }
     }
 }
@@ -652,5 +663,17 @@ extension Card {
     /// Whether the card holds a conversation, which takes the window's room.
     var hasFeed: Bool {
         rows.contains { if case .feed = $0 { true } else { false } }
+    }
+}
+
+/// A scroll view that starts at its bottom, and otherwise lays out as any:
+/// where the system can say so (macOS 15), for the first offset only.
+private struct StartsAtTheBottom: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content.defaultScrollAnchor(.bottom, for: .initialOffset)
+        } else {
+            content
+        }
     }
 }

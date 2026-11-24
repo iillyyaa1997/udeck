@@ -27,6 +27,22 @@ public struct GridWindow: Identifiable, Codable, Equatable, Sendable {
     /// An operator-supplied title, overriding the plugin's own.
     public var title: String?
 
+    /// Where the window is shown, by name (`place`): nil for its cell. Kept
+    /// as written, so that a place a later uDeck adds reads here as the cell
+    /// rather than failing the whole layout.
+    public var shownIn: String?
+
+    /// Where its own window, and its mini window, were last on the screen —
+    /// by the place's name, x, y, width and height in points, the origin
+    /// bottom-left as AppKit counts — so that each opens there again. A mini
+    /// window is not the size of a window. Nil until it has been shown so.
+    public var placeFrames: [String: [Double]]?
+
+    /// Where it was last on the screen shown in `place`.
+    public func frame(in place: WindowPlace) -> [Double]? {
+        placeFrames?[place.rawValue]
+    }
+
     public init(
         id: UUID = UUID(),
         pluginID: PluginIdentifier,
@@ -45,6 +61,13 @@ public struct GridWindow: Identifiable, Codable, Equatable, Sendable {
         self.title = title
     }
 
+    /// Where the window is shown: its cell on the board, a whole tab of the
+    /// panel, a window of its own, or a mini window above every other.
+    public var place: WindowPlace {
+        get { shownIn.flatMap(WindowPlace.init(rawValue:)) ?? .card }
+        set { shownIn = newValue == .card ? nil : newValue.rawValue }
+    }
+
     public var columnRange: Range<Int> { column ..< (column + width) }
     public var rowRange: Range<Int> { row ..< (row + height) }
 
@@ -60,5 +83,46 @@ public struct GridWindow: Identifiable, Codable, Equatable, Sendable {
         let w = CGFloat(width) * columnWidth + CGFloat(width - 1) * spacing
         let h = CGFloat(height) * rowHeight + CGFloat(height - 1) * spacing
         return CGRect(x: x, y: y, width: w, height: h)
+    }
+}
+
+/// Where a window of the board is shown. Every place shows the same card; the
+/// plugin is told the size it has there and draws for it.
+public enum WindowPlace: String, Codable, Sendable, CaseIterable {
+    /// Its cell on the board, as always.
+    case card
+    /// A whole tab of the panel, named after it; its cell says where it went.
+    case tab
+    /// An ordinary window of its own; closing it brings the card back.
+    case window
+    /// A small window above every other, full-screen apps' too, that takes
+    /// the keyboard only when clicked; closing it brings the card back.
+    case mini
+
+    /// Whether it is shown away from its cell, which then says where it went.
+    public var isAway: Bool { self != .card }
+
+    /// Whether it is shown in a window of uDeck's own outside the panel.
+    public var isOwnWindow: Bool { self == .window || self == .mini }
+}
+
+/// A size in cells of the board.
+public struct CellSize: Equatable, Sendable {
+    public var columns: Int
+    public var rows: Int
+
+    public init(columns: Int, rows: Int) {
+        self.columns = columns
+        self.rows = rows
+    }
+
+    /// The cells `points` hold, one column `columnWidth` wide and one row
+    /// `rowHeight` high, `spacing` between them: whole cells, at least one.
+    public static func of(_ points: CGSize, columnWidth: CGFloat, rowHeight: CGFloat, spacing: CGFloat) -> CellSize {
+        func cells(_ length: CGFloat, _ cell: CGFloat) -> Int {
+            guard cell > 0, length.isFinite else { return 1 }
+            return max(1, Int(((length + spacing) / (cell + spacing)).rounded(.down)))
+        }
+        return CellSize(columns: cells(points.width, columnWidth), rows: cells(points.height, rowHeight))
     }
 }

@@ -124,6 +124,15 @@ struct AgentsCardTests {
         let opened = try #require(said.last.flatMap { JSONValue.line(Substring($0)) }?["card"]?["rows"]?.array)
         #expect(opened.first?["bar"]?["items"]?.array?.first?["title"]?["text"]?.string == "fix the build")
         #expect(opened.dropFirst().first?["bar"]?["id"]?.string == "status")
+        // Three rows high — a mini window: what it does goes into the title
+        // line, in place of the provider, and the line of badges goes.
+        await app.handle(#"{"event":"size","size":{"columns":4,"rows":3}}"#)
+        let mini = try #require(said.last.flatMap { JSONValue.line(Substring($0)) }?["card"]?["rows"]?.array)
+        let miniHead = try #require(mini.first?["bar"]?["items"]?.array)
+        #expect(miniHead.contains { $0["badge"]?["text"]?.string == "Только просмотр" })
+        #expect(!miniHead.contains { $0["tag"] != nil })
+        #expect(!mini.contains { $0["bar"]?["id"]?.string == "status" })
+        #expect(mini.contains { $0["input"] != nil })
     }
 
     @MainActor

@@ -25,6 +25,12 @@ enum AgentsCard {
 
     static func narrow(_ app: AgentsApp) -> Bool { app.size.columns <= 4 }
 
+    /// Low enough that a line of badges and the menus by the field would
+    /// leave the conversation no room — a mini window above the other
+    /// windows: what the session is doing goes into the title line, and the
+    /// field is a field.
+    static func compact(_ app: AgentsApp) -> Bool { app.size.rows == 3 }
+
     // MARK: - The title line
 
     static func header(_ app: AgentsApp) -> JSONValue {
@@ -34,7 +40,13 @@ enum AgentsCard {
         if let session { title["tone"] = .string(tone(session, app)) }
         items.append(["title": .object(title)])
         items.append(["menu": sessionMenu(app)])
-        if let session { items.append(["tag": .string(session.active.name)]) }
+        if let session {
+            if compact(app) {
+                items.append(["badge": stateBadge(session, app)])
+            } else {
+                items.append(["tag": .string(session.active.name)])
+            }
+        }
         let others = app.conversations.filter { $0.id != session?.id }
         let waiting = others.filter { $0.current.waiting > 0 }.count
         if narrow(app) {
@@ -95,7 +107,7 @@ enum AgentsCard {
                         "No sessions. Start one with ＋ at the top right, or continue a saved one from the menu by the name")
                 : app.t("Выберите сессию в меню рядом с названием", "Choose a session from the menu by the name"))]]
         }
-        var rows: [JSONValue] = [status(session, app)]
+        var rows: [JSONValue] = compact(app) ? [] : [status(session, app)]
         // The card is sent whole on every change, five times a second while
         // words stream in, and uDeck lays all of it out: the newest entries
         // only, and no entry longer than a screenful.
@@ -173,7 +185,7 @@ enum AgentsCard {
             "enabled": .bool(!agent.isEnded && !held),
         ]
         if agent.state == .working { input["stop"] = "stop" }
-        guard !held, !agent.isEnded else { return .object(input) }
+        guard !held, !agent.isEnded, !compact(app) else { return .object(input) }
         var pickers: [JSONValue] = []
         if case .claude(let claude) = agent, app.accounts.count > 1 {
             pickers.append(["id": "account", "text": .string(accountName(claude.account, app)),
