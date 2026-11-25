@@ -849,6 +849,9 @@ public enum Phrase: Sendable, Equatable {
     /// The panel field's buttons, for their help and VoiceOver.
     case inputSend
     case inputStop
+    case inputAttach
+    case inputRemoveFile
+    case inputDropFiles
     case emptyNoPlugins
     case emptyTabEmpty
     case emptyNoPluginsBody(path: String)

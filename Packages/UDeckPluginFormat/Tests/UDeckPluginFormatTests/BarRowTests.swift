@@ -107,6 +107,22 @@ struct BarRowTests {
         #expect(drawn.rows.last == .text("this card is longer than uDeck will draw and has been cut short"))
     }
 
+    @Test("an input that takes files says so; submit carries their paths, and only when there are some")
+    func inputFiles() throws {
+        let json = #"{"rows":[{"input":{"id":"message","placeholder":"Message","files":true}}]}"#
+        let card = try JSONDecoder().decode(Card.self, from: Data(json.utf8))
+        guard case .input(let input) = card.rows[0] else {
+            Issue.record("not an input")
+            return
+        }
+        #expect(input.files == true)
+        #expect(ResidentEvent.submit(row: "message", text: "look", files: ["/tmp/a.png", "/tmp/b.txt"]).line
+                    == #"{"event":"submit","files":["\/tmp\/a.png","\/tmp\/b.txt"],"row":"message","text":"look"}"#)
+        #expect(ResidentEvent.submit(row: "message", text: "look").line == #"{"event":"submit","row":"message","text":"look"}"#)
+        let object = try #require(StrictJSON.parse(Array(json.utf8)).value?.object)
+        #expect(ContractFeatures.used(byCard: object).contains(.rowField(row: "input", field: "files")))
+    }
+
     @Test("a menu option's button reads with it; one that is not a button is left out, the option kept")
     func optionButton() throws {
         let json = #"""

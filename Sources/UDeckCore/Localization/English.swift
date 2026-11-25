@@ -729,6 +729,9 @@ struct English: Vocabulary {
         case .feedActionFailed: "failed"
         case .inputSend: "Send"
         case .inputStop: "Stop"
+        case .inputAttach: "Attach files"
+        case .inputRemoveFile: "Remove"
+        case .inputDropFiles: "Drop to attach to the message"
         case .cardUnsupportedRow(let kind):
             "this plugin sent a \"\(kind)\" row, which this version of uDeck does not draw"
         case .emptyNoPlugins: "No plugins installed"

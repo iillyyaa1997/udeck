@@ -148,7 +148,10 @@ public final class AgentsApp {
         case "press":
             press(event["id"]?.string ?? "")
         case "submit":
-            if let text = event["text"]?.string, !renameFromTheField(text) { selected?.send(text) }
+            let text = event["text"]?.string ?? ""
+            let files = (event["files"]?.array ?? []).compactMap(\.string)
+            if files.isEmpty, renameFromTheField(text) { break }
+            selected?.send(text, files: files)
         case "folder":
             let id = event["id"]?.string ?? ""
             if id.hasPrefix("new"), let path = event["path"]?.string {

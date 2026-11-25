@@ -267,6 +267,8 @@ enum AgentsCard {
             "enabled": .bool(!agent.isEnded && !held),
         ]
         if agent.state == .working { input["stop"] = "stop" }
+        // Files go with a message: pictures as pictures, the rest by path (uDeck 0.9.17).
+        if !held, !agent.isEnded { input["files"] = true }
         guard !held, !agent.isEnded, !compact(app) else { return .object(input) }
         var pickers: [JSONValue] = []
         if case .claude(let claude) = agent, app.accounts.count > 1 {

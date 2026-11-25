@@ -125,7 +125,7 @@ public final class ChatSession: Identifiable {
     @ObservationIgnored public var onLimit: ((Date?) -> Void)?
     /// The last message sent, as shown and as told: what to send again
     /// where the session goes on after a limit.
-    public private(set) var lastSent: (text: String, payload: String?)?
+    public private(set) var lastSent: (text: String, payload: String?, images: [(mediaType: String, base64: String)])?
     /// A limit the CLI said it refused this turn over.
     @ObservationIgnored private var refused: ClaudeRateLimit?
 
@@ -281,23 +281,23 @@ public final class ChatSession: Identifiable {
     /// `payload`, when given, is what the agent is told instead of what the
     /// feed shows — the conversation so far, when it has just been handed
     /// over.
-    public func send(_ text: String, payload: String? = nil) {
-        send(text, payload: payload, again: false)
+    public func send(_ text: String, payload: String? = nil, images: [(mediaType: String, base64: String)] = []) {
+        send(text, payload: payload, images: images, again: false)
     }
 
     /// The message a turn stopped at, sent again where the session goes on —
     /// already in the feed, so not put there twice.
     public func sendAgain() {
         guard let lastSent else { return }
-        send(lastSent.text, payload: lastSent.payload, again: true)
+        send(lastSent.text, payload: lastSent.payload, images: lastSent.images, again: true)
     }
 
-    private func send(_ text: String, payload: String?, again: Bool) {
+    private func send(_ text: String, payload: String?, images: [(mediaType: String, base64: String)], again: Bool) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let connection, !isEnded else { return }
         let told = payload ?? text
         let id = UUID()
-        lastSent = (text, payload)
+        lastSent = (text, payload, images)
         if state == .working || pendingTurns > 0 { queued.append(id) }
         if !again { items.append(.user(id: id, text: text)) }
         unconfirmed.append(told)
@@ -307,7 +307,7 @@ public final class ChatSession: Identifiable {
         if titleSource < .firstWords, let words = ChatNames.firstWords(text) { name(words, from: .firstWords) }
         Task {
             do {
-                try await connection.send(ClaudeOutbound.userMessage(told))
+                try await connection.send(ClaudeOutbound.userMessage(told, images: images))
             } catch {
                 self.note("not sent: the session has ended")
             }

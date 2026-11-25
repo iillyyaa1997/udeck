@@ -140,7 +140,7 @@ def name(text):
          "session_id": SESSION, "total_cost_usd": 0})
 
 
-def turn(text):
+def turn(text, pictures=0):
     if NAMING:
         name(text)
         return
@@ -154,6 +154,8 @@ def turn(text):
     out({"type": "system", "subtype": "init", "session_id": SESSION, "model": "claude-fake-1-0",
          "permissionMode": "default", "cwd": os.getcwd(), "claude_code_version": "2.1.330",
          "slash_commands": ["compact", "review"], "capabilities": []})
+    if pictures:
+        say(("Вижу картинок: %d." if russian else "I see %d picture(s).") % pictures)
     if "question" in text.lower() or "вопрос" in text.lower():
         tool_id = "toolu_q%d" % n
         questions = [{"question": "Which colour should the badge be?", "header": "Colour", "multiSelect": False,
@@ -217,5 +219,5 @@ while True:
             out({**message, "isReplay": True, "uuid": "echo-%d" % time.time_ns(), "session_id": SESSION})
         content = message.get("message", {}).get("content", [])
         text = " ".join(part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text")
-        turn(text)
+        turn(text, sum(1 for part in content if isinstance(part, dict) and part.get("type") == "image"))
 sys.exit(0)

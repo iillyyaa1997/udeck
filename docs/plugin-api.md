@@ -314,7 +314,9 @@ What uDeck writes:
   place's, in the same grid cells, so a card drawn for its size looks right
   wherever it is. A mini window is about three rows high.
 * `select` — a chip was chosen; `press` — a button was pressed (an `ask` answer,
-  an `input`'s Stop); `submit` — text was sent from an `input` row.
+  an `input`'s Stop); `submit` — text was sent from an `input` row, with
+  `files` — absolute paths — when the row takes files and some went with it
+  (uDeck 0.9.17 and later; the text may then be empty).
 * `folder` — the answer to a `pick`; `path` is absent when the person cancelled.
 * `choose` — an option of a menu was chosen (a `bar`'s menu or button, an
   `input`'s picker): the row's `id`, the menu's or button's `id`, the option's
@@ -521,6 +523,12 @@ knows nothing of what they are for.
 * `input` — a text field; Return sends `submit` with the row's `id` and the
   text, Shift-Return starts a new line. `enabled: false` greys it out; `stop`,
   when present, adds a Stop button that sends `press` with that id.
+  `files: true` (uDeck 0.9.17 and later) lets files go with the text: dragged
+  onto the field, pasted with ⌘V — a screenshot on the clipboard too — or
+  chosen with 📎. They show above the text, each with ✕, and `submit` carries
+  their paths in `files`; a pasted picture is written to a PNG file in uDeck's
+  temporary folder first. A uDeck before it ignores the field and sends text
+  only.
 
 uDeck 0.9.4 adds a fifth row, menus, and more to say in a feed:
 

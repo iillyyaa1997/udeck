@@ -171,8 +171,9 @@ public enum ResidentEvent: Equatable, Sendable {
     case select(id: String)
     /// A button was pressed (an ask's answer, Stop).
     case press(id: String)
-    /// Text was sent from an `input` row.
-    case submit(row: String, text: String)
+    /// Text was sent from an `input` row, and the files sent with it: absolute
+    /// paths, for a row that takes files (`InputRow.files`, 0.9.17).
+    case submit(row: String, text: String, files: [String] = [])
     /// The folder the person chose for a `pick` request; nil when they cancelled.
     case folder(id: String, path: String?)
     /// A notification the plugin asked for was clicked — or one of its
@@ -219,6 +220,7 @@ public enum ResidentEvent: Equatable, Sendable {
         var place: String?
         var keep: String?
         var to: String?
+        var files: [String]?
     }
 
     /// The event as one line for the plugin's stdin.
@@ -233,7 +235,9 @@ public enum ResidentEvent: Equatable, Sendable {
         case .size(let columns, let rows): wire = Wire(event: "size", size: .init(columns: columns, rows: rows))
         case .select(let id): wire = Wire(event: "select", id: id)
         case .press(let id): wire = Wire(event: "press", id: id)
-        case .submit(let row, let text): wire = Wire(event: "submit", row: row, text: text)
+        case .submit(let row, let text, let files):
+            wire = Wire(event: "submit", row: row, text: text)
+            if !files.isEmpty { wire.files = files }
         case .folder(let id, let path): wire = Wire(event: "folder", id: id, path: path)
         case .notification(let id, let action, let text):
             wire = Wire(event: "notification", id: id, text: text)

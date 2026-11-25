@@ -212,6 +212,10 @@ public enum ContractFeatures {
         let optionButtonRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 14))
         add(optionButtonRelease, [.rowField(row: "menu.options", field: "button")])
         add(optionButtonRelease, ["id", "label"].map { .rowField(row: "menu.options.button", field: $0) })
+
+        // Files sent with a message — dragged, pasted, chosen with 📎: the
+        // release after 0.9.16.
+        add(.next, [.rowField(row: "input", field: "files")])
         return registry
     }()
 

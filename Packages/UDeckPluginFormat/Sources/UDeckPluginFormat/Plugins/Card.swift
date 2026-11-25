@@ -260,17 +260,23 @@ public struct InputRow: Codable, Equatable, Sendable {
     public var enabled: Bool?
     public var stop: String?
     public var pickers: [CardMenu]?
+    /// Files may go with the text (0.9.17): dragged onto the field, pasted
+    /// with ⌘V — a screenshot too — or chosen with 📎. They are shown above
+    /// the text and sent with it in `submit` as `files`, absolute paths; a
+    /// pasted picture is written to a file first.
+    public var files: Bool?
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case id, placeholder, enabled, stop, pickers }
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, placeholder, enabled, stop, pickers, files }
 
     public init(id: String, placeholder: String? = nil, enabled: Bool? = nil, stop: String? = nil,
-                pickers: [CardMenu]? = nil)
+                pickers: [CardMenu]? = nil, files: Bool? = nil)
     {
         self.id = id
         self.placeholder = placeholder
         self.enabled = enabled
         self.stop = stop
         self.pickers = pickers
+        self.files = files
     }
 }
 

@@ -750,6 +750,9 @@ struct Russian: Vocabulary {
         case .feedActionFailed: "ошибка"
         case .inputSend: "Отправить"
         case .inputStop: "Остановить"
+        case .inputAttach: "Прикрепить файлы"
+        case .inputRemoveFile: "Убрать"
+        case .inputDropFiles: "Отпусти — файл прикрепится к сообщению"
         case .cardUnsupportedRow(let kind):
             "плагин прислал строку «\(kind)», которую эта версия uDeck не рисует"
         case .emptyNoPlugins: "Плагины не установлены"

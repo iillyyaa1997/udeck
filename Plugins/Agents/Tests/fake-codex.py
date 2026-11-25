@@ -13,6 +13,7 @@ import uuid
 
 DELAY = 0.05
 THREAD = "fake-thread-" + uuid.uuid4().hex[:8]
+PICTURES = 0  # pictures that came with the turn being played
 NAMING = False  # a thread of the plugin's namer: one answer, a name, for a message with "[name-me]"
 pending = {}  # server request id -> the turn waiting on it
 next_request = 1000
@@ -63,7 +64,8 @@ def start_turn(request_id, text):
     note("account/rateLimits/updated", {"rateLimits": {
         "primary": {"usedPercent": 81, "windowDurationMins": 300, "resetsAt": 4102444800},
         "secondary": {"usedPercent": 13, "windowDurationMins": 10080, "resetsAt": 4102444800}}})
-    say(turn, "Picking up from what was handed over." if "[This conversation" in text else "Looking at it.")
+    say(turn, "Picking up from what was handed over." if "[This conversation" in text
+        else "Looking at it and at %d picture(s)." % PICTURES if PICTURES else "Looking at it.")
     next_request += 1
     pending[next_request] = turn
     out({"id": next_request, "method": "item/commandExecution/requestApproval",
@@ -119,6 +121,7 @@ while True:
         out({"id": request_id, "result": {"thread": {"id": THREAD}, "model": "fake-codex-1", "reasoningEffort": "medium"}})
     elif method == "turn/start":
         text = " ".join(part.get("text", "") for part in params.get("input", []))
+        PICTURES = sum(1 for part in params.get("input", []) if part.get("type") == "local_image" and part.get("path"))
         start_turn(request_id, text)
     elif method == "thread/list":
         out({"id": request_id, "result": {"data": [

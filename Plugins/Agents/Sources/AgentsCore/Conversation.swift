@@ -156,10 +156,10 @@ public enum Agent {
     }
 
     /// Sends a message: `shown` into the feed, `text` to the agent.
-    public func send(_ shown: String, text: String? = nil) {
+    public func send(_ shown: String, text: String? = nil, files: SentFiles = SentFiles(paths: [])) {
         switch self {
-        case .claude(let session): session.send(shown, payload: text)
-        case .codex(let session): session.send(shown, text: text)
+        case .claude(let session): session.send(shown, payload: text, images: files.claudeImages())
+        case .codex(let session): session.send(shown, text: text, pictures: files.pictures.map(\.path))
         }
     }
 
@@ -289,9 +289,12 @@ public final class Conversation: Identifiable {
     }
 
     /// The person's next message, with what the provider was handed.
-    public func send(_ text: String) {
+    /// A message, and the files that go with it (`SentFiles`).
+    public func send(_ text: String, files paths: [String] = []) {
+        let files = SentFiles(paths: paths)
+        let (shown, told) = files.message(text)
         let handed = preamble.removeValue(forKey: active)
-        current.send(text, text: handed.map { $0 + "\n\n" + text })
+        current.send(shown, text: handed.map { $0 + "\n\n" + told } ?? (told == shown ? nil : told), files: files)
     }
 
     /// What happened in the segments after `since` — the provider's last

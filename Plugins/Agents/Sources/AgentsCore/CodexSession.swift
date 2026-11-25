@@ -79,7 +79,7 @@ public final class CodexSession: Identifiable {
     /// Messages sent while a turn ran, oldest first, with what Codex is to
     /// be told: each starts a turn when the one before it is done.
     public private(set) var queued: [UUID] = []
-    @ObservationIgnored private var waiting: [(id: UUID, text: String)] = []
+    @ObservationIgnored private var waiting: [(id: UUID, text: String, pictures: [String])] = []
 
     @ObservationIgnored public var onAsk: ((CodexAsk) -> Void)?
     @ObservationIgnored public var onTurnFinished: ((String) -> Void)?
@@ -216,7 +216,8 @@ public final class CodexSession: Identifiable {
 
     /// A turn: `shown` is what the feed shows, `text` what Codex is given
     /// (the conversation so far, when it has just been handed over).
-    public func send(_ shown: String, text: String? = nil) {
+    /// `pictures`: paths of pictures that go with it, which Codex looks at.
+    public func send(_ shown: String, text: String? = nil, pictures: [String] = []) {
         let shown = shown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !shown.isEmpty, let connection, let threadID, !isEnded else { return }
         let id = UUID()
@@ -224,18 +225,20 @@ public final class CodexSession: Identifiable {
         if titleSource < .firstWords, let words = ChatNames.firstWords(shown) { name(words, from: .firstWords) }
         if state == .working {
             queued.append(id)
-            waiting.append((id, text ?? shown))
+            waiting.append((id, text ?? shown, pictures))
             return
         }
-        startTurn(text ?? shown, connection: connection, threadID: threadID)
+        startTurn(text ?? shown, pictures: pictures, connection: connection, threadID: threadID)
     }
 
-    private func startTurn(_ text: String, connection: CodexConnection, threadID: String) {
+    private func startTurn(_ text: String, pictures: [String] = [], connection: CodexConnection, threadID: String) {
         state = .working
         if turnStartedAt == nil { turnStartedAt = Date() }
+        let input: [JSONValue] = [["type": "text", "text": .string(text)]]
+            + pictures.map { ["type": "local_image", "path": .string($0)] }
         var params: [String: JSONValue] = [
             "threadId": .string(threadID),
-            "input": [["type": "text", "text": .string(text)]],
+            "input": .array(input),
         ]
         if let chosenModel { params["model"] = .string(chosenModel) }
         if let effort { params["effort"] = .string(effort) }
@@ -312,7 +315,7 @@ public final class CodexSession: Identifiable {
                     let next = waiting.removeFirst()
                     queued.removeAll { $0 == next.id }
                     turnStartedAt = nil
-                    startTurn(next.text, connection: connection, threadID: threadID)
+                    startTurn(next.text, pictures: next.pictures, connection: connection, threadID: threadID)
                     return
                 }
                 state = .idle

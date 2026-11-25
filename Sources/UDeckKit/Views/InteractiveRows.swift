@@ -1,5 +1,7 @@
+import AppKit
 import SwiftUI
 import UDeckCore
+import UniformTypeIdentifiers
 
 /// The rows a resident plugin's card may take input with — chips, a feed, an
 /// ask, a text field. uDeck draws them; what the person does goes back to the
@@ -298,18 +300,126 @@ struct InputRowView: View {
         Binding(get: { draft }, set: { draft = $0 })
     }
 
+    /// The files going with the message, kept outside the view as the text is.
+    private var files: [URL] {
+        get { Drafts.shared.files[key] ?? [] }
+        nonmutating set { Drafts.shared.files[key] = newValue.isEmpty ? nil : newValue }
+    }
+
+    private var takesFiles: Bool { input.files == true && input.enabled != false }
+
+    @FocusState private var focused: Bool
+    @State private var dropping = false
+    /// The ⌘V watcher while the field is focused: a paste of files or of a
+    /// picture attaches it, a paste of text is the field's.
+    @State private var pasteWatcher: Any?
+
     var body: some View {
-        if let pickers = input.pickers, !pickers.isEmpty {
-            panel(pickers)
-        } else {
-            line
+        Group {
+            if let pickers = input.pickers, !pickers.isEmpty {
+                panel(pickers)
+            } else {
+                line
+            }
         }
+        .onDrop(of: [.fileURL], isTargeted: takesFiles ? $dropping : .constant(false)) { providers in
+            guard takesFiles else { return false }
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, url.isFileURL else { return }
+                    DispatchQueue.main.async { attach([url]) }
+                }
+            }
+            return true
+        }
+        .overlay {
+            if dropping {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                    .background(RoundedRectangle(cornerRadius: 12).fill(theme.backing.opacity(0.85)))
+                    .overlay(Text(strings(.inputDropFiles)).font(theme.smallFont).foregroundStyle(Color.accentColor))
+                    .accessibilityIdentifier("row.input.\(input.id).drop")
+            }
+        }
+        .onChange(of: focused) { _, now in watchPastes(now && takesFiles) }
+        .onDisappear { watchPastes(false) }
+    }
+
+    private func attach(_ urls: [URL]) {
+        var now = files
+        for url in urls where !now.contains(url) { now.append(url) }
+        files = Array(now.prefix(Self.mostFiles))
+    }
+
+    /// No more files than this go with one message.
+    static let mostFiles = 10
+
+    private func watchPastes(_ on: Bool) {
+        if let pasteWatcher { NSEvent.removeMonitor(pasteWatcher) }
+        pasteWatcher = nil
+        guard on else { return }
+        pasteWatcher = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.charactersIgnoringModifiers?.lowercased() == "v",
+                  let pasted = PastedFiles.take(from: .general) else { return event }
+            attach(pasted)
+            return nil
+        }
+    }
+
+    private func chooseFiles() {
+        attach(FilePicker.files(prompt: strings(.inputAttach)))
+    }
+
+    /// The files above the text: a picture by its thumbnail, any other by its
+    /// icon, each with ✕.
+    @ViewBuilder
+    private var attachments: some View {
+        if takesFiles, !files.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(Array(files.enumerated()), id: \.element) { index, url in
+                        HStack(spacing: 5) {
+                            Image(nsImage: PastedFiles.thumbnail(of: url))
+                                .resizable().aspectRatio(contentMode: .fill)
+                                .frame(width: 22, height: 22).clipShape(RoundedRectangle(cornerRadius: 4))
+                            Text(url.lastPathComponent).font(theme.smallFont).lineLimit(1).truncationMode(.middle)
+                                .frame(maxWidth: 160, alignment: .leading)
+                            Button { files = files.filter { $0 != url } } label: {
+                                Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                            }
+                            .buttonStyle(.plain)
+                            .help(strings(.inputRemoveFile))
+                            .accessibilityIdentifier("row.input.\(input.id).file.\(index).remove")
+                        }
+                        .foregroundStyle(theme.text)
+                        .padding(.leading, 3).padding(.trailing, 7).padding(.vertical, 3)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(theme.subtleFill))
+                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.accentColor.opacity(0.5), lineWidth: 1))
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("row.input.\(input.id).file.\(index)")
+                    }
+                }
+            }
+        }
+    }
+
+    private var attachButton: some View {
+        Button(action: chooseFiles) {
+            Image(systemName: "paperclip").font(.system(size: 12))
+                .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(theme.muted)
+        .help(strings(.inputAttach))
+        .accessibilityIdentifier("row.input.\(input.id).attach")
     }
 
     private var field: some View {
         TextField(input.placeholder ?? "", text: draftBinding, axis: .vertical)
             .font(theme.bodyFont)
             .disabled(input.enabled == false)
+            .focused($focused)
             .onSubmit(submit)
             // Return sends; Shift-Return is a new line in the message.
             .onKeyPress(.return, phases: .down) { press in
@@ -322,13 +432,17 @@ struct InputRowView: View {
     }
 
     private var line: some View {
-        HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
+            attachments
+            HStack(spacing: 6) {
+            if takesFiles { attachButton }
             field.textFieldStyle(.roundedBorder).lineLimit(1...6)
             if let stop = input.stop {
                 ProgressView().controlSize(.small)
                 Button { send(.press(id: stop)) } label: { Image(systemName: "stop.fill") }
                     .controlSize(.small)
                     .accessibilityIdentifier("row.input.\(input.id).stop")
+            }
             }
         }
     }
@@ -337,8 +451,10 @@ struct InputRowView: View {
     /// it.
     private func panel(_ pickers: [CardMenu]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            attachments
             field.textFieldStyle(.plain).lineLimit(1...8)
             HStack(spacing: 6) {
+                if takesFiles { attachButton }
                 ForEach(Array(pickers.enumerated()), id: \.offset) { index, picker in
                     MenuPill(menu: picker, row: input.id, theme: theme, send: send)
                         .layoutPriority(Double(-index))
@@ -375,14 +491,17 @@ struct InputRowView: View {
     }
 
     private var canSend: Bool {
-        input.enabled != false && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        input.enabled != false
+            && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (takesFiles && !files.isEmpty))
     }
 
     private func submit() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, input.enabled != false else { return }
+        let sent = takesFiles ? files : []
+        guard !text.isEmpty || !sent.isEmpty, input.enabled != false else { return }
         draft = ""
-        send(.submit(row: input.id, text: text))
+        files = []
+        send(.submit(row: input.id, text: text, files: sent.map(\.path)))
     }
 }
 
@@ -607,6 +726,80 @@ struct MenuPill: View {
 final class Drafts {
     static let shared = Drafts()
     var texts: [String: String] = [:]
+    /// The files going with each field's message (`InputRow.files`).
+    var files: [String: [URL]] = [:]
+}
+
+/// What a paste brings for a field that takes files: the files copied in the
+/// Finder, or a picture — a screenshot copied to the clipboard — written to a
+/// file of its own. Nil for anything else: that paste is text, the field's.
+@MainActor
+enum PastedFiles {
+    static func take(from pasteboard: NSPasteboard) -> [URL]? {
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self],
+                                             options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            return urls
+        }
+        let types = pasteboard.types ?? []
+        // Text with a picture in it (a web page, a document) pastes as text.
+        guard !types.contains(.string), types.contains(.png) || types.contains(.tiff),
+              let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff),
+              let url = write(picture: data) else { return nil }
+        return [url]
+    }
+
+    /// Where pasted pictures are written: a folder of uDeck's in the
+    /// temporary one, a week's worth kept.
+    static var folder: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("uDeck pasted", isDirectory: true)
+    }
+
+    static func write(picture data: Data) -> URL? {
+        let manager = FileManager.default
+        try? manager.createDirectory(at: folder, withIntermediateDirectories: true)
+        let weekAgo = Date().addingTimeInterval(-7 * 24 * 3600)
+        for old in (try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+        where ((try? old.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast) < weekAgo {
+            try? manager.removeItem(at: old)
+        }
+        guard let png = NSBitmapImageRep(data: data)?.representation(using: .png, properties: [:]) else { return nil }
+        let stamp = DateFormatter()
+        stamp.locale = Locale(identifier: "en_US_POSIX")
+        stamp.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        var url = folder.appendingPathComponent("Pasted \(stamp.string(from: Date())).png")
+        var copy = 2
+        while manager.fileExists(atPath: url.path) {
+            url = folder.appendingPathComponent("Pasted \(stamp.string(from: Date())) \(copy).png")
+            copy += 1
+        }
+        return (try? png.write(to: url)) != nil ? url : nil
+    }
+
+    /// A picture's own small copy, or the file's icon.
+    static func thumbnail(of url: URL) -> NSImage {
+        if let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image),
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+}
+
+/// The files the person chooses with 📎, in an Open dialog above the panel —
+/// at the panel's own level it opened under it (the folder picker, 0.9.5).
+@MainActor
+enum FilePicker {
+    static func files(prompt: String) -> [URL] {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.message = prompt
+        let top = NSApp.windows.filter(\.isVisible).map(\.level.rawValue).max() ?? NSWindow.Level.normal.rawValue
+        panel.level = NSWindow.Level(rawValue: max(top + 1, NSWindow.Level.modalPanel.rawValue))
+        NSApp.activate(ignoringOtherApps: true)
+        return panel.runModal() == .OK ? panel.urls : []
+    }
 }
 
 /// Whether one of the cards' popovers is open, or closed a moment ago: a
