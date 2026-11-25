@@ -8,6 +8,14 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.18] — 2026-11-25
+
+- **A dialog opens above the panel.** 📎's dialog, the folder dialog a plugin
+  asks for and the question before a plugin's command opened under the panel,
+  their buttons hidden by it: macOS puts a dialog uDeck waits for back to the
+  modal-panel level as it comes up, whatever level it was given. uDeck now
+  raises it again while it is up.
+
 ## [0.9.17] — 2026-11-25
 
 - **Files with a message.** A card's field that takes files (`files: true` on
