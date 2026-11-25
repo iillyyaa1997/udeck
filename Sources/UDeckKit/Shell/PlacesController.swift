@@ -61,7 +61,21 @@ public final class PlacesController: NSObject, NSWindowDelegate {
             let title = title(of: found)
             if window.title != title { window.title = title }
         }
+        holdTheDock()
     }
+
+    /// In the Dock and Cmd+Tab while a card has an ordinary window of its own
+    /// (11-25: the operator could not Cmd+Tab to Agents in one). A mini window
+    /// is above every other already, and leaves the switcher alone.
+    private func holdTheDock() {
+        if kinds.values.contains(.window) {
+            DockPresence.hold(Self.dockHolder)
+        } else {
+            DockPresence.release(Self.dockHolder)
+        }
+    }
+
+    static let dockHolder = "places"
 
     /// Whether the card of `id` is shown in an ordinary window: the panel,
     /// which sits above ordinary windows, steps aside for it.
@@ -88,6 +102,7 @@ public final class PlacesController: NSObject, NSWindowDelegate {
         windows.removeAll()
         kinds.removeAll()
         closingQuietly.removeAll()
+        holdTheDock()
     }
 
     // MARK: - Opening
@@ -183,6 +198,7 @@ public final class PlacesController: NSObject, NSWindowDelegate {
         guard !closingQuietly.contains(id) else { return }
         windows[id] = nil
         kinds[id] = nil
+        holdTheDock()
         // Closed by the person: the card goes back to its cell; a place apart
         // goes, what it showed staying with its plugin.
         model.closePlace(id)
