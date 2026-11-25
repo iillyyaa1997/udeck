@@ -133,8 +133,8 @@ public enum ContractFeatures {
     /// `name`, `show`, a notice's `actions` and `reply`, `unnotify` — which a
     /// uDeck before it ignores, and the docs date). 0.9.10 brings a card's
     /// `attention`, dated above. 0.9.11, 0.9.12 and 0.9.13 change
-    /// nothing in the contract.
-    static let reviewedAt = "0.9.13"
+    /// nothing in the contract; 0.9.14 brings a menu option's `button`.
+    static let reviewedAt = "0.9.14"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
@@ -207,9 +207,10 @@ public enum ContractFeatures {
         add(attentionRelease, ["count", "ask"].map { .rowField(row: "attention", field: $0) })
 
         // A button at the end of a menu's option — a session closed from the
-        // list of them: the release after 0.9.13.
-        add(.next, [.rowField(row: "menu.options", field: "button")])
-        add(.next, ["id", "label"].map { .rowField(row: "menu.options.button", field: $0) })
+        // list of them: 0.9.14.
+        let optionButtonRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 14))
+        add(optionButtonRelease, [.rowField(row: "menu.options", field: "button")])
+        add(optionButtonRelease, ["id", "label"].map { .rowField(row: "menu.options.button", field: $0) })
         return registry
     }()
 

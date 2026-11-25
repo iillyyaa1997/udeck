@@ -8,6 +8,20 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.14] — 2026-11-25
+
+- **A card's title opens its menu.** Where a title is followed by a menu — the
+  session menu in Agents — the whole title is the button, not just the small
+  arrow after it.
+- **A menu option can carry a button** (`button`: `{"id", "label"}`), drawn at
+  its end; a click sends `press` and leaves the menu open. Agents puts ✕ there
+  to close a session from the list.
+- A card's own window takes its plugin's name once the plugins are read, not
+  the plugin's id.
+- Agents (the plugin, installed separately) closes a session with ✕ in its
+  title line or by the session in the menu; the conversation stays in the
+  history, and one that is working asks first.
+
 ## [0.9.13] — 2026-11-25
 
 - **Cmd+Tab reaches a card's own window.** While a card is shown in a window of

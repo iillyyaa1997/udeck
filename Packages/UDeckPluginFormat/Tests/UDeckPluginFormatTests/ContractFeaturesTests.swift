@@ -112,14 +112,14 @@ struct ContractFeaturesTests {
         // 0.9.10: what waits for the person.
         let waiting: Set<ContractFeature> = [.cardField("attention"), .rowField(row: "attention", field: "count"),
                                              .rowField(row: "attention", field: "ask")]
-        // Waiting for the release after 0.9.13: a button at a menu option's end.
+        // 0.9.14: a button at a menu option's end.
         let optionButtons: Set<ContractFeature> = [.rowField(row: "menu.options", field: "button"),
                                                    .rowField(row: "menu.options.button", field: "id"),
                                                    .rowField(row: "menu.options.button", field: "label")]
         for (feature, release) in ContractFeatures.registry where feature != .manifestField("minUDeck") {
             switch feature {
             case _ where optionButtons.contains(feature):
-                #expect(release == .next, "\(feature)")
+                #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 14)), "\(feature)")
             case _ where waiting.contains(feature):
                 #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 10)), "\(feature)")
             case _ where next.contains(feature), .tone, .barIcon:
@@ -135,8 +135,7 @@ struct ContractFeaturesTests {
         let read = ContractRelease.released(SemanticVersion(major: 0, minor: 6, patch: 0))
         #expect(ContractFeatures.minimumUDeckReadFrom == read)
         #expect(ContractFeatures.release(of: .manifestField("minUDeck")) == Optional(read))
-        #expect(Set(ContractFeatures.registry.filter { $0.value == .next }.keys) == optionButtons,
-                "only a menu option's button is waiting for a release")
+        #expect(!ContractFeatures.registry.values.contains(.next), "nothing is waiting for a release")
         // The release after this one, which has no number yet: after every
         // released one, and met only by a uDeck after this one.
         let current = try #require(SemanticVersion(UDeckRelease.version))
