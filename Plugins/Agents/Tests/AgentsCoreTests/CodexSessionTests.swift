@@ -50,6 +50,55 @@ struct CodexSessionTests {
         await session.close()
     }
 
+    func index(_ session: CodexSession, _ match: (FeedItem) -> Bool) throws -> Int {
+        let found = session.items.firstIndex(where: match)
+        return try #require(found)
+    }
+
+    func answers(_ session: CodexSession, _ text: String) -> Int {
+        session.items.filter { if case .assistant(_, text, false) = $0 { true } else { false } }.count
+    }
+
+    @Test("a message sent while a command waits is steered into the turn: it waits, goes in after the command, one turn")
+    func steered() async throws {
+        let (session, folder) = try await started()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        session.send("What changed?")
+        try await until("the approval") { !session.asks.isEmpty }
+        session.send("Also say which file")
+        #expect(session.waitingMessages.map(\.text) == ["Also say which file"])
+        try await Task.sleep(for: .milliseconds(300))
+        session.answer(try #require(session.asks.first), with: "accept")
+        try await until("the turn's end") { session.state == .idle }
+        #expect(session.waitingMessages.isEmpty)
+        let command = try index(session) { if case .tool(_, "Shell", _, let result) = $0 { result != nil } else { false } }
+        let taken = try index(session) { if case .user(_, "Also say which file") = $0 { true } else { false } }
+        let closing = try index(session) { if case .assistant(_, "One file changed: Notes.md.", false) = $0 { true } else { false } }
+        #expect(command < taken && taken < closing, "after the command, before the words that follow it")
+        #expect(answers(session, "Looking at it.") == 1, "one turn")
+        await session.close()
+    }
+
+    @Test("a message the turn refuses to take waits for its end, and starts the next turn")
+    func refusedSteer() async throws {
+        let (session, folder) = try await started()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        session.send("What changed?")
+        try await until("the approval") { !session.asks.isEmpty }
+        session.send("[refuse] and then?")
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(session.waitingMessages.map(\.text) == ["[refuse] and then?"])
+        session.answer(try #require(session.asks.first), with: "accept")
+        try await until("the next turn's approval") { answers(session, "Looking at it.") == 2 && !session.asks.isEmpty }
+        let closing = try index(session) { if case .assistant(_, "One file changed: Notes.md.", false) = $0 { true } else { false } }
+        let taken = try index(session) { if case .user(_, "[refuse] and then?") = $0 { true } else { false } }
+        #expect(closing < taken, "after the first turn")
+        session.answer(try #require(session.asks.first), with: "decline")
+        try await until("the second turn's end") { session.state == .idle }
+        #expect(session.waitingMessages.isEmpty)
+        await session.close()
+    }
+
     @Test("a saved thread continued: its turns read back oldest first, then the resume noted; the saved list leaves ephemeral ones out")
     func savedThread() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("udeck-codex-" + UUID().uuidString)

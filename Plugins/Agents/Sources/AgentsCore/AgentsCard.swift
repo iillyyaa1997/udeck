@@ -192,10 +192,6 @@ enum AgentsCard {
         if case .codex(let codex) = session.current, let limits = codex.rateLimits, let badge = codexLimits(limits, app) {
             items.append(["badge": badge])
         }
-        let waiting = session.current.queued.count
-        if waiting > 0 {
-            items.append(["badge": ["text": .string(app.t("в очереди: \(waiting)", "queued: \(waiting)")), "tone": "info"]])
-        }
         if !narrow(app) {
             items.append(["badge": ["text": .string(session.folder.lastPathComponent), "icon": "folder"]])
         }
@@ -508,8 +504,8 @@ enum AgentsCard {
         switch item {
         case .user(let id, let text):
             var entry: [String: JSONValue] = ["id": .string(id.uuidString), "role": "user", "text": .string(clipped(text))]
-            if label == Conversation.queuedLabel {
-                entry["label"] = .string(app.t("в очереди — уйдёт после текущего ответа", "queued — goes after the current answer"))
+            if label == Conversation.waitingLabel {
+                entry["label"] = .string(app.t("войдёт после текущего шага", "goes in after the current step"))
             }
             return .object(entry)
         case .assistant(let id, let text, let streaming):

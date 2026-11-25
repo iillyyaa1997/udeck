@@ -8,13 +8,13 @@ let fakeClaude = URL(fileURLWithPath: #filePath).deletingLastPathComponent().del
     .appendingPathComponent("fake-claude.py")
 
 @MainActor
-func startFake(resume: String? = nil, history: [FeedItem] = []) async throws -> (ChatSession, URL) {
+func startFake(resume: String? = nil, history: [FeedItem] = [], delay: Double = 0) async throws -> (ChatSession, URL) {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent("udeck-chat-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     var arguments = [fakeClaude.path, "--replay-user-messages"]
     if let resume { arguments += ["--resume", resume] }
     let process = try AgentProcess(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: arguments,
-                                   environment: ["PATH": "/usr/bin:/bin", "FAKE_CLAUDE_DELAY": "0"], directory: folder)
+                                   environment: ["PATH": "/usr/bin:/bin", "FAKE_CLAUDE_DELAY": String(delay)], directory: folder)
     let session = ChatSession(folder: folder, account: ChatAccount(name: "main", configDir: nil),
                               resumeID: resume, history: history)
     await session.start(channel: process)
@@ -126,22 +126,63 @@ struct ChatSessionTests {
         await session.close()
     }
 
-    @Test("a message sent while a turn runs waits behind it, and both finish")
-    func queued() async throws {
+    func index(_ session: ChatSession, _ match: (FeedItem) -> Bool) throws -> Int {
+        let found = session.items.firstIndex(where: match)
+        return try #require(found)
+    }
+
+    @Test("a message sent while a step runs waits, goes into the feed after the step, and one result ends both")
+    func takenAfterTheStep() async throws {
         let (session, folder) = try await startFake()
         defer { try? FileManager.default.removeItem(at: folder) }
         try await until("ready") { session.state == .idle }
+        var finished = 0
+        session.onTurnFinished = { _ in finished += 1 }
         session.send("Look at the folder")
         session.send("Ask me a question")
-        #expect(session.pendingTurns == 2)
+        #expect(session.waitingMessages.map(\.text) == ["Ask me a question"])
+        #expect(!session.items.contains { if case .user(_, "Ask me a question") = $0 { true } else { false } })
         try await until("the first ask") { session.asks.count == 1 }
         session.answer(session.asks[0], with: .allow)
         try await until("the second ask") { session.asks.first?.ask.toolName == "AskUserQuestion" }
+        #expect(session.waitingMessages.isEmpty)
+        let step = try index(session) { if case .tool(_, "Bash", _, let result) = $0 { result != nil } else { false } }
+        let taken = try index(session) { if case .user(_, "Ask me a question") = $0 { true } else { false } }
+        #expect(step + 1 == taken, "right after the step it waited for")
         #expect(session.state == .working)
         let ask = session.asks[0]
         session.answer(ask, with: .choices([ask.ask.questions![0].question: ["Blue"]]))
-        try await until("both turns' ends") { session.state == .idle }
-        #expect(session.pendingTurns == 0)
+        // One result for both: the session done with it, not working on.
+        try await until("the turn's end") { session.state == .idle }
+        #expect(!session.inTurn)
+        #expect(finished == 1)
+        await session.close()
+    }
+
+    @Test("a message sent after the last step starts the next turn once the first has its result")
+    func takenAsTheNextTurn() async throws {
+        let (session, folder) = try await startFake(delay: 0.1)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try await until("ready") { session.state == .idle }
+        var finished = 0
+        session.onTurnFinished = { _ in finished += 1 }
+        session.send("Look at the folder")
+        try await until("the ask") { session.asks.count == 1 }
+        session.answer(session.asks[0], with: .allow)
+        try await until("the step's result") {
+            session.items.contains { if case .tool(_, "Bash", _, let result) = $0 { result != nil } else { false } }
+        }
+        session.send("Ask me a question")
+        #expect(session.waitingMessages.map(\.text) == ["Ask me a question"])
+        try await until("the second turn's ask", timeout: .seconds(20)) { session.asks.first?.ask.toolName == "AskUserQuestion" }
+        let closing = try index(session) { if case .assistant(_, let text, false) = $0 { text.hasPrefix("There is one file") } else { false } }
+        let taken = try index(session) { if case .user(_, "Ask me a question") = $0 { true } else { false } }
+        #expect(closing < taken, "after the first turn's last words")
+        #expect(finished == 0, "the first result left a message to take: no turn's end said")
+        let ask = session.asks[0]
+        session.answer(ask, with: .choices([ask.ask.questions![0].question: ["Blue"]]))
+        try await until("the second turn's end", timeout: .seconds(20)) { session.state == .idle }
+        #expect(finished == 1)
         await session.close()
     }
 
@@ -154,7 +195,6 @@ struct ChatSessionTests {
         session.receive(ClaudeInbound(["type": "result", "subtype": "success", "is_error": false, "num_turns": 0,
                                        "result": "", "session_id": "fake-session-0001"]))
         #expect(session.state == .working)
-        #expect(session.pendingTurns == 1)
         try await until("the permission ask") { session.asks.count == 1 }
         session.answer(session.asks[0], with: .allow)
         try await until("the turn's end") { session.state == .idle }
@@ -182,7 +222,7 @@ struct ChatSessionTests {
         #expect(users == ["first", "second"])
         #expect(session.asks.map(\.requestID) == ["p2"])
         #expect(session.state == .working)
-        #expect(session.pendingTurns == 1)
+        #expect(session.inTurn)
     }
 
     @Test("a resumed session starts with its history and the resume noted, under its own id")

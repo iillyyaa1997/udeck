@@ -83,10 +83,11 @@ public enum Agent {
         }
     }
 
-    public var queued: [UUID] {
+    /// Messages sent while it worked that it has not taken yet.
+    public var waitingMessages: [WaitingMessage] {
         switch self {
-        case .claude(let session): session.queued
-        case .codex(let session): session.queued
+        case .claude(let session): session.waitingMessages
+        case .codex(let session): session.waitingMessages
         }
     }
 
@@ -247,21 +248,24 @@ public final class Conversation: Identifiable {
             guard let items = agents[segment.provider]?.items else { continue }
             let end = min(segment.end ?? items.count, items.count)
             guard segment.start < end else { continue }
-            let queued = Set(agents[segment.provider]?.queued ?? [])
             for item in items[segment.start..<end] {
                 switch item {
                 case .assistant where several: out.append((item, segment.provider.name))
-                case .user(let id, _) where queued.contains(id): out.append((item, Self.queuedLabel))
                 default: out.append((item, nil))
                 }
             }
         }
+        // Last, the messages the agent has not taken yet: each goes up into
+        // the feed where it takes them.
+        for message in current.waitingMessages {
+            out.append((.user(id: message.id, text: message.text), Self.waitingLabel))
+        }
         return out
     }
 
-    /// The label of a message waiting behind the running turn, for the card
-    /// to put in words.
-    static let queuedLabel = "\u{0}queued"
+    /// The label of a message the agent has not taken yet, for the card to
+    /// put in words.
+    static let waitingLabel = "\u{0}waiting"
 
     /// The handoff note's text, for the card to put in words.
     static func noteText(_ handoff: Handoff) -> String {

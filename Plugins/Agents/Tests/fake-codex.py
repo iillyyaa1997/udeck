@@ -4,6 +4,11 @@ plugin's lab screenshots: it answers initialize, model/list, thread/start and th
 and for each turn streams an answer, asks to run one command, runs it once allowed, and
 finishes the turn with token usage.
 
+A message steered into a running turn (`turn/steer`) is taken as codex 0.160 takes one (measured
+11-25): after the command running — a `userMessage` item under the id it was sent with — and the
+same turn goes on with it. One whose text says "[refuse]" is refused, as a turn that has just
+ended refuses one.
+
     fake-codex.py app-server
 """
 import json
@@ -16,6 +21,8 @@ THREAD = "fake-thread-" + uuid.uuid4().hex[:8]
 PICTURES = 0  # pictures that came with the turn being played
 NAMING = False  # a thread of the plugin's namer: one answer, a name, for a message with "[name-me]"
 pending = {}  # server request id -> the turn waiting on it
+active = {"turn": None}  # the turn running
+steered = []  # messages steered into it, not taken yet: (client id, text)
 next_request = 1000
 
 
@@ -50,6 +57,7 @@ def say(turn, text):
 def start_turn(request_id, text):
     global next_request
     turn = "turn-" + uuid.uuid4().hex[:6]
+    active["turn"] = turn
     out({"id": request_id, "result": {"turn": {"id": turn, "status": "inProgress", "items": []}}})
     note("turn/started", {"threadId": THREAD, "turn": {"id": turn, "status": "inProgress", "items": []}})
     if NAMING:
@@ -81,16 +89,34 @@ def finish(turn, decision):
         time.sleep(DELAY)
         done = dict(item, status="completed", aggregatedOutput=" M Notes.md\n", exitCode=0)
         note("item/completed", {"threadId": THREAD, "turnId": turn, "item": done})
+        take(turn)
         say(turn, "One file changed: Notes.md.")
     else:
+        take(turn)
         say(turn, "All right, I will not run it.")
+    for _ in range(3):
+        if not steered:
+            break
+        take(turn)
+        say(turn, "Noted.")
     note("thread/tokenUsage/updated", {"threadId": THREAD, "turnId": turn, "tokenUsage": {
         "last": {"totalTokens": 41000, "inputTokens": 40000, "cachedInputTokens": 0, "outputTokens": 1000,
                  "reasoningOutputTokens": 0, "cacheWriteInputTokens": 0},
         "total": {"totalTokens": 41000, "inputTokens": 40000, "cachedInputTokens": 0, "outputTokens": 1000,
                   "reasoningOutputTokens": 0, "cacheWriteInputTokens": 0},
         "modelContextWindow": 272000}})
+    active["turn"] = None
     note("turn/completed", {"threadId": THREAD, "turn": {"id": turn, "status": "completed", "items": []}})
+
+
+def take(turn):
+    """The messages steered into the turn, taken after its step."""
+    while steered:
+        client, text = steered.pop(0)
+        item = {"id": "user-" + uuid.uuid4().hex[:6], "type": "userMessage", "clientId": client,
+                "content": [{"type": "text", "text": text}]}
+        note("item/started", {"threadId": THREAD, "turnId": turn, "item": item})
+        note("item/completed", {"threadId": THREAD, "turnId": turn, "item": item})
 
 
 MODELS = [
@@ -144,6 +170,13 @@ while True:
     elif method == "thread/name/set":
         out({"id": request_id, "result": {}})
         note("thread/name/updated", {"threadId": params.get("threadId"), "threadName": params.get("name")})
+    elif method == "turn/steer":
+        text = " ".join(part.get("text", "") for part in params.get("input", []))
+        if active["turn"] is None or params.get("expectedTurnId") != active["turn"] or "[refuse]" in text:
+            out({"id": request_id, "error": {"code": -32600, "message": "no active turn to steer"}})
+            continue
+        steered.append((params.get("clientUserMessageId"), text))
+        out({"id": request_id, "result": {"turnId": active["turn"]}})
     elif method == "turn/interrupt":
         out({"id": request_id, "result": {}})
     elif method == "account/rateLimits/read":

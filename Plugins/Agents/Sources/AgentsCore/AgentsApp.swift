@@ -192,7 +192,7 @@ public final class AgentsApp {
     var selected: Conversation? { conversations.first { $0.id == selection } }
 
     /// A reply written in a notification of `id`: the answer to its open
-    /// question, or else a message — queued while it works.
+    /// question, or else a message — taken by the agent as it works.
     private func reply(_ text: String, to id: UUID) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let conversation = conversations.first(where: { $0.id == id }),

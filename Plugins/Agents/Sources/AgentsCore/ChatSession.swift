@@ -2,6 +2,15 @@ import Foundation
 import Observation
 import UDeckAgents
 
+/// A message the person sent while the agent worked, not taken by it yet
+/// (11-25). The feed shows it last, waiting, until the agent takes it — after
+/// the step it is on, the same turn going on with it, as in the terminal; or,
+/// with no step ahead, as the next turn — and it goes into the feed there.
+public struct WaitingMessage: Sendable, Equatable, Identifiable {
+    public let id: UUID
+    public let text: String
+}
+
 /// One line of a session's feed, as the chat draws it.
 public enum FeedItem: Sendable, Equatable, Identifiable {
     case user(id: UUID, text: String)
@@ -97,12 +106,17 @@ public final class ChatSession: Identifiable {
     public private(set) var context: ClaudeContextUsage?
     /// When the running turn began, while one runs.
     public private(set) var turnStartedAt: Date?
-    /// The person's messages sent while a turn ran, oldest first: each waits
-    /// its turn, and the feed says so.
-    public private(set) var queued: [UUID] = []
-    /// Messages sent that no turn has finished yet: more than one means the
-    /// rest are queued behind the running turn.
-    public private(set) var pendingTurns = 0
+    /// The person's messages sent while a turn ran that the CLI has not
+    /// taken yet, oldest first. The CLI takes one after the step it is on and
+    /// the same turn goes on with it, or, with no step ahead, as the next
+    /// turn; its echo says when. Measured with claude 2.1.332 on 11-25: the
+    /// echo right after the step's result, the answer heeding it, one result
+    /// for both — and the next turn, after the result, when the answer was
+    /// already being written.
+    public private(set) var waitingMessages: [WaitingMessage] = []
+    /// Whether the CLI is in a turn: from the echo of a message it took to
+    /// the turn's result.
+    public private(set) var inTurn = false
     public var title: String
     /// Where `title` came from: a weaker source does not replace it.
     public internal(set) var titleSource: NameSource
@@ -130,9 +144,10 @@ public final class ChatSession: Identifiable {
     @ObservationIgnored private var refused: ClaudeRateLimit?
 
     /// Messages sent from here that the CLI has not repeated back yet, oldest
-    /// first: an echo of one confirms it; any other echo is the conversation
-    /// read back after a restart.
-    @ObservationIgnored private var unconfirmed: [String] = []
+    /// first, with the waiting message each is, if it waits: an echo of one
+    /// says the CLI took it; any other echo is the conversation read back
+    /// after a restart.
+    @ObservationIgnored private var unconfirmed: [(told: String, waiting: UUID?)] = []
 
     @ObservationIgnored private var connection: ClaudeCodeConnection?
     @ObservationIgnored private var reader: Task<Void, Never>?
@@ -218,6 +233,7 @@ public final class ChatSession: Identifiable {
         generation += 1
         state = .starting
         turnStartedAt = nil
+        inTurn = false
         asks.removeAll()
         items.append(.note(id: UUID(), text: note))
     }
@@ -277,7 +293,8 @@ public final class ChatSession: Identifiable {
 
     // MARK: - From the user
 
-    /// Sends a message; while a turn runs it queues behind it, as in the terminal.
+    /// Sends a message; while a turn runs it waits for the CLI to take it,
+    /// after the step it is on, as in the terminal.
     /// `payload`, when given, is what the agent is told instead of what the
     /// feed shows — the conversation so far, when it has just been handed
     /// over.
@@ -298,10 +315,13 @@ public final class ChatSession: Identifiable {
         let told = payload ?? text
         let id = UUID()
         lastSent = (text, payload, images)
-        if state == .working || pendingTurns > 0 { queued.append(id) }
-        if !again { items.append(.user(id: id, text: text)) }
-        unconfirmed.append(told)
-        pendingTurns += 1
+        let waits = state == .working && !again
+        if waits {
+            waitingMessages.append(WaitingMessage(id: id, text: text))
+        } else if !again {
+            items.append(.user(id: id, text: text))
+        }
+        unconfirmed.append((told, waits ? id : nil))
         state = .working
         if turnStartedAt == nil { turnStartedAt = Date() }
         if titleSource < .firstWords, let words = ChatNames.firstWords(text) { name(words, from: .firstWords) }
@@ -314,7 +334,7 @@ public final class ChatSession: Identifiable {
         }
     }
 
-    /// Stops the running turn; messages queued behind it run next.
+    /// Stops the running turn; messages waiting run next.
     public func interrupt() {
         guard let connection, state == .working else { return }
         Task { _ = try? await connection.request({ ClaudeOutbound.interrupt(id: $0) }, timeout: .seconds(10)) }
@@ -385,16 +405,22 @@ public final class ChatSession: Identifiable {
                 }
             }
         case .userEcho(let text, _):
-            if let index = unconfirmed.firstIndex(of: text) {
-                unconfirmed.remove(at: index)
+            if let index = unconfirmed.firstIndex(where: { $0.told == text }) {
+                // Taken: a message that waited goes into the feed here, after
+                // the step it waited for, or at the start of its own turn.
+                if let id = unconfirmed.remove(at: index).waiting,
+                   let at = waitingMessages.firstIndex(where: { $0.id == id }) {
+                    let message = waitingMessages.remove(at: at)
+                    items.append(.user(id: message.id, text: message.text))
+                }
             } else {
                 // Not one of ours: the conversation read back from the journal.
                 finishStreaming(with: nil)
                 items.append(.user(id: UUID(), text: text))
-                pendingTurns += 1
                 state = .working
                 if turnStartedAt == nil { turnStartedAt = Date() }
             }
+            inTurn = true
         case .toolResults(let results, _):
             for result in results {
                 // A tool's result answers the ask about it, whoever answered.
@@ -412,17 +438,17 @@ public final class ChatSession: Identifiable {
             // After a resume, or a background task's notice, the CLI reports a
             // result of zero turns before the real one (spec §10.20): it ends
             // nothing of the user's.
-            guard result.turns > 0 || pendingTurns == 0 else { return }
-            pendingTurns = max(0, pendingTurns - 1)
-            // The next message waiting starts now.
-            if !queued.isEmpty { queued.removeFirst() }
+            guard result.turns > 0 || (!inTurn && unconfirmed.isEmpty) else { return }
+            inTurn = false
             // Stopped at the account's limit: not an error to read, but a
             // session to go on elsewhere, or later (`onLimit`).
             let limit = result.isError && (refused != nil || Self.isLimit(result.result))
             let resets = refused?.usage.resetsAt ?? Self.resetTime(result.result)
             refused = nil
             if result.isError, !result.result.isEmpty, !limit { note(result.result) }
-            if pendingTurns == 0, !isEnded {
+            // A message the CLI has not taken yet starts the next turn: the
+            // session works on until it has.
+            if unconfirmed.isEmpty, !isEnded {
                 state = .idle
                 turnStartedAt = nil
                 refreshContext()
@@ -480,6 +506,14 @@ public final class ChatSession: Identifiable {
     private func ended() {
         finishStreaming(with: nil)
         asks.removeAll()
+        // Messages the CLI never took: in the feed, and said to be unsent.
+        if !waitingMessages.isEmpty {
+            items += waitingMessages.map { FeedItem.user(id: $0.id, text: $0.text) }
+            waitingMessages.removeAll()
+            note("not sent: the session has ended")
+        }
+        unconfirmed.removeAll()
+        inTurn = false
         if !isEnded { state = .ended("the session ended") }
     }
 }

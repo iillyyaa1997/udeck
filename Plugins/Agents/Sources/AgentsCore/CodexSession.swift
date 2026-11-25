@@ -76,10 +76,19 @@ public final class CodexSession: Identifiable {
     public internal(set) var effort: String?
     public private(set) var context: (tokens: Int, window: Int)?
     public private(set) var turnStartedAt: Date?
-    /// Messages sent while a turn ran, oldest first, with what Codex is to
-    /// be told: each starts a turn when the one before it is done.
-    public private(set) var queued: [UUID] = []
+    /// The person's messages sent while a turn ran that Codex has not taken
+    /// yet, oldest first. Each is steered into the running turn
+    /// (`turn/steer`) and taken after the step it is on, the turn going on
+    /// with it; its `userMessage` item, under the id it was sent with, says
+    /// when. Measured with codex 0.160 on 11-25: taken right after the command
+    /// running, or after the answer being written, one turn for both.
+    public private(set) var waitingMessages: [WaitingMessage] = []
+    /// Waiting messages not steered: sent before the turn had an id, or
+    /// refused by it. The first starts the next turn; the rest are steered
+    /// into it.
     @ObservationIgnored private var waiting: [(id: UUID, text: String, pictures: [String])] = []
+    /// Waiting messages steered into the running turn and not taken yet.
+    @ObservationIgnored private var steered: [(id: UUID, text: String, pictures: [String])] = []
 
     @ObservationIgnored public var onAsk: ((CodexAsk) -> Void)?
     @ObservationIgnored public var onTurnFinished: ((String) -> Void)?
@@ -228,33 +237,86 @@ public final class CodexSession: Identifiable {
         let shown = shown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !shown.isEmpty, let connection, let threadID, !isEnded else { return }
         let id = UUID()
-        items.append(.user(id: id, text: shown))
         if titleSource < .firstWords, let words = ChatNames.firstWords(shown) { name(words, from: .firstWords) }
         if state == .working {
-            queued.append(id)
+            waitingMessages.append(WaitingMessage(id: id, text: shown))
             waiting.append((id, text ?? shown, pictures))
+            steerWaiting()
             return
         }
+        items.append(.user(id: id, text: shown))
         startTurn(text ?? shown, pictures: pictures, connection: connection, threadID: threadID)
+    }
+
+    private static func input(_ text: String, pictures: [String]) -> JSONValue {
+        // `localImage`, as the app server names it (a live turn, 11-25: `local_image` is
+        // «unknown variant»).
+        .array([["type": "text", "text": .string(text)]] + pictures.map { ["type": "localImage", "path": .string($0)] })
+    }
+
+    /// The messages waiting, steered into the running turn once it has an
+    /// id. One the turn refuses — it has just ended — waits for the next.
+    private func steerWaiting() {
+        guard let connection, let threadID, let turn = turnID, !waiting.isEmpty else { return }
+        let messages = waiting
+        waiting.removeAll()
+        steered += messages
+        for message in messages {
+            let params: JSONValue = ["threadId": .string(threadID), "expectedTurnId": .string(turn),
+                                     "clientUserMessageId": .string(message.id.uuidString),
+                                     "input": Self.input(message.text, pictures: message.pictures)]
+            Task {
+                do {
+                    _ = try await connection.request("turn/steer", params)
+                } catch {
+                    // Refused by a turn that has just ended: into the turn after it — one
+                    // under way already, or one it starts now. The `turn/completed` still
+                    // to come for this turn starts it otherwise.
+                    guard let index = steered.firstIndex(where: { $0.id == message.id }) else { return }
+                    waiting.append(steered.remove(at: index))
+                    if let now = turnID, now != turn {
+                        steerWaiting()
+                    } else if state != .working {
+                        startWaiting()
+                    }
+                }
+            }
+        }
+    }
+
+    /// A waiting message Codex took: into the feed here.
+    private func taken(_ id: UUID) {
+        steered.removeAll { $0.id == id }
+        guard let index = waitingMessages.firstIndex(where: { $0.id == id }) else { return }
+        let message = waitingMessages.remove(at: index)
+        items.append(.user(id: message.id, text: message.text))
+    }
+
+    /// The first message waiting starts a turn; the rest are steered into it.
+    private func startWaiting() {
+        guard !waiting.isEmpty, let connection, let threadID else { return }
+        let next = waiting.removeFirst()
+        taken(next.id)
+        turnStartedAt = nil
+        startTurn(next.text, pictures: next.pictures, connection: connection, threadID: threadID)
     }
 
     private func startTurn(_ text: String, pictures: [String] = [], connection: CodexConnection, threadID: String) {
         state = .working
         if turnStartedAt == nil { turnStartedAt = Date() }
-        let input: [JSONValue] = [["type": "text", "text": .string(text)]]
-            // `localImage`, as the app server names it (a live turn, 11-25: `local_image` is
-            // «unknown variant»).
-            + pictures.map { ["type": "localImage", "path": .string($0)] }
         var params: [String: JSONValue] = [
             "threadId": .string(threadID),
-            "input": .array(input),
+            "input": Self.input(text, pictures: pictures),
         ]
         if let chosenModel { params["model"] = .string(chosenModel) }
         if let effort { params["effort"] = .string(effort) }
         Task {
             do {
                 let result = try await connection.request("turn/start", .object(params))
-                if let id = result["turn"]?["id"]?.string { turnID = id }
+                if let id = result["turn"]?["id"]?.string, turnID == nil, state == .working {
+                    turnID = id
+                    steerWaiting()
+                }
             } catch {
                 note("not sent: \(error)")
                 if state == .working, asks.isEmpty { state = .idle; turnStartedAt = nil }
@@ -299,6 +361,7 @@ public final class CodexSession: Identifiable {
         switch method {
         case "turn/started":
             turnID = params["turn"]?["id"]?.string ?? turnID
+            steerWaiting()
         case "item/agentMessage/delta":
             guard let itemID = params["itemId"]?.string, let delta = params["delta"]?.string else { return }
             if let index = streaming[itemID], case .assistant(let id, let text, _) = items[index] {
@@ -309,7 +372,11 @@ public final class CodexSession: Identifiable {
             }
         case "item/started":
             let item = params["item"] ?? .null
-            if let tool = Self.tool(item) { items.append(.tool(id: tool.id, name: tool.name, summary: tool.summary, result: nil)) }
+            if item["type"]?.string == "userMessage", let client = item["clientId"]?.string, let id = UUID(uuidString: client) {
+                taken(id)
+            } else if let tool = Self.tool(item) {
+                items.append(.tool(id: tool.id, name: tool.name, summary: tool.summary, result: nil))
+            }
         case "item/completed":
             complete(params["item"] ?? .null)
         case "turn/completed":
@@ -319,12 +386,13 @@ public final class CodexSession: Identifiable {
             streaming.removeAll()
             turnID = nil
             if let error = params["turn"]?["error"]?["message"]?.string, !error.isEmpty { note(error) }
+            // Steered and not taken — the turn stopped first — they wait for
+            // the next, oldest first.
+            waiting = steered + waiting
+            steered.removeAll()
             if !isEnded {
-                if !waiting.isEmpty, let connection, let threadID {
-                    let next = waiting.removeFirst()
-                    queued.removeAll { $0 == next.id }
-                    turnStartedAt = nil
-                    startTurn(next.text, pictures: next.pictures, connection: connection, threadID: threadID)
+                if !waiting.isEmpty, connection != nil, threadID != nil {
+                    startWaiting()
                     return
                 }
                 state = .idle
@@ -404,6 +472,14 @@ public final class CodexSession: Identifiable {
 
     private func ended() {
         asks.removeAll()
+        // Messages Codex never took: in the feed, and said to be unsent.
+        if !waitingMessages.isEmpty {
+            items += waitingMessages.map { FeedItem.user(id: $0.id, text: $0.text) }
+            waitingMessages.removeAll()
+            note("not sent: the session has ended")
+        }
+        waiting.removeAll()
+        steered.removeAll()
         if !isEnded { state = .ended("the session ended") }
     }
 }

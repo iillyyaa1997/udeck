@@ -7,6 +7,11 @@ message plays one turn — the answer streamed word by word, a Bash call that as
 its result, and a closing sentence. A message that mentions "question" asks an AskUserQuestion
 instead. Nothing here touches the network or the user's files. It exits when stdin closes.
 
+A message that comes while a turn runs is taken as claude 2.1.332 takes one (measured 11-25): one
+that came while a step ran is taken right after the step's result — echoed there, and played on
+in the same turn, which ends with one result for both; one that comes after the last step starts
+the next turn once this one has its result.
+
 Its account is the folder `CLAUDE_CONFIG_DIR` names (`~/.claude` without it). `get_usage`
 answers what `fake-usage.json` there says — `{"five_hour": {"utilization": 40, "resets_at": …},
 "seven_day": …}` — or a little of both. A `fake-limited` file there makes every turn hit the
@@ -140,6 +145,27 @@ def name(text):
          "session_id": SESSION, "total_cost_usd": 0})
 
 
+def echo(message):
+    if REPLAY:
+        out({**message, "isReplay": True, "uuid": "echo-%d" % time.time_ns(), "session_id": SESSION})
+
+
+def said(message):
+    """A user message's text and how many pictures came with it."""
+    content = message.get("message", {}).get("content", [])
+    text = " ".join(part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text")
+    return text, sum(1 for part in content if isinstance(part, dict) and part.get("type") == "image")
+
+
+def take_waiting():
+    """The messages that came while a step ran, taken after its result: echoed now, played on in this turn."""
+    taken = [message for message in waiting if message.get("type") == "user"]
+    for message in taken:
+        waiting.remove(message)
+        echo(message)
+    return [said(message) for message in taken]
+
+
 def turn(text, pictures=0):
     if NAMING:
         name(text)
@@ -147,13 +173,23 @@ def turn(text, pictures=0):
     if limited():
         hit_the_limit()
         return
+    out({"type": "system", "subtype": "init", "session_id": SESSION, "model": "claude-fake-1-0",
+         "permissionMode": "default", "cwd": os.getcwd(), "claude_code_version": "2.1.330",
+         "slash_commands": ["compact", "review"], "capabilities": []})
+    playing = [(text, pictures)]
+    while playing:
+        playing += play(*playing.pop(0))
+    out({"type": "result", "subtype": "success", "is_error": False, "num_turns": 2, "result": "done",
+         "session_id": SESSION, "total_cost_usd": 0.0012})
+
+
+def play(text, pictures):
+    """One message's part of a turn; what it returns are the messages taken after its step."""
     russian = any("а" <= ch.lower() <= "я" for ch in text)
     words = RU if russian else EN
     counter["turn"] += 1
     n = counter["turn"]
-    out({"type": "system", "subtype": "init", "session_id": SESSION, "model": "claude-fake-1-0",
-         "permissionMode": "default", "cwd": os.getcwd(), "claude_code_version": "2.1.330",
-         "slash_commands": ["compact", "review"], "capabilities": []})
+    taken = []
     if pictures:
         say(("Вижу картинок: %d." if russian else "I see %d picture(s).") % pictures)
     if "question" in text.lower() or "вопрос" in text.lower():
@@ -169,6 +205,7 @@ def turn(text, pictures=0):
         reply = answer_to("perm-q%d" % n) or {}
         chosen = (reply.get("updatedInput") or {}).get("answers", {}).get(questions[0]["question"], "nothing")
         tool_result(tool_id, "User answered: %s" % chosen)
+        taken = take_waiting()
         say(words["chose"] % (chosen, chosen.lower()))
     else:
         tool_id = "toolu_b%d" % n
@@ -183,12 +220,13 @@ def turn(text, pictures=0):
         reply = answer_to("perm-b%d" % n) or {}
         if reply.get("behavior") == "allow":
             tool_result(tool_id, "total 8\ndrwxr-xr-x  3 me  staff   96 .\n-rw-r--r--  1 me  staff   42 notes.md")
+            taken = take_waiting()
             say(words["found"])
         else:
             tool_result(tool_id, "The user declined.", is_error=True)
+            taken = take_waiting()
             say(words["declined"])
-    out({"type": "result", "subtype": "success", "is_error": False, "num_turns": 2, "result": "done",
-         "session_id": SESSION, "total_cost_usd": 0.0012})
+    return taken
 
 
 while True:
@@ -215,9 +253,6 @@ while True:
         out({"type": "control_response", "response": {"subtype": "success", "request_id": message.get("request_id"),
              "response": body}})
     elif kind == "user":
-        if REPLAY:
-            out({**message, "isReplay": True, "uuid": "echo-%d" % time.time_ns(), "session_id": SESSION})
-        content = message.get("message", {}).get("content", [])
-        text = " ".join(part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text")
-        turn(text, sum(1 for part in content if isinstance(part, dict) and part.get("type") == "image"))
+        echo(message)
+        turn(*said(message))
 sys.exit(0)
