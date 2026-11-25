@@ -164,7 +164,7 @@ enum AgentHelperSelfTest {
         do {
             try helper.registerIfNeeded()
             report["statusAfter"] = SystemAgentHelper.describe(helper.status)
-            let (client, hello) = try await helper.connectOrRestart()
+            let (client, hello) = try await helper.connect()
             report["helperVersion"] = hello.info.version
             report["helperPid"] = Int(hello.info.pid)
             report["helperInstance"] = hello.info.instance
