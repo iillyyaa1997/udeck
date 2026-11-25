@@ -120,11 +120,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel.allowsMultipleSelection = false
             if let prompt { panel.message = prompt }
             // Above the panel, which floats over other windows: at its own
-            // level the dialog opened under it, its folders hidden (0.9.5).
-            let top = NSApp.windows.filter(\.isVisible).map(\.level.rawValue).max() ?? NSWindow.Level.normal.rawValue
-            panel.level = NSWindow.Level(rawValue: max(top + 1, NSWindow.Level.modalPanel.rawValue))
-            NSApp.activate(ignoringOtherApps: true)
-            let path = panel.runModal() == .OK ? panel.url?.path : nil
+            // level the dialog opened under it, its folders hidden (0.9.5), and
+            // a level given before `runModal` is lost as it opens (0.9.18).
+            let path = AboveThePanel.runModal(panel) { panel.runModal() } == .OK ? panel.url?.path : nil
             model?.residentEvent(plugin, .folder(id: request, path: path))
         }
         // Resident plugins run in the helper, which keeps them through a

@@ -800,10 +800,7 @@ enum FilePicker {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
         panel.message = prompt
-        let top = NSApp.windows.filter(\.isVisible).map(\.level.rawValue).max() ?? NSWindow.Level.normal.rawValue
-        panel.level = NSWindow.Level(rawValue: max(top + 1, NSWindow.Level.modalPanel.rawValue))
-        NSApp.activate(ignoringOtherApps: true)
-        return panel.runModal() == .OK ? panel.urls : []
+        return AboveThePanel.runModal(panel) { panel.runModal() } == .OK ? panel.urls : []
     }
 }
 
