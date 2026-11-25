@@ -86,6 +86,10 @@ public final class CodexSession: Identifiable {
 
     public var isEnded: Bool { if case .ended = state { true } else { false } }
 
+    /// The signed-in account's windows (5 hours, a week), as Codex last said
+    /// them: read when the session starts, and on every update it sends.
+    public private(set) var rateLimits: CodexRateLimits?
+
     public var contextPercent: Double? {
         guard let context, context.window > 0 else { return nil }
         return min(100, Double(context.tokens) / Double(context.window) * 100)
@@ -118,6 +122,9 @@ public final class CodexSession: Identifiable {
                 result = try await connection.request("thread/start", ["cwd": .string(folder.path)])
             }
             let resumed = threadID != nil
+            if let limits = try? await connection.request("account/rateLimits/read", [:], timeout: .seconds(10)) {
+                rateLimits = CodexRateLimits(limits["rateLimits"] ?? .null)
+            }
             threadID = result["thread"]?["id"]?.string ?? threadID
             model = result["model"]?.string
             if effort == nil { effort = result["reasoningEffort"]?.string }
@@ -283,6 +290,8 @@ public final class CodexSession: Identifiable {
             if let window = usage["modelContextWindow"]?.int, window > 0 {
                 context = (usage["last"]?["totalTokens"]?.int ?? 0, window)
             }
+        case "account/rateLimits/updated":
+            rateLimits = CodexRateLimits(params["rateLimits"] ?? .null)
         case "serverRequest/resolved":
             if let id = params["requestId"] { asks.removeAll { $0.requestID == Self.key(id) } }
         case "error":

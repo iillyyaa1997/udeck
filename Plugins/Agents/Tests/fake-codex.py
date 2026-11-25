@@ -50,6 +50,9 @@ def start_turn(request_id, text):
     turn = "turn-" + uuid.uuid4().hex[:6]
     out({"id": request_id, "result": {"turn": {"id": turn, "status": "inProgress", "items": []}}})
     note("turn/started", {"threadId": THREAD, "turn": {"id": turn, "status": "inProgress", "items": []}})
+    note("account/rateLimits/updated", {"rateLimits": {
+        "primary": {"usedPercent": 81, "windowDurationMins": 300, "resetsAt": 4102444800},
+        "secondary": {"usedPercent": 13, "windowDurationMins": 10080, "resetsAt": 4102444800}}})
     say(turn, "Picking up from what was handed over." if "[This conversation" in text else "Looking at it.")
     next_request += 1
     pending[next_request] = turn
@@ -120,6 +123,10 @@ while True:
                                    {"type": "agentMessage", "text": "Fixed."}]}]}})
     elif method == "turn/interrupt":
         out({"id": request_id, "result": {}})
+    elif method == "account/rateLimits/read":
+        out({"id": request_id, "result": {"rateLimits": {
+            "primary": {"usedPercent": 34, "windowDurationMins": 300, "resetsAt": 4102444800},
+            "secondary": {"usedPercent": 12, "windowDurationMins": 10080, "resetsAt": 4102444800}}}})
     elif request_id is not None:
         out({"id": request_id, "result": {}})
 sys.exit(0)

@@ -181,6 +181,9 @@ enum AgentsCard {
             items.append(["badge": ["text": .string(app.t("контекст \(Int(percent.rounded()))%", "context \(Int(percent.rounded()))%")),
                                     "tone": .string(tone), "fill": .number(percent / 100)]])
         }
+        if case .codex(let codex) = session.current, let limits = codex.rateLimits, let badge = codexLimits(limits, app) {
+            items.append(["badge": badge])
+        }
         let waiting = session.current.queued.count
         if waiting > 0 {
             items.append(["badge": ["text": .string(app.t("в очереди: \(waiting)", "queued: \(waiting)")), "tone": "info"]])
@@ -189,6 +192,27 @@ enum AgentsCard {
             items.append(["badge": ["text": .string(session.folder.lastPathComponent), "icon": "folder"]])
         }
         return ["bar": ["id": "status", "items": .array(items)]]
+    }
+
+    /// Codex's own limits for the account it runs on, as the Claude accounts'
+    /// are said in their menu: «5 ч 34% · неделя 12%», tinted as they fill.
+    static func codexLimits(_ limits: CodexRateLimits, _ app: AgentsApp) -> JSONValue? {
+        let windows = [limits.primary, limits.secondary].compactMap { $0 }
+        guard !windows.isEmpty else { return nil }
+        let text = windows.map { window in
+            windowName(window.minutes, app) + " " + "\(Int((window.usage.used * 100).rounded()))%"
+        }.joined(separator: " · ")
+        let fullest = windows.map(\.usage.used).max() ?? 0
+        let tone = fullest >= 0.9 ? "crit" : fullest >= 0.75 ? "warn" : "info"
+        return ["text": .string(text), "tone": .string(tone), "icon": "account"]
+    }
+
+    static func windowName(_ minutes: Int?, _ app: AgentsApp) -> String {
+        guard let minutes else { return app.t("лимит", "limit") }
+        if minutes == 7 * 24 * 60 { return app.t("неделя", "week") }
+        if minutes % (24 * 60) == 0 { return app.t("\(minutes / (24 * 60)) д", "\(minutes / (24 * 60))d") }
+        if minutes % 60 == 0 { return app.t("\(minutes / 60) ч", "\(minutes / 60)h") }
+        return app.t("\(minutes) мин", "\(minutes)m")
     }
 
     static func stateBadge(_ session: Conversation, _ app: AgentsApp) -> JSONValue {
