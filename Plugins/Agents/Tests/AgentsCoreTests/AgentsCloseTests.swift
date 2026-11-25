@@ -57,7 +57,8 @@ struct AgentsCloseTests {
         #expect(app.conversations.contains { $0.id == other.id }, "not closed without asking")
         #expect(app.selected?.id == shown, "the one shown stays shown")
         let asked = try #require(closeAsk(said, for: other))
-        #expect(asked["title"]?.string == "Close «" + other.title + "»?")
+        #expect(asked["title"]?.string == "Close «" + other.title + "»? The conversation stays in the history")
+        #expect(asked["detail"] == nil, "said in the question: a detail is drawn as a command")
         #expect(asked["buttons"]?.array?.compactMap { $0["label"]?.string } == ["Close", "Keep it"])
         await app.handle(#"{"event":"press","id":"closenow:\#(other.id.uuidString)"}"#)
         #expect(!app.conversations.contains { $0.id == other.id })
@@ -89,7 +90,7 @@ struct AgentsCloseTests {
         #expect(app.conversations.count == 1, "not closed in a turn without asking")
         app.render()
         let ask = try #require(closeAsk(said, for: conversation))
-        #expect(ask["title"]?.string == "«" + conversation.title + "» сейчас работает — остановить и закрыть?")
+        #expect(ask["title"]?.string == "«" + conversation.title + "» сейчас работает — остановить и закрыть? Разговор останется в истории")
         #expect(ask["buttons"]?.array?.compactMap { $0["id"]?.string }
                     == ["closenow:" + conversation.id.uuidString, "keepopen:" + conversation.id.uuidString])
 

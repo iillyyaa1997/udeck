@@ -26,19 +26,18 @@ extension AgentsApp {
     }
 
     /// The question asked before a session is closed: «Stop and close» for
-    /// one in a turn, «Close» for the rest.
+    /// one in a turn, «Close» for the rest. What happens to the conversation
+    /// is said in the question itself: an ask's `detail` is drawn as a
+    /// command is.
     func closeAskRow(_ session: Conversation) -> JSONValue {
         let working = session.current.state == .working
         let name = "«" + session.title + "»"
         let title = working
-            ? t(name + " сейчас работает — остановить и закрыть?", name + " is working — stop it and close it?")
-            : t("Закрыть " + name + "?", "Close " + name + "?")
-        let detail = working
-            ? t("Ход остановится на середине. Разговор останется в истории",
-                "The turn stops where it is. The conversation stays in the history")
-            : t("Разговор останется в истории — его можно продолжить",
-                "The conversation stays in the history, to continue later")
-        return ["id": .string("close-" + session.id.uuidString), "title": .string(title), "detail": .string(detail),
+            ? t(name + " сейчас работает — остановить и закрыть? Разговор останется в истории",
+                name + " is working — stop it and close it? The conversation stays in the history")
+            : t("Закрыть " + name + "? Разговор останется в истории",
+                "Close " + name + "? The conversation stays in the history")
+        return ["id": .string("close-" + session.id.uuidString), "title": .string(title),
                 "buttons": [
                     ["id": .string("closenow:" + session.id.uuidString),
                      "label": .string(working ? t("Остановить и закрыть", "Stop and close") : t("Закрыть", "Close")),
