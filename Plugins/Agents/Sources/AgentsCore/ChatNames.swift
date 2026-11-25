@@ -118,6 +118,19 @@ extension ChatNames {
         return cut(words, limit: limit)
     }
 
+    /// What a message says, for a model to name a session by: a pasted
+    /// block's own text kept — what was pasted is what the work is — tags
+    /// and a bare answer left out. Nil when nothing is left.
+    public static func substance(_ text: String) -> String? {
+        var text = text.replacingOccurrences(of: #"</?pasted_content[^>]*>"#, with: "", options: .regularExpression)
+        text = text.replacingOccurrences(of: #"<[^<>\n]{1,200}>"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.unicodeScalars.filter({ CharacterSet.letters.contains($0) }).count >= 3 else { return nil }
+        let bare = text.lowercased().replacingOccurrences(of: #"^\d+[.)]?\s*"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+        return bareAnswers.contains(bare) ? nil : text
+    }
+
     /// Answers and greetings that say nothing of what a session is about.
     static let bareAnswers: Set<String> = [
         "да", "нет", "ок", "окей", "ага", "угу", "давай", "продолжай", "продолжи", "дальше", "го", "спасибо",
@@ -136,13 +149,14 @@ extension ChatNames {
     }
 
     /// Whether a model's name will not do: it starts with continuing or
-    /// helping — «Продолжение…», «Помощь с…», «Continue…» — or runs past six
-    /// words. Such a name is asked for once more.
+    /// helping — «Продолжение…», «Помощь с…», «Continue…» — runs past six
+    /// words, or has a second clause after a colon. Such a name is asked for
+    /// once more.
     public static func willNotDo(_ name: String) -> Bool {
         let words = name.trimmingCharacters(in: CharacterSet(charactersIn: "«»\"' ").union(.whitespacesAndNewlines))
         let lowered = words.lowercased()
         let starts = ["продолж", "помощь", "помоги", "работа над", "continu", "help"]
-        return starts.contains { lowered.hasPrefix($0) } || words.split(separator: " ").count > 6
+        return starts.contains { lowered.hasPrefix($0) } || words.split(separator: " ").count > 6 || words.contains(":")
     }
 
     /// A name that still will not do after the second try, made to: what is
@@ -176,6 +190,8 @@ extension ChatNames {
         line = line.trimmingCharacters(in: CharacterSet(charactersIn: "\"'«»“”„`*").union(.whitespaces))
         line = tidied(line)
         guard !line.isEmpty, line.split(separator: " ").count <= 10 else { return nil }
+        // A name in a list starts with a capital, whatever the model wrote.
+        line = line.prefix(1).uppercased() + line.dropFirst()
         return cut(line, limit: limit)
     }
 

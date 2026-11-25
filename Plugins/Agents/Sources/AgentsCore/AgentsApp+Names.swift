@@ -46,8 +46,8 @@ extension AgentsApp {
 
     /// What the model is told once more, about a name that will not do.
     nonisolated static func namingAgain(_ name: String) -> String {
-        "«\(name)» does not do: a name says what the work is about, in at most 5 words, and never starts with "
-            + "continuing or helping. Give the name again, the name only."
+        "«\(name)» does not do: a name says what the work is about, in at most 5 words, with no colon, and never "
+            + "starts with continuing or helping. Give the name again, the name only."
     }
 
     // MARK: - Known names
@@ -142,15 +142,15 @@ extension AgentsApp {
     }
 
     /// What the model names a session by: the first things the person said
-    /// that read as a subject, and the first answer — a few hundred
-    /// characters of each. Nil while the person has said nothing of the kind.
+    /// that say anything — a pasted prompt included, which is often the whole
+    /// of the task — and the first answer, a few hundred characters of each. Nil while the person has said nothing of the kind.
     nonisolated static func excerpt(_ items: [FeedItem]) -> String? {
         var said: [String] = []
         var answer: String?
         for item in items {
             switch item {
-            case .user(_, let text) where said.count < 3 && ChatNames.firstWords(text) != nil:
-                said.append(String(text.prefix(600)))
+            case .user(_, let text) where said.count < 3:
+                if let words = ChatNames.substance(text) { said.append(String(words.prefix(600))) }
             case .assistant(_, let text, _) where answer == nil && !said.isEmpty && !text.isEmpty:
                 answer = String(text.prefix(600))
             default:

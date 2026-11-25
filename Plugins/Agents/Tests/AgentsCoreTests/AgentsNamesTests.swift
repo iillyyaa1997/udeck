@@ -71,8 +71,31 @@ struct AgentsNamesTests {
         #expect(ChatNames.willNotDo("Continue the release notes"))
         #expect(ChatNames.willNotDo("Анализ кластера и CI, и решение про второй сервер в Европе"))
         #expect(!ChatNames.willNotDo("Документы для ИП и ВНЖ"))
+        #expect(ChatNames.willNotDo("Планирование: u-pilot"))
+        #expect(ChatNames.cleaned("подключение маркетплейса к чату") == "Подключение маркетплейса к чату")
         #expect(ChatNames.cleaned("Продолжение print-lab: шафл-коробка v3") == "Шафл-коробка v3")
         #expect(ChatNames.cleaned("Анализ кластера и CI, и решение про второй сервер в Европе") == "Анализ кластера и CI")
+    }
+
+    @Test("a model is shown what was pasted, not a skill's text or a bare answer")
+    func excerpt() {
+        let items: [FeedItem] = [
+            .user(id: UUID(), text: "\n\n<pasted_content id=\"05ce\">\n/planning-workflow Продолжаем Warren. Автономный прогон\n</pasted_content>"),
+            .user(id: UUID(), text: "1"),
+            .assistant(id: UUID(), text: "Читаю план Warren", streaming: false),
+        ]
+        let excerpt = AgentsApp.excerpt(items)
+        #expect(excerpt?.contains("Продолжаем Warren") == true)
+        #expect(excerpt?.contains("pasted_content") == false)
+        #expect(excerpt?.contains("Person: 1") == false)
+        #expect(excerpt?.hasSuffix("Agent: Читаю план Warren") == true)
+        #expect(SessionHistory.spoken("Base directory for this skill: /x/workflow-authoring\n# Workflow authoring") == .machine)
+        let transcript = ClaudeTranscript(contents: [
+            #"{"type":"user","message":{"role":"user","content":"<pasted_content id=\"1\">/planning-workflow Продолжаем Warren</pasted_content>"}}"#,
+            ##"{"type":"user","isMeta":true,"message":{"role":"user","content":[{"type":"text","text":"# Workflow authoring reference"}]}}"##,
+        ].joined(separator: "\n"))
+        let opening = SessionHistory.feed(of: transcript)
+        #expect(opening.count == 1, "a skill's text, put in by Claude Code, is not the person's")
     }
 
     @Test("the names kept: the person's is not replaced by a model's; the newest are kept")

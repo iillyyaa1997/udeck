@@ -38,6 +38,9 @@ public struct ClaudeTranscript: Sendable, Equatable {
             case "user" where raw["isSidechain"]?.bool != true:
                 cwd = raw["cwd"]?.string ?? cwd
                 branch = raw["gitBranch"]?.string ?? branch
+                // Put in by Claude Code, not typed: a skill's text as it loads,
+                // a local command's caveat. The CLI does not show them either.
+                if raw["isMeta"]?.bool == true { continue }
                 let at = raw["timestamp"]?.string.flatMap(parseDate)
                 let content = raw["message"]?["content"]
                 if let text = content?.string {
