@@ -21,6 +21,7 @@ from udeck_e2e import app, updates
 from udeck_e2e.errors import LabError, expect
 
 VERSION = ("0.4.1", "6")
+NEWER = ("0.4.2", "7")
 REPORT = "~/.udeck/agents/selftest.jsonl"
 HELPER = f"{app.GUEST_APPLICATIONS}/{app.APP}/Contents/Helpers/udeck-agentd"
 LABEL = f"{app.BUNDLE_ID}.agentd"
@@ -116,8 +117,50 @@ def check_turns_away_everyone_else(machine, check_dir, lab):
         _unregister(machine, lab)
 
 
+def check_takes_the_helper_back_after_an_update(machine, check_dir, lab):
+    """After an update the next uDeck reaches a helper of its own version: the one left running is started again.
+
+    An update replaces the bundle while the helper of the version before goes on
+    running from it. On the operator's Mac (11-25) the 0.9.9 helper still ran
+    after three updates and cut every connection from 0.9.12 — forty in ten
+    seconds — so resident plugins ran inside uDeck and did not outlive it.
+    0.4.1 starts the helper; 0.4.2 is put in its place under it, as Sparkle puts
+    an update; the uDeck that starts then has to reach a helper, and one of its
+    own version.
+
+    **Red for**: a uDeck that cannot reach a helper after an update, and one left
+    talking to the version before's.
+    """
+    builder = _prepare(machine, check_dir, lab)
+    try:
+        app.launch(machine, f"starting {VERSION[0]} with the helper's self-test on")
+        first = _wait_for_reports(machine, 1)[-1]
+        lab.note(f"   {VERSION[0]}: {_summary(first)}, helper {first.get('helperVersion')}")
+        expect("error" not in first, f"the self-test failed before the update: {first.get('error')}")
+        expect(first.get("helperVersion") == VERSION[0],
+               f"{VERSION[0]} reached helper {first.get('helperVersion')}, not its own")
+        newer = builder.build(*NEWER)
+        app.quit_app(machine, f"ending {VERSION[0]}, its helper left running")
+        helper = str(first.get("helperPid", ""))
+        alive = machine.ssh.ask(f"kill -0 {shlex.quote(helper)} && echo alive", "asking whether the helper outlived uDeck")
+        if "alive" not in alive.stdout:
+            raise LabError("leaving the helper running", f"the helper (pid {helper}) ended with uDeck: the update "
+                                                         "would find none to be stuck on")
+        app.install(machine, newer.zip, lab.note)
+        app.launch(machine, f"starting {NEWER[0]} over the helper {VERSION[0]} left")
+        second = _wait_for_reports(machine, 2)[-1]
+        lab.note(f"   {NEWER[0]}: {_summary(second)}, helper {second.get('helperVersion')} pid {second.get('helperPid')}")
+        expect("error" not in second,
+               f"after the update uDeck could not reach a helper: {second.get('error')}")
+        expect(second.get("helperVersion") == NEWER[0],
+               f"after the update uDeck talks to helper {second.get('helperVersion')}, not {NEWER[0]}")
+        _expect_helper_under_launchd(machine, second)
+    finally:
+        _unregister(machine, lab)
+
+
 def _prepare(machine, check_dir, lab):
-    """A lab build installed, not running, with the self-test switched on and no old reports."""
+    """A lab build installed, not running, with the self-test switched on and no old reports — and the builder."""
     feed = updates.Feed(machine, lab.note)
     builder = lab.builder(feed.url, check_dir.name)
     build = builder.build(*VERSION)
@@ -132,6 +175,7 @@ def _prepare(machine, check_dir, lab):
         f"defaults delete {app.BUNDLE_ID} AgentHelperUnregister >/dev/null 2>&1; exit 0",
         "switching the helper's self-test on",
     )
+    return builder
 
 
 def _reports(machine, step):

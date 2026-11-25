@@ -28,7 +28,7 @@ final class HelperResidentLauncher: ResidentLauncher {
         }
         do {
             try helper.registerIfNeeded()
-            let (client, hello) = try await helper.connect(seconds: 10)
+            let (client, hello) = try await helper.connectOrRestart(seconds: 10)
             DeckLog.plugins.notice("resident plugins run in the helper \(hello.info.version, privacy: .public), pid \(hello.info.pid)")
             self.client = client
             failedAt = nil

@@ -65,6 +65,51 @@ final class SystemAgentHelper {
         throw lastError
     }
 
+    /// Whether the helper has been started again by this uDeck already: once
+    /// a run, never in a loop.
+    private var restarted = false
+
+    /// `connect`, and — when the helper is registered, running and will not
+    /// answer — the helper started again once, and `connect` once more.
+    ///
+    /// An update leaves the helper of the version before it running, its file
+    /// on disk replaced underneath it: on the operator's Mac the 0.9.9 helper
+    /// was still running after 0.9.10, 0.9.11 and 0.9.12, and every connection
+    /// from 0.9.12 was cut within 10 ms, forty in ten seconds (11-25). Its
+    /// plugins could not be reached either, so restarting it loses nothing
+    /// that was still to be had; a plugin that keeps its own state (Agents'
+    /// sessions) takes it back when it starts again.
+    func connectOrRestart(seconds: Double = 20) async throws -> (AgentHostClient, AgentHostClient.Hello) {
+        do {
+            return try await connect(seconds: seconds)
+        } catch {
+            guard !restarted, helperRequirement != nil, status == .enabled else { throw error }
+            restarted = true
+            DeckLog.plugins.notice("the helper does not answer (\(String(describing: error), privacy: .public)): starting it again")
+            guard restart() else { throw error }
+            return try await connect(seconds: seconds)
+        }
+    }
+
+    /// The helper's job started again by launchd (`launchctl kickstart -k`):
+    /// the running one ended, a new one from the file on disk now. Not
+    /// registered again — that would post "Background item added" once more.
+    private func restart() -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["kickstart", "-k", "gui/\(getuid())/\(label)"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return false
+        }
+        DeckLog.plugins.notice("the helper started again: launchctl kickstart said \(process.terminationStatus)")
+        return process.terminationStatus == 0
+    }
+
     static var version: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "development"
     }
@@ -119,7 +164,7 @@ enum AgentHelperSelfTest {
         do {
             try helper.registerIfNeeded()
             report["statusAfter"] = SystemAgentHelper.describe(helper.status)
-            let (client, hello) = try await helper.connect()
+            let (client, hello) = try await helper.connectOrRestart()
             report["helperVersion"] = hello.info.version
             report["helperPid"] = Int(hello.info.pid)
             report["helperInstance"] = hello.info.instance
