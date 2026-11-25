@@ -756,6 +756,10 @@ public final class PanelController {
                 shell.tabRename = nil
                 return true
             }
+            // A menu open over the panel is what Escape closes, and only it:
+            // passed on to the popover, which closes itself. It used to take
+            // the whole panel away with it (the lab, 11-25, run 45536857973).
+            if PopoverPresence.isOpen { return false }
             // Whether a field is holding text is the content's business; the
             // state machine only needs to be told, and it protects the text.
             apply(.escape(isEditingText: isEditingText()))

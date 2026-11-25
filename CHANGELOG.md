@@ -18,6 +18,7 @@ for what that promises.
   to close a session from the list.
 - A card's own window takes its plugin's name once the plugins are read, not
   the plugin's id.
+- Escape with a card's menu open closes the menu, not the whole panel.
 - Agents (the plugin, installed separately) closes a session with ✕ in its
   title line or by the session in the menu; the conversation stays in the
   history, and one that is working asks first.
