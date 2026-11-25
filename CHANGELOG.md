@@ -8,6 +8,20 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.17] — 2026-11-25
+
+- **Files with a message.** A card's field that takes files (`files: true` on
+  an `input` row) has 📎: files dragged onto it, pasted with ⌘V — files copied
+  in the Finder, or a screenshot on the clipboard — or chosen with 📎 show
+  above the text, a picture by its thumbnail and any other file by its icon,
+  each with ✕, and go with the message: `submit` carries their paths in
+  `files`. A paste of text is still the field's.
+- Agents (the plugin, installed separately) sends them: a picture as a
+  picture to Claude and to Codex, any other file by its path for the agent to
+  read. Its session names now come from a model above a terminal's status
+  line, its history's sessions are named once, and a Codex picture goes as
+  `localImage`, as the app server takes it.
+
 ## [0.9.16] — 2026-11-25
 
 - **A style card shows both of its variants while the look changes by
