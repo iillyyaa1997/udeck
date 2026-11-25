@@ -52,6 +52,8 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
+from udeck_e2e import ax
 import json
 import re
 import shlex
@@ -8056,3 +8058,47 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+_APP_TYPE = "lsappinfo info \"$(lsappinfo find bundleid=place.unicorns.udeck)\" | grep -o 'type=\"[A-Za-z]*\"' | head -1"
+
+
+def check_cmd_tab(machine, check_dir, lab):
+    """A card in its own window puts uDeck in the Dock and Cmd+Tab; closed, it leaves — a lab tree's only."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake = f"{home}/lab-chat/fake-claude.py"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json && cp {root}/Tests/fake-claude.py {shlex.quote(fake)}",
+        "installing the Agents plugin")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake}}}, "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Work", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 8, "height": 6,
+         "shownIn": "window"}]}]}, "Agents in a window of its own")
+    app.launch(machine)
+    machine.sleep(6)
+    print("type with the window open:", machine.ssh.run(_APP_TYPE, "uDeck's type").stdout.strip())
+    titles = ui.windows(machine, "uDeck's windows")
+    print("windows:", titles)
+    machine.screenshot(check_dir, "cmdtab 1 the window open")
+    title = next((t for t in titles if "Agents" in t), None)
+    if title is None:
+        print("no Agents window")
+        return
+    walked, _ = ax.parse_walk(ax.ask(machine, ["walk", ui.PROCESS, f"title={title}", "4"], "walking the Agents window"))
+    close = next((w for w in walked if w.subrole == "AXCloseButton" and w.frame), None)
+    print("close button:", close.frame if close else None)
+    if close is None:
+        return
+    x, y, w, h = close.frame
+    machine.click(x + w / 2, y + h / 2, "closing the Agents window")
+    machine.sleep(3)
+    print("windows after:", ui.windows(machine, "uDeck's windows after"))
+    print("type with the window closed:", machine.ssh.run(_APP_TYPE, "uDeck's type").stdout.strip())
+    machine.screenshot(check_dir, "cmdtab 2 the window closed")
