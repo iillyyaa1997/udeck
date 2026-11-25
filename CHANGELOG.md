@@ -8,6 +8,19 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.13] — 2026-11-25
+
+- **Cmd+Tab reaches a card's own window.** While a card is shown in a window of
+  its own, uDeck is in the Dock and in the Cmd+Tab switcher, as it is while
+  Settings is open; when the last such window closes, the icon goes again.
+- **Plugins keep running in the helper after an update.** The helper the
+  version before left running cut every connection from the new uDeck — the
+  file it ran from had been replaced — so resident plugins such as Agents ran
+  inside uDeck and did not outlive it. uDeck now starts such a helper again.
+- Agents (the plugin, installed separately) keeps the Mac awake while an agent
+  works: said on its card, with who else keeps it awake, and a sleep that
+  stopped an agent said in that session.
+
 ## [0.9.12] — 2026-11-25
 
 - **Update in one press.** Settings → General has one button, **Check and

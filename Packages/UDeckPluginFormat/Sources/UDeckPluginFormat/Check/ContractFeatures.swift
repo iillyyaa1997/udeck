@@ -132,9 +132,9 @@ public enum ContractFeatures {
     /// had; 0.9.9's are lines beside a card and events — `view`, `keep`,
     /// `name`, `show`, a notice's `actions` and `reply`, `unnotify` — which a
     /// uDeck before it ignores, and the docs date). 0.9.10 brings a card's
-    /// `attention`, dated above. 0.9.11 and 0.9.12 change nothing in
-    /// the contract.
-    static let reviewedAt = "0.9.12"
+    /// `attention`, dated above. 0.9.11, 0.9.12 and 0.9.13 change
+    /// nothing in the contract.
+    static let reviewedAt = "0.9.13"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
