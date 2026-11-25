@@ -52,6 +52,7 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
 import json
 import re
 import shlex
@@ -8056,3 +8057,87 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+def check_agents_names(machine, check_dir, lab):
+    """Sessions named after the first answer, the history by names without scripts' sessions, /rename, ✕ asks — a lab tree's only."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin and the stand-in CLI")
+    # Saved sessions: one whose first message is «1» and last «2», one with a name of its own, one a script ran.
+    projects = f"{home}/.claude/projects/-Users-lab-Workspace-udeck"
+    machine.ssh.run(f"mkdir -p {shlex.quote(projects)}", "the saved sessions' folder")
+    def user(text, entry="cli"):
+        return json.dumps({"type": "user", "entrypoint": entry, "cwd": project, "message": {"role": "user", "content": text}},
+                          ensure_ascii=False)
+    _write_file(machine, f"{projects}/saved-first.jsonl", "\n".join([
+        user("1"), user("Почини кнопку обновления в настройках"),
+        json.dumps({"type": "last-prompt", "lastPrompt": "2"})]) + "\n")
+    _write_file(machine, f"{projects}/saved-own.jsonl", "\n".join([
+        user("продолжай"), json.dumps({"type": "custom-title", "customTitle": "ADR-0025 windows kvm-ci"}),
+        json.dumps({"type": "last-prompt", "lastPrompt": "продолжай"}, ensure_ascii=False)]) + "\n")
+    _write_file(machine, f"{projects}/saved-script.jsonl", user("Problem: Флоу 88d93440 (Со слов запроса)", "sdk-cli") + "\n")
+    _write(machine, SETTINGS, {"language": "ru"}, "uDeck in Russian")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake}}}, "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 8, "height": 6}]}]}, "placing Agents")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=40)
+    machine.click(*new.middle, "＋")
+    machine.sleep(1)
+    option = ui.wait_for(machine, "row.button.new.new:claude", "a new Claude session", ui.PANEL, seconds=8)
+    machine.click(*option.middle, "a new Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "the folder")
+    machine.sleep(3)
+    field = ui.wait_for(machine, "row.input.message", "the field", ui.PANEL, seconds=30)
+    machine.screenshot(check_dir, "names 1 a new session")
+    machine.click(*field.middle, "the field")
+    ui.type_text(machine, "Look at the notes [name-me]", "typing")
+    ui.press_return(machine, "sending")
+    allow = ui.wait_for(machine, "row.ask.allow:perm-b1", "the ask", ui.PANEL, seconds=60)
+    machine.click(*allow.middle, "allowing the command")
+    machine.sleep(5)
+    machine.screenshot(check_dir, "names 2 named after the answer")
+    title = ui.wait_for(machine, "row.menu.session", "the title", ui.PANEL, seconds=8)
+    machine.click(title.x + 24, title.y + title.height / 2, "the title")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "names 3 the menu")
+    machine.key("esc", "putting the menu away")
+    machine.sleep(1)
+    field = ui.wait_for(machine, "row.input.message", "the field again", ui.PANEL, seconds=10)
+    machine.click(*field.middle, "the field")
+    ui.type_text(machine, "/rename Notes check", "renaming")
+    ui.press_return(machine, "sending the rename")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "names 4 renamed")
+    close = ui.wait_for(machine, "row.button.close", "✕ in the title line", ui.PANEL, seconds=8)
+    machine.click(*close.middle, "✕ in the title line")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "names 5 the close asks")
+    asks = [i for i in ui.identifiers(machine, "the ask", ui.PANEL) if i.startswith("row.ask.")]
+    print("asks:", asks)
+    keep = next((i for i in asks if i.startswith("row.ask.keepopen:")), None)
+    if keep:
+        button = ui.wait_for(machine, keep, "Оставить", ui.PANEL, seconds=5)
+        machine.click(*button.middle, "Оставить")
+        machine.sleep(2)
+        machine.screenshot(check_dir, "names 6 kept")
+    print("left:", [i for i in ui.identifiers(machine, "left", ui.PANEL) if "row.button" in i or "row.menu" in i][:10])
