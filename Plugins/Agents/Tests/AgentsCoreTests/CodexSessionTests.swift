@@ -45,7 +45,9 @@ struct CodexSessionTests {
         session.send("Go on", text: "[This conversation was carried on with another assistant…]\n\nGo on")
         try await until("the answer") { session.items.contains { if case .assistant(_, let text, false) = $0 { text.contains("handed over") } else { false } } }
         #expect(session.items.first == .user(id: { if case .user(let id, _) = session.items.first! { id } else { UUID() } }(), text: "Go on"))
-        if let ask = session.asks.first { session.answer(ask, with: "decline") }
+        // The approval comes after the answer's words: waited for, not looked for once.
+        try await until("the approval") { !session.asks.isEmpty }
+        session.answer(try #require(session.asks.first), with: "decline")
         try await until("the turn's end") { session.state == .idle }
         await session.close()
     }

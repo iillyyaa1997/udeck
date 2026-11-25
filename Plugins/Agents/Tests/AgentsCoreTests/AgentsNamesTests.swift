@@ -181,7 +181,9 @@ struct AgentsNamesTests {
         func shown() -> String? {
             (AgentsCard.sessionMenu(app)["options"]?.array ?? []).first { $0["id"]?.string == "h:status" }?["text"]?.string
         }
-        try await until("the model's name") { shown() == "Осмотр папки с заметками" }
+        // Named in the background, at a utility priority: under a CI's load of
+        // every suite at once it took 7.6 s of a 10 s wait, and then more.
+        try await until("the model's name", timeout: .seconds(40)) { shown() == "Осмотр папки с заметками" }
         #expect(ChatNames.load(home: home).entries[ChatNames.key(.claude, "status")]?.name == "Осмотр папки с заметками")
         // Once: the next look asks nothing.
         let tries = app.namingTries
