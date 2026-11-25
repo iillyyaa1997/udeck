@@ -18,8 +18,10 @@ extension AgentsApp {
 
     /// Holds or lets go, as the sessions are now.
     func updateKeepAwake() {
+        // In English whatever the language: powerd keeps an assertion's name
+        // in ASCII, and `pmset -g assertions` showed a Russian one as "".
         keepAwake.update(working: workingSessions, enabled: keepAwakeEnabled,
-                         name: t("uDeck Agents: агент работает", "uDeck Agents: an agent is working"))
+                         name: "uDeck Agents: an agent is working")
     }
 
     /// Looks for a sleep every half a minute, and asks again who else holds
@@ -64,7 +66,7 @@ extension AgentsApp {
         let count = keepAwake.working
         let line = t("☕ Мак не уснёт, пока \(count == 1 ? "работает" : "работают") \(count) \(Self.sessions(count))",
                      "☕ The Mac stays awake while \(count) session\(count == 1 ? "" : "s") work\(count == 1 ? "s" : "")")
-        var rows: [JSONValue] = [["list": [["text": .string(line), "icon": "run"]]]]
+        var rows: [JSONValue] = [["text": .string(line)]]
         var more: [String] = []
         if !keepAwake.others.isEmpty {
             more.append(t("Ещё не дают спать: ", "Also keeping it awake: ") + keepAwake.others.joined(separator: ", "))
