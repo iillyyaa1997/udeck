@@ -21,12 +21,34 @@ extension AgentsApp {
         return raw != "false" && raw != "0"
     }
 
-    /// What the model is told; the conversation's start is the message.
+    /// What the model is told; the folder and the conversation's start are
+    /// the message. Tried on the operator's own sessions (11-25): «2 to 6
+    /// words, what it is about» gave «Продолжение handoff 009»; the rules and
+    /// the bad → good pairs below, with one more try for a name that still
+    /// starts with continuing (`namingAgain`), gave eight of eight that say
+    /// what the work is.
     static let namingInstructions = """
-        You give names to conversations. The message is the start of one between a person and a coding agent. \
-        Reply with its name only: 2 to 6 words, in the language the person writes in, saying what it is about. \
-        No quotes, no full stop, nothing else.
+        You name conversations for a list of chats, the way an email has a subject. The message gives the folder \
+        the conversation runs in and its start: what the person said and the agent's first answer.
+        Write the name that tells the person, weeks later, which conversation this was:
+        - at most 5 words, in the language the person writes in; one subject, no second clause after a colon;
+        - the subject itself: what is being made, fixed or decided, and in what — a project, a device, a service. \
+        Good: «Уведомления Plane в Telegram», «Кнопка обновления не работает», «Шафл-коробка для принтера», \
+        «Flaky login test»;
+        - never start with continuing or helping — not «Продолжение», «Продолжаем», «Помощь», «Работа над», \
+        «Continue», «Help with». When the person continues earlier work, name that work, taking it from the \
+        agent's answer if the person only points at a handoff;
+        - leave out the agent's or a skill's name, ticket numbers, file paths and the words handoff, prompt, session.
+        Bad → good: «Продолжение работы над ботом: команды» → «Команды бота»; «Помощь с настройкой роутера» → \
+        «Настройка роутера»; «Continue the release notes: v2» → «Release notes v2».
+        Reply with the name only: no quotes, no full stop, nothing else.
         """
+
+    /// What the model is told once more, about a name that will not do.
+    nonisolated static func namingAgain(_ name: String) -> String {
+        "«\(name)» does not do: a name says what the work is about, in at most 5 words, and never starts with "
+            + "continuing or helping. Give the name again, the name only."
+    }
 
     // MARK: - Known names
 
@@ -100,7 +122,8 @@ extension AgentsApp {
     func makeUpName(_ conversation: Conversation, key: String) {
         let agent = conversation.first
         guard nameChatsEnabled, agent.titleSource < .model, namingTries[key, default: 0] < Self.namingTries,
-              let excerpt = Self.excerpt(agent.items) else { return }
+              let start = Self.excerpt(agent.items) else { return }
+        let excerpt = "Folder: " + conversation.folder.lastPathComponent + "\n\n" + start
         namingTries[key, default: 0] += 1
         Task {
             let answer: String? = switch agent {
@@ -190,11 +213,18 @@ extension AgentsApp {
         guard (try? await connection.request({ ClaudeOutbound.initialize(id: $0) }, timeout: .seconds(30))) != nil,
               (try? await connection.send(ClaudeOutbound.userMessage(excerpt))) != nil else { return nil }
         let events = connection.events
-        return await Self.within(.seconds(60)) {
+        return await Self.within(.seconds(90)) {
+            var triedAgain = false
             for await event in events {
                 switch event {
                 case .turnFinished(let result, _):
-                    return result.isError ? nil : result.result
+                    guard !result.isError else { return nil }
+                    if !triedAgain, ChatNames.willNotDo(result.result) {
+                        triedAgain = true
+                        try? await connection.send(ClaudeOutbound.userMessage(Self.namingAgain(result.result)))
+                        continue
+                    }
+                    return result.result
                 case .rateLimit(let limit, _) where limit.status == "rejected":
                     // Out of its limit: the CLI would wait hours to try again.
                     return nil
@@ -235,8 +265,10 @@ extension AgentsApp {
             turn["effort"] = .string(effort)
         }
         guard (try? await connection.request("turn/start", .object(turn), timeout: .seconds(30))) != nil else { return nil }
-        return await Self.within(.seconds(60)) {
+        let effort = turn["effort"]
+        return await Self.within(.seconds(90)) {
             var answer: String?
+            var triedAgain = false
             for await event in events {
                 if let approval = event.approval {
                     try? await connection.send(CodexOutbound.decide(approval, "decline"))
@@ -248,7 +280,16 @@ extension AgentsApp {
                    let text = params["item"]?["text"]?.string, !text.isEmpty {
                     answer = text
                 }
-                if method == "turn/completed" { return answer }
+                guard method == "turn/completed" else { continue }
+                if !triedAgain, let named = answer, ChatNames.willNotDo(named) {
+                    triedAgain = true
+                    var again: [String: JSONValue] = ["threadId": .string(threadID),
+                                                      "input": [["type": "text", "text": .string(Self.namingAgain(named))]]]
+                    if let effort { again["effort"] = effort }
+                    _ = try? await connection.request("turn/start", .object(again), timeout: .seconds(30))
+                    continue
+                }
+                return answer
             }
             return answer
         }

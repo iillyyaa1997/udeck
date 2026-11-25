@@ -129,7 +129,13 @@ def hit_the_limit():
 
 def name(text):
     russian = any("а" <= ch.lower() <= "я" for ch in text)
-    words = ("Осмотр папки с заметками" if russian else "Looking at the notes folder") if "[name-me]" in text else ""
+    if text.startswith("«"):
+        # Asked again about a name that would not do.
+        words = "Заметки в папке" if "Продолжение" in text else "Notes in the folder"
+    elif "[name-bad]" in text:
+        words = "Продолжение работы над папкой заметок" if russian else "Continuing the work on the notes"
+    else:
+        words = ("Осмотр папки с заметками" if russian else "Looking at the notes folder") if "[name-me]" in text else ""
     out({"type": "result", "subtype": "success", "is_error": False, "num_turns": 1, "result": words,
          "session_id": SESSION, "total_cost_usd": 0})
 

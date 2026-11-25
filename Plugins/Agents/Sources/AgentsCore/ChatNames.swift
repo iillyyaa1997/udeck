@@ -133,6 +133,34 @@ extension ChatNames {
         return cut(line, limit: limit)
     }
 
+    /// Whether a model's name will not do: it starts with continuing or
+    /// helping — «Продолжение…», «Помощь с…», «Continue…» — or runs past six
+    /// words. Such a name is asked for once more.
+    public static func willNotDo(_ name: String) -> Bool {
+        let words = name.trimmingCharacters(in: CharacterSet(charactersIn: "«»\"' ").union(.whitespacesAndNewlines))
+        let lowered = words.lowercased()
+        let starts = ["продолж", "помощь", "помоги", "работа над", "continu", "help"]
+        return starts.contains { lowered.hasPrefix($0) } || words.split(separator: " ").count > 6
+    }
+
+    /// A name that still will not do after the second try, made to: what is
+    /// after «Продолжение …:» when there is a colon, what is before the first
+    /// colon or comma of one too long.
+    static func tidied(_ name: String) -> String {
+        guard willNotDo(name) else { return name }
+        let lowered = name.lowercased()
+        let continuing = ["продолж", "помощь", "помоги", "работа над", "continu", "help"].contains { lowered.hasPrefix($0) }
+        if continuing, let colon = name.firstIndex(of: ":") {
+            let rest = name[name.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            if !rest.isEmpty { return rest.prefix(1).uppercased() + rest.dropFirst() }
+        }
+        if name.split(separator: " ").count > 6, let cut = name.firstIndex(where: { $0 == ":" || $0 == "," }) {
+            let head = name[..<cut].trimmingCharacters(in: .whitespaces)
+            if !head.isEmpty { return head }
+        }
+        return name
+    }
+
     /// A model's answer as a name: its first line, without quotes, a label
     /// («Title:») or a closing full stop. Nil for nothing, or for more than a
     /// name — a model that answered the conversation instead.
@@ -144,6 +172,7 @@ extension ChatNames {
         line = line.trimmingCharacters(in: CharacterSet(charactersIn: "\"'«»“”„`*#").union(.whitespaces))
         while let last = line.last, ".。!".contains(last) { line.removeLast() }
         line = line.trimmingCharacters(in: CharacterSet(charactersIn: "\"'«»“”„`*").union(.whitespaces))
+        line = tidied(line)
         guard !line.isEmpty, line.split(separator: " ").count <= 10 else { return nil }
         return cut(line, limit: limit)
     }

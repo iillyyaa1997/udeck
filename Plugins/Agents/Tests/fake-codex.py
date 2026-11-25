@@ -52,7 +52,12 @@ def start_turn(request_id, text):
     out({"id": request_id, "result": {"turn": {"id": turn, "status": "inProgress", "items": []}}})
     note("turn/started", {"threadId": THREAD, "turn": {"id": turn, "status": "inProgress", "items": []}})
     if NAMING:
-        say(turn, "Fixing the notes" if "[name-me]" in text else "")
+        if text.startswith("«"):
+            say(turn, "Fixing the notes")
+        elif "[name-bad]" in text:
+            say(turn, "Continue the notes: fixing them")
+        else:
+            say(turn, "Fixing the notes" if "[name-me]" in text else "")
         note("turn/completed", {"threadId": THREAD, "turn": {"id": turn, "status": "completed", "items": []}})
         return
     note("account/rateLimits/updated", {"rateLimits": {

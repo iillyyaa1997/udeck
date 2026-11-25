@@ -64,6 +64,17 @@ struct AgentsNamesTests {
         #expect(ChatNames.cleaned("I looked at the conversation and I think it is about fixing a flaky test in CI") == nil)
     }
 
+    @Test("a name that starts with continuing or runs long will not do; one that still does not is made to")
+    func willNotDo() {
+        #expect(ChatNames.willNotDo("Продолжение print-lab: шафл-коробка v3"))
+        #expect(ChatNames.willNotDo("Помощь с документами"))
+        #expect(ChatNames.willNotDo("Continue the release notes"))
+        #expect(ChatNames.willNotDo("Анализ кластера и CI, и решение про второй сервер в Европе"))
+        #expect(!ChatNames.willNotDo("Документы для ИП и ВНЖ"))
+        #expect(ChatNames.cleaned("Продолжение print-lab: шафл-коробка v3") == "Шафл-коробка v3")
+        #expect(ChatNames.cleaned("Анализ кластера и CI, и решение про второй сервер в Европе") == "Анализ кластера и CI")
+    }
+
     @Test("the names kept: the person's is not replaced by a model's; the newest are kept")
     func kept() throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("agents-names-" + UUID().uuidString)
@@ -166,6 +177,27 @@ struct AgentsNamesTests {
         try await Task.sleep(for: .milliseconds(500))
         #expect(try namingRuns().count == 1, "no second naming run")
         for agent in conversation.agents.values { await agent.close() }
+    }
+
+    @Test("a name that will not do is asked for once more: Claude and Codex")
+    func askedAgain() async throws {
+        let (app, home) = try await app()
+        defer { try? FileManager.default.removeItem(at: home) }
+        await app.newConversation(in: home, provider: .claude)
+        let claude = try #require(app.conversations.first)
+        try await until("idle") { claude.current.state == .idle }
+        try await turn("Посмотри заметки в папке [name-bad]", in: claude, app)
+        try await until("the second name") { claude.title == "Заметки в папке" }
+        #expect(claude.first.titleSource == .model)
+
+        await app.newConversation(in: home, provider: .codex)
+        let codex = try #require(app.conversations.last)
+        try await until("idle") { codex.current.state == .idle }
+        try await turn("Fix the notes [name-bad]", in: codex, app)
+        try await until("the second name") { codex.title == "Fixing the notes" }
+        for conversation in [claude, codex] {
+            for agent in conversation.agents.values { await agent.close() }
+        }
     }
 
     @Test("switched off, a session keeps its first words")
