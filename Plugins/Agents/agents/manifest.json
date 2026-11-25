@@ -59,6 +59,13 @@
           "label": "Evenly by sessions"
         }
       ]
+    },
+    {
+      "key": "keep_awake",
+      "type": "bool",
+      "default": true,
+      "label": "Keep the Mac awake while an agent works",
+      "help": "The display still sleeps; a closed lid sleeps the Mac anyway."
     }
   ]
 }

@@ -149,7 +149,7 @@ enum AgentsCard {
                 })],
             ]
         }
-        var rows: [JSONValue] = compact(app) ? [] : [status(session, app)]
+        var rows: [JSONValue] = compact(app) ? [] : [status(session, app)] + app.keepAwakeRows()
         // The card is sent whole on every change, five times a second while
         // words stream in, and uDeck lays all of it out: the newest entries
         // only, and no entry longer than a screenful.

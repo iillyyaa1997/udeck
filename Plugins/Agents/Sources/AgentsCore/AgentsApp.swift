@@ -53,6 +53,9 @@ public final class AgentsApp {
     var probedAt: [String: Date] = [:]
     var probing: Set<String> = []
     var probeLoop: Task<Void, Never>?
+    /// The Mac kept awake while an agent works, and the look for a sleep.
+    public let keepAwake: KeepAwake
+    var sleepLoop: Task<Void, Never>?
     /// Sessions waiting for a limit to reset, to go on then.
     var waitingForLimit: [UUID: Task<Void, Never>] = [:]
     /// The models each provider offered when a session of it last started,
@@ -74,9 +77,10 @@ public final class AgentsApp {
     /// has finished — a new effort or login chosen mid-turn — and the note.
     private var restartAfterTurn: [UUID: String] = [:]
 
-    public init(home: URL, emit: @escaping (String) -> Void) {
+    public init(home: URL, emit: @escaping (String) -> Void, keepAwake: KeepAwake? = nil) {
         self.home = home
         self.emit = emit
+        self.keepAwake = keepAwake ?? KeepAwake()
         accounts = ChatAccount.discover(home: home)
         account = accounts[0]
         knownModels[.claude] = Self.claudeAliases
@@ -116,6 +120,7 @@ public final class AgentsApp {
                 // the place for the first time: the card is written again.
                 lastCards[here] = nil
                 watchLimits()
+                watchSleep()
                 refreshHistory()
                 if knownModels[.codex] == nil || codexHistory.isEmpty { Task { await learnCodex() } }
                 if let keep = event["keep"]?.string { restore(keep) }
@@ -708,6 +713,7 @@ public final class AgentsApp {
     /// with it and to carry to a place of its own.
     public func render() {
         if Date().timeIntervalSince(historyRead) > 30 { refreshHistory() }
+        updateKeepAwake()
         let current = here
         defer { here = current }
         for name in places.keys.sorted() {
