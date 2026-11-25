@@ -275,8 +275,7 @@ struct CardBodyView: View {
             alert.addButton(withTitle: strings(.actionCancel))
             // The panel sits at the status-bar level, so an ordinary alert
             // would open behind the thing that asked the question.
-            alert.window.level = .popUpMenu
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard AboveThePanel.runModal(alert.window, { alert.runModal() }) == .alertFirstButtonReturn else { return }
         }
         actionProblem = model.run(action, from: pluginID)
     }
