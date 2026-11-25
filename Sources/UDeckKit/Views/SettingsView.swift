@@ -1403,8 +1403,12 @@ private struct LookSettings: View {
         }
     }
 
-    /// Whether the dark variant is in force now: each card shows the one the
-    /// panel wears.
+    /// Whether the cards show both variants: as the big preview, while the
+    /// look changes by itself.
+    private var bothVariants: Bool { model.settings.theme.appearance == .automatic }
+
+    /// Whether the dark variant is in force now: a card with one variant shows
+    /// the one the panel wears.
     private var wearsDark: Bool {
         model.settings.isDark(systemIsDark: DeckModel.systemIsDark(), hour: DeckModel.currentHour())
     }
@@ -1414,7 +1418,7 @@ private struct LookSettings: View {
         switch item {
         case .style(let candidate):
             StyleCard(name: strings(candidate.namePhrase), summary: strings(candidate.summaryPhrase),
-                      light: candidate.light, dark: candidate.dark, wearsDark: wearsDark,
+                      light: candidate.light, dark: candidate.dark, both: bothVariants, wearsDark: wearsDark,
                       selected: style == candidate) {
                 var settings = model.settings
                 settings.theme.apply(candidate)
@@ -1423,7 +1427,7 @@ private struct LookSettings: View {
             .accessibilityIdentifier("look.style.\(candidate.rawValue)")
         case .saved(let preset):
             StyleCard(name: preset.name, summary: nil, light: preset.look, dark: preset.darkLook,
-                      wearsDark: wearsDark, selected: saved?.id == preset.id) {
+                      both: bothVariants, wearsDark: wearsDark, selected: saved?.id == preset.id) {
                 var settings = model.settings
                 settings.theme.apply(preset)
                 model.update(settings: settings)
@@ -1438,7 +1442,7 @@ private struct LookSettings: View {
             .accessibilityIdentifier("look.saved.\(preset.id.uuidString)")
         case .own:
             StyleCard(name: strings(.lookOwnStyle), summary: strings(.lookOwnStyleSummary),
-                      light: model.settings.theme.light, dark: model.settings.theme.dark, wearsDark: wearsDark,
+                      light: model.settings.theme.light, dark: model.settings.theme.dark, both: bothVariants, wearsDark: wearsDark,
                       selected: true) {}
                 .accessibilityIdentifier("look.style.own")
         case .save:
@@ -2131,13 +2135,16 @@ extension View {
     }
 }
 
-/// A style on the Look pane: the variant in force now over the big preview's
-/// two halves, its name and what it is.
+/// A style on the Look pane, drawn as the big preview is (both variants while
+/// the look changes by itself, the one in force otherwise), its name and what
+/// it is.
 private struct StyleCard: View {
     var name: String
     var summary: String?
     var light: PanelLook
     var dark: PanelLook
+    /// Both variants on the card: the look changes by itself.
+    var both: Bool
     /// Whether the dark variant is the one in force now.
     var wearsDark: Bool
     var selected: Bool
@@ -2146,7 +2153,7 @@ private struct StyleCard: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 3) {
-                StyleSwatch(look: wearsDark ? dark : light)
+                StyleSwatch(light: light, dark: dark, both: both, wearsDark: wearsDark)
                 .frame(height: 44)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
@@ -2171,28 +2178,49 @@ private struct StyleCard: View {
 /// A style drawn small, in the big preview's own language (the operator, 11-25:
 /// coloured stripes behind every card «рябит и не приятно глазу»; «в нашем
 /// стиле… есть темная и светлая часть»): the dark half and the paper half with
-/// their thin ruling, and the panel across the seam in the look in force now —
-/// a card is the preview above it, smaller. What tells the styles apart is what
-/// each does to what is behind: the ruling blurs, is covered, or shows.
+/// their thin ruling. While the look changes by itself — with the Mac or the
+/// clock — both variants, as the big preview shows both: the dark one on the
+/// dark half, the light one on the paper («А разделение на темный и светлый
+/// такого не будет?» → as the big preview). Set by hand, the one variant, across
+/// the seam. What tells the styles apart is what each does to what is behind:
+/// the ruling blurs, is covered, or shows.
 private struct StyleSwatch: View {
-    var look: PanelLook
+    var light: PanelLook
+    var dark: PanelLook
+    /// Both variants, each on its own half.
+    var both: Bool
+    /// Which one, when only one is shown.
+    var wearsDark: Bool
 
     var body: some View {
         ZStack {
             PreviewBackdrop(step: 9, lineWidth: 1)
-            PanelSurface(shape: RoundedRectangle(cornerRadius: 5),
-                         fallbackFill: DeckTheme(density: .normal, look: look).windowFill,
-                         glass: look.glass)
-                .overlay(alignment: .leading) {
-                    Capsule().fill(ink).frame(width: 20, height: 3).padding(.leading, 9)
+            if both {
+                HStack(spacing: 8) {
+                    panel(dark)
+                    panel(light)
                 }
-                .opacity(look.presence)
-                .padding(.horizontal, 18)
+                .padding(.horizontal, 5)
                 .padding(.vertical, 10)
+            } else {
+                panel(wearsDark ? dark : light)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+            }
         }
     }
 
-    private var ink: Color {
+    private func panel(_ look: PanelLook) -> some View {
+        PanelSurface(shape: RoundedRectangle(cornerRadius: 5),
+                     fallbackFill: DeckTheme(density: .normal, look: look).windowFill,
+                     glass: look.glass)
+            .overlay(alignment: .leading) {
+                Capsule().fill(Self.ink(look)).frame(width: both ? 14 : 20, height: 3).padding(.leading, both ? 7 : 9)
+            }
+            .opacity(look.presence)
+    }
+
+    private static func ink(_ look: PanelLook) -> Color {
         let colour = look.foreground
         return Color(red: colour.red, green: colour.green, blue: colour.blue)
     }
