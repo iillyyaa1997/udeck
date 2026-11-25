@@ -386,7 +386,9 @@ struct InputRowView: View {
                             Text(url.lastPathComponent).font(theme.smallFont).lineLimit(1).truncationMode(.middle)
                                 .frame(maxWidth: 160, alignment: .leading)
                             Button { files = files.filter { $0 != url } } label: {
+                                // The whole square takes the click, not only the glyph's lines.
                                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))
+                                    .frame(width: 16, height: 16).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .help(strings(.inputRemoveFile))
@@ -408,6 +410,9 @@ struct InputRowView: View {
         Button(action: chooseFiles) {
             Image(systemName: "paperclip").font(.system(size: 12))
                 .frame(width: 24, height: 24)
+                // The whole square takes the click: a paperclip is thin lines
+                // (lab run 45601824620: a click in its middle did nothing).
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(theme.muted)

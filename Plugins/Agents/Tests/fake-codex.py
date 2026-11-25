@@ -120,8 +120,14 @@ while True:
         NAMING = params.get("ephemeral") is True
         out({"id": request_id, "result": {"thread": {"id": THREAD}, "model": "fake-codex-1", "reasoningEffort": "medium"}})
     elif method == "turn/start":
+        kinds = [part.get("type") for part in params.get("input", [])]
+        unknown = [kind for kind in kinds if kind not in ("text", "image", "localImage", "audio", "localAudio", "skill", "mention")]
+        if unknown:
+            # As the real app server refuses one (codex 0.160).
+            out({"id": request_id, "error": {"code": -32600, "message": "Invalid request: unknown variant `%s`" % unknown[0]}})
+            continue
         text = " ".join(part.get("text", "") for part in params.get("input", []))
-        PICTURES = sum(1 for part in params.get("input", []) if part.get("type") == "local_image" and part.get("path"))
+        PICTURES = sum(1 for part in params.get("input", []) if part.get("type") == "localImage" and part.get("path"))
         start_turn(request_id, text)
     elif method == "thread/list":
         out({"id": request_id, "result": {"data": [

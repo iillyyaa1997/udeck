@@ -107,6 +107,13 @@ public final class CodexSession: Identifiable {
         return true
     }
 
+    /// Puts the thread in Codex's archive: out of its history, kept on disk.
+    /// For the live check, which leaves no test thread in the person's list.
+    func archive() async {
+        guard let connection, let threadID else { return }
+        _ = try? await connection.request("thread/archive", ["threadId": .string(threadID)], timeout: .seconds(10))
+    }
+
     /// Gives the thread the name `text` in Codex itself — its app and its
     /// thread list show it too. Codex answers with `thread/name/updated`.
     public func setName(_ text: String) async {
@@ -235,7 +242,9 @@ public final class CodexSession: Identifiable {
         state = .working
         if turnStartedAt == nil { turnStartedAt = Date() }
         let input: [JSONValue] = [["type": "text", "text": .string(text)]]
-            + pictures.map { ["type": "local_image", "path": .string($0)] }
+            // `localImage`, as the app server names it (a live turn, 11-25: `local_image` is
+            // «unknown variant»).
+            + pictures.map { ["type": "localImage", "path": .string($0)] }
         var params: [String: JSONValue] = [
             "threadId": .string(threadID),
             "input": .array(input),
