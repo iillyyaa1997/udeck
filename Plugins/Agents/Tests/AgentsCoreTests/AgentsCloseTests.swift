@@ -4,7 +4,7 @@ import Testing
 import UDeckAgents
 
 /// Closing a session: ✕ in the title line and by each open session in the
-/// menu; one in a turn asks first (11-25).
+/// menu; every ✕ asks first (11-25)
 @Suite("Closing a session", .serialized)
 @MainActor
 struct AgentsCloseTests {
@@ -26,8 +26,13 @@ struct AgentsCloseTests {
         said.cards.last?["rows"]?.array?.first?["bar"]?["items"]?.array ?? []
     }
 
-    @Test("✕ in the title line and by each open session in the menu; pressed, the session's CLI ends and it goes")
-    func closesAtOnce() async throws {
+    func ask(_ said: Said, for conversation: Conversation) -> JSONValue? {
+        let rows = said.cards.last?["rows"]?.array ?? []
+        return rows.compactMap { $0["ask"] }.first { $0["id"]?.string == "close-" + conversation.id.uuidString }
+    }
+
+    @Test("✕ in the title line and by each open session in the menu; every ✕ asks here, naming the session")
+    func asksFirst() async throws {
         let (app, home, said) = app()
         defer { try? FileManager.default.removeItem(at: home) }
         await app.handle(#"{"event":"hello","size":{"columns":8,"rows":8},"language":"en"}"#)
@@ -45,16 +50,23 @@ struct AgentsCloseTests {
         let buttons = menu["options"]?.array?.compactMap { $0["button"]?["id"]?.string } ?? []
         #expect(Set(buttons) == ["close:" + first.id.uuidString, "close:" + second.id.uuidString])
 
-        // By the menu: the one not shown, without switching to it.
+        // By the menu: the one not shown — asked about here, without switching to it.
         let shown = try #require(app.selected?.id)
         let other = shown == first.id ? second : first
         await app.handle(#"{"event":"press","id":"close:\#(other.id.uuidString)"}"#)
-        #expect(!app.conversations.contains { $0.id == other.id })
+        #expect(app.conversations.contains { $0.id == other.id }, "not closed without asking")
         #expect(app.selected?.id == shown, "the one shown stays shown")
+        let asked = try #require(ask(said, for: other))
+        #expect(asked["title"]?.string == "Close «" + other.title + "»?")
+        #expect(asked["buttons"]?.array?.compactMap { $0["label"]?.string } == ["Close", "Keep it"])
+        await app.handle(#"{"event":"press","id":"closenow:\#(other.id.uuidString)"}"#)
+        #expect(!app.conversations.contains { $0.id == other.id })
         try await until("the closed one's CLI ends") { other.claude?.isEnded == true }
 
         // By the title line: the one shown.
         await app.handle(#"{"event":"press","id":"close"}"#)
+        #expect(app.conversations.count == 1)
+        await app.handle(#"{"event":"press","id":"closenow:\#(shown.uuidString)"}"#)
         #expect(app.conversations.isEmpty)
         #expect(app.selected == nil)
         app.render()
@@ -76,9 +88,8 @@ struct AgentsCloseTests {
         await app.handle(#"{"event":"press","id":"close"}"#)
         #expect(app.conversations.count == 1, "not closed in a turn without asking")
         app.render()
-        let rows = said.cards.last?["rows"]?.array ?? []
-        let ask = try #require(rows.compactMap { $0["ask"] }.first { $0["id"]?.string == "close-" + conversation.id.uuidString })
-        #expect(ask["title"]?.string == "Сессия работает — закрыть?")
+        let ask = try #require(ask(said, for: conversation))
+        #expect(ask["title"]?.string == "«" + conversation.title + "» сейчас работает — остановить и закрыть?")
         #expect(ask["buttons"]?.array?.compactMap { $0["id"]?.string }
                     == ["closenow:" + conversation.id.uuidString, "keepopen:" + conversation.id.uuidString])
 

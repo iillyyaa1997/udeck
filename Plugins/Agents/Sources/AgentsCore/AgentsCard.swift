@@ -104,22 +104,23 @@ enum AgentsCard {
     static func sessionMenu(_ app: AgentsApp) -> JSONValue {
         var options: [JSONValue] = app.conversations.map { session in
             ["id": .string("s:" + session.id.uuidString), "text": .string(session.title),
-             "group": .string(app.t("Открытые", "Open")), "note": .string(placeNote(session, app)),
+             "group": .string(app.t("Открытые", "Open")),
+             "note": .string(session.folder.lastPathComponent + " · " + placeNote(session, app)),
              "tone": .string(tone(session, app)),
              // uDeck 0.9.14 draws it; an older one draws the option alone.
              "button": ["id": .string("close:" + session.id.uuidString), "label": "✕"]]
         }
         let open = Set(app.conversations.compactMap { $0.claude?.sessionID })
         options += app.history.filter { !open.contains($0.sessionID) }.map { saved in
-            ["id": .string("h:" + saved.sessionID), "text": .string(saved.title),
+            ["id": .string("h:" + saved.sessionID), "text": .string(app.name(of: saved)),
              "group": .string(app.t("История Claude — продолжить", "Claude history — continue")),
-             "note": .string(ago(saved.modified, app))]
+             "note": .string(savedNote(saved.folderName, saved.modified, app))]
         }
         let openThreads = Set(app.conversations.compactMap { $0.codex?.threadID })
         options += app.codexHistory.filter { !openThreads.contains($0.id) }.map { saved in
-            ["id": .string("ch:" + saved.id), "text": .string(saved.title),
+            ["id": .string("ch:" + saved.id), "text": .string(app.name(of: saved)),
              "group": .string(app.t("История Codex — продолжить", "Codex history — continue")),
-             "note": .string(ago(saved.updated, app))]
+             "note": .string(savedNote(saved.folderName, saved.updated, app))]
         }
         var menu: [String: JSONValue] = ["id": "session", "text": "", "options": .array(options)]
         if let selection = app.selection { menu["selected"] = .string("s:" + selection.uuidString) }
@@ -127,6 +128,13 @@ enum AgentsCard {
     }
 
     // MARK: - The body
+
+    /// The question before a session closes, here: for the one shown, or one
+    /// whose ✕ was pressed in the menu.
+    static func closeAsk(_ app: AgentsApp) -> JSONValue? {
+        guard let id = app.confirmingClose, let closing = app.conversations.first(where: { $0.id == id }) else { return nil }
+        return app.closeAskRow(closing)
+    }
 
     static func tiny(_ app: AgentsApp) -> [JSONValue] {
         guard !app.conversations.isEmpty else { return [["text": .string(app.t("Сессий нет", "No sessions"))]] }
@@ -145,7 +153,7 @@ enum AgentsCard {
             // Each session where it is: choosing one shows it — here, or
             // in the place it has of its own.
             let everywhere = app.conversations.allSatisfy { app.place(showing: $0.id) != nil }
-            return [
+            return (closeAsk(app).map { [["ask": $0]] } ?? []) + [
                 ["text": .string(everywhere
                     ? app.t("Все сессии открыты в других местах. Выберите, чтобы показать",
                             "Every session is shown in another place. Choose one to bring it forward")
@@ -164,7 +172,7 @@ enum AgentsCard {
         rows.append(["feed": .array(session.feed.suffix(keep).map { feedEntry($0.item, app, label: $0.label) })])
         let held = app.heldBack[session.id] != nil
         if held { rows.append(["ask": heldRow(session, app)]) }
-        if app.confirmingClose == session.id { rows.append(["ask": app.closeAskRow(session)]) }
+        if let closing = closeAsk(app) { rows.append(["ask": closing]) }
         switch session.current {
         case .claude(let agent): for ask in agent.asks { rows.append(["ask": askRow(ask, app)]) }
         case .codex(let agent): for ask in agent.asks { rows.append(["ask": codexAskRow(ask, app)]) }
@@ -458,6 +466,11 @@ enum AgentsCard {
         }
     }
 
+    /// A saved session's folder and when it was last written to.
+    static func savedNote(_ folder: String?, _ date: Date, _ app: AgentsApp) -> String {
+        [folder, ago(date, app)].compactMap { $0 }.joined(separator: " · ")
+    }
+
     static func ago(_ date: Date, _ app: AgentsApp) -> String {
         let minutes = max(0, Int(Date().timeIntervalSince(date) / 60))
         if minutes < 1 { return app.t("только что", "just now") }
@@ -551,6 +564,10 @@ enum AgentsCard {
                          "The provider can change once the turn is over and nothing waits")
         }
         if text == "resumed" { return app.t("Продолжено из истории", "Resumed from history") }
+        if text.hasPrefix("renamed:") { return app.t("Сессия называется «", "The session is called “") + text.dropFirst(8) + app.t("»", "”") }
+        if text == "rename-how" {
+            return app.t("Чтобы переименовать, напиши /rename и новое имя", "To rename it, write /rename and the new name")
+        }
         if text == "loading-history" { return app.t("Читаю историю…", "Reading the history…") }
         if text == "compacted" { return app.t("Здесь контекст был сжат", "The context was compacted here") }
         if text.hasPrefix("model:") { return app.t("Модель: ", "Model: ") + model(String(text.dropFirst(6))) }

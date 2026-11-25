@@ -17,10 +17,12 @@ public final class AgentsApp {
         public var showingHistory = false
         /// Where uDeck says it is: `card`, `tab`, `window` or `mini`.
         public var kind = "card"
+        /// The session whose ✕ was pressed here: the card asks first.
+        public var confirmingClose: UUID?
     }
     /// Every place, by uDeck's name for it (`view`): "" until uDeck names
     /// one, and for good on a uDeck older than places.
-    public private(set) var places: [String: Place] = ["": Place()]
+    public internal(set) var places: [String: Place] = ["": Place()]
     /// The place an event came from, or the card is drawn for, now.
     public private(set) var here = ""
     public private(set) var russian = false
@@ -56,8 +58,17 @@ public final class AgentsApp {
     /// The Mac kept awake while an agent works, and the look for a sleep.
     public let keepAwake: KeepAwake
     var sleepLoop: Task<Void, Never>?
-    /// The session whose ✕ was pressed while it was in a turn: the card asks.
-    public internal(set) var confirmingClose: UUID?
+    /// The session whose ✕ was pressed here: the card asks before it closes.
+    public internal(set) var confirmingClose: UUID? {
+        get { places[here]?.confirmingClose }
+        set { places[here, default: Place()].confirmingClose = newValue }
+    }
+    /// The names of sessions this plugin keeps, and how many times a name
+    /// was asked of a model for each in this run.
+    var names: ChatNames
+    var namingTries: [String: Int] = [:]
+    /// What the transcripts in the history said, by path, until they change.
+    var historyGlances: SessionHistory.Glances = [:]
     /// Sessions waiting for a limit to reset, to go on then.
     var waitingForLimit: [UUID: Task<Void, Never>] = [:]
     /// The models each provider offered when a session of it last started,
@@ -85,6 +96,7 @@ public final class AgentsApp {
         self.keepAwake = keepAwake ?? KeepAwake()
         accounts = ChatAccount.discover(home: home)
         account = accounts[0]
+        names = ChatNames.load(home: home)
         knownModels[.claude] = Self.claudeAliases
     }
 
@@ -134,7 +146,7 @@ public final class AgentsApp {
         case "press":
             press(event["id"]?.string ?? "")
         case "submit":
-            if let text = event["text"]?.string { selected?.send(text) }
+            if let text = event["text"]?.string, !renameFromTheField(text) { selected?.send(text) }
         case "folder":
             let id = event["id"]?.string ?? ""
             if id.hasPrefix("new"), let path = event["path"]?.string {
@@ -297,7 +309,8 @@ public final class AgentsApp {
                 show(open.id)
             } else if let saved = codexHistory.first(where: { $0.id == threadID }) {
                 let folder = URL(fileURLWithPath: saved.cwd ?? home.path, isDirectory: true)
-                let session = CodexSession(folder: folder, title: saved.title, threadID: saved.id)
+                let session = CodexSession(folder: folder, title: name(of: saved), titleSource: saved.source,
+                                           threadID: saved.id)
                 adopt(.codex(session))
                 Task {
                     await startCodex(session)
@@ -453,8 +466,9 @@ public final class AgentsApp {
             return
         }
         let folder = URL(fileURLWithPath: saved.cwd ?? home.path, isDirectory: true)
-        let session = ChatSession(folder: folder, account: account ?? self.account, title: saved.title,
-                                  resumeID: saved.sessionID)
+        let (title, source) = saved.named
+        let session = ChatSession(folder: folder, account: account ?? self.account, title: title,
+                                  titleSource: source, resumeID: saved.sessionID)
         session.note("loading-history")
         let conversation = adopt(.claude(session))
         showingHistory = false
@@ -482,6 +496,7 @@ public final class AgentsApp {
         watch(agent, in: conversation)
         conversations.append(conversation)
         selection = conversation.id
+        applyKnownName(conversation)
         return conversation
     }
 
@@ -500,6 +515,7 @@ public final class AgentsApp {
             notify(id, title: t("Готово — ", "Done — ") + conversation.title, body: words, actions: [],
                    reply: ["button": .string(t("Ответить", "Reply")), "placeholder": .string(t("Сообщение", "Message"))])
             if let note = restartAfterTurn.removeValue(forKey: id) { restartClaude(conversation, saying: note) }
+            nameAfterTurn(conversation)
         }
         func action(_ id: String, _ text: String) -> JSONValue { ["id": .string(id), "text": .string(text)] }
         switch agent {
@@ -714,7 +730,9 @@ public final class AgentsApp {
     }
 
     func refreshHistory() {
-        history = SessionHistory.recent(config: ChatAccount(name: "main", configDir: nil).folder(home: home), limit: 12)
+        // Sessions scripts ran are left out: more are looked at, to list twelve.
+        history = SessionHistory.recent(config: ChatAccount(name: "main", configDir: nil).folder(home: home), limit: 12,
+                                        keep: listsInHistory, looked: 60, glances: &historyGlances)
         historyRead = Date()
     }
 

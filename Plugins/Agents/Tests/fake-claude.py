@@ -23,6 +23,16 @@ DELAY = float(os.environ.get("FAKE_CLAUDE_DELAY", "0.02"))
 args = sys.argv[1:]
 SESSION = args[args.index("--resume") + 1] if "--resume" in args else "fake-session-0001"
 REPLAY = "--replay-user-messages" in args
+# A run that only names a conversation (the plugin's namer): no tools, nothing kept. It answers a
+# name for a message that asks for one with "[name-me]", and nothing for any other — the other
+# tests' sessions keep the names they have.
+NAMING = "--no-session-persistence" in args and "--tools" in args
+# A `fake-claude-log` file in the account's folder gets every run's arguments, one JSON line each.
+LOG = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"),
+                   "fake-claude-log")
+if os.path.exists(LOG):
+    with open(LOG, "a") as log:
+        log.write(json.dumps(args) + "\n")
 CONFIG = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
 waiting = []  # lines read while waiting for a particular answer, handled afterwards
 counter = {"turn": 0}
@@ -117,7 +127,17 @@ def hit_the_limit():
          "result": "Claude AI usage limit reached|%d" % resets, "session_id": SESSION, "total_cost_usd": 0})
 
 
+def name(text):
+    russian = any("а" <= ch.lower() <= "я" for ch in text)
+    words = ("Осмотр папки с заметками" if russian else "Looking at the notes folder") if "[name-me]" in text else ""
+    out({"type": "result", "subtype": "success", "is_error": False, "num_turns": 1, "result": words,
+         "session_id": SESSION, "total_cost_usd": 0})
+
+
 def turn(text):
+    if NAMING:
+        name(text)
+        return
     if limited():
         hit_the_limit()
         return

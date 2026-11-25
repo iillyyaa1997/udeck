@@ -66,6 +66,13 @@
       "default": true,
       "label": "Keep the Mac awake while an agent works",
       "help": "The display still sleeps; a closed lid sleeps the Mac anyway."
+    },
+    {
+      "key": "name_chats",
+      "type": "bool",
+      "default": true,
+      "label": "Make up names for chats",
+      "help": "After the first answer the session's own agent names a chat with no name of its own: Haiku for Claude, Codex's model for Codex. A little of the subscription's limit. /rename in the field names one yourself."
     }
   ]
 }

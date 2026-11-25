@@ -13,6 +13,7 @@ import uuid
 
 DELAY = 0.05
 THREAD = "fake-thread-" + uuid.uuid4().hex[:8]
+NAMING = False  # a thread of the plugin's namer: one answer, a name, for a message with "[name-me]"
 pending = {}  # server request id -> the turn waiting on it
 next_request = 1000
 
@@ -50,6 +51,10 @@ def start_turn(request_id, text):
     turn = "turn-" + uuid.uuid4().hex[:6]
     out({"id": request_id, "result": {"turn": {"id": turn, "status": "inProgress", "items": []}}})
     note("turn/started", {"threadId": THREAD, "turn": {"id": turn, "status": "inProgress", "items": []}})
+    if NAMING:
+        say(turn, "Fixing the notes" if "[name-me]" in text else "")
+        note("turn/completed", {"threadId": THREAD, "turn": {"id": turn, "status": "completed", "items": []}})
+        return
     note("account/rateLimits/updated", {"rateLimits": {
         "primary": {"usedPercent": 81, "windowDurationMins": 300, "resetsAt": 4102444800},
         "secondary": {"usedPercent": 13, "windowDurationMins": 10080, "resetsAt": 4102444800}}})
@@ -105,6 +110,7 @@ while True:
         out({"id": request_id, "result": {"data": MODELS, "nextCursor": None}})
     elif method in ("thread/start", "thread/resume"):
         THREAD = params.get("threadId", THREAD)
+        NAMING = params.get("ephemeral") is True
         out({"id": request_id, "result": {"thread": {"id": THREAD}, "model": "fake-codex-1", "reasoningEffort": "medium"}})
     elif method == "turn/start":
         text = " ".join(part.get("text", "") for part in params.get("input", []))
@@ -121,6 +127,9 @@ while True:
             {"id": "t1", "items": [{"type": "userMessage", "content": [{"type": "text", "text": "Fix the notes"}]},
                                    {"type": "commandExecution", "id": "c1", "command": "ls", "aggregatedOutput": "Notes.md", "exitCode": 0},
                                    {"type": "agentMessage", "text": "Fixed."}]}]}})
+    elif method == "thread/name/set":
+        out({"id": request_id, "result": {}})
+        note("thread/name/updated", {"threadId": params.get("threadId"), "threadName": params.get("name")})
     elif method == "turn/interrupt":
         out({"id": request_id, "result": {}})
     elif method == "account/rateLimits/read":

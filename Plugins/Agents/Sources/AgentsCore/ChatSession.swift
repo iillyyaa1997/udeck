@@ -104,6 +104,8 @@ public final class ChatSession: Identifiable {
     /// rest are queued behind the running turn.
     public private(set) var pendingTurns = 0
     public var title: String
+    /// Where `title` came from: a weaker source does not replace it.
+    public internal(set) var titleSource: NameSource
 
     /// Told of every new ask, and of every turn that finished (with its last
     /// words): for a notification when nobody is looking.
@@ -140,16 +142,28 @@ public final class ChatSession: Identifiable {
     /// The streaming answer's item, while one is arriving.
     @ObservationIgnored private var streamingIndex: Int?
 
-    public init(id: UUID = UUID(), folder: URL, account: ChatAccount, title: String? = nil, resumeID: String? = nil,
-                history: [FeedItem] = [])
+    public init(id: UUID = UUID(), folder: URL, account: ChatAccount, title: String? = nil,
+                titleSource: NameSource? = nil, resumeID: String? = nil, history: [FeedItem] = [])
     {
         self.id = id
         self.folder = folder
         self.account = account
         self.title = title ?? folder.lastPathComponent
+        self.titleSource = titleSource ?? (title == nil ? .folder : .firstWords)
         self.sessionID = resumeID
         self.items = history
         if resumeID != nil, !history.isEmpty { items.append(.note(id: UUID(), text: "resumed")) }
+    }
+
+    /// Calls the session `text`, unless its name came from a stronger
+    /// source; true when it changed.
+    @discardableResult
+    public func name(_ text: String, from source: NameSource) -> Bool {
+        guard source >= titleSource, !text.isEmpty, text != title || source != titleSource else { return false }
+        title = text
+        titleSource = source
+        onRecord?()
+        return true
     }
 
     /// Starts the agent over `channel` and says hello to it — or, for an agent
@@ -290,10 +304,7 @@ public final class ChatSession: Identifiable {
         pendingTurns += 1
         state = .working
         if turnStartedAt == nil { turnStartedAt = Date() }
-        if title == folder.lastPathComponent {
-            title = String(text.prefix(40))
-            onRecord?()
-        }
+        if titleSource < .firstWords, let words = ChatNames.firstWords(text) { name(words, from: .firstWords) }
         Task {
             do {
                 try await connection.send(ClaudeOutbound.userMessage(told))

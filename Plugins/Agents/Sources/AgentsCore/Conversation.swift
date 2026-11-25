@@ -35,6 +35,31 @@ public enum Agent {
         }
     }
 
+    public var titleSource: NameSource {
+        switch self {
+        case .claude(let session): session.titleSource
+        case .codex(let session): session.titleSource
+        }
+    }
+
+    /// Calls the session `text`, unless its name came from a stronger source.
+    @discardableResult
+    public func name(_ text: String, from source: NameSource) -> Bool {
+        switch self {
+        case .claude(let session): session.name(text, from: source)
+        case .codex(let session): session.name(text, from: source)
+        }
+    }
+
+    /// The session's key among the names this plugin keeps: its Claude
+    /// session id or its Codex thread, once it has one.
+    public var nameKey: String? {
+        switch self {
+        case .claude(let session): session.sessionID.map { ChatNames.key(.claude, $0) }
+        case .codex(let session): session.threadID.map { ChatNames.key(.codex, $0) }
+        }
+    }
+
     public var items: [FeedItem] {
         switch self {
         case .claude(let session): session.items
@@ -203,6 +228,8 @@ public final class Conversation: Identifiable {
 
     public var current: Agent { agents[active]! }
     public var title: String { agents[segments[0].provider]?.title ?? current.title }
+    /// The agent the conversation began with: its name is the conversation's.
+    public var first: Agent { agents[segments[0].provider] ?? current }
     public var providers: Set<Provider> { Set(agents.keys) }
 
     public var claude: ChatSession? { if case .claude(let session)? = agents[.claude] { session } else { nil } }

@@ -6,15 +6,25 @@ import UDeckAgents
 public struct CodexSaved: Sendable, Equatable {
     public let id: String
     public let title: String
+    /// Where `title` came from: the thread's own name, or its first words.
+    public var source: NameSource = .firstWords
     public let cwd: String?
     public let updated: Date
 
+    public var folderName: String? { cwd.map { URL(fileURLWithPath: $0).lastPathComponent } }
+
     static func list(_ result: JSONValue) -> [CodexSaved] {
-        (result["data"]?.array ?? []).compactMap { raw in
+        (result["data"]?.array ?? []).compactMap { raw -> CodexSaved? in
             guard let id = raw["id"]?.string, raw["ephemeral"]?.bool != true else { return nil }
-            let preview = raw["preview"]?.string ?? ""
-            let title = raw["name"]?.string ?? preview.split(separator: "\n").first.map(String.init) ?? id
-            return CodexSaved(id: id, title: String(title.prefix(80)), cwd: raw["cwd"]?.string,
+            let cwd = raw["cwd"]?.string
+            let named: (String, NameSource) = if let own = raw["name"]?.string.flatMap({ ChatNames.own($0) }) {
+                (own, .own)
+            } else if let words = ChatNames.firstWords(raw["preview"]?.string ?? "") {
+                (words, .firstWords)
+            } else {
+                (cwd.map { URL(fileURLWithPath: $0).lastPathComponent } ?? id, .folder)
+            }
+            return CodexSaved(id: id, title: named.0, source: named.1, cwd: cwd,
                               updated: Date(timeIntervalSince1970: raw["updatedAt"]?.number ?? 0))
         }
     }
@@ -53,6 +63,8 @@ public final class CodexSession: Identifiable {
     public let id = UUID()
     public let folder: URL
     public var title: String
+    /// Where `title` came from: a weaker source does not replace it.
+    public internal(set) var titleSource: NameSource
     public private(set) var state: ChatSession.State = .starting
     public private(set) var items: [FeedItem] = []
     public private(set) var asks: [CodexAsk] = []
@@ -78,10 +90,29 @@ public final class CodexSession: Identifiable {
     /// The feed index of each agent message still arriving, by item id.
     @ObservationIgnored private var streaming: [String: Int] = [:]
 
-    public init(folder: URL, title: String? = nil, threadID: String? = nil) {
+    public init(folder: URL, title: String? = nil, titleSource: NameSource? = nil, threadID: String? = nil) {
         self.folder = folder
         self.title = title ?? folder.lastPathComponent
+        self.titleSource = titleSource ?? (title == nil ? .folder : .firstWords)
         self.threadID = threadID
+    }
+
+    /// Calls the session `text`, unless its name came from a stronger
+    /// source; true when it changed.
+    @discardableResult
+    public func name(_ text: String, from source: NameSource) -> Bool {
+        guard source >= titleSource, !text.isEmpty, text != title || source != titleSource else { return false }
+        title = text
+        titleSource = source
+        return true
+    }
+
+    /// Gives the thread the name `text` in Codex itself — its app and its
+    /// thread list show it too. Codex answers with `thread/name/updated`.
+    public func setName(_ text: String) async {
+        guard let connection, let threadID else { return }
+        _ = try? await connection.request("thread/name/set", ["threadId": .string(threadID), "name": .string(text)],
+                                          timeout: .seconds(10))
     }
 
     public var isEnded: Bool { if case .ended = state { true } else { false } }
@@ -126,6 +157,9 @@ public final class CodexSession: Identifiable {
                 rateLimits = CodexRateLimits(limits["rateLimits"] ?? .null)
             }
             threadID = result["thread"]?["id"]?.string ?? threadID
+            if let own = result["thread"]?["name"]?.string, let name = ChatNames.own(own) {
+                self.name(name, from: .own)
+            }
             model = result["model"]?.string
             if effort == nil { effort = result["reasoningEffort"]?.string }
             state = .idle
@@ -187,7 +221,7 @@ public final class CodexSession: Identifiable {
         guard !shown.isEmpty, let connection, let threadID, !isEnded else { return }
         let id = UUID()
         items.append(.user(id: id, text: shown))
-        if title == folder.lastPathComponent { title = String(shown.prefix(40)) }
+        if titleSource < .firstWords, let words = ChatNames.firstWords(shown) { name(words, from: .firstWords) }
         if state == .working {
             queued.append(id)
             waiting.append((id, text ?? shown))
@@ -292,6 +326,11 @@ public final class CodexSession: Identifiable {
             }
         case "account/rateLimits/updated":
             rateLimits = CodexRateLimits(params["rateLimits"] ?? .null)
+        case "thread/name/updated":
+            guard params["threadId"]?.string == threadID else { return }
+            if let own = params["threadName"]?.string, let name = ChatNames.own(own) {
+                self.name(name, from: .own)
+            }
         case "serverRequest/resolved":
             if let id = params["requestId"] { asks.removeAll { $0.requestID == Self.key(id) } }
         case "error":

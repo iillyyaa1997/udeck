@@ -89,7 +89,7 @@ struct AgentsPlacesTests {
         let menu = try #require(said.card("B")?["card"]?["rows"]?[0]?["bar"]?["items"]?.array?
             .compactMap { $0["menu"] }.first?["options"]?.array)
         let note = menu.first { $0["id"]?.string == "s:" + y.id.uuidString }?["note"]?.string
-        #expect(note?.hasPrefix("in a window · ") == true, "\(String(describing: note))")
+        #expect(note?.contains(" · in a window · ") == true, "the folder, then where: \(String(describing: note))")
 
         // Chosen on the board: the window comes forward, the board stays.
         await app.handle(#"{"event":"choose","view":"B","row":"head","menu":"session","option":"s:\#(y.id.uuidString)"}"#)

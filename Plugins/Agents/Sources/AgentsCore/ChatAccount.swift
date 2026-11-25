@@ -61,40 +61,95 @@ public struct SavedSession: Sendable, Equatable, Identifiable {
     /// The last thing the user typed in it.
     public let lastPrompt: String?
     public let modified: Date
+    /// The session's own name: Claude Code's `custom-title` — the
+    /// terminal's /rename, or a hook's.
+    public var customTitle: String? = nil
+    /// The first thing said in it that reads as a subject.
+    public var firstWords: String? = nil
+    /// What started it: `cli` for a terminal, `sdk-…` for a program.
+    public var entrypoint: String? = nil
     public var id: String { sessionID }
 
-    public var title: String {
-        if let lastPrompt, !lastPrompt.isEmpty { return String(lastPrompt.prefix(80)) }
-        return cwd.map { URL(fileURLWithPath: $0).lastPathComponent } ?? sessionID
+    public var folderName: String? { cwd.map { URL(fileURLWithPath: $0).lastPathComponent } }
+
+    /// Its name and where that came from, by what the transcript says (11-25):
+    /// its own name, the first words said in it, the last ones, the folder.
+    /// The last thing typed alone was «1» or «продолжай» more often than not.
+    public var named: (String, NameSource) {
+        if let customTitle { return (customTitle, .own) }
+        if let firstWords { return (firstWords, .firstWords) }
+        if let lastPrompt, let words = ChatNames.firstWords(lastPrompt) { return (words, .firstWords) }
+        return (folderName ?? sessionID, .folder)
     }
+
+    public var title: String { named.0 }
+
+    /// Started by a program — a script, an orchestrator — not by a person.
+    public var byAProgram: Bool { entrypoint?.hasPrefix("sdk") == true }
 }
 
 public enum SessionHistory {
+    /// What a transcript says of itself, read from its head and its tail.
+    public struct Glance: Sendable, Equatable {
+        public var cwd: String?
+        public var lastPrompt: String?
+        public var customTitle: String?
+        public var firstWords: String?
+        public var entrypoint: String?
+    }
+
+    /// The glances of transcripts read before, by path, with the size and
+    /// date they had: one that has not changed is not read again.
+    public typealias Glances = [String: (size: Int, modified: Date, glance: Glance)]
+
     /// The most recently changed sessions in `config/projects`, newest first.
     /// Reads only each file's tail and head, so a transcript of many megabytes
-    /// costs no more than a small one.
+    /// costs no more than a small one; with `glances`, only the files that
+    /// changed since.
     public static func recent(config: URL, limit: Int = 60) -> [SavedSession] {
+        var glances: Glances = [:]
+        return recent(config: config, limit: limit, glances: &glances)
+    }
+
+    public static func recent(config: URL, limit: Int, keep: (SavedSession) -> Bool = { _ in true },
+                              looked: Int? = nil, glances: inout Glances) -> [SavedSession] {
         let projects = config.appendingPathComponent("projects", isDirectory: true)
         let manager = FileManager.default
         guard let folders = try? manager.contentsOfDirectory(at: projects, includingPropertiesForKeys: nil) else {
             return []
         }
-        var files: [(URL, Date)] = []
+        var files: [(URL, Date, Int)] = []
         for folder in folders {
             guard let entries = try? manager.contentsOfDirectory(at: folder,
-                                                                 includingPropertiesForKeys: [.contentModificationDateKey])
+                                                                 includingPropertiesForKeys: [.contentModificationDateKey,
+                                                                                              .fileSizeKey])
             else { continue }
             for file in entries where file.pathExtension == "jsonl" {
-                let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-                files.append((file, date ?? .distantPast))
+                let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+                files.append((file, values?.contentModificationDate ?? .distantPast, values?.fileSize ?? 0))
             }
         }
         files.sort { $0.1 > $1.1 }
-        return files.prefix(limit).map { file, date in
-            let (cwd, prompt) = glance(file)
-            return SavedSession(sessionID: file.deletingPathExtension().lastPathComponent, file: file, cwd: cwd,
-                                lastPrompt: prompt, modified: date)
+        var out: [SavedSession] = []
+        var seen: Set<String> = []
+        for (file, date, size) in files.prefix(looked ?? limit) {
+            let glance: Glance
+            if let known = glances[file.path], known.size == size, known.modified == date {
+                glance = known.glance
+            } else {
+                glance = Self.glance(file)
+                glances[file.path] = (size, date, glance)
+            }
+            seen.insert(file.path)
+            let saved = SavedSession(sessionID: file.deletingPathExtension().lastPathComponent, file: file,
+                                     cwd: glance.cwd, lastPrompt: glance.lastPrompt, modified: date,
+                                     customTitle: glance.customTitle, firstWords: glance.firstWords,
+                                     entrypoint: glance.entrypoint)
+            if keep(saved) { out.append(saved) }
+            if out.count == limit { break }
         }
+        glances = glances.filter { seen.contains($0.key) }
+        return out
     }
 
     /// The saved session `sessionID` of the account whose folder is `config`,
@@ -108,37 +163,73 @@ public enum SessionHistory {
             let file = folder.appendingPathComponent(sessionID + ".jsonl")
             guard manager.fileExists(atPath: file.path) else { continue }
             let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            let (cwd, prompt) = glance(file)
-            return SavedSession(sessionID: sessionID, file: file, cwd: cwd, lastPrompt: prompt,
-                                modified: date ?? .distantPast)
+            let glance = glance(file)
+            return SavedSession(sessionID: sessionID, file: file, cwd: glance.cwd, lastPrompt: glance.lastPrompt,
+                                modified: date ?? .distantPast, customTitle: glance.customTitle,
+                                firstWords: glance.firstWords, entrypoint: glance.entrypoint)
         }
         return nil
     }
 
-    /// The working folder (from the head) and the last prompt (from the tail).
-    static func glance(_ file: URL) -> (cwd: String?, lastPrompt: String?) {
-        guard let handle = try? FileHandle(forReadingFrom: file) else { return (nil, nil) }
+    /// The working folder, what started the session and the first words said
+    /// in it (from the head); its last prompt and its own name (from the
+    /// tail, where Claude Code writes them again as they change).
+    public static func glance(_ file: URL) -> Glance {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return Glance() }
         defer { try? handle.close() }
         let head = (try? handle.read(upToCount: 64 * 1024)) ?? Data()
         let size = (try? handle.seekToEnd()) ?? 0
         let tailStart = size > 256 * 1024 ? size - 256 * 1024 : 0
         try? handle.seek(toOffset: tailStart)
         let tail = (try? handle.readToEnd()) ?? Data()
-        var cwd: String?
-        for line in String(decoding: head, as: UTF8.self).split(separator: "\n") {
-            if let value = JSONValue.line(line), let found = value["cwd"]?.string { cwd = found; break }
-        }
-        var prompt: String?
-        for line in String(decoding: tail, as: UTF8.self).split(separator: "\n").reversed() {
+        var glance = Glance()
+        let headLines = String(decoding: head, as: UTF8.self).split(separator: "\n")
+        for line in headLines {
             guard let value = JSONValue.line(line) else { continue }
-            if value["type"]?.string == "last-prompt", let found = value["lastPrompt"]?.string { prompt = found; break }
-        }
-        if cwd == nil {
-            for line in String(decoding: tail, as: UTF8.self).split(separator: "\n") {
-                if let value = JSONValue.line(line), let found = value["cwd"]?.string { cwd = found; break }
+            if glance.cwd == nil, let found = value["cwd"]?.string { glance.cwd = found }
+            if glance.entrypoint == nil, let found = value["entrypoint"]?.string { glance.entrypoint = found }
+            if value["type"]?.string == "custom-title", let found = value["customTitle"]?.string {
+                glance.customTitle = ChatNames.own(found)
+            }
+            if glance.firstWords == nil, value["type"]?.string == "user", value["isMeta"]?.bool != true,
+               let text = userText(value), case .said(let words) = spoken(text) {
+                glance.firstWords = ChatNames.firstWords(words)
             }
         }
-        return (cwd, prompt)
+        let tailLines = String(decoding: tail, as: UTF8.self).split(separator: "\n")
+        // The newest of each, from the end: a later custom-title replaces
+        // the one in the head.
+        var lastPrompt: String?
+        var newestTitle: String?
+        for line in tailLines.reversed() {
+            if lastPrompt != nil, newestTitle != nil { break }
+            guard line.contains("\"last-prompt\"") || line.contains("\"custom-title\""),
+                  let value = JSONValue.line(line) else { continue }
+            if lastPrompt == nil, value["type"]?.string == "last-prompt", let found = value["lastPrompt"]?.string {
+                lastPrompt = found
+            }
+            if newestTitle == nil, value["type"]?.string == "custom-title", let found = value["customTitle"]?.string {
+                newestTitle = ChatNames.own(found)
+            }
+        }
+        glance.lastPrompt = lastPrompt
+        if let newestTitle { glance.customTitle = newestTitle }
+        if glance.cwd == nil {
+            for line in tailLines {
+                if let value = JSONValue.line(line), let found = value["cwd"]?.string { glance.cwd = found; break }
+            }
+        }
+        return glance
+    }
+
+    /// The text of a transcript's user line: what was typed, not tool results.
+    static func userText(_ value: JSONValue) -> String? {
+        let content = value["message"]?["content"]
+        if let text = content?.string { return text }
+        let texts = (content?.array ?? []).compactMap { block -> String? in
+            block["type"]?.string == "text" ? block["text"]?.string : nil
+        }
+        return texts.isEmpty ? nil : texts.joined(separator: "\n")
     }
 
     /// A saved session's conversation as feed items, for the feed of a resume.
