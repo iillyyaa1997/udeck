@@ -54,7 +54,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         controller.onPhaseChange = { [weak model] phase in
             model?.panelIsVisible = phase.isVisible
         }
-        model.onPluginsChanged = { [weak self] in self?.rebuildStatusMenu() }
+        model.onPluginsChanged = { [weak self] in
+            self?.rebuildStatusMenu()
+            // A window of its own opened before the plugins were read was
+            // called after the plugin's id ("agents"): its name now.
+            self?.places?.sync()
+        }
         model.onSettingsChanged = { [weak self, weak controller] _ in
             controller?.settingsChanged()
             self?.settings.applyAppearance()
