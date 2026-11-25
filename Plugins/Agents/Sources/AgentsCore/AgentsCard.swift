@@ -252,8 +252,8 @@ enum AgentsCard {
         let agent = session.current
         let placeholder = held ? app.t("Только просмотр — сессия идёт в другом месте", "View only — it runs elsewhere")
             : agent.isEnded ? stateWord(session, app)
-            : agent.state == .working ? (narrow(app) ? app.t("В очередь", "Queue")
-                : app.t("Работает · новое сообщение встанет в очередь", "Working · a new message waits its turn"))
+            : agent.state == .working ? (narrow(app) ? app.t("По ходу", "Mid-turn")
+                : app.t("Работает · сообщение войдёт после текущего шага", "Working · a message goes in after the current step"))
             : narrow(app) ? app.t("Сообщение", "Message")
             : app.t("Сообщение · Return отправляет, Shift+Return — новая строка",
                     "Message · Return sends, Shift+Return starts a new line")
