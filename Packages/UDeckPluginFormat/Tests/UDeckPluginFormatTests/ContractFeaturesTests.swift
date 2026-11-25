@@ -46,6 +46,7 @@ struct ContractFeaturesTests {
         features += CardMenu.CodingKeys.allCases.map { .rowField(row: "menu", field: $0.stringValue) }
         features += BarButton.CodingKeys.allCases.map { .rowField(row: "bar.button", field: $0.stringValue) }
         features += MenuOption.CodingKeys.allCases.map { .rowField(row: "menu.options", field: $0.stringValue) }
+        features += MenuOptionButton.CodingKeys.allCases.map { .rowField(row: "menu.options.button", field: $0.stringValue) }
         features += CardTone.allCases.map { .tone($0.rawValue) }
         features += BarIcon.allCases.map { .barIcon($0.rawValue) }
         features += CardIcon.allCases.map { .listIcon($0.rawValue) }
@@ -111,8 +112,14 @@ struct ContractFeaturesTests {
         // 0.9.10: what waits for the person.
         let waiting: Set<ContractFeature> = [.cardField("attention"), .rowField(row: "attention", field: "count"),
                                              .rowField(row: "attention", field: "ask")]
+        // Waiting for the release after 0.9.13: a button at a menu option's end.
+        let optionButtons: Set<ContractFeature> = [.rowField(row: "menu.options", field: "button"),
+                                                   .rowField(row: "menu.options.button", field: "id"),
+                                                   .rowField(row: "menu.options.button", field: "label")]
         for (feature, release) in ContractFeatures.registry where feature != .manifestField("minUDeck") {
             switch feature {
+            case _ where optionButtons.contains(feature):
+                #expect(release == .next, "\(feature)")
             case _ where waiting.contains(feature):
                 #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 10)), "\(feature)")
             case _ where next.contains(feature), .tone, .barIcon:
@@ -128,7 +135,8 @@ struct ContractFeaturesTests {
         let read = ContractRelease.released(SemanticVersion(major: 0, minor: 6, patch: 0))
         #expect(ContractFeatures.minimumUDeckReadFrom == read)
         #expect(ContractFeatures.release(of: .manifestField("minUDeck")) == Optional(read))
-        #expect(!ContractFeatures.registry.values.contains(.next), "nothing is waiting for a release")
+        #expect(Set(ContractFeatures.registry.filter { $0.value == .next }.keys) == optionButtons,
+                "only a menu option's button is waiting for a release")
         // The release after this one, which has no number yet: after every
         // released one, and met only by a uDeck after this one.
         let current = try #require(SemanticVersion(UDeckRelease.version))

@@ -24,6 +24,23 @@ public enum BarIcon: String, Codable, Sendable, CaseIterable {
     case run, wait, done, idle, info
 }
 
+/// A small button at the end of a menu's option (uDeck 0.9.14): a click
+/// sends `press` with its `id` — not a `choose` of the option — and the menu
+/// stays open, so that several can be pressed in a row: closing sessions from
+/// the list of them.
+public struct MenuOptionButton: Codable, Equatable, Sendable {
+    public var id: String
+    /// A word or a sign: `✕`.
+    public var label: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, label }
+
+    public init(id: String, label: String) {
+        self.id = id
+        self.label = label
+    }
+}
+
 /// One choice of a menu.
 public struct MenuOption: Codable, Equatable, Sendable {
     public var id: String
@@ -33,15 +50,30 @@ public struct MenuOption: Codable, Equatable, Sendable {
     /// A second, quieter line.
     public var note: String?
     public var tone: CardTone?
+    /// A button at its end (uDeck 0.9.14).
+    public var button: MenuOptionButton?
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case id, text, group, note, tone }
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, text, group, note, tone, button }
 
-    public init(id: String, text: String, group: String? = nil, note: String? = nil, tone: CardTone? = nil) {
+    public init(id: String, text: String, group: String? = nil, note: String? = nil, tone: CardTone? = nil,
+                button: MenuOptionButton? = nil)
+    {
         self.id = id
         self.text = text
         self.group = group
         self.note = note
         self.tone = tone
+        self.button = button
+    }
+
+    /// A button that is not one is left out, not the option with it.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try c.decode(String.self, forKey: .id), text: try c.decode(String.self, forKey: .text),
+                  group: try c.decodeIfPresent(String.self, forKey: .group),
+                  note: try c.decodeIfPresent(String.self, forKey: .note),
+                  tone: try c.decodeIfPresent(CardTone.self, forKey: .tone),
+                  button: try? c.decodeIfPresent(MenuOptionButton.self, forKey: .button))
     }
 }
 

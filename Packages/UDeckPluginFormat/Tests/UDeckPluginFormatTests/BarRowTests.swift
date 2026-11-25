@@ -107,6 +107,28 @@ struct BarRowTests {
         #expect(drawn.rows.last == .text("this card is longer than uDeck will draw and has been cut short"))
     }
 
+    @Test("a menu option's button reads with it; one that is not a button is left out, the option kept")
+    func optionButton() throws {
+        let json = #"""
+        {"rows":[{"bar":{"id":"head","items":[{"menu":{"id":"session","text":"","options":[
+          {"id":"s:1","text":"One","button":{"id":"close:1","label":"✕"}},
+          {"id":"s:2","text":"Two","button":"✕"}]}}]}}]}
+        """#
+        let card = try JSONDecoder().decode(Card.self, from: Data(json.utf8))
+        guard case .bar(let bar) = card.rows[0], case .menu(let menu) = bar.items[0] else {
+            Issue.record("not a bar with a menu")
+            return
+        }
+        #expect(menu.options[0].button == MenuOptionButton(id: "close:1", label: "✕"))
+        #expect(menu.options[1].button == nil && menu.options[1].text == "Two")
+        let again = try JSONDecoder().decode(Card.self, from: JSONEncoder().encode(card))
+        #expect(again == card)
+        let object = try #require(StrictJSON.parse(Array(json.utf8)).value?.object)
+        let used = ContractFeatures.used(byCard: object)
+        #expect(used.contains(.rowField(row: "menu.options", field: "button")))
+        #expect(used.contains(.rowField(row: "menu.options.button", field: "label")))
+    }
+
     @Test("a card with a bar needs the release that brought bars")
     func barIsDated() throws {
         let object = try #require(StrictJSON.parse(Array(Self.header.utf8)).value?.object)

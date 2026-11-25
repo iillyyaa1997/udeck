@@ -205,6 +205,11 @@ public enum ContractFeatures {
         let attentionRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 10))
         add(attentionRelease, [.cardField("attention")])
         add(attentionRelease, ["count", "ask"].map { .rowField(row: "attention", field: $0) })
+
+        // A button at the end of a menu's option — a session closed from the
+        // list of them: the release after 0.9.13.
+        add(.next, [.rowField(row: "menu.options", field: "button")])
+        add(.next, ["id", "label"].map { .rowField(row: "menu.options.button", field: $0) })
         return registry
     }()
 
@@ -302,6 +307,9 @@ public enum ContractFeatures {
                     if let icon = inner?.first("icon")?.string { used.insert(.barIcon(icon)) }
                     for option in inner?.first("options")?.array ?? [] {
                         for field in present(option.object) { used.insert(.rowField(row: "menu.options", field: field)) }
+                        for field in present(option.object?.first("button")?.object) {
+                            used.insert(.rowField(row: "menu.options.button", field: field))
+                        }
                     }
                 }
             case "feed":
@@ -315,6 +323,9 @@ public enum ContractFeatures {
                     if let icon = picker.object?.first("icon")?.string { used.insert(.barIcon(icon)) }
                     for option in picker.object?.first("options")?.array ?? [] {
                         for field in present(option.object) { used.insert(.rowField(row: "menu.options", field: field)) }
+                        for field in present(option.object?.first("button")?.object) {
+                            used.insert(.rowField(row: "menu.options.button", field: field))
+                        }
                     }
                 }
             default:

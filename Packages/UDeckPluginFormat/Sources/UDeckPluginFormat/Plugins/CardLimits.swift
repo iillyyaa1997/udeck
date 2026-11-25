@@ -89,7 +89,7 @@ extension Card {
             if list.count > CardLimits.menuOptions { cut = true }
             return list.prefix(CardLimits.menuOptions).map {
                 MenuOption(id: $0.id, text: trim($0.text), group: $0.group.map(trim), note: $0.note.map(trim),
-                           tone: $0.tone)
+                           tone: $0.tone, button: $0.button.map { MenuOptionButton(id: $0.id, label: trim($0.label)) })
             }
         }
 

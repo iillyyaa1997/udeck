@@ -396,29 +396,32 @@ struct BarRowView: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            ForEach(Array(bar.items.enumerated()), id: \.offset) { _, item in
+            ForEach(Array(Self.drawn(bar.items).enumerated()), id: \.offset) { _, item in
                 switch item {
-                case .title(let title):
+                case .titledMenu(let title, let menu):
+                    TitleMenu(title: title, menu: menu, row: bar.id, theme: theme, send: send)
+                        .layoutPriority(-1)
+                case .item(.title(let title)):
                     HStack(spacing: 7) {
                         if let tone = title.tone { Circle().fill(BarStyle.color(tone, theme)).frame(width: 7, height: 7) }
                         Text(title.text).font(theme.bodyFont.weight(.semibold)).lineLimit(1).truncationMode(.tail)
                     }
                     .foregroundStyle(theme.text)
                     .layoutPriority(-1)
-                case .tag(let text):
+                case .item(.tag(let text)):
                     Text(text).font(theme.smallFont).foregroundStyle(theme.muted).lineLimit(1)
                         .padding(.horizontal, 6).padding(.vertical, 1)
                         .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(theme.line, lineWidth: 1))
                         .fixedSize()
-                case .badge(let badge):
+                case .item(.badge(let badge)):
                     BadgeView(badge: badge, theme: theme).fixedSize()
-                case .menu(let menu):
+                case .item(.menu(let menu)):
                     MenuPill(menu: menu, row: bar.id, theme: theme, send: send, plain: true)
-                case .button(let button):
+                case .item(.button(let button)):
                     BarButtonView(button: button, row: bar.id, theme: theme, send: send)
-                case .spacer:
+                case .item(.spacer):
                     Spacer(minLength: 4)
-                case .unsupported:
+                case .item(.unsupported):
                     EmptyView()
                 }
             }
@@ -427,6 +430,66 @@ struct BarRowView: View {
         // would be given to every control in it.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("row.bar.\(bar.id)")
+    }
+
+    /// What is drawn: the items, a `title` followed at once by a `menu` made
+    /// one — the whole title opens the menu (0.9.14). It was the 8 pt
+    /// chevron alone, and the operator kept aiming at it (11-25).
+    enum Drawn {
+        case item(BarItem)
+        case titledMenu(BarTitle, CardMenu)
+    }
+
+    static func drawn(_ items: [BarItem]) -> [Drawn] {
+        var drawn: [Drawn] = []
+        var index = 0
+        while index < items.count {
+            if case .title(let title) = items[index], index + 1 < items.count, case .menu(let menu) = items[index + 1] {
+                drawn.append(.titledMenu(title, menu))
+                index += 2
+            } else {
+                drawn.append(.item(items[index]))
+                index += 1
+            }
+        }
+        return drawn
+    }
+}
+
+/// A bar's title that opens the menu after it: its dot, its name and the
+/// chevron, one button, lit while the pointer is on it.
+struct TitleMenu: View {
+    let title: BarTitle
+    let menu: CardMenu
+    let row: String
+    let theme: DeckTheme
+    let send: (ResidentEvent) -> Void
+    @State private var open = false
+    @State private var hovering = false
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            HStack(spacing: 7) {
+                if let tone = title.tone { Circle().fill(BarStyle.color(tone, theme)).frame(width: 7, height: 7) }
+                Text(title.text).font(theme.bodyFont.weight(.semibold)).lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(theme.text)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(theme.muted)
+            }
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(RoundedRectangle(cornerRadius: 6).fill(open ? theme.selection
+                : hovering ? Color.primary.opacity(0.08) : Color.clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityIdentifier("row.menu.\(menu.id)")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            OptionList(options: menu.options, selected: menu.selected, note: menu.note, prefix: "row.menu.\(menu.id)",
+                       theme: theme, press: { send(.press(id: $0)) }) { option in
+                open = false
+                send(.choose(row: row, menu: menu.id, option: option))
+            }
+        }
     }
 }
 
@@ -528,7 +591,7 @@ struct MenuPill: View {
         .accessibilityIdentifier("row.menu.\(menu.id)")
         .popover(isPresented: $open, arrowEdge: .bottom) {
             OptionList(options: menu.options, selected: menu.selected, note: menu.note, prefix: "row.menu.\(menu.id)",
-                       theme: theme) { option in
+                       theme: theme, press: { send(.press(id: $0)) }) { option in
                 open = false
                 send(.choose(row: row, menu: menu.id, option: option))
             }
@@ -579,6 +642,9 @@ struct OptionList: View {
     let note: String?
     let prefix: String
     let theme: DeckTheme
+    /// An option's button pressed (`MenuOptionButton`): its id, the list left
+    /// open. Nil where nothing could be sent — the place menu, uDeck's own.
+    var press: ((String) -> Void)? = nil
     let choose: (String) -> Void
 
     var body: some View {
@@ -594,8 +660,14 @@ struct OptionList: View {
                             .padding(.horizontal, 8).padding(.top, index == 0 ? 2 : 8).padding(.bottom, 2)
                     }
                     ForEach(group.1, id: \.id) { option in
-                        OptionRow(option: option, chosen: option.id == selected, theme: theme) { choose(option.id) }
-                            .accessibilityIdentifier("\(prefix).\(option.id)")
+                        HStack(spacing: 2) {
+                            OptionRow(option: option, chosen: option.id == selected, theme: theme) { choose(option.id) }
+                                .accessibilityIdentifier("\(prefix).\(option.id)")
+                            if let button = option.button, let press {
+                                OptionButtonView(button: button, theme: theme) { press(button.id) }
+                                    .accessibilityIdentifier("\(prefix).\(option.id).button")
+                            }
+                        }
                     }
                 }
                 if let note, !note.isEmpty {
@@ -610,6 +682,29 @@ struct OptionList: View {
         .frame(minWidth: 200, maxWidth: 300, maxHeight: 420)
         .fixedSize(horizontal: false, vertical: options.count < 14)
         .onDisappear { PopoverPresence.closedAt = ProcessInfo.processInfo.systemUptime }
+    }
+}
+
+/// The small button at an option's end: `✕` to close a session from the list
+/// of them. Pressed, it sends `press` and leaves the list open.
+private struct OptionButtonView: View {
+    let button: MenuOptionButton
+    let theme: DeckTheme
+    let press: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: press) {
+            Text(button.label)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(hovering ? theme.text : theme.muted)
+                .frame(minWidth: 22, minHeight: 22)
+                .background(RoundedRectangle(cornerRadius: 6).fill(hovering ? Color.primary.opacity(0.1) : Color.clear))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .accessibilityLabel(button.label)
     }
 }
 
@@ -662,7 +757,7 @@ struct BarButtonView: View {
             .accessibilityIdentifier("row.button.\(button.id)")
             .popover(isPresented: $open, arrowEdge: .bottom) {
                 OptionList(options: button.options ?? [], selected: nil, note: button.note,
-                           prefix: "row.button.\(button.id)", theme: theme) { option in
+                           prefix: "row.button.\(button.id)", theme: theme, press: { send(.press(id: $0)) }) { option in
                     open = false
                     send(.choose(row: row, menu: button.id, option: option))
                 }

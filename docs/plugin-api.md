@@ -552,13 +552,18 @@ uDeck 0.9.4 adds a fifth row, menus, and more to say in a feed:
   (an icon, a `label` or both; a click sends `press` with its `id`, and with
   `options` it opens them as a menu and sends `choose`), and a `spacer`, after
   which everything sits at the right edge. The title gives way first when the
-  card is narrow. **A card whose first row is a `bar` has that bar drawn as its
+  card is narrow. A `title` followed at once by a `menu` is drawn as one
+  button — the title, its dot and the menu's chevron — that opens the menu
+  (uDeck 0.9.14 and later; before, only the chevron did). **A card whose first row is a `bar` has that bar drawn as its
   window's title line**, in place of the card's name — the window is still
   dragged by it.
 * A menu — a `bar`'s `menu` item or one of an `input`'s `pickers` — shows its
   `text` (and `icon`) and opens its `options`: grouped under their `group`, in
   order, the one named by `selected` checked, each option's `note` after its
-  text, the menu's `note` last. Choosing sends `choose`.
+  text, the menu's `note` last. Choosing sends `choose`. An option may carry a
+  `button` — `{ "id": "close:s-42", "label": "✕" }` — drawn at its end (uDeck
+  0.9.14 and later): a click on it sends `press` with the button's `id`, not a
+  `choose`, and the menu stays open. An older uDeck draws the option without it.
 * `input` with `pickers` is drawn as a panel: the text on top, the menus under
   it beside Stop and Send. While there is a `stop`, a spinner turns beside it.
 * A row that takes input keeps its identity from one card to the next by its
