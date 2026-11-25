@@ -52,6 +52,7 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
 import json
 import re
 import shlex
@@ -8056,3 +8057,74 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+def check_agents_close(machine, check_dir, lab):
+    """Sessions closed by ✕ in the menu and in the title line; the title opens the menu — a lab tree's only."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin and the stand-in CLI")
+    _write(machine, SETTINGS, {"language": "en"}, "uDeck in Russian")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake}}}, "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 8, "height": 6}]}]}, "placing Agents")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=40)
+    machine.click(*new.middle, "＋")
+    machine.sleep(1)
+    option = ui.wait_for(machine, "row.button.new.new:claude", "a new Claude session", ui.PANEL, seconds=8)
+    machine.click(*option.middle, "a new Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "the folder")
+    machine.sleep(3)
+    ui.wait_for(machine, "row.input.message", "the first session's field", ui.PANEL, seconds=30)
+    new = ui.wait_for(machine, "row.button.new", "＋ again", ui.PANEL, seconds=10)
+    machine.click(*new.middle, "＋ again")
+    machine.sleep(1)
+    option = ui.wait_for(machine, "row.button.new.new:claude", "a second Claude session", ui.PANEL, seconds=8)
+    machine.click(*option.middle, "a second Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "the folder again")
+    machine.sleep(4)
+    machine.screenshot(check_dir, "close 1 two sessions")
+    ids = ui.identifiers(machine, "the head", ui.PANEL)
+    print("head:", [i for i in ids if "row.button" in i or "row.menu" in i][:10])
+    title = ui.wait_for(machine, "row.menu.session", "the title", ui.PANEL, seconds=8)
+    machine.click(title.x + 24, title.y + title.height / 2, "the title's text, not its chevron")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "close 2 the menu from the title")
+    ids = ui.identifiers(machine, "the menu", ui.PANEL)
+    options = [i for i in ids if i.startswith("row.menu.session.s:")]
+    print("menu:", options)
+    # The popover is a window the panel's walk does not hold: its first ✕ by where it was drawn on the 1920×1080
+    # runner (run 45535929236): 82 pt right of the title's middle, 69 below it.
+    mx, my = title.middle
+    print("title:", (title.x, title.y, title.width, title.height))
+    machine.click(mx + 82, my + 69, "✕ by the first session in the menu")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "close 3 after the menu's ✕")
+    machine.key("esc", "putting the menu away")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "close 3b the menu away")
+    close = ui.wait_for(machine, "row.button.close", "✕ in the title line", ui.PANEL, seconds=8)
+    machine.click(*close.middle, "✕ in the title line")
+    machine.sleep(2)
+    machine.screenshot(check_dir, "close 4 after the title's ✕")
+    print("left:", [i for i in ui.identifiers(machine, "left", ui.PANEL) if "row.button" in i or "row.menu" in i][:10])
