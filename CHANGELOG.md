@@ -8,6 +8,18 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.15] — 2026-11-25
+
+- **Calmer style cards in Settings → Look.** Each card is now a small copy of
+  the big preview above it: the dark half and the paper half with their thin
+  grey ruling, and the panel across the seam in the look in force now. The
+  coloured stripes behind every card are gone.
+- Agents (the plugin, installed separately) names its sessions: by the name
+  you give with `/rename` in its field, the session's own name, a name its
+  agent makes up after the first answer, or the first words said in it. Its
+  history leaves out sessions that scripts ran, and every ✕ asks before it
+  closes a session.
+
 ## [0.9.14] — 2026-11-25
 
 - **A card's title opens its menu.** Where a title is followed by a menu — the
