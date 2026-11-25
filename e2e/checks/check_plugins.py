@@ -8056,3 +8056,31 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+
+def check_look_styles(machine, check_dir, lab):
+    """Settings → Look: the style cards as small copies of the big preview, light and dark — a lab tree's only."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    machine.ssh.run(f"mkdir -p {UDECK_HOME}", "a home for uDeck's settings")
+    for index, dark in enumerate((False, True)):
+        name = "dark" if dark else "light"
+        if index:
+            app.quit_app(machine, f"quitting before {name}")
+        _write(machine, SETTINGS, {"language": "ru", "theme": {"source": "manual", "manualIsDark": dark}}, f"the {name} look")
+        app.launch(machine)
+        machine.sleep(4)
+        ui.open_settings_and_wait(machine, f"settings, {name}", item=ui.RUSSIAN.settings_item,
+                                  window=ui.RUSSIAN.settings_window)
+        ui.click(machine, "section.look", "choosing Look", ui.RUSSIAN.settings_window)
+        machine.sleep(3)
+        machine.screenshot(check_dir, f"styles {index + 1} {name}")
+        ids = [i for i in ui.identifiers(machine, "the cards", ui.RUSSIAN.settings_window) if "look.style" in i]
+        print(name, ids[:10])
+        if dark:
+            ghost = next((i for i in ids if "ghost" in i or "phantom" in i), None)
+            if ghost:
+                card = ui.wait_for(machine, ghost.split("[")[-1].rstrip("]"), "the ghost card", ui.RUSSIAN.settings_window,
+                                   seconds=5)
+                machine.click(*card.middle, "choosing the ghost")
+                machine.sleep(2)
+                machine.screenshot(check_dir, "styles 3 dark, the ghost chosen")

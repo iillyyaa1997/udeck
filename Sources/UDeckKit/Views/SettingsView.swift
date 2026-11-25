@@ -1403,12 +1403,19 @@ private struct LookSettings: View {
         }
     }
 
+    /// Whether the dark variant is in force now: each card shows the one the
+    /// panel wears.
+    private var wearsDark: Bool {
+        model.settings.isDark(systemIsDark: DeckModel.systemIsDark(), hour: DeckModel.currentHour())
+    }
+
     @ViewBuilder
     private func card(_ item: StyleItem, style: PanelStyle?, saved: PanelPreset?) -> some View {
         switch item {
         case .style(let candidate):
             StyleCard(name: strings(candidate.namePhrase), summary: strings(candidate.summaryPhrase),
-                      light: candidate.light, dark: candidate.dark, selected: style == candidate) {
+                      light: candidate.light, dark: candidate.dark, wearsDark: wearsDark,
+                      selected: style == candidate) {
                 var settings = model.settings
                 settings.theme.apply(candidate)
                 model.update(settings: settings)
@@ -1416,7 +1423,7 @@ private struct LookSettings: View {
             .accessibilityIdentifier("look.style.\(candidate.rawValue)")
         case .saved(let preset):
             StyleCard(name: preset.name, summary: nil, light: preset.look, dark: preset.darkLook,
-                      selected: saved?.id == preset.id) {
+                      wearsDark: wearsDark, selected: saved?.id == preset.id) {
                 var settings = model.settings
                 settings.theme.apply(preset)
                 model.update(settings: settings)
@@ -1431,7 +1438,8 @@ private struct LookSettings: View {
             .accessibilityIdentifier("look.saved.\(preset.id.uuidString)")
         case .own:
             StyleCard(name: strings(.lookOwnStyle), summary: strings(.lookOwnStyleSummary),
-                      light: model.settings.theme.light, dark: model.settings.theme.dark, selected: true) {}
+                      light: model.settings.theme.light, dark: model.settings.theme.dark, wearsDark: wearsDark,
+                      selected: true) {}
                 .accessibilityIdentifier("look.style.own")
         case .save:
             Button { naming = true } label: {
@@ -2123,23 +2131,22 @@ extension View {
     }
 }
 
-/// A style on the Look pane: its light variant over a light window and its dark
-/// one over a dark window, side by side, its name and what it is.
+/// A style on the Look pane: the variant in force now over the big preview's
+/// two halves, its name and what it is.
 private struct StyleCard: View {
     var name: String
     var summary: String?
     var light: PanelLook
     var dark: PanelLook
+    /// Whether the dark variant is the one in force now.
+    var wearsDark: Bool
     var selected: Bool
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 3) {
-                HStack(spacing: 0) {
-                    StyleSwatch(look: light, behind: Color(white: 0.86))
-                    StyleSwatch(look: dark, behind: Color(white: 0.16))
-                }
+                StyleSwatch(look: wearsDark ? dark : light)
                 .frame(height: 44)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
@@ -2161,36 +2168,67 @@ private struct StyleCard: View {
     }
 }
 
-/// One variant of a style, drawn small: the material itself over a window with
-/// something in it, and a line of its text. Over a flat colour every style
-/// looked the same — what tells them apart is what each does to what is behind
-/// (the operator's screenshot, 11-24) — so there are stripes and lines of
-/// "text" to blur, cover, dull or leave.
+/// A style drawn small, in the big preview's own language (the operator, 11-25:
+/// coloured stripes behind every card «рябит и не приятно глазу»; «в нашем
+/// стиле… есть темная и светлая часть»): the dark half and the paper half with
+/// their thin ruling, and the panel across the seam in the look in force now —
+/// a card is the preview above it, smaller. What tells the styles apart is what
+/// each does to what is behind: the ruling blurs, is covered, or shows.
 private struct StyleSwatch: View {
     var look: PanelLook
-    var behind: Color
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            SwatchBackdrop(base: behind)
-            PanelSurface(shape: RoundedRectangle(cornerRadius: 4),
+        ZStack {
+            PreviewBackdrop(step: 9, lineWidth: 1)
+            PanelSurface(shape: RoundedRectangle(cornerRadius: 5),
                          fallbackFill: DeckTheme(density: .normal, look: look).windowFill,
                          glass: look.glass)
+                .overlay(alignment: .leading) {
+                    Capsule().fill(ink).frame(width: 20, height: 3).padding(.leading, 9)
+                }
                 .opacity(look.presence)
-                .padding(.horizontal, 6)
-                .padding(.top, 12)
-                .padding(.bottom, 5)
-            Capsule()
-                .fill(ink)
-                .frame(width: 18, height: 3)
-                .padding(.leading, 12)
-                .padding(.top, 7)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
         }
     }
 
     private var ink: Color {
         let colour = look.foreground
         return Color(red: colour.red, green: colour.green, blue: colour.blue)
+    }
+}
+
+/// What is behind the panel in a preview of it: a dark window and a white
+/// document side by side — a tint that rescues the panel from a dark game is
+/// the one that washes it out over a page — or, over another application's
+/// full screen, a film. Thin grey ruling over it, so that the material has
+/// something to bend.
+private struct PreviewBackdrop: View {
+    var film = false
+    var step: CGFloat = 13
+    var lineWidth: CGFloat = 1.5
+
+    var body: some View {
+        ZStack {
+            if film {
+                Color(red: 0.05, green: 0.05, blue: 0.06)
+            } else {
+                HStack(spacing: 0) {
+                    Color(red: 0.09, green: 0.13, blue: 0.08)
+                    Color(red: 0.90, green: 0.89, blue: 0.86)
+                }
+            }
+            Canvas { context, size in
+                var path = Path()
+                var x = -size.height
+                while x < size.width {
+                    path.move(to: CGPoint(x: x, y: 0))
+                    path.addLine(to: CGPoint(x: x + size.height, y: size.height))
+                    x += step
+                }
+                context.stroke(path, with: .color(.gray.opacity(0.75)), lineWidth: lineWidth)
+            }
+        }
     }
 }
 
@@ -2245,25 +2283,7 @@ private struct GlassPreview: View {
             // judging. Over another application's full screen there is no white
             // document to worry about — there is a film, and the question is
             // whether the island is still findable on it.
-            if surrounding == .fullscreenApp {
-                Color(red: 0.05, green: 0.05, blue: 0.06)
-            } else {
-                HStack(spacing: 0) {
-                    Color(red: 0.09, green: 0.13, blue: 0.08)
-                    Color(red: 0.90, green: 0.89, blue: 0.86)
-                }
-            }
-            Canvas { context, size in
-                var path = Path()
-                let step: CGFloat = 13
-                var x = -size.height
-                while x < size.width {
-                    path.move(to: CGPoint(x: x, y: 0))
-                    path.addLine(to: CGPoint(x: x + size.height, y: size.height))
-                    x += step
-                }
-                context.stroke(path, with: .color(.gray.opacity(0.75)), lineWidth: 1.5)
-            }
+            PreviewBackdrop(film: surrounding == .fullscreenApp)
             PanelSurface(
                 shape: RoundedRectangle(cornerRadius: cardRadius),
                 fallbackFill: theme.windowFill,
@@ -2315,41 +2335,6 @@ private struct GlassPreview: View {
         .frame(width: width, height: 150)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.separator))
-    }
-}
-
-/// What a style swatch sits over: the window's colour with coloured stripes and
-/// two lines of "text" across it, for the material to blur, cover or leave.
-private struct SwatchBackdrop: View {
-    var base: Color
-
-    var body: some View {
-        Canvas { context, size in
-            context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(base))
-            let colours: [Color] = [Color(red: 0.24, green: 0.44, blue: 0.71),
-                                    Color(red: 0.91, green: 0.69, blue: 0.29),
-                                    Color(red: 0.18, green: 0.56, blue: 0.36)]
-            var x: CGFloat = -size.height
-            var index = 0
-            while x < size.width {
-                var stripe = Path()
-                stripe.move(to: CGPoint(x: x, y: size.height))
-                stripe.addLine(to: CGPoint(x: x + size.height, y: 0))
-                stripe.addLine(to: CGPoint(x: x + size.height + 5, y: 0))
-                stripe.addLine(to: CGPoint(x: x + 5, y: size.height))
-                stripe.closeSubpath()
-                context.fill(stripe, with: .color(colours[index % colours.count]))
-                x += 11
-                index += 1
-            }
-            let text = Color(white: isLight ? 0.1 : 0.92)
-            context.fill(Path(CGRect(x: 6, y: 4, width: size.width * 0.55, height: 2.5)), with: .color(text))
-            context.fill(Path(CGRect(x: 6, y: size.height - 5, width: size.width * 0.4, height: 2.5)), with: .color(text))
-        }
-    }
-
-    private var isLight: Bool {
-        (NSColor(base).usingColorSpace(.deviceRGB)?.brightnessComponent ?? 0) > 0.5
     }
 }
 
