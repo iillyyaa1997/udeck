@@ -222,6 +222,15 @@ public enum SessionHistory {
         return glance
     }
 
+    /// How a saved session began, as feed items, from the head of its
+    /// transcript: what a model names it by.
+    public static func opening(of file: URL, bytes: Int = 400_000) -> [FeedItem] {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return [] }
+        defer { try? handle.close() }
+        let head = (try? handle.read(upToCount: bytes)) ?? Data()
+        return feed(of: ClaudeTranscript(contents: String(decoding: head, as: UTF8.self)), limit: 60)
+    }
+
     /// The text of a transcript's user line: what was typed, not tool results.
     static func userText(_ value: JSONValue) -> String? {
         let content = value["message"]?["content"]

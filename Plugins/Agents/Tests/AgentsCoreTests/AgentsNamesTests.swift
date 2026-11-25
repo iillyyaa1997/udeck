@@ -145,6 +145,27 @@ struct AgentsNamesTests {
         #expect(person["note"]?.string?.hasPrefix("work · ") == true, "the folder, then when")
     }
 
+    @Test("the history's sessions are named by a model once, over a status line's custom-title")
+    func historyNamedByAModel() async throws {
+        let (app, home) = try await app()
+        defer { try? FileManager.default.removeItem(at: home) }
+        #expect(NameSource.model > .own && NameSource.person > .model)
+        try transcript([
+            #"{"type":"user","entrypoint":"cli","cwd":"/tmp/work","message":{"role":"user","content":"Посмотри заметки в папке [name-me]"}}"#,
+            #"{"type":"custom-title","customTitle":"operator skill","sessionId":"status"}"#,
+        ], id: "status", in: home)
+        app.refreshHistory()
+        func shown() -> String? {
+            (AgentsCard.sessionMenu(app)["options"]?.array ?? []).first { $0["id"]?.string == "h:status" }?["text"]?.string
+        }
+        try await until("the model's name") { shown() == "Осмотр папки с заметками" }
+        #expect(ChatNames.load(home: home).entries[ChatNames.key(.claude, "status")]?.name == "Осмотр папки с заметками")
+        // Once: the next look asks nothing.
+        let tries = app.namingTries
+        app.refreshHistory()
+        #expect(app.namingTries == tries && app.historyNaming == nil)
+    }
+
     // MARK: - Made up, renamed
 
     @Test("after the first answer the session's own agent names it: Claude by Haiku, with nothing of the person's")
@@ -225,8 +246,9 @@ struct AgentsNamesTests {
         try await until("idle") { conversation.current.state == .idle }
         try await turn("Fix the notes [name-me]", in: conversation, app)
         try await until("the name") { conversation.title == "Fixing the notes" }
-        // Codex says the thread's name back: its own now, the same words.
-        try await until("Codex's own name") { conversation.first.titleSource == .own }
+        // Codex says the thread's name back as its own: weaker than the model's, the same words.
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(conversation.first.titleSource == .model)
         #expect(conversation.title == "Fixing the notes")
         for agent in conversation.agents.values { await agent.close() }
     }

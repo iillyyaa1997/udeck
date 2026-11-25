@@ -47,6 +47,9 @@ struct AgentsCardTests {
         ]
         try (lines.joined(separator: "\n") + "\n").write(to: folder.appendingPathComponent("\(id).jsonl"), atomically: true, encoding: .utf8)
         var said: [String] = []
+        // The stand-in, not the person's own claude: the history's names are
+        // asked of a model.
+        setenv("UDECK_SETTING_CLAUDE", "\"\(fakeClaude.path)\"", 1)
         let app = AgentsApp(home: home) { said.append($0) }
         await app.handle(#"{"event":"hello","size":{"columns":8,"rows":6},"language":"ru"}"#)
         await app.handle(#"{"event":"select","id":"history"}"#)
@@ -104,6 +107,9 @@ struct AgentsCardTests {
         let file = folder.appendingPathComponent("\(id).jsonl")
         try (line + "\n" + #"{"type":"last-prompt","lastPrompt":"fix the build"}"# + "\n").write(to: file, atomically: true, encoding: .utf8)
         var said: [String] = []
+        // The stand-in, not the person's own claude: the history's names are
+        // asked of a model.
+        setenv("UDECK_SETTING_CLAUDE", "\"\(fakeClaude.path)\"", 1)
         let app = AgentsApp(home: home) { said.append($0) }
         await app.handle(#"{"event":"hello","size":{"columns":8,"rows":6},"language":"ru"}"#)
         let card = try #require(said.last.flatMap { JSONValue.line(Substring($0)) }?["card"])

@@ -67,6 +67,8 @@ public final class AgentsApp {
     /// was asked of a model for each in this run.
     var names: ChatNames
     var namingTries: [String: Int] = [:]
+    /// The history's sessions being named, one at a time.
+    var historyNaming: Task<Void, Never>?
     /// What the transcripts in the history said, by path, until they change.
     var historyGlances: SessionHistory.Glances = [:]
     /// Sessions waiting for a limit to reset, to go on then.
@@ -733,6 +735,7 @@ public final class AgentsApp {
         // Sessions scripts ran are left out: more are looked at, to list twelve.
         history = SessionHistory.recent(config: ChatAccount(name: "main", configDir: nil).folder(home: home), limit: 12,
                                         keep: listsInHistory, looked: 60, glances: &historyGlances)
+        nameHistory()
         historyRead = Date()
     }
 

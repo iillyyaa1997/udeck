@@ -3,13 +3,15 @@ import UDeckAgents
 
 /// Where a session's name came from, weakest first (11-25). A name is taken
 /// over only by one from as strong a source or a stronger one: the person's
-/// own `/rename` here beats the session's own name — Claude Code's
-/// `custom-title` (the terminal's /rename, or a hook's), Codex's thread name —
-/// which beats the one a model made up after the first answer, which beats the
+/// own `/rename` here beats a name a model made up, which beats the session's
+/// own — Claude Code's `custom-title`, Codex's thread name — which beats the
 /// first words said in it; the folder is what a session is called before
-/// anything is said.
+/// anything is said. The model's is above the session's own because a
+/// terminal's status line writes `custom-title` too («operator skill», «ZT-0
+/// only slit» — every name of the operator's history, 11-25), and nothing
+/// tells it from a /rename (the operator: «1»).
 public enum NameSource: Int, Comparable, Sendable, Codable {
-    case folder, firstWords, model, own, person
+    case folder, firstWords, own, model, person
 
     public static func < (a: Self, b: Self) -> Bool { a.rawValue < b.rawValue }
 }

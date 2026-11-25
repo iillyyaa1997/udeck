@@ -162,6 +162,45 @@ extension AgentsApp {
         return (said.map { "Person: " + $0 } + (answer.map { ["Agent: " + $0] } ?? [])).joined(separator: "\n\n")
     }
 
+    // MARK: - The history's names
+
+    /// The history's sessions with no name a model made or the person gave,
+    /// named one at a time — once a run each — on an account with room in
+    /// its limits: a status line's `custom-title` is no name (the operator,
+    /// 11-25: «1»). About two thousand tokens a session, once.
+    func nameHistory() {
+        guard nameChatsEnabled, historyNaming == nil else { return }
+        let waiting = history.filter { saved in
+            let key = ChatNames.key(.claude, saved.sessionID)
+            return names.entries[key]?.name == nil && namingTries[key, default: 0] == 0
+        }
+        guard !waiting.isEmpty else { return }
+        historyNaming = Task { [weak self] in
+            for saved in waiting {
+                guard let self else { return }
+                await self.nameSaved(saved)
+            }
+            self?.historyNaming = nil
+        }
+    }
+
+    /// A saved session named by its opening, once.
+    func nameSaved(_ saved: SavedSession) async {
+        let key = ChatNames.key(.claude, saved.sessionID)
+        guard names.entries[key]?.name == nil, namingTries[key, default: 0] == 0 else { return }
+        namingTries[key] = Self.namingTries
+        let file = saved.file
+        let items = await Task.detached(priority: .utility) { SessionHistory.opening(of: file) }.value
+        guard let start = Self.excerpt(items) else { return }
+        let excerpt = "Folder: " + (saved.folderName ?? "") + "\n\n" + start
+        guard let answer = await nameByClaude(excerpt, account: autoPick()?.account ?? account),
+              let name = ChatNames.cleaned(answer) else { return }
+        names.name(key, name, byPerson: false)
+        names.save(home: home)
+        conversations.first { $0.claude?.sessionID == saved.sessionID }?.first.name(name, from: .model)
+        render()
+    }
+
     // MARK: - The person's own name
 
     /// `/rename Name` typed in the field: the session is called that, over
