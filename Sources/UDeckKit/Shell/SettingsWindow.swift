@@ -146,7 +146,7 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
             return
         }
         applyAppearance()
-        NSApp.setActivationPolicy(.regular)
+        DockPresence.hold(Self.dockHolder)
         if place.minimized {
             window?.miniaturize(nil)
         } else {
@@ -205,16 +205,10 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
         let wasShown = isShown
         applyAppearance()
 
-        // uDeck is an accessory application: no Dock icon, and — the part that
-        // matters here — not in the ⌘-Tab switcher. That is right for a panel
-        // that lives at the edge of the screen and wrong for a window somebody
-        // is working in, because a window you cannot switch back to is a window
-        // you have to close and reopen.
-        //
-        // So the policy is `.regular` for exactly as long as this window is
-        // open. The Dock icon that comes with it is the price, and it leaves
-        // again with the window.
-        NSApp.setActivationPolicy(.regular)
+        // In the Dock and Cmd+Tab for exactly as long as this window is open
+        // (`DockPresence`): the Dock icon is the price, and it leaves with the
+        // window — or with the last of uDeck's windows that holds it.
+        DockPresence.hold(Self.dockHolder)
 
         showing += 1
         let this = showing
@@ -360,15 +354,13 @@ public final class SettingsWindowController: NSObject, NSWindowDelegate {
             back.activate()
         }
 
-        // Back to an accessory. Deferred by one turn of the run loop because
-        // changing the policy while the window that made it necessary is still
-        // closing leaves the Dock icon behind — and not if the window has been
-        // opened again in that turn.
-        DispatchQueue.main.async { [weak self] in
-            guard self?.isShown != true else { return }
-            NSApp.setActivationPolicy(.accessory)
-        }
+        // Back to an accessory, unless a card's own window still holds the
+        // Dock, or this one opened again in the turn `DockPresence` waits.
+        DockPresence.release(Self.dockHolder)
     }
+
+    /// What this window holds the Dock as (`DockPresence`).
+    static let dockHolder = "settings"
 
     /// Brings the window's own text into line with the settings.
     ///
