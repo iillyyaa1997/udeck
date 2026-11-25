@@ -134,8 +134,8 @@ public enum ContractFeatures {
     /// uDeck before it ignores, and the docs date). 0.9.10 brings a card's
     /// `attention`, dated above. 0.9.11, 0.9.12 and 0.9.13 change
     /// nothing in the contract; 0.9.14 brings a menu option's `button`; 0.9.15
-    /// changes nothing in it.
-    static let reviewedAt = "0.9.15"
+    /// and 0.9.16 change nothing in it.
+    static let reviewedAt = "0.9.16"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 

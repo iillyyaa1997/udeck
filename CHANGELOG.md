@@ -8,6 +8,13 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.16] — 2026-11-25
+
+- **A style card shows both of its variants while the look changes by
+  itself**, as the big preview above does: following the Mac or the clock, the
+  dark variant on the dark half and the light one on the paper. Set by hand,
+  the card shows the one variant, across the seam.
+
 ## [0.9.15] — 2026-11-25
 
 - **Calmer style cards in Settings → Look.** Each card is now a small copy of
