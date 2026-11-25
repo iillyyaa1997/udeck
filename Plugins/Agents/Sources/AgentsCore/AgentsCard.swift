@@ -92,6 +92,11 @@ enum AgentsCard {
                  "group": .string(app.t("Новая сессия", "New session"))]
             }),
         ]])
+        if session != nil {
+            items.append(["button": ["id": "close", "label": "✕",
+                                     "note": .string(app.t("Закрыть эту сессию — она останется в истории",
+                                                           "Close this session — it stays in the history"))]])
+        }
         return ["bar": ["id": "head", "items": .array(items)]]
     }
 
@@ -100,7 +105,9 @@ enum AgentsCard {
         var options: [JSONValue] = app.conversations.map { session in
             ["id": .string("s:" + session.id.uuidString), "text": .string(session.title),
              "group": .string(app.t("Открытые", "Open")), "note": .string(placeNote(session, app)),
-             "tone": .string(tone(session, app))]
+             "tone": .string(tone(session, app)),
+             // uDeck 0.9.14 draws it; an older one draws the option alone.
+             "button": ["id": .string("close:" + session.id.uuidString), "label": "✕"]]
         }
         let open = Set(app.conversations.compactMap { $0.claude?.sessionID })
         options += app.history.filter { !open.contains($0.sessionID) }.map { saved in
@@ -157,6 +164,7 @@ enum AgentsCard {
         rows.append(["feed": .array(session.feed.suffix(keep).map { feedEntry($0.item, app, label: $0.label) })])
         let held = app.heldBack[session.id] != nil
         if held { rows.append(["ask": heldRow(session, app)]) }
+        if app.confirmingClose == session.id { rows.append(["ask": app.closeAskRow(session)]) }
         switch session.current {
         case .claude(let agent): for ask in agent.asks { rows.append(["ask": askRow(ask, app)]) }
         case .codex(let agent): for ask in agent.asks { rows.append(["ask": codexAskRow(ask, app)]) }

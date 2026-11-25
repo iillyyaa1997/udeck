@@ -56,6 +56,8 @@ public final class AgentsApp {
     /// The Mac kept awake while an agent works, and the look for a sleep.
     public let keepAwake: KeepAwake
     var sleepLoop: Task<Void, Never>?
+    /// The session whose ✕ was pressed while it was in a turn: the card asks.
+    public internal(set) var confirmingClose: UUID?
     /// Sessions waiting for a limit to reset, to go on then.
     var waitingForLimit: [UUID: Task<Void, Never>] = [:]
     /// The models each provider offered when a session of it last started,
@@ -75,7 +77,7 @@ public final class AgentsApp {
     private var historyRead = Date.distantPast
     /// Conversations whose Claude session starts again once its running turn
     /// has finished — a new effort or login chosen mid-turn — and the note.
-    private var restartAfterTurn: [UUID: String] = [:]
+    var restartAfterTurn: [UUID: String] = [:]
 
     public init(home: URL, emit: @escaping (String) -> Void, keepAwake: KeepAwake? = nil) {
         self.home = home
@@ -197,7 +199,7 @@ public final class AgentsApp {
 
     /// Shows the conversation `id` here — or, shown in another place
     /// already, brings that place forward: one conversation, one place.
-    private func show(_ id: UUID) {
+    func show(_ id: UUID) {
         if let other = place(showing: id) {
             send(["show": ["view": .string(other)]])
             return
@@ -217,6 +219,20 @@ public final class AgentsApp {
     }
 
     /// The newest conversation no place shows.
+    /// Takes the conversation off the list: a place that showed it shows
+    /// another one not shown elsewhere, or none.
+    func forget(_ id: UUID) {
+        conversations.removeAll { $0.id == id }
+        heldBack[id] = nil
+        restartAfterTurn[id] = nil
+        waitingForLimit.removeValue(forKey: id)?.cancel()
+        for name in places.keys.sorted() where places[name]?.selection == id {
+            places[name]?.selection = nil
+            let next = unshown()
+            places[name]?.selection = next
+        }
+    }
+
     private func unshown() -> UUID? {
         let shown = Set(places.values.compactMap(\.selection))
         return conversations.last { !shown.contains($0.id) }?.id
@@ -365,6 +381,7 @@ public final class AgentsApp {
     private func press(_ id: String) {
         defer { withdrawAnswered() }
         if id == "stop" { selected?.current.interrupt(); return }
+        if pressClose(id) { return }
         if id == "new" { select("new"); return }
         if id.hasPrefix("here:") || id.hasPrefix("drop:"), let uuid = UUID(uuidString: String(id.dropFirst(5))),
            heldBack[uuid] != nil, let conversation = conversations.first(where: { $0.id == uuid }) {
@@ -372,12 +389,7 @@ public final class AgentsApp {
             if id.hasPrefix("here:"), let session = conversation.claude {
                 Task { await startClaude(session, resume: session.sessionID) }
             } else if id.hasPrefix("drop:") {
-                conversations.removeAll { $0.id == uuid }
-                for name in places.keys.sorted() where places[name]?.selection == uuid {
-                    places[name]?.selection = nil
-                    let next = unshown()
-                    places[name]?.selection = next
-                }
+                forget(uuid)
             }
             return
         }
@@ -701,7 +713,7 @@ public final class AgentsApp {
         }
     }
 
-    private func refreshHistory() {
+    func refreshHistory() {
         history = SessionHistory.recent(config: ChatAccount(name: "main", configDir: nil).folder(home: home), limit: 12)
         historyRead = Date()
     }
