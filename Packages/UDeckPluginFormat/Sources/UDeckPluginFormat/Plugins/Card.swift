@@ -265,11 +265,14 @@ public struct InputRow: Codable, Equatable, Sendable {
     /// the text and sent with it in `submit` as `files`, absolute paths; a
     /// pasted picture is written to a file first.
     public var files: Bool?
+    /// Text the plugin puts into the field, once (0.9.19): messages it gives
+    /// back to be edited and sent again.
+    public var fill: InputFill?
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case id, placeholder, enabled, stop, pickers, files }
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, placeholder, enabled, stop, pickers, files, fill }
 
     public init(id: String, placeholder: String? = nil, enabled: Bool? = nil, stop: String? = nil,
-                pickers: [CardMenu]? = nil, files: Bool? = nil)
+                pickers: [CardMenu]? = nil, files: Bool? = nil, fill: InputFill? = nil)
     {
         self.id = id
         self.placeholder = placeholder
@@ -277,6 +280,23 @@ public struct InputRow: Codable, Equatable, Sendable {
         self.stop = stop
         self.pickers = pickers
         self.files = files
+        self.fill = fill
+    }
+}
+
+/// Text put into a field once (uDeck 0.9.19). `id` names this fill: a fill the
+/// field has had is not put there again — the same card sent twice, a restart
+/// of uDeck — so a new fill takes a new `id`. The text goes after what is
+/// typed there already, on a line of its own, and is the person's to edit.
+public struct InputFill: Codable, Equatable, Sendable {
+    public var id: String
+    public var text: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, text }
+
+    public init(id: String, text: String) {
+        self.id = id
+        self.text = text
     }
 }
 

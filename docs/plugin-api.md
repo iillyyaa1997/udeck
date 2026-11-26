@@ -529,6 +529,13 @@ knows nothing of what they are for.
   their paths in `files`; a pasted picture is written to a PNG file in uDeck's
   temporary folder first. A uDeck before it ignores the field and sends text
   only.
+  `fill` (uDeck 0.9.19 and later) — `{ "id": "unsent-1", "text": "…" }` — puts
+  text into the field once: after what is typed there already, on a line of
+  its own, for the person to edit and send. A fill the field has had is not
+  put there again while uDeck runs, so a new fill takes a new `id`; keep it on
+  the card until the person sends from the field, and a uDeck that restarts
+  meanwhile puts it back. A uDeck before it ignores it — say
+  `"minUDeck": "0.9.19"` when the text must not be lost.
 
 uDeck 0.9.4 adds a fifth row, menus, and more to say in a feed:
 

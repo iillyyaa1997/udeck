@@ -343,6 +343,18 @@ struct InputRowView: View {
         }
         .onChange(of: focused) { _, now in watchPastes(now && takesFiles) }
         .onDisappear { watchPastes(false) }
+        .onAppear(perform: applyFill)
+        .onChange(of: input.fill) { _, _ in applyFill() }
+    }
+
+    /// The plugin's text put into the field (`InputRow.fill`), once per fill:
+    /// after what is typed already, on a line of its own.
+    private func applyFill() {
+        guard let fill = input.fill, Drafts.shared.filled[key] != fill.id else { return }
+        Drafts.shared.filled[key] = fill.id
+        let text = fill.text.trimmingCharacters(in: .newlines)
+        guard !text.isEmpty else { return }
+        draft = draft.isEmpty ? text : draft + "\n" + text
     }
 
     private func attach(_ urls: [URL]) {
@@ -359,9 +371,7 @@ struct InputRowView: View {
         pasteWatcher = nil
         guard on else { return }
         pasteWatcher = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                  event.charactersIgnoringModifiers?.lowercased() == "v",
-                  let pasted = PastedFiles.take(from: .general) else { return event }
+            guard PastedFiles.isPaste(event), let pasted = PastedFiles.take(from: .general) else { return event }
             attach(pasted)
             return nil
         }
@@ -733,6 +743,9 @@ final class Drafts {
     var texts: [String: String] = [:]
     /// The files going with each field's message (`InputRow.files`).
     var files: [String: [URL]] = [:]
+    /// The fill each field had last (`InputRow.fill`), by its id: not put
+    /// there again.
+    var filled: [String: String] = [:]
 }
 
 /// What a paste brings for a field that takes files: the files copied in the
@@ -740,6 +753,12 @@ final class Drafts {
 /// file of its own. Nil for anything else: that paste is text, the field's.
 @MainActor
 enum PastedFiles {
+    /// ⌘V, whatever the keyboard layout (`PasteKey`).
+    static func isPaste(_ event: NSEvent) -> Bool {
+        PasteKey.isPaste(commandOnly: event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                         letter: event.charactersIgnoringModifiers, keyCode: event.keyCode)
+    }
+
     static func take(from pasteboard: NSPasteboard) -> [URL]? {
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self],
                                              options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {

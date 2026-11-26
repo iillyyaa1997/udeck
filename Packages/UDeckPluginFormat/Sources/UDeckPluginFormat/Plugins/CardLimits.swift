@@ -84,6 +84,12 @@ extension Card {
             cut = true
             return String(text.prefix(limits.textLength)) + "…"
         }
+        // A person's or an agent's words: bound far above a label's.
+        func long(_ text: String) -> String {
+            guard text.count > CardLimits.feedTextLength else { return text }
+            cut = true
+            return String(text.prefix(CardLimits.feedTextLength)) + "…"
+        }
 
         func options(_ list: [MenuOption]) -> [MenuOption] {
             if list.count > CardLimits.menuOptions { cut = true }
@@ -165,11 +171,6 @@ extension Card {
                 // The newest are what matters; an answer may be long, so its
                 // own bound is far above a label's.
                 if entries.count > CardLimits.feedEntries { cut = true }
-                func long(_ text: String) -> String {
-                    guard text.count > CardLimits.feedTextLength else { return text }
-                    cut = true
-                    return String(text.prefix(CardLimits.feedTextLength)) + "…"
-                }
                 return .feed(entries.suffix(CardLimits.feedEntries).map {
                     FeedEntry(id: $0.id, role: $0.role, text: long($0.text), detail: $0.detail.map(long),
                               streaming: $0.streaming, error: $0.error, name: $0.name.map(trim),
@@ -185,9 +186,12 @@ extension Card {
 
             case .input(let input):
                 if (input.pickers?.count ?? 0) > CardLimits.pickers { cut = true }
+                // A fill is the person's message given back: long like a feed entry's text.
                 return .input(InputRow(id: input.id, placeholder: input.placeholder.map(trim),
                                        enabled: input.enabled, stop: input.stop,
-                                       pickers: input.pickers.map { Array($0.prefix(CardLimits.pickers).map(menu)) }))
+                                       pickers: input.pickers.map { Array($0.prefix(CardLimits.pickers).map(menu)) },
+                                       files: input.files,
+                                       fill: input.fill.map { InputFill(id: trim($0.id), text: long($0.text)) }))
 
             case .bar(let bar):
                 if bar.items.count > CardLimits.barItems { cut = true }

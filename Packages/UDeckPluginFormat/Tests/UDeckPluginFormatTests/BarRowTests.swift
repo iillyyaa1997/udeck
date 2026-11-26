@@ -107,6 +107,30 @@ struct BarRowTests {
         #expect(drawn.rows.last == .text("this card is longer than uDeck will draw and has been cut short"))
     }
 
+    @Test("an input's fill: read, kept through the drawing limits with its files, and a new contract field")
+    func inputFill() throws {
+        let json = #"{"rows":[{"input":{"id":"message","files":true,"fill":{"id":"unsent-3","text":"one\ntwo"}}}]}"#
+        let card = try JSONDecoder().decode(Card.self, from: Data(json.utf8))
+        guard case .input(let input) = card.rows[0] else {
+            Issue.record("not an input")
+            return
+        }
+        #expect(input.fill == InputFill(id: "unsent-3", text: "one\ntwo"))
+        // The limits used to rebuild an input without its `files` (0.9.17–0.9.18).
+        #expect(card.withinDrawingLimits() == card)
+        let long = Card(rows: [.input(InputRow(id: "i", fill: InputFill(id: "f", text: String(repeating: "a", count: 30_000))))])
+        guard case .input(let cut) = long.withinDrawingLimits().rows[0] else {
+            Issue.record("not an input")
+            return
+        }
+        #expect(cut.fill?.text.count == CardLimits.feedTextLength + 1)
+        let object = try #require(StrictJSON.parse(Array(json.utf8)).value?.object)
+        let used = ContractFeatures.used(byCard: object)
+        #expect(used.contains(.rowField(row: "input", field: "fill")))
+        #expect(used.contains(.rowField(row: "input.fill", field: "text")))
+        #expect(ContractFeatures.release(of: .rowField(row: "input.fill", field: "id")) == .next)
+    }
+
     @Test("an input that takes files says so; submit carries their paths, and only when there are some")
     func inputFiles() throws {
         let json = #"{"rows":[{"input":{"id":"message","placeholder":"Message","files":true}}]}"#

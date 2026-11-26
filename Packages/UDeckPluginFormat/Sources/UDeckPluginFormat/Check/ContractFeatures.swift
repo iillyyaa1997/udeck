@@ -216,6 +216,10 @@ public enum ContractFeatures {
 
         // Files sent with a message — dragged, pasted, chosen with 📎: 0.9.17.
         add(.released(SemanticVersion(major: 0, minor: 9, patch: 17)), [.rowField(row: "input", field: "files")])
+
+        // Text a plugin puts into its field — messages given back to edit: 0.9.19.
+        add(.next, [.rowField(row: "input", field: "fill")])
+        add(.next, ["id", "text"].map { .rowField(row: "input.fill", field: $0) })
         return registry
     }()
 
@@ -324,6 +328,9 @@ public enum ContractFeatures {
                 }
             case "input":
                 for field in present(body?.object) { used.insert(.rowField(row: "input", field: field)) }
+                for field in present(body?.object?.first("fill")?.object) {
+                    used.insert(.rowField(row: "input.fill", field: field))
+                }
                 for picker in body?.object?.first("pickers")?.array ?? [] {
                     for field in present(picker.object) { used.insert(.rowField(row: "menu", field: field)) }
                     if let icon = picker.object?.first("icon")?.string { used.insert(.barIcon(icon)) }
