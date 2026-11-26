@@ -60,6 +60,16 @@ def start_turn(request_id, text):
     active["turn"] = turn
     out({"id": request_id, "result": {"turn": {"id": turn, "status": "inProgress", "items": []}}})
     note("turn/started", {"threadId": THREAD, "turn": {"id": turn, "status": "inProgress", "items": []}})
+    if "[429]" in text:
+        # OpenAI refused the model request (a live run, 11-25: the turn ended 0.1 s in). The
+        # app server says the error and then fails the turn with it — both, by its source;
+        # not measured, a 429 cannot be called up.
+        error = {"message": "exceeded retry limit, last status: 429 Too Many Requests",
+                 "codexErrorInfo": {"responseTooManyFailedAttempts": {"httpStatusCode": 429}}}
+        note("error", {"threadId": THREAD, "turnId": turn, "willRetry": False, "error": error})
+        note("turn/completed", {"threadId": THREAD, "turn": {"id": turn, "status": "failed", "items": [], "error": error}})
+        active["turn"] = None
+        return
     if NAMING:
         if text.startswith("«"):
             say(turn, "Fixing the notes")

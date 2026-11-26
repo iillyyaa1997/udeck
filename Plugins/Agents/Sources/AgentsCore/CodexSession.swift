@@ -96,6 +96,9 @@ public final class CodexSession: Identifiable {
     @ObservationIgnored private var connection: CodexConnection?
     @ObservationIgnored private var reader: Task<Void, Never>?
     @ObservationIgnored private var turnID: String?
+    /// Errors this turn already put in the feed: the app server says one and
+    /// then fails the turn with the same one.
+    @ObservationIgnored private var turnErrors: Set<String> = []
     /// The feed index of each agent message still arriving, by item id.
     @ObservationIgnored private var streaming: [String: Int] = [:]
 
@@ -385,7 +388,8 @@ public final class CodexSession: Identifiable {
             }
             streaming.removeAll()
             turnID = nil
-            if let error = params["turn"]?["error"]?["message"]?.string, !error.isEmpty { note(error) }
+            if let error = params["turn"]?["error"]?["message"]?.string, !error.isEmpty, !turnErrors.contains(error) { note(error) }
+            turnErrors.removeAll()
             // Steered and not taken — the turn stopped first — they wait for
             // the next, oldest first.
             waiting = steered + waiting
@@ -414,7 +418,10 @@ public final class CodexSession: Identifiable {
         case "serverRequest/resolved":
             if let id = params["requestId"] { asks.removeAll { $0.requestID == Self.key(id) } }
         case "error":
-            if let message = params["error"]?["message"]?.string ?? params["message"]?.string { note(message) }
+            if let message = params["error"]?["message"]?.string ?? params["message"]?.string,
+               turnErrors.insert(message).inserted {
+                note(message)
+            }
         default:
             return
         }

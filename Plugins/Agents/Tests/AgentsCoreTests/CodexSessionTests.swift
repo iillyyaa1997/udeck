@@ -101,6 +101,23 @@ struct CodexSessionTests {
         await session.close()
     }
 
+    @Test("a turn OpenAI refuses ends at once: its error shown once, the session ready for the next message")
+    func refusedTurn() async throws {
+        let (session, folder) = try await started()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var finished = 0
+        session.onTurnFinished = { _ in finished += 1 }
+        session.send("[429] What changed?")
+        try await until("the turn's end") { session.state == .idle && finished == 1 }
+        let error = "exceeded retry limit, last status: 429 Too Many Requests"
+        #expect(session.items.filter { if case .note(_, error) = $0 { true } else { false } }.count == 1, "\(session.items)")
+        session.send("What changed?")
+        try await until("the next turn's approval") { !session.asks.isEmpty }
+        session.answer(try #require(session.asks.first), with: "decline")
+        try await until("the next turn's end") { session.state == .idle }
+        await session.close()
+    }
+
     @Test("a saved thread continued: its turns read back oldest first, then the resume noted; the saved list leaves ephemeral ones out")
     func savedThread() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("udeck-codex-" + UUID().uuidString)

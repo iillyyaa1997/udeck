@@ -153,9 +153,12 @@ struct RealSteerTests {
                 sent = true
                 #expect(session.waitingMessages.map(\.text) == [Self.change])
             }
-            return sent && session.state == .idle
+            // A turn that ends before any step (refused upstream) ends the wait at once.
+            return sent ? session.state == .idle : finished > 0
         }
         print("items:", Self.lines(session.items))
+        if !sent { await session.close() }
+        try #require(sent, "the turn ended before any step: \(Self.lines(session.items))")
         #expect(session.waitingMessages.isEmpty)
         let taken = try #require(session.items.firstIndex { if case .user(_, Self.change) = $0 { true } else { false } })
         let first = try #require(session.items.firstIndex { if case .tool = $0 { true } else { false } })
@@ -171,7 +174,9 @@ struct RealSteerTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let shell = try await ShellEnvironment.capture(shell: "/bin/zsh", home: NSHomeDirectory(), user: NSUserName())
-        let codex = try #require(ShellEnvironment.resolve("codex", path: shell["PATH"] ?? ""))
+        // `REAL_CODEX_PATH`: a stand-in that runs `codex` and keeps what passes both ways.
+        let codex = try #require(ProcessInfo.processInfo.environment["REAL_CODEX_PATH"].map { URL(fileURLWithPath: $0) }
+            ?? ShellEnvironment.resolve("codex", path: shell["PATH"] ?? ""))
         let session = CodexSession(folder: folder)
         session.effort = "low"
         var finished = 0
@@ -188,7 +193,9 @@ struct RealSteerTests {
                     sent = true
                     #expect(session.waitingMessages.map(\.text) == [Self.change])
                 }
-                return sent && session.state == .idle
+                // A turn that ends before any command ends the wait at once: OpenAI refused
+                // the first run on 11-25 with a 429, and the test sat out its 150 s.
+                return sent ? session.state == .idle : finished > 0
             }
         } catch {
             print("state:", session.state, "waiting:", session.waitingMessages.map(\.text), "items:", Self.lines(session.items))
@@ -197,6 +204,11 @@ struct RealSteerTests {
             throw error
         }
         print("items:", Self.lines(session.items))
+        if !sent {
+            await session.archive()
+            await session.close()
+        }
+        try #require(sent, "the turn ended before any command: \(Self.lines(session.items))")
         #expect(session.waitingMessages.isEmpty)
         let taken = try #require(session.items.firstIndex { if case .user(_, Self.change) = $0 { true } else { false } })
         let first = try #require(session.items.firstIndex { if case .tool = $0 { true } else { false } })
