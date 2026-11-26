@@ -8,6 +8,23 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.19] — 2026-11-26
+
+- **⌘V pastes files whatever the keyboard layout.** It was read by its letter,
+  and a Russian layout's ⌘V gives «м»: a file copied in the Finder went into
+  the field as its name. A layout that types Latin letters is still read by
+  its letter, any other by the V key.
+- **A plugin can put text into its field** (`fill` on an `input` row): once,
+  after what is typed there, for the person to edit and send.
+- Agents (the plugin, installed separately, needs this release) no longer
+  says «Working» while nothing happens: a line above the field says what the
+  agent does, the turn's time and its tokens, as the terminal does, and a
+  call tried again says why. An account's limit stops the turn at once and
+  the conversation goes on under another account, with what was written
+  meanwhile; a session continued from the history goes on under the account
+  «Авто» picks. Stop stops everything: what was written meanwhile stays in
+  the feed, not sent, with «Отправить все» and «В поле», kept across restarts.
+
 ## [0.9.18] — 2026-11-25
 
 - **A dialog opens above the panel.** 📎's dialog, the folder dialog a plugin

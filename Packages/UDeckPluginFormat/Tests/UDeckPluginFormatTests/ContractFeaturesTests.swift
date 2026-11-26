@@ -119,14 +119,14 @@ struct ContractFeaturesTests {
                                                    .rowField(row: "menu.options.button", field: "label")]
         // 0.9.17: files sent with a message.
         let inputFiles: Set<ContractFeature> = [.rowField(row: "input", field: "files")]
-        // Waiting for the release after 0.9.18: text a plugin puts into its field.
+        // 0.9.19: text a plugin puts into its field.
         let inputFill: Set<ContractFeature> = [.rowField(row: "input", field: "fill"),
                                                .rowField(row: "input.fill", field: "id"),
                                                .rowField(row: "input.fill", field: "text")]
         for (feature, release) in ContractFeatures.registry where feature != .manifestField("minUDeck") {
             switch feature {
             case _ where inputFill.contains(feature):
-                #expect(release == .next, "\(feature)")
+                #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 19)), "\(feature)")
             case _ where inputFiles.contains(feature):
                 #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 17)), "\(feature)")
             case _ where optionButtons.contains(feature):
@@ -146,8 +146,7 @@ struct ContractFeaturesTests {
         let read = ContractRelease.released(SemanticVersion(major: 0, minor: 6, patch: 0))
         #expect(ContractFeatures.minimumUDeckReadFrom == read)
         #expect(ContractFeatures.release(of: .manifestField("minUDeck")) == Optional(read))
-        #expect(Set(ContractFeatures.registry.filter { $0.value == .next }.keys) == inputFill,
-                "only an input's fill is waiting for a release")
+        #expect(!ContractFeatures.registry.values.contains(.next), "nothing is waiting for a release")
         // The release after this one, which has no number yet: after every
         // released one, and met only by a uDeck after this one.
         let current = try #require(SemanticVersion(UDeckRelease.version))

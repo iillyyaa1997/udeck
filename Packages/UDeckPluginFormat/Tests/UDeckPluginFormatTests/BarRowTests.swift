@@ -128,7 +128,7 @@ struct BarRowTests {
         let used = ContractFeatures.used(byCard: object)
         #expect(used.contains(.rowField(row: "input", field: "fill")))
         #expect(used.contains(.rowField(row: "input.fill", field: "text")))
-        #expect(ContractFeatures.release(of: .rowField(row: "input.fill", field: "id")) == .next)
+        #expect(ContractFeatures.release(of: .rowField(row: "input.fill", field: "id")) == .released(SemanticVersion(major: 0, minor: 9, patch: 19)))
     }
 
     @Test("an input that takes files says so; submit carries their paths, and only when there are some")
