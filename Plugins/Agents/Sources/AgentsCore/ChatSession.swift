@@ -106,6 +106,11 @@ public final class ChatSession: Identifiable {
     public private(set) var context: ClaudeContextUsage?
     /// When the running turn began, while one runs.
     public private(set) var turnStartedAt: Date?
+    /// What it does now, while a turn runs.
+    public private(set) var activity: AgentActivity?
+    /// The tokens that came back this turn.
+    public private(set) var tokens = TurnTokens()
+    @ObservationIgnored private var retries = 0
     /// The person's messages sent while a turn ran that the CLI has not
     /// taken yet, oldest first. The CLI takes one after the step it is on and
     /// the same turn goes on with it, or, with no step ahead, as the next
@@ -248,6 +253,7 @@ public final class ChatSession: Identifiable {
         generation += 1
         state = .starting
         turnStartedAt = nil
+        activity = nil
         inTurn = false
         stopping = nil
         asks.removeAll()
@@ -340,7 +346,7 @@ public final class ChatSession: Identifiable {
         }
         unconfirmed.append((told, waits ? id : nil))
         state = .working
-        if turnStartedAt == nil { turnStartedAt = Date() }
+        beginTurnClock()
         if titleSource < .firstWords, let words = ChatNames.firstWords(text) { name(words, from: .firstWords) }
         Task {
             do {
@@ -422,6 +428,7 @@ public final class ChatSession: Identifiable {
     public func answer(_ ask: ChatAsk, with answer: Answer) {
         guard let connection else { return }
         asks.removeAll { $0.requestID == ask.requestID }
+        if activity == .asking, asks.isEmpty { activity = .tool(ask.ask.toolName) }
         let message: JSONValue
         switch answer {
         case .allow: message = ClaudeOutbound.allow(ask.requestID, input: ask.ask.input)
@@ -458,6 +465,7 @@ public final class ChatSession: Identifiable {
             model = info.model
             if changed { onRecord?() }
         case .partial(let event, _):
+            follow(event)
             guard event.parentToolUseID == nil, case .text(let delta)? = event.delta else { return }
             appendStreaming(delta)
         case .assistant(let message, _):
@@ -468,6 +476,7 @@ public final class ChatSession: Identifiable {
                     finishStreaming(with: text)
                 case .toolUse(let id, let name, let input):
                     finishStreaming(with: nil)
+                    activity = .tool(name)
                     items.append(.tool(id: id, name: name, summary: ToolSummary.of(name: name, input: input),
                                        result: nil))
                 case .thinking, .other:
@@ -492,10 +501,11 @@ public final class ChatSession: Identifiable {
                 finishStreaming(with: nil)
                 items.append(.user(id: UUID(), text: text))
                 state = .working
-                if turnStartedAt == nil { turnStartedAt = Date() }
+                beginTurnClock()
             }
             inTurn = true
         case .toolResults(let results, _):
+            if !results.isEmpty, state == .working { activity = .requesting }
             for result in results {
                 // A tool's result answers the ask about it, whoever answered.
                 asks.removeAll { $0.ask.toolUseID == result.toolUseID }
@@ -534,6 +544,7 @@ public final class ChatSession: Identifiable {
             if unconfirmed.isEmpty, !isEnded {
                 state = .idle
                 turnStartedAt = nil
+                activity = nil
                 refreshContext()
                 refreshUsage()
                 if limit {
@@ -547,6 +558,7 @@ public final class ChatSession: Identifiable {
             if let permission = request.permission {
                 let ask = ChatAsk(requestID: request.requestID, ask: permission)
                 asks.append(ask)
+                activity = .asking
                 onAsk?(ask)
             }
         case .cancelled(let requestID, _):
@@ -561,6 +573,14 @@ public final class ChatSession: Identifiable {
                 // here, the turn goes on under another account, or later.
                 stop(.limit)
             }
+        case .system("status", let raw) where raw["status"]?.string == "requesting" && state == .working:
+            activity = .requesting
+        case .system("api_retry", let raw) where state == .working:
+            // The call failed and the CLI tries again: said, not «working».
+            retries += 1
+            let delay = raw["retry_delay_ms"]?.number.map { Date().addingTimeInterval($0 / 1000) }
+            activity = .retrying(status: raw["error_status"]?.int, error: raw["error"]?.string ?? "",
+                                 attempt: raw["attempt"]?.int ?? retries, next: delay)
         case .response, .system, .other:
             return
         }
@@ -596,6 +616,32 @@ public final class ChatSession: Identifiable {
 
     func note(_ text: String) {
         items.append(.note(id: UUID(), text: text))
+    }
+
+    /// A turn starts its clock, its count of tokens and its activity once.
+    private func beginTurnClock() {
+        guard turnStartedAt == nil else { return }
+        turnStartedAt = Date()
+        tokens = TurnTokens()
+        retries = 0
+        activity = .requesting
+    }
+
+    /// What a piece of the stream says the agent does, and how many tokens
+    /// came: every agent's, a subagent's too, as the terminal counts them.
+    private func follow(_ event: ClaudeStreamEvent) {
+        switch event.delta {
+        case .text(let text), .thinking(let text), .toolInput(let text): tokens.streamed(text)
+        case nil: break
+        }
+        if let returned = event.outputTokens { tokens.call(returned) }
+        guard event.parentToolUseID == nil, state == .working, event.type == "content_block_start" else { return }
+        switch event.blockType {
+        case "thinking", "redacted_thinking": activity = .thinking
+        case "text": activity = .writing
+        case "tool_use": activity = .preparing(event.blockName ?? "")
+        default: break
+        }
     }
 
     private func ended() {

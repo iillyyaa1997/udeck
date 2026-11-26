@@ -141,6 +141,11 @@ struct AgentsStopTests {
         await app.handle(#"{"event":"submit","row":"message","text":"[hang] look"}"#)
         try await until("the turn") { claude.state == .working }
         try await Task.sleep(for: .milliseconds(200))
+        // Above the field, what it does: a call out, nothing back yet.
+        app.render()
+        let live = try #require(said.lastCard?["rows"]?.array?.compactMap { $0["bar"] }.first { $0["id"]?.string == "live" })
+        let doing = live["items"]?.array?.first?["badge"]?["text"]?.string ?? ""
+        #expect(doing.hasPrefix("✻ Отправляет запрос… · 0:0"), "\(doing)")
         await app.handle(#"{"event":"submit","row":"message","text":"second"}"#)
         await app.handle(#"{"event":"submit","row":"message","text":"third"}"#)
         await app.handle(#"{"event":"press","id":"stop"}"#)
@@ -151,6 +156,7 @@ struct AgentsStopTests {
         let unsent = feed.filter { $0["label"]?.string == "не отправлено" }.compactMap { $0["text"]?.string }
         #expect(unsent == ["second", "third"])
         #expect(feed.contains { $0["role"]?.string == "note" && $0["text"]?.string == "Остановлено" })
+        #expect(try rows().allSatisfy { $0["bar"]?["id"]?.string != "live" }, "nothing runs")
         let bar = try #require(try rows().compactMap { $0["bar"] }.first { $0["id"]?.string == "unsent" })
         let items = bar["items"]?.array ?? []
         #expect(items.compactMap { $0["badge"]?["text"]?.string } == ["2 сообщения не отправлены"])
@@ -192,5 +198,64 @@ struct AgentsStopTests {
         let conversation = try #require(app.conversations.first)
         #expect(conversation.unsentMessages.map(\.text) == ["second", "third"])
         for agent in conversation.agents.values { await agent.close() }
+    }
+}
+
+/// The line above the field (the operator's «1», 11-26): what the agent
+/// does, the turn's time and its tokens, as the terminal shows them.
+@Suite("What the agent does now", .serialized)
+@MainActor
+struct AgentsLiveLineTests {
+    @Test("a turn's activities in order, its tokens counted, nothing once it ends")
+    func activities() async throws {
+        let (session, folder) = try await startFake(delay: 0.02)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        var seen: [AgentActivity] = []
+        func look() { if let now = session.activity, seen.last != now { seen.append(now) } }
+        session.send("Look at the folder")
+        try await until("the ask") { look(); return !session.asks.isEmpty }
+        #expect(session.activity == .asking)
+        #expect(session.tokens.counted > 0, "the call's own count")
+        session.answer(try #require(session.asks.first), with: .allow)
+        try await until("the turn's end") { look(); return session.state == .idle }
+        #expect(session.activity == nil)
+        #expect(seen.first == .requesting)
+        #expect(seen.contains(.writing))
+        #expect(seen.contains(.preparing("Bash")) || seen.contains(.tool("Bash")))
+        #expect(seen.contains(.asking))
+        await session.close()
+    }
+
+    @Test("a call tried again is said: why, which attempt, when — not «working»")
+    func retrying() async throws {
+        let (session, folder) = try await startFake()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        session.send("[retry] Look at the folder")
+        try await until("the retry") {
+            if case .retrying = session.activity { true } else { false }
+        }
+        guard case .retrying(let status, _, let attempt, let next)? = session.activity else { return }
+        #expect(status == 529 && attempt == 1)
+        #expect((next?.timeIntervalSinceNow ?? 0) > 5)
+        try await until("going on") { session.activity != nil && !{ if case .retrying = session.activity { true } else { false } }() }
+        try await until("the ask") { !session.asks.isEmpty }
+        session.answer(try #require(session.asks.first), with: .deny)
+        try await until("the turn's end") { session.state == .idle }
+        await session.close()
+    }
+
+    @Test("the card's line: words, time and tokens; a retry in its own words")
+    func line() throws {
+        let app = AgentsApp(home: FileManager.default.temporaryDirectory) { _ in }
+        #expect(AgentsCard.retryReason(status: 529, error: "overloaded_error", app) == "The server is overloaded (529)")
+        #expect(AgentsCard.retryReason(status: nil, error: "", app) == "No connection to the server")
+        var tokens = TurnTokens()
+        tokens.call(87_200)
+        #expect(AgentsCard.tokenCount(tokens, app) == "↓ 87.2k tokens")
+        tokens.streamed(String(repeating: "a", count: 400))
+        #expect(AgentsCard.tokenCount(tokens, app) == "↓ ~87.3k tokens")
+        var few = TurnTokens()
+        few.streamed("abcdefgh")
+        #expect(AgentsCard.tokenCount(few, app) == "↓ ~2 tokens")
     }
 }

@@ -178,8 +178,79 @@ enum AgentsCard {
         case .claude(let agent): for ask in agent.asks { rows.append(["ask": askRow(ask, app)]) }
         case .codex(let agent): for ask in agent.asks { rows.append(["ask": codexAskRow(ask, app)]) }
         }
+        if !held, let live = liveRow(session, app) { rows.append(["bar": live]) }
         rows.append(["input": input(session, app, held: held)])
         return rows
+    }
+
+    /// Above the field while a turn runs, as the terminal's «✻ Crafting…
+    /// (18m 43s · ↓ 87.2k tokens)»: what the agent does, the turn's time and
+    /// the tokens that came; a call tried again says why and when (the
+    /// operator's «1», 11-26).
+    static func liveRow(_ session: Conversation, _ app: AgentsApp, now: Date = Date()) -> JSONValue? {
+        let agent = session.current
+        guard agent.state == .working, let activity = agent.activity else { return nil }
+        let elapsed = agent.turnStartedAt.map { clock(now.timeIntervalSince($0)) } ?? ""
+        let text: String
+        let tone: String
+        switch activity {
+        case .retrying(let status, let error, let attempt, let next):
+            var parts = ["↻ " + retryReason(status: status, error: error, app),
+                         app.t("попытка \(attempt)", "attempt \(attempt)")]
+            if let next {
+                let wait = max(0, Int(next.timeIntervalSince(now).rounded()))
+                parts.append(app.t("снова через ", "again in ") + (wait >= 120 ? clock(TimeInterval(wait)) : app.t("\(wait) с", "\(wait)s")))
+            }
+            if !elapsed.isEmpty { parts.append(elapsed) }
+            text = parts.joined(separator: " · ")
+            tone = "warn"
+        default:
+            var parts = ["✻ " + doing(activity, app) + "…"]
+            if !elapsed.isEmpty { parts.append(elapsed) }
+            if agent.tokens.total > 0 { parts.append(tokenCount(agent.tokens, app)) }
+            text = parts.joined(separator: " · ")
+            tone = "run"
+        }
+        return ["id": "live", "items": [["badge": ["text": .string(text), "tone": .string(tone)]]]]
+    }
+
+    static func doing(_ activity: AgentActivity, _ app: AgentsApp) -> String {
+        switch activity {
+        case .requesting: app.t("Отправляет запрос", "Asking the model")
+        case .thinking: app.t("Думает", "Thinking")
+        case .writing: app.t("Пишет ответ", "Writing")
+        case .preparing(let tool): app.t("Готовит \(tool)", "Preparing \(tool)")
+        case .tool(let tool): app.t("Выполняет \(tool)", "Running \(tool)")
+        case .asking: app.t("Ждёт твоего ответа", "Waiting for you")
+        case .retrying: app.t("Повторяет запрос", "Trying again")
+        }
+    }
+
+    /// Why a call is tried again, in words.
+    static func retryReason(status: Int?, error: String, _ app: AgentsApp) -> String {
+        let code = status.map { " (\($0))" } ?? ""
+        switch status {
+        case 529?: return app.t("Сервер перегружен", "The server is overloaded") + code
+        case 429?: return app.t("Лимит запросов", "Too many requests") + code
+        case let value? where value >= 500: return app.t("Ошибка сервера", "A server error") + code
+        case let value? where value >= 400: return app.t("Запрос отклонён", "The request was refused") + code
+        default:
+            if error.lowercased().contains("overload") { return app.t("Сервер перегружен", "The server is overloaded") }
+            if error.isEmpty || error.lowercased().contains("connect") || error.lowercased().contains("network") {
+                return app.t("Нет связи с сервером", "No connection to the server")
+            }
+            return clipped(error, 120)
+        }
+    }
+
+    /// «↓ ~1,4 тыс. токенов» — the tilde while part of it is an estimate.
+    static func tokenCount(_ tokens: TurnTokens, _ app: AgentsApp) -> String {
+        let about = tokens.estimated ? "~" : ""
+        let total = tokens.total
+        guard total >= 1000 else { return "↓ " + about + app.t("\(total) токенов", "\(total) tokens") }
+        let thousands = (Double(total) / 1000 * 10).rounded() / 10
+        let number = thousands >= 100 ? String(Int(thousands.rounded())) : String(format: "%.1f", thousands)
+        return "↓ " + about + app.t(number.replacingOccurrences(of: ".", with: ",") + " тыс. токенов", number + "k tokens")
     }
 
     /// Under the feed while a Stop left messages unsent: how many, and the

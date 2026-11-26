@@ -76,6 +76,14 @@ public final class CodexSession: Identifiable {
     public internal(set) var effort: String?
     public private(set) var context: (tokens: Int, window: Int)?
     public private(set) var turnStartedAt: Date?
+    /// What it does now, while a turn runs.
+    public private(set) var activity: AgentActivity?
+    /// The tokens that came back this turn.
+    public private(set) var tokens = TurnTokens()
+    /// The thread's output tokens as Codex last said them, and when the turn began.
+    @ObservationIgnored private var threadOutput = 0
+    @ObservationIgnored private var turnBase = 0
+    @ObservationIgnored private var retries = 0
     /// The person's messages sent while a turn ran that Codex has not taken
     /// yet, oldest first. Each is steered into the running turn
     /// (`turn/steer`) and taken after the step it is on, the turn going on
@@ -335,7 +343,13 @@ public final class CodexSession: Identifiable {
 
     private func startTurn(_ text: String, pictures: [String] = [], connection: CodexConnection, threadID: String) {
         state = .working
-        if turnStartedAt == nil { turnStartedAt = Date() }
+        if turnStartedAt == nil {
+            turnStartedAt = Date()
+            tokens = TurnTokens()
+            turnBase = threadOutput
+            retries = 0
+        }
+        activity = .requesting
         var params: [String: JSONValue] = [
             "threadId": .string(threadID),
             "input": Self.input(text, pictures: pictures),
@@ -351,7 +365,7 @@ public final class CodexSession: Identifiable {
                 }
             } catch {
                 note("not sent: \(error)")
-                if state == .working, asks.isEmpty { state = .idle; turnStartedAt = nil }
+                if state == .working, asks.isEmpty { state = .idle; turnStartedAt = nil; activity = nil }
             }
         }
     }
@@ -388,6 +402,7 @@ public final class CodexSession: Identifiable {
         if let approval = event.approval {
             let ask = CodexAsk(requestID: Self.key(approval.id), ask: approval)
             asks.append(ask)
+            activity = .asking
             onAsk?(ask)
             return
         }
@@ -398,6 +413,8 @@ public final class CodexSession: Identifiable {
             steerWaiting()
         case "item/agentMessage/delta":
             guard let itemID = params["itemId"]?.string, let delta = params["delta"]?.string else { return }
+            tokens.streamed(delta)
+            if state == .working { activity = .writing }
             if let index = streaming[itemID], case .assistant(let id, let text, _) = items[index] {
                 items[index] = .assistant(id: id, text: text + delta, streaming: true)
             } else {
@@ -410,9 +427,14 @@ public final class CodexSession: Identifiable {
                 taken(id)
             } else if let tool = Self.tool(item) {
                 items.append(.tool(id: tool.id, name: tool.name, summary: tool.summary, result: nil))
+                if state == .working { activity = .tool(tool.name) }
+            } else if item["type"]?.string == "reasoning", state == .working {
+                activity = .thinking
             }
         case "item/completed":
-            complete(params["item"] ?? .null)
+            let item = params["item"] ?? .null
+            if Self.tool(item) != nil, state == .working, asks.isEmpty { activity = .requesting }
+            complete(item)
         case "turn/completed":
             for (_, index) in streaming {
                 if case .assistant(let id, let text, _) = items[index] { items[index] = .assistant(id: id, text: text, streaming: false) }
@@ -443,12 +465,17 @@ public final class CodexSession: Identifiable {
                 }
                 state = .idle
                 turnStartedAt = nil
+                activity = nil
                 onTurnFinished?(lastAnswer)
             }
         case "thread/tokenUsage/updated":
             let usage = params["tokenUsage"] ?? .null
             if let window = usage["modelContextWindow"]?.int, window > 0 {
                 context = (usage["last"]?["totalTokens"]?.int ?? 0, window)
+            }
+            if let output = usage["total"]?["outputTokens"]?.int {
+                threadOutput = output
+                if turnStartedAt != nil { tokens.countedSoFar(output - turnBase) }
             }
         case "account/rateLimits/updated":
             rateLimits = CodexRateLimits(params["rateLimits"] ?? .null)
@@ -460,10 +487,15 @@ public final class CodexSession: Identifiable {
         case "serverRequest/resolved":
             if let id = params["requestId"] { asks.removeAll { $0.requestID == Self.key(id) } }
         case "error":
-            if let message = params["error"]?["message"]?.string ?? params["message"]?.string,
-               turnErrors.insert(message).inserted {
-                note(message)
+            guard let message = params["error"]?["message"]?.string ?? params["message"]?.string else { return }
+            // One Codex tries again is said on the line above the field, not in the feed.
+            if params["willRetry"]?.bool == true, state == .working {
+                retries += 1
+                activity = .retrying(status: params["error"]?["codexErrorInfo"]?.object?.values.first?["httpStatusCode"]?.int,
+                                     error: message, attempt: retries, next: nil)
+                return
             }
+            if turnErrors.insert(message).inserted { note(message) }
         default:
             return
         }

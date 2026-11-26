@@ -111,9 +111,22 @@ def answer_to(request_id):
         waiting.append(obj)
 
 
+def calling():
+    """A call to the model goes out (claude 2.1.332 says so before each)."""
+    out({"type": "system", "subtype": "status", "status": "requesting", "session_id": SESSION})
+
+
+def tokens(count):
+    """The call's own count of the tokens it returned, said at its end (measured 11-26)."""
+    out({"type": "stream_event", "event": {"type": "message_delta", "delta": {"stop_reason": "end_turn"},
+         "usage": {"output_tokens": count}}, "parent_tool_use_id": None, "session_id": SESSION})
+
+
 def say(text):
     """The answer streamed word by word, then whole — as with --include-partial-messages."""
     words = text.split(" ")
+    out({"type": "stream_event", "event": {"type": "content_block_start", "index": 0,
+         "content_block": {"type": "text", "text": ""}}, "parent_tool_use_id": None, "session_id": SESSION})
     for index, word in enumerate(words):
         piece = word if index == 0 else " " + word
         out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0,
@@ -121,9 +134,13 @@ def say(text):
         time.sleep(DELAY)
     out({"type": "assistant", "message": {"id": "msg-%d" % time.time_ns(), "model": "claude-fake-1-0", "role": "assistant",
          "content": [{"type": "text", "text": text}]}, "parent_tool_use_id": None, "session_id": SESSION})
+    tokens(len(words) * 2)
 
 
 def tool_call(tool_id, name, tool_input):
+    out({"type": "stream_event", "event": {"type": "content_block_start", "index": 1,
+         "content_block": {"type": "tool_use", "id": tool_id, "name": name, "input": {}}},
+         "parent_tool_use_id": None, "session_id": SESSION})
     out({"type": "assistant", "message": {"id": "msg-%d" % time.time_ns(), "model": "claude-fake-1-0", "role": "assistant",
          "content": [{"type": "tool_use", "id": tool_id, "name": name, "input": tool_input}]},
          "parent_tool_use_id": None, "session_id": SESSION})
@@ -281,6 +298,13 @@ def turn(text, pictures=0):
     out({"type": "system", "subtype": "init", "session_id": SESSION, "model": "claude-fake-1-0",
          "permissionMode": "default", "cwd": os.getcwd(), "claude_code_version": "2.1.330",
          "slash_commands": ["compact", "review"], "capabilities": []})
+    if "[retry]" in text:
+        # The call failed and is tried again: overloaded, as the API says it.
+        calling()
+        out({"type": "system", "subtype": "api_retry", "attempt": 1, "max_retries": 10, "retry_delay_ms": 8000,
+             "error_status": 529, "error": "overloaded_error", "session_id": SESSION})
+        time.sleep(float(os.environ.get("FAKE_CLAUDE_RETRY", "0.5")))
+    calling()
     playing = [(text, pictures)]
     while playing:
         playing += play(*playing.pop(0))
@@ -311,6 +335,7 @@ def play(text, pictures):
         chosen = (reply.get("updatedInput") or {}).get("answers", {}).get(questions[0]["question"], "nothing")
         tool_result(tool_id, "User answered: %s" % chosen)
         taken = take_waiting()
+        calling()
         say(words["chose"] % (chosen, chosen.lower()))
     else:
         tool_id = "toolu_b%d" % n
@@ -326,10 +351,12 @@ def play(text, pictures):
         if reply.get("behavior") == "allow":
             tool_result(tool_id, "total 8\ndrwxr-xr-x  3 me  staff   96 .\n-rw-r--r--  1 me  staff   42 notes.md")
             taken = take_waiting()
+            calling()
             say(words["found"])
         else:
             tool_result(tool_id, "The user declined.", is_error=True)
             taken = take_waiting()
+            calling()
             say(words["declined"])
     return taken
 

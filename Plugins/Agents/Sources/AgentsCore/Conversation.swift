@@ -122,6 +122,22 @@ public enum Agent {
         }
     }
 
+    /// What it does now, while a turn runs.
+    public var activity: AgentActivity? {
+        switch self {
+        case .claude(let session): session.activity
+        case .codex(let session): session.activity
+        }
+    }
+
+    /// The tokens that came back this turn.
+    public var tokens: TurnTokens {
+        switch self {
+        case .claude(let session): session.tokens
+        case .codex(let session): session.tokens
+        }
+    }
+
     public var turnStartedAt: Date? {
         switch self {
         case .claude(let session): session.turnStartedAt

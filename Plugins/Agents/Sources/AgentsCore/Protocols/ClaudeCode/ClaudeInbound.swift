@@ -157,12 +157,22 @@ public struct ClaudeStreamEvent: Sendable, Equatable {
     public let index: Int?
     public let delta: Delta?
     public let parentToolUseID: String?
+    /// `content_block_start`: the block's type (`text`, `thinking`,
+    /// `tool_use`) and, for a tool call, the tool's name.
+    public let blockType: String?
+    public let blockName: String?
+    /// `message_delta`: the tokens the call returned — said once, at its end
+    /// (measured 11-26, claude 2.1.332).
+    public let outputTokens: Int?
 
     init(_ raw: JSONValue) {
         let event = raw["event"] ?? .null
         type = event["type"]?.string ?? ""
         index = event["index"]?.int
         parentToolUseID = raw["parent_tool_use_id"]?.string
+        blockType = event["content_block"]?["type"]?.string
+        blockName = event["content_block"]?["name"]?.string
+        outputTokens = type == "message_delta" ? event["usage"]?["output_tokens"]?.int : nil
         let delta = event["delta"] ?? .null
         switch delta["type"]?.string {
         case "text_delta": self.delta = .text(delta["text"]?.string ?? "")
