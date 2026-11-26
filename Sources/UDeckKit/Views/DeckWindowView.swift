@@ -34,6 +34,30 @@ struct DeckWindowView: View {
     private var presentation: CardPresentation { model.presentation(for: window) }
 
     var body: some View {
+        // The window is its cell's size, whatever it holds: laid out over a
+        // shape of the cell's size, what does not fit is cut at the window's
+        // own edge — never the window pushed past its cell, as an 8-row
+        // conversation was on 11-26, its top or its bottom out of the panel.
+        Color.clear
+            .overlay(alignment: .topLeading) { content }
+            .background(
+                RoundedRectangle(cornerRadius: theme.windowCornerRadius).fill(theme.windowFill)
+            )
+            .overlay(RoundedRectangle(cornerRadius: theme.windowCornerRadius).strokeBorder(theme.line))
+            .clipShape(RoundedRectangle(cornerRadius: theme.windowCornerRadius))
+            .overlay(alignment: .bottomTrailing) { if !isPlaced { resizeGrip } }
+            .opacity(isMoving ? 0.85 : 1)
+            .onHover { isHovering = $0 }
+            .contextMenu {
+                Button(strings(.cardRefreshNow)) { model.refresh(window.pluginID) }
+                PlaceMenuItems(model: model, window: window)
+                Button(strings(.cardRemoveFromTab), role: .destructive) {
+                    model.removeWindow(window.id, from: tabID)
+                }
+            }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: theme.rowSpacing) {
             header
                 // The window's size belongs to the grid, so a card with more to
@@ -62,22 +86,7 @@ struct DeckWindowView: View {
         // of it. Each card used to make its own glass, which meant each one
         // asked the system for its own coat of tint — so the things inside the
         // panel came out a different colour from the panel, whichever way the
-        // tint was set. One material, once, and a card is drawn on it.
-        .background(
-            RoundedRectangle(cornerRadius: theme.windowCornerRadius).fill(theme.windowFill)
-        )
-        .overlay(RoundedRectangle(cornerRadius: theme.windowCornerRadius).strokeBorder(theme.line))
-        .clipShape(RoundedRectangle(cornerRadius: theme.windowCornerRadius))
-        .overlay(alignment: .bottomTrailing) { if !isPlaced { resizeGrip } }
-        .opacity(isMoving ? 0.85 : 1)
-        .onHover { isHovering = $0 }
-        .contextMenu {
-            Button(strings(.cardRefreshNow)) { model.refresh(window.pluginID) }
-            PlaceMenuItems(model: model, window: window)
-            Button(strings(.cardRemoveFromTab), role: .destructive) {
-                model.removeWindow(window.id, from: tabID)
-            }
-        }
+        // tint was set. One material, once, and a card is drawn on it (`body`).
     }
 
     // MARK: - Header

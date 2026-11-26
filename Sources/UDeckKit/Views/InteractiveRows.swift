@@ -308,11 +308,7 @@ struct InputRowView: View {
 
     private var takesFiles: Bool { input.files == true && input.enabled != false }
 
-    @FocusState private var focused: Bool
     @State private var dropping = false
-    /// The ⌘V watcher while the field is focused: a paste of files or of a
-    /// picture attaches it, a paste of text is the field's.
-    @State private var pasteWatcher: Any?
 
     var body: some View {
         Group {
@@ -341,8 +337,6 @@ struct InputRowView: View {
                     .accessibilityIdentifier("row.input.\(input.id).drop")
             }
         }
-        .onChange(of: focused) { _, now in watchPastes(now && takesFiles) }
-        .onDisappear { watchPastes(false) }
         .onAppear(perform: applyFill)
         .onChange(of: input.fill) { _, _ in applyFill() }
     }
@@ -366,15 +360,12 @@ struct InputRowView: View {
     /// No more files than this go with one message.
     static let mostFiles = 10
 
-    private func watchPastes(_ on: Bool) {
-        if let pasteWatcher { NSEvent.removeMonitor(pasteWatcher) }
-        pasteWatcher = nil
-        guard on else { return }
-        pasteWatcher = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard PastedFiles.isPaste(event), let pasted = PastedFiles.take(from: .general) else { return event }
-            attach(pasted)
-            return nil
-        }
+    /// A paste of files, or of a picture, attaches it; a paste of text is
+    /// the field's.
+    private func pasteFiles() -> Bool {
+        guard takesFiles, let pasted = PastedFiles.take(from: .general) else { return false }
+        attach(pasted)
+        return true
     }
 
     private func chooseFiles() {
@@ -430,20 +421,14 @@ struct InputRowView: View {
         .accessibilityIdentifier("row.input.\(input.id).attach")
     }
 
-    private var field: some View {
-        TextField(input.placeholder ?? "", text: draftBinding, axis: .vertical)
-            .font(theme.bodyFont)
-            .disabled(input.enabled == false)
-            .focused($focused)
-            .onSubmit(submit)
-            // Return sends; Shift-Return is a new line in the message.
-            .onKeyPress(.return, phases: .down) { press in
-                guard press.modifiers.contains(.shift) else { return .ignored }
-                draft.append("\n")
-                return .handled
-            }
-            .onExitCommand { if let stop = input.stop { send(.press(id: stop)) } }
-            .accessibilityIdentifier("row.input.\(input.id)")
+    /// The text: grows to `lines` lines, then scrolls inside (`MessageEditor`).
+    private func field(lines: Int) -> some View {
+        MessageEditor(text: draftBinding, placeholder: input.placeholder ?? "",
+                      font: .systemFont(ofSize: theme.textSize), textColor: NSColor(theme.text),
+                      placeholderColor: NSColor(theme.muted), enabled: input.enabled != false, maxLines: lines,
+                      identifier: "row.input.\(input.id)", onSubmit: submit,
+                      onEscape: input.stop.map { stop in { send(.press(id: stop)) } },
+                      onPasteFiles: pasteFiles)
     }
 
     private var line: some View {
@@ -451,7 +436,10 @@ struct InputRowView: View {
             attachments
             HStack(spacing: 6) {
             if takesFiles { attachButton }
-            field.textFieldStyle(.roundedBorder).lineLimit(1...6)
+            field(lines: 6)
+                .padding(.horizontal, 7).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(theme.backing))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(theme.line, lineWidth: 1))
             if let stop = input.stop {
                 ProgressView().controlSize(.small)
                 Button { send(.press(id: stop)) } label: { Image(systemName: "stop.fill") }
@@ -467,7 +455,7 @@ struct InputRowView: View {
     private func panel(_ pickers: [CardMenu]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             attachments
-            field.textFieldStyle(.plain).lineLimit(1...8)
+            field(lines: 8)
             HStack(spacing: 6) {
                 if takesFiles { attachButton }
                 ForEach(Array(pickers.enumerated()), id: \.offset) { index, picker in
@@ -753,12 +741,6 @@ final class Drafts {
 /// file of its own. Nil for anything else: that paste is text, the field's.
 @MainActor
 enum PastedFiles {
-    /// ⌘V, whatever the keyboard layout (`PasteKey`).
-    static func isPaste(_ event: NSEvent) -> Bool {
-        PasteKey.isPaste(commandOnly: event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                         letter: event.charactersIgnoringModifiers, keyCode: event.keyCode)
-    }
-
     static func take(from pasteboard: NSPasteboard) -> [URL]? {
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self],
                                              options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {

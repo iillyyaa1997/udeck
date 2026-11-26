@@ -40,7 +40,8 @@ struct DeckGridView: View {
             let metrics = GridMetrics(
                 contentWidth: geometry.size.width,
                 columns: model.layout.columns,
-                rowHeight: theme.gridRowHeight,
+                rowHeight: GridMetrics.rowHeight(available: geometry.size.height, rows: committedRows,
+                                                 nominal: theme.gridRowHeight, spacing: theme.gridSpacing),
                 spacing: theme.gridSpacing
             )
 
@@ -146,6 +147,13 @@ struct DeckGridView: View {
         model.layout.tabs.first { $0.id == tab.id }?.windows ?? []
     }
 
+    /// The tab's rows as laid out, without a drag in flight: the row height
+    /// follows these, so a window dragged taller does not shrink every row
+    /// under the pointer.
+    private var committedRows: Int {
+        windows.map { $0.row + $0.height }.max() ?? 1
+    }
+
     private var totalRows: Int {
         windows.map { window in
             let placed = draftApplied(to: window)
@@ -230,5 +238,10 @@ struct GridMetrics {
 
     func rows(forHeight height: CGFloat) -> Int {
         Int((height / (rowHeight + spacing)).rounded())
+    }
+
+    /// The row height that shows a tab's `rows` in `available` points (`GridRows`).
+    static func rowHeight(available: CGFloat, rows: Int, nominal: CGFloat, spacing: CGFloat) -> CGFloat {
+        GridRows.height(available: available, rows: rows, nominal: nominal, spacing: spacing)
     }
 }
