@@ -8,6 +8,17 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.20] — 2026-11-26
+
+- **A card always fits the panel.** A grid row's height follows the panel:
+  a tab fills it exactly on any screen, density and text size, where an
+  8-row card was some 20 points too tall and its top or its bottom was cut
+  off. A window is its cell's size whatever its card holds.
+- **The field scrolls a long message** inside, from its sixth or eighth line,
+  instead of stopping at it. A paste of files is the paste itself, from any
+  keyboard layout; Return sends, Shift-Return starts a line, Escape stops.
+- **Typing after a click on an answer goes into the field** of that card.
+
 ## [0.9.19] — 2026-11-26
 
 - **⌘V pastes files whatever the keyboard layout.** It was read by its letter,
