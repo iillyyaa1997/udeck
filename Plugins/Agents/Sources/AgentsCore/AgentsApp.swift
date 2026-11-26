@@ -66,6 +66,8 @@ public final class AgentsApp {
     /// The names of sessions this plugin keeps, and how many times a name
     /// was asked of a model for each in this run.
     var names: ChatNames
+    /// Messages a Stop left unsent, kept on disk by session.
+    var unsent: UnsentStore
     var namingTries: [String: Int] = [:]
     /// The history's sessions being named, one at a time.
     var historyNaming: Task<Void, Never>?
@@ -99,6 +101,7 @@ public final class AgentsApp {
         accounts = ChatAccount.discover(home: home)
         account = accounts[0]
         names = ChatNames.load(home: home)
+        unsent = UnsentStore.load(home: home)
         knownModels[.claude] = Self.claudeAliases
     }
 
@@ -151,6 +154,8 @@ public final class AgentsApp {
             let text = event["text"]?.string ?? ""
             let files = (event["files"]?.array ?? []).compactMap(\.string)
             if files.isEmpty, renameFromTheField(text) { break }
+            // Sent from the field: what was put back into it is the person's now.
+            selected?.fill = nil
             selected?.send(text, files: files)
         case "folder":
             let id = event["id"]?.string ?? ""
@@ -399,6 +404,8 @@ public final class AgentsApp {
     private func press(_ id: String) {
         defer { withdrawAnswered() }
         if id == "stop" { selected?.current.interrupt(); return }
+        if id == "unsent:send" { selected?.sendUnsent(); return }
+        if id == "unsent:field" { selected?.putUnsentIntoField(); return }
         if pressClose(id) { return }
         if id == "new" { select("new"); return }
         if id.hasPrefix("here:") || id.hasPrefix("drop:"), let uuid = UUID(uuidString: String(id.dropFirst(5))),
@@ -472,7 +479,7 @@ public final class AgentsApp {
         }
         let folder = URL(fileURLWithPath: saved.cwd ?? home.path, isDirectory: true)
         let (title, source) = saved.named
-        let session = ChatSession(folder: folder, account: account ?? self.account, title: title,
+        let session = ChatSession(folder: folder, account: account ?? historyAccount(for: saved), title: title,
                                   titleSource: source, resumeID: saved.sessionID)
         session.note("loading-history")
         let conversation = adopt(.claude(session))
@@ -502,7 +509,23 @@ public final class AgentsApp {
         conversations.append(conversation)
         selection = conversation.id
         applyKnownName(conversation)
+        // Left unsent when it was open before: back, to be sent or edited.
+        if let key = agent.nameKey, let kept = unsent.entries[key], agent.unsentMessages.isEmpty {
+            agent.restoreUnsent(kept.texts)
+        }
         return conversation
+    }
+
+    /// The open conversations' unsent messages, on disk when they change.
+    func keepUnsent() {
+        var store = unsent
+        for conversation in conversations {
+            guard let key = conversation.first.nameKey else { continue }
+            store.set(key, conversation.unsentMessages.map(\.text))
+        }
+        guard store != unsent else { return }
+        unsent = store
+        store.save(home: home)
     }
 
     /// Notifications for an agent's asks and finished turns, and the restart
@@ -749,6 +772,7 @@ public final class AgentsApp {
     /// with it and to carry to a place of its own.
     public func render() {
         if Date().timeIntervalSince(historyRead) > 30 { refreshHistory() }
+        keepUnsent()
         updateKeepAwake()
         let current = here
         defer { here = current }

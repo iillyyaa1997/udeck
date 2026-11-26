@@ -15,13 +15,21 @@ the next turn once this one has its result.
 Its account is the folder `CLAUDE_CONFIG_DIR` names (`~/.claude` without it). `get_usage`
 answers what `fake-usage.json` there says — `{"five_hour": {"utilization": 40, "resets_at": …},
 "seven_day": …}` — or a little of both. A `fake-limited` file there makes every turn hit the
-limit, as the real one reports it: a `rate_limit_event` rejected, then an error result.
+limit, as the real one reports it: a `rate_limit_event` rejected, then an error result. A
+`fake-limited-wait` file there makes it meet a week's limit as claude 2.1.332 does in a program's
+session (measured 11-26): the limit said at once, then «retry in 6 h» again and again, and no result
+until an interrupt. A message with "[hang]" in it waits for an interrupt the same way, without a
+limit — a model call that takes long. An interrupt's turn ends with the message echoed, «[Request
+interrupted by user]» and an error result of two turns; the messages that came meanwhile start the
+next turn, unless the interrupt cancelled them (`cancel_queued`).
 
     fake-claude.py [--resume SESSION_ID] [anything else the real CLI takes]
 """
 import json
 import os
+import queue
 import sys
+import threading
 import time
 
 DELAY = float(os.environ.get("FAKE_CLAUDE_DELAY", "0.02"))
@@ -55,10 +63,31 @@ def out(obj):
     sys.stdout.flush()
 
 
+# Every line of stdin, read on a thread of its own: a turn that waits can look for one now and then.
+lines = queue.Queue()
+
+
+def reader():
+    for line in sys.stdin:
+        lines.put(line)
+    lines.put(None)
+
+
+threading.Thread(target=reader, daemon=True).start()
+
+
+def next_line(timeout=None):
+    """The next line of stdin; None once it has closed — for every reader after, too."""
+    line = lines.get(timeout=timeout)
+    if line is None:
+        lines.put(None)
+    return line
+
+
 def read():
     if waiting:
         return waiting.pop(0)
-    line = sys.stdin.readline()
+    line = next_line()
     if not line:
         return None
     try:
@@ -70,7 +99,7 @@ def read():
 def answer_to(request_id):
     """Read until the control_response for `request_id`, keeping anything else for later."""
     while True:
-        line = sys.stdin.readline()
+        line = next_line()
         if not line:
             return None
         try:
@@ -130,6 +159,82 @@ def hit_the_limit():
          "utilization": 1.0, "resetsAt": resets}, "session_id": SESSION})
     out({"type": "result", "subtype": "success", "is_error": True, "num_turns": 1,
          "result": "Claude AI usage limit reached|%d" % resets, "session_id": SESSION, "total_cost_usd": 0})
+
+
+def limited_wait():
+    return os.path.exists(os.path.join(CONFIG, "fake-limited-wait"))
+
+
+def control_answer(message):
+    """The answer to a control request that is not an interrupt."""
+    request = message.get("request", {})
+    body = {}
+    subtype = request.get("subtype")
+    if subtype == "initialize":
+        body = {"commands": [], "models": [
+            {"value": "default", "displayName": "Default (recommended)", "resolvedModel": "claude-fake-1-0",
+             "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
+            {"value": "fake", "displayName": "Fake 1.0", "resolvedModel": "claude-fake-1-0",
+             "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
+            {"value": "quick", "displayName": "Quick 1.0", "resolvedModel": "claude-quick-1-0",
+             "supportedEffortLevels": ["low", "medium", "high"]}]}
+    elif subtype == "get_context_usage":
+        body = {"totalTokens": 28000, "maxTokens": 200000, "percentage": 14, "model": "claude-fake-1-0"}
+    elif subtype == "get_usage":
+        body = {"subscription_type": "max", "rate_limits": usage()}
+    elif subtype == "interrupt":
+        body = {"still_queued": []}
+    out({"type": "control_response", "response": {"subtype": "success", "request_id": message.get("request_id"),
+         "response": body}})
+
+
+def wait_for_interrupt(message, limit):
+    """A turn that goes nowhere until it is interrupted: at a week's limit, or a long model call."""
+    out({"type": "system", "subtype": "init", "session_id": SESSION, "model": "claude-fake-1-0",
+         "permissionMode": "default", "cwd": os.getcwd(), "claude_code_version": "2.1.332",
+         "slash_commands": [], "capabilities": []})
+    out({"type": "system", "subtype": "status", "status": "requesting", "session_id": SESSION})
+    if limit:
+        time.sleep(0.5)  # as long as the real one took to say it
+        out({"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "rateLimitType": "seven_day",
+             "resetsAt": int(time.time()) + 6 * 86400, "overageStatus": "rejected", "isUsingOverage": False},
+             "session_id": SESSION})
+    queued = []
+    while True:
+        if limit:
+            out({"type": "system", "subtype": "api_retry", "attempt": 1, "max_retries": 300,
+                 "retry_delay_ms": 21600000, "error_status": 429, "error": "rate_limit", "session_id": SESSION})
+        try:
+            line = next_line(timeout=0.2)
+        except queue.Empty:
+            continue
+        if not line:
+            return
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            continue
+        if obj.get("type") == "user":
+            queued.append(obj)
+            continue
+        if obj.get("type") != "control_request":
+            continue
+        request = obj.get("request", {})
+        if request.get("subtype") != "interrupt":
+            control_answer(obj)
+            continue
+        cancel = request.get("cancel_queued") is True
+        out({"type": "control_response", "response": {"subtype": "success", "request_id": obj.get("request_id"),
+             "response": {"still_queued": [], **({"cancelled": []} if cancel else {})}}})
+        if limit:
+            echo(message)
+        out({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]},
+             "parent_tool_use_id": None, "session_id": SESSION})
+        out({"type": "result", "subtype": "error_during_execution", "is_error": True, "num_turns": 2, "result": None,
+             "session_id": SESSION, "total_cost_usd": 0})
+        if not cancel:
+            waiting[:0] = queued
+        return
 
 
 def name(text):
@@ -235,24 +340,15 @@ while True:
         break
     kind = message.get("type")
     if kind == "control_request":
-        request = message.get("request", {})
-        body = {}
-        subtype = request.get("subtype")
-        if subtype == "initialize":
-            body = {"commands": [], "models": [
-                {"value": "default", "displayName": "Default (recommended)", "resolvedModel": "claude-fake-1-0",
-                 "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
-                {"value": "fake", "displayName": "Fake 1.0", "resolvedModel": "claude-fake-1-0",
-                 "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
-                {"value": "quick", "displayName": "Quick 1.0", "resolvedModel": "claude-quick-1-0",
-                 "supportedEffortLevels": ["low", "medium", "high"]}]}
-        elif subtype == "get_context_usage":
-            body = {"totalTokens": 28000, "maxTokens": 200000, "percentage": 14, "model": "claude-fake-1-0"}
-        elif subtype == "get_usage":
-            body = {"subscription_type": "max", "rate_limits": usage()}
-        out({"type": "control_response", "response": {"subtype": "success", "request_id": message.get("request_id"),
-             "response": body}})
+        control_answer(message)
     elif kind == "user":
+        text = said(message)[0]
+        if not NAMING and (limited_wait() or "[hang]" in text):
+            # At a limit the real one echoes the message only when interrupted.
+            if not limited_wait():
+                echo(message)
+            wait_for_interrupt(message, limited_wait())
+            continue
         echo(message)
         turn(*said(message))
 sys.exit(0)

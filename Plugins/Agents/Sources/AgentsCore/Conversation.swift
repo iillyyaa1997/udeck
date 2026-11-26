@@ -91,6 +91,37 @@ public enum Agent {
         }
     }
 
+    /// Messages a stop cancelled before the agent took them.
+    public var unsentMessages: [WaitingMessage] {
+        switch self {
+        case .claude(let session): session.unsentMessages
+        case .codex(let session): session.unsentMessages
+        }
+    }
+
+    /// The unsent messages sent again, oldest first.
+    public func sendUnsent() {
+        switch self {
+        case .claude(let session): session.sendUnsent()
+        case .codex(let session): session.sendUnsent()
+        }
+    }
+
+    /// The unsent messages, taken out.
+    public func takeUnsent() -> [WaitingMessage] {
+        switch self {
+        case .claude(let session): session.takeUnsent()
+        case .codex(let session): session.takeUnsent()
+        }
+    }
+
+    public func restoreUnsent(_ texts: [String]) {
+        switch self {
+        case .claude(let session): session.restoreUnsent(texts)
+        case .codex(let session): session.restoreUnsent(texts)
+        }
+    }
+
     public var turnStartedAt: Date? {
         switch self {
         case .claude(let session): session.turnStartedAt
@@ -260,12 +291,51 @@ public final class Conversation: Identifiable {
         for message in current.waitingMessages {
             out.append((.user(id: message.id, text: message.text), Self.waitingLabel))
         }
+        // Then those a stop left unsent, until they are sent or put into the field.
+        for message in unsentMessages {
+            out.append((.user(id: message.id, text: message.text), Self.unsentLabel))
+        }
         return out
     }
 
     /// The label of a message the agent has not taken yet, for the card to
     /// put in words.
     static let waitingLabel = "\u{0}waiting"
+    /// The label of a message a stop left unsent.
+    static let unsentLabel = "\u{0}unsent"
+
+    /// Every provider's unsent messages, oldest provider first.
+    public var unsentMessages: [WaitingMessage] {
+        providersInOrder.flatMap { agents[$0]?.unsentMessages ?? [] }
+    }
+
+    /// The providers in the order they first answered here.
+    private var providersInOrder: [Provider] {
+        segments.reduce(into: [Provider]()) { if !$0.contains($1.provider) { $0.append($1.provider) } }
+    }
+
+    /// Text put back into the field, once, until the person sends from it
+    /// (uDeck's `fill`, 0.9.19).
+    public internal(set) var fill: (id: String, text: String)?
+
+    /// «Отправить все»: the unsent messages go, oldest first, as if typed
+    /// now one after another — the current provider's with their pictures;
+    /// another's, after a switch, as text to the current one.
+    public func sendUnsent() {
+        for provider in providersInOrder where provider != active {
+            for message in agents[provider]?.takeUnsent() ?? [] { send(message.text) }
+        }
+        current.sendUnsent()
+    }
+
+    /// «В поле»: the unsent messages' text into the field, one per line, for
+    /// the person to edit and send as one.
+    public func putUnsentIntoField() {
+        let texts = providersInOrder.flatMap { (agents[$0]?.takeUnsent() ?? []).map(\.text) }
+        guard !texts.isEmpty else { return }
+        // A fill goes after what the field holds: only what is new this time.
+        fill = ("unsent-" + UUID().uuidString, texts.joined(separator: "\n"))
+    }
 
     /// The handoff note's text, for the card to put in words.
     static func noteText(_ handoff: Handoff) -> String {

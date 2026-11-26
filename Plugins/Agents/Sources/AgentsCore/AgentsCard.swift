@@ -173,12 +173,29 @@ enum AgentsCard {
         let held = app.heldBack[session.id] != nil
         if held { rows.append(["ask": heldRow(session, app)]) }
         if let closing = closeAsk(app) { rows.append(["ask": closing]) }
+        if let unsent = unsentRow(session, app) { rows.append(["bar": unsent]) }
         switch session.current {
         case .claude(let agent): for ask in agent.asks { rows.append(["ask": askRow(ask, app)]) }
         case .codex(let agent): for ask in agent.asks { rows.append(["ask": codexAskRow(ask, app)]) }
         }
         rows.append(["input": input(session, app, held: held)])
         return rows
+    }
+
+    /// Under the feed while a Stop left messages unsent: how many, and the
+    /// two ways on — all sent, oldest first, or their text into the field
+    /// (the operator's «1», 11-26).
+    static func unsentRow(_ session: Conversation, _ app: AgentsApp) -> JSONValue? {
+        let count = session.unsentMessages.count
+        guard count > 0, !session.current.isEnded else { return nil }
+        let said = app.t(russianCount(count, "сообщение не отправлено", "сообщения не отправлены", "сообщений не отправлено"),
+                         count == 1 ? "1 message not sent" : "\(count) messages not sent")
+        return ["id": "unsent", "items": [
+            ["badge": ["text": .string(said), "tone": "wait"]],
+            ["spacer": true],
+            ["button": ["id": "unsent:send", "label": .string(app.t("Отправить все", "Send all"))]],
+            ["button": ["id": "unsent:field", "label": .string(app.t("В поле", "Into the field"))]],
+        ]]
     }
 
     /// What the session is doing, how full its context is, and where it works.
@@ -265,6 +282,8 @@ enum AgentsCard {
         if agent.state == .working { input["stop"] = "stop" }
         // Files go with a message: pictures as pictures, the rest by path (uDeck 0.9.17).
         if !held, !agent.isEnded { input["files"] = true }
+        // Unsent messages put back to be edited: in the field until sent from it (uDeck 0.9.19).
+        if let fill = session.fill { input["fill"] = ["id": .string(fill.id), "text": .string(fill.text)] }
         guard !held, !agent.isEnded, !compact(app) else { return .object(input) }
         var pickers: [JSONValue] = []
         if case .claude(let claude) = agent, app.accounts.count > 1 {
@@ -506,6 +525,8 @@ enum AgentsCard {
             var entry: [String: JSONValue] = ["id": .string(id.uuidString), "role": "user", "text": .string(clipped(text))]
             if label == Conversation.waitingLabel {
                 entry["label"] = .string(app.t("войдёт после текущего шага", "goes in after the current step"))
+            } else if label == Conversation.unsentLabel {
+                entry["label"] = .string(app.t("не отправлено", "not sent"))
             }
             return .object(entry)
         case .assistant(let id, let text, let streaming):
@@ -562,6 +583,7 @@ enum AgentsCard {
                          "The provider can change once the turn is over and nothing waits")
         }
         if text == "resumed" { return app.t("Продолжено из истории", "Resumed from history") }
+        if text == "stopped" { return app.t("Остановлено", "Stopped") }
         if text.hasPrefix("renamed:") { return app.t("Сессия называется «", "The session is called “") + text.dropFirst(8) + app.t("»", "”") }
         if text == "rename-how" {
             return app.t("Чтобы переименовать, напиши /rename и новое имя", "To rename it, write /rename and the new name")

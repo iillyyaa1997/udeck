@@ -4,7 +4,7 @@ plugin's lab screenshots: it answers initialize, model/list, thread/start and th
 and for each turn streams an answer, asks to run one command, runs it once allowed, and
 finishes the turn with token usage.
 
-A message steered into a running turn (`turn/steer`) is taken as codex 0.160 takes one (measured
+`turn/interrupt` ends the running turn as interrupted, its question withdrawn. A message steered into a running turn (`turn/steer`) is taken as codex 0.160 takes one (measured
 11-25): after the command running — a `userMessage` item under the id it was sent with — and the
 same turn goes on with it. One whose text says "[refuse]" is refused, as a turn that has just
 ended refuses one.
@@ -189,6 +189,15 @@ while True:
         out({"id": request_id, "result": {"turnId": active["turn"]}})
     elif method == "turn/interrupt":
         out({"id": request_id, "result": {}})
+        # The turn ends, interrupted: its question withdrawn, what was steered and not taken dropped.
+        turn = active["turn"]
+        if turn is not None:
+            for asked in [key for key, value in pending.items() if value == turn]:
+                del pending[asked]
+                note("serverRequest/resolved", {"threadId": THREAD, "requestId": asked})
+            del steered[:]
+            active["turn"] = None
+            note("turn/completed", {"threadId": THREAD, "turn": {"id": turn, "status": "interrupted", "items": []}})
     elif method == "account/rateLimits/read":
         out({"id": request_id, "result": {"rateLimits": {
             "primary": {"usedPercent": 34, "windowDurationMins": 300, "resetsAt": 4102444800},

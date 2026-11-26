@@ -83,6 +83,13 @@ public final class CodexSession: Identifiable {
     /// when. Measured with codex 0.160 on 11-25: taken right after the command
     /// running, or after the answer being written, one turn for both.
     public private(set) var waitingMessages: [WaitingMessage] = []
+    /// Messages a Stop cancelled before Codex took them: kept, oldest first,
+    /// until they are sent again or put back into the field.
+    public private(set) var unsentMessages: [WaitingMessage] = []
+    /// What each unsent message is told, with its pictures.
+    @ObservationIgnored private var unsentSent: [UUID: (text: String, pictures: [String])] = [:]
+    /// The person pressed Stop: the turn's end leaves what waits unsent.
+    @ObservationIgnored private var stopping = false
     /// Waiting messages not steered: sent before the turn had an id, or
     /// refused by it. The first starts the next turn; the rest are steered
     /// into it.
@@ -287,6 +294,28 @@ public final class CodexSession: Identifiable {
         }
     }
 
+    /// The unsent messages sent again, oldest first, as if typed now.
+    public func sendUnsent() {
+        let messages = unsentMessages
+        unsentMessages.removeAll()
+        for message in messages {
+            let sent = unsentSent.removeValue(forKey: message.id)
+            send(message.text, text: sent.flatMap { $0.text == message.text ? nil : $0.text }, pictures: sent?.pictures ?? [])
+        }
+    }
+
+    /// The unsent messages, taken out — to be put back into the field.
+    public func takeUnsent() -> [WaitingMessage] {
+        let messages = unsentMessages
+        unsentMessages.removeAll()
+        for message in messages { unsentSent[message.id] = nil }
+        return messages
+    }
+
+    public func restoreUnsent(_ texts: [String]) {
+        unsentMessages += texts.map { WaitingMessage(id: UUID(), text: $0) }
+    }
+
     /// A waiting message Codex took: into the feed here.
     private func taken(_ id: UUID) {
         steered.removeAll { $0.id == id }
@@ -327,8 +356,10 @@ public final class CodexSession: Identifiable {
         }
     }
 
+    /// Stops the running turn; the messages waiting stay unsent (11-26).
     public func interrupt() {
         guard let connection, let threadID, let turnID, state == .working else { return }
+        stopping = true
         Task { _ = try? await connection.request("turn/interrupt", ["threadId": .string(threadID), "turnId": .string(turnID)]) }
     }
 
@@ -394,6 +425,17 @@ public final class CodexSession: Identifiable {
             // the next, oldest first.
             waiting = steered + waiting
             steered.removeAll()
+            if stopping {
+                stopping = false
+                for message in waiting {
+                    if let at = waitingMessages.firstIndex(where: { $0.id == message.id }) {
+                        unsentMessages.append(waitingMessages.remove(at: at))
+                        unsentSent[message.id] = (message.text, message.pictures)
+                    }
+                }
+                waiting.removeAll()
+                if !isEnded { note("stopped") }
+            }
             if !isEnded {
                 if !waiting.isEmpty, connection != nil, threadID != nil {
                     startWaiting()

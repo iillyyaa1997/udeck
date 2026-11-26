@@ -124,6 +124,63 @@ struct AgentsAccountsTests {
         for agent in conversation.agents.values { await agent.close() }
     }
 
+    @Test("a week's limit met as claude 2.1.332 meets it — waiting for hours: the turn stops at once and goes on under a mirror, with what waited behind it")
+    func movesOnAWeekLimit() async throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try Data().write(to: home.appendingPathComponent(".claude-pers2/fake-limited-wait"))
+        try Data().write(to: home.appendingPathComponent(".claude-solo/fake-limited"))
+        let app = app(home)
+        setenv("UDECK_SETTING_ACCOUNT_MODE", "\"spareMain\"", 1)
+        defer { unsetenv("UDECK_SETTING_ACCOUNT_MODE") }
+        await app.newConversation(in: home, provider: .claude)
+        let conversation = try #require(app.conversations.first)
+        let claude = try #require(conversation.claude)
+        #expect(claude.account.name == "pers2")
+        try await until("idle") { claude.state == .idle }
+        conversation.send("Look at the folder")
+        try await Task.sleep(for: .milliseconds(100))
+        conversation.send("And the size?")
+        try await until("going on under pers3", timeout: .seconds(15)) { claude.account.name == "pers3" }
+        try await until("both answered", timeout: .seconds(20)) {
+            for ask in claude.asks { claude.answer(ask, with: .allow) }
+            return claude.state == .idle && claude.waitingMessages.isEmpty && claude.asks.isEmpty
+        }
+        let users = claude.items.compactMap { if case .user(_, let text) = $0 { text } else { nil } }
+        #expect(users == ["Look at the folder", "And the size?"], "each once, in order")
+        #expect(claude.unsentMessages.isEmpty)
+        for agent in conversation.agents.values { await agent.close() }
+    }
+
+    @Test("a session continued from the history goes on under the account Auto picks, not the main one")
+    func historyUnderAuto() async throws {
+        let home = try home()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let folder = home.appendingPathComponent(".claude/projects/-tmp")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let id = UUID().uuidString.lowercased()
+        let transcript = folder.appendingPathComponent("\(id).jsonl")
+        try (#"{"type":"user","sessionId":"\#(id)","cwd":"/tmp","message":{"role":"user","content":"look at it"},"timestamp":"2026-11-22T10:00:00Z"}"#
+            + "\n").write(to: transcript, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: transcript.path)
+        // The main account's week spent, as on 11-26; the mirrors with room.
+        let week = { (used: Int) in #"{"five_hour":{"utilization":10,"resets_at":"2099-01-01T00:00:00Z"},"seven_day":{"utilization":\#(used),"resets_at":"2099-01-07T00:00:00Z"}}"# }
+        try week(100).write(to: home.appendingPathComponent(".claude/fake-usage.json"), atomically: true, encoding: .utf8)
+        try week(30).write(to: home.appendingPathComponent(".claude-pers2/fake-usage.json"), atomically: true, encoding: .utf8)
+        try week(60).write(to: home.appendingPathComponent(".claude-pers3/fake-usage.json"), atomically: true, encoding: .utf8)
+        let app = app(home)
+        setenv("UDECK_SETTING_ACCOUNT_MODE", "\"headroom\"", 1)
+        defer { unsetenv("UDECK_SETTING_ACCOUNT_MODE") }
+        app.limits["main"] = AccountLimits(fiveHour: UsageWindow(used: 0.1, resetsAt: nil), week: UsageWindow(used: 1.0, resetsAt: nil))
+        app.limits["pers2"] = AccountLimits(fiveHour: UsageWindow(used: 0.1, resetsAt: nil), week: UsageWindow(used: 0.3, resetsAt: nil))
+        app.limits["pers3"] = AccountLimits(fiveHour: UsageWindow(used: 0.1, resetsAt: nil), week: UsageWindow(used: 0.6, resetsAt: nil))
+        await app.handle(#"{"event":"select","id":"history"}"#)
+        await app.handle(#"{"event":"select","id":"h:\#(id)"}"#)
+        let claude = try #require(app.conversations.first?.claude)
+        #expect(claude.account.name == "pers2", "Auto's pick among those that share the main one's sessions")
+        for conversation in app.conversations { for agent in conversation.agents.values { await agent.close() } }
+    }
+
     @Test("an account chosen by hand stays: the session waits for the reset and says so")
     func waitsWhenChosenByHand() async throws {
         let home = try home()

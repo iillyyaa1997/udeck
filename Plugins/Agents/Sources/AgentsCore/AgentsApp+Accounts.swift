@@ -39,6 +39,17 @@ extension AgentsApp {
         return (account, pick)
     }
 
+    /// The account a session from the history goes on under. The history is
+    /// read from the main account's transcripts: with «Авто», the account it
+    /// would pick among those that share them — 11-26 a session continued
+    /// from the history went on under the main account, a week's limit spent,
+    /// and waited for its reset; by hand, the one chosen.
+    func historyAccount(for saved: SavedSession, now: Date = Date()) -> ChatAccount {
+        guard autoAccount, let main = accounts.first(where: { $0.configDir == nil }),
+              let picked = autoPick(sharingWith: main, now: now)?.account else { return account }
+        return picked
+    }
+
     /// Whether a session of `a` goes on under `b`: their sessions are the same
     /// folder (`projects`), as with a mirrored account (`AccountMirror`).
     func sharesSessions(_ a: ChatAccount, _ b: ChatAccount) -> Bool {
@@ -52,8 +63,10 @@ extension AgentsApp {
 
     /// A turn of `session` stopped at its account's limit. With «Авто» on it
     /// goes on under the account with the most left whose sessions it shares,
-    /// sending again the message it stopped at; with none — or with an account
-    /// chosen by hand — it waits, and goes on when a limit resets.
+    /// sending again the message it stopped at and those that waited behind
+    /// it; with none — or with an account chosen by hand — it waits, goes on
+    /// with the one it stopped at when a limit resets, and the ones behind it
+    /// are the person's to send (unsent).
     func reachedTheLimit(_ conversation: Conversation, _ session: ChatSession, resets: Date?) {
         let now = Date()
         let from = session.account
@@ -62,12 +75,13 @@ extension AgentsApp {
         if autoAccount, let target = autoPick(excluding: [from.name], sharingWith: from, now: now)?.account {
             session.account = target
             restartClaude(conversation, saying: "limit-move:\(from.name)|\(target.name)|\(Int(until.timeIntervalSince1970))") {
-                session.sendAgain()
+                session.sendAgainAfterLimit()
             }
             refreshOtherLimits()
             return
         }
         // Nothing to go to now: on again at the first reset that frees one.
+        session.keepHeldAsUnsent()
         let candidates = autoAccount ? accounts.filter { sharesSessions(from, $0) } : [from]
         let wake = candidates.compactMap { candidate -> Date? in
             candidate == from ? until : limits[candidate.name]?.limitedUntil

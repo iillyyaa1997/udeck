@@ -143,6 +143,21 @@ public final class ChatSession: Identifiable {
     /// A limit the CLI said it refused this turn over.
     @ObservationIgnored private var refused: ClaudeRateLimit?
 
+    /// Messages a stop cancelled before the agent took them — the person's
+    /// Stop, or the account's limit: kept, oldest first, until they are sent
+    /// again or put back into the field. Never dropped (the operator, 11-26:
+    /// «Терять сообщения нельзя»).
+    public private(set) var unsentMessages: [WaitingMessage] = []
+    /// What each waiting or unsent message is told, with its pictures: sent
+    /// again as it was.
+    @ObservationIgnored private var outgoing: [UUID: (told: String, images: [(mediaType: String, base64: String)])] = [:]
+    /// Why the running turn is being stopped, until its result comes.
+    @ObservationIgnored private var stopping: Stop?
+    /// Messages that waited behind a turn stopped at the limit: sent after
+    /// it where the session goes on, or unsent when it cannot go on now.
+    @ObservationIgnored private var heldAtLimit: [WaitingMessage] = []
+    enum Stop { case person, limit }
+
     /// Messages sent from here that the CLI has not repeated back yet, oldest
     /// first, with the waiting message each is, if it waits: an echo of one
     /// says the CLI took it; any other echo is the conversation read back
@@ -234,6 +249,7 @@ public final class ChatSession: Identifiable {
         state = .starting
         turnStartedAt = nil
         inTurn = false
+        stopping = nil
         asks.removeAll()
         items.append(.note(id: UUID(), text: note))
     }
@@ -314,12 +330,13 @@ public final class ChatSession: Identifiable {
         guard !text.isEmpty, let connection, !isEnded else { return }
         let told = payload ?? text
         let id = UUID()
-        lastSent = (text, payload, images)
         let waits = state == .working && !again
         if waits {
             waitingMessages.append(WaitingMessage(id: id, text: text))
-        } else if !again {
-            items.append(.user(id: id, text: text))
+            outgoing[id] = (told, images)
+        } else {
+            if !again { items.append(.user(id: id, text: text)) }
+            lastSent = (text, payload, images)
         }
         unconfirmed.append((told, waits ? id : nil))
         state = .working
@@ -334,10 +351,63 @@ public final class ChatSession: Identifiable {
         }
     }
 
-    /// Stops the running turn; messages waiting run next.
-    public func interrupt() {
-        guard let connection, state == .working else { return }
-        Task { _ = try? await connection.request({ ClaudeOutbound.interrupt(id: $0) }, timeout: .seconds(10)) }
+    /// Stops the running turn, and with it the messages waiting: they stay
+    /// in the feed, unsent, for the person to send or put back into the field
+    /// (the operator's «2» and «1», 11-26).
+    public func interrupt() { stop(.person) }
+
+    private func stop(_ reason: Stop) {
+        guard let connection, state == .working, stopping == nil else { return }
+        stopping = reason
+        // Without `cancel_queued` the CLI runs what is queued right after the
+        // stop (measured 11-26): the messages written while it waited at a
+        // limit went to the same limit, and Stop seemed to do nothing.
+        Task { _ = try? await connection.request({ ClaudeOutbound.interrupt(id: $0, cancelQueued: true) }, timeout: .seconds(10)) }
+    }
+
+    /// The unsent messages sent again, oldest first, as if typed now one
+    /// after another: the first starts a turn, the rest wait for their step.
+    public func sendUnsent() {
+        let messages = unsentMessages
+        unsentMessages.removeAll()
+        resend(messages)
+    }
+
+    private func resend(_ messages: [WaitingMessage]) {
+        for message in messages {
+            let sent = outgoing.removeValue(forKey: message.id)
+            let payload = sent.flatMap { $0.told == message.text ? nil : $0.told }
+            send(message.text, payload: payload, images: sent?.images ?? [], again: false)
+        }
+    }
+
+    /// Where the session goes on after a limit: the message it stopped at
+    /// again, then those that waited behind it, in order.
+    public func sendAgainAfterLimit() {
+        sendAgain()
+        let held = heldAtLimit
+        heldAtLimit.removeAll()
+        resend(held)
+    }
+
+    /// No account to go on under now: the messages that waited behind the
+    /// stopped one are the person's to send.
+    public func keepHeldAsUnsent() {
+        unsentMessages += heldAtLimit
+        heldAtLimit.removeAll()
+    }
+
+    /// The unsent messages, taken out — to be put back into the field.
+    public func takeUnsent() -> [WaitingMessage] {
+        let messages = unsentMessages
+        unsentMessages.removeAll()
+        for message in messages { outgoing[message.id] = nil }
+        return messages
+    }
+
+    /// Unsent messages kept on disk, back after the plugin started again.
+    public func restoreUnsent(_ texts: [String]) {
+        unsentMessages += texts.map { WaitingMessage(id: UUID(), text: $0) }
     }
 
     public enum Answer: Sendable, Equatable {
@@ -412,6 +482,10 @@ public final class ChatSession: Identifiable {
                    let at = waitingMessages.firstIndex(where: { $0.id == id }) {
                     let message = waitingMessages.remove(at: at)
                     items.append(.user(id: message.id, text: message.text))
+                    // One that starts a turn of its own is what a limit sends again.
+                    if let sent = outgoing.removeValue(forKey: id), !inTurn {
+                        lastSent = (message.text, sent.told == message.text ? nil : sent.told, sent.images)
+                    }
                 }
             } else {
                 // Not one of ours: the conversation read back from the journal.
@@ -438,14 +512,23 @@ public final class ChatSession: Identifiable {
             // After a resume, or a background task's notice, the CLI reports a
             // result of zero turns before the real one (spec §10.20): it ends
             // nothing of the user's.
-            guard result.turns > 0 || (!inTurn && unconfirmed.isEmpty) else { return }
+            let stopped = stopping
+            guard stopped != nil || result.turns > 0 || (!inTurn && unconfirmed.isEmpty) else { return }
+            stopping = nil
             inTurn = false
+            // A stop cancelled what the CLI had not taken: unsent now.
+            if stopped != nil {
+                unconfirmed.removeAll()
+                if stopped == .limit { heldAtLimit += waitingMessages } else { unsentMessages += waitingMessages }
+                waitingMessages.removeAll()
+            }
             // Stopped at the account's limit: not an error to read, but a
             // session to go on elsewhere, or later (`onLimit`).
             let limit = result.isError && (refused != nil || Self.isLimit(result.result))
             let resets = refused?.usage.resetsAt ?? Self.resetTime(result.result)
             refused = nil
             if result.isError, !result.result.isEmpty, !limit { note(result.result) }
+            if stopped == .person, !limit { note("stopped") }
             // A message the CLI has not taken yet starts the next turn: the
             // session works on until it has.
             if unconfirmed.isEmpty, !isEnded {
@@ -453,7 +536,12 @@ public final class ChatSession: Identifiable {
                 turnStartedAt = nil
                 refreshContext()
                 refreshUsage()
-                if limit { onLimit?(resets) } else { onTurnFinished?(lastAnswer) }
+                if limit {
+                    onLimit?(resets)
+                } else {
+                    keepHeldAsUnsent()
+                    onTurnFinished?(lastAnswer)
+                }
             }
         case .request(let request):
             if let permission = request.permission {
@@ -465,7 +553,14 @@ public final class ChatSession: Identifiable {
             asks.removeAll { $0.requestID == requestID }
         case .rateLimit(let limit, _):
             onRateLimit?(limit)
-            if limit.status == "rejected" { refused = limit }
+            if limit.status == "rejected" {
+                refused = limit
+                // claude 2.1.332 does not end a turn at a limit: it waits for
+                // the reset — hours, a week's — saying «retry» every 30 s, and
+                // the card said «Working» all along (measured 11-26). Stopped
+                // here, the turn goes on under another account, or later.
+                stop(.limit)
+            }
         case .response, .system, .other:
             return
         }
