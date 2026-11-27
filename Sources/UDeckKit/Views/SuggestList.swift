@@ -21,6 +21,8 @@ final class SuggestState {
     /// A typed trigger closed with Escape: not opened again while it stays.
     var dismissedAt: Int?
 
+    init() { SuggestionsPresence.register(self) }
+
     func close() {
         open = false
         tab = nil
@@ -29,6 +31,28 @@ final class SuggestState {
         token = nil
         searching = false
         highlighted = 0
+    }
+}
+
+/// Whether a field's suggestions are open: then Escape is theirs, not the
+/// panel's — whose monitor sees the key first and, with no text in what has
+/// the keyboard, collapsed the panel when the list's search was empty (lab
+/// 45994568681). Asked of the lists themselves, held weakly: a list whose
+/// field has gone goes with it.
+@MainActor
+enum SuggestionsPresence {
+    private final class Held { weak var state: SuggestState?; init(_ state: SuggestState) { self.state = state } }
+    private static var held: [Held] = []
+
+    static func register(_ state: SuggestState) {
+        held.removeAll { $0.state == nil }
+        held.append(Held(state))
+    }
+
+    static var isOpen: Bool { held.contains { $0.state?.open == true } }
+
+    static func closeAll() {
+        for entry in held { entry.state?.close() }
     }
 }
 

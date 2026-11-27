@@ -760,6 +760,14 @@ public final class PanelController {
             // passed on to the popover, which closes itself. It used to take
             // the whole panel away with it (the lab, 11-25, run 45536857973).
             if PopoverPresence.isOpen { return false }
+            // A field's suggestions open: Escape closes them, and only them —
+            // the field or the list's search takes it; with neither holding
+            // the keyboard, they are closed here.
+            if SuggestionsPresence.isOpen {
+                if panel.firstResponder is NSText { return false }
+                SuggestionsPresence.closeAll()
+                return true
+            }
             // Whether a field is holding text is the content's business; the
             // state machine only needs to be told, and it protects the text.
             apply(.escape(isEditingText: isEditingText()))
