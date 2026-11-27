@@ -169,7 +169,9 @@ enum AgentsCard {
         // words stream in, and uDeck lays all of it out: the newest entries
         // only, and no entry longer than a screenful.
         let keep = app.size.rows <= 4 ? 30 : 60
-        rows.append(["feed": .array(session.feed.suffix(keep).map { feedEntry($0.item, app, label: $0.label) })])
+        rows.append(["feed": .array(session.feed.suffix(keep).map {
+            feedEntry($0.item, app, label: $0.label, files: $0.item.uuid.flatMap { session.files(of: $0) })
+        })])
         let held = app.heldBack[session.id] != nil
         if held { rows.append(["ask": heldRow(session, app)]) }
         if let closing = closeAsk(app) { rows.append(["ask": closing]) }
@@ -607,10 +609,12 @@ enum AgentsCard {
         text.count <= limit ? text : String(text.prefix(limit)) + "…"
     }
 
-    static func feedEntry(_ item: FeedItem, _ app: AgentsApp, label: String? = nil) -> JSONValue {
+    static func feedEntry(_ item: FeedItem, _ app: AgentsApp, label: String? = nil, files: [String]? = nil) -> JSONValue {
         switch item {
         case .user(let id, let text):
             var entry: [String: JSONValue] = ["id": .string(id.uuidString), "role": "user", "text": .string(clipped(text))]
+            // Drawn above the message, opened by a click (uDeck 0.9.23).
+            if let files, !files.isEmpty { entry["files"] = .array(files.map { .string($0) }) }
             if label == Conversation.waitingLabel {
                 entry["label"] = .string(app.t("войдёт после текущего шага", "goes in after the current step"))
             } else if label == Conversation.unsentLabel {

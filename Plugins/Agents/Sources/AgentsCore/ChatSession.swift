@@ -27,6 +27,11 @@ public enum FeedItem: Sendable, Equatable, Identifiable {
         case .tool(let id, _, _, _): "tool-" + id
         }
     }
+
+    /// A user message's id, the key its files are kept by.
+    public var uuid: UUID? {
+        if case .user(let id, _) = self { id } else { nil }
+    }
 }
 
 public struct ToolOutcome: Sendable, Equatable {
@@ -156,6 +161,8 @@ public final class ChatSession: Identifiable {
     /// What each waiting or unsent message is told, with its pictures: sent
     /// again as it was.
     @ObservationIgnored private var outgoing: [UUID: (told: String, images: [(mediaType: String, base64: String)])] = [:]
+    /// The files that went with each message, by its id: drawn with it.
+    public private(set) var attachments: [UUID: [String]] = [:]
     /// Messages written while the session starts or starts again — a new
     /// effort, another login: they go once it is up. 11-27 one written while
     /// a new effort restarted the session went to the closed process and was
@@ -329,22 +336,25 @@ public final class ChatSession: Identifiable {
     /// `payload`, when given, is what the agent is told instead of what the
     /// feed shows — the conversation so far, when it has just been handed
     /// over.
-    public func send(_ text: String, payload: String? = nil, images: [(mediaType: String, base64: String)] = []) {
-        send(text, payload: payload, images: images, again: false)
+    public func send(_ text: String, payload: String? = nil, images: [(mediaType: String, base64: String)] = [],
+                     files: [String] = []) {
+        send(text, payload: payload, images: images, files: files, again: false)
     }
 
     /// The message a turn stopped at, sent again where the session goes on —
     /// already in the feed, so not put there twice.
     public func sendAgain() {
         guard let lastSent else { return }
-        send(lastSent.text, payload: lastSent.payload, images: lastSent.images, again: true)
+        send(lastSent.text, payload: lastSent.payload, images: lastSent.images, files: [], again: true)
     }
 
-    private func send(_ text: String, payload: String?, images: [(mediaType: String, base64: String)], again: Bool) {
+    private func send(_ text: String, payload: String?, images: [(mediaType: String, base64: String)],
+                      files: [String] = [], again: Bool) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !isEnded else { return }
+        guard !text.isEmpty || !files.isEmpty, !isEnded else { return }
         let told = payload ?? text
         let id = UUID()
+        if !files.isEmpty { attachments[id] = files }
         // Starting, or starting again: it waits for the session to be up.
         if state == .starting || connection == nil {
             startingMessages.append(WaitingMessage(id: id, text: text))
@@ -429,7 +439,8 @@ public final class ChatSession: Identifiable {
         for message in messages {
             let sent = outgoing.removeValue(forKey: message.id)
             let payload = sent.flatMap { $0.told == message.text ? nil : $0.told }
-            send(message.text, payload: payload, images: sent?.images ?? [], again: false)
+            send(message.text, payload: payload, images: sent?.images ?? [],
+                 files: attachments.removeValue(forKey: message.id) ?? [], again: false)
         }
     }
 

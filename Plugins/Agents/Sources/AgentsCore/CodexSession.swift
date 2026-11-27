@@ -94,6 +94,8 @@ public final class CodexSession: Identifiable {
     /// Messages a Stop cancelled before Codex took them: kept, oldest first,
     /// until they are sent again or put back into the field.
     public private(set) var unsentMessages: [WaitingMessage] = []
+    /// The files that went with each message, by its id: drawn with it.
+    public private(set) var attachments: [UUID: [String]] = [:]
     /// What each unsent message is told, with its pictures.
     @ObservationIgnored private var unsentSent: [UUID: (text: String, pictures: [String])] = [:]
     /// The person pressed Stop: the turn's end leaves what waits unsent.
@@ -251,10 +253,11 @@ public final class CodexSession: Identifiable {
     /// A turn: `shown` is what the feed shows, `text` what Codex is given
     /// (the conversation so far, when it has just been handed over).
     /// `pictures`: paths of pictures that go with it, which Codex looks at.
-    public func send(_ shown: String, text: String? = nil, pictures: [String] = []) {
+    public func send(_ shown: String, text: String? = nil, pictures: [String] = [], files: [String] = []) {
         let shown = shown.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !shown.isEmpty, let connection, let threadID, !isEnded else { return }
+        guard !shown.isEmpty || !files.isEmpty, let connection, let threadID, !isEnded else { return }
         let id = UUID()
+        if !files.isEmpty { attachments[id] = files }
         if titleSource < .firstWords, let words = ChatNames.firstWords(shown) { name(words, from: .firstWords) }
         if state == .working {
             waitingMessages.append(WaitingMessage(id: id, text: shown))
@@ -308,7 +311,8 @@ public final class CodexSession: Identifiable {
         unsentMessages.removeAll()
         for message in messages {
             let sent = unsentSent.removeValue(forKey: message.id)
-            send(message.text, text: sent.flatMap { $0.text == message.text ? nil : $0.text }, pictures: sent?.pictures ?? [])
+            send(message.text, text: sent.flatMap { $0.text == message.text ? nil : $0.text }, pictures: sent?.pictures ?? [],
+                 files: attachments.removeValue(forKey: message.id) ?? [])
         }
     }
 

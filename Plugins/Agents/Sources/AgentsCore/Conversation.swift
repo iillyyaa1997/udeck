@@ -213,9 +213,18 @@ public enum Agent {
 
     /// Sends a message: `shown` into the feed, `text` to the agent.
     public func send(_ shown: String, text: String? = nil, files: SentFiles = SentFiles(paths: [])) {
+        let paths = (files.pictures + files.others).map(\.path)
         switch self {
-        case .claude(let session): session.send(shown, payload: text, images: files.claudeImages())
-        case .codex(let session): session.send(shown, text: text, pictures: files.pictures.map(\.path))
+        case .claude(let session): session.send(shown, payload: text, images: files.claudeImages(), files: paths)
+        case .codex(let session): session.send(shown, text: text, pictures: files.pictures.map(\.path), files: paths)
+        }
+    }
+
+    /// The files that went with the message `id`.
+    public func files(of id: UUID) -> [String]? {
+        switch self {
+        case .claude(let session): session.attachments[id]
+        case .codex(let session): session.attachments[id]
         }
     }
 
@@ -335,6 +344,12 @@ public final class Conversation: Identifiable {
     /// The label of a message waiting for the session to start.
     static let startingLabel = "\u{0}starting"
 
+    /// The files that went with the message `id`, whichever agent has it.
+    public func files(of id: UUID) -> [String]? {
+        for agent in agents.values { if let files = agent.files(of: id) { return files } }
+        return nil
+    }
+
     /// Every provider's unsent messages, oldest provider first.
     public var unsentMessages: [WaitingMessage] {
         providersInOrder.flatMap { agents[$0]?.unsentMessages ?? [] }
@@ -397,7 +412,9 @@ public final class Conversation: Identifiable {
     /// A message, and the files that go with it (`SentFiles`).
     public func send(_ text: String, files paths: [String] = []) {
         let files = SentFiles(paths: paths)
-        let (shown, told) = files.message(text)
+        // The files are drawn with the message (uDeck 0.9.23), not named in it.
+        let (_, told) = files.message(text)
+        let shown = text
         let handed = preamble.removeValue(forKey: active)
         current.send(shown, text: handed.map { $0 + "\n\n" + told } ?? (told == shown ? nil : told), files: files)
     }

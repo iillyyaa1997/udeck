@@ -66,7 +66,13 @@ struct AgentsFilesTests {
         let line = try JSONValue.object(["event": "submit", "row": "message", "text": "What is here?",
                                          "files": [.string(picture.path), .string(text.path)]]).encodedLine()
         await app.handle(line)
-        #expect(claude.items.contains { if case .user(_, let said) = $0 { said == "What is here?\n📎 shot.png, notes.txt" } else { false } })
+        // The message is its text; its files go with it, drawn above it (uDeck 0.9.23).
+        let message = try #require(claude.items.first { if case .user(_, "What is here?") = $0 { true } else { false } })
+        let id = try #require(message.uuid)
+        #expect(conversation.files(of: id) == [picture.path, text.path])
+        let feed = try #require(AgentsCard.card(for: app)["rows"]?.array?.compactMap { $0["feed"]?.array }.first)
+        let entry = try #require(feed.first { $0["text"]?.string == "What is here?" })
+        #expect(entry["files"]?.array?.compactMap(\.string) == [picture.path, text.path])
         #expect(claude.lastSent?.images.count == 1)
         #expect(claude.lastSent?.payload?.contains(text.path) == true)
         try await until("the picture seen") {
@@ -90,7 +96,9 @@ struct AgentsFilesTests {
         try await until("the picture seen") {
             conversation.current.items.contains { if case .assistant(_, let said, _) = $0 { said.contains("1 picture") } else { false } }
         }
-        #expect(conversation.current.items.contains { if case .user(_, let said) = $0 { said == "📎 shot.png" } else { false } })
+        // A picture with no words: an empty message, its picture drawn with it.
+        let message = try #require(conversation.current.items.first { if case .user = $0 { true } else { false } })
+        #expect(message.uuid.flatMap { conversation.files(of: $0) } == [picture.path])
         for agent in conversation.agents.values { await agent.close() }
     }
 
