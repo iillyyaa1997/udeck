@@ -8,6 +8,18 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.28] — 2026-11-27
+
+- **A feed's text is read once.** A card redrawn — and the panel redraws it as
+  it opens — no longer parses every message's markdown again; the opening of
+  the panel is kept in the log, how long it took and how long the app stood
+  still, to find what still slows it.
+- Agents (installed separately) shows what `claude` puts in by itself — a
+  background task's notice — as a quiet line, not as your message. `/compact`
+  says «Сжимает разговор» while it runs, ends its turn and shows how full the
+  context is right after; `/cost` and the other built-in commands no longer
+  leave the session «working». Stopped, every session closes at once.
+
 ## [0.9.27] — 2026-11-27
 
 - **Tables, quotes, rules and code with Copy in a feed.** A table is a clean
