@@ -11,7 +11,10 @@ struct CardBodyView: View {
     /// The card's own space: a field's suggestions measure the room above it in it.
     static let space = "udeck.card.body"
     /// How tall the card's feed is: the room a field's suggestions can take.
-    @State private var feedHeight: CGFloat = 0
+    /// Kept in a box, not as state: the panel's spring changes it on every
+    /// frame, and as state it redrew the whole card each time — the panel
+    /// opened in jerks (the operator, 11-27: «анимация очень резкая»).
+    @State private var room = CardRoom()
 
     var card: Card
     var presentation: CardPresentation
@@ -50,11 +53,15 @@ struct CardBodyView: View {
                 let row = keyed.row
                 if case .feed = row {
                     rowView(row).frame(maxHeight: .infinity).layoutPriority(-1)
-                        .background(GeometryReader { Color.clear.preference(key: FeedHeight.self, value: $0.size.height) })
+                        .background(GeometryReader { geometry in
+                            Color.clear
+                                .onAppear { room.feedHeight = geometry.size.height }
+                                .onChange(of: geometry.size.height) { _, height in room.feedHeight = height }
+                        })
                 } else if case .input = row {
                     // Its suggestions take their room from the feed's.
                     rowView(row).fixedSize(horizontal: false, vertical: true).zIndex(1)
-                        .environment(\.feedHeight, feedHeight)
+                        .environment(\.cardRoom, room)
                 } else {
                     rowView(row).fixedSize(horizontal: false, vertical: true)
                 }
@@ -83,7 +90,6 @@ struct CardBodyView: View {
             }
         }
         .coordinateSpace(name: CardBodyView.space)
-        .onPreferenceChange(FeedHeight.self) { feedHeight = $0 }
     }
 
     private func failedRun(_ failed: FailureOnAFreshCard) -> some View {
@@ -368,13 +374,15 @@ struct TableRowsView: View {
     }
 }
 
-/// The height of a card's feed, measured where it is drawn.
-struct FeedHeight: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+/// What a card measures of itself for its rows — its feed's height, the
+/// room a field's suggestions take from — kept where writing it redraws
+/// nothing: it changes on every frame the panel opens.
+@MainActor
+final class CardRoom {
+    var feedHeight: CGFloat = 0
 }
 
 extension EnvironmentValues {
-    /// The card's feed's height, for a field's suggestions: 0 with no feed.
-    @Entry var feedHeight: CGFloat = 0
+    /// The card's measures, for a field's suggestions; nil outside a card.
+    @Entry var cardRoom: CardRoom? = nil
 }

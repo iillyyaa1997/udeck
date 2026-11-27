@@ -322,19 +322,22 @@ struct InputRowView: View {
     /// The field's suggestions (0.9.25): open or not, where, for what.
     @State private var suggesting = SuggestState()
     @State private var handle = EditorHandle()
-    /// Room above the field in the card, for the list over it.
-    @State private var roomAbove: CGFloat = 240
-    /// The feed's height, which an open list takes its room from — what the
-    /// card can give; the other rows do not shrink (lab 45996031854: a list
-    /// with a question open pushed the field past the card's bottom).
-    @Environment(\.feedHeight) private var feedHeight
+    /// Room above the field in the card, for the list over it: in a box, as
+    /// the card's feed height is (`CardRoom`) — it changes on every frame the
+    /// panel opens, and as state it redrew the row each time.
+    @State private var fieldRoom = FieldRoom()
+    /// The card's feed height, which an open list takes its room from — what
+    /// the card can give; the other rows do not shrink (lab 45996031854: a
+    /// list with a question open pushed the field past the card's bottom).
+    @Environment(\.cardRoom) private var cardRoom
     /// The room the open list has, set as it opens.
     @State private var listRoom: CGFloat = 200
 
     /// What the list may take: the feed less a little of it kept in view; or,
     /// with no feed, part of the room above.
     private func measureListRoom() {
-        listRoom = feedHeight > 0 ? feedHeight - 56 : roomAbove * 0.6
+        let feed = cardRoom?.feedHeight ?? 0
+        listRoom = feed > 0 ? feed - 56 : fieldRoom.above * 0.6
     }
 
     private var suggest: InputSuggest? {
@@ -357,9 +360,9 @@ struct InputRowView: View {
         // takes part of it from the feed.
         .background(GeometryReader { geometry in
             Color.clear
-                .onAppear { if !suggesting.open { roomAbove = geometry.frame(in: .named(CardBodyView.space)).minY } }
+                .onAppear { if !suggesting.open { fieldRoom.above = geometry.frame(in: .named(CardBodyView.space)).minY } }
                 .onChange(of: geometry.frame(in: .named(CardBodyView.space)).minY) { _, top in
-                    if !suggesting.open { roomAbove = top }
+                    if !suggesting.open { fieldRoom.above = top }
                 }
         })
         .onChange(of: input.suggest == nil) { _, gone in if gone { suggesting.close() } }
@@ -864,6 +867,12 @@ struct BadgeView: View {
             }
         )
     }
+}
+
+/// The room above a field, measured where writing it redraws nothing.
+@MainActor
+final class FieldRoom {
+    var above: CGFloat = 240
 }
 
 /// The ✻ of a badge that is `busy`, turning through the glyphs a terminal's

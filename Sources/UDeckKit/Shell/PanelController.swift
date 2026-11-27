@@ -537,11 +537,14 @@ public final class PanelController {
         let outcome = recognizer.handle(sample, geometry: gestureGeometry, environment: environment, tuning: settings.gesture)
         if case .idle(let reason) = outcome, reason != lastIdleReason {
             lastIdleReason = reason
-            DeckLog.gesture.debug("idle: \(reason.rawValue, privacy: .public)")
+            // Kept in the log (notice, not debug): once per change of reason,
+            // it says why a hover did not open the panel — the operator's
+            // «наводил много раз и не работало» (11-27) left no trace.
+            DeckLog.gesture.notice("idle: \(reason.rawValue, privacy: .public)")
         }
         switch outcome {
         case .fire(let path):
-            DeckLog.gesture.debug("fired by \(path.rawValue, privacy: .public) on \(screenUnderCursor?.name ?? "no screen", privacy: .public)")
+            DeckLog.gesture.notice("fired by \(path.rawValue, privacy: .public) on \(screenUnderCursor?.name ?? "no screen", privacy: .public)")
             armingTimer?.invalidate()
             if let screenUnderCursor { attachedScreenID = screenUnderCursor.id }
             apply(.revealRequested)
