@@ -219,6 +219,9 @@ public enum ContractFeatures {
         add(.released(SemanticVersion(major: 0, minor: 9, patch: 17)), [.rowField(row: "input", field: "files")])
 
         // Text a plugin puts into its field — messages given back to edit: 0.9.19.
+        // A message's files drawn with it in the feed: the next release.
+        add(.next, [.rowField(row: "feed", field: "files")])
+
         let fillRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 19))
         add(fillRelease, [.rowField(row: "input", field: "fill")])
         add(fillRelease, ["id", "text"].map { .rowField(row: "input.fill", field: $0) })

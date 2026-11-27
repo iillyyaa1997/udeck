@@ -198,12 +198,17 @@ public struct FeedEntry: Codable, Equatable, Sendable {
     /// A small label above an `assistant` entry: who said it, when more than
     /// one side can.
     public var label: String?
+    /// The files that went with a `user` entry, absolute paths (uDeck 0.9.23):
+    /// pictures drawn above it — one larger — any other file as its icon and
+    /// name; a click opens them in Quick Look.
+    public var files: [String]?
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case id, role, text, detail, streaming, error, name, label }
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, role, text, detail, streaming, error, name, label, files }
 
     public init(id: String, role: Role, text: String, detail: String? = nil, streaming: Bool? = nil,
-                error: Bool? = nil, name: String? = nil, label: String? = nil)
+                error: Bool? = nil, name: String? = nil, label: String? = nil, files: [String]? = nil)
     {
+        self.files = files
         self.id = id
         self.role = role
         self.text = text

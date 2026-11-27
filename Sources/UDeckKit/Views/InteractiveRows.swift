@@ -139,6 +139,15 @@ private struct FeedEntryView: View {
         switch entry.role {
         case .user:
             VStack(alignment: .trailing, spacing: 2) {
+                if let files = entry.files, !files.isEmpty {
+                    HStack {
+                        Spacer(minLength: 30)
+                        MessageFiles(paths: files, theme: theme, entryID: entry.id)
+                    }
+                    .padding(.bottom, 2)
+                }
+                // A picture sent with no words is its picture alone.
+                if !entry.text.isEmpty {
                 HStack {
                     Spacer(minLength: 30)
                     Text(entry.text)
@@ -149,6 +158,7 @@ private struct FeedEntryView: View {
                                                            bottomTrailingRadius: 4, topTrailingRadius: 13)
                             .fill(Color.accentColor.opacity(entry.label == nil ? 1 : 0.55)))
                         .foregroundStyle(.white)
+                }
                 }
                 // A message's state, under it: queued behind the running turn.
                 if let label = entry.label, !label.isEmpty {
@@ -381,11 +391,20 @@ struct InputRowView: View {
                 HStack(spacing: 6) {
                     ForEach(Array(files.enumerated()), id: \.element) { index, url in
                         HStack(spacing: 5) {
-                            Image(nsImage: PastedFiles.thumbnail(of: url))
-                                .resizable().aspectRatio(contentMode: .fill)
-                                .frame(width: 22, height: 22).clipShape(RoundedRectangle(cornerRadius: 4))
-                            Text(url.lastPathComponent).font(theme.smallFont).lineLimit(1).truncationMode(.middle)
-                                .frame(maxWidth: 160, alignment: .leading)
+                            // A click opens it — and the field's others — in Quick Look.
+                            Button { QuickLook.shared.show(files, at: index) } label: {
+                                HStack(spacing: 5) {
+                                    Image(nsImage: PastedFiles.thumbnail(of: url))
+                                        .resizable().aspectRatio(contentMode: .fill)
+                                        .frame(width: 22, height: 22).clipShape(RoundedRectangle(cornerRadius: 4))
+                                    Text(url.lastPathComponent).font(theme.smallFont).lineLimit(1).truncationMode(.middle)
+                                        .frame(maxWidth: 160, alignment: .leading)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help(url.path)
+                            .accessibilityIdentifier("row.input.\(input.id).file.\(index).open")
                             Button { files = files.filter { $0 != url } } label: {
                                 // The whole square takes the click, not only the glyph's lines.
                                 Image(systemName: "xmark").font(.system(size: 9, weight: .semibold))

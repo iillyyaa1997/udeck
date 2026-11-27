@@ -64,6 +64,7 @@ public struct CardLimits: Sendable, Equatable {
     /// A `feed` keeps its newest entries, each up to this long.
     static let feedEntries = 300
     static let feedTextLength = 20_000
+    static let feedFiles = 20
     /// A bar's items, a menu's options, an input's menus.
     static let barItems = 16
     static let menuOptions = 100
@@ -172,9 +173,11 @@ extension Card {
                 // own bound is far above a label's.
                 if entries.count > CardLimits.feedEntries { cut = true }
                 return .feed(entries.suffix(CardLimits.feedEntries).map {
-                    FeedEntry(id: $0.id, role: $0.role, text: long($0.text), detail: $0.detail.map(long),
-                              streaming: $0.streaming, error: $0.error, name: $0.name.map(trim),
-                              label: $0.label.map(trim))
+                    if ($0.files?.count ?? 0) > CardLimits.feedFiles { cut = true }
+                    return FeedEntry(id: $0.id, role: $0.role, text: long($0.text), detail: $0.detail.map(long),
+                                     streaming: $0.streaming, error: $0.error, name: $0.name.map(trim),
+                                     label: $0.label.map(trim),
+                                     files: $0.files.map { Array($0.prefix(CardLimits.feedFiles).map(trim)) })
                 })
 
             case .ask(let ask):

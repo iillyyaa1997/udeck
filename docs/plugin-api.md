@@ -587,7 +587,11 @@ uDeck 0.9.4 adds a fifth row, menus, and more to say in a feed:
   `Bash`: two or more tool entries in a row fold into one line, «4 actions ·
   Bash ×2, Read ×2», that opens to them — and `label`, a small line: above an
   `assistant` entry, who answered; under a `user` entry, its state (such as
-  *queued*), the bubble drawn paler. An `assistant` entry's text is
+  *queued*), the bubble drawn paler. A `user` entry's `files` (uDeck 0.9.23
+  and later) — absolute paths — are drawn above it: pictures as pictures, one
+  alone larger, any other file as its icon and name; a click opens them in
+  Quick Look, the entry's files one after another. A uDeck before it draws
+  the text alone. An `assistant` entry's text is
   markdown: paragraphs, `-` and `1.` lists, `#` headings, fenced code, and
   inline emphasis, code and links.
 * Tones are `run`, `wait`, `idle`, `ok`, `warn`, `crit` and `info`; bar icons
