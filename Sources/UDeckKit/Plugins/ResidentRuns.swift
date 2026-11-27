@@ -189,6 +189,17 @@ final class ResidentRuns {
         run.told = now
     }
 
+    /// What the place `view` of `id` keeps, as the plugin last said it: told
+    /// with `hello` when the process starts again. The places were read from
+    /// the layout when the plugin started, before it had said anything, so a
+    /// plugin started again was told it kept nothing (11-27, Agents' log:
+    /// «keep none») and could not continue what it had shown.
+    func kept(_ keep: String?, view: String, of id: PluginIdentifier) {
+        guard let run = runs[id] else { return }
+        if let index = run.views.firstIndex(where: { $0.id == view }) { run.views[index].keep = keep }
+        if let index = run.told.firstIndex(where: { $0.id == view }) { run.told[index].keep = keep }
+    }
+
     /// Tells `id` of something done on its card — in the place `view`, or,
     /// with none, its first window on the board.
     func send(_ event: ResidentEvent, to id: PluginIdentifier, view: String? = nil) {

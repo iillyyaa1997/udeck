@@ -52,6 +52,7 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
 import json
 import re
 import shlex
@@ -8056,3 +8057,75 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+def check_agents_restart(machine, check_dir, lab):
+    """Agents stopped as uDeck's update stops it (SIGTERM) while a session works: no claude is left
+    behind, uDeck starts Agents again, and the session is back."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)} ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md",
+        "installing the Agents plugin and the stand-in CLI")
+    machine.ssh.run("mkdir -p ~/.claude && touch ~/.claude/fake-transcripts", "the stand-in writes transcripts")
+    _write(machine, SETTINGS, {"language": "ru"}, "uDeck in Russian")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake, "name_chats": False}}},
+           "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 8, "height": 11}]}]}, "placing Agents")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=40)
+    machine.click(*new.middle, "＋")
+    machine.sleep(1)
+    option = ui.wait_for(machine, "row.button.new.new:claude", "a new Claude session", ui.PANEL, seconds=8)
+    machine.click(*option.middle, "a new Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "the folder")
+    machine.sleep(3)
+    field = ui.wait_for(machine, "row.input.message", "the field", ui.PANEL, seconds=30)
+    machine.click(*field.middle, "the field")
+    ui.type_text(machine, "[hang] Look at the folder", "a message the stand-in works on until stopped")
+    ui.press_return(machine, "sending it")
+    machine.sleep(3)
+    before = machine.ssh.run("pgrep -f lab-chat/fake-claude.py || true", "the stand-in running").stdout.split()
+    agents = machine.ssh.run(f"pgrep -f {UDECK_HOME}/plugins/agents/agents || true", "Agents' pid").stdout.split()
+    print("before:", before, "agents:", agents)
+    assert before and agents, "nothing running to stop"
+    machine.screenshot(check_dir, "restart 1 a session at work")
+    machine.ssh.run(f"kill -TERM {agents[0]}", "SIGTERM to Agents, as the helper sends it")
+    machine.sleep(6)
+    left = [pid for pid in machine.ssh.run("pgrep -f lab-chat/fake-claude.py || true", "the stand-in after").stdout.split() if pid in before]
+    print("left behind:", left)
+    assert not left, f"claude left behind: {left}"
+    again = []
+    for _ in range(20):
+        again = machine.ssh.run(f"pgrep -f {UDECK_HOME}/plugins/agents/agents || true", "Agents again").stdout.split()
+        if again and again != agents:
+            break
+        machine.sleep(2)
+    print("agents again:", again)
+    machine.sleep(6)
+    ids = ui.identifiers(machine, "the card", ui.PANEL)
+    print("card:", [i for i in ids if "head" in i or "input" in i][:8])
+    texts = ui.static_texts(machine, "the feed", ui.PANEL)
+    print("feed:", [t for t in texts if "Look at the folder" in t][:3])
+    print(machine.ssh.run(f"cat {UDECK_HOME}/agents/agents.log || true", "Agents' log").stdout[-3000:])
+    machine.screenshot(check_dir, "restart 2 the session back")
+    assert any("Look at the folder" in t for t in texts), "the session is not back"
+    log = machine.ssh.run(f"cat {UDECK_HOME}/agents/agents.log || true", "Agents' log").stdout
+    hellos = [line for line in log.splitlines() if " hello " in line]
+    assert hellos and "keep none" not in hellos[-1], f"the place's keep was not told again: {hellos[-1:]}"

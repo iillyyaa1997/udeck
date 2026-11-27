@@ -812,6 +812,11 @@ public final class DeckModel {
 
     /// Tells the plugin its place `view` was closed: with `to`, what it showed
     /// goes back to that window on the board.
+    /// What a place of `id` keeps now, for its next `hello` (`ResidentRuns.kept`).
+    func residentKept(_ keep: String?, view: UUID, of id: PluginIdentifier) {
+        residents.kept(keep, view: view.uuidString, of: id)
+    }
+
     func residentPlaceClosed(_ view: UUID, of id: PluginIdentifier, keep: String?, to: UUID?) {
         residents.closed(view.uuidString, of: id, keep: keep, to: to?.uuidString)
     }

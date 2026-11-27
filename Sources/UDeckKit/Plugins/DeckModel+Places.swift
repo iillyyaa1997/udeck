@@ -130,6 +130,7 @@ extension DeckModel {
         }
         guard let keeper = target ?? views.first,
               layout.keep(place.keep, showing: place.name, for: keeper.id) else { return }
+        residentKept(place.keep, view: keeper.id, of: id)
         saveLayout()
     }
 
