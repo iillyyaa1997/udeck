@@ -8,6 +8,17 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.23] — 2026-11-27
+
+- **A message's photos in the feed.** A message sent with pictures shows
+  them above it — one alone larger — and any other file as its icon and
+  name; a click opens Quick Look over the panel, ←/→ through the message's
+  files. A file in the field opens the same way before it is sent. For a
+  plugin: a feed entry's `files`.
+- Agents (installed separately, needs this release) sends a message's files
+  to the feed this way instead of a «📎 names» line, and a picture can go
+  with no words.
+
 ## [0.9.22] — 2026-11-27
 
 - **A plugin's card comes back as it was after an update.** A resident

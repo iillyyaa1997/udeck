@@ -136,8 +136,8 @@ public enum ContractFeatures {
     /// nothing in the contract; 0.9.14 brings a menu option's `button`; 0.9.15
     /// and 0.9.16 change nothing in it; 0.9.17 brings an input's `files`;
     /// 0.9.18 changes nothing in it; 0.9.19 brings an input's `fill`; 0.9.20
-    /// to 0.9.22 change nothing in it.
-    static let reviewedAt = "0.9.22"
+    /// to 0.9.22 change nothing in it; 0.9.23 brings a feed entry's `files`.
+    static let reviewedAt = "0.9.23"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
@@ -219,8 +219,8 @@ public enum ContractFeatures {
         add(.released(SemanticVersion(major: 0, minor: 9, patch: 17)), [.rowField(row: "input", field: "files")])
 
         // Text a plugin puts into its field — messages given back to edit: 0.9.19.
-        // A message's files drawn with it in the feed: the next release.
-        add(.next, [.rowField(row: "feed", field: "files")])
+        // A message's files drawn with it in the feed: 0.9.23.
+        add(.released(SemanticVersion(major: 0, minor: 9, patch: 23)), [.rowField(row: "feed", field: "files")])
 
         let fillRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 19))
         add(fillRelease, [.rowField(row: "input", field: "fill")])

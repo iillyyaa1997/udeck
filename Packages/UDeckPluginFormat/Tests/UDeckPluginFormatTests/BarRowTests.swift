@@ -107,7 +107,7 @@ struct BarRowTests {
         #expect(drawn.rows.last == .text("this card is longer than uDeck will draw and has been cut short"))
     }
 
-    @Test("a feed entry's files: read, cut to twenty by the drawing limits, a contract field of the next release")
+    @Test("a feed entry's files: read, cut to twenty by the drawing limits, a contract field of 0.9.23")
     func feedFiles() throws {
         let json = #"{"rows":[{"feed":[{"id":"1","role":"user","text":"look","files":["/tmp/a.png","/tmp/b.txt"]}]}]}"#
         let card = try JSONDecoder().decode(Card.self, from: Data(json.utf8))
@@ -125,7 +125,7 @@ struct BarRowTests {
         #expect(cut.first?.files?.count == 20)
         let object = try #require(StrictJSON.parse(Array(json.utf8)).value?.object)
         #expect(ContractFeatures.used(byCard: object).contains(.rowField(row: "feed", field: "files")))
-        #expect(ContractFeatures.release(of: .rowField(row: "feed", field: "files")) == .next)
+        #expect(ContractFeatures.release(of: .rowField(row: "feed", field: "files")) == .released(SemanticVersion(major: 0, minor: 9, patch: 23)))
     }
 
     @Test("an input's fill: read, kept through the drawing limits with its files, and a new contract field")
