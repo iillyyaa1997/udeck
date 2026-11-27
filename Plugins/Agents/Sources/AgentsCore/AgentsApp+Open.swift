@@ -40,7 +40,9 @@ extension AgentsApp {
         guard !openRestored else { return }
         let shown = places.mapValues(\.selection)
         let current = here
-        for line in Self.loadOpen(home: home) {
+        let lines = Self.loadOpen(home: home)
+        log.say("open: \(lines.count) written last run, \(conversations.count) back from the places")
+        for line in lines {
             guard let kept = Kept(line) else { continue }
             let open = conversations.contains { conversation in
                 (kept.claude != nil && conversation.claude?.sessionID == kept.claude)

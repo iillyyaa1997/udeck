@@ -21,20 +21,22 @@ public enum Orphans {
 
     /// Stops the orphans resuming `sessionID`: SIGTERM, then SIGKILL for one
     /// still there two seconds later.
-    public static func stop(resuming sessionID: String) async {
+    @discardableResult
+    public static func stop(resuming sessionID: String) async -> [Int32] {
         let ps = Process()
         ps.executableURL = URL(fileURLWithPath: "/bin/ps")
         ps.arguments = ["-ax", "-o", "pid=,ppid=,command="]
         let pipe = Pipe()
         ps.standardOutput = pipe
         ps.standardError = FileHandle.nullDevice
-        guard (try? ps.run()) != nil else { return }
+        guard (try? ps.run()) != nil else { return [] }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         ps.waitUntilExit()
         let found = resuming(sessionID, in: String(decoding: data, as: UTF8.self))
-        guard !found.isEmpty else { return }
+        guard !found.isEmpty else { return [] }
         for pid in found { kill(pid, SIGTERM) }
         try? await Task.sleep(for: .seconds(2))
         for pid in found where kill(pid, 0) == 0 { kill(pid, SIGKILL) }
+        return found
     }
 }

@@ -68,6 +68,8 @@ public final class AgentsApp {
     var names: ChatNames
     /// Messages a Stop left unsent, kept on disk by session.
     var unsent: UnsentStore
+    /// What it decided as it started and stopped (`AgentsLog`).
+    lazy var log = AgentsLog(home: home)
     /// The open conversations as last written (`keepOpen`), and whether the
     /// last run's are back (`restoreOpen`).
     var openLines: [String] = []
@@ -148,6 +150,7 @@ public final class AgentsApp {
                 watchSleep()
                 refreshHistory()
                 if knownModels[.codex] == nil || codexHistory.isEmpty { Task { await learnCodex() } }
+                log.say("hello \(here.isEmpty ? "-" : here): keep \(event["keep"]?.string.map { String($0.prefix(160)) } ?? "none")")
                 if let keep = event["keep"]?.string { restore(keep) }
                 // Every place says hello with what it keeps; then the rest of
                 // what was open comes back.
@@ -293,17 +296,25 @@ public final class AgentsApp {
     /// conversation, while it is open; otherwise its Claude session or its
     /// Codex thread, continued — after uDeck or this plugin started again.
     func restore(_ keep: String) {
-        guard let kept = Kept(keep) else { return }
+        guard let kept = Kept(keep) else {
+            log.say("restore: a keep that is not one: \(keep.prefix(120))")
+            return
+        }
         let found = conversations.first { kept.id != nil && $0.id == kept.id }
             ?? conversations.first { kept.claude != nil && $0.claude?.sessionID == kept.claude }
             ?? conversations.first { kept.codex != nil && $0.codex?.threadID == kept.codex }
         if let found {
+            log.say("restore \(kept.claude ?? kept.codex ?? "?"): open already")
             take(found.id)
             return
         }
         if let sessionID = kept.claude {
             let login = accounts.first { $0.name == kept.account } ?? account
-            guard let saved = SessionHistory.saved(sessionID, config: login.folder(home: home)) else { return }
+            guard let saved = SessionHistory.saved(sessionID, config: login.folder(home: home)) else {
+                log.say("restore claude \(sessionID): no transcript under \(login.name)")
+                return
+            }
+            log.say("restore claude \(sessionID) under \(login.name)")
             // Its own, a moment ago: no other program has it open.
             open(saved, account: login, holdIfRecent: false)
         } else if let threadID = kept.codex {
@@ -511,6 +522,7 @@ public final class AgentsApp {
         let written = (try? saved.file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             ?? saved.modified
         if holdIfRecent, Date().timeIntervalSince(written) < Self.liveWindow {
+            log.say("open claude \(saved.sessionID): held back, written \(Int(Date().timeIntervalSince(written))) s ago")
             heldBack[conversation.id] = written
             return
         }
@@ -714,7 +726,10 @@ public final class AgentsApp {
         var arguments = prefix + ClaudeOutbound.arguments(model: session.chosenModel, resume: resume)
         if let effort = session.effort { arguments += ["--effort", effort] }
         // One left by a run of this plugin that died: not a second writer.
-        if let resume { await Orphans.stop(resuming: resume) }
+        if let resume {
+            let stopped = await Orphans.stop(resuming: resume)
+            if !stopped.isEmpty { log.say("orphans of \(resume) stopped: \(stopped)") }
+        }
         do {
             let process = try AgentProcess(executable: executable, arguments: arguments, environment: environment,
                                            directory: session.folder)
@@ -790,6 +805,7 @@ public final class AgentsApp {
     /// Every session closed, as the plugin stops: each `claude` and `codex`
     /// given its end of input and a moment, then stopped — none left behind.
     public func closeAll(grace: Duration = .seconds(1.5)) async {
+        log.say("stopping: closing \(conversations.count) conversation(s)")
         // All at once: uDeck's helper gives the plugin a few seconds.
         let closing = conversations.flatMap { $0.agents.values }.map { agent in
             Task { await agent.close(grace: grace) }

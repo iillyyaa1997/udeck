@@ -111,6 +111,19 @@ def answer_to(request_id):
         waiting.append(obj)
 
 
+def transcript(text):
+    """With a `fake-transcripts` file in the account's folder (the lab's), the session's transcript where the real
+    one keeps it — projects/<the folder, / and . as ->/<session>.jsonl — for a plugin to continue it from."""
+    if not os.path.exists(os.path.join(CONFIG, "fake-transcripts")):
+        return
+    folder = os.path.join(CONFIG, "projects", os.getcwd().replace("/", "-").replace(".", "-"))
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, SESSION + ".jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "user", "sessionId": SESSION, "cwd": os.getcwd(), "entrypoint": "sdk-cli",
+                            "message": {"role": "user", "content": text},
+                            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, ensure_ascii=False) + "\n")
+
+
 def calling():
     """A call to the model goes out (claude 2.1.332 says so before each)."""
     out({"type": "system", "subtype": "status", "status": "requesting", "session_id": SESSION})
@@ -370,6 +383,8 @@ while True:
         control_answer(message)
     elif kind == "user":
         text = said(message)[0]
+        if not NAMING:
+            transcript(text)
         if not NAMING and (limited_wait() or "[hang]" in text):
             # At a limit the real one echoes the message only when interrupted.
             if not limited_wait():
