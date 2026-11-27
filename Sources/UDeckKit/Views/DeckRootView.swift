@@ -148,17 +148,22 @@ public struct DeckRootView: View {
 
     @ViewBuilder
     private func panel(theme: DeckTheme) -> some View {
-        Group {
-            switch shell.phase {
-            case .collapsed:
-                // Nothing of its own: what the operator sees while the panel
-                // is away is the island's mark, and that is carried by the
-                // panel rather than by this state — see `IslandMark`.
-                Color.clear
-            case .peek:
+        ZStack(alignment: .top) {
+            // Built once and kept, hidden while the panel is away or peeking,
+            // and laid out at the size it opens at rather than the moving one:
+            // what a reveal costs is the panel's clip, not every card built and
+            // laid out again (`ShellState.workspaceSize`). Hidden from the
+            // pointer and from accessibility, so that nothing reaches what is
+            // not shown.
+            WorkspaceView(shell: shell, model: model, theme: theme)
+                .frame(width: workspaceFrame?.width, height: workspaceFrame?.height, alignment: .top)
+                .opacity(showsWorkspace ? 1 : 0)
+                .allowsHitTesting(showsWorkspace)
+                .accessibilityHidden(!showsWorkspace)
+                .animation(shell.contentAnimation, value: showsWorkspace)
+            if shell.phase == .peek {
                 PeekView(theme: theme, summary: summary, model: model, shell: shell)
-            case .open, .fullscreen:
-                WorkspaceView(shell: shell, model: model, theme: theme)
+                    .transition(.opacity)
             }
         }
         // The panel reaches above the menu bar so that it stays welded to its
@@ -169,8 +174,6 @@ public struct DeckRootView: View {
         // once the panel has visibly begun to move, and leaves faster than it
         // arrives. Which of the two it is, the controller decides — it is the
         // only place that knows the direction.
-        .id(contentKind)
-        .transition(.opacity)
         .animation(shell.contentAnimation, value: contentKind)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // Any click anywhere in the panel promotes a peek into a held panel.
@@ -227,6 +230,20 @@ public struct DeckRootView: View {
                    value: islandLook)
         .frame(width: shell.panelRect.width, height: shell.panelRect.height)
         .offset(x: shell.panelRect.minX, y: shell.panelRect.minY)
+    }
+
+    /// Whether the workspace is what the panel shows.
+    private var showsWorkspace: Bool {
+        shell.phase == .open || shell.phase == .fullscreen
+    }
+
+    /// The workspace's own size: the open panel's, less the strip it leaves
+    /// under the menu bar; nil before the controller has said, when it takes
+    /// the panel's.
+    private var workspaceFrame: CGSize? {
+        guard shell.workspaceSize != .zero else { return nil }
+        return CGSize(width: shell.workspaceSize.width,
+                      height: max(0, shell.workspaceSize.height - shell.topOverhang))
     }
 
     /// Which of the three layouts is showing.
