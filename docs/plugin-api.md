@@ -321,6 +321,9 @@ What uDeck writes:
 * `choose` — an option of a menu was chosen (a `bar`'s menu or button, an
   `input`'s picker): the row's `id`, the menu's or button's `id`, the option's
   `id` (uDeck 0.9.4 and later).
+* `suggest` — a searched tab of an `input`'s suggestions wants items for
+  what is typed: the row's `id`, the tab as `id`, the query as `text` (uDeck
+  0.9.25 and later). Answer with the card, the items in `suggest.found`.
 * `closed` — a place of the card's own was closed (below).
 
 #### Each thing in a place of its own
@@ -536,6 +539,34 @@ knows nothing of what they are for.
   the card until the person sends from the field, and a uDeck that restarts
   meanwhile puts it back. A uDeck before it ignores it — say
   `"minUDeck": "0.9.19"` when the text must not be lost.
+  `suggest` (uDeck 0.9.25 and later) — what the field suggests: commands,
+  skills, files. A list opens over the field when the person types a tab's
+  `trigger` — at the start of the text only for a tab that is `start`, after a
+  space anywhere otherwise — and from the «/» button by the field, ⌘/ (⌘⇧/ for
+  a searched tab) and the field's own menu. ↑↓ move, Tab or a click puts the
+  item's `text` in place of the trigger and what was typed after it, Return
+  does too — and sends a `start` item typed whole, as a terminal does — and
+  Escape closes the list. uDeck adds a tab of its own, *All*, of every tab not
+  searched, with the `recent` ones — ids, newest first — on top while nothing
+  is typed.
+
+  ```json
+  { "suggest": {
+      "tabs": [ { "id": "commands", "title": "Commands", "trigger": "/", "start": true },
+                { "id": "files", "title": "Files", "trigger": "@", "search": true } ],
+      "items": [ { "id": "c:compact", "tab": "commands", "text": "/compact",
+                   "detail": "free up context", "note": "claude" } ],
+      "recent": [ "c:compact" ],
+      "found": { "tab": "files", "query": "grid",
+                 "items": [ { "id": "f:1", "tab": "files", "text": "@Sources/GridRows.swift",
+                              "title": "GridRows.swift", "detail": "Sources" } ] } } }
+  ```
+
+  A tab that is `search` has its items found for each query rather than given
+  whole: uDeck sends `{"event":"suggest","row":"message","id":"files","text":"grid"}`
+  a moment after the person stops typing, and shows the card's `found` items
+  once their `tab` and `query` are that. Up to 500 items, 100 found, 20 recent
+  and 8 tabs are kept. A uDeck before it ignores the field.
 
 uDeck 0.9.4 adds a fifth row, menus, and more to say in a feed:
 
