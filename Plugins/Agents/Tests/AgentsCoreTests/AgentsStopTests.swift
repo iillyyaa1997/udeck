@@ -259,3 +259,101 @@ struct AgentsLiveLineTests {
         #expect(AgentsCard.tokenCount(few, app) == "↓ ~2 tokens")
     }
 }
+
+/// 11-27: «Отправить сейчас», every open session back after a restart, and
+/// the effort the CLI runs with on the card.
+@Suite("Send now, sessions back, the effort shown", .serialized)
+@MainActor
+struct AgentsSendNowTests {
+    func users(_ items: [FeedItem]) -> [String] {
+        items.compactMap { if case .user(_, let text) = $0 { text } else { nil } }
+    }
+
+    @Test("Claude: «Отправить сейчас» stops the step and sends what waited, at once")
+    func claudeNow() async throws {
+        let (session, folder) = try await startFake()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        session.send("[hang] look")
+        try await until("the turn") { session.state == .working }
+        try await Task.sleep(for: .milliseconds(200))
+        session.send("second")
+        #expect(session.waitingMessages.map(\.text) == ["second"])
+        session.sendNow()
+        try await until("it answered", timeout: .seconds(20)) {
+            for ask in session.asks { session.answer(ask, with: .allow) }
+            return session.state == .idle && users(session.items).contains("second") && session.asks.isEmpty
+        }
+        #expect(users(session.items) == ["[hang] look", "second"])
+        #expect(session.unsentMessages.isEmpty && session.waitingMessages.isEmpty)
+        await session.close()
+    }
+
+    @Test("Codex: «Отправить сейчас» ends the turn and what was steered starts the next at once")
+    func codexNow() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("udeck-codex-now-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let session = CodexSession(folder: folder)
+        await session.start(executable: URL(fileURLWithPath: "/usr/bin/python3"), arguments: [fakeCodex.path, "app-server"],
+                            environment: ["PATH": "/usr/bin:/bin"])
+        session.send("What changed?")
+        try await until("the approval") { !session.asks.isEmpty }
+        session.send("Also say which file")
+        try await Task.sleep(for: .milliseconds(300))
+        session.sendNow()
+        try await until("the next turn's approval", timeout: .seconds(10)) {
+            users(session.items).contains("Also say which file") && !session.asks.isEmpty
+        }
+        session.answer(try #require(session.asks.first), with: "decline")
+        try await until("its end") { session.state == .idle }
+        #expect(session.waitingMessages.isEmpty && session.unsentMessages.isEmpty)
+        await session.close()
+    }
+
+    @Test("every session open before is back after the plugin starts again, not only a place's")
+    func openBack() async throws {
+        setenv("UDECK_SETTING_CLAUDE", "\"\(fakeClaude.path)\"", 1)
+        setenv("FAKE_CLAUDE_DELAY", "0", 1)
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("agents-open-" + UUID().uuidString)
+        let folder = home.appendingPathComponent(".claude/projects/-tmp")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        var lines: [String] = []
+        for (index, text) in ["look at it", "and the notes"].enumerated() {
+            let id = UUID().uuidString.lowercased()
+            let transcript = folder.appendingPathComponent("\(id).jsonl")
+            try (#"{"type":"user","sessionId":"\#(id)","cwd":"/tmp","message":{"role":"user","content":"\#(text)"},"timestamp":"2026-11-22T10:0\#(index):00Z"}"#
+                + "\n").write(to: transcript, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)], ofItemAtPath: transcript.path)
+            lines.append(Kept(claude: id, account: "main", folder: "/tmp", title: text).text)
+        }
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".udeck/agents"), withIntermediateDirectories: true)
+        try JSONEncoder().encode(lines).write(to: AgentsApp.openFile(home: home))
+        let app = AgentsApp(home: home) { _ in }
+        // The place keeps the second; the first comes back with it.
+        await app.handle(#"{"event":"hello","size":{"columns":8,"rows":6},"keep":\#(JSONValue.string(lines[1]).encodedLineOrEmpty)}"#)
+        try await until("both back", timeout: .seconds(10)) { app.conversations.count == 2 }
+        #expect(app.selected?.claude?.sessionID == Kept(lines[1])?.claude, "the place shows what it kept")
+        #expect(Set(AgentsApp.loadOpen(home: home)).count == 2, "and both are still written down")
+        for conversation in app.conversations { for agent in conversation.agents.values { await agent.close() } }
+    }
+
+    @Test("the effort the CLI runs with, from the account's settings, when none was chosen here")
+    func effortShown() async throws {
+        setenv("UDECK_SETTING_CLAUDE", "\"\(fakeClaude.path)\"", 1)
+        setenv("FAKE_CLAUDE_DELAY", "0", 1)
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("agents-effort-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        try #"{"effortLevel": "xhigh"}"#.write(to: home.appendingPathComponent(".claude/settings.json"), atomically: true, encoding: .utf8)
+        let app = AgentsApp(home: home) { _ in }
+        await app.newConversation(in: home, provider: .claude)
+        let conversation = try #require(app.conversations.first)
+        #expect(app.effortShown(conversation.current) == "xhigh")
+        for agent in conversation.agents.values { await agent.close() }
+    }
+}
+
+private extension JSONValue {
+    var encodedLineOrEmpty: String { (try? encodedLine()) ?? "\"\"" }
+}

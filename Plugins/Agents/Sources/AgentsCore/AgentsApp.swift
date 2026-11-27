@@ -24,7 +24,7 @@ public final class AgentsApp {
     /// one, and for good on a uDeck older than places.
     public internal(set) var places: [String: Place] = ["": Place()]
     /// The place an event came from, or the card is drawn for, now.
-    public private(set) var here = ""
+    public internal(set) var here = ""
     public private(set) var russian = false
 
     /// The conversation shown here.
@@ -68,6 +68,12 @@ public final class AgentsApp {
     var names: ChatNames
     /// Messages a Stop left unsent, kept on disk by session.
     var unsent: UnsentStore
+    /// The open conversations as last written (`keepOpen`), and whether the
+    /// last run's are back (`restoreOpen`).
+    var openLines: [String] = []
+    var openRestored = false
+    /// The `effortLevel` of an account's settings, read at most every 30 s.
+    var settingsEffort: [String: (level: String?, at: Date)] = [:]
     var namingTries: [String: Int] = [:]
     /// The history's sessions being named, one at a time.
     var historyNaming: Task<Void, Never>?
@@ -143,6 +149,14 @@ public final class AgentsApp {
                 refreshHistory()
                 if knownModels[.codex] == nil || codexHistory.isEmpty { Task { await learnCodex() } }
                 if let keep = event["keep"]?.string { restore(keep) }
+                // Every place says hello with what it keeps; then the rest of
+                // what was open comes back.
+                if !openRestored {
+                    Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(1.5))
+                        self?.restoreOpen()
+                    }
+                }
             }
         case "closed":
             closed(here, to: event["to"]?.string)
@@ -278,7 +292,7 @@ public final class AgentsApp {
     /// What a place showed before, by what uDeck kept of it (`keep`): the
     /// conversation, while it is open; otherwise its Claude session or its
     /// Codex thread, continued — after uDeck or this plugin started again.
-    private func restore(_ keep: String) {
+    func restore(_ keep: String) {
         guard let kept = Kept(keep) else { return }
         let found = conversations.first { kept.id != nil && $0.id == kept.id }
             ?? conversations.first { kept.claude != nil && $0.claude?.sessionID == kept.claude }
@@ -405,6 +419,7 @@ public final class AgentsApp {
         defer { withdrawAnswered() }
         if id == "stop" { selected?.current.interrupt(); return }
         if id == "unsent:send" { selected?.sendUnsent(); return }
+        if id == "waiting:now" { selected?.current.sendNow(); return }
         if id == "unsent:field" { selected?.putUnsentIntoField(); return }
         if pressClose(id) { return }
         if id == "new" { select("new"); return }
@@ -773,6 +788,7 @@ public final class AgentsApp {
     public func render() {
         if Date().timeIntervalSince(historyRead) > 30 { refreshHistory() }
         keepUnsent()
+        keepOpen()
         updateKeepAwake()
         let current = here
         defer { here = current }

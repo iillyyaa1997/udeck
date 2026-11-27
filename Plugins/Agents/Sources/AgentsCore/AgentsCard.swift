@@ -174,6 +174,7 @@ enum AgentsCard {
         if held { rows.append(["ask": heldRow(session, app)]) }
         if let closing = closeAsk(app) { rows.append(["ask": closing]) }
         if let unsent = unsentRow(session, app) { rows.append(["bar": unsent]) }
+        if let waiting = waitingRow(session, app) { rows.append(["bar": waiting]) }
         switch session.current {
         case .claude(let agent): for ask in agent.asks { rows.append(["ask": askRow(ask, app)]) }
         case .codex(let agent): for ask in agent.asks { rows.append(["ask": codexAskRow(ask, app)]) }
@@ -251,6 +252,22 @@ enum AgentsCard {
         let thousands = (Double(total) / 1000 * 10).rounded() / 10
         let number = thousands >= 100 ? String(Int(thousands.rounded())) : String(format: "%.1f", thousands)
         return "↓ " + about + app.t(number.replacingOccurrences(of: ".", with: ",") + " тыс. токенов", number + "k tokens")
+    }
+
+    /// Under the feed while messages wait for the step the agent is on: how
+    /// many, and «Отправить сейчас» — the step stopped, they go at once (the
+    /// operator, 11-27: a message queued, and nothing to send it with).
+    static func waitingRow(_ session: Conversation, _ app: AgentsApp) -> JSONValue? {
+        let agent = session.current
+        let count = agent.waitingMessages.count
+        guard count > 0, agent.state == .working else { return nil }
+        let said = app.t(russianCount(count, "сообщение ждёт", "сообщения ждут", "сообщений ждут"),
+                         count == 1 ? "1 message waits" : "\(count) messages wait")
+        return ["id": "waiting", "items": [
+            ["badge": ["text": .string(said), "tone": "info"]],
+            ["spacer": true],
+            ["button": ["id": "waiting:now", "label": .string(app.t("Отправить сейчас", "Send now"))]],
+        ]]
     }
 
     /// Under the feed while a Stop left messages unsent: how many, and the
@@ -372,11 +389,11 @@ enum AgentsCard {
             var options = models
             options += efforts.map { level in
                 ["id": .string("e:" + level),
-                 "text": .string(effortName(level, app) + (level == agent.effort ? "  ✓" : "")),
+                 "text": .string(effortName(level, app) + (level == app.effortShown(agent) ? "  ✓" : "")),
                  "group": .string(app.t("Усилие", "Effort"))]
             }
             var menu: [String: JSONValue] = [
-                "id": "me", "text": .string(shortModel(agent) + " · " + (agent.effort.map { effortName($0, app) } ?? app.t("усилие", "effort"))),
+                "id": "me", "text": .string(shortModel(agent) + " · " + (app.effortShown(agent).map { effortName($0, app) } ?? app.t("усилие", "effort"))),
                 "note": .string(modelNote), "options": .array(options),
             ]
             if let current { menu["selected"] = .string("m:" + current) }
@@ -390,13 +407,13 @@ enum AgentsCard {
             pickers.append(.object(menu))
             var effort: [String: JSONValue] = [
                 "id": "effort", "icon": "effort",
-                "text": .string(agent.effort.map { effortName($0, app) } ?? app.t("усилие", "effort")),
+                "text": .string(app.effortShown(agent).map { effortName($0, app) } ?? app.t("усилие", "effort")),
                 "note": .string(agent.provider == .claude
                     ? app.t("Со следующего сообщения: сессия продолжится с ним", "From the next message: the session continues with it")
                     : app.t("Со следующего сообщения", "From the next message")),
                 "options": .array(efforts.map { ["id": .string($0), "text": .string(effortName($0, app))] }),
             ]
-            if let level = agent.effort { effort["selected"] = .string(level) }
+            if let level = app.effortShown(agent) { effort["selected"] = .string(level) }
             pickers.append(.object(effort))
         }
         input["pickers"] = .array(pickers)

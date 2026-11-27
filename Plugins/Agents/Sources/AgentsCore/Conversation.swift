@@ -99,6 +99,14 @@ public enum Agent {
         }
     }
 
+    /// The step stopped, the waiting messages sent at once.
+    public func sendNow() {
+        switch self {
+        case .claude(let session): session.sendNow()
+        case .codex(let session): session.sendNow()
+        }
+    }
+
     /// The unsent messages sent again, oldest first.
     public func sendUnsent() {
         switch self {

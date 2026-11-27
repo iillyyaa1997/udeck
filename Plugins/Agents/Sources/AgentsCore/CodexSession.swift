@@ -370,6 +370,13 @@ public final class CodexSession: Identifiable {
         }
     }
 
+    /// «Отправить сейчас»: the turn is stopped and the messages waiting go
+    /// at once — the turn's end starts them (`turn/completed`).
+    public func sendNow() {
+        guard let connection, let threadID, let turnID, state == .working, !waitingMessages.isEmpty else { return }
+        Task { _ = try? await connection.request("turn/interrupt", ["threadId": .string(threadID), "turnId": .string(turnID)]) }
+    }
+
     /// Stops the running turn; the messages waiting stay unsent (11-26).
     public func interrupt() {
         guard let connection, let threadID, let turnID, state == .working else { return }

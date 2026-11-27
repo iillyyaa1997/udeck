@@ -161,7 +161,7 @@ public final class ChatSession: Identifiable {
     /// Messages that waited behind a turn stopped at the limit: sent after
     /// it where the session goes on, or unsent when it cannot go on now.
     @ObservationIgnored private var heldAtLimit: [WaitingMessage] = []
-    enum Stop { case person, limit }
+    enum Stop { case person, limit, now }
 
     /// Messages sent from here that the CLI has not repeated back yet, oldest
     /// first, with the waiting message each is, if it waits: an echo of one
@@ -371,6 +371,13 @@ public final class ChatSession: Identifiable {
         Task { _ = try? await connection.request({ ClaudeOutbound.interrupt(id: $0, cancelQueued: true) }, timeout: .seconds(10)) }
     }
 
+    /// «Отправить сейчас» (the operator's «1», 11-27): the step the agent is
+    /// on is stopped, and the messages waiting go at once, oldest first.
+    public func sendNow() {
+        guard !waitingMessages.isEmpty else { return }
+        stop(.now)
+    }
+
     /// The unsent messages sent again, oldest first, as if typed now one
     /// after another: the first starts a turn, the rest wait for their step.
     public func sendUnsent() {
@@ -527,9 +534,14 @@ public final class ChatSession: Identifiable {
             stopping = nil
             inTurn = false
             // A stop cancelled what the CLI had not taken: unsent now.
+            var now: [WaitingMessage] = []
             if stopped != nil {
                 unconfirmed.removeAll()
-                if stopped == .limit { heldAtLimit += waitingMessages } else { unsentMessages += waitingMessages }
+                switch stopped {
+                case .limit: heldAtLimit += waitingMessages
+                case .now: now = waitingMessages
+                default: unsentMessages += waitingMessages
+                }
                 waitingMessages.removeAll()
             }
             // Stopped at the account's limit: not an error to read, but a
@@ -549,6 +561,9 @@ public final class ChatSession: Identifiable {
                 refreshUsage()
                 if limit {
                     onLimit?(resets)
+                } else if !now.isEmpty {
+                    // Stopped to send them: they go now, a turn of their own.
+                    resend(now)
                 } else {
                     keepHeldAsUnsent()
                     onTurnFinished?(lastAnswer)
