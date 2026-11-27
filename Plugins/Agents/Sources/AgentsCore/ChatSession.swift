@@ -191,6 +191,14 @@ public final class ChatSession: Identifiable {
     /// says the CLI took it; any other echo is the conversation read back
     /// after a restart.
     @ObservationIgnored private var unconfirmed: [(told: String, waiting: UUID?)] = []
+    /// A built-in command answered in this turn: what it printed came, or the
+    /// conversation was compacted by `/compact`. Its result counts no turns
+    /// and the CLI repeats no `/command` back (claude 2.1.332, measured 11-27:
+    /// `/cost`, `/compact`), so this is what ends its turn.
+    @ObservationIgnored private var commandAnswered = false
+    /// The conversation was compacted in this turn: the CLI then says the last
+    /// command's output again (measured 11-27), not to be drawn twice.
+    @ObservationIgnored private var compactedInTurn = false
 
     @ObservationIgnored private var connection: ClaudeCodeConnection?
     @ObservationIgnored private var reader: Task<Void, Never>?
@@ -283,6 +291,8 @@ public final class ChatSession: Identifiable {
         turnStartedAt = nil
         activity = nil
         inTurn = false
+        commandAnswered = false
+        compactedInTurn = false
         stopping = nil
         asks.removeAll()
         items.append(.note(id: UUID(), text: note))
@@ -543,6 +553,10 @@ public final class ChatSession: Identifiable {
             appendStreaming(delta)
         case .assistant(let message, _):
             guard message.parentToolUseID == nil else { return }
+            if message.localCommand != nil {
+                if compactedInTurn { return }
+                commandAnswered = true
+            }
             for block in message.blocks {
                 switch block {
                 case .text(let text):
@@ -558,17 +572,7 @@ public final class ChatSession: Identifiable {
             }
         case .userEcho(let text, _):
             if let index = unconfirmed.firstIndex(where: { $0.told == text }) {
-                // Taken: a message that waited goes into the feed here, after
-                // the step it waited for, or at the start of its own turn.
-                if let id = unconfirmed.remove(at: index).waiting,
-                   let at = waitingMessages.firstIndex(where: { $0.id == id }) {
-                    let message = waitingMessages.remove(at: at)
-                    items.append(.user(id: message.id, text: message.text))
-                    // One that starts a turn of its own is what a limit sends again.
-                    if let sent = outgoing.removeValue(forKey: id), !inTurn {
-                        lastSent = (message.text, sent.told == message.text ? nil : sent.told, sent.images)
-                    }
-                }
+                taken(at: index)
             } else {
                 // Not one of ours: the conversation read back from the journal,
                 // or what the CLI itself put in — a background task's notice,
@@ -580,6 +584,7 @@ public final class ChatSession: Identifiable {
                 case .compacted: items.append(.note(id: UUID(), text: "compacted"))
                 case .machine:
                     if let task = Self.taskNotice(text) { items.append(.note(id: UUID(), text: "task:" + task)) }
+                    if text.hasPrefix("<local-command-stdout>") { commandAnswered = true }
                 }
                 state = .working
                 beginTurnClock()
@@ -604,9 +609,17 @@ public final class ChatSession: Identifiable {
             // result of zero turns before the real one (spec §10.20): it ends
             // nothing of the user's.
             let stopped = stopping
-            guard stopped != nil || result.turns > 0 || (!inTurn && unconfirmed.isEmpty) else { return }
+            // A built-in command's result: the command is taken, and answered.
+            var answered = false
+            if result.turns == 0, commandAnswered, let index = unconfirmed.firstIndex(where: { $0.told.hasPrefix("/") }) {
+                taken(at: index)
+                answered = true
+            }
+            commandAnswered = false
+            guard stopped != nil || result.turns > 0 || answered || (!inTurn && unconfirmed.isEmpty) else { return }
             stopping = nil
             inTurn = false
+            compactedInTurn = false
             // A stop cancelled what the CLI had not taken: unsent now.
             var now: [WaitingMessage] = []
             if stopped != nil {
@@ -662,8 +675,20 @@ public final class ChatSession: Identifiable {
                 // here, the turn goes on under another account, or later.
                 stop(.limit)
             }
-        case .system("status", let raw) where raw["status"]?.string == "requesting" && state == .working:
-            activity = .requesting
+        case .system("status", let raw) where state == .working:
+            switch raw["status"]?.string {
+            case "requesting": activity = .requesting
+            case "compacting": activity = .compacting
+            default: return
+            }
+        case .system("compact_boundary", let raw):
+            // Said where it happened, and how full the context is now — not
+            // after the next turn (the operator, 11-27: «79%» after /compact).
+            compactedInTurn = true
+            if raw["compact_metadata"]?["trigger"]?.string == "manual" { commandAnswered = true }
+            items.append(.note(id: UUID(), text: "compacted"))
+            if state == .working { activity = .requesting }
+            refreshContext()
         case .system("api_retry", let raw) where state == .working:
             // The call failed and the CLI tries again: said, not «working».
             retries += 1
@@ -685,6 +710,19 @@ public final class ChatSession: Identifiable {
         guard let open = text.range(of: "<summary>"),
               let close = text.range(of: "</summary>", range: open.upperBound..<text.endIndex) else { return "" }
         return String(text[open.upperBound..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A message the CLI has taken: one that waited goes into the feed here,
+    /// after the step it waited for, or at the start of its own turn.
+    private func taken(at index: Int) {
+        guard let id = unconfirmed.remove(at: index).waiting,
+              let at = waitingMessages.firstIndex(where: { $0.id == id }) else { return }
+        let message = waitingMessages.remove(at: at)
+        items.append(.user(id: message.id, text: message.text))
+        // One that starts a turn of its own is what a limit sends again.
+        if let sent = outgoing.removeValue(forKey: id), !inTurn {
+            lastSent = (message.text, sent.told == message.text ? nil : sent.told, sent.images)
+        }
     }
 
     /// The model's last words in the feed.
@@ -757,6 +795,8 @@ public final class ChatSession: Identifiable {
         }
         unconfirmed.removeAll()
         inTurn = false
+        commandAnswered = false
+        compactedInTurn = false
         if !isEnded { state = .ended("the session ended") }
     }
 }

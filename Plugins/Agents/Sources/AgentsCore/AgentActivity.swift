@@ -14,6 +14,9 @@ public enum AgentActivity: Sendable, Equatable {
     case tool(String)
     /// It waits for the person's answer.
     case asking
+    /// The conversation is summed up to free its context: `/compact`, or the
+    /// CLI's own when it fills (`status: compacting`, claude 2.1.332).
+    case compacting
     /// The call failed and is tried again: why — an HTTP status, an error's
     /// name — which attempt, and when the next one goes.
     case retrying(status: Int?, error: String, attempt: Int, next: Date?)

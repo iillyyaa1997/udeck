@@ -226,7 +226,9 @@ enum AgentsCard {
             let step = doing(activity, app) + " " + stepTime
             let silent = now.timeIntervalSince(agent.lastHeard)
             let quietIsTheTool: Bool = switch activity {
-            case .tool, .asking: true
+            // Compacting says nothing until it is done: a long one (104 s,
+            // the operator's, 11-27) is no silence to worry about.
+            case .tool, .asking, .compacting: true
             default: false
             }
             let silence = !quietIsTheTool && silent >= silenceShown ? app.t("тишина ", "silent ") + clock(silent) : nil
@@ -260,6 +262,7 @@ enum AgentsCard {
         case .preparing(let tool): app.t("Готовит \(tool)", "Preparing \(tool)")
         case .tool(let tool): app.t("Выполняет \(tool)", "Running \(tool)")
         case .asking: app.t("Ждёт твоего ответа", "Waiting for you")
+        case .compacting: app.t("Сжимает разговор", "Compacting")
         case .retrying: app.t("Повторяет запрос", "Trying again")
         }
     }

@@ -115,6 +115,10 @@ public struct ClaudeAssistantMessage: Sendable, Equatable {
     /// Set when the message came from a subagent: the tool call that started it.
     public let parentToolUseID: String?
     public let sessionID: String
+    /// What a built-in command printed comes as a message of the model
+    /// `<synthetic>` with the command's name here (`/cost` → `usage`,
+    /// claude 2.1.332, measured 11-27).
+    public let localCommand: String?
 
     init(_ raw: JSONValue) {
         let message = raw["message"] ?? .null
@@ -122,6 +126,7 @@ public struct ClaudeAssistantMessage: Sendable, Equatable {
         model = message["model"]?.string ?? ""
         parentToolUseID = raw["parent_tool_use_id"]?.string
         sessionID = raw["session_id"]?.string ?? ""
+        localCommand = raw["local_command_run"]?["command"]?.string
         blocks = (message["content"]?.array ?? []).map { block in
             switch block["type"]?.string ?? "" {
             case "text": .text(block["text"]?.string ?? "")

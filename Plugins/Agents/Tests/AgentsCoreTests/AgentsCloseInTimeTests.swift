@@ -79,4 +79,32 @@ struct AgentsMachineMessagesTests {
         #expect(AgentsCard.noteText("task:", app) == "A background task ended")
         await session.close()
     }
+    /// `/compact` in the operator's chat (11-27): «Отправляет запрос» for the
+    /// 104 s it took, «Работает» after it, and the context at 79% until the
+    /// next turn ended.
+    @Test("/cost and /compact end their turns; compacting is said; the context is asked again; nothing twice")
+    func builtInCommands() async throws {
+        let (session, folder) = try await startFake()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try await until("idle") { session.state == .idle }
+        try await until("the context") { session.context?.percent == 14 }
+        let answer = "You are currently using your subscription to power your Claude Code usage"
+        let answers = { session.items.filter { if case .assistant(_, answer, _) = $0 { true } else { false } }.count }
+
+        session.send("/cost")
+        try await until("/cost answered") { answers() == 1 }
+        try await until("idle after /cost") { session.state == .idle }
+
+        session.send("/compact")
+        try await until("compacting said") { session.activity == .compacting }
+        let app = AgentsApp(home: folder) { _ in }
+        let live = AgentsCard.liveRow(Conversation(.claude(session)), app).map { "\($0)" } ?? ""
+        #expect(live.contains("Compacting"), "the live line: \(live)")
+        try await until("idle after /compact") { session.state == .idle }
+        try await until("the context after it") { session.context?.percent == 2 }
+        #expect(answers() == 1, "the output /compact says again is not drawn twice")
+        #expect(session.items.filter { if case .note(_, "compacted") = $0 { true } else { false } }.count == 1)
+        #expect(session.items.filter { if case .user(_, "/compact") = $0 { true } else { false } }.count == 1)
+        await session.close()
+    }
 }

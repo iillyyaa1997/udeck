@@ -245,7 +245,8 @@ def control_answer(message):
             {"value": "quick", "displayName": "Quick 1.0", "resolvedModel": "claude-quick-1-0",
              "supportedEffortLevels": ["low", "medium", "high"]}]}
     elif subtype == "get_context_usage":
-        body = {"totalTokens": 28000, "maxTokens": 200000, "percentage": 14, "model": "claude-fake-1-0"}
+        body = ({"totalTokens": 4000, "maxTokens": 200000, "percentage": 2, "model": "claude-fake-1-0"} if COMPACTED
+                else {"totalTokens": 28000, "maxTokens": 200000, "percentage": 14, "model": "claude-fake-1-0"})
     elif subtype == "get_usage":
         body = {"subscription_type": "max", "rate_limits": usage()}
     elif subtype == "interrupt":
@@ -313,6 +314,42 @@ def name(text):
     else:
         words = ("Осмотр папки с заметками" if russian else "Looking at the notes folder") if "[name-me]" in text else ""
     out({"type": "result", "subtype": "success", "is_error": False, "num_turns": 1, "result": words,
+         "session_id": SESSION, "total_cost_usd": 0})
+
+
+COMPACTED = False
+LAST_LOCAL = None
+
+
+def local_command(text):
+    """A built-in command as claude 2.1.332 answers it (measured 11-27): never repeated back; `/cost` prints
+    through a `<synthetic>` message, `/compact` says it compacts, compacts, says the last command's output again;
+    a result of no turns either way."""
+    global COMPACTED, LAST_LOCAL
+    if text.startswith("/compact"):
+        out({"type": "system", "subtype": "status", "status": "compacting", "session_id": SESSION})
+        time.sleep(float(os.environ.get("FAKE_CLAUDE_COMPACT", "1")))
+        out({"type": "system", "subtype": "status", "status": None, "session_id": SESSION})
+        out({"type": "system", "subtype": "compact_boundary", "session_id": SESSION,
+             "compact_metadata": {"trigger": "manual", "pre_tokens": 28000, "post_tokens": 4000}})
+        COMPACTED = True
+        out({"type": "user", "isSynthetic": True, "session_id": SESSION, "uuid": "sum-%d" % time.time_ns(),
+             "message": {"role": "user", "content": "This session is being continued from a previous conversation "
+                                                    "that ran out of context. The summary below covers it."}})
+        if LAST_LOCAL:
+            out({**LAST_LOCAL, "uuid": "again-%d" % time.time_ns()})
+        out({"type": "user", "isReplay": True, "session_id": SESSION, "uuid": "out-%d" % time.time_ns(),
+             "message": {"role": "user", "content": "<local-command-stdout>Compacted </local-command-stdout>"}})
+        result = ""
+    else:
+        result = "You are currently using your subscription to power your Claude Code usage"
+        LAST_LOCAL = {"type": "assistant", "parent_tool_use_id": None, "session_id": SESSION,
+                      "uuid": "cost-%d" % time.time_ns(), "local_command_run": {"command": "usage", "args": ""},
+                      "local_command_source": "<local-command-stdout>%s</local-command-stdout>" % result,
+                      "message": {"id": "cost", "model": "<synthetic>", "role": "assistant",
+                                  "content": [{"type": "text", "text": result}]}}
+        out(LAST_LOCAL)
+    out({"type": "result", "subtype": "success", "is_error": False, "num_turns": 0, "result": result,
          "session_id": SESSION, "total_cost_usd": 0})
 
 
@@ -451,6 +488,9 @@ while True:
             if not limited_wait():
                 echo(message)
             wait_for_interrupt(message, limited_wait())
+            continue
+        if not NAMING and text.strip() in ("/compact", "/cost"):
+            local_command(text.strip())
             continue
         echo(message)
         turn(*said(message))
