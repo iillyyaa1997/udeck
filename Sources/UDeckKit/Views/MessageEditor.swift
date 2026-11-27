@@ -51,6 +51,9 @@ struct MessageEditor: NSViewRepresentable {
         view.textContainer?.widthTracksTextView = true
         view.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         view.delegate = context.coordinator
+        // A file dropped on the field is the row's to attach (its onDrop), not
+        // this view's to write out as a path.
+        view.unregisterDraggedTypes()
         scroll.documentView = view
         context.coordinator.view = view
         apply(to: view)
@@ -151,6 +154,20 @@ final class EditorTextView: NSTextView {
     override func paste(_ sender: Any?) {
         if coordinator?.parent.onPasteFiles() == true { return }
         pasteAsPlainText(sender)
+    }
+
+    /// A picture alone on the clipboard — a screenshot — is something this
+    /// view takes: a plain text view reads no picture, so Edit ▸ Paste was
+    /// greyed out for one and ⌘V did nothing (0.9.20, measured 11-27; a
+    /// Finder file, which comes with its name as text, went through).
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        super.readablePasteboardTypes + [.png, .tiff, .fileURL]
+    }
+
+    /// Kept unregistered: an editable text view registers for drops again
+    /// whenever it is made editable.
+    override func updateDragTypeRegistration() {
+        unregisterDraggedTypes()
     }
 
     override func becomeFirstResponder() -> Bool {
