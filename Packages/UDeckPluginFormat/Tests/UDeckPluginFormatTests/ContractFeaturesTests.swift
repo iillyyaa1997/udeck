@@ -121,12 +121,17 @@ struct ContractFeaturesTests {
         let inputFiles: Set<ContractFeature> = [.rowField(row: "input", field: "files")]
         // 0.9.23: a message's files in the feed.
         let feedFiles: Set<ContractFeature> = [.rowField(row: "feed", field: "files")]
+        // 0.9.24: a badge that turns while busy, and its shorter forms.
+        let liveBadge: Set<ContractFeature> = [.rowField(row: "bar.badge", field: "busy"),
+                                               .rowField(row: "bar.badge", field: "shorter")]
         // 0.9.19: text a plugin puts into its field.
         let inputFill: Set<ContractFeature> = [.rowField(row: "input", field: "fill"),
                                                .rowField(row: "input.fill", field: "id"),
                                                .rowField(row: "input.fill", field: "text")]
         for (feature, release) in ContractFeatures.registry where feature != .manifestField("minUDeck") {
             switch feature {
+            case _ where liveBadge.contains(feature):
+                #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 24)), "\(feature)")
             case _ where feedFiles.contains(feature):
                 #expect(release == .released(SemanticVersion(major: 0, minor: 9, patch: 23)), "\(feature)")
             case _ where inputFill.contains(feature):

@@ -8,6 +8,17 @@ The **plugin contract** is versioned separately from the application, by the
 `api` field in a plugin manifest. See [docs/plugin-api.md](docs/plugin-api.md)
 for what that promises.
 
+## [0.9.24] — 2026-11-27
+
+- **A live line that shows it is alive.** A badge may be `busy` — uDeck
+  turns a ✻ before it, still with Reduce Motion — and have `shorter` forms:
+  where its text does not fit, uDeck shows the longest form that does
+  instead of letting its end go past the card's edge.
+- Agents (installed separately, needs this release) shows above the field
+  what the agent does and for how long this step, «тишина» in yellow when
+  the CLI has said nothing for 30 s outside a running tool, the whole turn's
+  time, and its tokens counting thinking as it goes.
+
 ## [0.9.23] — 2026-11-27
 
 - **A message's photos in the feed.** A message sent with pictures shows

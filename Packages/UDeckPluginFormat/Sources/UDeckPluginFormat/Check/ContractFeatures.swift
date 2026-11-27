@@ -136,8 +136,9 @@ public enum ContractFeatures {
     /// nothing in the contract; 0.9.14 brings a menu option's `button`; 0.9.15
     /// and 0.9.16 change nothing in it; 0.9.17 brings an input's `files`;
     /// 0.9.18 changes nothing in it; 0.9.19 brings an input's `fill`; 0.9.20
-    /// to 0.9.22 change nothing in it; 0.9.23 brings a feed entry's `files`.
-    static let reviewedAt = "0.9.23"
+    /// to 0.9.22 change nothing in it; 0.9.23 brings a feed entry's `files`;
+    /// 0.9.24 a badge's `busy` and `shorter`.
+    static let reviewedAt = "0.9.24"
 
     static let firstRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 1, patch: 0))
 
@@ -224,7 +225,7 @@ public enum ContractFeatures {
 
         // A badge that turns while something is going on, and its shorter
         // forms for a narrow card: 0.9.24.
-        add(.next, ["busy", "shorter"].map { .rowField(row: "bar.badge", field: $0) })
+        add(.released(SemanticVersion(major: 0, minor: 9, patch: 24)), ["busy", "shorter"].map { .rowField(row: "bar.badge", field: $0) })
 
         let fillRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 19))
         add(fillRelease, [.rowField(row: "input", field: "fill")])

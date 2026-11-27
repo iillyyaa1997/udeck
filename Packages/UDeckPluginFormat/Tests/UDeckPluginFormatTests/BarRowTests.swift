@@ -214,7 +214,7 @@ struct BarRowTests {
         let used = ContractFeatures.used(byCard: object)
         #expect(used.contains(.rowField(row: "bar.badge", field: "busy")))
         #expect(used.contains(.rowField(row: "bar.badge", field: "shorter")))
-        #expect(ContractFeatures.release(of: .rowField(row: "bar.badge", field: "busy")) == .next)
+        #expect(ContractFeatures.release(of: .rowField(row: "bar.badge", field: "busy")) == .released(SemanticVersion(major: 0, minor: 9, patch: 24)))
     }
 
     @Test("a card with a bar needs the release that brought bars")
