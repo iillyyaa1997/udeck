@@ -615,6 +615,8 @@ enum AgentsCard {
                 entry["label"] = .string(app.t("войдёт после текущего шага", "goes in after the current step"))
             } else if label == Conversation.unsentLabel {
                 entry["label"] = .string(app.t("не отправлено", "not sent"))
+            } else if label == Conversation.startingLabel {
+                entry["label"] = .string(app.t("уйдёт, когда сессия запустится", "goes once the session is up"))
             }
             return .object(entry)
         case .assistant(let id, let text, let streaming):
@@ -672,6 +674,13 @@ enum AgentsCard {
         }
         if text == "resumed" { return app.t("Продолжено из истории", "Resumed from history") }
         if text == "stopped" { return app.t("Остановлено", "Stopped") }
+        if text == "not-sent" {
+            return app.t("Сообщение не дошло до агента — оно внизу, в «не отправлено»",
+                         "The message did not reach the agent — it is below, not sent")
+        }
+        if text == "not sent: the session has ended" {
+            return app.t("Не отправлено: сессия завершилась", "Not sent: the session has ended")
+        }
         if text.hasPrefix("renamed:") { return app.t("Сессия называется «", "The session is called “") + text.dropFirst(8) + app.t("»", "”") }
         if text == "rename-how" {
             return app.t("Чтобы переименовать, напиши /rename и новое имя", "To rename it, write /rename and the new name")

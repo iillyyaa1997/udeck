@@ -156,6 +156,11 @@ public final class ChatSession: Identifiable {
     /// What each waiting or unsent message is told, with its pictures: sent
     /// again as it was.
     @ObservationIgnored private var outgoing: [UUID: (told: String, images: [(mediaType: String, base64: String)])] = [:]
+    /// Messages written while the session starts or starts again — a new
+    /// effort, another login: they go once it is up. 11-27 one written while
+    /// a new effort restarted the session went to the closed process and was
+    /// lost, «not sent: the session has ended».
+    public private(set) var startingMessages: [WaitingMessage] = []
     /// Why the running turn is being stopped, until its result comes.
     @ObservationIgnored private var stopping: Stop?
     /// Messages that waited behind a turn stopped at the limit: sent after
@@ -222,6 +227,7 @@ public final class ChatSession: Identifiable {
         }
         if reattached {
             if state == .starting { state = .idle }
+            sendWhatWaitedForTheStart()
             return
         }
         do {
@@ -230,8 +236,11 @@ public final class ChatSession: Identifiable {
             if !offered.isEmpty { models = offered }
             if state == .starting { state = .idle }
             refreshContext()
+            sendWhatWaitedForTheStart()
         } catch {
             state = .ended("could not start: \(error)")
+            unsentMessages += startingMessages
+            startingMessages.removeAll()
         }
     }
 
@@ -333,9 +342,16 @@ public final class ChatSession: Identifiable {
 
     private func send(_ text: String, payload: String?, images: [(mediaType: String, base64: String)], again: Bool) {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, let connection, !isEnded else { return }
+        guard !text.isEmpty, !isEnded else { return }
         let told = payload ?? text
         let id = UUID()
+        // Starting, or starting again: it waits for the session to be up.
+        if state == .starting || connection == nil {
+            startingMessages.append(WaitingMessage(id: id, text: text))
+            outgoing[id] = (told, images)
+            return
+        }
+        guard let connection else { return }
         let waits = state == .working && !again
         if waits {
             waitingMessages.append(WaitingMessage(id: id, text: text))
@@ -352,9 +368,32 @@ public final class ChatSession: Identifiable {
             do {
                 try await connection.send(ClaudeOutbound.userMessage(told, images: images))
             } catch {
-                self.note("not sent: the session has ended")
+                self.notSent(id, text: text, told: told, images: images)
             }
         }
+    }
+
+    /// A message the CLI could not be given: unsent, to be sent again — not
+    /// shown as sent and lost — and the card not left saying «working».
+    private func notSent(_ id: UUID, text: String, told: String, images: [(mediaType: String, base64: String)]) {
+        if let at = unconfirmed.firstIndex(where: { $0.told == told }) { unconfirmed.remove(at: at) }
+        items.removeAll { $0.id == id.uuidString }
+        waitingMessages.removeAll { $0.id == id }
+        unsentMessages.append(WaitingMessage(id: id, text: text))
+        outgoing[id] = (told, images)
+        if unconfirmed.isEmpty, !inTurn, state == .working {
+            state = .idle
+            turnStartedAt = nil
+            activity = nil
+        }
+        note("not-sent")
+    }
+
+    /// The session is up: what was written while it started goes now.
+    private func sendWhatWaitedForTheStart() {
+        let held = startingMessages
+        startingMessages.removeAll()
+        resend(held)
     }
 
     /// Stops the running turn, and with it the messages waiting: they stay

@@ -338,6 +338,27 @@ struct AgentsSendNowTests {
         for conversation in app.conversations { for agent in conversation.agents.values { await agent.close() } }
     }
 
+    @Test("a message written while the session starts again goes once it is up — not to the closed process, lost (11-27)")
+    func whileRestarting() async throws {
+        let (session, folder) = try await startFake()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        #expect(session.state == .idle)
+        session.beginRestart("effort:xhigh")
+        session.send("written meanwhile")
+        #expect(session.startingMessages.map(\.text) == ["written meanwhile"])
+        #expect(!users(session.items).contains("written meanwhile"), "not shown as sent")
+        await session.close()
+        let process = try AgentProcess(executable: URL(fileURLWithPath: "/usr/bin/python3"),
+                                       arguments: [fakeClaude.path, "--replay-user-messages"],
+                                       environment: ["PATH": "/usr/bin:/bin", "FAKE_CLAUDE_DELAY": "0"], directory: folder)
+        await session.start(channel: process)
+        try await until("taken once up") { users(session.items).contains("written meanwhile") && !session.asks.isEmpty }
+        #expect(session.startingMessages.isEmpty)
+        session.answer(try #require(session.asks.first), with: .deny)
+        try await until("its end") { session.state == .idle }
+        await session.close()
+    }
+
     @Test("the effort the CLI runs with, from the account's settings, when none was chosen here")
     func effortShown() async throws {
         setenv("UDECK_SETTING_CLAUDE", "\"\(fakeClaude.path)\"", 1)

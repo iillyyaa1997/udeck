@@ -315,6 +315,11 @@ public final class Conversation: Identifiable {
         for message in current.waitingMessages {
             out.append((.user(id: message.id, text: message.text), Self.waitingLabel))
         }
+        if let claude, current.provider == .claude {
+            for message in claude.startingMessages {
+                out.append((.user(id: message.id, text: message.text), Self.startingLabel))
+            }
+        }
         // Then those a stop left unsent, until they are sent or put into the field.
         for message in unsentMessages {
             out.append((.user(id: message.id, text: message.text), Self.unsentLabel))
@@ -327,6 +332,8 @@ public final class Conversation: Identifiable {
     static let waitingLabel = "\u{0}waiting"
     /// The label of a message a stop left unsent.
     static let unsentLabel = "\u{0}unsent"
+    /// The label of a message waiting for the session to start.
+    static let startingLabel = "\u{0}starting"
 
     /// Every provider's unsent messages, oldest provider first.
     public var unsentMessages: [WaitingMessage] {
