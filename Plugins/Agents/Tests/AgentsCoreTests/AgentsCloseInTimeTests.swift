@@ -48,3 +48,35 @@ struct AgentsCloseInTimeTests {
         #expect(ContinuousClock.now - started < .seconds(2))
     }
 }
+
+/// What the CLI puts in as a user message itself — a background task's
+/// notice — is a quiet note, not the person's bubble (the operator, 11-27).
+@Suite("The CLI's own messages")
+@MainActor
+struct AgentsMachineMessagesTests {
+    @Test("a task notice replayed is a note with its summary; the person's words stay a bubble")
+    func taskNotice() async throws {
+        let (session, folder) = try await startFake()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try await until("idle") { session.state == .idle }
+        let notice = """
+        <task-notification>
+        <task-id>bug3s3zwy</task-id>
+        <status>completed</status>
+        <summary>Background command "Записать работу uDeck" completed (exit code 0)</summary>
+        </task-notification>
+        """
+        session.receive(.userEcho(text: notice, raw: .null))
+        #expect(!session.items.contains { if case .user = $0 { true } else { false } }, "no bubble of the person's")
+        #expect(session.items.contains {
+            if case .note(_, let text) = $0 { text == "task:Background command \"Записать работу uDeck\" completed (exit code 0)" } else { false }
+        })
+        session.receive(.userEcho(text: "<system-reminder>x</system-reminder>", raw: .null))
+        #expect(!session.items.contains { if case .user = $0 { true } else { false } }, "a reminder is nothing at all")
+        session.receive(.userEcho(text: "Посмотри логи", raw: .null))
+        #expect(session.items.contains { if case .user(_, "Посмотри логи") = $0 { true } else { false } })
+        let app = AgentsApp(home: folder) { _ in }
+        #expect(AgentsCard.noteText("task:", app) == "A background task ended")
+        await session.close()
+    }
+}

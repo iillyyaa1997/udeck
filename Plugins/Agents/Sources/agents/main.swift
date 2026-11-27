@@ -47,9 +47,9 @@ func run() async {
         }
     } catch {}
     ticker.cancel()
-    for conversation in app.conversations {
-        for agent in conversation.agents.values { await agent.close() }
-    }
+    // Stopped by uDeck — an update, most often: all at once and briefly, as
+    // on SIGTERM. Five seconds for each CLI held an update that long (11-27).
+    await app.closeAll()
 }
 
 await run()

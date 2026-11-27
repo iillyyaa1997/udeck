@@ -570,9 +570,17 @@ public final class ChatSession: Identifiable {
                     }
                 }
             } else {
-                // Not one of ours: the conversation read back from the journal.
+                // Not one of ours: the conversation read back from the journal,
+                // or what the CLI itself put in — a background task's notice,
+                // which was drawn as the person's message (the operator, 11-27:
+                // «не понимаю почему они идут от меня, а я их не отправлял»).
                 finishStreaming(with: nil)
-                items.append(.user(id: UUID(), text: text))
+                switch SessionHistory.spoken(text) {
+                case .said(let words): items.append(.user(id: UUID(), text: words))
+                case .compacted: items.append(.note(id: UUID(), text: "compacted"))
+                case .machine:
+                    if let task = Self.taskNotice(text) { items.append(.note(id: UUID(), text: "task:" + task)) }
+                }
                 state = .working
                 beginTurnClock()
             }
@@ -668,6 +676,15 @@ public final class ChatSession: Identifiable {
         case .response, .system, .other:
             return
         }
+    }
+
+    /// A background task's notice as the CLI puts it in: its summary, «"…"
+    /// completed», without the tags; nil for anything else.
+    nonisolated static func taskNotice(_ text: String) -> String? {
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<task-notification>") else { return nil }
+        guard let open = text.range(of: "<summary>"),
+              let close = text.range(of: "</summary>", range: open.upperBound..<text.endIndex) else { return "" }
+        return String(text[open.upperBound..<close.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// The model's last words in the feed.

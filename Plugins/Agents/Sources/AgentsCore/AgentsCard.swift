@@ -749,6 +749,11 @@ enum AgentsCard {
         }
         if text == "loading-history" { return app.t("Читаю историю…", "Reading the history…") }
         if text == "compact" { return app.t("Сжимаю разговор…", "Compacting the thread…") }
+        if text.hasPrefix("task:") {
+            let summary = String(text.dropFirst(5))
+            return summary.isEmpty ? app.t("Фоновая задача закончилась", "A background task ended")
+                : app.t("Фоновая задача: ", "Background task: ") + summary
+        }
         if text == "compact-failed" { return app.t("Не удалось сжать разговор", "Could not compact the thread") }
         if text == "review-failed" { return app.t("Не удалось начать ревью", "Could not start the review") }
         if text == "model-how" {
