@@ -113,7 +113,7 @@ public enum SessionHistory {
 
     public static func recent(config: URL, limit: Int, keep: (SavedSession) -> Bool = { _ in true },
                               looked: Int? = nil, glances: inout Glances) -> [SavedSession] {
-        let projects = config.appendingPathComponent("projects", isDirectory: true)
+        let projects = SessionHistory.projects(of: config)
         let manager = FileManager.default
         guard let folders = try? manager.contentsOfDirectory(at: projects, includingPropertiesForKeys: nil) else {
             return []
@@ -152,10 +152,18 @@ public enum SessionHistory {
         return out
     }
 
+    /// An account's transcripts folder, its link followed: a mirrored
+    /// account's `projects` links to the main one's, and a directory listing
+    /// of the link itself fails («couldn't be opened», measured 11-27) — no
+    /// session of `pers2` was found to continue after a restart.
+    public static func projects(of config: URL) -> URL {
+        config.appendingPathComponent("projects", isDirectory: true).resolvingSymlinksInPath()
+    }
+
     /// The saved session `sessionID` of the account whose folder is `config`,
     /// wherever its project is; nil when there is none.
     public static func saved(_ sessionID: String, config: URL) -> SavedSession? {
-        let projects = config.appendingPathComponent("projects", isDirectory: true)
+        let projects = SessionHistory.projects(of: config)
         let manager = FileManager.default
         guard Kept.isName(sessionID),
               let folders = try? manager.contentsOfDirectory(at: projects, includingPropertiesForKeys: nil) else { return nil }

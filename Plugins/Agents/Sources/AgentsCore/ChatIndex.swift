@@ -68,7 +68,7 @@ extension SessionHistory {
     /// A saved session's transcript by Claude Code's id, wherever its project
     /// folder is.
     public static func transcript(ofSession id: String, config: URL) -> URL? {
-        let projects = config.appendingPathComponent("projects", isDirectory: true)
+        let projects = SessionHistory.projects(of: config)
         guard let folders = try? FileManager.default.contentsOfDirectory(at: projects, includingPropertiesForKeys: nil)
         else { return nil }
         for folder in folders {

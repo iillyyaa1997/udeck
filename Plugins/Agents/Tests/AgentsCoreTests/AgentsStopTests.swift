@@ -412,3 +412,26 @@ struct AgentsOrphansTests {
         for pid in pids { #expect(kill(pid, 0) != 0, "claude \(pid) still runs") }
     }
 }
+
+/// 11-27, Agents' log: «restore claude 46c04e29…: no transcript under pers2».
+@Suite("A mirrored account's sessions")
+struct MirroredSessionsTests {
+    @Test("a session is found under an account whose projects folder links to the main one's")
+    func throughTheLink() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("agents-mirror-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let main = root.appendingPathComponent(".claude"), mirror = root.appendingPathComponent(".claude-pers2")
+        let folder = main.appendingPathComponent("projects/-Users-me-work")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: mirror, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: mirror.appendingPathComponent("projects"),
+                                                   withDestinationURL: main.appendingPathComponent("projects"))
+        let id = UUID().uuidString.lowercased()
+        try (#"{"type":"user","sessionId":"\#(id)","cwd":"/Users/me/work","message":{"role":"user","content":"look"}}"# + "\n")
+            .write(to: folder.appendingPathComponent("\(id).jsonl"), atomically: true, encoding: .utf8)
+        #expect(SessionHistory.saved(id, config: mirror)?.sessionID == id)
+        #expect(SessionHistory.transcript(ofSession: id, config: mirror) != nil)
+        var glances: SessionHistory.Glances = [:]
+        #expect(SessionHistory.recent(config: mirror, limit: 5, glances: &glances).map(\.sessionID) == [id])
+    }
+}
