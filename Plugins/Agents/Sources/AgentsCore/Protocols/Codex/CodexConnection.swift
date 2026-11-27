@@ -128,16 +128,9 @@ public actor CodexConnection {
 
     public func close(grace: Duration = .seconds(5)) async -> AgentProcess.Exit {
         process.closeInput()
-        let exit = await withTaskGroup(of: AgentProcess.Exit?.self) { group in
-            group.addTask { await self.process.exit() }
-            group.addTask {
-                try? await Task.sleep(for: grace)
-                return nil
-            }
-            defer { group.cancelAll() }
-            return await group.next() ?? nil
-        }
-        if let exit { return exit }
+        // Within `grace` for real: a task group would have waited for the
+        // exit anyway (`AgentChannel.exit(within:)`).
+        if let exit = await process.exit(within: grace) { return exit }
         return await process.terminate(grace: .seconds(3))
     }
 }

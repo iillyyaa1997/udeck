@@ -235,11 +235,15 @@ public actor AgentHost {
         let clock = ContinuousClock()
         let deadline = clock.now + grace
         let margin = min(grace / 4, .seconds(4))
+        // Asked to go, an agent has ten seconds to: what a plugin needs to
+        // close its own (Agents: 5 s for its CLI, 3 more to stop it). Waiting
+        // to the margin held an update 21 s on one that would not (11-27).
+        let asked = min(deadline - margin, clock.now + .seconds(10))
         for session in sessions.values where session.running {
             if let stopLine = session.spec.stopLine { try? session.process?.write(line: stopLine) }
             session.process?.closeInput()
         }
-        while hasRunningAgents, clock.now < deadline - margin {
+        while hasRunningAgents, clock.now < asked {
             try? await Task.sleep(for: .milliseconds(50))
         }
         let stubborn = sessions.values.filter(\.running).compactMap(\.process)

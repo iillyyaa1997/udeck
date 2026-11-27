@@ -454,4 +454,6 @@ while True:
             continue
         echo(message)
         turn(*said(message))
+# A CLI that does not go when its stdin closes — the real one with a task of its own still running (11-27).
+time.sleep(float(os.environ.get("FAKE_CLAUDE_LINGER", "0")))
 sys.exit(0)

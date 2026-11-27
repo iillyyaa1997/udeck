@@ -339,17 +339,35 @@ extension AgentsApp {
         ["none", "minimal", "low", "medium", "high", "xhigh", "max"].first { efforts.contains($0) }
     }
 
-    /// `work`'s answer, or nil when it takes longer than `limit`.
+    /// `work`'s answer, or nil when it takes longer than `limit` — really
+    /// then: a task group waits for `work` to end however it is cancelled.
     nonisolated static func within(_ limit: Duration, _ work: @escaping @Sendable () async -> String?) async -> String? {
-        await withTaskGroup(of: String?.self) { group in
-            group.addTask { await work() }
-            group.addTask {
+        let once = OnceAnswer()
+        return await withCheckedContinuation { continuation in
+            once.set(continuation)
+            Task { once.finish(await work()) }
+            Task {
                 try? await Task.sleep(for: limit)
-                return nil
+                once.finish(nil)
             }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first
         }
+    }
+}
+
+/// A continuation resumed once, whichever answers first.
+final class OnceAnswer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<String?, Never>?
+
+    func set(_ continuation: CheckedContinuation<String?, Never>) {
+        lock.withLock { self.continuation = continuation }
+    }
+
+    func finish(_ value: String?) {
+        let waiting = lock.withLock { () -> CheckedContinuation<String?, Never>? in
+            defer { continuation = nil }
+            return continuation
+        }
+        waiting?.resume(returning: value)
     }
 }

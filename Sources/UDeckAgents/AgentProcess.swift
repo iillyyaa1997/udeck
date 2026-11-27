@@ -274,6 +274,28 @@ public protocol AgentChannel: Sendable {
     var processIdentifier: Int32 { get }
 }
 
+public extension AgentChannel {
+    /// The exit, or nil once `limit` has passed without one — really after
+    /// `limit`: an exit awaited in a task group alongside a sleep was waited
+    /// for all the same when the group ended, the sleep's win or not, and a
+    /// `claude` that would not exit on its closed stdin held Agents for as
+    /// long as it lived (21 s at the 0.9.26 update, 11-27).
+    func exit(within limit: Duration) async -> AgentProcess.Exit? {
+        let once = Locked<CheckedContinuation<AgentProcess.Exit?, Never>?>(nil)
+        return await withCheckedContinuation { continuation in
+            once.withLock { $0 = continuation }
+            let finish: @Sendable (AgentProcess.Exit?) -> Void = { value in
+                once.withLock { $0.take() }?.resume(returning: value)
+            }
+            Task { finish(await self.exit()) }
+            Task {
+                try? await Task.sleep(for: limit)
+                finish(nil)
+            }
+        }
+    }
+}
+
 /// A value behind a lock, for state the pipe handlers (on their own queues)
 /// and callers share.
 final class Locked<Value>: @unchecked Sendable {

@@ -325,6 +325,25 @@ struct HostTests {
         await rig.cleanUp()
     }
 
+    @Test("an agent that does not go when its stdin closes is stopped after 10 s, not at the deadline's margin")
+    func shutdownAsksThenStops() async throws {
+        let rig = try Rig()
+        let client = try await rig.client()
+        // Goes on SIGTERM, not on its stdin closing: Agents waiting for its CLI (11-27).
+        let lingering = try rig.script("lingering.sh", "echo ready; exec sleep 60")
+        let events = Collected(client.events)
+        try await client.spawn(rig.spec("s1", lingering))
+        try await client.subscribe(session: "s1")
+        try await events.until("ready") { _ in events.lines("s1") == ["ready"] }
+        let started = ContinuousClock.now
+        await rig.host.shutdown(grace: .seconds(25))
+        let took = ContinuousClock.now - started
+        #expect(took > .seconds(9) && took < .seconds(13), "took \(took) — 21 s before")
+        #expect(await !rig.host.hasRunningAgents)
+        await client.close()
+        await rig.cleanUp()
+    }
+
     @Test("quit is refused while agents run, unless forced")
     func quit() async throws {
         let rig = try Rig()

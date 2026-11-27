@@ -52,13 +52,20 @@ final class SystemAgentHelper {
         }
         let deadline = Date().addingTimeInterval(seconds)
         var lastError: Error = AgentHostClient.Failure.closed
+        var cutOff = CutOff()
         while Date() < deadline {
+            let tried = Date()
             do {
                 let client = AgentHostClient(machServiceName: label, helperRequirement: helperRequirement)
                 let hello = try await client.hello(client: "uDeck \(Self.version)")
                 return (client, hello)
             } catch {
                 lastError = error
+                // A helper that answers by cutting the line at once is one of
+                // an older uDeck, left running by the update: waiting the
+                // whole time for it was 10 s of an empty panel (11-27).
+                if cutOff.note(closedAtOnce: (error as? AgentHostClient.Failure) == .closed
+                    && Date().timeIntervalSince(tried) < 0.2) { break }
                 try await Task.sleep(for: .milliseconds(250))
             }
         }
@@ -122,6 +129,19 @@ final class SystemAgentHelper {
         case .notFound: "notFound"
         @unknown default: "unknown(\(status.rawValue))"
         }
+    }
+}
+
+/// Connections cut at once, in a row: after `limit` of them the helper
+/// answering is taken for one that will not serve this uDeck.
+struct CutOff {
+    var count = 0
+    let limit = 6
+
+    /// True once enough in a row were cut at once.
+    mutating func note(closedAtOnce: Bool) -> Bool {
+        count = closedAtOnce ? count + 1 : 0
+        return count >= limit
     }
 }
 
