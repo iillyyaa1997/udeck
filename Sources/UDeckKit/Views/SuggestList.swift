@@ -124,17 +124,21 @@ struct SuggestList: View {
                         return key(.tab(number)) ? .handled : .ignored
                     }
                     .accessibilityIdentifier("row.input.\(rowID).suggest.search")
-                    .onAppear { searchFocused = true }
+                    .task {
+                        // After the field lets the keyboard go: set at once, the
+                        // focus stayed in the field (lab 45993059585).
+                        try? await Task.sleep(for: .milliseconds(80))
+                        searchFocused = true
+                    }
             }
-            ViewThatFits(in: .vertical) {
-                list(shown)
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical) { list(shown) }
-                        .onChange(of: state.highlighted) { _, index in
-                            let items = shown.flatMap(\.items)
-                            if items.indices.contains(index) { proxy.scrollTo(items[index].id) }
-                        }
-                }
+            // As tall as what it holds, up to the room it has; then it scrolls.
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) { list(shown) }
+                    .frame(height: min(maxHeight, Self.height(of: shown, textSize: theme.textSize)))
+                    .onChange(of: state.highlighted) { _, index in
+                        let items = shown.flatMap(\.items)
+                        if items.indices.contains(index) { proxy.scrollTo(items[index].id) }
+                    }
             }
             Text(strings(.suggestKeys))
                 .font(.system(size: max(9, theme.textSize - 3)))
@@ -144,7 +148,6 @@ struct SuggestList: View {
         .padding(5)
         .background(RoundedRectangle(cornerRadius: 10).fill(theme.backing).shadow(color: .black.opacity(0.35), radius: 10, y: 4))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(theme.line, lineWidth: 1))
-        .frame(maxHeight: maxHeight, alignment: .bottom)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("row.input.\(rowID).suggest.list")
         .task(id: searchKey) {
@@ -206,6 +209,17 @@ struct SuggestList: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// What the list's rows take: a row and a group's title each a line
+    /// and its padding; an empty list its one line.
+    static func height(of groups: [Group], textSize: CGFloat) -> CGFloat {
+        let row = ceil(textSize * 1.25) + 6 + 1
+        let title = ceil((textSize - 3.5) * 1.25) + 7
+        guard !groups.isEmpty else { return row + 8 }
+        let items = groups.reduce(0) { $0 + $1.items.count }
+        let titles = groups.filter { $0.title != nil }.count
+        return CGFloat(items) * row + CGFloat(titles) * title + 4
     }
 
     static func offsets(_ groups: [Group]) -> [Int] {

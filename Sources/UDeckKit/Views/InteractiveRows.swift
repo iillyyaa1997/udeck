@@ -333,26 +333,26 @@ struct InputRowView: View {
     var body: some View {
         Group {
             if let pickers = input.pickers, !pickers.isEmpty {
-                panel(pickers)
+                VStack(alignment: .leading, spacing: 6) {
+                    suggestionList
+                    panel(pickers)
+                }
             } else {
                 line
             }
         }
+        // The room above the field while the list is shut: the list, open,
+        // takes part of it from the feed.
         .background(GeometryReader { geometry in
             Color.clear
-                .onAppear { roomAbove = geometry.frame(in: .named(CardBodyView.space)).minY }
-                .onChange(of: geometry.frame(in: .named(CardBodyView.space)).minY) { _, top in roomAbove = top }
+                .onAppear { if !suggesting.open { roomAbove = geometry.frame(in: .named(CardBodyView.space)).minY } }
+                .onChange(of: geometry.frame(in: .named(CardBodyView.space)).minY) { _, top in
+                    if !suggesting.open { roomAbove = top }
+                }
         })
-        .overlay(alignment: .top) {
-            if let suggest, suggesting.open {
-                let height = max(90, min(300, roomAbove - 8))
-                SuggestList(rowID: input.id, suggest: suggest, theme: theme, state: suggesting, maxHeight: height,
-                            pick: pick, send: send)
-                    .frame(height: height, alignment: .bottom)
-                    .alignmentGuide(.top) { $0[.bottom] + 6 }
-            }
-        }
         .onChange(of: input.suggest == nil) { _, gone in if gone { suggesting.close() } }
+        // Shut, the list gives the keyboard back to the field.
+        .onChange(of: suggesting.open) { _, open in if !open { handle.focus() } }
         .onDrop(of: [.fileURL], isTargeted: takesFiles ? $dropping : .constant(false)) { providers in
             guard takesFiles else { return false }
             for provider in providers {
@@ -484,6 +484,17 @@ struct InputRowView: View {
 
     // MARK: - Suggestions
 
+    /// The list, above the field and part of its row: the feed gives it room
+    /// while it is open — an overlay over the feed went below the field, past
+    /// the card's edge (lab 45993059585).
+    @ViewBuilder
+    private var suggestionList: some View {
+        if let suggest, suggesting.open {
+            SuggestList(rowID: input.id, suggest: suggest, theme: theme, state: suggesting,
+                        maxHeight: max(90, min(260, roomAbove * 0.6)), pick: pick, send: send)
+        }
+    }
+
     /// The «/» by the field: opens the suggestions, or closes them.
     @ViewBuilder
     private var suggestButton: some View {
@@ -508,6 +519,8 @@ struct InputRowView: View {
     private func openSuggestions(tab: String? = nil, searched: Bool = false) {
         guard let suggest else { return }
         suggesting.close()
+        // The list's search takes the keyboard from the field.
+        handle.view?.window?.makeFirstResponder(nil)
         suggesting.searching = true
         suggesting.tab = tab ?? (searched ? suggest.tabs.first { $0.search == true }?.id : nil)
         if suggesting.tab == nil, suggest.tabs.filter({ $0.search != true }).count <= 1 {
@@ -561,6 +574,7 @@ struct InputRowView: View {
 
     private var line: some View {
         VStack(alignment: .leading, spacing: 6) {
+            suggestionList
             attachments
             HStack(spacing: 6) {
             if takesFiles { attachButton }
