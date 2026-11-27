@@ -86,6 +86,8 @@ public final class CodexSession: Identifiable {
     public private(set) var lastHeard = Date()
     /// The tokens that came back this turn.
     public private(set) var tokens = TurnTokens()
+    /// Its skills for the folder (`skills/list`): «$name» in a message is one.
+    public private(set) var skills: [AgentCommand] = []
     /// The thread's output tokens as Codex last said them, and when the turn began.
     @ObservationIgnored private var threadOutput = 0
     @ObservationIgnored private var turnBase = 0
@@ -185,6 +187,9 @@ public final class CodexSession: Identifiable {
             if let list = try? await connection.request("model/list", [:], timeout: .seconds(30)) {
                 models = Self.models(list)
             }
+            if let list = try? await connection.request("skills/list", ["cwds": [.string(folder.path)]], timeout: .seconds(20)) {
+                skills = AgentCommand.codex(list)
+            }
             let result: JSONValue
             if let threadID {
                 result = try await connection.request("thread/resume", ["threadId": .string(threadID)])
@@ -275,10 +280,45 @@ public final class CodexSession: Identifiable {
         startTurn(text ?? shown, pictures: pictures, connection: connection, threadID: threadID)
     }
 
-    private static func input(_ text: String, pictures: [String]) -> JSONValue {
+    private func input(_ text: String, pictures: [String]) -> JSONValue {
+        Self.input(text, pictures: pictures, skills: skills)
+    }
+
+    /// The text, the pictures, and each skill it names as `$name` — as the
+    /// Codex terminal sends a skill picked from its list: the text keeps
+    /// the name, and the skill goes with it.
+    static func input(_ text: String, pictures: [String], skills: [AgentCommand] = []) -> JSONValue {
         // `localImage`, as the app server names it (a live turn, 11-25: `local_image` is
         // «unknown variant»).
-        .array([["type": "text", "text": .string(text)]] + pictures.map { ["type": "localImage", "path": .string($0)] })
+        let named = skills.filter { skill in
+            guard let path = skill.path, !path.isEmpty else { return false }
+            return text.components(separatedBy: .whitespacesAndNewlines).contains("$" + skill.name)
+        }
+        return .array([["type": "text", "text": .string(text)]]
+            + pictures.map { ["type": "localImage", "path": .string($0)] }
+            + named.map { ["type": "skill", "name": .string($0.name), "path": .string($0.path ?? "")] })
+    }
+
+    /// `/compact`: Codex sums the thread up to free its context.
+    public func compact() {
+        guard let connection, let threadID, !isEnded else { return }
+        note("compact")
+        Task {
+            if (try? await connection.request("thread/compact/start", ["threadId": .string(threadID)])) == nil {
+                note("compact-failed")
+            }
+        }
+    }
+
+    /// `/review`: Codex reviews what is not committed, in this thread.
+    public func review() {
+        guard let connection, let threadID, !isEnded else { return }
+        Task {
+            if (try? await connection.request("review/start", ["threadId": .string(threadID),
+                                                               "target": ["type": "uncommittedChanges"]])) == nil {
+                note("review-failed")
+            }
+        }
     }
 
     /// The messages waiting, steered into the running turn once it has an
@@ -291,7 +331,7 @@ public final class CodexSession: Identifiable {
         for message in messages {
             let params: JSONValue = ["threadId": .string(threadID), "expectedTurnId": .string(turn),
                                      "clientUserMessageId": .string(message.id.uuidString),
-                                     "input": Self.input(message.text, pictures: message.pictures)]
+                                     "input": input(message.text, pictures: message.pictures)]
             Task {
                 do {
                     _ = try await connection.request("turn/steer", params)
@@ -363,7 +403,7 @@ public final class CodexSession: Identifiable {
         activity = .requesting
         var params: [String: JSONValue] = [
             "threadId": .string(threadID),
-            "input": Self.input(text, pictures: pictures),
+            "input": input(text, pictures: pictures),
         ]
         if let chosenModel { params["model"] = .string(chosenModel) }
         if let effort { params["effort"] = .string(effort) }

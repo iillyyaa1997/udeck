@@ -101,6 +101,9 @@ public final class ChatSession: Identifiable {
     public private(set) var model: String?
     /// The models the CLI offers, from `initialize`.
     public private(set) var models: [ModelChoice] = []
+    /// Its commands and skills, from `initialize` (claude 2.1.332: 99 on the
+    /// operator's account, each with a description, measured 11-27).
+    public private(set) var commands: [AgentCommand] = []
     /// The model asked for here (a `value` of `models`), nil for the CLI's
     /// own choice.
     public internal(set) var chosenModel: String?
@@ -249,6 +252,7 @@ public final class ChatSession: Identifiable {
             let answer = try await connection.request({ ClaudeOutbound.initialize(id: $0) }, timeout: .seconds(60))
             let offered = ModelChoice.list(answer.body)
             if !offered.isEmpty { models = offered }
+            commands = AgentCommand.claude(answer.body)
             if state == .starting { state = .idle }
             refreshContext()
             sendWhatWaitedForTheStart()

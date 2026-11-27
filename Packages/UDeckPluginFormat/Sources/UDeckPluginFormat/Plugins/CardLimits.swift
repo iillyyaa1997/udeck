@@ -71,6 +71,11 @@ public struct CardLimits: Sendable, Equatable {
     static let pickers = 4
     /// A badge's shorter forms.
     static let badgeForms = 4
+    /// What a field suggests: its tabs, its items, what was found, recent ones.
+    static let suggestTabs = 8
+    static let suggestItems = 500
+    static let suggestFound = 100
+    static let suggestRecent = 20
 }
 
 extension Card {
@@ -196,7 +201,29 @@ extension Card {
                                        enabled: input.enabled, stop: input.stop,
                                        pickers: input.pickers.map { Array($0.prefix(CardLimits.pickers).map(menu)) },
                                        files: input.files,
-                                       fill: input.fill.map { InputFill(id: trim($0.id), text: long($0.text)) }))
+                                       fill: input.fill.map { InputFill(id: trim($0.id), text: long($0.text)) },
+                                       suggest: input.suggest.map { suggest in
+                                           if suggest.tabs.count > CardLimits.suggestTabs
+                                               || (suggest.items?.count ?? 0) > CardLimits.suggestItems
+                                               || (suggest.found?.items.count ?? 0) > CardLimits.suggestFound
+                                               || (suggest.recent?.count ?? 0) > CardLimits.suggestRecent { cut = true }
+                                           func item(_ item: SuggestItem) -> SuggestItem {
+                                               SuggestItem(id: trim(item.id), tab: trim(item.tab), text: trim(item.text),
+                                                           title: item.title.map(trim), detail: item.detail.map(trim),
+                                                           note: item.note.map(trim))
+                                           }
+                                           return InputSuggest(
+                                               tabs: suggest.tabs.prefix(CardLimits.suggestTabs).map {
+                                                   SuggestTab(id: trim($0.id), title: trim($0.title), trigger: $0.trigger.map(trim),
+                                                              start: $0.start, search: $0.search)
+                                               },
+                                               items: suggest.items.map { Array($0.prefix(CardLimits.suggestItems).map(item)) },
+                                               recent: suggest.recent.map { Array($0.prefix(CardLimits.suggestRecent).map(trim)) },
+                                               found: suggest.found.map {
+                                                   SuggestFound(tab: trim($0.tab), query: trim($0.query),
+                                                                items: Array($0.items.prefix(CardLimits.suggestFound).map(item)))
+                                               })
+                                       }))
 
             case .bar(let bar):
                 if bar.items.count > CardLimits.barItems { cut = true }

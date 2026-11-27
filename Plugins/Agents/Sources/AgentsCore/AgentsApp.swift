@@ -25,6 +25,11 @@ public final class AgentsApp {
     public internal(set) var places: [String: Place] = ["": Place()]
     /// The place an event came from, or the card is drawn for, now.
     public internal(set) var here = ""
+    /// Commands and skills used lately, newest first, by provider: the
+    /// field's suggestions show them first (uDeck 0.9.25).
+    public internal(set) var recentCommands: [String: [String]] = [:]
+    /// The files found for the last «@» query, by place.
+    public internal(set) var foundFiles: [String: (query: String, files: [String])] = [:]
     public private(set) var russian = false
 
     /// The conversation shown here.
@@ -110,6 +115,7 @@ public final class AgentsApp {
         account = accounts[0]
         names = ChatNames.load(home: home)
         unsent = UnsentStore.load(home: home)
+        recentCommands = RecentCommands.load(home: home)
         knownModels[.claude] = Self.claudeAliases
     }
 
@@ -167,10 +173,16 @@ public final class AgentsApp {
             select(event["id"]?.string ?? "")
         case "press":
             press(event["id"]?.string ?? "")
+        case "suggest":
+            suggested(tab: event["id"]?.string ?? "", query: event["text"]?.string ?? "")
         case "submit":
             let text = event["text"]?.string ?? ""
             let files = (event["files"]?.array ?? []).compactMap(\.string)
+            if let agent = selected?.current, let used = AgentsSuggest.used(text, agent) {
+                remember(used, for: agent.provider)
+            }
             if files.isEmpty, renameFromTheField(text) { break }
+            if files.isEmpty, await commandFromTheField(text) { break }
             // Sent from the field: what was put back into it is the person's now.
             selected?.fill = nil
             selected?.send(text, files: files)
@@ -847,5 +859,97 @@ public final class AgentsApp {
         guard let raw else { return nil }
         if let decoded = try? JSONDecoder().decode(String.self, from: Data(raw.utf8)) { return decoded }
         return raw
+    }
+}
+
+// MARK: - The field's suggestions
+
+extension AgentsApp {
+    /// «@» typed, or the files' tab searched: the folder's files for the
+    /// query, into this place's card.
+    func suggested(tab: String, query: String) {
+        guard tab == "files", let conversation = selected else { return }
+        let place = here
+        let folder = conversation.folder
+        Task {
+            let files = await FileSearch.shared.find(query, in: folder)
+            foundFiles[place] = (query, files)
+            render()
+        }
+    }
+
+    /// A command or a skill sent: first among the recent ones.
+    func remember(_ id: String, for provider: Provider) {
+        var list = recentCommands[provider.rawValue] ?? []
+        list.removeAll { $0 == id }
+        list.insert(id, at: 0)
+        recentCommands[provider.rawValue] = Array(list.prefix(10))
+        RecentCommands.save(recentCommands, home: home)
+    }
+
+    /// What the card does itself with a command typed: `/model`, `/effort`,
+    /// `/clear` — `/new` and Codex's `/compact` and `/review` too. True when
+    /// the text was one of them.
+    func commandFromTheField(_ text: String) async -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("/"), let conversation = selected else { return false }
+        let words = trimmed.split(maxSplits: 1, whereSeparator: { $0.isWhitespace }).map(String.init)
+        let command = String(words[0].dropFirst()).lowercased()
+        let argument = words.count > 1 ? words[1].trimmingCharacters(in: .whitespaces) : ""
+        let agent = conversation.current
+        switch command {
+        case "model":
+            guard !argument.isEmpty else { agent.note("model-how"); return true }
+            let wanted = argument.lowercased()
+            let models = agent.models
+            guard let model = models.first(where: { $0.value.lowercased() == wanted || $0.name.lowercased() == wanted })
+                ?? models.first(where: { $0.value.lowercased().hasPrefix(wanted) || $0.name.lowercased().hasPrefix(wanted) })
+            else {
+                agent.note("model-unknown:" + argument)
+                return true
+            }
+            choose(menu: "model", option: agent.provider.rawValue + ":" + model.value)
+            return true
+        case "effort":
+            let levels = AgentsCard.effortLevels(agent)
+            guard !argument.isEmpty, let level = levels.first(where: { $0 == argument.lowercased() }) else {
+                agent.note("effort-how")
+                return true
+            }
+            choose(menu: "effort", option: level)
+            return true
+        case "clear", "new":
+            await newConversation(in: conversation.folder, provider: conversation.active)
+            return true
+        case "compact":
+            guard case .codex(let session) = agent else { return false }
+            session.compact()
+            return true
+        case "review":
+            guard case .codex(let session) = agent else { return false }
+            session.review()
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+/// The recent commands, kept across restarts: `~/.udeck/agents/recent.json`.
+enum RecentCommands {
+    static func file(_ home: URL) -> URL {
+        home.appendingPathComponent(".udeck/agents/recent.json")
+    }
+
+    static func load(home: URL) -> [String: [String]] {
+        guard let data = try? Data(contentsOf: file(home)),
+              let kept = try? JSONDecoder().decode([String: [String]].self, from: data) else { return [:] }
+        return kept
+    }
+
+    static func save(_ recent: [String: [String]], home: URL) {
+        let url = file(home)
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? JSONEncoder().encode(recent).write(to: url, options: .atomic)
     }
 }

@@ -227,6 +227,13 @@ public enum ContractFeatures {
         // forms for a narrow card: 0.9.24.
         add(.released(SemanticVersion(major: 0, minor: 9, patch: 24)), ["busy", "shorter"].map { .rowField(row: "bar.badge", field: $0) })
 
+        // What a field suggests — commands, skills, files: the next release.
+        add(.next, [.rowField(row: "input", field: "suggest")])
+        add(.next, InputSuggest.CodingKeys.allCases.map { .rowField(row: "input.suggest", field: $0.stringValue) })
+        add(.next, SuggestTab.CodingKeys.allCases.map { .rowField(row: "input.suggest.tabs", field: $0.stringValue) })
+        add(.next, SuggestItem.CodingKeys.allCases.map { .rowField(row: "input.suggest.items", field: $0.stringValue) })
+        add(.next, SuggestFound.CodingKeys.allCases.map { .rowField(row: "input.suggest.found", field: $0.stringValue) })
+
         let fillRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 19))
         add(fillRelease, [.rowField(row: "input", field: "fill")])
         add(fillRelease, ["id", "text"].map { .rowField(row: "input.fill", field: $0) })
@@ -340,6 +347,16 @@ public enum ContractFeatures {
                 for field in present(body?.object) { used.insert(.rowField(row: "input", field: field)) }
                 for field in present(body?.object?.first("fill")?.object) {
                     used.insert(.rowField(row: "input.fill", field: field))
+                }
+                let suggest = body?.object?.first("suggest")?.object
+                for field in present(suggest) { used.insert(.rowField(row: "input.suggest", field: field)) }
+                for tab in suggest?.first("tabs")?.array ?? [] {
+                    for field in present(tab.object) { used.insert(.rowField(row: "input.suggest.tabs", field: field)) }
+                }
+                let found = suggest?.first("found")?.object
+                for field in present(found) { used.insert(.rowField(row: "input.suggest.found", field: field)) }
+                for item in (suggest?.first("items")?.array ?? []) + (found?.first("items")?.array ?? []) {
+                    for field in present(item.object) { used.insert(.rowField(row: "input.suggest.items", field: field)) }
                 }
                 for picker in body?.object?.first("pickers")?.array ?? [] {
                     for field in present(picker.object) { used.insert(.rowField(row: "menu", field: field)) }

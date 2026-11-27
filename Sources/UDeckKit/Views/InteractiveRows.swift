@@ -319,6 +319,16 @@ struct InputRowView: View {
     private var takesFiles: Bool { input.files == true && input.enabled != false }
 
     @State private var dropping = false
+    /// The field's suggestions (0.9.25): open or not, where, for what.
+    @State private var suggesting = SuggestState()
+    @State private var handle = EditorHandle()
+    /// Room above the field in the card, for the list over it.
+    @State private var roomAbove: CGFloat = 240
+
+    private var suggest: InputSuggest? {
+        guard let suggest = input.suggest, !suggest.tabs.isEmpty, input.enabled != false else { return nil }
+        return suggest
+    }
 
     var body: some View {
         Group {
@@ -328,6 +338,21 @@ struct InputRowView: View {
                 line
             }
         }
+        .background(GeometryReader { geometry in
+            Color.clear
+                .onAppear { roomAbove = geometry.frame(in: .named(CardBodyView.space)).minY }
+                .onChange(of: geometry.frame(in: .named(CardBodyView.space)).minY) { _, top in roomAbove = top }
+        })
+        .overlay(alignment: .top) {
+            if let suggest, suggesting.open {
+                let height = max(90, min(300, roomAbove - 8))
+                SuggestList(rowID: input.id, suggest: suggest, theme: theme, state: suggesting, maxHeight: height,
+                            pick: pick, send: send)
+                    .frame(height: height, alignment: .bottom)
+                    .alignmentGuide(.top) { $0[.bottom] + 6 }
+            }
+        }
+        .onChange(of: input.suggest == nil) { _, gone in if gone { suggesting.close() } }
         .onDrop(of: [.fileURL], isTargeted: takesFiles ? $dropping : .constant(false)) { providers in
             guard takesFiles else { return false }
             for provider in providers {
@@ -447,7 +472,91 @@ struct InputRowView: View {
                       placeholderColor: NSColor(theme.muted), enabled: input.enabled != false, maxLines: lines,
                       identifier: "row.input.\(input.id)", onSubmit: submit,
                       onEscape: input.stop.map { stop in { send(.press(id: stop)) } },
-                      onPasteFiles: pasteFiles)
+                      onPasteFiles: pasteFiles,
+                      onCaret: suggest == nil ? nil : { text, caret in typed(text, caret: caret) },
+                      onSuggestKey: suggest == nil ? nil : { key in suggestKey(key) },
+                      onShortcut: suggest == nil ? nil : { files in openSuggestions(searched: files) },
+                      menuItems: (suggest?.tabs ?? []).map { tab in
+                          (title: tab.title + "…", action: { openSuggestions(tab: tab.id) })
+                      },
+                      handle: handle)
+    }
+
+    // MARK: - Suggestions
+
+    /// The «/» by the field: opens the suggestions, or closes them.
+    @ViewBuilder
+    private var suggestButton: some View {
+        if suggest != nil {
+            Button {
+                if suggesting.open { suggesting.close() } else { openSuggestions() }
+            } label: {
+                Text("/").font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .frame(width: 24, height: 24)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(suggesting.open ? Color.accentColor.opacity(0.3) : Color.clear))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(theme.muted)
+            .help(strings(.suggestOpen))
+            .accessibilityIdentifier("row.input.\(input.id).suggest")
+        }
+    }
+
+    /// Opened without typing — the button, ⌘/, the menu: on a tab, with a
+    /// search of the list's own.
+    private func openSuggestions(tab: String? = nil, searched: Bool = false) {
+        guard let suggest else { return }
+        suggesting.close()
+        suggesting.searching = true
+        suggesting.tab = tab ?? (searched ? suggest.tabs.first { $0.search == true }?.id : nil)
+        if suggesting.tab == nil, suggest.tabs.filter({ $0.search != true }).count <= 1 {
+            suggesting.tab = suggest.tabs.first { $0.search != true }?.id ?? suggest.tabs.first?.id
+        }
+        suggesting.open = true
+    }
+
+    /// The text or the caret moved: a trigger before the caret opens the
+    /// list on its tabs, and what follows it is the query; without one, a
+    /// list a trigger opened closes.
+    private func typed(_ text: String, caret: Int) {
+        guard let suggest else { return }
+        let token = Suggestions.token(in: text, caret: caret, tabs: suggest.tabs)
+        if let token {
+            if suggesting.dismissedAt == token.range.location { return }
+            suggesting.dismissedAt = nil
+            if !suggesting.open || suggesting.searching || suggesting.token?.trigger != token.trigger {
+                suggesting.close()
+                suggesting.scope = token.tabs
+                suggesting.tab = token.tabs.count == 1 ? token.tabs[0] : nil
+            }
+            suggesting.token = token
+            suggesting.query = token.query
+            suggesting.open = true
+        } else {
+            suggesting.dismissedAt = nil
+            if suggesting.open, !suggesting.searching { suggesting.close() }
+        }
+    }
+
+    /// A key from the field, the list's while it is open.
+    private func suggestKey(_ key: SuggestKey) -> Bool {
+        guard let suggest, suggesting.open else { return false }
+        return SuggestList.key(key, suggest, suggesting, pick: pick)
+    }
+
+    /// A suggestion picked: its text into the field — in place of the
+    /// trigger typed, or at the caret — and the list closed.
+    private func pick(_ item: SuggestItem) {
+        let atStart = suggest?.tabs.first { $0.id == item.tab }?.start == true
+        let caret = handle.caret ?? (draft as NSString).length
+        let result = Suggestions.insert(item, into: draft, caret: caret, token: suggesting.token, atStart: atStart)
+        suggesting.close()
+        if handle.view != nil {
+            handle.apply(result.text, caret: result.caret)
+        } else {
+            draft = result.text
+        }
     }
 
     private var line: some View {
@@ -455,6 +564,7 @@ struct InputRowView: View {
             attachments
             HStack(spacing: 6) {
             if takesFiles { attachButton }
+            suggestButton
             field(lines: 6)
                 .padding(.horizontal, 7).padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 6).fill(theme.backing))
@@ -477,6 +587,7 @@ struct InputRowView: View {
             field(lines: 8)
             HStack(spacing: 6) {
                 if takesFiles { attachButton }
+                suggestButton
                 ForEach(Array(pickers.enumerated()), id: \.offset) { index, picker in
                     MenuPill(menu: picker, row: input.id, theme: theme, send: send)
                         .layoutPriority(Double(-index))
@@ -523,6 +634,7 @@ struct InputRowView: View {
         guard !text.isEmpty || !sent.isEmpty, input.enabled != false else { return }
         draft = ""
         files = []
+        suggesting.close()
         send(.submit(row: input.id, text: text, files: sent.map(\.path)))
     }
 }

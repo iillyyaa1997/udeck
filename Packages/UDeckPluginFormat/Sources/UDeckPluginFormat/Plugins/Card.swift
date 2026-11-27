@@ -273,11 +273,15 @@ public struct InputRow: Codable, Equatable, Sendable {
     /// Text the plugin puts into the field, once (0.9.19): messages it gives
     /// back to be edited and sent again.
     public var fill: InputFill?
+    /// What the field suggests (0.9.25): commands, skills, files — a list over
+    /// the field, opened by typing a tab's trigger, by the field's «/» button,
+    /// by ⌘/ or from the field's menu. Picking one puts its `text` in.
+    public var suggest: InputSuggest?
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case id, placeholder, enabled, stop, pickers, files, fill }
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, placeholder, enabled, stop, pickers, files, fill, suggest }
 
     public init(id: String, placeholder: String? = nil, enabled: Bool? = nil, stop: String? = nil,
-                pickers: [CardMenu]? = nil, files: Bool? = nil, fill: InputFill? = nil)
+                pickers: [CardMenu]? = nil, files: Bool? = nil, fill: InputFill? = nil, suggest: InputSuggest? = nil)
     {
         self.id = id
         self.placeholder = placeholder
@@ -286,6 +290,96 @@ public struct InputRow: Codable, Equatable, Sendable {
         self.pickers = pickers
         self.files = files
         self.fill = fill
+        self.suggest = suggest
+    }
+}
+
+/// What a field suggests (uDeck 0.9.25), in tabs: uDeck adds one of its own
+/// before them, «All», of every tab that is not searched.
+public struct InputSuggest: Codable, Equatable, Sendable {
+    public var tabs: [SuggestTab]
+    /// The suggestions of the tabs that are given whole.
+    public var items: [SuggestItem]?
+    /// Items used lately, newest first, by `id`: shown first while nothing
+    /// is typed.
+    public var recent: [String]?
+    /// What the plugin found for a searched tab's query — its answer to a
+    /// `suggest` event.
+    public var found: SuggestFound?
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case tabs, items, recent, found }
+
+    public init(tabs: [SuggestTab], items: [SuggestItem]? = nil, recent: [String]? = nil, found: SuggestFound? = nil) {
+        self.tabs = tabs
+        self.items = items
+        self.recent = recent
+        self.found = found
+    }
+}
+
+/// One tab of suggestions.
+public struct SuggestTab: Codable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    /// Typing this opens the list on this tab: «/», «@». What is typed after
+    /// it, up to the caret, is the query.
+    public var trigger: String?
+    /// The trigger counts only at the start of the text, as a command's «/».
+    public var start: Bool?
+    /// Its items are the plugin's to find for each query — files — and asked
+    /// for with a `suggest` event, rather than given whole in `items`.
+    public var search: Bool?
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, title, trigger, start, search }
+
+    public init(id: String, title: String, trigger: String? = nil, start: Bool? = nil, search: Bool? = nil) {
+        self.id = id
+        self.title = title
+        self.trigger = trigger
+        self.start = start
+        self.search = search
+    }
+}
+
+/// One suggestion.
+public struct SuggestItem: Codable, Equatable, Sendable {
+    public var id: String
+    /// The tab it is in.
+    public var tab: String
+    /// What picking it puts into the field, in place of the trigger and what
+    /// was typed after it.
+    public var text: String
+    /// What the list shows of it, when not its `text`.
+    public var title: String?
+    /// A line about it, after the title.
+    public var detail: String?
+    /// A word at the end of its line: where it goes, what kind it is.
+    public var note: String?
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case id, tab, text, title, detail, note }
+
+    public init(id: String, tab: String, text: String, title: String? = nil, detail: String? = nil, note: String? = nil) {
+        self.id = id
+        self.tab = tab
+        self.text = text
+        self.title = title
+        self.detail = detail
+        self.note = note
+    }
+}
+
+/// What a plugin found for a searched tab's query.
+public struct SuggestFound: Codable, Equatable, Sendable {
+    public var tab: String
+    public var query: String
+    public var items: [SuggestItem]
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case tab, query, items }
+
+    public init(tab: String, query: String, items: [SuggestItem]) {
+        self.tab = tab
+        self.query = query
+        self.items = items
     }
 }
 

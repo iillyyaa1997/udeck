@@ -412,6 +412,22 @@ enum AgentsCard {
         if !held, !agent.isEnded { input["files"] = true }
         // Unsent messages put back to be edited: in the field until sent from it (uDeck 0.9.19).
         if let fill = session.fill { input["fill"] = ["id": .string(fill.id), "text": .string(fill.text)] }
+        // Commands, skills and files on «/» and «@» (uDeck 0.9.25).
+        if !held, !agent.isEnded {
+            var suggest: [String: JSONValue] = ["tabs": .array(AgentsSuggest.tabs(app)),
+                                                "items": .array(AgentsSuggest.items(agent, app))]
+            let recent = app.recentCommands[agent.provider.rawValue] ?? []
+            if !recent.isEmpty { suggest["recent"] = .array(recent.map { .string($0) }) }
+            if let found = app.foundFiles[app.here] {
+                suggest["found"] = ["tab": "files", "query": .string(found.query),
+                                    "items": .array(found.files.enumerated().map { index, path in
+                                        ["id": .string("f:\(index):" + path), "tab": "files", "text": .string("@" + path),
+                                         "title": .string((path as NSString).lastPathComponent),
+                                         "detail": .string((path as NSString).deletingLastPathComponent)]
+                                    })]
+            }
+            input["suggest"] = .object(suggest)
+        }
         guard !held, !agent.isEnded, !compact(app) else { return .object(input) }
         var pickers: [JSONValue] = []
         if case .claude(let claude) = agent, app.accounts.count > 1 {
@@ -728,6 +744,20 @@ enum AgentsCard {
             return app.t("Чтобы переименовать, напиши /rename и новое имя", "To rename it, write /rename and the new name")
         }
         if text == "loading-history" { return app.t("Читаю историю…", "Reading the history…") }
+        if text == "compact" { return app.t("Сжимаю разговор…", "Compacting the thread…") }
+        if text == "compact-failed" { return app.t("Не удалось сжать разговор", "Could not compact the thread") }
+        if text == "review-failed" { return app.t("Не удалось начать ревью", "Could not start the review") }
+        if text == "model-how" {
+            return app.t("Чтобы сменить модель, напиши /model и её имя — или выбери в меню модели",
+                         "To change the model, write /model and its name — or pick it in the model menu")
+        }
+        if text.hasPrefix("model-unknown:") {
+            return app.t("Нет такой модели: ", "No such model: ") + text.dropFirst(14)
+        }
+        if text == "effort-how" {
+            return app.t("Чтобы сменить усилие, напиши /effort и уровень — или выбери в меню усилия",
+                         "To change the effort, write /effort and a level — or pick it in the effort menu")
+        }
         if text == "compacted" { return app.t("Здесь контекст был сжат", "The context was compacted here") }
         if text.hasPrefix("model:") { return app.t("Модель: ", "Model: ") + model(String(text.dropFirst(6))) }
         if text.hasPrefix("model-failed:") {

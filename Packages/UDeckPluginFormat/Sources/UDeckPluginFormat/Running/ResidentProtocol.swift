@@ -182,6 +182,10 @@ public enum ResidentEvent: Equatable, Sendable {
     /// An option of a menu was chosen: the row (a `bar` or an `input`), the
     /// menu (or button) and the option.
     case choose(row: String, menu: String, option: String)
+    /// A searched tab of an input's suggestions wants items for what is
+    /// typed (0.9.25): the row, the tab and the query. The plugin answers with
+    /// its card, the items in the input's `suggest.found`.
+    case suggest(row: String, tab: String, query: String)
     /// A place of its own was closed. With `to`, the person asked for what it
     /// showed back on the board: show it in the place `to`.
     case closed(to: String?)
@@ -244,6 +248,7 @@ public enum ResidentEvent: Equatable, Sendable {
             wire.action = action
         case .choose(let row, let menu, let option): wire = Wire(event: "choose", row: row, menu: menu, option: option)
         case .closed(let to): wire = Wire(event: "closed", to: to)
+        case .suggest(let row, let tab, let query): wire = Wire(event: "suggest", id: tab, row: row, text: query)
         }
         if let place {
             wire.view = place.view

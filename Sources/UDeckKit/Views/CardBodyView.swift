@@ -8,6 +8,9 @@ import UDeckCore
 /// of plugins from different authors read as one application, and what lets the
 /// density setting mean something for plugins nobody has seen yet.
 struct CardBodyView: View {
+    /// The card's own space: a field's suggestions measure the room above it in it.
+    static let space = "udeck.card.body"
+
     var card: Card
     var presentation: CardPresentation
     var theme: DeckTheme
@@ -45,6 +48,9 @@ struct CardBodyView: View {
                 let row = keyed.row
                 if case .feed = row {
                     rowView(row).frame(maxHeight: .infinity).layoutPriority(-1)
+                } else if case .input = row {
+                    // Over what follows it: its suggestions open over the card.
+                    rowView(row).fixedSize(horizontal: false, vertical: true).zIndex(1)
                 } else {
                     rowView(row).fixedSize(horizontal: false, vertical: true)
                 }
@@ -72,6 +78,7 @@ struct CardBodyView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .coordinateSpace(name: CardBodyView.space)
     }
 
     private func failedRun(_ failed: FailureOnAFreshCard) -> some View {

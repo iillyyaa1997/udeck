@@ -851,6 +851,15 @@ public enum Phrase: Sendable, Equatable {
     case inputStop
     case inputAttach
     case inputRemoveFile
+    /// A field's suggestions (0.9.25): its own tab of all, recent ones, the
+    /// search, a search under way, nothing found, the keys, the «/» button.
+    case suggestAll
+    case suggestRecent
+    case suggestSearch
+    case suggestSearching
+    case suggestNothing
+    case suggestKeys
+    case suggestOpen
     case inputDropFiles
     case emptyNoPlugins
     case emptyTabEmpty

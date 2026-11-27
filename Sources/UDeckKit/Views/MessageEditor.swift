@@ -24,6 +24,17 @@ struct MessageEditor: NSViewRepresentable {
     var onEscape: (() -> Void)?
     /// A paste the row takes as files: true when it did.
     var onPasteFiles: () -> Bool
+    /// The text and the caret, as they change: the row's suggestions open on
+    /// a trigger typed (0.9.25).
+    var onCaret: ((String, Int) -> Void)? = nil
+    /// A key while the suggestions are open: theirs when this says so.
+    var onSuggestKey: ((SuggestKey) -> Bool)? = nil
+    /// ⌘/ — and ⌘⇧/ for the searched tab — opens the suggestions.
+    var onShortcut: ((Bool) -> Void)? = nil
+    /// Items added to the field's menu: the suggestions' tabs.
+    var menuItems: [(title: String, action: () -> Void)] = []
+    /// Lets the row put a picked suggestion into the text.
+    var handle: EditorHandle? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -59,12 +70,14 @@ struct MessageEditor: NSViewRepresentable {
         apply(to: view)
         view.string = text
         TypingIntoTheField.shared.register(view)
+        handle?.view = view
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let view = scroll.documentView as? EditorTextView else { return }
+        if let handle, handle.view !== view { handle.view = view }
         apply(to: view)
         // Put back by the plugin, a draft restored, sent and emptied: the text
         // from outside replaces what is shown, the caret at its end.
@@ -113,9 +126,25 @@ struct MessageEditor: NSViewRepresentable {
             guard let view else { return }
             parent.text = view.string
             view.scrollRangeToVisible(view.selectedRange())
+            caretMoved()
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            caretMoved()
+        }
+
+        private func caretMoved() {
+            guard let view, let onCaret = parent.onCaret, !view.hasMarkedText() else { return }
+            let selection = view.selectedRange()
+            guard selection.length == 0 else { return }
+            onCaret(view.string, selection.location)
         }
 
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            // The suggestions, while open, have the arrows, Tab, Return and Escape.
+            if let key = SuggestKey(selector), !textView.hasMarkedText(), parent.onSuggestKey?(key) == true {
+                return true
+            }
             switch selector {
             case #selector(NSResponder.insertNewline(_:)):
                 // Shift-Return, and Option-Return, a new line; Return sends.
@@ -170,6 +199,33 @@ final class EditorTextView: NSTextView {
         unregisterDraggedTypes()
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if TypingIntoTheField.isSuggestShortcut(event), let shortcut = coordinator?.parent.onShortcut {
+            shortcut(event.modifierFlags.contains(.shift))
+            return true
+        }
+        if let number = TypingIntoTheField.tabNumber(event), coordinator?.parent.onSuggestKey?(.tab(number)) == true {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// The field's menu, and after it what the row adds: its suggestions' tabs.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event) ?? NSMenu()
+        guard let items = coordinator?.parent.menuItems, !items.isEmpty else { return menu }
+        menu.insertItem(.separator(), at: 0)
+        for (index, item) in items.enumerated().reversed() {
+            let entry = NSMenuItem(title: item.title, action: #selector(MenuAction.run), keyEquivalent: "")
+            let action = MenuAction(item.action)
+            entry.target = action
+            entry.representedObject = action
+            entry.setAccessibilityIdentifier("row.input.menu.\(index)")
+            menu.insertItem(entry, at: 0)
+        }
+        return menu
+    }
+
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
         if became { TypingIntoTheField.shared.focused(self) }
@@ -192,6 +248,64 @@ final class EditorTextView: NSTextView {
         super.didChangeText()
         needsDisplay = true
     }
+}
+
+/// A key the open suggestions take from the field.
+enum SuggestKey: Equatable {
+    /// `accept` is Tab and a click; `enter` is Return, which sends a command
+    /// already typed whole.
+    case up, down, accept, enter, close
+    /// ⌘1, ⌘2…: the list's tabs, «All» first.
+    case tab(Int)
+
+    init?(_ selector: Selector) {
+        switch selector {
+        case #selector(NSResponder.moveUp(_:)): self = .up
+        case #selector(NSResponder.moveDown(_:)): self = .down
+        case #selector(NSResponder.insertTab(_:)): self = .accept
+        case #selector(NSResponder.insertNewline(_:)):
+            // Shift- and Option-Return stay a new line.
+            let flags = NSApp.currentEvent?.modifierFlags.intersection(.deviceIndependentFlagsMask) ?? []
+            guard !flags.contains(.shift), !flags.contains(.option) else { return nil }
+            self = .enter
+        case #selector(NSResponder.cancelOperation(_:)): self = .close
+        default: return nil
+        }
+    }
+}
+
+/// The text view of a field, for its row to put a picked suggestion in.
+@MainActor
+final class EditorHandle {
+    weak var view: EditorTextView?
+
+    /// Where the caret is, when there is one.
+    var caret: Int? { view.map { $0.selectedRange().location } }
+
+    /// The text after a pick, as an edit of the field: undone with ⌘Z.
+    func apply(_ text: String, caret: Int) {
+        guard let view else { return }
+        let whole = NSRange(location: 0, length: (view.string as NSString).length)
+        if view.shouldChangeText(in: whole, replacementString: text) {
+            view.replaceCharacters(in: whole, with: text)
+            view.didChangeText()
+        }
+        view.window?.makeFirstResponder(view)
+        view.setSelectedRange(NSRange(location: min(caret, (text as NSString).length), length: 0))
+        view.scrollRangeToVisible(view.selectedRange())
+    }
+
+    func focus() {
+        guard let view else { return }
+        view.window?.makeFirstResponder(view)
+    }
+}
+
+/// A menu item's action as a closure.
+final class MenuAction: NSObject {
+    let action: () -> Void
+    init(_ action: @escaping () -> Void) { self.action = action }
+    @objc func run() { action() }
 }
 
 /// What is typed while a panel has the keyboard but no field does goes into
@@ -223,6 +337,14 @@ final class TypingIntoTheField {
     func focused(_ view: EditorTextView) { last = view }
 
     private func redirect(_ event: NSEvent) -> NSEvent? {
+        // ⌘/ anywhere in the card opens its field's suggestions (0.9.25).
+        if Self.isSuggestShortcut(event), let window = event.window, window.isKeyWindow,
+           !(window.firstResponder is EditorTextView),
+           let target = target(in: window), let shortcut = target.coordinator?.parent.onShortcut
+        {
+            shortcut(event.modifierFlags.contains(.shift))
+            return nil
+        }
         guard let window = event.window, window.isKeyWindow, Self.types(event) else { return event }
         if let editing = window.firstResponder as? NSTextView, editing.isEditable { return event }
         guard let target = target(in: window) else { return event }
@@ -230,6 +352,21 @@ final class TypingIntoTheField {
         target.setSelectedRange(NSRange(location: (target.string as NSString).length, length: 0))
         target.keyDown(with: event)
         return nil
+    }
+
+    /// ⌘/ or ⌘⇧/, whatever the layout: the key by its place, or its «/».
+    static func isSuggestShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.command), flags.isDisjoint(with: [.control, .option]) else { return false }
+        return event.keyCode == 44 || event.charactersIgnoringModifiers == "/"
+    }
+
+    /// ⌘1…⌘9: which.
+    static func tabNumber(_ event: NSEvent) -> Int? {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags == .command, let character = event.charactersIgnoringModifiers, let number = Int(character),
+              (1...9).contains(number) else { return nil }
+        return number
     }
 
     /// A key that types: characters, with no ⌘ or ⌃.

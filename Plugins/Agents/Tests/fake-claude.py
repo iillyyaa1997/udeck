@@ -220,7 +220,24 @@ def control_answer(message):
     body = {}
     subtype = request.get("subtype")
     if subtype == "initialize":
-        body = {"commands": [], "models": [
+        body = {"commands": [
+            # As claude 2.1.332 lists them (measured 11-27): its own, the skills it comes with, the person's.
+            {"name": "compact", "description": "Free up context by summarizing the conversation so far",
+             "argumentHint": "<optional custom summarization instructions>", "builtin": True},
+            {"name": "context", "description": "Show current context usage", "argumentHint": "", "builtin": True},
+            {"name": "model", "description": "Set the AI model for Claude Code", "argumentHint": "<model>", "builtin": True},
+            {"name": "effort", "description": "Set the model's effort level", "argumentHint": "<low|medium|high>",
+             "builtin": True},
+            {"name": "clear", "description": "Start a new session with empty context", "argumentHint": "[name]",
+             "builtin": True},
+            {"name": "color", "description": "Set the prompt bar color for this session", "argumentHint": "", "builtin": True},
+            {"name": "ultrareview", "description": "Start a cloud agent that finds bugs (~5-15 min, $5-$25 USD)",
+             "argumentHint": "", "builtin": True},
+            {"name": "code-review", "description": "Review the current diff for correctness bugs. More after this.",
+             "argumentHint": "[low|medium|high]", "builtin": True},
+            {"name": "planning-workflow", "description": "Lightweight planning utility. Drives an interview.",
+             "argumentHint": ""}],
+            "models": [
             {"value": "default", "displayName": "Default (recommended)", "resolvedModel": "claude-fake-1-0",
              "supportedEffortLevels": ["low", "medium", "high", "xhigh", "max"]},
             {"value": "fake", "displayName": "Fake 1.0", "resolvedModel": "claude-fake-1-0",
@@ -335,7 +352,7 @@ def turn(text, pictures=0):
         calling()
         out({"type": "system", "subtype": "api_retry", "attempt": 1, "max_retries": 10, "retry_delay_ms": 8000,
              "error_status": 529, "error": "overloaded_error", "session_id": SESSION})
-        time.sleep(float(os.environ.get("FAKE_CLAUDE_RETRY", "0.5")))
+        time.sleep(float(os.environ.get("FAKE_CLAUDE_RETRY", "1.5")))
     calling()
     if "[think]" in text:
         think(int(os.environ.get("FAKE_CLAUDE_THINK", "3")))

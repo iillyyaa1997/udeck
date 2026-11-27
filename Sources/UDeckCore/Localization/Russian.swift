@@ -752,6 +752,13 @@ struct Russian: Vocabulary {
         case .inputStop: "Остановить"
         case .inputAttach: "Прикрепить файлы"
         case .inputRemoveFile: "Убрать"
+        case .suggestAll: "Все"
+        case .suggestRecent: "Недавние"
+        case .suggestSearch: "Поиск…"
+        case .suggestSearching: "Ищет…"
+        case .suggestNothing: "Ничего не нашлось"
+        case .suggestKeys: "↑↓ выбрать · Tab вставить · Esc закрыть"
+        case .suggestOpen: "Команды, скилы и файлы (⌘/)"
         case .inputDropFiles: "Отпусти — файл прикрепится к сообщению"
         case .cardUnsupportedRow(let kind):
             "плагин прислал строку «\(kind)», которую эта версия uDeck не рисует"
