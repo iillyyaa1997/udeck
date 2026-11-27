@@ -451,6 +451,9 @@ public final class PanelController {
             apply(.closeRequested)
             return
         }
+        revealStarted = ProcessInfo.processInfo.systemUptime
+        mainThreadStalls.reset()
+        mainThreadStalls.start()
         apply(.revealRequested)
         apply(.interacted)
     }
