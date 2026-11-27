@@ -29,6 +29,19 @@ public final class ShellState {
     /// that knows which direction this transition is going.
     public internal(set) var contentAnimation: Animation = .default
 
+    /// The size the panel's content is laid out at: the panel's size where the
+    /// transition ends, not the animated one.
+    ///
+    /// Proposed the animated rectangle, the content — every card on the deck —
+    /// was laid out again on every frame of a reveal, on the main thread, and
+    /// a frame that took too long held the panel still: the operator's log of
+    /// 11-27 had a stall of 85 to 133 ms in every one of eight reveals, and he
+    /// saw the panel wait and then jump. Laid out once at the size it arrives
+    /// at, the content is only clipped by the moving rectangle. Kept as it is
+    /// while the panel collapses, so that what fades out is not laid out
+    /// again at the island's size on the way.
+    public internal(set) var contentSize: CGSize = .zero
+
     /// How far the panel window reaches above the menu bar's lower edge on the
     /// screen it is currently on.
     ///

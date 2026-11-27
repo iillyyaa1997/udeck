@@ -62,6 +62,9 @@ public struct DeckRootView: View {
             }
 
             panel(theme: theme)
+                // Laid out once, at the size the panel arrives at, and only
+                // clipped while it moves (`ShellState.contentSize`).
+                .frame(width: contentSize.width, height: contentSize.height, alignment: .top)
                 .frame(
                     width: shell.panelRect.width,
                     height: shell.panelRect.height,
@@ -145,6 +148,12 @@ public struct DeckRootView: View {
 
     /// How much of the island is on screen right now.
     private var presence: Double { islandLook.presence }
+
+    /// What the content is laid out at: the size the panel ends at, or — before
+    /// the first reveal, when there is none — the rectangle itself.
+    private var contentSize: CGSize {
+        shell.contentSize == .zero ? shell.panelRect.size : shell.contentSize
+    }
 
     @ViewBuilder
     private func panel(theme: DeckTheme) -> some View {

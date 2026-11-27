@@ -451,6 +451,11 @@ public final class PanelController {
             apply(.closeRequested)
             return
         }
+        // Timed like the gesture's (`settleWindow`): the whole panel, cards and
+        // all, is what the shortcut brings, and what is slow to arrive.
+        revealStarted = ProcessInfo.processInfo.systemUptime
+        mainThreadStalls.reset()
+        mainThreadStalls.start()
         apply(.revealRequested)
         apply(.interacted)
     }
@@ -621,6 +626,9 @@ public final class PanelController {
         // whose window stays the size of the stage, it is the island's place
         // inside it.
         shell.panelRect = geometry.panelRect(for: state.phase, inWindow: frame)
+        // At rest the content is exactly the panel, whatever rounding the
+        // window's frame brought.
+        if state.phase != .collapsed { shell.contentSize = shell.panelRect.size }
         panel.setFrame(frame, display: true)
     }
 
@@ -1161,6 +1169,10 @@ public final class PanelController {
         if phase.isVisible {
             panel.makeKeyAndOrderFront(nil)
         }
+
+        // Laid out at the size it ends at, before anything moves
+        // (`ShellState.contentSize`).
+        if phase != .collapsed { shell.contentSize = plan.panelRect.size }
 
         guard animated else {
             shell.panelRect = plan.panelRect
