@@ -52,6 +52,7 @@ path (`ui.choose_folder`).
 """
 
 import hashlib
+from pathlib import Path
 import json
 import re
 import shlex
@@ -8056,3 +8057,117 @@ def _log_entries(machine, log):
     """The entries of a run log: its lines that are not a run's stderr under one."""
     text = machine.ssh.ask(f"cat {log} 2>/dev/null || true", "reading the run log").stdout
     return [line for line in text.splitlines() if line and not line.startswith("  ")]
+
+AGENTS_ROOT = Path(__file__).resolve().parent.parent.parent / "Plugins" / "Agents"
+
+
+_KEY = """
+tell application "System Events" to tell process %(process)s
+  set frontmost to true
+  key code KEYCODE USING
+end tell
+return "pressed"
+"""
+
+
+def _key(machine, code, step, using=""):
+    script = ui._applescript(_KEY, process=ui.PROCESS).replace("KEYCODE", str(code)).replace(
+        "USING", (" using {" + using + "}") if using else "")
+    ui.ask(machine, script, step)
+
+
+def check_agents_suggest(machine, check_dir, lab):
+    """The field's suggestions: «/co» typed lists commands and skills, ↓ and Tab put one in; «@grid» finds the file;
+    the «/» button, ⌘/ and the field's menu open the same list; a command typed whole goes with one Return."""
+    _prepare(machine, check_dir, lab, main="c1", launch=False)
+    root = shlex.quote(str(AGENTS_ROOT))
+    machine.ssh.run(f"cd {root} && swift build -c release 2>&1 | tail -3", "building the Agents plugin", seconds=900)
+    home = machine.ssh.run('printf %s "$HOME"', "reading home").stdout.strip()
+    fake, project = f"{home}/lab-chat/fake-claude.py", f"{home}/Workspace/udeck"
+    machine.ssh.run(
+        f"mkdir -p {UDECK_HOME}/plugins/agents {shlex.quote(project)}/Sources/Layout ~/lab-chat"
+        f" && cp {root}/agents/manifest.json {root}/agents/manifest.ru.json {UDECK_HOME}/plugins/agents/ && cp {root}/.build/release/agents {UDECK_HOME}/plugins/agents/agents"
+        f" && sed -i '' '/minUDeck/d' {UDECK_HOME}/plugins/agents/manifest.json"
+        f" && cp {root}/Tests/fake-claude.py {shlex.quote(fake)} && printf '# Notes\\n' > {shlex.quote(project)}/notes.md"
+        f" && printf 'rows\\n' > {shlex.quote(project)}/Sources/Layout/GridRows.swift",
+        "installing the Agents plugin, the stand-in CLI and a project")
+    _write(machine, SETTINGS, {"language": "ru"}, "uDeck in Russian")
+    _write(machine, PLUGIN_SETTINGS, {"version": 1, "disabled": [], "values": {"agents": {"claude": fake, "name_chats": False}}},
+           "pointing Agents at the stand-in")
+    tab = str(uuid.uuid4()).upper()
+    _write(machine, LAYOUT, {"version": 1, "columns": 12, "selectedTabID": tab, "tabs": [{"id": tab, "name": "Работа", "windows": [
+        {"id": str(uuid.uuid4()).upper(), "pluginID": "agents", "column": 0, "row": 0, "width": 7, "height": 11}]}]}, "placing Agents")
+    app.launch(machine)
+    machine.sleep(4)
+    _open_the_panel(machine, "opening the panel")
+    machine.sleep(2)
+    allow = ui.wait_for(machine, "consent.agents.allow", "waiting for Agents to ask", ui.PANEL, seconds=20)
+    machine.click(*allow.middle, "allowing Agents")
+    new = ui.wait_for(machine, "row.button.new", "waiting for the card", ui.PANEL, seconds=40)
+    machine.click(*new.middle, "＋")
+    machine.sleep(1)
+    option = ui.wait_for(machine, "row.button.new.new:claude", "a new Claude session", ui.PANEL, seconds=8)
+    machine.click(*option.middle, "a new Claude session")
+    machine.sleep(2)
+    ui.choose_folder(machine, project, "the folder")
+    machine.sleep(4)
+    field = ui.wait_for(machine, "row.input.message", "the field", ui.PANEL, seconds=30)
+    machine.click(*field.middle, "the field")
+    ui.type_text(machine, "/co", "a command begun")
+    machine.sleep(1.5)
+    machine.screenshot(check_dir, "suggest 1 typed co, commands and skills")
+    ids = ui.identifiers(machine, "the list", ui.PANEL)
+    print("suggest ids:", [i for i in ids if ".suggest" in i][:20])
+    _key(machine, 125, "↓")
+    machine.sleep(0.5)
+    machine.screenshot(check_dir, "suggest 2 the second one lit")
+    _key(machine, 48, "Tab")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "suggest 3 put into the field")
+    print("focused after Tab:", ui.focused(machine, "the field after Tab"))
+    _key(machine, 0, "select all", "command down")
+    _key(machine, 51, "delete")
+    ui.type_text(machine, "look at @grid", "a file asked for")
+    machine.sleep(2.5)
+    machine.screenshot(check_dir, "suggest 4 at grid, the file found")
+    _key(machine, 48, "Tab")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "suggest 5 the file put in")
+    print("focused after the file:", ui.focused(machine, "the field after the file"))
+    _key(machine, 0, "select all", "command down")
+    _key(machine, 51, "delete")
+    button = ui.wait_for(machine, "row.input.message.suggest", "the «/» button", ui.PANEL, seconds=10)
+    machine.click(*button.middle, "the «/» button")
+    machine.sleep(1.5)
+    machine.screenshot(check_dir, "suggest 6 the button, tabs and a search")
+    ui.type_text(machine, "plan", "a search in the list")
+    machine.sleep(1)
+    machine.screenshot(check_dir, "suggest 7 searched")
+    print("focused in the search:", ui.focused(machine, "the search"))
+    _key(machine, 53, "Escape")
+    machine.sleep(0.5)
+    machine.click(*field.middle, "the field")
+    _key(machine, 44, "⌘/", "command down")
+    machine.sleep(1.5)
+    machine.screenshot(check_dir, "suggest 8 opened with cmd slash")
+    _key(machine, 53, "Escape")
+    machine.sleep(0.8)
+    machine.screenshot(check_dir, "suggest 8b Escape closed the list, the panel stays")
+    field = ui.wait_for(machine, "row.input.message", "the field still there after Escape", ui.PANEL, seconds=5)
+    machine.right_click(*field.middle, "the field's menu")
+    machine.sleep(1.5)
+    machine.screenshot(check_dir, "suggest 9 the field menu")
+    _key(machine, 53, "Escape")
+    machine.sleep(0.5)
+    machine.click(*field.middle, "the field")
+    _key(machine, 0, "select all", "command down")
+    _key(machine, 51, "delete")
+    ui.type_text(machine, "/compact", "a command typed whole")
+    machine.sleep(1)
+    ui.press_return(machine, "one Return")
+    machine.sleep(3)
+    machine.screenshot(check_dir, "suggest 10 sent with one Return")
+    machine.click(*field.middle, "the field")
+    ui.type_text(machine, "/", "the list again")
+    machine.sleep(1.5)
+    machine.screenshot(check_dir, "suggest 11 recent first")
