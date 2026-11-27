@@ -144,8 +144,21 @@ struct AgentsStopTests {
         // Above the field, what it does: a call out, nothing back yet.
         app.render()
         let live = try #require(said.lastCard?["rows"]?.array?.compactMap { $0["bar"] }.first { $0["id"]?.string == "live" })
-        let doing = live["items"]?.array?.first?["badge"]?["text"]?.string ?? ""
-        #expect(doing.hasPrefix("✻ Отправляет запрос… · 0:0"), "\(doing)")
+        let badge = try #require(live["items"]?.array?.first?["badge"])
+        let doing = badge["text"]?.string ?? ""
+        #expect(doing.hasPrefix("Отправляет запрос 0:0"), "\(doing)")
+        #expect(doing.contains("всего 0:0"), "\(doing)")
+        #expect(badge["busy"] == true, "uDeck turns the ✻")
+        #expect(badge["tone"]?.string == "run")
+        // Shorter for a narrow card, the step kept in each.
+        let shorter = badge["shorter"]?.array?.compactMap(\.string) ?? []
+        #expect(shorter.last?.hasPrefix("Отправляет запрос 0:0") == true && shorter.last?.contains("·") == false, "\(shorter)")
+        // Nothing from claude for 45 s while a call is out: said, in yellow.
+        let later = try #require(AgentsCard.liveRow(conversation, app, now: Date().addingTimeInterval(45)))
+        let quiet = try #require(later["items"]?.array?.first?["badge"])
+        #expect(quiet["tone"]?.string == "warn")
+        #expect(quiet["text"]?.string?.contains("тишина 0:4") == true, "\(quiet)")
+        #expect(quiet["shorter"]?.array?.last?.string?.contains("тишина 0:4") == true, "kept in the shortest form")
         await app.handle(#"{"event":"submit","row":"message","text":"second"}"#)
         await app.handle(#"{"event":"submit","row":"message","text":"third"}"#)
         await app.handle(#"{"event":"press","id":"stop"}"#)
@@ -254,9 +267,34 @@ struct AgentsLiveLineTests {
         #expect(AgentsCard.tokenCount(tokens, app) == "↓ 87.2k tokens")
         tokens.streamed(String(repeating: "a", count: 400))
         #expect(AgentsCard.tokenCount(tokens, app) == "↓ ~87.3k tokens")
+        #expect(AgentsCard.tokenCount(tokens, app, short: true) == "↓ ~87.3k")
         var few = TurnTokens()
         few.streamed("abcdefgh")
         #expect(AgentsCard.tokenCount(few, app) == "↓ ~2 tokens")
+        // Thinking: its size as the CLI estimates it, until the call's own count.
+        var thinking = TurnTokens()
+        thinking.thought(150)
+        thinking.thought(150)
+        #expect(thinking.total == 300 && thinking.estimated)
+        thinking.call(420)
+        #expect(thinking.total == 420 && !thinking.estimated, "the call's count has its thinking in it")
+    }
+
+    @Test("thinking: its tokens grow while it thinks, and the step is «Думает» with its own time")
+    func thinking() async throws {
+        let (session, folder) = try await startFake()
+        defer { try? FileManager.default.removeItem(at: folder) }
+        session.send("[think] Look at the folder")
+        try await until("thinking") { session.activity == .thinking }
+        let began = session.activitySince
+        try await until("its size", timeout: .seconds(10)) { session.tokens.thought >= 300 }
+        #expect(session.activity == .thinking, "still the same step")
+        #expect(session.activitySince == began, "the step's time runs from its start")
+        #expect(Date().timeIntervalSince(session.lastHeard) < 1.5, "heard every second while it thinks")
+        try await until("the ask", timeout: .seconds(10)) { !session.asks.isEmpty }
+        session.answer(try #require(session.asks.first), with: .deny)
+        try await until("the turn's end") { session.state == .idle }
+        await session.close()
     }
 }
 

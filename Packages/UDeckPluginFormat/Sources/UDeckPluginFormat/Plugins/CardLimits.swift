@@ -69,6 +69,8 @@ public struct CardLimits: Sendable, Equatable {
     static let barItems = 16
     static let menuOptions = 100
     static let pickers = 4
+    /// A badge's shorter forms.
+    static let badgeForms = 4
 }
 
 extension Card {
@@ -198,12 +200,17 @@ extension Card {
 
             case .bar(let bar):
                 if bar.items.count > CardLimits.barItems { cut = true }
+                if bar.items.contains(where: { item in
+                    if case .badge(let badge) = item { (badge.shorter?.count ?? 0) > CardLimits.badgeForms } else { false }
+                }) { cut = true }
                 return .bar(BarRow(id: bar.id, items: bar.items.prefix(CardLimits.barItems).map { item in
                     switch item {
                     case .title(let title): .title(BarTitle(text: trim(title.text), tone: title.tone))
                     case .tag(let text): .tag(trim(text))
-                    case .badge(let badge): .badge(BarBadge(text: trim(badge.text), tone: badge.tone, icon: badge.icon,
-                                                            fill: badge.fill))
+                    case .badge(let badge):
+                        .badge(BarBadge(text: trim(badge.text), tone: badge.tone, icon: badge.icon, fill: badge.fill,
+                                        busy: badge.busy,
+                                        shorter: badge.shorter.map { Array($0.prefix(CardLimits.badgeForms).map(trim)) }))
                     case .menu(let value): .menu(menu(value))
                     case .button(let button):
                         .button(BarButton(id: button.id, icon: button.icon, label: button.label.map(trim),

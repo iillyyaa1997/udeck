@@ -555,7 +555,13 @@ struct BarRowView: View {
                         .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(theme.line, lineWidth: 1))
                         .fixedSize()
                 case .item(.badge(let badge)):
-                    BadgeView(badge: badge, theme: theme).fixedSize()
+                    // One with shorter forms takes the width there is and picks
+                    // the form that fits it; one without is as wide as its text.
+                    if badge.forms.count > 1 {
+                        BadgeView(badge: badge, theme: theme).layoutPriority(1)
+                    } else {
+                        BadgeView(badge: badge, theme: theme).fixedSize()
+                    }
                 case .item(.menu(let menu)):
                     MenuPill(menu: menu, row: bar.id, theme: theme, send: send, plain: true)
                 case .item(.button(let button)):
@@ -681,8 +687,23 @@ struct BadgeView: View {
     var body: some View {
         let tone = badge.tone.map { BarStyle.color($0, theme) } ?? theme.muted
         HStack(spacing: 5) {
+            if badge.busy == true { BusyGlyph() }
             if let icon = badge.icon { BarStyle.icon(icon) }
-            Text(badge.text).lineLimit(1).monospacedDigit()
+            let forms = badge.forms
+            if forms.count > 1 {
+                // The longest form that fits; the last, cut short, when none does.
+                ViewThatFits(in: .horizontal) {
+                    ForEach(Array(forms.enumerated()), id: \.offset) { index, form in
+                        if index < forms.count - 1 {
+                            Text(form).lineLimit(1).monospacedDigit().fixedSize()
+                        } else {
+                            Text(form).lineLimit(1).monospacedDigit().truncationMode(.tail)
+                        }
+                    }
+                }
+            } else {
+                Text(badge.text).lineLimit(1).monospacedDigit()
+            }
         }
         .font(theme.smallFont)
         .foregroundStyle(badge.tone == nil || badge.tone == .idle ? theme.muted : theme.text)
@@ -699,6 +720,32 @@ struct BadgeView: View {
                 .clipShape(Capsule())
             }
         )
+    }
+}
+
+/// The ✻ of a badge that is `busy`, turning through the glyphs a terminal's
+/// agent turns through while it works; still for Reduce Motion.
+struct BusyGlyph: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    static let frames = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"]
+
+    var body: some View {
+        Group {
+            if reduceMotion {
+                Text("✻")
+            } else {
+                TimelineView(.periodic(from: .now, by: 0.12)) { context in
+                    Text(Self.frame(at: context.date))
+                }
+            }
+        }
+        .frame(width: 11)
+        .accessibilityHidden(true)
+    }
+
+    static func frame(at date: Date) -> String {
+        let index = Int((date.timeIntervalSinceReferenceDate / 0.12).rounded(.down)) % frames.count
+        return frames[(index + frames.count) % frames.count]
     }
 }
 

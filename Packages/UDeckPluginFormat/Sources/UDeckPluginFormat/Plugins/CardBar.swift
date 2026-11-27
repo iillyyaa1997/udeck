@@ -124,14 +124,28 @@ public struct BarBadge: Codable, Equatable, Sendable {
     public var tone: CardTone?
     public var icon: BarIcon?
     public var fill: Double?
+    /// Something is going on (0.9.24): uDeck turns a ✻ before the text, so
+    /// that it is seen to be alive while the text stands still — a step that
+    /// takes minutes (the operator, 11-27: «не понимаю … она точно работает
+    /// или нет»).
+    public var busy: Bool?
+    /// Shorter forms of `text`, longest first (0.9.24): where the text does
+    /// not fit, uDeck shows the longest that does, and cuts the last one
+    /// short if even it does not — rather than the end of the text going
+    /// past the card's edge.
+    public var shorter: [String]?
 
-    enum CodingKeys: String, CodingKey, CaseIterable { case text, tone, icon, fill }
+    enum CodingKeys: String, CodingKey, CaseIterable { case text, tone, icon, fill, busy, shorter }
 
-    public init(text: String, tone: CardTone? = nil, icon: BarIcon? = nil, fill: Double? = nil) {
+    public init(text: String, tone: CardTone? = nil, icon: BarIcon? = nil, fill: Double? = nil,
+                busy: Bool? = nil, shorter: [String]? = nil)
+    {
         self.text = text
         self.tone = tone
         self.icon = icon
         self.fill = fill.map { min(max($0, 0), 1) }
+        self.busy = busy
+        self.shorter = shorter
     }
 
     public init(from decoder: any Decoder) throws {
@@ -140,9 +154,14 @@ public struct BarBadge: Codable, Equatable, Sendable {
             text: try c.decode(String.self, forKey: .text),
             tone: try c.decodeIfPresent(CardTone.self, forKey: .tone),
             icon: try c.decodeIfPresent(BarIcon.self, forKey: .icon),
-            fill: try c.decodeIfPresent(Double.self, forKey: .fill)
+            fill: try c.decodeIfPresent(Double.self, forKey: .fill),
+            busy: try c.decodeIfPresent(Bool.self, forKey: .busy),
+            shorter: try c.decodeIfPresent([String].self, forKey: .shorter)
         )
     }
+
+    /// The forms to show, longest first: the text, then its shorter ones.
+    public var forms: [String] { [text] + (shorter ?? []).filter { !$0.isEmpty } }
 }
 
 /// A small button: an icon, a label or both. Pressing it sends a `press`

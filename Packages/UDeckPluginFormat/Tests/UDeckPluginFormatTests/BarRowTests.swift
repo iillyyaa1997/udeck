@@ -190,6 +190,33 @@ struct BarRowTests {
         #expect(used.contains(.rowField(row: "menu.options.button", field: "label")))
     }
 
+    @Test("a badge that is busy and has shorter forms: read, kept to four forms, dated to the release that brought them")
+    func busyAndShorter() throws {
+        let json = #"""
+        {"rows":[{"bar":{"id":"live","items":[{"badge":{"text":"Думает 0:41 · всего 32:26 · ↓ ~30,7 тыс. токенов",
+          "tone":"run","busy":true,"shorter":["Думает 0:41 · всего 32:26 · ↓ ~30,7 тыс.","Думает 0:41 · ↓ ~30,7 тыс.",
+          "Думает 0:41","","a","b"]}}]}}]}
+        """#
+        let card = try JSONDecoder().decode(Card.self, from: Data(json.utf8))
+        guard case .bar(let bar) = card.rows[0], case .badge(let badge) = bar.items[0] else {
+            Issue.record("not a badge"); return
+        }
+        #expect(badge.busy == true)
+        #expect(badge.shorter?.count == 6)
+        #expect(badge.forms.count == 6, "the text and its forms, an empty one left out")
+        let drawn = card.withinDrawingLimits()
+        guard case .bar(let kept) = drawn.rows[0], case .badge(let cut) = kept.items[0] else {
+            Issue.record("not a badge"); return
+        }
+        #expect(cut.shorter == ["Думает 0:41 · всего 32:26 · ↓ ~30,7 тыс.", "Думает 0:41 · ↓ ~30,7 тыс.", "Думает 0:41", ""])
+        #expect(cut.busy == true)
+        let object = try #require(StrictJSON.parse(Array(json.utf8)).value?.object)
+        let used = ContractFeatures.used(byCard: object)
+        #expect(used.contains(.rowField(row: "bar.badge", field: "busy")))
+        #expect(used.contains(.rowField(row: "bar.badge", field: "shorter")))
+        #expect(ContractFeatures.release(of: .rowField(row: "bar.badge", field: "busy")) == .next)
+    }
+
     @Test("a card with a bar needs the release that brought bars")
     func barIsDated() throws {
         let object = try #require(StrictJSON.parse(Array(Self.header.utf8)).value?.object)

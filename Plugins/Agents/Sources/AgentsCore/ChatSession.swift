@@ -112,7 +112,15 @@ public final class ChatSession: Identifiable {
     /// When the running turn began, while one runs.
     public private(set) var turnStartedAt: Date?
     /// What it does now, while a turn runs.
-    public private(set) var activity: AgentActivity?
+    public private(set) var activity: AgentActivity? {
+        didSet { if activity != oldValue { activitySince = Date() } }
+    }
+    /// Since when it does what it does: the step's own time.
+    public private(set) var activitySince = Date()
+    /// When the CLI last said anything at all. While the model thinks it
+    /// says how many tokens about every second (measured 11-27), so a long
+    /// silence outside a running tool is the CLI's, not the model's.
+    public private(set) var lastHeard = Date()
     /// The tokens that came back this turn.
     public private(set) var tokens = TurnTokens()
     @ObservationIgnored private var retries = 0
@@ -518,6 +526,7 @@ public final class ChatSession: Identifiable {
     // MARK: - From the agent
 
     func receive(_ event: ClaudeInbound) {
+        lastHeard = Date()
         switch event {
         case .sessionStarted(let info, _):
             let changed = sessionID != info.sessionID
@@ -649,6 +658,9 @@ public final class ChatSession: Identifiable {
             let delay = raw["retry_delay_ms"]?.number.map { Date().addingTimeInterval($0 / 1000) }
             activity = .retrying(status: raw["error_status"]?.int, error: raw["error"]?.string ?? "",
                                  attempt: raw["attempt"]?.int ?? retries, next: delay)
+        case .system("thinking_tokens", let raw):
+            // Thinking comes as empty deltas; its size comes here instead.
+            tokens.thought(raw["estimated_tokens_delta"]?.int ?? 0)
         case .response, .system, .other:
             return
         }
@@ -690,6 +702,7 @@ public final class ChatSession: Identifiable {
     private func beginTurnClock() {
         guard turnStartedAt == nil else { return }
         turnStartedAt = Date()
+        lastHeard = Date()
         tokens = TurnTokens()
         retries = 0
         activity = .requesting

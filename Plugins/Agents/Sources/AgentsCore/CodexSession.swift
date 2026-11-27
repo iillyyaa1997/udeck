@@ -77,7 +77,13 @@ public final class CodexSession: Identifiable {
     public private(set) var context: (tokens: Int, window: Int)?
     public private(set) var turnStartedAt: Date?
     /// What it does now, while a turn runs.
-    public private(set) var activity: AgentActivity?
+    public private(set) var activity: AgentActivity? {
+        didSet { if activity != oldValue { activitySince = Date() } }
+    }
+    /// Since when it does what it does: the step's own time.
+    public private(set) var activitySince = Date()
+    /// When the server last said anything at all.
+    public private(set) var lastHeard = Date()
     /// The tokens that came back this turn.
     public private(set) var tokens = TurnTokens()
     /// The thread's output tokens as Codex last said them, and when the turn began.
@@ -349,6 +355,7 @@ public final class CodexSession: Identifiable {
         state = .working
         if turnStartedAt == nil {
             turnStartedAt = Date()
+            lastHeard = Date()
             tokens = TurnTokens()
             turnBase = threadOutput
             retries = 0
@@ -410,6 +417,7 @@ public final class CodexSession: Identifiable {
     // MARK: - From Codex
 
     func receive(_ event: CodexInbound) {
+        lastHeard = Date()
         if let approval = event.approval {
             let ask = CodexAsk(requestID: Self.key(approval.id), ask: approval)
             asks.append(ask)

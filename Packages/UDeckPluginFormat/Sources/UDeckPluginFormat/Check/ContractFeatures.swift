@@ -222,6 +222,10 @@ public enum ContractFeatures {
         // A message's files drawn with it in the feed: 0.9.23.
         add(.released(SemanticVersion(major: 0, minor: 9, patch: 23)), [.rowField(row: "feed", field: "files")])
 
+        // A badge that turns while something is going on, and its shorter
+        // forms for a narrow card: 0.9.24.
+        add(.next, ["busy", "shorter"].map { .rowField(row: "bar.badge", field: $0) })
+
         let fillRelease = ContractRelease.released(SemanticVersion(major: 0, minor: 9, patch: 19))
         add(fillRelease, [.rowField(row: "input", field: "fill")])
         add(fillRelease, ["id", "text"].map { .rowField(row: "input.fill", field: $0) })

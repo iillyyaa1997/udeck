@@ -153,6 +153,22 @@ public enum Agent {
         }
     }
 
+    /// Since when it does what it does now.
+    public var activitySince: Date {
+        switch self {
+        case .claude(let session): session.activitySince
+        case .codex(let session): session.activitySince
+        }
+    }
+
+    /// When it last said anything.
+    public var lastHeard: Date {
+        switch self {
+        case .claude(let session): session.lastHeard
+        case .codex(let session): session.lastHeard
+        }
+    }
+
     public var models: [ModelChoice] {
         switch self {
         case .claude(let session): session.models.filter { $0.value != "default" }

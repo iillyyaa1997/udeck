@@ -190,31 +190,59 @@ enum AgentsCard {
     /// (18m 43s · ↓ 87.2k tokens)»: what the agent does, the turn's time and
     /// the tokens that came; a call tried again says why and when (the
     /// operator's «1», 11-26).
+    /// After this long without a word from the agent — outside a running
+    /// tool, which says nothing until it ends — the line says so.
+    static let silenceShown: TimeInterval = 30
+
+    /// The line above the field while the agent works (the operator's «1»,
+    /// 11-27): what it does and for how long this step, how long it has said
+    /// nothing when that is long, the whole turn's time and its tokens — in
+    /// forms that get shorter for a narrow card, the step always kept. uDeck
+    /// turns a ✻ before it (`busy`), so that a step of minutes is seen alive.
     static func liveRow(_ session: Conversation, _ app: AgentsApp, now: Date = Date()) -> JSONValue? {
         let agent = session.current
         guard agent.state == .working, let activity = agent.activity else { return nil }
-        let elapsed = agent.turnStartedAt.map { clock(now.timeIntervalSince($0)) } ?? ""
-        let text: String
+        let elapsed = agent.turnStartedAt.map { clock(now.timeIntervalSince($0)) }
+        var forms: [[String]]
         let tone: String
+        var busy = true
         switch activity {
         case .retrying(let status, let error, let attempt, let next):
-            var parts = ["↻ " + retryReason(status: status, error: error, app),
-                         app.t("попытка \(attempt)", "attempt \(attempt)")]
+            let reason = "↻ " + retryReason(status: status, error: error, app)
+            let tryNumber = app.t("попытка \(attempt)", "attempt \(attempt)")
+            var again: String?
             if let next {
                 let wait = max(0, Int(next.timeIntervalSince(now).rounded()))
-                parts.append(app.t("снова через ", "again in ") + (wait >= 120 ? clock(TimeInterval(wait)) : app.t("\(wait) с", "\(wait)s")))
+                again = app.t("снова через ", "again in ") + (wait >= 120 ? clock(TimeInterval(wait)) : app.t("\(wait) с", "\(wait)s"))
             }
-            if !elapsed.isEmpty { parts.append(elapsed) }
-            text = parts.joined(separator: " · ")
+            forms = [[reason, tryNumber, again, elapsed].compactMap { $0 },
+                     [reason, again].compactMap { $0 },
+                     [reason]]
             tone = "warn"
+            busy = false
         default:
-            var parts = ["✻ " + doing(activity, app) + "…"]
-            if !elapsed.isEmpty { parts.append(elapsed) }
-            if agent.tokens.total > 0 { parts.append(tokenCount(agent.tokens, app)) }
-            text = parts.joined(separator: " · ")
-            tone = "run"
+            let step = doing(activity, app) + " " + clock(now.timeIntervalSince(agent.activitySince))
+            let silent = now.timeIntervalSince(agent.lastHeard)
+            let quietIsTheTool: Bool = switch activity {
+            case .tool, .asking: true
+            default: false
+            }
+            let silence = !quietIsTheTool && silent >= silenceShown ? app.t("тишина ", "silent ") + clock(silent) : nil
+            let total = elapsed.map { app.t("всего ", "in all ") + $0 }
+            let tokens = agent.tokens.total > 0 ? agent.tokens : nil
+            forms = [[step, silence, total, tokens.map { tokenCount($0, app) }].compactMap { $0 },
+                     [step, silence, total, tokens.map { tokenCount($0, app, short: true) }].compactMap { $0 },
+                     [step, silence, tokens.map { tokenCount($0, app, short: true) }].compactMap { $0 },
+                     [step, silence].compactMap { $0 }]
+            tone = silence == nil ? "run" : "warn"
+            if case .asking = activity { busy = false }
         }
-        return ["id": "live", "items": [["badge": ["text": .string(text), "tone": .string(tone)]]]]
+        var texts: [String] = []
+        for form in forms.map({ $0.joined(separator: " · ") }) where !texts.contains(form) { texts.append(form) }
+        var badge: [String: JSONValue] = ["text": .string(texts[0]), "tone": .string(tone)]
+        if busy { badge["busy"] = true }
+        if texts.count > 1 { badge["shorter"] = .array(texts.dropFirst().map { .string($0) }) }
+        return ["id": "live", "items": [["badge": .object(badge)]]]
     }
 
     static func doing(_ activity: AgentActivity, _ app: AgentsApp) -> String {
@@ -247,13 +275,17 @@ enum AgentsCard {
     }
 
     /// «↓ ~1,4 тыс. токенов» — the tilde while part of it is an estimate.
-    static func tokenCount(_ tokens: TurnTokens, _ app: AgentsApp) -> String {
+    /// «↓ ~30,7 тыс. токенов», and short, «↓ ~30,7 тыс.».
+    static func tokenCount(_ tokens: TurnTokens, _ app: AgentsApp, short: Bool = false) -> String {
         let about = tokens.estimated ? "~" : ""
         let total = tokens.total
-        guard total >= 1000 else { return "↓ " + about + app.t("\(total) токенов", "\(total) tokens") }
+        guard total >= 1000 else {
+            return "↓ " + about + (short ? "\(total)" : app.t("\(total) токенов", "\(total) tokens"))
+        }
         let thousands = (Double(total) / 1000 * 10).rounded() / 10
         let number = thousands >= 100 ? String(Int(thousands.rounded())) : String(format: "%.1f", thousands)
-        return "↓ " + about + app.t(number.replacingOccurrences(of: ".", with: ",") + " тыс. токенов", number + "k tokens")
+        let russian = number.replacingOccurrences(of: ".", with: ",") + (short ? " тыс." : " тыс. токенов")
+        return "↓ " + about + app.t(russian, number + (short ? "k" : "k tokens"))
     }
 
     /// Under the feed while messages wait for the step the agent is on: how

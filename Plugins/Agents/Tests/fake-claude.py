@@ -19,7 +19,8 @@ limit, as the real one reports it: a `rate_limit_event` rejected, then an error 
 `fake-limited-wait` file there makes it meet a week's limit as claude 2.1.332 does in a program's
 session (measured 11-26): the limit said at once, then «retry in 6 h» again and again, and no result
 until an interrupt. A message with "[hang]" in it waits for an interrupt the same way, without a
-limit — a model call that takes long. An interrupt's turn ends with the message echoed, «[Request
+limit — a model call that takes long. One with "[think]" thinks first, `FAKE_CLAUDE_THINK` seconds (3),
+as the real one does: no text, only its size every second. An interrupt's turn ends with the message echoed, «[Request
 interrupted by user]» and an error result of two turns; the messages that came meanwhile start the
 next turn, unless the interrupt cancelled them (`cancel_queued`).
 
@@ -133,6 +134,24 @@ def tokens(count):
     """The call's own count of the tokens it returned, said at its end (measured 11-26)."""
     out({"type": "stream_event", "event": {"type": "message_delta", "delta": {"stop_reason": "end_turn"},
          "usage": {"output_tokens": count}}, "parent_tool_use_id": None, "session_id": SESSION})
+
+
+def think(seconds):
+    """Thinking as claude 2.1.332 streams it (measured 11-27): no text, an empty delta and the size so far
+    about every second, the signature at the end."""
+    out({"type": "stream_event", "event": {"type": "content_block_start", "index": 0,
+         "content_block": {"type": "thinking", "thinking": "", "signature": ""}}, "parent_tool_use_id": None,
+         "session_id": SESSION})
+    for second in range(seconds):
+        time.sleep(1)
+        out({"type": "system", "subtype": "thinking_tokens", "estimated_tokens": 150 * (second + 1),
+             "estimated_tokens_delta": 150, "session_id": SESSION})
+        out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0,
+             "delta": {"type": "thinking_delta", "thinking": ""}}, "parent_tool_use_id": None, "session_id": SESSION})
+    out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0,
+         "delta": {"type": "signature_delta", "signature": "fake"}}, "parent_tool_use_id": None, "session_id": SESSION})
+    out({"type": "stream_event", "event": {"type": "content_block_stop", "index": 0}, "parent_tool_use_id": None,
+         "session_id": SESSION})
 
 
 def say(text):
@@ -318,6 +337,8 @@ def turn(text, pictures=0):
              "error_status": 529, "error": "overloaded_error", "session_id": SESSION})
         time.sleep(float(os.environ.get("FAKE_CLAUDE_RETRY", "0.5")))
     calling()
+    if "[think]" in text:
+        think(int(os.environ.get("FAKE_CLAUDE_THINK", "3")))
     playing = [(text, pictures)]
     while playing:
         playing += play(*playing.pop(0))

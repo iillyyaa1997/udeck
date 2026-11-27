@@ -24,25 +24,32 @@ public enum AgentActivity: Sendable, Equatable {
 public struct TurnTokens: Sendable, Equatable {
     public var counted = 0
     public var streamedCharacters = 0
+    /// Thinking the CLI estimated as it went: it streams no thinking text,
+    /// only its size (`thinking_tokens`, claude 2.1.332).
+    public var thought = 0
 
     public init() {}
 
     /// About four characters a token.
-    public var total: Int { counted + streamedCharacters / 4 }
+    public var total: Int { counted + streamedCharacters / 4 + thought }
     /// Part of `total` is an estimate.
-    public var estimated: Bool { streamedCharacters > 0 }
+    public var estimated: Bool { streamedCharacters > 0 || thought > 0 }
 
     mutating func streamed(_ text: String) { streamedCharacters += text.count }
 
-    /// A call's own count: what streamed during it is in it.
+    mutating func thought(_ tokens: Int) { thought += max(0, tokens) }
+
+    /// A call's own count: what streamed during it, its thinking too, is in it.
     mutating func call(_ tokens: Int) {
         counted += tokens
         streamedCharacters = 0
+        thought = 0
     }
 
     /// The turn's count so far, said whole (Codex's usage after each call).
     mutating func countedSoFar(_ tokens: Int) {
         counted = max(0, tokens)
         streamedCharacters = 0
+        thought = 0
     }
 }
